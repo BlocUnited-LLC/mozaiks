@@ -37,7 +37,7 @@ from mozaiksai.control_plane.contracts import (
     SurfaceExecutionRecord,
     SurfacePlanExecutionResult,
 )
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 
@@ -76,7 +76,7 @@ class SurfaceRegenerationWorker:
         *,
         agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
     ) -> None:
         self._agent_runner = agent_runner or AG2StructuredAgentRunner()
         self._config_loader = config_loader
@@ -331,13 +331,13 @@ class SurfaceRegenerationWorker:
         checkpoint = pack.checkpoint_by_event(_CODING_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
             raise RuntimeError(
-                f"Selected control-plane pack does not declare a '{_CODING_CHECKPOINT_EVENT}' "
+                f"Selected refinement harness does not declare a '{_CODING_CHECKPOINT_EVENT}' "
                 "checkpoint with prompt_id — required for surface regeneration"
             )
         prompt = pack.prompt_by_id(checkpoint.prompt_id)
         if prompt is None:
             raise RuntimeError(
-                f"Coding prompt '{checkpoint.prompt_id}' not found in control-plane pack "
+                f"Coding prompt '{checkpoint.prompt_id}' not found in refinement harness "
                 "— required for surface regeneration"
             )
         return prompt.content

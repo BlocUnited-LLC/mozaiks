@@ -64,7 +64,7 @@ class _FakeToolExecutor:
         return ControlPlaneToolResult(success=True, output={"tool_id": call.tool_id, "app_id": context.app_id})
 
 
-def _enabled_control_plane() -> ControlPlaneConfig:
+def _enabled_refinement_policy() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
         classifier=ControlPlaneCapabilityConfig(
@@ -79,9 +79,9 @@ def _enabled_control_plane() -> ControlPlaneConfig:
 
 def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path=Path("factory_app/control_plane"),
+        path=Path("factory_app/refinement_harness"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             checkpoints=[
                 ControlPlaneCheckpointManifest(
                     event="request_submitted",
@@ -91,7 +91,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="change_classifier_system",
@@ -100,7 +100,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
                     id="get_revision_context",
@@ -122,7 +122,7 @@ def _pack() -> LoadedControlPlanePack:
 
 
 @pytest.mark.asyncio
-async def test_change_classifier_uses_control_plane_llm_config() -> None:
+async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
     tool_executor = _FakeToolExecutor()
     created: list[_FakeAgent] = []
 
@@ -133,7 +133,7 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
 
     classifier = LLMChangeClassifier(
         agent_factory=capturing_factory,
-        config_loader=_enabled_control_plane,
+        config_loader=_enabled_refinement_policy,
         pack_loader=_pack,
         tool_executor=tool_executor,
     )
@@ -156,7 +156,7 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
     assert created[0].llm_config == {"model": "gpt-5-nano", "temperature": 0.0}
 
     assert len(created[0].calls) == 1
-    assert "control_plane_context_json:" in created[0].calls[0]["user_prompt"]
+    assert "refinement_context_json:" in created[0].calls[0]["user_prompt"]
     assert '"get_revision_context"' in created[0].calls[0]["user_prompt"]
 
     assert len(tool_executor.calls) == 2
@@ -165,7 +165,7 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
 
 
 @pytest.mark.asyncio
-async def test_change_classifier_requires_enabled_control_plane() -> None:
+async def test_change_classifier_requires_enabled_refinement_engine() -> None:
     classifier = LLMChangeClassifier(
         agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
         config_loader=lambda: ControlPlaneConfig(enabled=False),
@@ -173,7 +173,7 @@ async def test_change_classifier_requires_enabled_control_plane() -> None:
         tool_executor=_FakeToolExecutor(),
     )
 
-    with pytest.raises(RuntimeError, match="Control-plane harness is disabled"):
+    with pytest.raises(RuntimeError, match="Refinement Engine is disabled"):
         await classifier.classify(
             artifact_kind="app_bundle",
             raw_user_request="Add exports for reporting",

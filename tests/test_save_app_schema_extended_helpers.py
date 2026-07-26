@@ -94,13 +94,13 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.save_app_schema import (
-    _persist_to_filesystem,
     _deep_merge_dicts,
     _is_non_empty_string,
     _normalize_action_data,
     _normalize_blank_optional_strings,
     _normalize_config_actions,
     _normalize_page_section,
+    _persist_to_filesystem,
     _require_dict,
     _validate_api_endpoint,
     _validate_optional_string,

@@ -51,7 +51,7 @@ definitions:
     type: string
     description: >
       Build mode for ValueEngine. `initial` means fresh ideation; `revision`
-      means the workflow was reopened by the control plane and should revise
+      means the workflow was reopened by the refinement engine and should revise
       persisted concept state instead of acting like a blank-slate interview.
     source:
       type: state
@@ -60,7 +60,7 @@ definitions:
     type: string
     description: >
       Active workflow sequence that launched this run, such as conceptual_replan
-      or full_rebuild. Injected by the control plane so agents can distinguish
+      or full_rebuild. Injected by the refinement engine so agents can distinguish
       reroute intent from a plain workflow id.
     source:
       type: state
@@ -69,7 +69,7 @@ definitions:
     type: string
     description: >
       Revision scope: patch | design | feature | core. When present,
-      it describes why the control plane re-entered ValueEngine.
+      it describes why the refinement engine re-entered ValueEngine.
     source:
       type: state
       default: null
@@ -128,7 +128,7 @@ definitions:
   refinement_request_meta:
     type: object
     description: >
-      Full typed RefinementRequest payload persisted by the control plane.
+      Full typed RefinementRequest payload persisted by the refinement engine.
       Useful when agents need artifact ids, source surface, or other request
       metadata beyond the raw refinement text.
     source:
@@ -146,7 +146,7 @@ definitions:
   change_intent:
     type: object
     description: >
-      Typed refinement classification emitted by the control plane. Contains the
+      Typed refinement classification emitted by the refinement engine. Contains the
       final `revision_scope`, rationale, and layer-touch information so
       ValueEngine can treat reroutes as deliberate concept revisions.
     source:
@@ -155,7 +155,7 @@ definitions:
   impact_set:
     type: object
     description: >
-      Typed downstream impact summary emitted by the control plane. Contains
+      Typed downstream impact summary emitted by the refinement engine. Contains
       affected workflows, affected declarative families, restart_from, and
       rebuild/replanning flags for the current refinement request.
     source:
@@ -164,7 +164,7 @@ definitions:
   pivot_description:
     type: string
     description: >
-      User's original change request text, injected by the control plane when
+      User's original change request text, injected by the refinement engine when
       the active workflow_sequence is conceptual_replan. Describes the nature
       of the concept-level pivot (e.g., "make this a marketplace, not a CRM")
       so ValueEngine can anchor the new concept to explicit pivot intent rather
@@ -202,7 +202,7 @@ definitions:
   llm_profile:
     type: string
     description: >
-      Advisory LLM profile name injected by the control plane when the
+      Advisory LLM profile name injected by the refinement engine when the
       active workflow_sequence requires stronger reasoning (conceptual_replan
       or full_rebuild). Maps to a named profile in ai.json llm_profiles.
       Null for patch, design, and feature routes. Advisory only — the

@@ -34,7 +34,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     registry = config["registry"]
 
     assert registry["ConfigMiddlewareAgent"] == "ConfigMiddlewareOutput"
-    assert registry["ControlPlaneAgent"] == "ControlPlaneOutput"
+    assert registry["RefinementHarnessAgent"] == "RefinementHarnessOutput"
     assert registry["DatabaseAgent"] == "DatabaseOutput"
     assert registry["ModelAgent"] == "ModelOutput"
     assert registry["ServiceAgent"] == "ServiceOutput"
@@ -67,17 +67,17 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "DatabaseOutput",
         "BackendFoundationFile",
         "BackendFoundationBundle",
-        "ControlPlaneRouteRef",
-        "ControlPlaneArtifactChangeRoutes",
-        "ControlPlaneArtifactRouting",
-        "ControlPlaneRoutingManifest",
-        "ControlPlaneCheckpointManifestOutput",
-        "ControlPlaneManifestOutput",
-        "ControlPlaneToolDefinition",
-        "ControlPlaneToolsManifestOutput",
-        "ControlPlanePromptFile",
-        "ControlPlanePackBundle",
-        "ControlPlaneOutput",
+        "RefinementHarnessRouteRef",
+        "RefinementHarnessArtifactChangeRoutes",
+        "RefinementHarnessArtifactRouting",
+        "RefinementHarnessRoutingManifest",
+        "RefinementHarnessCheckpointManifestOutput",
+        "RefinementHarnessManifestOutput",
+        "RefinementHarnessToolDefinition",
+        "RefinementHarnessToolsManifestOutput",
+        "RefinementHarnessPromptFile",
+        "RefinementHarnessBundle",
+        "RefinementHarnessOutput",
         "ModelFile",
         "ModelOutput",
         "AppBackendAdminPanel",
@@ -114,7 +114,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "DeploymentTemplateManifest",
     ]:
         assert model_name in models
-    checkpoint_fields = models["ControlPlaneCheckpointManifestOutput"]["fields"]
+    checkpoint_fields = models["RefinementHarnessCheckpointManifestOutput"]["fields"]
     assert checkpoint_fields["event"]["values"] == [
         "request_submitted",
         "scope_requested",
@@ -171,7 +171,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "SubscriptionConfigBundle",
         "null",
     ]
-    assert models["ControlPlaneOutput"]["fields"]["control_plane_pack"]["type"] == "ControlPlanePackBundle"
+    assert models["RefinementHarnessOutput"]["fields"]["refinement_harness"]["type"] == "RefinementHarnessBundle"
     assert models["ModuleJsStub"]["fields"]["surface"]["values"] == ["admin_component", "profile_component"]
     assert models["AppSchemaOutput"]["fields"]["custom_route_bundle"]["variants"] == ["AppCustomRouteBundle", "null"]
     assert models["AppManifest"]["fields"]["custom_routes"]["items"] == "str"
@@ -252,14 +252,14 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
 
     assert "task_type: module_contract" in source
-    assert "task_type: control_plane_pack" in source
+    assert "task_type: refinement_harness" in source
     assert "shell_preset_hint" in source
     assert "[SHELL PRESET CONTEXT]" in source
-    assert "initial_agent` must be `ControlPlaneAgent`" in source
-    assert "app/config/llm.yaml" in source
-    assert "Output MUST be a valid JSON object matching `ControlPlaneOutput`" in source
-    assert "`current_build_task_type` must equal `control_plane_pack`" in source
-    assert "ControlPlanePackBundle" in source
+    assert "initial_agent` must be `RefinementHarnessAgent`" in source
+    assert "app/config/refinement_policy.yaml" in source
+    assert "Output MUST be a valid JSON object matching `RefinementHarnessOutput`" in source
+    assert "`current_build_task_type` must equal `refinement_harness`" in source
+    assert "RefinementHarnessBundle" in source
     assert "Routes use workflow_sequence only" in source
     assert "service_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
@@ -351,12 +351,12 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "shell_extension" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
     module_contract = file_contracts["task_contracts"]["module_contract"]
-    control_plane_pack = file_contracts["task_contracts"]["control_plane_pack"]
+    refinement_harness = file_contracts["task_contracts"]["refinement_harness"]
     assert module_contract["required_outputs"] == ["modules/{pack_name}/module.yaml"]
-    assert control_plane_pack["required_outputs"] == [
-        "app/config/llm.yaml",
-        "control_plane/config/control_plane.yaml",
-        "control_plane/config/tools.yaml",
+    assert refinement_harness["required_outputs"] == [
+        "app/config/refinement_policy.yaml",
+        "refinement_harness/config/harness.yaml",
+        "refinement_harness/config/tools.yaml",
     ]
     assert "modules/{pack_name}/contracts/reactions.yaml" in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/subscriptions.yaml" not in module_contract["optional_outputs"]
@@ -383,7 +383,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Use one of these exact top-level shapes:" in source
     assert "Use one of these exact bounded shapes:" in source
     assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`." in source
-    assert "Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`." in source
+    assert "Exact nested field shapes come from `RefinementHarnessOutput` and `RefinementHarnessBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
 
 
@@ -416,23 +416,23 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     assert "never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization" in source
 
 
-def test_control_plane_pack_codegen_seeds_runtime_yaml() -> None:
-    from factory_app.workflows.AppGenerator.tools.control_plane_pack_codegen import (
-        build_control_plane_pack_code_files,
+def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
+    from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
+        build_refinement_harness_code_files,
     )
 
-    files = build_control_plane_pack_code_files(
-            {
-                "control_plane_yaml": {
-                    "schema_version": "mozaiks.control_plane",
-                    "routing": {
-                        "default_artifact_kind": "app_bundle",
-                        "artifacts": [],
+    files = build_refinement_harness_code_files(
+        {
+            "harness_yaml": {
+                "schema_version": "mozaiks.refinement_harness.v1",
+                "routing": {
+                    "default_artifact_kind": "app_bundle",
+                    "artifacts": [],
                 },
                 "checkpoints": [],
             },
             "tools_yaml": {
-                "schema_version": "mozaiks.control_plane.tools",
+                "schema_version": "mozaiks.refinement_harness.tools.v1",
                 "tools": [],
             },
         }
@@ -440,9 +440,9 @@ def test_control_plane_pack_codegen_seeds_runtime_yaml() -> None:
 
     file_map = {item["filename"]: item["content"] for item in files}
 
-    assert "app/config/llm.yaml" in file_map
-    runtime_yaml = yaml.safe_load(file_map["app/config/llm.yaml"])
-    assert runtime_yaml["schema_version"] == "mozaiks.control_plane.runtime"
+    assert "app/config/refinement_policy.yaml" in file_map
+    runtime_yaml = yaml.safe_load(file_map["app/config/refinement_policy.yaml"])
+    assert runtime_yaml["schema_version"] == "mozaiks.refinement.policy.v1"
     assert runtime_yaml["classifier"]["llm_profile"] == "classifier"
 
 
@@ -468,7 +468,7 @@ def test_appgenerator_prompt_time_contract_artifacts_align_with_structured_outpu
     assert file_contracts["task_contracts"]["page_bundle"]["owner_agent"] == "AppSchemaAgent"
     assert file_contracts["task_contracts"]["module_contract"]["owner_agent"] == "ConfigMiddlewareAgent"
     assert file_contracts["task_contracts"]["service_foundation"]["owner_agent"] == "ConfigMiddlewareAgent"
-    assert file_contracts["task_contracts"]["control_plane_pack"]["owner_agent"] == "ControlPlaneAgent"
+    assert file_contracts["task_contracts"]["refinement_harness"]["owner_agent"] == "RefinementHarnessAgent"
     assert file_contracts["task_contracts"]["api_surface"]["owner_agent"] == "ControllerAgent"
 
     assert set(module_archetypes["archetypes"].keys()) == set(module_type_values)

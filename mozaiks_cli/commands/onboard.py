@@ -11,7 +11,7 @@ import yaml
 
 from mozaiks_cli.commands.init import (
     build_default_ai_config,
-    build_default_control_plane_config,
+    build_default_refinement_policy_config,
     build_default_shell_config,
     create_scaffold,
 )
@@ -60,7 +60,7 @@ def run(args) -> None:
     app_json_path = app_root / "app.json"
     ai_json_path = app_root / "config" / "ai.json"
     shell_json_path = app_root / "config" / "shell.json"
-    control_plane_runtime_path = app_root / "config" / "llm.yaml"
+    refinement_policy_path = app_root / "config" / "refinement_policy.yaml"
 
     app_config = _read_json(app_json_path)
     ai_config = _read_json(ai_json_path)
@@ -91,14 +91,14 @@ def run(args) -> None:
 
     _apply_app_config(app_config=app_config, app_name=app_name)
     _apply_ai_config(ai_config=ai_config, app_name=app_name, provider=provider, model=model)
-    control_plane_config = _apply_control_plane_config(control_plane_runtime_path)
+    refinement_policy_config = _apply_refinement_policy_config(refinement_policy_path)
 
     _write_json(app_json_path, app_config)
     print(f"Updated {app_json_path.relative_to(workspace_root)}")
     _write_json(ai_json_path, ai_config)
     print(f"Updated {ai_json_path.relative_to(workspace_root)}")
-    _write_yaml(control_plane_runtime_path, control_plane_config)
-    print(f"Updated {control_plane_runtime_path.relative_to(workspace_root)}")
+    _write_yaml(refinement_policy_path, refinement_policy_config)
+    print(f"Updated {refinement_policy_path.relative_to(workspace_root)}")
     refreshed_shell_config = _maybe_refresh_shell_config(shell_config, app_name)
     if refreshed_shell_config is not None:
         _write_json(shell_json_path, refreshed_shell_config)
@@ -277,7 +277,7 @@ def _apply_ai_config(*, ai_config: dict, app_name: str, provider: str, model: st
     }
 
 
-def _apply_control_plane_config(path: Path) -> dict:
+def _apply_refinement_policy_config(path: Path) -> dict:
     existing: dict = {}
     if path.exists():
         try:
@@ -287,7 +287,7 @@ def _apply_control_plane_config(path: Path) -> dict:
         if isinstance(loaded, dict):
             existing = loaded
 
-    merged = build_default_control_plane_config()
+    merged = build_default_refinement_policy_config()
     merged.update(existing)
     return merged
 

@@ -1,4 +1,4 @@
-schema_version: mozaiks.control_plane
+schema_version: mozaiks.refinement_harness.v1
 routing:
   default_artifact_kind: app_bundle
   artifacts:

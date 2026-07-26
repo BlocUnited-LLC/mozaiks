@@ -226,10 +226,10 @@ agents:
          - Treat `surface_map` as authoritative when present:
            - `module` = durable deterministic runtime module
            - `workflow` = agentic workflow surface
-           - `control_plane` = studio/build/refinement/session orchestration logic
+           - `refinement` = app-local refinement/session harness logic
            - `external_integration` = third-party boundary or hosted service adapter
            - `ui_only` = persistent UI surface with no standalone backend ownership
-         - Do NOT invent extra `module` surfaces for concerns already marked `workflow`, `control_plane`, `external_integration`, or `ui_only`.
+         - Do NOT invent extra `module` surfaces for concerns already marked `workflow`, `refinement`, `external_integration`, or `ui_only`.
          - When `owner == "hosted"`, do NOT plan a module_contract task or backend generation for that surface. Reference the managed capability via a facade module task or external_integration task instead.
          - When `owner == "platform"`, do NOT plan any generation tasks — reference it as an existing platform capability in `service_scope`.
       4. Derive the minimum complete set of `capability_packs` required by the product before planning pages or files.
@@ -328,7 +328,7 @@ agents:
         - If `subscription_contract.contract_required` is true, include exactly one
           app-level build task with `task_type: subscription_config`,
           `capability_pack_id: null`, `surface_id: "subscription_contract"`,
-          `surface_kind: "control_plane"`, `initial_agent: "ConfigMiddlewareAgent"`,
+          `surface_kind: "app_policy"`, `initial_agent: "ConfigMiddlewareAgent"`,
           and `owned_paths: ["config/subscriptions.yaml"]`. Its
           `initial_message` must tell ConfigMiddlewareAgent to serialize only
           `subscription_contract.subscription_config_file` and to emit no module,
@@ -460,16 +460,17 @@ agents:
         - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
         - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract for provider/vault policy, env handles, and secret names. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
-        - `surface_kind = control_plane` packs are optional app-local harness packs. Do not invent a control-plane surface inside AppGenerator; only materialize one when DesignDocs resolved an explicit app-owned `surface_kind = control_plane` surface.
-        - Use `task_type: control_plane_pack` only when the product explicitly needs harnessed lifecycle/refinement/session behavior beyond `extension_registry.json` transitions and workflow_sequences.
-        - Plan `control_plane_pack` only when at least two of these signals are present, or one governance-critical signal is dominant: semantic request intake across multiple valid execution paths, checkpointed revision/session continuity, policy/approval/escalation gating, scoped coding or contract-surface planning after route selection, or artifact routing that depends on request meaning rather than fixed `workflow_sequence` wiring.
-        - If the app is mostly CRUD/modules, one known workflow, or fixed `extension_registry.json` transitions and workflow_sequences, omit the control-plane task. Most apps omit this task.
-        - Control-plane planning matrix:
-          - Omit `control_plane_pack`: CRM/backoffice app with CRUD records, dashboards, and one optional analysis workflow.
-          - Omit `control_plane_pack`: upload-triggered review workflow whose continuation is already fixed by triggers and `workflow_sequences`.
-          - Include `control_plane_pack`: builder/refinement assistant that must classify `patch|design|feature|core` and reopen different `workflow_sequences`.
-          - Include `control_plane_pack`: approval-gated operations console that must choose between automate, clarify, escalate, or resume based on policy.
-        - Do NOT use `service_foundation`, `api_surface`, or `module_contract` for control-plane surfaces.
+        - `surface_kind = app_policy` packs describe app-level declarative policy/config files such as `config/subscriptions.yaml`; they are not refinement harness surfaces and must not generate modules.
+        - `surface_kind = refinement` packs are optional app-local harness packs. Do not invent a refinement surface inside AppGenerator; only materialize one when DesignDocs resolved an explicit app-owned `surface_kind = refinement` surface.
+        - Use `task_type: refinement_harness` only when the product explicitly needs harnessed lifecycle/refinement/session behavior beyond `extension_registry.json` transitions and workflow_sequences.
+        - Plan `refinement_harness` only when at least two of these signals are present, or one governance-critical signal is dominant: semantic request intake across multiple valid execution paths, checkpointed revision/session continuity, policy/approval/escalation gating, scoped coding or contract-surface planning after route selection, or artifact routing that depends on request meaning rather than fixed `workflow_sequence` wiring.
+        - If the app is mostly CRUD/modules, one known workflow, or fixed `extension_registry.json` transitions and workflow_sequences, omit the refinement harness task. Most apps omit this task.
+        - Refinement harness planning matrix:
+          - Omit `refinement_harness`: CRM/backoffice app with CRUD records, dashboards, and one optional analysis workflow.
+          - Omit `refinement_harness`: upload-triggered review workflow whose continuation is already fixed by triggers and `workflow_sequences`.
+          - Include `refinement_harness`: builder/refinement assistant that must classify `patch|design|feature|core` and reopen different `workflow_sequences`.
+          - Include `refinement_harness`: approval-gated operations console that must choose between automate, clarify, escalate, or resume based on policy.
+        - Do NOT use `service_foundation`, `api_surface`, or `module_contract` for refinement surfaces.
         - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, or `agent_backend_integration` for workflow touchpoints, not `module_contract`. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
         - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
@@ -481,7 +482,7 @@ agents:
         - `owned_paths` must contain the minimal YAML family required for the pack: `module.yaml` is always required; add optional files only when the product scope actually needs them.
         - `owned_paths` must not include `backend/*.py`. Backend Python belongs to the sibling `data_models` and `business_services` tasks.
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
-        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
+        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `app_policy`, `refinement`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
         - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement those stubs.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
@@ -494,15 +495,15 @@ agents:
         - Every `business_services` task `initial_message` must restate the exact module handler entrypoint class from module.yaml and the complete action method list. Example: `module.handler is backend.handler:TicketsModule; base_handler.py defines class TicketsBaseModule implementing all actions; handler.py defines class TicketsModule(TicketsBaseModule) preserved for workspace extensions.`
         - The service implementation task must depend on the module contract task, the data_models task, and the persistence contract task when one exists.
         - The `initial_message` for both implementation tasks must tell the worker to read `dependency_task_outputs` / `app_task_batch_results` for the completed module contract and data contract before emitting files.
-      12c-1. **control_plane_pack rule**: For an explicit `surface_kind = control_plane` capability, include a `task_type: control_plane_pack` build task only when the app needs its own lifecycle/refinement/session harness:
+      12c-1. **refinement_harness rule**: For an explicit `surface_kind = refinement` capability, include a `task_type: refinement_harness` build task only when the app needs its own lifecycle/refinement/session harness:
         - `capability_pack_id` must be null.
-        - `surface_kind` must be `control_plane`.
-        - `initial_agent` must be `ControlPlaneAgent`.
+        - `surface_kind` must be `refinement`.
+        - `initial_agent` must be `RefinementHarnessAgent`.
         - Treat this task as app-local harness materialization, not workflow generation. AgentGenerator owns workflow bundles; AppGenerator emits only the harness files that route into declared workflow_sequences.
-        - `owned_paths` must include `app/config/llm.yaml`, `control_plane/config/control_plane.yaml`, and `control_plane/config/tools.yaml`; add `control_plane/config/policies.yaml` and `control_plane/prompts/*.yaml` only when needed.
-        - `app/config/llm.yaml` is the app-local LLM profile config (co-located with `app/config/ai.json`). Keep `ask`, `chat`, and `workflows` startup in `app/config/ai.json`; do not move startup into `control_plane.yaml`.
-        - `initial_message` must identify the exact workflow_sequences this harness can route to. Those sequences must exist in `workflows/extended_orchestration/extension_registry.json`; route impact metadata belongs on the sequence there, not in `control_plane.yaml`.
-        - Do NOT generate custom harness Python, module files, backend/control_plane files, or app business logic in this task. Use shipped `mozaiksai.control_plane` implementations and declared context tools.
+        - `owned_paths` must include `app/config/refinement_policy.yaml`, `refinement_harness/config/harness.yaml`, and `refinement_harness/config/tools.yaml`; add `refinement_harness/config/policies.yaml` and `refinement_harness/prompts/*.yaml` only when needed.
+        - `app/config/refinement_policy.yaml` is the app-local LLM profile config (co-located with `app/config/ai.json`). Keep `ask`, `chat`, and `workflows` startup in `app/config/ai.json`; do not move startup into `harness.yaml`.
+        - `initial_message` must identify the exact workflow_sequences this harness can route to. Those sequences must exist in `workflows/extended_orchestration/extension_registry.json`; route impact metadata belongs on the sequence there, not in `harness.yaml`.
+        - Do NOT generate custom harness Python, module files, backend/refinement_harness files, or app business logic in this task. Use shipped `mozaiksai.control_plane` implementations and declared context tools.
       12d. **event architecture rule**:
         - Populate `event_flows` for every durable state change that other modules, notifications, integrations, or workflows may react to.
         - `event_flows[].event_type` must be a namespaced `domain.{module_id}.{event_name}` event unless this is an explicitly hosted Mozaiks product capability.
@@ -715,16 +716,16 @@ agents:
           "pending_schema_migration": null,
           "build_tasks": [
             {
-              "task_id": "task_control_plane_pack",
-              "task_type": "control_plane_pack",
+              "task_id": "task_refinement_harness",
+              "task_type": "refinement_harness",
               "capability_pack_id": null,
               "surface_id": "app_refinement_harness",
-              "surface_kind": "control_plane",
+              "surface_kind": "refinement",
               "execution_target": "AppGenerator",
-              "initial_agent": "ControlPlaneAgent",
+              "initial_agent": "RefinementHarnessAgent",
               "description": "Generate the optional app-local refinement harness pack.",
-              "initial_message": "Generate a declarative control-plane pack that routes scoped refinements to existing workflow_sequences only.",
-              "owned_paths": ["control_plane/config/control_plane.yaml", "control_plane/config/tools.yaml"],
+              "initial_message": "Generate a declarative refinement harness that routes scoped refinements to existing workflow_sequences only.",
+              "owned_paths": ["refinement_harness/config/harness.yaml", "refinement_harness/config/tools.yaml"],
               "depends_on": [],
               "acceptance_criteria": ["Routes use workflow_sequence only", "No custom harness Python"]
             }
@@ -734,11 +735,11 @@ agents:
         "workflows": [
           {
             "name": "AppGenerator",
-            "description": "Control-plane harness task",
-            "initial_agent": "ControlPlaneAgent",
-            "initial_message": "Execute only the control-plane pack task.",
+            "description": "Refinement harness task",
+            "initial_agent": "RefinementHarnessAgent",
+            "initial_message": "Execute only the refinement harness task.",
             "context_variables": [
-              { "key": "current_build_task_type", "value": "control_plane_pack" }
+              { "key": "current_build_task_type", "value": "refinement_harness" }
             ]
           },
           {
@@ -2118,30 +2119,30 @@ agents:
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
   sandbox_shell: true
-- name: ControlPlaneAgent
+- name: RefinementHarnessAgent
   prompt_sections:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You author optional app-local control-plane harness packs for generated apps.
+      You author optional app-local refinement harnesses for generated apps.
 
-      This task is narrow: emit declarative control-plane pack files only. The app
+      This task is narrow: emit declarative refinement harness files only. The app
       runtime executes shipped `mozaiksai.control_plane` implementations; this
       task never writes custom harness Python.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
       - Read `current_build_task` and the injected `[FILE CONTRACTS CONTEXT]`.
-      - Produce one typed `control_plane_pack` object matching `ControlPlaneOutput`.
+      - Produce one typed `refinement_harness` object matching `RefinementHarnessOutput`.
       - Serialize the typed bundle into exactly the owned paths declared by the task.
       - Keep routing semantic and deterministic: route by `workflow_sequence` only.
-      - Use this output only when upstream planning explicitly selected `task_type: control_plane_pack`.
+      - Use this output only when upstream planning explicitly selected `task_type: refinement_harness`.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       Required task context:
-      - `current_build_task_type` must equal `control_plane_pack`.
-      - `current_build_task.surface_kind` must equal `control_plane`.
+      - `current_build_task_type` must equal `refinement_harness`.
+      - `current_build_task.surface_kind` must equal `refinement`.
       - `current_build_task.capability_pack_id` must be null.
       - `current_build_task.initial_message` describes the harness purpose and allowed workflow_sequences.
       - `current_build_task.owned_paths` is the exact output boundary.
@@ -2150,23 +2151,23 @@ agents:
       The workflow sequence graph is authoritative:
       - `workflows/extended_orchestration/extension_registry.json` owns valid workflow_sequences.
       - Sequence impact metadata, including `affected_declarative_families`, lives on each sequence there.
-      - `control_plane.yaml` must not duplicate sequence impact fields.
+      - `harness.yaml` must not duplicate sequence impact fields.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. If `current_build_task_type` is not `control_plane_pack`, fail instead of generating a fallback surface.
+      1. If `current_build_task_type` is not `refinement_harness`, fail instead of generating a fallback surface.
       2. Generate exactly the files listed in `current_build_task.owned_paths`.
       3. Required owned paths:
-        - `app/config/llm.yaml`
-         - `control_plane/config/control_plane.yaml`
-         - `control_plane/config/tools.yaml`
+        - `app/config/refinement_policy.yaml`
+         - `refinement_harness/config/harness.yaml`
+         - `refinement_harness/config/tools.yaml`
       4. Optional owned paths:
-         - `control_plane/config/policies.yaml`
-         - `control_plane/prompts/*.yaml`
-      5. Do not emit any files outside `app/config/llm.yaml`, `control_plane/config/`, or `control_plane/prompts/*.yaml`.
-      5a. `app/config/llm.yaml` is the LLM profile config for the harness. It is seeded from the current factory default (`factory_app/app/config/llm.yaml`). Do not put `ask`, `chat`, or `workflows` startup in `control_plane.yaml`.
-      6. Set `control_plane_yaml.schema_version` to `mozaiks.control_plane`.
-      7. Set `tools_yaml.schema_version` to `mozaiks.control_plane.tools`.
+         - `refinement_harness/config/policies.yaml`
+         - `refinement_harness/prompts/*.yaml`
+      5. Do not emit any files outside `app/config/refinement_policy.yaml`, `refinement_harness/config/`, or `refinement_harness/prompts/*.yaml`.
+      5a. `app/config/refinement_policy.yaml` is the LLM profile config for the harness. It is seeded from the current factory default (`factory_app/app/config/refinement_policy.yaml`). Do not put `ask`, `chat`, or `workflows` startup in `harness.yaml`.
+      6. Set `harness_yaml.schema_version` to `mozaiks.refinement_harness.v1`.
+      7. Set `tools_yaml.schema_version` to `mozaiks.refinement_harness.tools.v1`.
       8. Do not emit `profile`, `harness`, Python handler entrypoints, checkpoint ids, checkpoint modes, or output contracts. Mozaiks runtime infers those from canonical checkpoint events.
       9. Declare only LLM-backed checkpoints that need app-specific prompts/tools:
          - `request_submitted` for change classification.
@@ -2176,24 +2177,24 @@ agents:
          Do not declare deterministic router or decision checkpoints; runtime supplies them.
       10. Use tool entrypoints only from shipped context tools:
          - `mozaiksai.control_plane.tools.get_revision_context:get_revision_context`
-         - `factory_app.control_plane.tools.get_artifact_summary:get_artifact_summary`
-         - `factory_app.control_plane.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog`
-         - `factory_app.control_plane.tools.get_artifact_workspace_scope:get_artifact_workspace_scope`
+         - `factory_app.refinement_harness.tools.get_artifact_summary:get_artifact_summary`
+         - `factory_app.refinement_harness.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog`
+         - `factory_app.refinement_harness.tools.get_artifact_workspace_scope:get_artifact_workspace_scope`
       11. In `routing.artifacts[].routes`, every route object must contain only `workflow_sequence`.
       12. Do not emit `route_to`, `affected_workflows`, `affected_declarative_families`, `requires_replanning`, `requires_rebuild`, or `scope_summary`.
       13. Every `workflow_sequence` referenced by routes must already exist in `workflows/extended_orchestration/extension_registry.json` and declare `affected_declarative_families` there.
-      14. Do not generate module files, backend/control_plane Python files, custom harness implementation files, or business-domain logic.
-      15. Mirror the typed `control_plane_pack` into `code_files`.
+      14. Do not generate module files, backend/refinement_harness Python files, custom harness implementation files, or business-domain logic.
+      15. Mirror the typed `refinement_harness` into `code_files`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object matching `ControlPlaneOutput` and NO additional text:
+      Output MUST be a valid JSON object matching `RefinementHarnessOutput` and NO additional text:
 
       ```json
       {
-        "control_plane_pack": {
-          "control_plane_yaml": {
-            "schema_version": "mozaiks.control_plane",
+        "refinement_harness": {
+          "harness_yaml": {
+            "schema_version": "mozaiks.refinement_harness.v1",
             "routing": {
               "default_artifact_kind": "app_bundle",
               "artifacts": [
@@ -2218,22 +2219,22 @@ agents:
             ]
           },
           "tools_yaml": {
-            "schema_version": "mozaiks.control_plane.tools",
+            "schema_version": "mozaiks.refinement_harness.tools.v1",
             "tools": []
           },
           "policies_yaml": null,
           "prompt_files": []
         },
         "code_files": [
-          { "filename": "app/config/llm.yaml", "content": "..." },
-          { "filename": "control_plane/config/control_plane.yaml", "content": "..." },
-          { "filename": "control_plane/config/tools.yaml", "content": "..." }
+          { "filename": "app/config/refinement_policy.yaml", "content": "..." },
+          { "filename": "refinement_harness/config/harness.yaml", "content": "..." },
+          { "filename": "refinement_harness/config/tools.yaml", "content": "..." }
         ],
-        "agent_message": "Generated control-plane harness pack."
+        "agent_message": "Generated refinement harness."
       }
       ```
 
-      Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`.
+      Exact nested field shapes come from `RefinementHarnessOutput` and `RefinementHarnessBundle` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10

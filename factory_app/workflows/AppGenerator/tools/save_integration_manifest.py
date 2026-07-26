@@ -15,8 +15,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from factory_app.app.modules.workspace_integrations.backend.schemas import CATALOG_BY_ID
-from factory_app.app.modules.workspace_integrations.backend.service import WorkspaceIntegrationsService
+from factory_app.app.modules.workspace_integrations.backend.service import (
+    WorkspaceIntegrationsService,
+)
 
 logger = logging.getLogger(__name__)
 

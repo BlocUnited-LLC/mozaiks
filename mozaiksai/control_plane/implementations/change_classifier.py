@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlaneToolContext
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 
@@ -35,7 +35,7 @@ class LLMChangeClassifier:
         agent_factory: Callable[[str, dict[str, Any]], Any] | None = None,
         agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
         tool_executor: Any = None,
     ) -> None:
         self._agent_runner = agent_runner or AG2StructuredAgentRunner(agent_factory=agent_factory)
@@ -59,9 +59,9 @@ class LLMChangeClassifier:
     ) -> ChangeClassifierResult:
         control_plane = self._load_config()
         if not control_plane.enabled:
-            raise RuntimeError("Control-plane harness is disabled in app/config/ai.json")
+            raise RuntimeError("Refinement Engine is disabled in app/config/refinement_policy.yaml")
         if not control_plane.classifier_enabled():
-            raise RuntimeError("Control-plane classifier is disabled in app/config/ai.json")
+            raise RuntimeError("Refinement classifier is disabled in app/config/refinement_policy.yaml")
 
         llm_config = control_plane.resolve_capability_llm_config("classifier") or {}
 
@@ -109,7 +109,7 @@ class LLMChangeClassifier:
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
             raise RuntimeError(
-                f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
+                f"Selected refinement harness does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
             )
         prompt = pack.prompt_by_id(checkpoint.prompt_id)
         if prompt is None:
@@ -185,7 +185,7 @@ class LLMChangeClassifier:
             f"request: {raw_user_request or ''}",
         ]
         if control_plane_context:
-            lines.append("control_plane_context_json:")
+            lines.append("refinement_context_json:")
             lines.append(json.dumps(control_plane_context, indent=2, sort_keys=True, default=str))
         if extra:
             lines.append(f"extra_context: {extra}")

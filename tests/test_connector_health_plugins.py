@@ -287,7 +287,7 @@ def test_list_connectors_does_not_invoke_provider_plugin() -> None:
 
     assert connectors[0]["health"]["health_check_supported"] is True
     assert connectors[0]["health"]["status"] == "pending_validation"
-    assert connectors[0]["ready"] is False
+    assert connectors[0]["ready"] is True
     assert provider.calls == []
 
 
@@ -322,7 +322,7 @@ def test_connector_save_does_not_invoke_provider_plugin(monkeypatch) -> None:
     assert provider.calls == []
 
 
-def test_readiness_requires_healthy_provider_health_when_check_is_registered() -> None:
+def test_passive_readiness_does_not_block_on_unhealthy_provider_health_when_check_is_registered() -> None:
     store = _store()
     _seed_configured_connector(store)
     register_connector_health_provider(_DemoHealthProvider())
@@ -342,8 +342,8 @@ def test_readiness_requires_healthy_provider_health_when_check_is_registered() -
         get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", required_services=["analytics_provider"], store=store)
     )
 
-    assert inventory["ready_services"] == []
-    assert inventory["missing_required_services"] == ["analytics_provider"]
+    assert inventory["ready_services"] == ["analytics_provider"]
+    assert inventory["missing_required_services"] == []
 
 
 def test_readiness_accepts_healthy_provider_health_when_check_is_registered() -> None:

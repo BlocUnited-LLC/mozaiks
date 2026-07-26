@@ -26,6 +26,12 @@ async def get_workflows(
     for workflow_name in ordered_names:
         config = workflow_manager.get_config(workflow_name)
         startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
+        structured_outputs = workflow_manager.get_structured_output_registry(workflow_name)
+        structured_output_components = {
+            agent_name: model_name
+            for agent_name, model_name in structured_outputs.items()
+            if model_name
+        }
         workflows.append({
             "name": workflow_name,
             "display_name": config.get("display_name") or config.get("name") or workflow_name,
@@ -33,6 +39,8 @@ async def get_workflows(
             "visual_agents": config.get("visual_agents") or [],
             "startup_mode": startup_mode,
             "workflow_startup_mode": startup_mode,
+            "structured_outputs": structured_outputs,
+            "structured_output_components": structured_output_components,
             "status": "ready",
         })
     return {"workflows": workflows}

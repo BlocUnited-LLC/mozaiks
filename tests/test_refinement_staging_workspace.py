@@ -196,7 +196,7 @@ def test_staging_helper_does_not_execute_workflows_or_llm() -> None:
     source = (REPO_ROOT / "mozaiksai/control_plane/staging.py").read_text(encoding="utf-8")
 
     assert "RefinementTriggerRouteResolver" not in source
-    assert "load_control_plane_pack" not in source
+    assert "load_refinement_harness" not in source
     assert "LLMChangeClassifier" not in source
     assert "build_refinement_execution_plan(" not in source
 

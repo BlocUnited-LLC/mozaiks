@@ -268,7 +268,7 @@ def test_app_build_plan_rejects_module_contract_task_with_backend_python() -> No
         )
 
 
-def test_app_build_plan_rejects_control_plane_pack_without_runtime_yaml() -> None:
+def test_app_build_plan_rejects_refinement_harness_without_runtime_yaml() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_task_batch_control_plane_runtime",
@@ -276,24 +276,24 @@ def test_app_build_plan_rejects_control_plane_pack_without_runtime_yaml() -> Non
     plan = _base_plan()
     plan["build_tasks"].append(
         {
-            "task_id": "task_control_plane_pack",
-            "task_type": "control_plane_pack",
+            "task_id": "task_refinement_harness",
+            "task_type": "refinement_harness",
             "capability_pack_id": None,
             "surface_id": "app_refinement_harness",
-            "surface_kind": "control_plane",
+            "surface_kind": "refinement",
             "execution_target": "AppGenerator",
-            "initial_agent": "ControlPlaneAgent",
+            "initial_agent": "RefinementHarnessAgent",
             "description": "Generate app-local refinement harness files.",
-            "initial_message": "Generate only the control-plane pack.",
+            "initial_message": "Generate only the refinement harness.",
             "owned_paths": [
-                "control_plane/config/control_plane.yaml",
+                "refinement_harness/config/harness.yaml",
             ],
             "depends_on": [],
             "acceptance_criteria": ["Harness routes stay declarative"],
         }
     )
 
-    with pytest.raises(ValueError, match="missing required control-plane pack paths"):
+    with pytest.raises(ValueError, match="missing required refinement harness paths"):
         module.app_build_plan(
             AppBuildPlan=plan,
             context_variables=_Context(),

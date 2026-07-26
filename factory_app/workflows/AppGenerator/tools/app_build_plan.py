@@ -61,7 +61,7 @@ _ALLOWED_TASK_TYPES = {
     "api_surface",
     "page_bundle",
     "agent_backend_integration",
-    "control_plane_pack",
+    "refinement_harness",
 }
 _CANONICAL_INITIAL_AGENTS = {
     "subscription_config": "ConfigMiddlewareAgent",
@@ -71,13 +71,14 @@ _CANONICAL_INITIAL_AGENTS = {
     "data_migrations": "DatabaseAgent",
     "data_models": "ModelAgent",
     "business_services": "ServiceAgent",
-    "control_plane_pack": "ControlPlaneAgent",
+    "refinement_harness": "RefinementHarnessAgent",
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
+    "app_policy": frozenset({"subscription_config"}),
     "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
-    "control_plane": frozenset({"control_plane_pack", "subscription_config"}),
+    "refinement": frozenset({"refinement_harness"}),
     "ui_only": frozenset({"page_bundle"}),
 }
 _SHARED_OWNED_PATHS = frozenset({"app.json"})
@@ -1418,8 +1419,8 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
             raise ValueError(
                 "Build task "
                 f"'{task_id}' owns path(s) outside canonical app planes: {invalid_roots}. "
-                "Allowed app-root planes are admin, backend, brand, config, control_plane, "
-                "data, modules, security, services, and ui."
+                "Allowed app-root planes are admin, backend, brand, config, data, "
+                "modules, refinement_harness, security, services, and ui."
             )
 
         invalid_config_paths = noncanonical_app_config_paths(owned_paths)
@@ -1428,7 +1429,8 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "Build task "
                 f"'{task_id}' owns noncanonical app config path(s): {invalid_config_paths}. "
                 "Use config/ai.json, config/shell.json, config/asset_manifest.json, "
-                "config/targets.json, or safe metadata under config/integrations/."
+                "config/refinement_policy.yaml, config/subscriptions.yaml, config/targets.json, "
+                "or safe metadata under config/integrations/."
             )
 
         invalid_service_paths = _noncanonical_service_paths(owned_paths)
@@ -1452,49 +1454,69 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     f"services/routes/, and {APP_SECURITY_SECRETS_PATH}."
                 )
 
-        if task_type == "control_plane_pack":
+        if task_type == "subscription_config":
+            if normalized_capability_pack_id:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'subscription_config' but capability_pack_id is not null. "
+                    "Subscription config is an app-level policy artifact, not a capability-pack module."
+                )
+            if surface_kind_raw != "app_policy":
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'subscription_config' but surface_kind is "
+                    f"'{surface_kind_raw}'. Use surface_kind='app_policy'."
+                )
+            if owned_paths != ["config/subscriptions.yaml"]:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'subscription_config' but owns {owned_paths}. "
+                    "Subscription config tasks may only own config/subscriptions.yaml."
+                )
+
+        if task_type == "refinement_harness":
             allowed_config_paths = {
-                "control_plane/config/control_plane.yaml",
-                "control_plane/config/tools.yaml",
-                "control_plane/config/policies.yaml",
+                "refinement_harness/config/harness.yaml",
+                "refinement_harness/config/tools.yaml",
+                "refinement_harness/config/policies.yaml",
             }
             if normalized_capability_pack_id:
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' uses task_type 'control_plane_pack' but capability_pack_id is not null. "
-                    "Control-plane packs are app-level harness artifacts, not capability-pack modules."
+                    f"'{task_id}' uses task_type 'refinement_harness' but capability_pack_id is not null. "
+                    "Refinement harnesses are app-level artifacts, not capability-pack modules."
                 )
-            if surface_kind_raw != "control_plane":
+            if surface_kind_raw != "refinement":
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' uses task_type 'control_plane_pack' but surface_kind is "
-                    f"'{surface_kind_raw}'. Use surface_kind='control_plane'."
+                    f"'{task_id}' uses task_type 'refinement_harness' but surface_kind is "
+                    f"'{surface_kind_raw}'. Use surface_kind='refinement'."
                 )
             invalid = [
                 path
                 for path in owned_paths
                 if path not in allowed_config_paths
                 and not (
-                    path.startswith("control_plane/prompts/")
+                    path.startswith("refinement_harness/prompts/")
                     and PurePosixPath(path).suffix == ".yaml"
                 )
             ]
             if invalid:
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' owns invalid control-plane pack paths: {invalid}. "
-                    "Control-plane pack tasks may only own control_plane/config/* and "
-                    "control_plane/prompts/*.yaml."
+                    f"'{task_id}' owns invalid refinement harness paths: {invalid}. "
+                    "Refinement harness tasks may only own refinement_harness/config/* and "
+                    "refinement_harness/prompts/*.yaml."
                 )
             required = {
-                "control_plane/config/control_plane.yaml",
-                "control_plane/config/tools.yaml",
+                "refinement_harness/config/harness.yaml",
+                "refinement_harness/config/tools.yaml",
             }
             missing = sorted(required.difference(owned_paths))
             if missing:
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' is missing required control-plane pack paths: {missing}."
+                    f"'{task_id}' is missing required refinement harness paths: {missing}."
                 )
 
         if task_type not in _ALLOWED_TASK_TYPES:

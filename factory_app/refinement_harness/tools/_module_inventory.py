@@ -2,7 +2,7 @@
 Deterministic module inventory extractor and carry-forward classifier.
 
 This utility is **read-only**. It consumes a ``file_map`` as returned by
-:func:`factory_app.control_plane.tools._artifact_workspace.load_artifact_workspace`
+:func:`factory_app.refinement_harness.tools._artifact_workspace.load_artifact_workspace`
 and produces structured inventory entries for every module found in the map,
 including an advisory carry-forward reuse-fit classification.
 
@@ -359,7 +359,7 @@ def extract_module_inventory(file_map: dict[str, str]) -> list[ModuleInventoryEn
     """Extract structured module inventory from an app-bundle file_map.
 
     The ``file_map`` is expected to be the output of
-    :func:`factory_app.control_plane.tools._artifact_workspace.load_artifact_workspace`
+    :func:`factory_app.refinement_harness.tools._artifact_workspace.load_artifact_workspace`
     — a ``{relative_path: content}`` dict where paths use forward slashes.
 
     Modules are identified by the presence of ``modules/{module_id}/module.yaml``.

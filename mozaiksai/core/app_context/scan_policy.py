@@ -117,7 +117,7 @@ DEFAULT_CONTEXT_GRAPH_PRIORITY_RULES: tuple[ScanPriorityRule, ...] = (
     ScanPriorityRule("build_context/packs/", 7, "build_context_packs"),
     ScanPriorityRule("build_context/", 8, "build_context"),
     ScanPriorityRule("factory_app/workflows/", 10, "factory_workflows"),
-    ScanPriorityRule("factory_app/control_plane/", 11, "factory_control_plane"),
+    ScanPriorityRule("factory_app/refinement_harness/", 11, "factory_control_plane"),
     ScanPriorityRule("mozaiksai/", 12, "runtime"),
     ScanPriorityRule("src/", 20, "src"),
     ScanPriorityRule("docs/", 70, "docs"),

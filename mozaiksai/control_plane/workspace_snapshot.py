@@ -69,7 +69,7 @@ async def register_workspace_snapshot(
     """Create a current app artifact and AppContextVersion from a local workspace.
 
     The snapshot is a code-context artifact, not a direct source mutation path. It
-    gives the control plane a durable artifact_version_id plus a deterministic
+    gives the Refinement Engine a durable artifact_version_id plus a deterministic
     Context Graph for scoped patch planning.
     """
     resolved_app_id = str(app_id or "").strip()

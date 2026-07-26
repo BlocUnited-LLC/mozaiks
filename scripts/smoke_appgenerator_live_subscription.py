@@ -189,7 +189,7 @@ def _subscription_task() -> dict[str, Any]:
         "task_type": "subscription_config",
         "capability_pack_id": None,
         "surface_id": "subscription_contract",
-        "surface_kind": "control_plane",
+        "surface_kind": "refinement",
         "execution_target": "app_bundle",
         "initial_agent": "ConfigMiddlewareAgent",
         "description": "Materialize the provider-neutral subscription plan catalog.",

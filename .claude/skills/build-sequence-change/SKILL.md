@@ -11,8 +11,8 @@ Inspect first:
 - `factory_app/workflows/extended_orchestration/extension_registry.json`
 - `docs/architecture/workflows/workflow-routing-transitions.md`
 - `docs/architecture/orchestration-and-decomposition.md`
-- `docs/architecture/workflows/control-plane-harness-architecture.md` when
-  sequence ids are referenced by control-plane routes
+- `docs/architecture/workflows/refinement-harness-architecture.md` when
+  sequence ids are referenced by refinement harness routes
 - the `orchestrator.yaml` and `transition_graph.yaml` files of each affected workflow
 
 Keep these distinct:
@@ -32,8 +32,8 @@ Current build truth:
 - `AppGenerator` owns final app-bundle generation
 - `ExistingAppDiscovery` is brownfield discovery, not the default greenfield build path
 
-If a `workflow_sequence` id changes, update `control_plane.yaml`, docs, and
-tests that reference it.
+If a `workflow_sequence` id changes, update `refinement_harness/config/harness.yaml`,
+docs, and tests that reference it.
 
 Return:
 

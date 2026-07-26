@@ -16,7 +16,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Concrete realization boundary for the surface.
@@ -137,7 +138,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Surface kind that owns the collection.
@@ -205,7 +207,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Surface kind mirrored from surface_map.

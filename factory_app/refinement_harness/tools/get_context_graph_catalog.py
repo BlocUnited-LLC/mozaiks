@@ -15,7 +15,7 @@ async def get_context_graph_catalog(
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
-    """Return graph-aware candidates for control-plane coding scope selection."""
+    """Return graph-aware candidates for refinement coding scope selection."""
     tool_context = normalize_context(context)
     loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
     if not loaded.get("present"):

@@ -269,7 +269,7 @@ def _create_bundle_scaffold(
   ):
     directory.mkdir(parents=True, exist_ok=True)
 
-  print("Created scaffold directories: app/config, app/security, control_plane/config, app/services, app/modules, workflows, app/ui, app/brand")
+  print("Created scaffold directories: app/config, app/security, app/services, app/modules, workflows, app/ui, app/brand")
 
   features = TIER_PRESETS[preset]
   resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
@@ -294,10 +294,10 @@ def _create_bundle_scaffold(
   print("Created app/config/ai.json")
 
   _write_text(
-    config_dir / "llm.yaml",
-    yaml.safe_dump(build_default_control_plane_config(), sort_keys=False, allow_unicode=False),
+    config_dir / "refinement_policy.yaml",
+    yaml.safe_dump(build_default_refinement_policy_config(), sort_keys=False, allow_unicode=False),
   )
-  print("Created app/config/llm.yaml")
+  print("Created app/config/refinement_policy.yaml")
 
   _write_json(config_dir / "shell.json", _build_shell_config(app_name))
   print("Created app/config/shell.json")
@@ -877,18 +877,18 @@ def _load_factory_ai_config() -> dict:
     return payload
 
 
-def _load_factory_control_plane_runtime_config() -> dict:
+def _load_factory_refinement_policy_config() -> dict:
     factory_root = resolve_factory_app_root()
     if factory_root is None:
         raise FileNotFoundError("Unable to resolve the packaged factory_app root.")
 
-    config_path = factory_root / "app" / "config" / "llm.yaml"
+    config_path = factory_root / "app" / "config" / "refinement_policy.yaml"
     if not config_path.exists():
         return {}
 
     payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"Factory control-plane runtime config must be a YAML object: {config_path}")
+        raise ValueError(f"Factory refinement policy config must be a YAML object: {config_path}")
     return payload
 
 
@@ -937,8 +937,12 @@ def _build_ai_config(app_name: str, *, starter: bool) -> dict:
     return build_default_ai_config(app_name, starter=starter)
 
 
+def build_default_refinement_policy_config() -> dict:
+    return deepcopy(_load_factory_refinement_policy_config())
+
+
 def build_default_control_plane_config() -> dict:
-    return deepcopy(_load_factory_control_plane_runtime_config())
+    return build_default_refinement_policy_config()
 
 
 def build_default_shell_config(app_name: str) -> dict:

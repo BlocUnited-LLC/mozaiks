@@ -184,7 +184,7 @@ def test_artifact_version_doc_report_survives_model_dump_roundtrip() -> None:
 @pytest.mark.asyncio
 async def test_resolver_writes_carry_forward_report_to_context() -> None:
     """[8] resolve_carry_forward_preservation writes carry_forward_report to context dict."""
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
 
@@ -204,15 +204,15 @@ async def test_resolver_writes_carry_forward_report_to_context() -> None:
     }
     with (
         patch(
-            "factory_app.control_plane.tools.resolve_carry_forward_preservation.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.load_artifact_workspace",
             new=AsyncMock(return_value=workspace),
         ),
         patch(
-            "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_store",
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_store",
             return_value=MagicMock(),
         ),
         patch(
-            "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_content_store",
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_content_store",
             return_value=MagicMock(),
         ),
     ):
@@ -229,7 +229,7 @@ async def test_resolver_writes_carry_forward_report_to_context() -> None:
 @pytest.mark.asyncio
 async def test_resolver_report_has_required_keys() -> None:
     """[9] carry_forward_report from resolver has all 8 keys expected by CarryForwardReportSummary."""
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
 
@@ -250,15 +250,15 @@ async def test_resolver_report_has_required_keys() -> None:
     }
     with (
         patch(
-            "factory_app.control_plane.tools.resolve_carry_forward_preservation.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.load_artifact_workspace",
             new=AsyncMock(return_value=workspace),
         ),
         patch(
-            "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_store",
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_store",
             return_value=MagicMock(),
         ),
         patch(
-            "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_content_store",
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_content_store",
             return_value=MagicMock(),
         ),
     ):

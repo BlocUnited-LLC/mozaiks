@@ -8,45 +8,45 @@ from typing import Any
 from logs.logging_config import get_workflow_logger
 
 from .contracts import ControlPlaneToolCall, ControlPlaneToolContext, ControlPlaneToolResult
-from .loader import load_selected_control_plane_pack
+from .loader import load_selected_refinement_harness
 from .schema import LoadedControlPlanePack
 
 logger = get_workflow_logger("control_plane.executor")
 
 
 class ControlPlaneToolExecutionError(RuntimeError):
-    """Raised when a control-plane tool cannot be resolved or executed."""
+    """Raised when a refinement tool cannot be resolved or executed."""
 
 
 def resolve_control_plane_tool_entrypoint(entrypoint: str) -> Callable[..., Any]:
     module_name, separator, attr_name = str(entrypoint or "").partition(":")
     if not separator or not module_name or not attr_name:
         raise ControlPlaneToolExecutionError(
-            f"Invalid control-plane tool entrypoint '{entrypoint}'. Expected 'module.path:callable_name'."
+            f"Invalid refinement tool entrypoint '{entrypoint}'. Expected 'module.path:callable_name'."
         )
     try:
         module = import_module(module_name)
     except Exception as exc:
         raise ControlPlaneToolExecutionError(
-            f"Failed to import control-plane tool module '{module_name}': {exc}"
+            f"Failed to import refinement tool module '{module_name}': {exc}"
         ) from exc
     try:
         tool_callable = getattr(module, attr_name)
     except AttributeError as exc:
         raise ControlPlaneToolExecutionError(
-            f"Control-plane tool callable '{attr_name}' was not found in '{module_name}'."
+            f"Refinement tool callable '{attr_name}' was not found in '{module_name}'."
         ) from exc
     if not callable(tool_callable):
         raise ControlPlaneToolExecutionError(
-            f"Control-plane tool entrypoint '{entrypoint}' did not resolve to a callable."
+            f"Refinement tool entrypoint '{entrypoint}' did not resolve to a callable."
         )
     return tool_callable  # type: ignore[no-any-return]
 
 
 class ControlPlaneToolExecutor:
-    """Generic executor for declarative control-plane tools."""
+    """Generic executor for declarative refinement tools."""
 
-    def __init__(self, *, pack_loader: Any = load_selected_control_plane_pack) -> None:
+    def __init__(self, *, pack_loader: Any = load_selected_refinement_harness) -> None:
         self._pack_loader = pack_loader
 
     async def execute_tool(
@@ -58,10 +58,10 @@ class ControlPlaneToolExecutor:
         pack = self._load_pack()
         tool = pack.tool_by_id(call.tool_id)
         if tool is None:
-            raise ControlPlaneToolExecutionError(f"Unknown control-plane tool '{call.tool_id}'.")
+            raise ControlPlaneToolExecutionError(f"Unknown refinement tool '{call.tool_id}'.")
         if call.target and call.target not in tool.available_to:
             raise ControlPlaneToolExecutionError(
-                f"Control-plane tool '{call.tool_id}' is not available to target '{call.target}'."
+                f"Refinement tool '{call.tool_id}' is not available to target '{call.target}'."
             )
 
         normalized_context = self._normalize_context(context, target=call.target)
@@ -72,7 +72,7 @@ class ControlPlaneToolExecutor:
             raise
         except Exception as exc:
             logger.warning(
-                "Control-plane tool execution failed",
+                "Refinement tool execution failed",
                 extra={"tool_id": call.tool_id, "target": call.target, "error": str(exc)},
             )
             return ControlPlaneToolResult(success=False, error=str(exc), metadata={"tool_id": call.tool_id})

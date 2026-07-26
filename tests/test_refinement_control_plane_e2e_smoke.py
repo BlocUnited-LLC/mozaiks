@@ -9,7 +9,7 @@ from mozaiksai.control_plane import (
     ControlPlaneConfig,
     RefinementTriggerRouteResolver,
     load_control_plane_config,
-    load_control_plane_pack,
+    load_refinement_harness,
 )
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "factory_app" / "app"
@@ -33,7 +33,7 @@ class _FakeChangeClassifier:
 def _resolver(classifier: _FakeChangeClassifier) -> RefinementTriggerRouteResolver:
     return RefinementTriggerRouteResolver(
         classifier=classifier,
-        pack_loader=lambda: load_control_plane_pack(app_root=APP_ROOT),
+        pack_loader=lambda: load_refinement_harness(app_root=APP_ROOT),
     )
 
 

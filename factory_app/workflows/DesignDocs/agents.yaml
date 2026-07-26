@@ -31,7 +31,7 @@ agents:
       - Do NOT implement AI/LLM backend logic. No LLM endpoints, embeddings, vector DBs, model training, or prompt-serving APIs.
       - Focus on core application functionality only.
       - Generate documents as strings inside one structured output bundle.
-      - concept_overview, concept_blueprint, captured_theme_config, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement control-plane fields are provided via context variables; do not call tools to load them.
+      - concept_overview, concept_blueprint, captured_theme_config, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement refinement-engine fields are provided via context variables; do not call tools to load them.
       - If design_docs_hitl is true, make the docs easier to review by clearly separating assumptions, alternatives, and final recommendations.
       - If coding_participation is autonomous, keep docs direct and execution-oriented.
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
@@ -77,8 +77,8 @@ agents:
       Key fields and how to use them:
 
       surface_candidate_hints[]: The upstream surface signal from ValueEngine. Each hint
-      carries surface_id, label, likely_surface_kind (module/workflow/control_plane/
-      external_integration/ui_only), source_capability_packs, owner_hint (app/hosted/platform/null),
+      carries surface_id, label, likely_surface_kind (module/workflow/app_policy/
+      refinement/external_integration/ui_only), source_capability_packs, owner_hint (app/hosted/platform/null),
       confidence (low/medium/high), and rationale. High-confidence hints should become surface_map entries.
       Low-confidence hints are design inputs, not mandates. Do not invent surfaces that contradict the
       hints without rationale. Do not omit high-confidence hints without rationale.
@@ -121,7 +121,7 @@ agents:
            surface signal and brand_intent as the upstream brand signal (see [CONCEPT BLUEPRINT]).
          - If both are null, infer surfaces and brand direction from concept_overview prose.
 
-      1a) If build_mode is `revision` or refinement_request, revision_scope, change_intent, or impact_set are present, treat them as authoritative control-plane reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
+      1a) If build_mode is `revision` or refinement_request, revision_scope, change_intent, or impact_set are present, treat them as authoritative refinement reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
 
       2) Generate the Frontend doc as Markdown and place it in `frontend_markdown`.
 
@@ -167,7 +167,7 @@ agents:
       Every `surface_map.surfaces[]` entry must include:
       - `surface_id`: stable snake_case id
       - `label`: human-readable label
-      - `surface_kind`: one of `module`, `workflow`, `control_plane`, `external_integration`, `ui_only`
+      - `surface_kind`: one of `module`, `workflow`, `app_policy`, `refinement`, `external_integration`, `ui_only`
       - `owner`: who owns the surface, such as `app`, `hosted`, or `platform`
       - `source_capability_packs`: capability-pack hints this surface realizes
       - `primary_entities`: durable entities or records owned by the surface
@@ -182,11 +182,12 @@ agents:
       - Use `module` for durable deterministic business logic under `app/modules/*`.
       - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
       - Use `workflow` for agentic orchestration lanes.
-      - Use `control_plane` for Studio/build/session/refinement coordination.
-      - Treat `control_plane` as an app-owned semantic coordination surface above workflows and modules, not as a synonym for any agentic workflow.
-      - Promote a hint to `surface_kind: control_plane` only when the app needs at least two of: semantic intake across multiple execution paths, checkpointed revision/session continuity, policy/approval/escalation gates, scoped coding or contract-surface planning, or request-meaning-based artifact routing.
-      - If the need is a single known workflow, fixed `workflow_sequence`, or ordinary module action routing, resolve it as `workflow` or `module`, not `control_plane`.
-      - Keep workflow execution lanes as `workflow` surfaces even when a separate control plane may route into them.
+      - Use `app_policy` for app-level declarative policy/config artifacts such as `config/subscriptions.yaml`.
+      - Use `refinement` for app-owned Studio/build/session/refinement coordination that needs its own declarative refinement harness.
+      - Treat `refinement` as an app-owned semantic coordination surface above workflows and modules, not as a synonym for any agentic workflow.
+      - Promote a hint to `surface_kind: refinement` only when the app needs at least two of: semantic intake across multiple execution paths, checkpointed revision/session continuity, policy/approval/escalation gates, scoped coding or contract-surface planning, or request-meaning-based artifact routing.
+      - If the need is a single known workflow, fixed `workflow_sequence`, or ordinary module action routing, resolve it as `workflow` or `module`, not `refinement`.
+      - Keep workflow execution lanes as `workflow` surfaces even when a separate refinement harness may route into them.
       - Use `external_integration` when the main boundary is payment provider onboarding, ads APIs, hosting providers, CRM APIs, etc.
       - If a surface depends on third-party credentials, describe that dependency in `integrations`, but keep the credential lifecycle in the platform connector/admin surface rather than in module-owned persistence.
       - Use `ui_only` only for purely presentational/reporting surfaces that own no durable business state.

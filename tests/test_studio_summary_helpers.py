@@ -57,7 +57,7 @@ Covers:
     - workflows > 0, no entry point → "workflows_present_no_entry_point"
     - workflows > 0, entry point set → "entry_point_configured"
 
-  _summarize_control_plane:
+  _summarize_refinement_policy:
     - non-dict input → disabled/empty
     - enabled True → enabled=True
     - classifier enabled → classifier_enabled=True
@@ -95,7 +95,7 @@ from mozaiksai.core.runtime.app.studio_summary import (
     _recommend_lifecycle_next_step,
     _resolve_admins,
     _runtime_readiness,
-    _summarize_control_plane,
+    _summarize_refinement_policy,
     build_app_list_entry,
     build_apps_metrics,
 )
@@ -368,42 +368,42 @@ class TestRuntimeReadiness:
 
 
 # ---------------------------------------------------------------------------
-# 10. _summarize_control_plane
+# 10. _summarize_refinement_policy
 # ---------------------------------------------------------------------------
 
-class TestSummarizeControlPlane:
+class TestSummarizeRefinementPolicy:
     def test_non_dict_returns_disabled(self):
-        result = _summarize_control_plane(None)
+        result = _summarize_refinement_policy(None)
         assert result["enabled"] is False
         assert result["classifier_enabled"] is False
         assert result["llm_profile_count"] == 0
 
     def test_enabled_true(self):
-        result = _summarize_control_plane({"enabled": True})
+        result = _summarize_refinement_policy({"enabled": True})
         assert result["enabled"] is True
 
     def test_classifier_enabled(self):
-        result = _summarize_control_plane({"classifier": {"enabled": True}})
+        result = _summarize_refinement_policy({"classifier": {"enabled": True}})
         assert result["classifier_enabled"] is True
 
     def test_profile_string_returned(self):
-        result = _summarize_control_plane({"profile": "standard"})
+        result = _summarize_refinement_policy({"profile": "standard"})
         assert result["profile"] == "standard"
 
     def test_profile_non_string_returns_none(self):
-        result = _summarize_control_plane({"profile": 123})
+        result = _summarize_refinement_policy({"profile": 123})
         assert result["profile"] is None
 
     def test_llm_profile_count(self):
-        result = _summarize_control_plane({"llm_profiles": {"a": {}, "b": {}}})
+        result = _summarize_refinement_policy({"llm_profiles": {"a": {}, "b": {}}})
         assert result["llm_profile_count"] == 2
 
     def test_coding_enabled(self):
-        result = _summarize_control_plane({"coding": {"enabled": True}})
+        result = _summarize_refinement_policy({"coding": {"enabled": True}})
         assert result["coding_enabled"] is True
 
     def test_non_dict_classifier_ignored(self):
-        result = _summarize_control_plane({"classifier": "not-a-dict"})
+        result = _summarize_refinement_policy({"classifier": "not-a-dict"})
         assert result["classifier_enabled"] is False
 
 

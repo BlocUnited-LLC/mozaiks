@@ -168,12 +168,13 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
 
     adoption_journey = next(item for item in workflow_sequences if item["id"] == "brownfield_app_adoption")
     assert adoption_journey["steps"][0]["transition"] == "app_type_selector"
-    assert adoption_journey["steps"][1]["workflows"] == ["ExistingAppDiscovery"]
-    assert adoption_journey["steps"][2]["transition"] == "brownfield_path_selector"
+    assert adoption_journey["steps"][1]["transition"] == "brownfield_discovery_intro"
+    assert adoption_journey["steps"][2]["workflows"] == ["ExistingAppDiscovery"]
+    assert adoption_journey["steps"][3]["transition"] == "brownfield_path_selector"
 
     app_type_selector = transition_map["app_type_selector"]
     existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "brownfield_app")
-    assert existing_app_option["route_to"] == "ExistingAppDiscovery"
+    assert existing_app_option["route_to"] == "brownfield_discovery_intro"
     assert existing_app_option["sequence"] == "brownfield_app_adoption"
     assert existing_app_option["context_variables"] == {"app_type": "brownfield_app"}
 

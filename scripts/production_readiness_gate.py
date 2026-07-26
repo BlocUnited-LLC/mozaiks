@@ -115,6 +115,7 @@ SOURCE_HYGIENE_SUFFIXES = {
 }
 SOURCE_HYGIENE_EXCLUDED_DIRS = {
     ".git",
+    ".local",
     ".mkdocs-tmp",
     ".mypy_cache",
     ".pytest_cache",

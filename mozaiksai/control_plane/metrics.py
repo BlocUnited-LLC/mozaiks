@@ -1,7 +1,7 @@
-"""Structured observability hooks for the factory build control plane.
+"""Structured observability hooks for the factory Refinement Engine.
 
 Provides lightweight, zero-dependency instrumentation that emits structured
-log records at control-plane stage boundaries. These records can be forwarded
+log records at refinement stage boundaries. These records can be forwarded
 to any log aggregator (Datadog, CloudWatch, Loki, etc.) for dashboards and
 alerting.
 
@@ -18,7 +18,7 @@ Environment variables:
   warning is emitted. Defaults to 50_000. Set to 0 to disable.
 
 Log record format (structured ``extra`` fields):
-  cp_stage        — control-plane stage name (e.g. "route_refinement")
+  cp_stage        — refinement stage name (e.g. "route_refinement")
   cp_request_id   — refinement request ID (when available)
   cp_app_id       — app being built (when available)
   cp_duration_ms  — wall-clock milliseconds for stage (on end/failure)
@@ -60,7 +60,7 @@ def ControlPlaneBuildTimer(
     request_id: str | None = None,
     app_id: str | None = None,
 ) -> Generator[None, None, None]:
-    """Context manager that times a control-plane stage and logs the result.
+    """Context manager that times a refinement stage and logs the result.
 
     Logs ``cp_stage_start`` at entry, ``cp_stage_end`` on clean exit,
     and ``cp_stage_error`` if an exception is raised (the exception is
@@ -115,7 +115,7 @@ def log_build_outcome(
 ) -> None:
     """Log the terminal outcome of a full build or refinement request.
 
-    Call once at the top of the control-plane flow after the final decision
+    Call once at the top of the Refinement Engine flow after the final decision
     or failure is known.
 
     Args:
@@ -173,7 +173,7 @@ def check_token_usage(
     Safe to call with None values — no-ops silently when token_count is None.
 
     Args:
-        stage:       Control-plane stage that consumed the tokens.
+        stage:       Refinement stage that consumed the tokens.
         token_count: Total tokens used. Skipped when None.
         request_id:  Refinement request ID.
         app_id:      App being built.

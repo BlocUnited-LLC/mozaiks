@@ -10,10 +10,10 @@ def _read(relative_path: str) -> str:
 def test_control_plane_refinement_skill_exists_and_states_current_truth() -> None:
     skill = _read(".claude/skills/control-plane-refinement-change/SKILL.md")
 
-    assert "checkpoint/control-plane re-entry" in skill
+    assert "checkpoint-driven re-entry" in skill
     assert "not a dedicated\n  `RefinementWorkflow`" in skill or "not a dedicated `RefinementWorkflow`" in skill
-    assert "llm.yaml" in skill
-    assert "control_plane/config/control_plane.yaml" in skill
+    assert "refinement_policy.yaml" in skill
+    assert "refinement_harness/config/harness.yaml" in skill
     assert "app/config/ai.json" in skill
     assert "affected_declarative_families" in skill
     assert "factory_control_plane" in skill
@@ -47,7 +47,7 @@ def test_control_plane_refinement_skill_is_routed_and_public_safe() -> None:
     skill = _read(".claude/skills/control-plane-refinement-change/SKILL.md")
 
     assert "| Control-plane / refinement / harness routing | `control-plane-refinement-change` |" in skills
-    assert "Control-plane or refinement change: use `control-plane-refinement-change`" in quickstart
+    assert "Refinement Engine or refinement harness change: use `control-plane-refinement-change`" in quickstart
 
     for text, label in [
         (skills, ".claude/skills/README.md"),

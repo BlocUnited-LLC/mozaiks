@@ -118,9 +118,9 @@ def _enabled_control_plane() -> ControlPlaneConfig:
 
 def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path=Path("factory_app/control_plane"),
+        path=Path("factory_app/refinement_harness"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             checkpoints=[
                 ControlPlaneCheckpointManifest(
                     event="coding_requested",
@@ -130,7 +130,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="coding_refinement_system",
@@ -139,7 +139,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
                     id="get_artifact_summary",
@@ -212,7 +212,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert created[0].system_prompt == "coding system prompt from pack"
     assert created[0].llm_config == {"model": "gpt-5.2-codex", "temperature": 0.1}
     assert '"input_files"' in created[0].calls[0]["user_prompt"]
-    assert '"control_plane_context"' in created[0].calls[0]["user_prompt"]
+    assert '"refinement_context"' in created[0].calls[0]["user_prompt"]
 
     assert len(tool_executor.calls) == 2
     assert artifact_store.calls[0]["parent_version_id"] == "av_123"

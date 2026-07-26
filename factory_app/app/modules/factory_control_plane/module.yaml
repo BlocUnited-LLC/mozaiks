@@ -1,9 +1,9 @@
 schema_version: mozaiks.module.v1
 module:
   id: factory_control_plane
-  display_name: Factory Control Plane
+  display_name: Factory Refinement Engine
   version: 1.0.0
-  description: Factory workspace control-plane helpers and routing policy.
+  description: Factory workspace refinement engine helpers and harness routing policy.
   handler: backend.handler:FactoryControlPlaneModule
 permissions: []
 actions: []

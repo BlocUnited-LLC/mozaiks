@@ -87,21 +87,21 @@ def _absent_workspace(reason: str = "artifact_not_found") -> dict:
 class TestToolExists:
     def test_module_importable(self) -> None:
         mod = importlib.import_module(
-            "factory_app.control_plane.tools.get_carry_forward_candidates"
+            "factory_app.refinement_harness.tools.get_carry_forward_candidates"
         )
         assert hasattr(mod, "get_carry_forward_candidates")
 
     def test_function_is_callable(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         assert callable(get_carry_forward_candidates)
 
     def test_all_exported(self) -> None:
-        from factory_app.control_plane.tools import (
+        from factory_app.refinement_harness.tools import (
             get_carry_forward_candidates as mod_,  # noqa: F401
         )
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             __all__,
         )
         assert "get_carry_forward_candidates" in __all__
@@ -114,7 +114,7 @@ class TestToolExists:
 class TestOutputShape:
     @pytest.mark.asyncio
     async def test_output_has_required_keys(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -123,16 +123,16 @@ class TestOutputShape:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[mock_entry],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -142,7 +142,7 @@ class TestOutputShape:
 
     @pytest.mark.asyncio
     async def test_count_matches_modules_length(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -152,16 +152,16 @@ class TestOutputShape:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=entries,
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -172,7 +172,7 @@ class TestOutputShape:
 
     @pytest.mark.asyncio
     async def test_source_artifact_version_id_from_artifact(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -183,16 +183,16 @@ class TestOutputShape:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=workspace,
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -202,7 +202,7 @@ class TestOutputShape:
 
     @pytest.mark.asyncio
     async def test_modules_are_dicts(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -211,16 +211,16 @@ class TestOutputShape:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -230,7 +230,7 @@ class TestOutputShape:
 
     @pytest.mark.asyncio
     async def test_warnings_is_list(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -239,16 +239,16 @@ class TestOutputShape:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -264,7 +264,7 @@ class TestOutputShape:
 class TestDelegates:
     @pytest.mark.asyncio
     async def test_calls_load_artifact_workspace(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -274,16 +274,16 @@ class TestDelegates:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ) as mock_load,
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=mock_store,
             ),
         ):
@@ -297,7 +297,7 @@ class TestDelegates:
 
     @pytest.mark.asyncio
     async def test_calls_extract_module_inventory_with_file_map(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -307,16 +307,16 @@ class TestDelegates:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=workspace,
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ) as mock_extract,
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -326,7 +326,7 @@ class TestDelegates:
 
     @pytest.mark.asyncio
     async def test_uses_injected_artifact_store(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -336,12 +336,12 @@ class TestDelegates:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ) as mock_load,
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
         ):
@@ -359,7 +359,7 @@ class TestDelegates:
 class TestGracefulDegradation:
     @pytest.mark.asyncio
     async def test_missing_previous_app_bundle_ref_returns_empty(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {}}
@@ -373,7 +373,7 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_missing_app_id_returns_empty(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -386,19 +386,19 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_workspace_not_present_returns_empty_with_warning(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_absent_workspace("artifact_not_found"),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -410,19 +410,19 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_workspace_load_exception_returns_empty_with_warning(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("db connection refused"),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -434,19 +434,19 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_workspace_unavailable_reason_forwarded(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_absent_workspace("workspace_unavailable"),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -456,23 +456,23 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_extract_module_inventory_exception_returns_empty(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 side_effect=ValueError("bad yaml structure"),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -484,7 +484,7 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_no_modules_found_warning_when_empty_inventory(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -492,16 +492,16 @@ class TestGracefulDegradation:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(empty_file_map),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -514,7 +514,7 @@ class TestGracefulDegradation:
     async def test_invalid_module_yaml_in_workspace_does_not_crash(self) -> None:
         """extract_module_inventory handles invalid YAML defensively (per Phase 1).
         The tool should return whatever entries survive, not crash."""
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -527,12 +527,12 @@ class TestGracefulDegradation:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=workspace,
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -552,7 +552,7 @@ class TestGracefulDegradation:
 class TestReadOnly:
     @pytest.mark.asyncio
     async def test_no_artifact_store_write_called(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -562,12 +562,12 @@ class TestReadOnly:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
         ):
@@ -585,7 +585,7 @@ class TestReadOnly:
         """All output values must be JSON-serializable (dict, list, str, int, None)."""
         import json
 
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
@@ -594,16 +594,16 @@ class TestReadOnly:
 
         with (
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
                 new_callable=AsyncMock,
                 return_value=_good_workspace(),
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.extract_module_inventory",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.extract_module_inventory",
                 return_value=[entry],
             ),
             patch(
-                "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+                "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
                 return_value=MagicMock(),
             ),
         ):
@@ -622,7 +622,7 @@ class TestToolRegistration:
         tools_path = (
             Path(__file__).resolve().parents[1]
             / "factory_app"
-            / "control_plane"
+            / "refinement_harness"
             / "config"
             / "tools.yaml"
         )
@@ -670,18 +670,18 @@ class TestToolRegistration:
         )
         assert tool is not None
         assert tool["entrypoint"] == (
-            "factory_app.control_plane.tools.get_carry_forward_candidates"
+            "factory_app.refinement_harness.tools.get_carry_forward_candidates"
             ":get_carry_forward_candidates"
         )
 
     def test_pack_loads_without_error(self) -> None:
-        """The full control-plane pack must load cleanly with the new tool."""
-        from mozaiksai.control_plane import load_control_plane_pack
+        """The full refinement harness must load cleanly with the new tool."""
+        from mozaiksai.control_plane import load_refinement_harness
 
         app_root = (
             Path(__file__).resolve().parents[1] / "factory_app" / "app"
         )
-        pack = load_control_plane_pack(app_root=app_root)
+        pack = load_refinement_harness(app_root=app_root)
         tool_ids = [t.id for t in pack.tools.tools]
         assert "get_carry_forward_candidates" in tool_ids
 
@@ -697,7 +697,7 @@ class TestDocumentation:
             / "docs"
             / "architecture"
             / "workflows"
-            / "refinement-control-plane.md"
+            / "refinement-engine.md"
         )
         return doc_path.read_text(encoding="utf-8")
 
@@ -768,7 +768,7 @@ class TestClassificationInToolOutput:
     async def test_each_module_entry_has_classification_fields(self) -> None:
         """Every module dict in 'modules' has carry_forward_classification and
         carry_forward_reasons when the real extract_module_inventory runs."""
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         file_map = {
@@ -780,7 +780,7 @@ class TestClassificationInToolOutput:
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with patch(
-            "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=self._good_workspace_with_real_map(file_map),
         ):
@@ -803,7 +803,7 @@ class TestClassificationInToolOutput:
     @pytest.mark.asyncio
     async def test_safe_module_classified_correctly_in_output(self) -> None:
         """'settings' module is safe_carry_forward in tool output."""
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         file_map = {
@@ -813,7 +813,7 @@ class TestClassificationInToolOutput:
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with patch(
-            "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=self._good_workspace_with_real_map(file_map),
         ):
@@ -825,7 +825,7 @@ class TestClassificationInToolOutput:
     @pytest.mark.asyncio
     async def test_domain_module_classified_regenerate_in_output(self) -> None:
         """'projects' module is regenerate in tool output (domain-specific fragment)."""
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         file_map = {
@@ -835,7 +835,7 @@ class TestClassificationInToolOutput:
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with patch(
-            "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=self._good_workspace_with_real_map(file_map),
         ):
@@ -847,7 +847,7 @@ class TestClassificationInToolOutput:
     @pytest.mark.asyncio
     async def test_classification_fields_present_even_on_minimal_module(self) -> None:
         """A module with only module.yaml and no other files still has classification fields."""
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         file_map = {
@@ -856,7 +856,7 @@ class TestClassificationInToolOutput:
         ctx = {"app_id": _APP_ID, "extra": {"previous_app_bundle_ref": _PREV_REF}}
 
         with patch(
-            "factory_app.control_plane.tools.get_carry_forward_candidates.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.get_carry_forward_candidates.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=self._good_workspace_with_real_map(file_map),
         ):

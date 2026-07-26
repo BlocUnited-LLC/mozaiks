@@ -1,4 +1,4 @@
-"""Control-plane tool: load context graph catalog for contract surface planning.
+"""Refinement tool: load context graph catalog for contract surface planning.
 
 Available at: contract_surface_requested
 

@@ -73,7 +73,7 @@ def load_profile_tabs(app_root: Path) -> list[dict[str, Any]]:
 
 
 def _tab_to_page(tab: dict[str, Any], module_id: str) -> dict[str, Any]:
-    """Convert a v1 tab dict to a profile page dict for backward-compat surfacing."""
+    """Map a profile tab manifest entry to the canonical profile page shape."""
     return {
         "id": tab["id"],
         "label": tab["label"],
@@ -93,14 +93,11 @@ def _tab_to_page(tab: dict[str, Any], module_id: str) -> dict[str, Any]:
 def load_profile_pages(app_root: Path) -> list[dict[str, Any]]:
     """Walk modules/{module}/contracts/profile.yaml and return profile page dicts.
 
-    For v2 manifests (schema_version == "mozaiks.profile.v2"), native ``pages``
-    entries are collected directly.
+    Native ``pages`` entries are collected directly. Tab entries are promoted to
+    pages so the platform exposes one profile-page endpoint to the frontend.
 
-    For v1 manifests, ``tabs`` are automatically promoted to pages so that the
-    v2 endpoint surfaces them without requiring module authors to migrate.
-
-    Each returned dict includes ``module_id`` and placeholder ``data``/``error``
-    keys (both ``None``). Callers are responsible for hydrating actions.
+    Each returned dict includes ``module_id`` and empty ``data``/``error`` keys
+    (both ``None``). Callers are responsible for hydrating actions.
 
     Pages are returned sorted globally by ``order`` ascending.
     """
@@ -112,8 +109,6 @@ def load_profile_pages(app_root: Path) -> list[dict[str, Any]]:
                 entry["module_id"] = module_id
                 pages.append(entry)
         else:
-            # v1: promote tabs → pages so the /api/me/profile-pages endpoint
-            # surfaces all module content regardless of schema version.
             for tab in manifest.tabs:
                 pages.append(_tab_to_page(tab.model_dump(mode="python"), module_id))
     pages.sort(key=lambda p: (p.get("order", 100), p.get("module_id", ""), p.get("id", "")))

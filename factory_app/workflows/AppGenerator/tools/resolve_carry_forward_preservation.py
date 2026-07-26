@@ -3,7 +3,7 @@ AG2 wrapper for the Phase 7A carry-forward preservation resolver.
 
 Thin wrapper with Pydantic tool metadata annotations that delegates to
 the core implementation in
-``factory_app.control_plane.tools.resolve_carry_forward_preservation``.
+``factory_app.refinement_harness.tools.resolve_carry_forward_preservation``.
 """
 from __future__ import annotations
 

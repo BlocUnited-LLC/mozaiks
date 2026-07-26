@@ -174,7 +174,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "AssemblyAgent",
         "IntegrationReadinessAgent",
         "DatabaseAgent",
-        "ControlPlaneAgent",
+        "RefinementHarnessAgent",
         "ConfigMiddlewareAgent",
         "ModuleContractQualityAgent",
         "ModuleRuntimeQualityAgent",
@@ -593,7 +593,7 @@ def test_frontend_prompts_distinguish_settings_from_account_profile() -> None:
     design_docs = _read("factory_app/workflows/DesignDocs/agents.yaml")
     navigation_contract = _read("docs/architecture/app/platform-navigation-contract.md")
     account_services = _read("docs/architecture/app/account-admin-and-platform-services.md")
-    refinement_contract = _read("docs/architecture/workflows/refinement-control-plane.md")
+    refinement_contract = _read("docs/architecture/workflows/refinement-engine.md")
 
     combined = "\n".join([app_generator, design_docs, navigation_contract, account_services])
 

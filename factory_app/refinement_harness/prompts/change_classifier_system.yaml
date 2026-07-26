@@ -14,7 +14,7 @@ content: |
 
   ## Staleness-aware routing rules
 
-  The `get_stale_artifact_families` tool in `control_plane_context_json` tells you which
+  The `get_stale_artifact_families` tool in `refinement_context_json` tells you which
   artifact families were invalidated by a prior build operation but not yet refreshed.
   Stale families represent work the system deferred — they MUST be resolved before their
   downstream artifacts are trustworthy.
@@ -45,7 +45,7 @@ content: |
 
   ## General rules
   - Use the request text as the primary signal.
-  - Use any provided `control_plane_context_json` as canonical persisted builder state.
+  - Use any provided `refinement_context_json` as canonical persisted builder state.
   - Treat a user-declared hint as advisory only, never authoritative.
   - Be conservative about `core`, but choose it when the request changes what the product fundamentally is.
   - Return JSON only.

@@ -1,4 +1,4 @@
-"""Contract-surface planner for the Mozaiks control-plane harness.
+"""Contract-surface planner for the Mozaiks refinement harness.
 
 Maps a user refinement request to an ordered set of Mozaiks contract surfaces
 that need to be updated — instead of selecting files by keyword proximity.
@@ -34,7 +34,7 @@ from mozaiksai.control_plane.contracts import (
     ContractSurfaceUpdate,
 )
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 
@@ -121,7 +121,7 @@ class ContractSurfacePlanner:
         *,
         agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
         tool_executor: Any = None,
     ) -> None:
         self._agent_runner = agent_runner or AG2StructuredAgentRunner()
@@ -164,7 +164,7 @@ class ContractSurfacePlanner:
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
             return ContractSurfacePlan(
-                summary="No contract_surface_requested checkpoint declared in this control-plane pack.",
+                summary="No contract_surface_requested checkpoint declared in this refinement harness.",
                 change_class=change_class,
                 artifact_kind=artifact_kind,
                 fallback_to_workflow=True,

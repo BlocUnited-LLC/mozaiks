@@ -740,7 +740,7 @@ def test_promotion_helpers_do_not_execute_workflows() -> None:
     source = (REPO_ROOT / "mozaiksai/control_plane/promotion.py").read_text(encoding="utf-8")
 
     assert "RefinementTriggerRouteResolver" not in source
-    assert "load_control_plane_pack" not in source
+    assert "load_refinement_harness" not in source
     assert "execute_workflow" not in source
 
 

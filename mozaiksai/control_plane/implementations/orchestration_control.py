@@ -1,8 +1,8 @@
-"""Builder-session orchestration control harness.
+"""Builder-session Refinement Engine harness.
 
-This is the control-plane entrypoint for build-affecting requests that arrive
-through Studio or other builder surfaces. It is intentionally *not* a global
-prompt or a workflow-local AG2 handoff graph.
+This is the Refinement Engine entrypoint for build-affecting requests that
+arrive through Studio or other builder surfaces. It is intentionally *not* a
+global prompt or a workflow-local AG2 handoff graph.
 
 Today the harness delegates refinement-classified requests to the authoritative
 LLM-backed refinement router. Future builder-session analyzers can plug into the
@@ -49,7 +49,7 @@ from .surface_regeneration_worker import SurfaceRegenerationWorker, get_surface_
 
 
 class OrchestrationControlHarness:
-    """Control-plane harness for builder-session routing.
+    """Refinement Engine harness for builder-session routing.
 
     The harness owns builder-context interception and delegates to narrower
     analyzers or routers. It should stay above workflow-local AG2 execution.
@@ -156,7 +156,7 @@ class OrchestrationControlHarness:
         """Run authoritative refinement classification + routing for one request."""
 
         if not self.enabled():
-            raise RuntimeError("Control-plane harness is disabled in app/config/ai.json")
+            raise RuntimeError("Refinement Engine is disabled in app/config/refinement_policy.yaml")
 
         _app_id = str(request.app_id or "")
         await record_refinement_event(
@@ -219,7 +219,7 @@ class OrchestrationControlHarness:
         """
 
         if not self.contract_surface_enabled():
-            raise RuntimeError("Contract surface planning is disabled in app/config/ai.json")
+            raise RuntimeError("Contract surface planning is disabled in app/config/refinement_policy.yaml")
 
         plan: ContractSurfacePlan = await self._contract_surface_planner.propose(
             refinement_request=refinement_request,
@@ -254,7 +254,7 @@ class OrchestrationControlHarness:
         Raises RuntimeError when contract_surface is disabled.
         """
         if not self.contract_surface_enabled():
-            raise RuntimeError("Contract surface planning is disabled in app/config/ai.json")
+            raise RuntimeError("Contract surface planning is disabled in app/config/refinement_policy.yaml")
 
         return await self._surface_regeneration_worker.execute_plan(
             plan=plan,
@@ -313,7 +313,7 @@ class OrchestrationControlHarness:
         request: CodingWorkerRequest,
     ) -> tuple[CodingWorkerRequest | None, HarnessDecision]:
         if not self.coding_enabled():
-            raise RuntimeError("Control-plane coding worker is disabled in app/config/ai.json")
+            raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
         refinement_payload = request.context_seed.get("refinement_request")
         routing_payload = request.context_seed.get("routing_decision")
         if not isinstance(refinement_payload, dict) or not isinstance(routing_payload, dict):
@@ -368,7 +368,7 @@ class OrchestrationControlHarness:
 
     async def execute_coding_request(self, request: CodingWorkerRequest) -> CodingWorkerResult:
         if not self.coding_enabled():
-            raise RuntimeError("Control-plane coding worker is disabled in app/config/ai.json")
+            raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
 
         request_id: str | None = None
         try:

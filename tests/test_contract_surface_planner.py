@@ -187,9 +187,9 @@ def _enabled_contract_surface_config() -> ControlPlaneConfig:
 
 def _planner_pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path="factory_app/control_plane",
+        path="factory_app/refinement_harness",
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             checkpoints=[
                 ControlPlaneCheckpointManifest(
                     event="contract_surface_requested",
@@ -198,7 +198,7 @@ def _planner_pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="contract_surface_selection_system",
@@ -206,7 +206,7 @@ def _planner_pack() -> LoadedControlPlanePack:
                 )
             ],
         ),
-        tools=ControlPlaneToolsManifest(schema_version="mozaiks.control_plane.tools"),
+        tools=ControlPlaneToolsManifest(schema_version="mozaiks.refinement_harness.tools.v1"),
     )
 
 

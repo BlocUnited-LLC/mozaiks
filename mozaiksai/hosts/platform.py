@@ -39,7 +39,11 @@ from mozaiksai.core.auth.dependencies import (
 )
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.entitlement import EntitlementPort
-from mozaiksai.core.profile.discovery import load_profile_pages, load_profile_panels, load_profile_tabs
+from mozaiksai.core.profile.discovery import (
+    load_profile_pages,
+    load_profile_panels,
+    load_profile_tabs,
+)
 from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter

@@ -181,14 +181,14 @@ This project follows a practical pre-1.0 changelog format:
   Added `pytest-rerunfailures>=12.0` to dev deps. Pytest now re-runs flaky tests up to 2 times on `AssertionError` or `TimeoutError`. Coverage threshold set to `--cov-fail-under=30` (calibrated to full-suite achievable level). mypy CI command updated to `--disable-error-code=import-untyped` to suppress PyYAML stub noise consistent with `pyproject.toml` config.
 
 - **mypy clean pass** (`mozaiksai/`, `factory_app/`):
-  12 targeted type fixes across `ag2_runner.py`, `artifact_store.py`, `supabase.py`, `orchestration_patterns.py`, `queue.py`, `artifact_version.py`, `http_app_backend.py`, `commerce/backend/repo.py`, `DesignDocs/tools/save_design_doc.py`, `SubscriptionContractDesigner/tools/save_subscription_contract.py`, `control_plane_pack_codegen.py`, `routers/modules.py`. Result: 477 source files, 0 errors.
+  12 targeted type fixes across `ag2_runner.py`, `artifact_store.py`, `supabase.py`, `orchestration_patterns.py`, `queue.py`, `artifact_version.py`, `http_app_backend.py`, `commerce/backend/repo.py`, `DesignDocs/tools/save_design_doc.py`, `SubscriptionContractDesigner/tools/save_subscription_contract.py`, `refinement_harness_codegen.py`, `routers/modules.py`. Result: 477 source files, 0 errors.
 
 - **`hosts/runtime.py` startup** (`mozaiksai/hosts/runtime.py`):
   Runtime startup now ensures distributed lock indexes, idempotency indexes, and artifact version indexes, connects the Redis cache, and starts the inter-instance event bus. All operations degrade silently if their backends are unavailable.
 
 ### Fixed
 
-- **Hosted app runtime compatibility** (`mozaiksai/control_plane/config.py`, `mozaiksai/core/runtime/composition/module_executor.py`, `mozaiksai/core/runtime/persistence/indexes.py`):
+- **Hosted app runtime compatibility** (`mozaiksai/refinement_harness/config.py`, `mozaiksai/core/runtime/composition/module_executor.py`, `mozaiksai/core/runtime/persistence/indexes.py`):
   Control-plane runtime config now accepts optional profile metadata used by hosted app workspaces, module output validation normalizes `nullable: true` schemas before JSON Schema validation, and database index application strips metadata-only options while supporting literal Motor collections. These fixes unblock `mozaiks-app` startup, module dispatch, and database index bootstrapping from an installed package.
 
 ### Changed
@@ -1152,12 +1152,12 @@ This project follows a practical pre-1.0 changelog format:
   materialises `contracts/profile.yaml` — this change closes the generation-side
   gap.
 
-- `docs/architecture/app/control-plane-pack.md` — canonical reference for
-  app-local control plane packs. Covers when to use a pack, the full file
+- `docs/architecture/app/refinement-harness.md` — canonical reference for
+  app-local refinement harnesses. Covers when to use a pack, the full file
   layout, annotated starter templates for all four config files
-  (`runtime.yaml`, `control_plane.yaml`, `tools.yaml`, `policies.yaml`), prompt
+  (`runtime.yaml`, `harness.yaml`, `tools.yaml`, `policies.yaml`), prompt
   starters for all four LLM-backed checkpoints, and route rules. This is the
-  authoritative AppGenerator reference for `control_plane_pack` build tasks.
+  authoritative AppGenerator reference for `refinement_harness` build tasks.
 
 - `WorkflowEntry` in the pack-graph schema now accepts a `startup_mode` field
   (`UserDriven`, `AgentDriven`, or `BackendOnly`). `GlobalPackGraph` enforces
@@ -1172,7 +1172,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
-- `docs/architecture/workflows/control-plane-harness-architecture.md` updated:
+- `docs/architecture/workflows/refinement-harness-architecture.md` updated:
   file trees corrected (added `contract_surface_planner.py`, `runtime.yaml`,
   `contract_surface_selection_system.yaml`, all 11 context tools); new "AG2
   Implementation Model" section covering `agent.ask()` pattern, structured
@@ -1199,11 +1199,11 @@ This project follows a practical pre-1.0 changelog format:
   loader both expect, and keeps `AppSchemaOutput` and `AppBuildPlanOutput`
   compatible with provider strict structured-output mode.
 - AppGenerator now seeds generated app bundles with `config/ai.json` from the
-  current factory runtime defaults, and `control_plane_pack` outputs now stage
-  `control_plane/config/runtime.yaml` alongside `control_plane.yaml` and
+  current factory runtime defaults, and `refinement_harness` outputs now stage
+  `app/config/refinement_policy.yaml` alongside `harness.yaml` and
   `tools.yaml`. This keeps `ask` / `chat` / `workflows` startup in `ai.json`
   while moving app-local control-plane runtime policy under
-  `control_plane/config/`.
+  `refinement_harness/config/`.
 - `IntegrationTestAgent` removed from the AppGenerator agent roster.
   Integration and wiring validation (`run_integration_tests`,
   `validate_wiring`) are deterministic runtime-gate tools called by
@@ -1365,7 +1365,7 @@ This project follows a practical pre-1.0 changelog format:
   `list[FileUpdate]` generates an array of objects with `additionalProperties: false`.
 
 - Fixed `codegen`, `planner_replanner`, and `reviewer_validator` LLM profiles in
-  `factory_app/control_plane/config/runtime.yaml` — previously set to
+  `factory_app/refinement_harness/config/runtime.yaml` — previously set to
   `gpt-5.2-codex`, which is a completions-only model that returns a 404 from
   `/v1/chat/completions`. Changed to `gpt-4o` with `temperature: 0.1`.
 

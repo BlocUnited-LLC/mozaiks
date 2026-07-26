@@ -112,18 +112,18 @@ async def _resolve(
     *,
     workspace_result: dict = _WORKSPACE_OK,
 ) -> dict:
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
 
     with patch(
-        "factory_app.control_plane.tools.resolve_carry_forward_preservation.load_artifact_workspace",
+        "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.load_artifact_workspace",
         new=AsyncMock(return_value=workspace_result),
     ), patch(
-        "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_store",
+        "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_store",
         return_value=MagicMock(),
     ), patch(
-        "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_content_store",
+        "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_content_store",
         return_value=MagicMock(),
     ):
         return await resolve_carry_forward_preservation(
@@ -304,7 +304,9 @@ async def test_reuse_does_not_copy_route_manifest():
 
 @pytest.mark.asyncio
 async def test_reuse_does_not_copy_sensitive_paths():
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import _is_denylist_path
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
+        _is_denylist_path,
+    )
 
     # Paths explicitly matched by _is_denylist_path sensitive-term check
     denylist_sensitive_paths = [
@@ -319,7 +321,7 @@ async def test_reuse_does_not_copy_sensitive_paths():
     # api_key.yaml is not in the Phase 7A allowlist (only specific contract filenames
     # are allowed), so it is protected by allowlist exclusivity, not the denylist.
     # Verify that it is NOT in the allowlist.
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         _PHASE_7A_MODULE_ALLOWLIST,
     )
     assert "contracts/api_key.yaml" not in _PHASE_7A_MODULE_ALLOWLIST
@@ -550,13 +552,13 @@ async def test_wrapper_imports_and_delegates():
 
     ctx = _make_context(decisions=[])
     with patch(
-        "factory_app.control_plane.tools.resolve_carry_forward_preservation.load_artifact_workspace",
+        "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.load_artifact_workspace",
         new=AsyncMock(return_value=_WORKSPACE_OK),
     ), patch(
-        "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_store",
+        "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_store",
         return_value=MagicMock(),
     ), patch(
-        "factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_content_store",
+        "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.get_artifact_content_store",
         return_value=MagicMock(),
     ):
         result = await func(context_variables=ctx)
@@ -645,7 +647,7 @@ class TestDocsPhase7A:
         / "docs"
         / "architecture"
         / "workflows"
-        / "refinement-control-plane.md"
+        / "refinement-engine.md"
     )
 
     def _content(self) -> str:

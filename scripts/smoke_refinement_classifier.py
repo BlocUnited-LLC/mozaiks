@@ -19,7 +19,7 @@ from mozaiksai.control_plane import (
     LLMChangeClassifier,
     RefinementTriggerRouteResolver,
     load_control_plane_config,
-    load_control_plane_pack,
+    load_refinement_harness,
 )
 from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
 
@@ -235,7 +235,7 @@ async def run_smoke() -> dict[str, Any]:
         }
 
     def pack_loader():
-        return load_control_plane_pack(app_root=APP_ROOT)
+        return load_refinement_harness(app_root=APP_ROOT)
 
     classifier = LLMChangeClassifier(
         config_loader=lambda: control_plane_config,

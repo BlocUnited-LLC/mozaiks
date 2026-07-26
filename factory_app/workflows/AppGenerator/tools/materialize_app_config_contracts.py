@@ -125,7 +125,7 @@ def _materialize_subscriptions_yaml(*, context_variables: Any) -> str | None:
     if isinstance(pricing_catalog, dict):
         doc["pricing_catalog"] = _safe_dict(pricing_catalog)
 
-    return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    return str(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True))
 
 
 def _materialize_integrations_yaml(*, app_id: str, context_variables: Any) -> str:
@@ -157,7 +157,7 @@ def _materialize_integrations_yaml(*, app_id: str, context_variables: Any) -> st
         "app_id": app_id,
         "requirements": requirements,
     }
-    return yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
+    return str(yaml.safe_dump(payload, sort_keys=False, default_flow_style=False))
 
 
 def _first_dict(items: Any) -> dict[str, Any]:
@@ -188,19 +188,21 @@ def _materialize_targets_json(*, app_id: str, app_build_plan: Any, context_varia
             "container_port": 8000,
         }
 
+    allowed_lanes = target.get("allowed_lanes")
     deployment: dict[str, Any] = {
         "profile": str(deployment_profile),
         "preferred_lane": str(target.get("preferred_lane") or "self_hosted"),
         "allowed_lanes": (
-            [_safe_scalar(item) for item in target.get("allowed_lanes")]
-            if isinstance(target.get("allowed_lanes"), list)
+            [_safe_scalar(item) for item in allowed_lanes]
+            if isinstance(allowed_lanes, list)
             else ["self_hosted"]
         ),
     }
     if target.get("target_id"):
         deployment["target_id"] = str(target["target_id"])
-    if target.get("artifact_outputs"):
-        deployment["artifact_outputs"] = [_safe_scalar(item) for item in target.get("artifact_outputs") or []]
+    artifact_outputs = target.get("artifact_outputs")
+    if isinstance(artifact_outputs, list):
+        deployment["artifact_outputs"] = [_safe_scalar(item) for item in artifact_outputs]
 
     environment = _safe_dict(target.get("environment"))
     if environment:

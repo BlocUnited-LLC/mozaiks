@@ -17,7 +17,7 @@ Typical triggers:
 - build lifecycle hooks in `factory_app/workflows/_shared/platform/build_lifecycle.py`
 - artifact routing, generated artifact ownership, or workflow integration contracts
 - shared workflow tools, hooks, or cross-workflow build glue
-- build control-plane or refinement integration that references `workflow_sequence`
+- build refinement integration that references `workflow_sequence`
 
 Inspect first:
 
@@ -30,7 +30,8 @@ Inspect first:
 - `factory_app/workflows/extended_orchestration/extension_registry.json`
 - `docs/architecture/workflows/workflow-routing-transitions.md`
 - `docs/architecture/orchestration-and-decomposition.md`
-- `docs/architecture/workflows/refinement-control-plane.md`
+- `docs/architecture/workflows/refinement-engine.md`
+- `docs/architecture/workflows/refinement-harness-architecture.md`
 - the full affected workflow directory, especially:
   - `orchestrator.yaml`
   - `transition_graph.yaml`
@@ -112,7 +113,7 @@ Common change types:
    - inspect `factory_app/workflows/ExistingAppDiscovery/` and brownfield sequence routing in `extension_registry.json`
    - keep brownfield adoption as a distinct journey with its own routing and artifact expectations
 7. Changing artifact routing, refinement, or control-plane linkage:
-   - inspect `docs/architecture/workflows/refinement-control-plane.md`, `factory_app/control_plane/config/control_plane.yaml`, and `tests/test_control_plane_loader.py`
+   - inspect `docs/architecture/workflows/refinement-engine.md`, `factory_app/refinement_harness/config/harness.yaml`, and `tests/test_control_plane_loader.py`
    - routes use `workflow_sequence`; do not duplicate downstream workflow lists when the sequence is the source of truth
 8. Changing build lifecycle hooks:
    - inspect `factory_app/workflows/_shared/platform/build_lifecycle.py` and `tests/test_build_lifecycle_hooks.py`

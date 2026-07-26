@@ -19,7 +19,7 @@ from mozaiksai.core.workflow.pack.config import (
 
 from ..contracts import ControlPlaneToolContext
 from ..executor import resolve_control_plane_tool_entrypoint
-from ..loader import load_selected_control_plane_pack
+from ..loader import load_selected_refinement_harness
 from ..schema import (
     ControlPlaneArtifactRoutingManifest,
     ControlPlaneChangeRouteManifest,
@@ -364,7 +364,7 @@ class ArtifactRoutePolicy:
         return getattr(self, change_class.value)  # type: ignore[no-any-return]
 
 class RefinementTriggerRouteResolver:
-    def __init__(self, *, classifier=None, pack_loader=load_selected_control_plane_pack) -> None:
+    def __init__(self, *, classifier=None, pack_loader=load_selected_refinement_harness) -> None:
         self._classifier = classifier or get_change_classifier()
         self._pack_loader = pack_loader
 
@@ -382,8 +382,8 @@ class RefinementTriggerRouteResolver:
         if policy is None:
             configured = ", ".join(sorted(artifact.artifact_kind for artifact in pack.manifest.routing.artifacts))
             raise RuntimeError(
-                "No control-plane routing is configured for "
-                f"artifact_kind '{artifact_kind}'. Add it to control_plane.yaml routing.artifacts. "
+                "No refinement routing is configured for "
+                f"artifact_kind '{artifact_kind}'. Add it to harness.yaml routing.artifacts. "
                 f"Configured kinds: {configured or 'none'}."
             )
         return self._to_policy(policy)
@@ -410,18 +410,18 @@ class RefinementTriggerRouteResolver:
         pack = load_global_pack_graph()
         if pack is None:
             raise RuntimeError(
-                f"Control-plane route references workflow_sequence '{sid}', but no extension registry is loaded."
+                f"Refinement route references workflow_sequence '{sid}', but no extension registry is loaded."
             )
         sequence = get_workflow_sequence(pack, sid)
         if sequence is None:
-            raise RuntimeError(f"Control-plane route references unknown workflow_sequence '{sid}'.")
+            raise RuntimeError(f"Refinement route references unknown workflow_sequence '{sid}'.")
         workflows: list[str] = []
         for group in normalize_step_groups(sequence.steps):
             for workflow_id in group:
                 if workflow_id not in workflows:
                     workflows.append(workflow_id)
         if not workflows:
-            raise RuntimeError(f"Control-plane workflow_sequence '{sid}' does not contain workflow steps.")
+            raise RuntimeError(f"Refinement workflow_sequence '{sid}' does not contain workflow steps.")
         return workflows
 
     @staticmethod
@@ -432,11 +432,11 @@ class RefinementTriggerRouteResolver:
         pack = load_global_pack_graph()
         if pack is None:
             raise RuntimeError(
-                f"Control-plane route references workflow_sequence '{sid}', but no extension registry is loaded."
+                f"Refinement route references workflow_sequence '{sid}', but no extension registry is loaded."
             )
         sequence = get_workflow_sequence(pack, sid)
         if sequence is None:
-            raise RuntimeError(f"Control-plane route references unknown workflow_sequence '{sid}'.")
+            raise RuntimeError(f"Refinement route references unknown workflow_sequence '{sid}'.")
         return [
             str(item).strip()
             for item in getattr(sequence, "affected_declarative_families", [])
@@ -1642,7 +1642,7 @@ class RefinementTriggerRouteResolver:
     ) -> tuple[list[str], list[str]]:
         """Auto-extract carry-forward module ids using the registered tool.
 
-        Calls the ``get_carry_forward_candidates`` control-plane tool via the
+        Calls the ``get_carry_forward_candidates`` refinement tool via the
         pack executor mechanism — no direct import from factory_app.
 
         Returns ``(module_ids, warnings)``. Never raises. Returns

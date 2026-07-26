@@ -11,6 +11,7 @@ APP_DATA_MIGRATIONS_DIR = "data/migrations"
 APP_DATA_MIGRATIONS_GLOB = "data/migrations/*.json"
 APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
+APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
     {
@@ -20,6 +21,7 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         "config/integrations.json",
         "config/integrations.yaml",
         "config/integrations.yml",
+        APP_REFINEMENT_POLICY_CONFIG_PATH,
         "config/shell.json",
         "config/subscriptions.yaml",
         "config/targets.json",
@@ -52,11 +54,11 @@ CANONICAL_APP_ROOT_DIRS = frozenset(
         "admin",
         "backend",
         "brand",
-        "control_plane",
         ".github",
         "config",
         "data",
         "modules",
+        "refinement_harness",
         "security",
         "services",
         "ui",
@@ -72,11 +74,13 @@ _SENSITIVE_CONFIG_TOKEN_RE = re.compile(
 DISALLOWED_LEGACY_APP_PATHS = frozenset(
     {
         "config/data.json",
+        "config/llm.yaml",
         "config/secrets.yaml",
     }
 )
 DISALLOWED_LEGACY_APP_DIR_PREFIXES = frozenset(
     {
+        "control_plane/",
         "config/data_migrations/",
         "services/data/",
         "services/security/",
@@ -165,6 +169,7 @@ __all__ = [
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",
     "APP_AUTH_CONFIG_PATH",
+    "APP_REFINEMENT_POLICY_CONFIG_PATH",
     "APP_SECURITY_SECRETS_PATH",
     "CANONICAL_APP_CONFIG_FILES",
     "CANONICAL_APP_ROOT_DIRS",

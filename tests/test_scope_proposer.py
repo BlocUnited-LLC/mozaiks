@@ -91,9 +91,9 @@ def _enabled_control_plane() -> ControlPlaneConfig:
 
 def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path=Path("factory_app/control_plane"),
+        path=Path("factory_app/refinement_harness"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             checkpoints=[
                 ControlPlaneCheckpointManifest(
                     event="scope_requested",
@@ -103,7 +103,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="coding_scope_selection_system",
@@ -112,7 +112,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
                     id="get_artifact_summary",
@@ -238,7 +238,7 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
     assert agent_runner.calls[0]["agent_name"] == "ScopeProposer"
     assert agent_runner.calls[0]["system_prompt"] == "scope selection prompt from pack"
     assert agent_runner.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
-    assert '"control_plane_context"' in agent_runner.calls[0]["user_prompt"]
+    assert '"refinement_context"' in agent_runner.calls[0]["user_prompt"]
     assert len(tool_executor.calls) == 3
 
 

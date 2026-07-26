@@ -130,6 +130,10 @@ def _list_of_str(value: Any) -> list[str]:
     return [str(item).strip() for item in value if isinstance(item, str) and str(item).strip()]
 
 
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _merge_env_names(base: list[str], extra: list[str] | None) -> list[str]:
     merged: list[str] = []
     for item in [*base, *list(extra or [])]:
@@ -777,11 +781,11 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
     if target_kind not in _TARGET_KINDS:
         errors.append("target_kind must be one of: container, compose, external_adapter")
 
-    runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
-    container_port = runtime.get("container_port")  # type: ignore[union-attr]
+    runtime = _dict_or_empty(spec.get("runtime"))
+    container_port = runtime.get("container_port")
     if not isinstance(container_port, int) or container_port <= 0:
         errors.append("runtime.container_port must be a positive integer")
-    if not str(runtime.get("health_path") or "").startswith("/"):  # type: ignore[union-attr]
+    if not str(runtime.get("health_path") or "").startswith("/"):
         errors.append("runtime.health_path must start with '/'")
 
     outputs = _list_of_str(spec.get("artifact_outputs"))
@@ -794,10 +798,10 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
     if "deployment.manifest.json" not in outputs:
         errors.append("artifact_outputs must include deployment.manifest.json")
 
-    env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
-    required_env = _list_of_str(env.get("required_variables"))  # type: ignore[union-attr]
-    secret_env = _list_of_str(env.get("secret_variables"))  # type: ignore[union-attr]
-    public_env = _list_of_str(env.get("public_variables"))  # type: ignore[union-attr]
+    env = _dict_or_empty(spec.get("environment"))
+    required_env = _list_of_str(env.get("required_variables"))
+    secret_env = _list_of_str(env.get("secret_variables"))
+    public_env = _list_of_str(env.get("public_variables"))
     if not required_env:
         errors.append("environment.required_variables must not be empty")
     if set(secret_env) & set(public_env):
@@ -1028,11 +1032,11 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
 
 
 def _render_env_example(spec: dict[str, Any], *, environment: str | None = None) -> str:
-    env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
-    required_env = _list_of_str(env.get("required_variables"))  # type: ignore[union-attr]
-    optional_env = _list_of_str(env.get("optional_variables"))  # type: ignore[union-attr]
-    secret_env = set(_list_of_str(env.get("secret_variables")))  # type: ignore[union-attr]
-    public_env = _list_of_str(env.get("public_variables"))  # type: ignore[union-attr]
+    env = _dict_or_empty(spec.get("environment"))
+    required_env = _list_of_str(env.get("required_variables"))
+    optional_env = _list_of_str(env.get("optional_variables"))
+    secret_env = set(_list_of_str(env.get("secret_variables")))
+    public_env = _list_of_str(env.get("public_variables"))
     env_label = str(environment or "local/default").strip() or "local/default"
 
     lines: list[str] = [
@@ -1265,14 +1269,14 @@ def _render_workflow(spec: dict[str, Any]) -> str:
 
 
 def _render_readiness_workflow(spec: dict[str, Any]) -> str:
-    runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
-    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
-    health_path = str(runtime.get("health_path") or DEFAULT_HEALTH_PATH).strip() or DEFAULT_HEALTH_PATH  # type: ignore[union-attr]
-    env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
-    auth = spec.get("auth") if isinstance(spec.get("auth"), dict) else {}
+    runtime = _dict_or_empty(spec.get("runtime"))
+    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
+    health_path = str(runtime.get("health_path") or DEFAULT_HEALTH_PATH).strip() or DEFAULT_HEALTH_PATH
+    env = _dict_or_empty(spec.get("environment"))
+    auth = _dict_or_empty(spec.get("auth"))
     auth_enabled_default = "true" if bool(auth.get("required")) else "false"
-    required_env = _list_of_str(env.get("required_variables"))  # type: ignore[union-attr]
-    secret_env = set(_list_of_str(env.get("secret_variables")))  # type: ignore[union-attr]
+    required_env = _list_of_str(env.get("required_variables"))
+    secret_env = set(_list_of_str(env.get("secret_variables")))
     readiness = _normalize_readiness_requirements(spec.get("readiness_requirements"))
     required_evidence = _merge_env_names(
         [],

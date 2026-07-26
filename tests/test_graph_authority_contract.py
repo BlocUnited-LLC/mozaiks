@@ -92,7 +92,7 @@ def test_graph_authority_doc_declares_matrix_and_kg_boundaries() -> None:
     assert "| graph | source of truth | runtime critical? | falkordb role |" in lowered
     assert "`artifact_dependency_graph`" in doc
     assert "`workflow_sequence` / handoffs" in doc
-    assert "control-plane refinement impact graph" in lowered
+    assert "refinement engine refinement impact graph" in lowered
     assert "module event/reaction/notification graph" in lowered
     assert "ui route/component graph" in lowered
     assert "context graph intelligence layer" in lowered
