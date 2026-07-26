@@ -56,8 +56,7 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     ---
 
-    Tune startup config, enable refinement, and control which workflows re-run
-    when users request changes.
+    Add workflow behavior and route artifact-aware revisions.
 
     [:octicons-arrow-right-24: Extending AI Functionality](extending-ai-functionality/01-overview.md)
 

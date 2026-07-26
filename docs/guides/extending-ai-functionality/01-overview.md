@@ -1,19 +1,18 @@
 # Extending AI Functionality
 
-Mozaiks apps can extend AI behavior after generation through a small set of
-declarative artifacts. This is optional. Most apps do not need an app-local
-refinement harness.
+Mozaiks apps can add AI behavior through workflow bundles and optional
+artifact-aware refinement. Most apps start with one workflow and add refinement
+only when they need routed revisions.
 
-The key idea is that Mozaiks separates ordinary runtime startup from
-artifact-aware refinement policy:
+The key files are:
 
-- `app/config/ai.json` starts ask, chat, and workflow behavior.
-- `app/config/refinement_policy.yaml` enables the refinement runtime profile
-  and model budgets.
-- `refinement_harness/config/harness.yaml` declares artifact routing plus
-  LLM-backed checkpoint events, prompt ids, and tool ids.
 - `workflows/extended_orchestration/extension_registry.json` declares the
   workflow sequences the refinement engine may re-enter.
+- `workflows/{workflow_id}/` declares agents, tools, state, routing, and UI for
+  a workflow.
+- `app/config/ai.json` starts ask, chat, and workflow behavior.
+- `app/config/refinement_policy.yaml` and `refinement_harness/config/` enable
+  routed artifact refinement.
 
 When a user asks for a change, the refinement engine can classify whether the
 request is a patch, design adjustment, feature addition, or concept-level
@@ -65,13 +64,13 @@ Ownership is split deliberately:
 
 ## Artifacts
 
-- [AI Runtime Startup](02-ai-runtime-startup.md)
-- [Refinement Policy](03-refinement-policy.md)
-- [Refinement Harness](04-refinement-harness.md)
+- [AI Startup](../configs/ai-startup.md)
+- [Refinement](../configs/refinement.md)
 - [Workflow Sequences](05-workflow-sequences.md)
 
 ## Read Next
 
+- [Config Files](../configs/index.md)
 - [Context Graph](../platform-intelligence/01-context-graph.md)
 - [Harness](../platform-intelligence/02-harness.md)
 - [Refinement](../platform-intelligence/03-refinement.md)
