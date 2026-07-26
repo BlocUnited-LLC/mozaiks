@@ -9,7 +9,7 @@ Scope:
 - Shared-core frontend integration contract for non-browser hosts.
 
 Out of scope:
-- Platform-only services (hosted builds, billing, marketing, proprietary control plane).
+- Platform-only services (hosted builds, billing, marketing, proprietary Refinement Engine).
 - Native UI framework choices (SwiftUI, Kotlin, React Native, Flutter, etc.).
 
 ## 1) Core Contract Invariants

@@ -20,7 +20,7 @@ records, approvals, provider calls, and status surfaces.
 
 Use these terms precisely:
 
-- **Artifact review staging** is the Mozaiks/Studio control-plane stage where
+- **Artifact review staging** is the Mozaiks/Studio Refinement Engine stage where
   generated or refined files are held for validation, review, `ArtifactVersion`
   acceptance, and explicit promotion into an app workspace.
 - **Environment staging** is an operator or hosted deployment target used to

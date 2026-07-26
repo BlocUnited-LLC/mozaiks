@@ -105,8 +105,8 @@ nav:
       - Extending AI Functionality:
           - guides/extending-ai-functionality/01-overview.md
           - Startup Config: guides/extending-ai-functionality/02-ai-runtime-startup.md
-          - Refinement Policy: guides/extending-ai-functionality/03-control-plane-runtime-policy.md
-          - Artifact Routing: guides/extending-ai-functionality/04-control-plane-manifest.md
+          - Refinement Policy: guides/extending-ai-functionality/03-refinement-policy.md
+          - Refinement Harness: guides/extending-ai-functionality/04-refinement-harness.md
           - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Self-Hosting: guides/self-hosting.md
@@ -144,7 +144,7 @@ nav:
           - Admin System: architecture/app/admin-system.md
           - Account, Admin, and Platform Services: architecture/app/account-admin-and-platform-services.md
           - Tenant Auth and Scope: architecture/app/tenant-auth-and-scope.md
-          - App-Local Control Plane Pack: architecture/app/control-plane-pack.md
+          - App-Local Refinement Harness: architecture/app/refinement-harness.md
       - Module Systems:
           - architecture/modules-systems/index.md
           - Module System: architecture/modules-systems/module-system.md
@@ -167,9 +167,9 @@ nav:
           - Build Context Packs: architecture/workflows/build-context-packs.md
           - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
-          - Refinement Control Plane: architecture/workflows/refinement-control-plane.md
+          - Refinement Engine: architecture/workflows/refinement-engine.md
           - Session Router: architecture/workflows/session-router.md
-          - Control-Plane Harness Architecture: architecture/workflows/control-plane-harness-architecture.md
+          - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
       - MozaiksAI Runtime:
           - architecture/mozaiksai/index.md
           - Workflow and Orchestration:

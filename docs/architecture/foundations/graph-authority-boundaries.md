@@ -7,7 +7,7 @@ runtime source of truth.
 The in-repo canonical graph snapshot is `AppContextGraph`. It is built from
 source refs, accepted or staged `ArtifactVersion` records, generated bundle
 files, workflow bundle files, discovery evidence, ownership boundaries,
-validation evidence, and refinement history. Control-plane tools use it to
+validation evidence, and refinement history. Refinement Engine tools use it to
 select context, explain impact, rank candidate files, and prepare compact LLM
 context packs.
 
@@ -27,8 +27,8 @@ snapshot.
 | --- | --- | --- | --- |
 | `artifact_dependency_graph` | `factory_app/workflows/extended_orchestration/extension_registry.json` | Yes, for artifact invalidation and refinement impact | Optional backend mirror |
 | `workflow_sequence` / handoffs | Workflow pack config, `workflow_sequences[]`, workflow `transition_graph.yaml`, and loaded AG2 handoff objects | Yes, for workflow sequence routing and agent transitions | Optional backend mirror |
-| Control-plane refinement impact graph | `factory_app/control_plane/config/control_plane.yaml`, artifact metadata, app context policy, and artifact dependency config | Yes, for refinement routing and stale artifact decisions | Optional backend mirror |
-| `AppContextGraph` / Context Graph intelligence layer | Source refs, accepted or staged `ArtifactVersion` records, discovery snapshots, generated bundle files, ownership boundaries, validation evidence, and control-plane app context records | No for runtime execution; yes for LLM context quality, scope selection, impact explanation, and Studio inspection | Preferred optional backend mirror |
+| Refinement Engine refinement impact graph | `factory_app/refinement_harness/config/harness.yaml`, artifact metadata, app context policy, and artifact dependency config | Yes, for refinement routing and stale artifact decisions | Optional backend mirror |
+| `AppContextGraph` / Context Graph intelligence layer | Source refs, accepted or staged `ArtifactVersion` records, discovery snapshots, generated bundle files, ownership boundaries, validation evidence, and Refinement Engine app context records | No for runtime execution; yes for LLM context quality, scope selection, impact explanation, and Studio inspection | Preferred optional backend mirror |
 | Module event/reaction/notification graph | Module contracts plus the runtime module event dispatcher | Yes, for module action side effects, event reactions, and notification dispatch | Optional backend mirror |
 | UI route/component graph | `ui/route_manifest.json`, `ui/index.js`, admin registry files, and frontend component registry | Yes, for route rendering and app shell composition | Optional backend mirror |
 | Integration readiness graph | `AppBuildPlan`, app-scoped connector store, and connector vault backend | Yes, for build readiness and secret ownership | Redacted optional backend mirror |

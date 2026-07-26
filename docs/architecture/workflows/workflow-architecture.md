@@ -8,7 +8,7 @@ Workflows are for agentic work.
 
 Builder-session harness behavior is not authored in workflow packs. It is
 driven by app startup in `app/config/ai.json` plus optional app-local
-control-plane policy and manifest files under `control_plane/config/`, then
+Refinement Engine policy and manifest files under `refinement_harness/config/`, then
 layered above workflow execution by the host/harness.
 
 Use a workflow when the value comes from:
@@ -63,7 +63,7 @@ Workflows may be entered in two very different ways:
 Those are not the same responsibility.
 
 Post-generation changes should not automatically route back through intake or
-planning agents. A control plane should first classify whether the request is a
+planning agents. A Refinement Engine should first classify whether the request is a
 `patch`, `design`, `feature`, or `core` change, then choose the smallest valid
 re-entry point.
 

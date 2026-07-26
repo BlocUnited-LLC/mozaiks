@@ -4,7 +4,7 @@ The old "universal orchestrator" idea has been folded into three explicit
 runtime surfaces:
 
 - `SessionRouter` decides which execution context should receive a user event.
-- The control plane classifies build/refinement intent against durable artifact
+- The Refinement Engine classifies build/refinement intent against durable artifact
   state.
 - `OrchestrationPort` starts, re-enters, or cancels a concrete workflow run.
   In the current runtime, re-entry means Mozaiks restores runtime-owned session
@@ -21,7 +21,7 @@ AG2 1.0 beta Network `TransitionGraph` objects.
 User / API / UI event
   -> SessionRouter
       -> direct module/action route
-      -> control-plane refinement route
+      -> Refinement Engine refinement route
       -> workflow run route
   -> OrchestrationPort.run/resume/cancel
   -> AG2 1.0 beta workflow execution
@@ -33,7 +33,7 @@ User / API / UI event
 `SessionRouter` owns route selection across execution contexts. It should not
 know the internals of individual agents.
 
-The control plane owns builder-session interpretation:
+The Refinement Engine owns builder-session interpretation:
 
 - refinement classification
 - artifact scope
@@ -56,7 +56,7 @@ Current implementation note:
   storage keyed per `app_id + chat_id`.
 - `OrchestrationPort.resume(...)` re-enters the workflow using that persisted
   AG2 event history plus runtime-managed session routing state.
-- This is separate from control-plane resume, which is builder-session
+- This is separate from Refinement Engine resume, which is builder-session
   continuity over artifacts, checkpoints, and routing decisions.
 
 Workflow bundles own local execution structure:
@@ -76,15 +76,15 @@ Use the smallest routing layer that owns the decision:
 | Decision | Owner |
 | --- | --- |
 | Which active session should receive this event? | `SessionRouter` |
-| Is this a refinement, patch, rebuild, or new build? | Control plane |
-| Which workflow sequence should execute? | `extension_registry.json` + control-plane route |
+| Is this a refinement, patch, rebuild, or new build? | Refinement Engine |
+| Which workflow sequence should execute? | `extension_registry.json` + Refinement Engine route |
 | Which agent speaks next inside one workflow? | `transition_graph.yaml` compiled to AG2 `TransitionGraph` |
 | Which UI state should the websocket show? | Runtime transport + `ui_config.yaml` |
 
 Do not encode product-level route decisions in workflow-local handoffs. A
 workflow-local transition can read deterministic context variables, tool results,
 or typed structured-output state. Natural-language intent classification belongs
-in the control plane before the workflow run is started or resumed.
+in the Refinement Engine before the workflow run is started or resumed.
 
 For AG2 1.0 beta specifically, be careful with the word `resume`: AG2 typed events
 are the runtime source of truth, while durable AG2 Network channel continuation

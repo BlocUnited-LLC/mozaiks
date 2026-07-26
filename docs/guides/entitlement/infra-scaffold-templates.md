@@ -7,7 +7,7 @@ After first emit the operator owns these files — regeneration is explicit and 
 
 Mozaiks uses two different staging concepts:
 
-- **Artifact review staging** is the Mozaiks/Studio control-plane area where
+- **Artifact review staging** is the Mozaiks/Studio Refinement Engine area where
   generated or refined files wait for validation, review, `ArtifactVersion`
   acceptance, and promotion.
 - **Environment staging** is the operator or hosted deployment target used to

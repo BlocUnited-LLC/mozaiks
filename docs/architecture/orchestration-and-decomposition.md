@@ -7,7 +7,7 @@
 ## Non-Negotiable Rules
 
 - Workflow sequencing, workflow-local agent routing, workflow-local task batching,
-  and control-plane routing are separate contracts.
+  and Refinement Engine routing are separate contracts.
 - Natural-language reasoning does not belong in runtime graphs.
 - LLMs may produce plans, task lists, classifications, and structured outputs.
   Runtime code validates and executes those contracts deterministically.
@@ -16,7 +16,7 @@
 - Mozaiks owns continuity: artifact state, app/build scope, workflow sequence
   selection, persistence, validation, and user-facing lifecycle events.
 - There is no single global orchestration prompt over every user request.
-  Builder-context free-text analysis belongs in the control-plane harness.
+  Builder-context free-text analysis belongs in the refinement harness.
 
 ## Execution Scopes
 
@@ -130,7 +130,7 @@ model fields consumed by the worker agent. The runtime should not infer product
 meaning from fields such as `task_type`; it should use only the harness-visible
 fields needed to schedule, scope, and validate execution.
 
-### 4. Control-Plane Routing
+### 4. Refinement Engine Routing
 
 The builder-session harness chooses the route before any workflow or coding
 worker starts.
@@ -251,7 +251,7 @@ Typed builder contracts anchor the artifact pipeline:
 - Global pack graphs sequence workflows.
 - `transition_graph.yaml` controls workflow-local AG2 routing.
 - `task_batches.yaml` handles short parallel LLM work inside a workflow.
-- The control-plane harness chooses build/refinement/coding routes.
+- The refinement harness chooses build/refinement/coding routes.
 - Decomposition belongs to typed agent outputs, not runtime graph prose.
 - Cross-workflow carry is explicit persistence plus lifecycle loading.
 - The runtime executes compiled contracts, not natural-language logic.

@@ -75,7 +75,7 @@ Runtime compilation rules:
 - `target_agent: user` pauses the run for user input
 - `target_agent: terminate` compiles to `TerminateTarget`
 
-LLM classification belongs before routing: a control-plane route, agent tool, or
+LLM classification belongs before routing: a Refinement Engine route, agent tool, or
 structured output sets context state; the graph then routes deterministically.
 
 Termination is declarative. A workflow bundle ends through

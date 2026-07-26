@@ -14,7 +14,7 @@ Mozaiks has three user-visible layers and one internal infrastructure layer.
 3. `App Studio`
    - the single-app management surface
 4. internal runtime systems
-   - workflows, sessions, artifacts, control plane, and orchestration state
+   - workflows, sessions, artifacts, Refinement Engine, and orchestration state
 
 The user should understand the first three. The fourth layer should rarely be
 named in product UX.
@@ -37,7 +37,7 @@ Does not own as a visible concept:
 
 - factory-specific implementation terms
 - workflow execution internals
-- control-plane routing details
+- Refinement Engine routing details
 
 ### Workspace Studio
 
@@ -78,7 +78,7 @@ Includes:
 - workflow sequences
 - session router
 - artifact store
-- control plane
+- Refinement Engine
 - refinement router
 - runtime transports and event dispatch
 
@@ -159,7 +159,7 @@ mixed:
 - `mozaiksai.hosts.studio` is the management host composition
 - `factory_app/app/` is the first-party app bundle loaded by that host
 - `factory_app/workflows/` is the shared builder workflow root
-- `factory_app/control_plane/` is the first-party harness pack
+- `factory_app/refinement_harness/` is the first-party harness pack
 - `mozaiksai/control_plane/` is runtime orchestration infrastructure
 
 The IA goal is not to expose those boundaries directly. The user-visible model
@@ -193,14 +193,14 @@ Mozaiks
 | Build | creation and revision experience | first-party builder workflows + runtime harness |
 | Admin | privileged app management | framework-owned admin shell |
 | App pages | generated or app-authored product UI | app workspace |
-| Control Plane | hidden orchestration layer | runtime infrastructure |
+| Refinement Engine | hidden orchestration layer | runtime infrastructure |
 
 ## Terms That Should Disappear From IA
 
 These should not appear as top-level product areas:
 
 - `Hub`
-- `Control Plane`
+- `Refinement Engine`
 - `Factory App`
 
 ## UX Movement Model

@@ -77,7 +77,7 @@ The first-party builder is a consumer of the platform, not the platform.
 
 People build app bundles on Mozaiks.
 
-They do not build app logic inside the hosted control plane.
+They do not build app logic inside the hosted Refinement Engine.
 
 Its main job is to turn intent into:
 
@@ -91,7 +91,7 @@ Its main job is to turn intent into:
 
 Hosted product responsibilities also include:
 
-- hosted control plane and tenant operations
+- hosted Refinement Engine and tenant operations
 - environment provisioning
 - domains, TLS, secrets, and monitoring
 - billing and monetized platform operations

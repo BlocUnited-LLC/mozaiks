@@ -1,12 +1,12 @@
 # Harness
 
-The harness is the part of the control plane that wires in the opt-in
+The harness is the part of the Refinement Engine that wires in the opt-in
 primitives that let Mozaiks classify a request, route it to the right path, and
 scope the work to the right part of the app.
 
 ## What It Does
 
-The control plane is the full intelligence layer. The harness is the part that
+The Refinement Engine is the full intelligence layer. The harness is the part that
 runs the control flow.
 
 In practice, that means the harness coordinates:
@@ -30,7 +30,7 @@ coding path, or a targeted surface regeneration.
 
 ## Why It Exists
 
-The harness gives the control plane a place to attach the decision flow without
+The harness gives the Refinement Engine a place to attach the decision flow without
 turning the whole system into one huge router.
 
 That is what makes Mozaiks feel intentional: it does not guess first and clean

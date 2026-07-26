@@ -4,7 +4,7 @@ Mozaiks is event-driven, but not every event means the same thing.
 
 The event system exists to let deterministic app behavior, AI workflow
 orchestration, UI reactivity, notifications, and hosted product capabilities
-cooperate without collapsing into one control plane.
+cooperate without collapsing into one Refinement Engine.
 
 ## Core Rule
 

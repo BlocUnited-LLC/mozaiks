@@ -151,7 +151,7 @@ This phase creates a durable hosted build/app record before deep generation.
 
 Owned by:
 
-- hosted product control plane
+- hosted product Refinement Engine
 - invoked by `ValueEngine`
 
 Responsibilities:
@@ -166,7 +166,7 @@ Responsibilities:
 
 Important rule:
 
-- this is a hosted control-plane record
+- this is a hosted Refinement Engine record
 - it is not the generated app bundle itself
 
 ## Phase 4: Intent Decomposition
@@ -196,14 +196,14 @@ Workflow ownership:
    - `workflow_stages`, tools, workflow-local UI
 5. `AppGenerator`
    - app schema
-   - module/control-plane/integration build tasks
+   - module/Refinement Engine/integration build tasks
    - layered module backend contracts
 
 Important rule:
 
 - decomposition decisions belong to `factory_app`, not to ad hoc logic in the
   CLI or hosted app shell
-- when later refinement re-enters one of these workflows, the control-plane
+- when later refinement re-enters one of these workflows, the Refinement Engine
   harness should preserve the shared refinement-context contract
   (`change_class`, `refinement_request`, `change_intent`, `impact_set`, and
   related artifact metadata) instead of relying on transcript reconstruction
@@ -264,7 +264,7 @@ Owned by:
 - `AppReview` workflow and the `AppReviewSummary` in-chat UI artifact
 - Studio artifact promotion endpoint
 - `app_registry` module lifecycle update
-- refinement control plane (revision path)
+- Refinement Engine (revision path)
 
 Responsibilities:
 
@@ -281,7 +281,7 @@ Responsibilities:
   the reviewed bundle into the active app root, and transition
   `lifecycle_state` from `review` to `active`
 - on Revise: accept user revision request via chat, route through the refinement
-  control plane, operate on the staged `generated/` bundle path (not the active workspace)
+  Refinement Engine, operate on the staged `generated/` bundle path (not the active workspace)
 
 How the pause works:
 
@@ -327,7 +327,7 @@ Important rule:
   not the active workspace; `artifact_root` in the context seed is the guard for this
 - AppReview revision payloads must preserve `artifact_key`, `artifact_version_id`,
   `source_surface`, lifecycle state, and `bundle_path`; dropping those fields
-  causes the control plane to lose reviewed-bundle provenance
+  causes the Refinement Engine to lose reviewed-bundle provenance
 - AppReview-triggered `harness_decision` responses must be surfaced through the
   shared pending harness decision UI; they must not be silently ignored by the
   websocket bridge
@@ -372,7 +372,7 @@ This phase copies approved artifacts into a runnable app root.
 
 Owned by:
 
-- Studio host / control plane
+- Studio host / Refinement Engine
 - optionally CLI for advanced users
 
 Promotion source:
@@ -430,7 +430,7 @@ Use these terms consistently.
 | --- | --- |
 | `workspace root` | Local folder selected by CLI or the current Studio host. |
 | `app root` | The runnable app bundle directory, usually `<workspace>/app`. |
-| `build_registry_id` | Hosted control-plane/build-tracking record id. |
+| `build_registry_id` | Hosted Refinement Engine/build-tracking record id. |
 | `app_id` | Logical app identity used across workflows and artifacts. |
 | `build_id` | Specific build/run identity for staged generation output and lifecycle events. For routed workflow sequences this is the active `journey_instance_id`. |
 | `journey_instance_id` | Runtime sequence instance id shared across all chats in the same authored workflow sequence. |
@@ -445,7 +445,7 @@ Runtime lifecycle hook events emitted from build workflows are sequence-scoped.
 - `build_completed` is emitted from the terminal workflow step in the active sequence.
 - `build_failed` may be emitted by any workflow that belongs to the active sequence.
 - Event payload `buildId` uses the active `journey_instance_id` when the workflow is part of a routed sequence.
-- Event payload `buildRegistryId` is included separately once the hosted control-plane record exists.
+- Event payload `buildRegistryId` is included separately once the hosted Refinement Engine record exists.
 
 This keeps lifecycle reporting aligned with the full routed build journey instead
 of treating each workflow chat id as an independent build.

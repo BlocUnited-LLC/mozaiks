@@ -36,8 +36,9 @@ subscription/runtime entitlement primitives:
 Do not create `config/subscriptions.yaml` for custom money flows unless the same
 app also sells access tiers, quotas, credits, token wallets, or token
 allowances. Custom flows may declare app-owned modules, policy hooks, managed
-facades, or external adapters, but they do not expand the OSS subscription
-runtime.
+facades, optional module-owned `contracts/service.yaml` /
+`contracts/commercial.yaml`, or external adapters, but they do not expand the
+OSS subscription runtime.
 
 ## Factory Flow
 

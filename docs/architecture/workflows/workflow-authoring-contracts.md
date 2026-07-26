@@ -201,7 +201,7 @@ Rules:
   `ToolCalled` condition.
 - Same-source condition rules must appear before fallback `after_turn` rules
   because AG2 evaluates lower priority first.
-- LLM intent classification belongs in the control plane before a workflow run
+- LLM intent classification belongs in the Refinement Engine before a workflow run
   is started or resumed.
 - The runtime compiles these rules into an AG2 1.0 beta `TransitionGraph` and
   resolves each turn through `WorkflowAdapter`.

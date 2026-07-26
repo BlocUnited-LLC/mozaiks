@@ -26,7 +26,7 @@ Mozaiks owns deterministic product and runtime contracts around AG2:
   artifact shapes
 - app/runtime persistence, transport integration, tenant/session boundaries,
   Studio/platform lifecycle, and artifact promotion
-- factory control-plane policy and deterministic decomposition contracts that
+- factory Refinement Engine policy and deterministic decomposition contracts that
   define the typed work AG2 agents execute
 
 ## Runtime Handoff
@@ -87,16 +87,16 @@ Mozaiks may own the typed task graph when the graph represents canonical build
 work. AG2 should own as much of the actual execution, lifecycle observation,
 and agent communication as its APIs allow.
 
-## Control Plane
+## Refinement Engine
 
-Do not model the Mozaiks control plane as one free-running AG2 agent that
-launches workflows by tool call. The control plane is deterministic
+Do not model the Mozaiks Refinement Engine as one free-running AG2 agent that
+launches workflows by tool call. The Refinement Engine is deterministic
 artifact-aware policy over generated app/workflow state: it classifies change
 scope, checks artifact lineage, chooses checkpoints, validates route decisions,
 and starts the selected workflow or scoped worker only after typed policy has
 accepted the decision.
 
-AG2 should still execute the LLM portions of that pipeline. Control-plane
+AG2 should still execute the LLM portions of that pipeline. Refinement Engine
 checkpoints that need a model should use AG2 agent primitives through a narrow
 adapter, currently `mozaiksai.core.adapters.AG2StructuredAgentRunner`, and
 return strict structured outputs. Mozaiks then validates those outputs and

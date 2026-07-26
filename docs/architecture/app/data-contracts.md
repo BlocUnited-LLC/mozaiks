@@ -102,7 +102,7 @@ collections.
 ### `surfaces`
 
 `surfaces` is the executable data ownership contract. Each surface groups the
-collections owned by a module, workflow, control-plane surface, external
+collections owned by a module, workflow, Refinement Engine surface, external
 integration, or UI-only surface.
 
 For module-owned business data, each collection should declare:

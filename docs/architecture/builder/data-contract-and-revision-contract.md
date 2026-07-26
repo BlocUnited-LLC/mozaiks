@@ -7,7 +7,7 @@ This document defines the canonical app data contract across:
 - `ValueEngine`
 - `DesignDocs`
 - `AppGenerator`
-- refinement control-plane flows
+- refinement Refinement Engine flows
 - generated app artifacts
 - runtime migration application
 
@@ -91,8 +91,8 @@ Use these ownership rules.
 | --- | --- |
 | Runtime/session collections | `mozaiksai` runtime |
 | Builder artifact collections | `factory_app` workflows persisted through `mozaiksai` |
-| App business collections | generated module/control-plane surfaces |
-| Migration planning | `AppGenerator` + refinement control plane |
+| App business collections | generated module/Refinement Engine surfaces |
+| Migration planning | `AppGenerator` + Refinement Engine |
 | Migration application | platform/backend runtime |
 
 ## Canonical Persistence Namespaces
@@ -683,8 +683,8 @@ These are known inconsistencies in the current system:
   - overall builder lifecycle
 - [generated-frontend-surface-contract.md](../frontend/ui-system/generated-frontend-surface-contract.md)
   - persistent frontend surface ownership and realization boundaries
-- [refinement-control-plane.md](../workflows/refinement-control-plane.md)
-  - refinement routing and artifact-version control plane
+- [refinement-engine.md](../workflows/refinement-engine.md)
+  - refinement routing and artifact-version Refinement Engine
 
 This document defines the missing database layer that those docs assume.
 

@@ -2,15 +2,15 @@
 
 ## Purpose
 
-This document explains how the control plane tracks artifact family staleness
+This document explains how the Refinement Engine tracks artifact family staleness
 and uses it to route refinement requests to the minimal necessary workflow
 sequence rather than always triggering a full rebuild.
 
 Related documents:
 
-- [Refinement Control Plane](../workflows/refinement-control-plane.md)
+- [Refinement Engine](../workflows/refinement-engine.md)
 - [End-to-End Build Lifecycle](end-to-end-build-lifecycle.md)
-- [Control-Plane Harness Architecture](../workflows/control-plane-harness-architecture.md)
+- [Refinement Harness Architecture](../workflows/refinement-harness-architecture.md)
 
 ---
 
@@ -272,9 +272,9 @@ created during an in-flight revision are never included.
 | Version refs sync after run | `mozaiksai/core/session/router.py` — `advance_journey_after_run_complete()` |
 | Deterministic pre-check (Tier 1) | `mozaiksai/control_plane/implementations/refinement_router.py` — `_stale_route()` |
 | Stale priority + sequence map | `mozaiksai/control_plane/implementations/refinement_router.py` — `_STALE_PRIORITY`, `_STALE_SEQUENCE_MAP` |
-| Control plane tool (Tier 2) | `factory_app/control_plane/tools/get_stale_artifact_families.py` |
-| Tool registration | `factory_app/control_plane/config/tools.yaml` |
-| Classifier prompt rules | `factory_app/control_plane/prompts/change_classifier_system.yaml` |
+| Refinement Engine tool (Tier 2) | `factory_app/refinement_harness/tools/get_stale_artifact_families.py` |
+| Tool registration | `factory_app/refinement_harness/config/tools.yaml` |
+| Classifier prompt rules | `factory_app/refinement_harness/prompts/change_classifier_system.yaml` |
 | Lifecycle status enum | `mozaiksai/core/artifacts/models.py` — `ArtifactLifecycleStatus` |
 
 ---
@@ -287,7 +287,7 @@ created during an in-flight revision are never included.
   `extension_registry.json`, add the family to `_STALE_PRIORITY` and
   `_STALE_SEQUENCE_MAP` in `refinement_router.py`, and update
   `GlobalPackGraph` in `schema.py` if needed.
-- Do not add staleness routing logic to `control_plane.yaml`. The deterministic
+- Do not add staleness routing logic to `harness.yaml`. The deterministic
   pre-check in `refinement_router.py` and `ArtifactInvalidationService` own
   that responsibility.
 - Do not add staleness logic to tools. Tools return data; the router and LLM reason.

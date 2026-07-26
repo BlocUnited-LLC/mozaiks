@@ -91,7 +91,7 @@ the context they need for their scope — the contract, the domain patterns, the
 file shapes, the integration requirements. They have creative latitude within
 that scope. They cannot contradict what the architecture declared.
 
-**Refinement** — when requirements change, the control plane routes the request
+**Refinement** — when requirements change, the Refinement Engine routes the request
 to the correct build stage. A small change touches only what it needs to. A
 conceptual change restarts from design. The history is preserved.
 
@@ -123,9 +123,9 @@ routing are supplied from catalogs at these points. The AI reasons from
 grounded, domain-specific context rather than from general knowledge and
 inference.
 
-**Control Plane** — the sequencing and routing layer above individual stages. It
+**Refinement Engine** — the sequencing and routing layer above individual stages. It
 classifies what changed, determines which stages need to run, seeds the correct
-context, and enforces the build sequence. The control plane is what makes
+context, and enforces the build sequence. The Refinement Engine is what makes
 refinement surgical rather than destructive.
 
 ---

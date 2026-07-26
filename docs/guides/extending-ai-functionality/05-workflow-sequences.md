@@ -1,9 +1,9 @@
 # Workflow Sequences
 
 `workflows/extended_orchestration/extension_registry.json` declares workflow
-sequences the control plane can re-enter.
+sequences the Refinement Engine can re-enter.
 
-The control plane chooses a route. The workflow registry owns what that route
+The Refinement Engine chooses a route. The workflow registry owns what that route
 means.
 
 Example:
@@ -46,7 +46,7 @@ Example:
 }
 ```
 
-Each sequence referenced by `control_plane/config/control_plane.yaml` must
+Each sequence referenced by `refinement_harness/config/harness.yaml` must
 exist here and must declare `affected_declarative_families`.
 
-Keep route impact metadata here, not in `control_plane.yaml`.
+Keep route impact metadata here, not in `harness.yaml`.

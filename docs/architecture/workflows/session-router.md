@@ -3,7 +3,7 @@ title: SessionRouter
 status: Authoritative - Pre-Production
 created: 2026-04-13
 depends_on:
-  - refinement-control-plane.md
+  - refinement-engine.md
   - workflow-routing-transitions.md
   - ../../architecture/mozaiksai/task-batches.md
   - ../../architecture/mozaiksai/universal-orchestrator.md
@@ -15,9 +15,9 @@ This document defines the SessionRouter — the unified session-level coordinato
 sits above `JourneyOrchestrator`, host-supplied trigger routing policy, and workflow-local task batches.
 
 The concrete refinement re-entry policy is framework-owned. The generic
-control-plane contracts and runtime now live under `mozaiksai/control_plane/`,
+Refinement Engine contracts and runtime now live under `mozaiksai/control_plane/`,
 while the first-party factory pack stays declarative under
-`factory_app/control_plane/`. The Studio/Mozaiks host injects the harness into
+`factory_app/refinement_harness/`. The Studio/Mozaiks host injects the harness into
 SessionRouter through a trigger-route resolver seam. SessionRouter does not
 import factory pack policy directly.
 
@@ -445,9 +445,9 @@ only sees the outer workflow's run_complete event.
 1. trigger_source == "refinement" arrives at /api/workflows/trigger
 2. SessionRouter loads Session for (app_id, user_id) plus accepted artifact refs
 3. derives the re-entry workflow and `workflow_sequence` from change class +
-   app-declared control-plane routing
+   app-declared Refinement Engine routing
 4. receives RoutingDecision(workflow_id, journey_id, context_seed, is_full_restart)
-5. control plane persists artifact-level stale status for affected
+5. Refinement Engine persists artifact-level stale status for affected
    artifact_version_refs using the new `change_request_id`
 6. if the harness defers launch and returns a decision UI first:
      - persist active_revision_id and active_change_request_id immediately
@@ -474,9 +474,9 @@ only sees the outer workflow's run_complete event.
 ```
 
 Refinement re-entry creates a **new workflow run** against the same Session.
-The selected control-plane `workflow_sequence` becomes the run's journey binding
+The selected Refinement Engine `workflow_sequence` becomes the run's journey binding
 when one is declared. The original build sequence is not reused unless the
-control-plane route explicitly selects it.
+Refinement Engine route explicitly selects it.
 On completion, Session transitions back to ACTIVE or COMPLETED depending on prior state.
 
 Rules:

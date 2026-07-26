@@ -6,7 +6,7 @@ Workflow handoffs are deterministic. All transition conditions in
 `transition_graph.yaml` evaluate context variables at turn time — no LLM
 classification happens inside routing.
 
-LLM reasoning happens before routing: a control-plane route, structured agent
+LLM reasoning happens before routing: a Refinement Engine route, structured agent
 output, or an agent tool writes the result into a context variable. The
 transition graph then routes deterministically on that value.
 

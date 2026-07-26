@@ -13,7 +13,7 @@ The code-intelligence layer is the higher-value part of the system:
 deterministic syntax extraction
 -> Mozaiks contract mapping
 -> bounded LLM semantic annotation
--> graph-aware control-plane retrieval
+-> graph-aware Refinement Engine retrieval
 -> scoped refinement and coding context
 ```
 
@@ -22,7 +22,7 @@ graph later. They are not the product contract. `AppContextGraph` is.
 
 ## Goals
 
-- give the control plane code-level impact context before scope selection,
+- give the Refinement Engine code-level impact context before scope selection,
   coding, validation, and promotion
 - map generated and brownfield code back to Mozaiks contracts such as modules,
   actions, pages, workflows, tools, repos, services, policies, schemas, and
@@ -46,7 +46,7 @@ The Context Graph does not own:
 - promotion approval
 
 Those decisions continue to read deterministic contracts, runtime stores, and
-control-plane policy directly.
+Refinement Engine policy directly.
 
 ## Ownership
 
@@ -57,7 +57,7 @@ control-plane policy directly.
 | `mozaiksai.core.app_context.scan_policy` | deterministic, bounded, secret-safe source selection for graph indexing |
 | `mozaiksai.control_plane.context_graph` | compact retrieval packs for scope selection and coding |
 | `mozaiksai.control_plane.workspace_snapshot` | local workspace snapshot registration for dogfooding and scoped refinement |
-| `factory_app/control_plane/tools` | first-party control-plane tools that load artifact workspaces and current app context graphs |
+| `factory_app/refinement_harness/tools` | first-party Refinement Engine tools that load artifact workspaces and current app context graphs |
 | `factory_app/workflows/_shared/context_graph` | shared workflow prompt injection for preloaded graph packs |
 | Studio UX | inspection, impact visualization, and build-sequence surfacing |
 
@@ -121,7 +121,7 @@ page components, workflow tools, and contracts.
 The policy is used by:
 
 - ExistingAppDiscovery local source preloads
-- control-plane artifact Context Graph loading
+- Refinement Engine artifact Context Graph loading
 - workspace snapshot registration
 
 `context_graph_health` is the workflow-visible health surface. Agents get the
@@ -173,7 +173,7 @@ Examples:
 | `workflows/{workflow}/tools/**` | `contract_role=workflow_tool_code` |
 
 Declared module actions become graph nodes. Matching handler symbols link to
-those action nodes through `implements_capability`. That lets the control plane
+those action nodes through `implements_capability`. That lets the Refinement Engine
 distinguish "a function named `complete_task`" from "the deterministic handler
 for the `tasks.complete_task` action contract."
 
@@ -250,9 +250,9 @@ symbol nodes. They are not authority. They should improve retrieval, review,
 and human explanation, but deterministic graph facts remain the basis for
 scoping and validation.
 
-## Control-Plane Consumption
+## Refinement Engine Consumption
 
-The control plane consumes the Context Graph through compact packs:
+The Refinement Engine consumes the Context Graph through compact packs:
 
 - `get_context_graph_catalog`: scope-selection context with candidate files,
   matched nodes, edges, and semantic annotation candidates
@@ -303,7 +303,7 @@ POST /api/studio/apps/{app_id}/context/workspace-snapshot
 ```
 
 Both the CLI and Studio response include artifact ids, indexed file count,
-`scan_health`, and `health_report`. This gives the control plane a durable
+`scan_health`, and `health_report`. This gives the Refinement Engine a durable
 `artifact_version_id` and current graph before scoped coding/refinement starts,
 while giving the operator an explicit signal when the graph is missing core
 code coverage.
@@ -335,10 +335,10 @@ aliases:
 Raw `app_context_graph` payloads should not be injected directly into prompts;
 prompt hooks consume compact packs only.
 
-Control-plane tool outputs are not workflow context by default. In particular,
+Refinement Engine tool outputs are not workflow context by default. In particular,
 `get_context_graph_catalog` and `get_context_graph_scope` return context to
-control-plane checkpoints such as scope selection and coding refinement. The
-workflow prompt hook does not read a control-plane `context_graph_scope`; a
+Refinement Engine checkpoints such as scope selection and coding refinement. The
+workflow prompt hook does not read a Refinement Engine `context_graph_scope`; a
 workflow that needs graph prompt context must populate `context_graph_pack`
 through its own lifecycle preload.
 
@@ -358,7 +358,7 @@ ExistingAppDiscovery is both a producer and an early consumer:
 
 The preloaded source graph is not the final authority. It is a bounded prompt
 context pack for discovery. The saved `app_context_graph` remains the canonical
-artifact used by downstream control-plane and generator workflows.
+artifact used by downstream Refinement Engine and generator workflows.
 
 The shared context hook injects:
 
@@ -421,13 +421,13 @@ or promotion.
 | graph models | `mozaiksai/core/app_context/models.py` |
 | graph builder and code-intelligence pipeline | `mozaiksai/core/app_context/context_graph.py` |
 | deterministic source scan policy | `mozaiksai/core/app_context/scan_policy.py` |
-| control-plane graph query packs | `mozaiksai/control_plane/context_graph/query.py` |
+| Refinement Engine graph query packs | `mozaiksai/control_plane/context_graph/query.py` |
 | context graph health gate | `mozaiksai/control_plane/context_graph/health.py` |
 | workspace snapshot registration | `mozaiksai/control_plane/workspace_snapshot.py` |
 | CLI dogfood snapshot command | `mozaiks_cli/commands/context.py` |
-| factory graph loading tools | `factory_app/control_plane/tools/_context_graph.py` |
-| scope-selection tool | `factory_app/control_plane/tools/get_context_graph_catalog.py` |
-| coding-context tool | `factory_app/control_plane/tools/get_context_graph_scope.py` |
+| factory graph loading tools | `factory_app/refinement_harness/tools/_context_graph.py` |
+| scope-selection tool | `factory_app/refinement_harness/tools/get_context_graph_catalog.py` |
+| coding-context tool | `factory_app/refinement_harness/tools/get_context_graph_scope.py` |
 | shared prompt injection hook | `factory_app/workflows/_shared/context_graph/hook_context_graph.py` |
 | boundary doc | `docs/architecture/foundations/graph-authority-boundaries.md` |
 | app-context doc | `docs/architecture/foundations/app-context-and-brownfield-adoption.md` |
@@ -444,7 +444,7 @@ Changes to this layer should include targeted tests for:
 - semantic annotation request/apply behavior
 - deterministic scan policy and scan health
 - Context Graph health reports and blocked/warning coverage states
-- control-plane catalog and scope packs
+- Refinement Engine catalog and scope packs
 - workspace snapshot registration
 - CLI snapshot registration command wiring
 - shared hook injection behavior
@@ -480,7 +480,7 @@ The graph already maps:
 - declared events → producer modules and subscriber reactions
 - declared integrations → client files under `services/integrations/`
 
-These relationships let the control plane answer questions that no amount of
+These relationships let the Refinement Engine answer questions that no amount of
 prompt engineering can answer reliably:
 
 - Is every declared action actually implemented in a handler?
@@ -493,7 +493,7 @@ the `AppContextGraph` built from the generated artifact workspace after the buil
 completes and before promotion.
 
 When a check fails it surfaces as a graph annotation on the affected node with
-`risk_level: high` and a `purpose` describing the gap. The control plane can
+`risk_level: high` and a `purpose` describing the gap. The Refinement Engine can
 surface this as a targeted revision — "ServiceAgent did not implement
 `tasks.archive_task`" — rather than asking the user to discover it at runtime.
 

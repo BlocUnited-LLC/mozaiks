@@ -1,6 +1,6 @@
 # Refinement Dry Run
 
-The refinement dry-run harness previews how the control plane would stage a
+The refinement dry-run harness previews how the Refinement Engine would stage a
 refinement request without mutating app files or running generation workflows.
 It performs classification, route resolution, impact derivation, and LLM profile
 reference resolution, then emits a JSON-safe plan.

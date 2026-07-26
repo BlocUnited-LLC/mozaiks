@@ -157,7 +157,7 @@ so the ReviewAgent can present a build summary artifact in chat and the user
 can type revision requests or click Promote without a blocking screen.
 Revision events emitted from this chat session must carry the reviewed
 `artifact_key`, `artifact_version_id`, `source_surface=app_review`,
-`lifecycle_state`, and staged `bundle_path` so the refinement control plane
+`lifecycle_state`, and staged `bundle_path` so the Refinement Engine
 routes against the reviewed bundle rather than an ambient app workspace.
 If the trigger response is `harness_decision`, the chat shell must feed it into
 the shared pending harness decision UI before launching any downstream workflow.
@@ -214,7 +214,7 @@ Rules:
 ### Brownfield Context Refresh
 
 `brownfield_discovery_refresh` is the canonical sequence for resolving a
-control-plane `ContextRefreshPlan` after stale brownfield context blocks a risky
+Refinement Engine `ContextRefreshPlan` after stale brownfield context blocks a risky
 refinement. It reruns `ExistingAppDiscovery` only.
 
 `ContextRefreshPlan` creation is planning-only. It does not start this sequence
@@ -231,7 +231,7 @@ This sequence is non-mutating by shape:
 - it refreshes app-context artifact families and registers a new
   `AppContextVersion` through `ExistingAppDiscovery` persistence
 
-After workflow completion, the control plane can call `complete_context_refresh`
+After workflow completion, the Refinement Engine can call `complete_context_refresh`
 to compare the previous context version with the new current
 `AppContextVersion` and produce a `ContextRefreshResult`. That result records
 whether stale context was actually resolved. It does not relaunch workflows,

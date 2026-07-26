@@ -199,5 +199,5 @@ see product terms:
 Not:
 
 - `workflow_sequence restart`
-- `control-plane reroute`
+- `Refinement Engine reroute`
 - `workflow-run resume`

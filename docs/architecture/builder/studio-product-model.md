@@ -30,7 +30,7 @@ not appear as primary customer-facing product language:
 - `factory_app`
 - `Hub`
 - `Studio host`
-- `Control Plane`
+- `Refinement Engine`
 - `workflow_sequence`
 - `extension_registry`
 
@@ -43,7 +43,7 @@ entrypoint always starts a fresh build journey, while continuation happens from
 Studio/App Studio build history or an explicit chat/build record.
 
 The **Studio host** is the internal FastAPI composition layer that serves the
-browser Studio and mounts the factory builder/control-plane capabilities. Keep
+browser Studio and mounts the factory builder/Refinement Engine capabilities. Keep
 `studio` in host names, environment values, and architecture docs where it
 describes runtime composition.
 
@@ -155,7 +155,7 @@ Replace these in customer-facing UX:
 | `Treasury` | provider-owned billing capability | Hosted/product-owned | Do not add OSS factory Studio billing routes for hosted billing products |
 | `Adapters` | `Integrations` | Customer-facing | Use `Integrations` for visible app surfaces; workspace adapter routing is hidden |
 | `Factory App` | `Mozaiks` / `Mozaiks Studio` | Customer-facing | `factory_app` remains an internal package name |
-| `Control Plane` | none | Internal-only | Do not expose as primary product copy |
+| `Refinement Engine` | none | Internal-only | Do not expose as primary product copy |
 
 Keep internal API and host names stable unless runtime work explicitly requires
 deeper refactoring.

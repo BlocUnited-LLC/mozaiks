@@ -18,7 +18,7 @@ python scripts/smoke_refinement_live_coding_worker.py --run-live --scenario all 
 ## Required environment
 
 - `OPENAI_API_KEY` must be available for the live worker call.
-- The standard control-plane configuration must resolve a coding LLM config.
+- The standard Refinement Engine configuration must resolve a coding LLM config.
 - No model settings are changed by the smoke.
 - The script stays in skip mode unless `--run-live` is provided.
 
@@ -65,10 +65,10 @@ validated staged change set. The manual smoke validation hook intentionally
 returns a skipped validation result, not a failure. Persistent worker-output
 storage is not required for success; the fixture is the replay record.
 
-The live smoke also uses a smoke-local control-plane tool executor for the
+The live smoke also uses a smoke-local Refinement Engine tool executor for the
 coding checkpoint context tools. That keeps the manual smoke self-contained and
 avoids hitting Mongo-backed stores just to assemble prompt context. The real
-control-plane executor still surfaces actual tool failures in non-smoke paths.
+Refinement Engine executor still surfaces actual tool failures in non-smoke paths.
 
 The smoke path also injects a smoke-local in-memory artifact store. That keeps
 artifact persistence self-contained for the manual smoke and avoids depending
