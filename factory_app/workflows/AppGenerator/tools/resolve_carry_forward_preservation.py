@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
     resolve_carry_forward_preservation as _core,
 )
 

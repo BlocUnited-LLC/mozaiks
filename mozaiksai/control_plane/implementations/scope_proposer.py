@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from factory_app.control_plane.tools._artifact_workspace import (
+from factory_app.refinement_harness.tools._artifact_workspace import (
     load_artifact_workspace,
     safe_relpath,
 )

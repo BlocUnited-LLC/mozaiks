@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from factory_app.control_plane.tools._artifact_workspace import load_artifact_workspace
+from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
 from mozaiksai.control_plane.context_graph.query import build_context_graph_catalog
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.app_context.models import AppContextGraph
