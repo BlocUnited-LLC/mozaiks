@@ -20,14 +20,13 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     [:octicons-arrow-right-24: Studio](../studio/index.md)
 
--   :material-cog-outline: **Configs**
+-   :material-cog-outline: **Config Files**
 
     ---
 
-    Know which files define app identity, AI startup, shell, subscriptions,
-    secrets, data, integrations, targets, and refinement.
+    Find the right file to edit without reading the architecture reference.
 
-    [:octicons-arrow-right-24: Configs](configs/index.md)
+    [:octicons-arrow-right-24: Config Files](configs/index.md)
 
 -   :material-connection: **Integrations**
 
