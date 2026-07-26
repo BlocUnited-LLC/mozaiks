@@ -34,7 +34,7 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     assert "transitions[]" in build_rule
     assert "entrypoints[]" in build_rule
 
-    assert "checkpoint/control-plane re-entry" in control_plane_rule
+    assert "checkpoint-driven re-entry" in control_plane_rule
     assert "RefinementWorkflow" in control_plane_rule
     assert "app/config/refinement_policy.yaml" in control_plane_rule
     assert "refinement_harness/config/harness.yaml" in control_plane_rule

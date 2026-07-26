@@ -2,8 +2,9 @@
 paths:
   - "docs/**/*.md"
   - ".claude/**/*.md"
-  - "factory_app/control_plane/**"
+  - "factory_app/refinement_harness/**"
   - "factory_app/app/config/ai.json"
+  - "factory_app/app/config/refinement_policy.yaml"
   - "factory_app/app/modules/factory_control_plane/**"
   - "factory_app/workflows/extended_orchestration/**"
 ---
@@ -15,15 +16,15 @@ artifact routing, or checkpoint re-entry behavior.
 
 ## Current Truth
 
-- Refinement today is checkpoint/control-plane re-entry driven by
-  `app/config/ai.json` startup plus `app/config/llm.yaml`
-  runtime policy and the selected `control_plane/config/control_plane.yaml`
+- Refinement today is checkpoint-driven re-entry driven by
+  `app/config/ai.json` startup plus `app/config/refinement_policy.yaml`
+  runtime policy and the selected `refinement_harness/config/harness.yaml`
   pack.
 - Do not document or assume a dedicated `RefinementWorkflow` unless the runtime
   actually introduces one.
 - The first-party harness runtime lives in `mozaiksai/control_plane/`.
-- `factory_app/control_plane/` owns the first-party declarative pack, prompts,
-  and tools.
+- `factory_app/refinement_harness/` owns the first-party declarative pack,
+  prompts, and tools.
 - `factory_app/app/modules/factory_control_plane/` is a Studio identity stub,
   not the harness engine.
 
@@ -31,7 +32,8 @@ artifact routing, or checkpoint re-entry behavior.
 
 - When the selected pack exposes `patch`, `design`, `feature`, and `core`
   routes, keep those classes aligned across docs, pack config, and tests.
-- `control_plane.yaml` routes declare `workflow_sequence` only.
+- `refinement_harness/config/harness.yaml` routes declare `workflow_sequence`
+  only.
 - The referenced `workflow_sequence` in
   `extended_orchestration/extension_registry.json` owns downstream workflow
   ordering and `affected_declarative_families`.
@@ -46,15 +48,16 @@ Keep these mechanisms distinct:
 - `entrypoints[]` = external route entry into a sequence or transition
 - `transition_graph.yaml` = workflow-local agent routing
 - `routing.artifacts[]` = artifact ownership and change-class routing
-- `checkpoints[]` = control-plane decision points above workflows
+- `checkpoints[]` = Refinement Engine decision points above workflows
 
 ## Inspect These Anchors First
 
 - `factory_app/app/config/ai.json`
-- `factory_app/control_plane/config/control_plane.yaml`
+- `factory_app/app/config/refinement_policy.yaml`
+- `factory_app/refinement_harness/config/harness.yaml`
 - `factory_app/workflows/extended_orchestration/extension_registry.json`
-- `docs/architecture/workflows/refinement-control-plane.md`
-- `docs/architecture/workflows/control-plane-harness-architecture.md`
+- `docs/architecture/workflows/refinement-engine.md`
+- `docs/architecture/workflows/refinement-harness-architecture.md`
 - `factory_app/app/modules/factory_control_plane/`
 
 ## Reporting

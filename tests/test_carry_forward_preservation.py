@@ -304,7 +304,9 @@ async def test_reuse_does_not_copy_route_manifest():
 
 @pytest.mark.asyncio
 async def test_reuse_does_not_copy_sensitive_paths():
-    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import _is_denylist_path
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
+        _is_denylist_path,
+    )
 
     # Paths explicitly matched by _is_denylist_path sensitive-term check
     denylist_sensitive_paths = [

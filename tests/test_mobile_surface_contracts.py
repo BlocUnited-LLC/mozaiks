@@ -78,12 +78,11 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "supportError" in widget_source
     assert "page_title:" not in widget_source
     assert "page_url:" not in widget_source
-    assert "urlAppIdParam" in profile_source
-    assert "/api/me/profile-panels${panelQuery" not in profile_source
-    assert "const subjectSuffix = subjectQuery ? `?${subjectQuery}` : '';" in profile_source
-    assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels${subjectSuffix}`, {}, auth)" in profile_source
-    assert "fetchWithAuth(`${backendUrl}/api/me/profile-tabs${subjectSuffix}`, {}, auth)" in profile_source
-    assert "profileTrace('tabs:profile_panels:loaded'" in profile_source
+    assert "subjectParams.set('username', username)" in profile_source
+    assert "const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';" in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth)" in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels" not in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-tabs" not in profile_source
     assert "supportTrace('support_request:create:start'" in widget_source
     assert "supportTrace('support_thread:open'" in widget_source
     assert "supportPanelTrace('data:received'" in profile_panel_source
@@ -93,8 +92,8 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert 'if app_id and "app_id" in properties:' in platform_source
     assert 'if subject_user_id and "user_id" in properties:' in platform_source
     assert "queryRequestId" in profile_panel_source
-    assert "urlTabParam && tabs.some(tab => tab.id === urlTabParam)" in profile_source
-    assert "return prev === urlTabParam ? prev : urlTabParam;" in profile_source
+    assert "urlTabParam && allPages.some(p => p.id === urlTabParam)" in profile_source
+    assert "return urlTabParam;" in profile_source
     escalation_source = _read("chat-ui/src/core/ui/EscalationCard.js")
     assert "const handleEscalate = async () =>" in escalation_source
     assert "await onResponse({ action: 'open_support' })" in escalation_source

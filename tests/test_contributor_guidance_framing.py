@@ -47,7 +47,7 @@ def test_refinement_guidance_states_checkpoint_reentry_truth() -> None:
 
     assert "checkpoint-driven re-entry" in architecture
     assert "not a dedicated `RefinementWorkflow`" in architecture
-    assert "normal chat/workflow startup comes" in refinement_harness
+    assert "Normal chat/workflow startup comes" in refinement_harness
     assert "app/config/refinement_policy.yaml" in refinement_harness
     assert "refinement_harness/config/harness.yaml" in refinement_harness
     assert "Do not document a dedicated `RefinementWorkflow`" in refinement_harness

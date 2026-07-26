@@ -294,7 +294,7 @@ function SetupSlideOver({
             onClick={() => onDelete(item.id)}
             disabled={saving || deleting}
           >
-            {deleting ? 'Deleting...' : 'Remove connector'}
+            {deleting ? 'Deleting...' : 'Delete connector'}
           </ActionButton>
         ) : (
           <p className="max-w-sm text-xs leading-5 text-muted-foreground">
@@ -356,6 +356,20 @@ function SetupSlideOver({
               {connectorDescription(connector, item)}
             </p>
           </div>
+        </div>
+
+        <div className="rounded-lg border border-border/55 bg-background/35 p-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Credential source
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <StatusPill tone={hasStoredConnector ? 'success' : 'default'}>
+              {hasStoredConnector ? 'Workspace connector' : connectorLabel(connector, item)}
+            </StatusPill>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {connectorDescription(connector, item)}
+          </p>
         </div>
 
         {connectorError && (
@@ -454,7 +468,7 @@ function SetupSlideOver({
         {secrets.length > 0 && (
           <details className="rounded-lg border border-border/55 bg-background/25 p-4">
             <summary className="cursor-pointer text-sm font-semibold text-foreground">
-              Environment variable status
+              Advanced setup details
             </summary>
             <div className="mt-4 space-y-4">
               {missingSecrets.length > 0 && (
@@ -517,6 +531,7 @@ function IntegrationCard({ item, connector, onOpen }) {
   const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item)
   const isAttention = needsAttention(item)
   const usageLabel = appUsageLabel(item)
+  const visibleStatusLabel = statusLabel(effectiveStatus(item), item)
 
   const borderAccent = isConnected
     ? 'border-l-2 border-l-emerald-500/60'
@@ -547,17 +562,14 @@ function IntegrationCard({ item, connector, onOpen }) {
         {item.description}
       </p>
 
-      {/* Footer: status pill + action */}
+      {/* Footer: status and usage remain separate so workspace state is explicit. */}
       <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-3 mt-auto">
-        {usageLabel ? (
-          <StatusPill tone="muted">{usageLabel}</StatusPill>
-        ) : isConnected ? (
-          <StatusPill tone="success" dot>Connected</StatusPill>
-        ) : isAttention ? (
-          <StatusPill tone="warning" dot>Needs setup</StatusPill>
-        ) : (
-          <StatusPill tone="default">Not connected</StatusPill>
-        )}
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <StatusPill tone={tone} dot={isConnected || isAttention}>
+            {visibleStatusLabel}
+          </StatusPill>
+          <StatusPill tone="muted">{usageLabel || 'Not used yet'}</StatusPill>
+        </div>
         <ActionButton
           variant={isAttention ? 'default' : 'secondary'}
           size="sm"
@@ -568,6 +580,38 @@ function IntegrationCard({ item, connector, onOpen }) {
         </ActionButton>
       </div>
     </div>
+  )
+}
+
+function IntegrationGroup({ title, items, connectorsByService, onOpen }) {
+  const headingId = `workspace-integrations-${title.toLowerCase().replace(/\s+/g, '-')}`
+
+  return (
+    <section aria-labelledby={headingId} className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id={headingId} className="text-sm font-semibold text-foreground">
+          {title}
+        </h2>
+        <span className="text-xs text-muted-foreground">{items.length}</span>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border/60 bg-background/20 px-4 py-3 text-xs text-muted-foreground">
+          No integrations in this state.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((item) => (
+            <IntegrationCard
+              key={item.id}
+              item={item}
+              connector={connectorsByService.get(item.id)}
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -710,6 +754,23 @@ export default function WorkspaceIntegrationsPage() {
     activeCategory === ALL_TAB
       ? sorted
       : sorted.filter((i) => String(i.category || '').toLowerCase() === activeCategory)
+  const groupedIntegrations = [
+    {
+      id: 'attention',
+      title: 'Needs attention',
+      items: filtered.filter(needsAttention),
+    },
+    {
+      id: 'connected',
+      title: 'Connected',
+      items: filtered.filter((i) => effectiveStatus(i) === 'configured' && !needsAttention(i)),
+    },
+    {
+      id: 'available',
+      title: 'Available',
+      items: filtered.filter((i) => !needsAttention(i) && effectiveStatus(i) !== 'configured'),
+    },
+  ]
 
   const attentionCount = integrations.filter(needsAttention).length
   const connectedCount = integrations.filter(
@@ -754,12 +815,13 @@ export default function WorkspaceIntegrationsPage() {
                 description="Try a different category filter."
               />
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {filtered.map((item) => (
-                  <IntegrationCard
-                    key={item.id}
-                    item={item}
-                    connector={connectorsByService.get(item.id)}
+              <div className="space-y-6">
+                {groupedIntegrations.map((group) => (
+                  <IntegrationGroup
+                    key={group.id}
+                    title={group.title}
+                    items={group.items}
+                    connectorsByService={connectorsByService}
                     onOpen={setActiveItem}
                   />
                 ))}

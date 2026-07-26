@@ -255,7 +255,7 @@ class ConfiguredEntitlementAdapter:
 
     async def _check_product(
         self,
-        product: "ProductDef",
+        product: ProductDef,
         capability_id: str,
         *,
         app_id: str,

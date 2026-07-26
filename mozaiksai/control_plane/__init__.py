@@ -78,9 +78,9 @@ from .loader import (
     load_selected_refinement_harness,
     resolve_app_control_plane_root,
     resolve_app_refinement_harness_root,
-    resolve_refinement_harness_path,
     resolve_factory_control_plane_root,
     resolve_factory_refinement_harness_root,
+    resolve_refinement_harness_path,
 )
 from .ports import (
     ChangeClassifierPort,

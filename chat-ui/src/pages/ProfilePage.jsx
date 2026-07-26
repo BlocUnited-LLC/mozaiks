@@ -7,7 +7,7 @@
  *
  * Layout driven by GET /api/me/profile-config → layout field.
  * Pages contributed by modules via contracts/profile.yaml (v2 schema).
- * Falls back to legacy /api/me/profile-tabs + /api/me/profile-panels (v1).
+ * Page data is loaded from GET /api/me/profile-pages.
  *
  * Supported layouts: sidebar_left | top_nav | drawer | icon_rail
  * Shell mode: social — full-width, header on, no sidebar.
@@ -366,7 +366,6 @@ function PageContent({ page, padded = true }) {
   if (Component) {
     return (
       <div className={cls}>
-        {/* Pass both `page` and `tab` for backward compat with registered components */}
         <Component page={page} tab={page} data={page.data} />
       </div>
     );
@@ -715,7 +714,6 @@ export default function ProfilePage() {
       if (!isOwner && username) subjectParams.set('username', username);
       const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';
 
-      // v2: /api/me/profile-pages
       try {
         const res = await fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth);
         if (res.ok) {
@@ -736,54 +734,6 @@ export default function ProfilePage() {
         profileWarn('pages:v2:error', {});
       }
 
-      // v1 fallback: merge profile-panels + profile-tabs
-      if (Object.keys(sections).length === 0) {
-        profileTrace('pages:v1:fallback:start', {});
-        const legacy = [];
-
-        try {
-          const res = await fetchWithAuth(`${backendUrl}/api/me/profile-panels${subjectSuffix}`, {}, auth);
-          const body = res.ok ? await res.json() : {};
-          (Array.isArray(body?.panels) ? body.panels : []).forEach(p => {
-            legacy.push({
-              id: p.id,
-              label: p.title,
-              component: p.component || null,
-              data: p.data || null,
-              order: p.order ?? 50,
-              error: p.error || null,
-              section: 'overview',
-              visibility: 'public',
-            });
-          });
-        } catch (_) {
-          profileWarn('pages:v1:panels:failed', {});
-        }
-
-        try {
-          const res = await fetchWithAuth(`${backendUrl}/api/me/profile-tabs${subjectSuffix}`, {}, auth);
-          const body = res.ok ? await res.json() : {};
-          (Array.isArray(body?.tabs) ? body.tabs : []).forEach(t => {
-            legacy.push({
-              id: t.id,
-              label: t.label,
-              component: t.component || null,
-              data: t.data || null,
-              order: t.order ?? 100,
-              error: t.error || null,
-              section: 'overview',
-              visibility: 'public',
-            });
-          });
-        } catch (_) {
-          profileWarn('pages:v1:tabs:failed', {});
-        }
-
-        if (legacy.length > 0) {
-          sections.overview = legacy.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
-          profileTrace('pages:v1:fallback:complete', { count: legacy.length });
-        }
-      }
     }
 
     setPagesBySection(sections);

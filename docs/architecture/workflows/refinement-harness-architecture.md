@@ -28,7 +28,7 @@ Examples:
 In the first-party builder experience today, this refinement loop is driven by
 startup declared through `app/config/ai.json`, refinement runtime policy in
 `app/config/refinement_policy.yaml`, and the selected
-`refinement_harness/config/harness.yaml` pack. Do not document a dedicated `RefinementWorkflow` unless the runtime actually introduces one.
+`refinement_harness/config/harness.yaml` pack. Do not document a dedicated `RefinementWorkflow` unless the runtime actually introduces one. Normal chat/workflow startup comes from `app/config/ai.json`; refinement policy and harness routing only take over once a refinement request or checkpoint needs routed work.
 
 Those requests need:
 

@@ -258,7 +258,9 @@ class WorkspaceIntegrationsService:
         service: str,
     ) -> dict[str, Any]:
         from mozaiksai.core.data.persistence import ConnectorStore
-        from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
+        from mozaiksai.core.workflow.generator_support.connector_health import (
+            run_connector_health_check,
+        )
         return await run_connector_health_check(
             scope=ConnectorStore.SCOPE_WORKSPACE,
             scope_id=str(workspace_id),

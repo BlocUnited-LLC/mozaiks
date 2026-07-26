@@ -23,7 +23,7 @@ def test_contributing_quickstart_states_repo_and_build_truth() -> None:
     assert "first-party builder/reference app workspace" in quickstart
     assert "workflow_sequence" in quickstart
     assert "AppGenerator` is one workflow inside that build system, not the whole build" in quickstart
-    assert "checkpoint and control-plane re-entry" in quickstart
+    assert "checkpoint-driven re-entry" in quickstart
     assert "RefinementWorkflow" in quickstart
     assert "app/config/refinement_policy.yaml" in quickstart
     assert "refinement_harness/config/harness.yaml" in quickstart
@@ -38,7 +38,7 @@ def test_contributing_quickstart_contains_common_task_map() -> None:
     assert "AppGenerator-specific change" in quickstart
     assert "AgentGenerator-specific change" in quickstart
     assert "ExistingAppDiscovery or brownfield change" in quickstart
-    assert "Control-plane or refinement change" in quickstart
+    assert "Refinement Engine or refinement harness change" in quickstart
     assert "Module contract change" in quickstart
     assert "Page or frontend change" in quickstart
     assert "Admin UI change" in quickstart

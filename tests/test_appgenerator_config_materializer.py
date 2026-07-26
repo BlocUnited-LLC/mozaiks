@@ -4,12 +4,12 @@ import json
 
 import yaml
 
-from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
-    materialize_app_config_contracts,
-    _materialize_subscriptions_yaml,
-)
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
     _apply_entitlement_gates,
+)
+from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+    _materialize_subscriptions_yaml,
+    materialize_app_config_contracts,
 )
 
 

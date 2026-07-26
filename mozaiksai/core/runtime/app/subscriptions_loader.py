@@ -724,7 +724,7 @@ class ProductDef(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_product(self) -> "ProductDef":
+    def _validate_product(self) -> ProductDef:
         if not self.plans:
             raise ValueError(f"product {self.product_id!r} must have at least one plan")
         plan_ids = [p.plan_id for p in self.plans]
@@ -819,7 +819,7 @@ class SubscriptionsConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_plan_catalog(self) -> "SubscriptionsConfig":
+    def _validate_plan_catalog(self) -> SubscriptionsConfig:
         is_v2 = self.schema_version == "mozaiks.subscriptions.v2"
 
         if is_v2:
@@ -904,7 +904,7 @@ class SubscriptionsConfig(BaseModel):
         return self
 
     @property
-    def assembled_pricing_catalog(self) -> "PricingCatalogDef | None":
+    def assembled_pricing_catalog(self) -> PricingCatalogDef | None:
         """Return the pricing catalog, assembling it from product groups for v2."""
         if self.pricing_catalog:
             return self.pricing_catalog
@@ -945,7 +945,7 @@ class SubscriptionsConfig(BaseModel):
                 return frozenset(plan.capabilities)
         return frozenset()
 
-    def plan_by_id(self, plan_id: str | None) -> "PlanDef":
+    def plan_by_id(self, plan_id: str | None) -> PlanDef:
         """Return a declared plan, falling back to the configured default."""
         requested = str(plan_id or "").strip()
         if self.products:

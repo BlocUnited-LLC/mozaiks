@@ -722,16 +722,17 @@ tabs:
 
 
 # ---------------------------------------------------------------------------
-# ProfilePage.jsx — panel contract surface check
+# ProfilePage.jsx — page contract surface check
 # ---------------------------------------------------------------------------
 
-def test_profile_page_fetches_profile_panels() -> None:
+def test_profile_page_fetches_profile_pages() -> None:
     source = (
         Path(__file__).resolve().parents[1] / "chat-ui" / "src" / "pages" / "ProfilePage.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "/api/me/profile-tabs" in source
-    assert "/api/me/profile-panels" in source
+    assert "/api/me/profile-pages" in source
+    assert "/api/me/profile-tabs" not in source
+    assert "/api/me/profile-panels" not in source
     assert "/api/users/" in source
     assert "subjectParams.set('username', username)" in source
     assert "componentRegistry" in source

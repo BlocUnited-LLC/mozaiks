@@ -15,27 +15,30 @@ class _Context:
         return self.data.get(key, default)
 
 
-class _FakeDeclarationsRepo:
-    instances: list[_FakeDeclarationsRepo] = []
+class _FakeWorkspaceIntegrationsService:
+    instances: list[_FakeWorkspaceIntegrationsService] = []
 
     def __init__(self) -> None:
         self.saved: list[dict[str, Any]] = []
         self.__class__.instances.append(self)
 
-    async def upsert_declarations(
+    async def declare_app_integration_needs(
         self,
         *,
         app_id: str,
-        declarations: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        self.saved = declarations
-        return declarations
+        needs: list[dict[str, Any]],
+        declared_at: str,
+    ) -> dict[str, Any]:
+        self.app_id = app_id
+        self.declared_at = declared_at
+        self.saved = needs
+        return {"saved": len(needs)}
 
 
 @pytest.mark.asyncio
 async def test_save_integration_manifest_defaults_mozaikspay_for_subscription_app(monkeypatch: pytest.MonkeyPatch) -> None:
-    _FakeDeclarationsRepo.instances = []
-    monkeypatch.setattr(manifest_module, "IntegrationDeclarationsRepo", _FakeDeclarationsRepo)
+    _FakeWorkspaceIntegrationsService.instances = []
+    monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", _FakeWorkspaceIntegrationsService)
     monkeypatch.delenv("MOZAIKSPAY_API_BASE", raising=False)
     monkeypatch.delenv("MOZAIKSPAY_CLIENT_ID", raising=False)
     monkeypatch.delenv("MOZAIKSPAY_CLIENT_SECRET", raising=False)
@@ -51,7 +54,7 @@ async def test_save_integration_manifest_defaults_mozaikspay_for_subscription_ap
     )
 
     assert result["saved"] == 1
-    saved = _FakeDeclarationsRepo.instances[0].saved
+    saved = _FakeWorkspaceIntegrationsService.instances[0].saved
     assert saved[0]["service"] == "mozaikspay"
     assert saved[0]["defaulted"] is True
     assert saved[0]["removable"] is True
@@ -63,8 +66,8 @@ async def test_save_integration_manifest_defaults_mozaikspay_for_subscription_ap
 async def test_save_integration_manifest_defaults_mozaikspay_for_required_subscription_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _FakeDeclarationsRepo.instances = []
-    monkeypatch.setattr(manifest_module, "IntegrationDeclarationsRepo", _FakeDeclarationsRepo)
+    _FakeWorkspaceIntegrationsService.instances = []
+    monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", _FakeWorkspaceIntegrationsService)
 
     result = await manifest_module.save_integration_manifest(
         _Context(
@@ -77,15 +80,15 @@ async def test_save_integration_manifest_defaults_mozaikspay_for_required_subscr
     )
 
     assert result["saved"] == 1
-    assert _FakeDeclarationsRepo.instances[0].saved[0]["service"] == "mozaikspay"
+    assert _FakeWorkspaceIntegrationsService.instances[0].saved[0]["service"] == "mozaikspay"
 
 
 @pytest.mark.asyncio
 async def test_save_integration_manifest_does_not_default_mozaikspay_for_custom_money_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _FakeDeclarationsRepo.instances = []
-    monkeypatch.setattr(manifest_module, "IntegrationDeclarationsRepo", _FakeDeclarationsRepo)
+    _FakeWorkspaceIntegrationsService.instances = []
+    monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", _FakeWorkspaceIntegrationsService)
 
     result = await manifest_module.save_integration_manifest(
         _Context(
@@ -102,13 +105,13 @@ async def test_save_integration_manifest_does_not_default_mozaikspay_for_custom_
     )
 
     assert result["saved"] == 0
-    assert _FakeDeclarationsRepo.instances == []
+    assert _FakeWorkspaceIntegrationsService.instances == []
 
 
 @pytest.mark.asyncio
 async def test_save_integration_manifest_does_not_default_mozaikspay_for_free_app(monkeypatch: pytest.MonkeyPatch) -> None:
-    _FakeDeclarationsRepo.instances = []
-    monkeypatch.setattr(manifest_module, "IntegrationDeclarationsRepo", _FakeDeclarationsRepo)
+    _FakeWorkspaceIntegrationsService.instances = []
+    monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", _FakeWorkspaceIntegrationsService)
 
     result = await manifest_module.save_integration_manifest(
         _Context(
@@ -121,4 +124,4 @@ async def test_save_integration_manifest_does_not_default_mozaikspay_for_free_ap
     )
 
     assert result["saved"] == 0
-    assert _FakeDeclarationsRepo.instances == []
+    assert _FakeWorkspaceIntegrationsService.instances == []

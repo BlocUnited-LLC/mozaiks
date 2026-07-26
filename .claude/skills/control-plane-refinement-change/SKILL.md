@@ -1,6 +1,6 @@
 ---
 name: control-plane-refinement-change
-description: Review or implement a change to refinement routing, control_plane config, artifact routing, checkpoint re-entry, or factory_control_plane contributor guidance.
+description: Review or implement a change to refinement routing, refinement_harness config, artifact routing, checkpoint re-entry, or factory_control_plane contributor guidance.
 argument-hint: "[change summary or file path]"
 ---
 
@@ -9,8 +9,8 @@ Use this skill when a change touches control-plane or refinement behavior.
 Typical triggers:
 
 - `app/config/ai.json` startup settings in the canonical contract or the first-party repo path `factory_app/app/config/ai.json`
-- `app/config/llm.yaml` or `factory_app/app/config/llm.yaml`
-- `control_plane/config/control_plane.yaml` or `factory_app/control_plane/config/control_plane.yaml`
+- `app/config/refinement_policy.yaml` or `factory_app/app/config/refinement_policy.yaml`
+- `refinement_harness/config/harness.yaml` or `factory_app/refinement_harness/config/harness.yaml`
 - checkpoint or re-entry behavior
 - refinement classification and `patch|design|feature|core` routing
 - `routing.artifacts[]` or artifact-family ownership
@@ -22,12 +22,12 @@ Inspect first:
 
 - `app/config/ai.json` in the canonical contract and the first-party repo path `factory_app/app/config/ai.json`
 - `factory_app/app/config/ai.json`
-- `factory_app/app/config/llm.yaml`
-- `factory_app/control_plane/config/control_plane.yaml`
+- `factory_app/app/config/refinement_policy.yaml`
+- `factory_app/refinement_harness/config/harness.yaml`
 - `factory_app/workflows/extended_orchestration/extension_registry.json`
-- `docs/architecture/workflows/refinement-control-plane.md`
+- `docs/architecture/workflows/refinement-engine.md`
 - `docs/architecture/orchestration-and-decomposition.md`
-- `docs/architecture/workflows/control-plane-harness-architecture.md`
+- `docs/architecture/workflows/refinement-harness-architecture.md`
 - `factory_app/app/modules/factory_control_plane/module.yaml`
 - `factory_app/app/modules/factory_control_plane/backend/handler.py`
 - the narrowest matching tests before editing:
@@ -38,15 +38,15 @@ Inspect first:
 
 Current truth:
 
-- refinement is checkpoint/control-plane re-entry, not a dedicated
+- refinement is checkpoint-driven re-entry, not a dedicated
   `RefinementWorkflow`
 - `app/config/ai.json` owns runtime startup for `ask`, `chat`, and `workflows`
-- `app/config/llm.yaml` owns control-plane runtime policy
-- `control_plane/config/control_plane.yaml` owns declarative checkpoints and routing
+- `app/config/refinement_policy.yaml` owns refinement runtime policy
+- `refinement_harness/config/harness.yaml` owns declarative checkpoints and routing
 - the first-party harness runtime lives in `mozaiksai/control_plane/`
-- `factory_app/control_plane/` is the declarative first-party pack
+- `factory_app/refinement_harness/` is the declarative first-party pack
 - `factory_app/app/modules/factory_control_plane/` is a Studio identity stub only
-- the control plane classifies change scope and routes to declared
+- the Refinement Engine classifies change scope and routes to declared
   `workflow_sequence` re-entry points and checkpoints
 - the referenced `workflow_sequence` owns downstream workflow order and
   `affected_declarative_families`
@@ -57,12 +57,12 @@ Keep these distinct:
 - `transitions[]` = route-time user choice or deterministic context seed
 - `entrypoints[]` = external route entry into a sequence or transition
 - `transition_graph.yaml` = workflow-local AG2 agent routing
-- `routing.artifacts[]` = artifact-kind ownership and change-class routing in `control_plane.yaml`
-- `checkpoints[]` = control-plane decision points above workflows and above workflow-local handoffs
+- `routing.artifacts[]` = artifact-kind ownership and change-class routing in `refinement_harness/config/harness.yaml`
+- `checkpoints[]` = Refinement Engine decision points above workflows and above workflow-local handoffs
 
 Routing rules:
 
-- `control_plane.yaml` routes declare `workflow_sequence` only
+- `refinement_harness/config/harness.yaml` routes declare `workflow_sequence` only
 - `workflow_sequence` ids must exist in
   `extended_orchestration/extension_registry.json`
 - sequence-owned `affected_declarative_families` stay on the sequence, not in
