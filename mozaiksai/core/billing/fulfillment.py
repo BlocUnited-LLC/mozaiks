@@ -749,6 +749,12 @@ class BillingFulfillmentService:
         assignment_id = _assignment_id(command.app_id, query)
         status = command.status or ("cancelled" if command.event_type == "subscription_cancelled" else "active")
         plan_id = command.plan_id or self._config.default_plan_id
+        if plan_id is None:
+            return BillingFulfillmentEffectResult(
+                effect="assignment_cancel" if command.event_type == "subscription_cancelled" else "assignment_upsert",
+                status="skipped",
+                reason="plan_id_missing",
+            )
         plan_label = command.plan_label or plan_id
         capabilities = list(plan.capabilities if plan is not None else command.granted_capabilities)
         token_allowances = list(plan.token_allowances if plan is not None else command.token_allowances)

@@ -843,8 +843,8 @@ class SubscriptionsConfig(BaseModel):
                 )
             if self.pricing_catalog:
                 all_plan_ids: set[str] = set()
-                for product in self.products:
-                    all_plan_ids.update(p.plan_id for p in product.plans)
+                for product_def in self.products:
+                    all_plan_ids.update(p.plan_id for p in product_def.plans)
                 for group in self.pricing_catalog.groups:
                     unknown = [pid for pid in group.plan_ids if pid not in all_plan_ids]
                     if unknown:
@@ -879,10 +879,10 @@ class SubscriptionsConfig(BaseModel):
             if len(usage_charge_meter_ids) != len(set(usage_charge_meter_ids)):
                 raise ValueError("usage_charge_policies meter_ids must be unique")
             declared_wallet_ids = set(wallet_ids)
-            for product in self.top_up_products:
-                if declared_wallet_ids and product.wallet_id not in declared_wallet_ids:
+            for top_up_product in self.top_up_products:
+                if declared_wallet_ids and top_up_product.wallet_id not in declared_wallet_ids:
                     raise ValueError(
-                        f"top_up_product wallet_id {product.wallet_id!r} must reference token_wallets"
+                        f"top_up_product wallet_id {top_up_product.wallet_id!r} must reference token_wallets"
                     )
             for plan in self.plans:
                 for allowance in plan.token_allowances:

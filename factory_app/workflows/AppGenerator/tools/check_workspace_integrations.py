@@ -87,9 +87,11 @@ async def check_workspace_integrations(
                 scope_id=str(workspace_id),
                 required_services=[str(spec["id"]) for spec in catalog_scope],
             )
+            raw_connectors = inventory.get("connectors") if isinstance(inventory, dict) else []
+            connectors = raw_connectors if isinstance(raw_connectors, list) else []
             connector_by_service = {
                 str(connector.get("service") or ""): connector
-                for connector in inventory.get("connectors", [])
+                for connector in connectors
                 if isinstance(connector, dict) and connector.get("service")
             }
         except Exception:
@@ -110,10 +112,11 @@ async def check_workspace_integrations(
             "status": status,
         }
         if connector:
-            health = connector.get("health") if isinstance(connector.get("health"), dict) else {}
+            health_raw = connector.get("health")
+            health: dict[str, Any] = health_raw if isinstance(health_raw, dict) else {}
             entry["source"] = "workspace_connector"
             entry["connector_status"] = "ready" if connector.get("ready") else "partial"
-            entry["health_status"] = health.get("status") or "unknown"
+            entry["health_status"] = str(health.get("status") or "unknown")
             entry["health_check_supported"] = bool(health.get("health_check_supported"))
         if status == "configured":
             if "source" not in entry:
