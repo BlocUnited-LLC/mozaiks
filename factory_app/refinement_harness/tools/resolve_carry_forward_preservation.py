@@ -20,7 +20,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any
 
-from factory_app.control_plane.tools._artifact_workspace import load_artifact_workspace
+from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
 from mozaiksai.core.artifacts.content_store import ArtifactContentStore, get_artifact_content_store
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 

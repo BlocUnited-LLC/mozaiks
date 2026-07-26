@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from factory_app.control_plane.tools._context_graph import load_context_graph_for_tool
+from factory_app.refinement_harness.tools._context_graph import load_context_graph_for_tool
 from factory_app.workflows._shared.context_graph.prompt_pack import (
     build_context_graph_prompt_pack,
     build_context_graph_unavailable_pack,

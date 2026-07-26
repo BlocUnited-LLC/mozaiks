@@ -18,7 +18,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
     read_carry_forward_module_contract as _core,
 )
 
