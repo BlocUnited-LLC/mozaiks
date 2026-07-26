@@ -156,7 +156,7 @@ async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
     assert created[0].llm_config == {"model": "gpt-5-nano", "temperature": 0.0}
 
     assert len(created[0].calls) == 1
-    assert "control_plane_context_json:" in created[0].calls[0]["user_prompt"]
+    assert "refinement_context_json:" in created[0].calls[0]["user_prompt"]
     assert '"get_revision_context"' in created[0].calls[0]["user_prompt"]
 
     assert len(tool_executor.calls) == 2

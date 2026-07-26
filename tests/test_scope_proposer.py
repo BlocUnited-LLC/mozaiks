@@ -238,7 +238,7 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
     assert agent_runner.calls[0]["agent_name"] == "ScopeProposer"
     assert agent_runner.calls[0]["system_prompt"] == "scope selection prompt from pack"
     assert agent_runner.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
-    assert '"control_plane_context"' in agent_runner.calls[0]["user_prompt"]
+    assert '"refinement_context"' in agent_runner.calls[0]["user_prompt"]
     assert len(tool_executor.calls) == 3
 
 

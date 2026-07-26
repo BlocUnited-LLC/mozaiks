@@ -212,7 +212,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert created[0].system_prompt == "coding system prompt from pack"
     assert created[0].llm_config == {"model": "gpt-5.2-codex", "temperature": 0.1}
     assert '"input_files"' in created[0].calls[0]["user_prompt"]
-    assert '"control_plane_context"' in created[0].calls[0]["user_prompt"]
+    assert '"refinement_context"' in created[0].calls[0]["user_prompt"]
 
     assert len(tool_executor.calls) == 2
     assert artifact_store.calls[0]["parent_version_id"] == "av_123"
