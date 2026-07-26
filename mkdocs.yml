@@ -98,16 +98,18 @@ nav:
   - Guides:
       - guides/index.md
       - Use Studio: guides/studio/01-overview.md
-      - Config Files: guides/configs/index.md
+      - Config Files:
+          - Overview: guides/configs/index.md
+          - AI Startup: guides/configs/ai-startup.md
+          - Subscriptions: guides/configs/subscriptions.md
+          - Refinement: guides/configs/refinement.md
+          - Module Contracts: guides/configs/module-contracts.md
       - Integrations: guides/integrations/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
       - Extending AI Functionality:
           - guides/extending-ai-functionality/01-overview.md
-          - Startup Config: guides/extending-ai-functionality/02-ai-runtime-startup.md
-          - Refinement Policy: guides/extending-ai-functionality/03-refinement-policy.md
-          - Refinement Harness: guides/extending-ai-functionality/04-refinement-harness.md
           - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Self-Hosting: guides/self-hosting.md

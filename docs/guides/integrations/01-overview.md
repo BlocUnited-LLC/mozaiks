@@ -88,7 +88,7 @@ That action combines:
 - the app's persisted integration declarations,
 - live environment-secret presence from the catalog,
 - saved workspace connector inventory,
-- removed optional defaults.
+- optional defaults the app has turned off.
 
 A catalog-backed service is considered ready when either its required
 environment variables are present or a ready workspace connector exists. Custom

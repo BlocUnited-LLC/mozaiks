@@ -135,8 +135,8 @@ Catalog-backed services can be ready in either of two ways:
 
 Custom services are not in the catalog, so they rely on connector status.
 
-Removed optional defaults are soft-deleted so future builds do not immediately
-re-add a user-removed default such as Mozaiks Pay.
+Optional defaults that a user turns off stay turned off for later builds of the
+same app.
 
 ## Catalog Ownership
 
