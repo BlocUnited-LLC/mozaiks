@@ -202,10 +202,10 @@ def _with_connector_health(
     )
     configuration_complete = enriched["health"]["status"] != "not_configured" and not enriched["health"].get("missing_fields")
     lifecycle_status = _classify_connector_status(enriched).get("status")
-    requires_provider_validation = bool(enriched["health"].get("health_check_supported"))
-    provider_ready = not requires_provider_validation or enriched["health"].get("status") == "healthy"
+    # Passive readiness (inventory) never runs live provider health checks.
+    # Active checks happen explicitly via run_connector_health_check.
     enriched["configured"] = configuration_complete
-    enriched["ready"] = lifecycle_status in {"active", "expiring"} and configuration_complete and provider_ready
+    enriched["ready"] = lifecycle_status in {"active", "expiring"} and configuration_complete
     return enriched
 
 
