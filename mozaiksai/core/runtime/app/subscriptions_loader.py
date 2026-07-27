@@ -59,6 +59,15 @@ Example::
           amount_cents: 500
           currency: usd
           display: "$5"
+    add_on_products:
+      - add_on_id: priority_review
+        label: Priority Review
+        kind: service
+        billing_mode: one_time
+        price:
+          amount_cents: 2500
+          currency: usd
+          display: "$25"
     usage_charge_policies:
       - meter_id: ai_tokens
         label: AI usage
@@ -350,6 +359,103 @@ class TokenTopUpProductDef(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+
+class AddOnProductPriceDef(TokenTopUpPriceDef):
+    """Provider-neutral cash price for a non-token add-on product."""
+
+    interval: Literal["one_time", "day", "week", "month", "year", "custom"] = "one_time"
+
+
+class AddOnProductDef(BaseModel):
+    """Provider-neutral purchasable add-on surfaced by pricing catalogs.
+
+    Add-on products describe app-level purchase intent only. They do not grant
+    entitlements by themselves and intentionally omit payment-provider product
+    ids, price ids, checkout sessions, invoices, taxes, and fulfillment state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    add_on_id: str
+    label: str
+    description: str | None = None
+    kind: str = "service"
+    billing_mode: Literal["one_time", "recurring", "manual"] = "one_time"
+    price: AddOnProductPriceDef | None = None
+    required_capability: str | None = None
+    capability_groups: list[str] = Field(default_factory=list)
+    duration_days: int | None = Field(default=None, gt=0)
+    active: bool = True
+
+    @field_validator("add_on_id")
+    @classmethod
+    def _validate_add_on_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _CATALOG_ID_RE.match(value):
+            raise ValueError(
+                f"add_on_id must match [a-z0-9_-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label must be non-empty")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def _validate_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("kind")
+    @classmethod
+    def _validate_kind(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _CATALOG_ID_RE.match(value):
+            raise ValueError(
+                f"kind must match [a-z0-9_-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("required_capability")
+    @classmethod
+    def _validate_required_capability(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if not _CAPABILITY_ID_RE.match(value):
+            raise ValueError(
+                f"capability_id must match [a-z0-9_.]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("capability_groups", mode="before")
+    @classmethod
+    def _validate_capability_groups(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("capability_groups must be a list")
+        result: list[str] = []
+        for raw in value:
+            group = str(raw or "").strip()
+            if not group:
+                continue
+            if not _CAPABILITY_GROUP_RE.match(group):
+                raise ValueError(
+                    f"capability_group must match [a-z0-9_.-]+, got {group!r}"
+                )
+            result.append(group)
+        return result
 
 
 class UsageChargePolicyDef(BaseModel):
@@ -794,6 +900,7 @@ class SubscriptionsConfig(BaseModel):
     default_product_id: str | None = None
     token_wallets: list[TokenWalletDef] = Field(default_factory=list)
     top_up_products: list[TokenTopUpProductDef] = Field(default_factory=list)
+    add_on_products: list[AddOnProductDef] = Field(default_factory=list)
     usage_charge_policies: list[UsageChargePolicyDef] = Field(default_factory=list)
     pricing_catalog: PricingCatalogDef | None = None
     plans: list[PlanDef] = Field(default_factory=list)
@@ -821,6 +928,31 @@ class SubscriptionsConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_plan_catalog(self) -> SubscriptionsConfig:
         is_v2 = self.schema_version == "mozaiks.subscriptions.v2"
+        add_on_product_ids = [product.add_on_id for product in self.add_on_products]
+        if len(add_on_product_ids) != len(set(add_on_product_ids)):
+            raise ValueError("add_on_products add_on_ids must be unique")
+
+        declared_add_on_ids = set(add_on_product_ids)
+        catalog_groups: list[PricingCatalogGroupDef] = []
+        if self.pricing_catalog:
+            catalog_groups.extend(self.pricing_catalog.groups)
+        catalog_groups.extend(
+            product.pricing_catalog_group
+            for product in self.products
+            if product.pricing_catalog_group is not None
+        )
+        if declared_add_on_ids:
+            for group in catalog_groups:
+                unknown_add_on_ids = [
+                    add_on_id
+                    for add_on_id in group.add_on_ids
+                    if add_on_id not in declared_add_on_ids
+                ]
+                if unknown_add_on_ids:
+                    raise ValueError(
+                        f"pricing_catalog group {group.group_id!r} references "
+                        f"unknown add_on_ids: {unknown_add_on_ids}"
+                    )
 
         if is_v2:
             if not self.products:
@@ -985,6 +1117,31 @@ class SubscriptionsConfig(BaseModel):
             if product.wallet_id == wallet_key and product.active
         ]
 
+    def add_on_product_by_id(self, add_on_id: str | None) -> AddOnProductDef | None:
+        """Return a declared add-on product by id, or None when unknown."""
+        add_on_key = str(add_on_id or "").strip()
+        for product in self.add_on_products:
+            if product.add_on_id == add_on_key:
+                return product
+        return None
+
+    def add_on_products_for_group(self, group_id: str | None) -> list[AddOnProductDef]:
+        """Return active add-on products referenced by a pricing catalog group."""
+        group_key = str(group_id or "").strip()
+        catalog = self.assembled_pricing_catalog
+        if catalog is None:
+            return []
+        for group in catalog.groups:
+            if group.group_id != group_key:
+                continue
+            products: list[AddOnProductDef] = []
+            for add_on_id in group.add_on_ids:
+                product = self.add_on_product_by_id(add_on_id)
+                if product is not None and product.active:
+                    products.append(product)
+            return products
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Loader
@@ -1027,6 +1184,8 @@ def load_subscriptions_config(app_root: Path) -> SubscriptionsConfig | None:
 
 
 __all__ = [
+    "AddOnProductDef",
+    "AddOnProductPriceDef",
     "PlanDef",
     "PricingCatalogDef",
     "PricingCatalogGroupDef",

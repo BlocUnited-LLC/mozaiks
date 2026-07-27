@@ -48,7 +48,10 @@ def _safe_dict(value: Any) -> dict[str, Any]:
         if isinstance(item, dict):
             result[str(key)] = _safe_dict(item)
         elif isinstance(item, list):
-            result[str(key)] = [_safe_scalar(entry) for entry in item]
+            result[str(key)] = [
+                _safe_dict(entry) if isinstance(entry, dict) else _safe_scalar(entry)
+                for entry in item
+            ]
         else:
             result[str(key)] = _safe_scalar(item)
     return result
@@ -117,7 +120,7 @@ def _materialize_subscriptions_yaml(*, context_variables: Any) -> str | None:
             plan_docs.append(plan_doc)
         doc["plans"] = plan_docs
 
-    for list_key in ("token_wallets", "top_up_products", "usage_charge_policies"):
+    for list_key in ("token_wallets", "top_up_products", "add_on_products", "usage_charge_policies"):
         val = cfg.get(list_key)
         doc[list_key] = [_safe_dict(item) if isinstance(item, dict) else _safe_scalar(item) for item in val] if isinstance(val, list) else []
 

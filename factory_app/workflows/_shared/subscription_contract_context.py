@@ -103,7 +103,7 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
     return "\n".join(
         [
             "[SUBSCRIPTION CONTRACT CONTEXT]",
-            "Use this provider-neutral contract as the source of truth for generated SaaS plans, entitlement gates, token wallets, depleted-balance recovery metadata, top-up products with price.amount_cents/currency, token allowances, usage pages, and workflow metering declarations.",
+            "Use this provider-neutral contract as the source of truth for generated SaaS plans, entitlement gates, token wallets, depleted-balance recovery metadata, top-up products with price.amount_cents/currency, add-on products with price.amount_cents/currency, token allowances, usage pages, and workflow metering declarations.",
             "Do not implement a custom usage ledger or token wallet. Use the OSS runtime subscription/token primitives.",
             "Do not add hosted-product provider behavior here; payment checkout, invoices, and settlement are app-owned or host-provided integration concerns.",
             "Since contract_required is true, AppPlanAgent MUST include a build task with task_type='subscription_config', capability_pack_id=null, surface_id='subscription_contract', surface_kind='app_policy', initial_agent='ConfigMiddlewareAgent', owned_paths=['config/subscriptions.yaml']. That task serializes this contract's subscription_config_file.",

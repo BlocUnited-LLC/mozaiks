@@ -87,10 +87,11 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     config.setdefault("schema_version", "mozaiks.subscriptions.v1")
     config.setdefault("assignment_store", None)
     config.setdefault("token_wallets", [])
+    config.setdefault("add_on_products", [])
     config.setdefault("plans", [])
     validated = SubscriptionsConfig.model_validate(config)
     normalized = validated.model_dump(mode="python", exclude_none=True)
-    for key in ("token_wallets", "top_up_products", "usage_charge_policies"):
+    for key in ("token_wallets", "top_up_products", "add_on_products", "usage_charge_policies"):
         if normalized.get(key) == []:
             normalized.pop(key, None)
     for plan in normalized.get("plans") or []:
@@ -175,6 +176,7 @@ def _build_review_payload(
         "assignment_store": config.get("assignment_store"),
         "token_wallets": list(config.get("token_wallets") or []),
         "top_up_products": list(config.get("top_up_products") or []),
+        "add_on_products": list(config.get("add_on_products") or []),
         "usage_charge_policies": list(config.get("usage_charge_policies") or []),
         "pricing_groups": list((config.get("pricing_catalog") or {}).get("groups") or []),
         "plan_design_rationale": list(output.get("plan_design_rationale") or []),

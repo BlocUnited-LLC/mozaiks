@@ -142,7 +142,11 @@ execution code.
 commercial display metadata, fee policy, service terms, or custom money-flow
 metadata outside the core `app/config/subscriptions.yaml` contract. It does not
 grant entitlements, write subscription assignments, process payments, or
-replace `subscriptions.yaml`.
+replace `subscriptions.yaml`. Provider-neutral purchasable add-on products that
+pricing or billing pages need to list belong in root
+`app/config/subscriptions.yaml` as `add_on_products`; module commercial
+contracts may reference or complement that catalog but must not become a second
+subscription source of truth.
 
 ## Service Contract
 

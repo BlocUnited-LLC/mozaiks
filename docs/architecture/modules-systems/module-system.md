@@ -426,10 +426,12 @@ public_disclosure: Fees are shown before payment.
 ```
 
 Use `app/config/subscriptions.yaml` for recurring plans, paid feature gates,
-quotas, token wallets, and entitlement grants. Use module-owned
+quotas, token wallets, entitlement grants, and provider-neutral add-on product
+definitions shown on pricing or billing surfaces. Use module-owned
 `commercial.yaml` for commercial metadata that belongs to a specific module or
-service. Central app-level registries, if present in an operator app, should be
-derived or compatibility summaries rather than the source of truth.
+service, including order/fulfillment policy that complements an add-on product.
+Central app-level registries, if present in an operator app, should be derived
+or compatibility summaries rather than the source of truth.
 
 ### `contracts/admin.yaml`
 

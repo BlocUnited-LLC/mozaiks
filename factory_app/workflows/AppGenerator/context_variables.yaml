@@ -447,8 +447,8 @@ definitions:
       Provider-neutral SubscriptionContractOutput produced by
       SubscriptionContractDesigner in the current workflow sequence, when present.
       This is the canonical contract for config/subscriptions.yaml, entitlement
-      gates, token wallets, token allowances, generated usage/billing pages, and
-      workflow/module metering declarations.
+      gates, token wallets, token allowances, add-on products, generated
+      usage/billing pages, and workflow/module metering declarations.
     source:
       type: state
       default: null

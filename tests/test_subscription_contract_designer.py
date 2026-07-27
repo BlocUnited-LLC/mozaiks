@@ -103,6 +103,25 @@ def _sample_contract() -> dict:
                     "active": True,
                 }
             ],
+            "add_on_products": [
+                {
+                    "add_on_id": "priority_review",
+                    "label": "Priority Review",
+                    "description": "One-time expert review for a generated report.",
+                    "kind": "service",
+                    "billing_mode": "one_time",
+                    "price": {
+                        "amount_cents": 2500,
+                        "currency": "usd",
+                        "display": "$25",
+                        "interval": "one_time",
+                    },
+                    "required_capability": "reports.generate",
+                    "capability_groups": ["reports"],
+                    "duration_days": None,
+                    "active": True,
+                }
+            ],
             "usage_charge_policies": [
                 {
                     "meter_id": "ai_tokens",
@@ -135,6 +154,15 @@ def _sample_contract() -> dict:
                         "plan_ids": ["free", "pro"],
                         "capability_groups": ["ai_tokens"],
                         "add_on_ids": [],
+                    },
+                    {
+                        "group_id": "services",
+                        "label": "Services",
+                        "description": "Optional report services.",
+                        "kind": "add_on",
+                        "plan_ids": [],
+                        "capability_groups": ["reports"],
+                        "add_on_ids": ["priority_review"],
                     },
                 ],
             },
@@ -259,13 +287,17 @@ def test_subscription_contract_designer_schema_supports_semantic_pricing_catalog
     assert "TokenWalletRecovery" in models
     assert "TokenTopUpProduct" in models
     assert "TokenTopUpPrice" in models
+    assert "AddOnProduct" in models
+    assert "AddOnProductPrice" in models
 
     subscription_fields = models["SubscriptionConfigFile"]["fields"]
     assert subscription_fields["pricing_catalog"]["variants"] == ["PricingCatalog", "null"]
     assert subscription_fields["usage_charge_policies"]["items"] == "UsageChargePolicy"
     assert subscription_fields["top_up_products"]["items"] == "TokenTopUpProduct"
+    assert subscription_fields["add_on_products"]["items"] == "AddOnProduct"
     assert models["TokenWallet"]["fields"]["depleted_balance"]["variants"] == ["TokenWalletRecovery", "null"]
     assert models["TokenTopUpProduct"]["fields"]["price"]["type"] == "TokenTopUpPrice"
+    assert models["AddOnProduct"]["fields"]["price"]["variants"] == ["AddOnProductPrice", "null"]
 
     output_fields = models["SubscriptionContractOutput"]["fields"]
     assert output_fields["plan_design_rationale"]["items"] == "PlanDesignRationale"
@@ -287,6 +319,8 @@ def test_subscription_contract_designer_prompt_maps_plans_to_upstream_context() 
     assert "plan_design_rationale" in agents_text
     assert "Do not emit token_wallets" in agents_text
     assert "access only" in agents_text
+    assert "add_on_products" in agents_text
+    assert "pricing_catalog.groups[].add_on_ids" in agents_text
 
 
 def test_subscription_contract_designer_exposes_review_ui() -> None:
@@ -313,6 +347,7 @@ def test_subscription_contract_designer_exposes_review_ui() -> None:
     assert "Confirm Subscription Plan Contract" in ui_source
     assert "matches what the user wants" in ui_source
     assert "does not charge anyone" in ui_source
+    assert "Add-on products" in ui_source
     assert "Request Changes" in ui_source
     assert "canRequestChanges" in ui_source
 
@@ -351,6 +386,8 @@ def test_subscription_context_injection_preserves_plan_design_reasoning() -> Non
     assert trimmed["subscription_config_file"]["usage_charge_policies"][0]["markup_percent"] == 35
     assert trimmed["subscription_config_file"]["top_up_products"][0]["product_id"] == "ai_tokens_10k"
     assert trimmed["subscription_config_file"]["top_up_products"][0]["price"]["amount_cents"] == 500
+    assert trimmed["subscription_config_file"]["add_on_products"][0]["add_on_id"] == "priority_review"
+    assert trimmed["subscription_config_file"]["pricing_catalog"]["groups"][2]["add_on_ids"] == ["priority_review"]
     assert trimmed["subscription_config_file"]["token_wallets"][0]["depleted_balance"]["recovery_action"] == "top_up"
 
 
@@ -373,6 +410,7 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "current_build_task_type == \"subscription_config\"" in agents_text
     assert "usage_charge_policies" in agents_text
     assert "top_up_products" in agents_text
+    assert "add_on_products" in agents_text
     assert "depleted_balance" in agents_text
     assert "module_contract_updates" in agents_text
     assert "set that action's `entitlement_gate` to the exact" in agents_text
@@ -508,6 +546,10 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     assert config.top_up_products[0].product_id == "ai_tokens_10k"
     assert config.top_up_products[0].price.amount_cents == 500
     assert config.top_up_products[0].price.currency == "usd"
+    assert config.add_on_products[0].add_on_id == "priority_review"
+    assert config.add_on_products[0].price is not None
+    assert config.add_on_products[0].price.amount_cents == 2500
+    assert config.add_on_products_for_group("services")[0].add_on_id == "priority_review"
     assert config.pricing_catalog is not None
     assert config.pricing_catalog.default_group_id == "platform"
     assert config.pricing_catalog.groups[1].group_id == "ai_usage"
@@ -585,6 +627,7 @@ def test_subscription_contract_allows_access_only_saas_without_token_wallets() -
     config = contract["subscription_config_file"]
     config.pop("token_wallets", None)
     config.pop("top_up_products", None)
+    config.pop("add_on_products", None)
     config.pop("usage_charge_policies", None)
     for plan in config["plans"]:
         plan["usage_limits"] = []
@@ -595,6 +638,7 @@ def test_subscription_contract_allows_access_only_saas_without_token_wallets() -
     parsed = normalized["subscription_config_file"]
     assert "token_wallets" not in parsed
     assert "top_up_products" not in parsed
+    assert "add_on_products" not in parsed
     assert "usage_charge_policies" not in parsed
     assert all("token_allowances" not in plan for plan in parsed["plans"])
     assert all("usage_limits" not in plan for plan in parsed["plans"])
