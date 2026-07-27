@@ -151,11 +151,11 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
   const plans = asList(payload.plans);
   const tokenWallets = asList(payload.token_wallets);
   const topUps = asList(payload.top_up_products);
+  const addOns = asList(payload.add_on_products);
   const usagePolicies = asList(payload.usage_charge_policies);
   const moduleUpdates = asList(payload.module_contract_updates);
   const workflowUpdates = asList(payload.workflow_contract_updates);
   const pages = asList(payload.page_surface_requirements);
-  const generatedFiles = asList(payload.generated_files);
   const forbiddenOutputs = asList(payload.forbidden_outputs);
   const contractRequired = Boolean(payload.contract_required);
   const canRequestChanges = changeText.trim().length > 0 && submitted !== 'changes_requested';
@@ -217,8 +217,8 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
       <div className="mb-4 grid gap-3 md:grid-cols-4">
         <Metric label="Plans" value={plans.length} />
         <Metric label="Token Wallets" value={tokenWallets.length} />
+        <Metric label="Add-Ons" value={addOns.length} />
         <Metric label="Gated Actions" value={moduleUpdates.length} />
-        <Metric label="Generated Files" value={generatedFiles.length} />
       </div>
 
       {contractRequired ? (
@@ -254,7 +254,7 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
               )}
             </Section>
 
-            <Section title="Top-Ups And Usage Charges">
+            <Section title="Top-Ups, Add-Ons, And Usage Charges">
               <p className="mb-2 text-xs font-semibold text-muted-foreground">Top-up products</p>
               {topUps.length ? (
                 <ul className="mb-3 flex flex-col gap-1">
@@ -262,6 +262,19 @@ export default function SubscriptionContractReview({ payload = {}, onResponse })
                     <li key={product?.product_id || index} className="text-xs text-foreground">
                       <span className="font-mono">{product?.product_id}</span>
                       {product?.token_amount != null && `: ${product.token_amount} tokens`}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mb-3 text-xs text-muted-foreground">None declared.</p>
+              )}
+              <p className="mb-2 text-xs font-semibold text-muted-foreground">Add-on products</p>
+              {addOns.length ? (
+                <ul className="mb-3 flex flex-col gap-1">
+                  {addOns.map((product, index) => (
+                    <li key={product?.add_on_id || index} className="text-xs text-foreground">
+                      <span className="font-mono">{product?.add_on_id}</span>
+                      {product?.price?.display && `: ${product.price.display}`}
                     </li>
                   ))}
                 </ul>

@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.subscriptions_loader import (
+    AddOnProductDef,
     PlanDef,
     PricingCatalogDef,
     SubscriptionAssignmentStoreDef,
@@ -322,6 +323,93 @@ def test_load_pricing_catalog_groups(tmp_path: Path) -> None:
     assert config.pricing_catalog.default_group_id == "platform"
     assert config.pricing_catalog.groups[0].plan_ids == ["free", "pro"]
     assert config.pricing_catalog.groups[1].add_on_ids == ["hero_weekly"]
+
+
+def test_load_add_on_products_for_pricing_catalog_groups(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        """
+        schema_version: mozaiks.subscriptions.v1
+        label: Multi Service SaaS
+        default_plan_id: free
+        add_on_products:
+          - add_on_id: hero_weekly
+            label: Hero Placement - Weekly
+            description: Promoted placement for seven days.
+            kind: marketplace_placement
+            billing_mode: one_time
+            required_capability: marketplace.placements.order
+            capability_groups: [marketplace.placements]
+            duration_days: 7
+            price:
+              amount_cents: 9900
+              currency: USD
+              display: "$99/week"
+              interval: one_time
+        pricing_catalog:
+          default_group_id: marketing
+          groups:
+            - group_id: marketing
+              label: Marketing
+              kind: add_on
+              add_on_ids: [hero_weekly]
+        plans:
+          - plan_id: free
+            label: Free
+            capabilities: []
+        """,
+    )
+
+    config = load_subscriptions_config(tmp_path)
+
+    assert config is not None
+    assert config.add_on_products[0].add_on_id == "hero_weekly"
+    assert config.add_on_products[0].price is not None
+    assert config.add_on_products[0].price.currency == "usd"
+    assert config.add_on_product_by_id("hero_weekly") is config.add_on_products[0]
+    assert config.add_on_products_for_group("marketing") == [config.add_on_products[0]]
+
+
+def test_add_on_products_reject_unknown_pricing_catalog_add_on_id() -> None:
+    with pytest.raises(ValidationError, match="unknown add_on_ids"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Multi Service SaaS",
+                "default_plan_id": "free",
+                "add_on_products": [
+                    {
+                        "add_on_id": "hero_weekly",
+                        "label": "Hero Placement - Weekly",
+                    }
+                ],
+                "pricing_catalog": {
+                    "default_group_id": "marketing",
+                    "groups": [
+                        {
+                            "group_id": "marketing",
+                            "label": "Marketing",
+                            "kind": "add_on",
+                            "add_on_ids": ["missing"],
+                        }
+                    ],
+                },
+                "plans": [
+                    {"plan_id": "free", "label": "Free", "capabilities": []},
+                ],
+            }
+        )
+
+
+def test_add_on_product_rejects_provider_specific_extra_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AddOnProductDef.model_validate(
+            {
+                "add_on_id": "hero_weekly",
+                "label": "Hero Placement - Weekly",
+                "stripe_price_id": "price_123",
+            }
+        )
 
 
 def test_pricing_catalog_rejects_unknown_plan_id() -> None:

@@ -29,6 +29,9 @@ agents:
             token budgets or AI usage quotas
           - provider-neutral top_up_products when users can buy token packs
             outside a recurring plan
+          - provider-neutral add_on_products when users can buy non-token
+            services, placements, seats, features, support, or credits outside
+            a recurring plan
           - depleted-balance recovery metadata on token wallets so generated UI
             can route INSUFFICIENT_TOKENS to billing, top-up, upgrade, or admin contact
           - provider-neutral usage_charge_policies when the app charges users
@@ -148,9 +151,11 @@ agents:
                storage, seats, ecommerce, marketplace tools, integrations, support,
                marketing, domains, or hosting.
              - pricing_catalog.groups are display metadata for pricing pages.
-               They group declared plan_ids and optional app/provider-owned
-               add_on_ids; they never grant capabilities, create prices, or encode
-               payment-provider ids.
+               They group declared plan_ids and optional app-owned add_on_ids;
+               they never grant capabilities or encode payment-provider ids.
+               When purchasable non-token add-ons are needed, declare them once
+               at subscription_config_file.add_on_products and reference those
+               ids from pricing_catalog.groups[].add_on_ids.
              - If the app has one simple subscription ladder, set pricing_catalog
                to null and let AppSchemaAgent render the default plan cards.
 
@@ -196,7 +201,16 @@ agents:
               price.amount_cents plus lowercase price.currency, and must not
               contain provider product ids, provider price ids, checkout
               session ids, invoices, taxes, or settlement details.
-          9b. token_wallets[].depleted_balance declares safe app-local recovery
+          9b. add_on_products are provider-neutral app-owned non-token
+              products. Declare service, placement, seat, feature, support, or
+              credit add-ons at subscription_config_file.add_on_products when
+              pricing_catalog.groups[].add_on_ids need real purchasable product
+              metadata. They may include price.amount_cents, price.currency,
+              price.display, billing_mode, duration_days, required_capability,
+              and capability_groups, but they must not contain provider product
+              ids, provider price ids, checkout session ids, invoices, taxes,
+              settlement details, or entitlement grants.
+          9c. token_wallets[].depleted_balance declares safe app-local recovery
               routes for INSUFFICIENT_TOKENS. Routes must be generated app
               paths such as /billing, /pricing, or /support; never external
               provider URLs.
@@ -211,9 +225,11 @@ agents:
               metering service is available. Do not implement the meter in the workflow.
           12. pricing_catalog is optional display metadata inside
               subscription_config_file. pricing_catalog.groups[].plan_ids must
-              reference declared plans. pricing_catalog must not replace
-              plans[].capabilities, usage_limits, token_allowances, or
-              assignment_store.
+              reference declared plans. When subscription_config_file declares
+              add_on_products, pricing_catalog.groups[].add_on_ids must
+              reference declared add_on_products[].add_on_id. pricing_catalog
+              must not replace plans[].capabilities, usage_limits,
+              token_allowances, add_on_products, or assignment_store.
           13. The contract must not reference concrete hosted products, operator
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.

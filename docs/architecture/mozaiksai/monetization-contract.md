@@ -160,6 +160,8 @@ to:
 - prepaid credits
 - token wallets
 - token allowances
+- provider-neutral non-token add-on product definitions for pricing and billing
+  display
 - usage meters that feed those plans or wallets
 
 Everything else is a custom money-flow boundary, not a new OSS monetization
@@ -202,6 +204,12 @@ for those flows, such as display pricing, a fee percentage, service terms, or a
 custom money-flow label. It must not replace `subscriptions.yaml` for plan
 grants and must not expose provider identifiers, credentials, payout internals,
 or private settlement policy.
+
+If a custom flow also needs a purchasable add-on listed on pricing or billing
+surfaces, declare only the provider-neutral catalog entry in
+`app/config/subscriptions.yaml` as `add_on_products[]`. The owning module still
+keeps order state, inventory policy, fulfillment, events, and payment
+confirmation handling.
 
 ## Self-Hosted Posture
 

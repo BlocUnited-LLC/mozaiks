@@ -128,12 +128,13 @@ agents:
         `actions[].entitlement_gate`, usage/billing page requirements, and
         metering declarations. Copy module/action entitlement gates from
         `module_contract_updates` exactly; do not invent paid feature ids. Do
-        not implement a custom token ledger or usage ledger.
+        not implement a custom token ledger, usage ledger, or module-local
+        subscription extension file.
         If the contract declares `token_wallets[].auto_debit_usage`,
-        `top_up_products`, billing page requirements, or depleted-balance
-        recovery routes, plan an app-owned `billing_portal` facade module plus
-        usage/billing/pricing pages. The facade may call a selected managed
-        billing adapter, but generated pages must bind only to
+        `top_up_products`, `add_on_products`, billing page requirements, or
+        depleted-balance recovery routes, plan an app-owned `billing_portal`
+        facade module plus usage/billing/pricing pages. The facade may call a
+        selected managed billing adapter, but generated pages must bind only to
         `/api/modules/billing_portal/*`.
       - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in `app/app.json` when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-managed contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
@@ -1720,8 +1721,10 @@ agents:
         `config/subscriptions.yaml` file.
       - The file declares app plans, capabilities, assignment_store,
         token_wallets, token_wallets[].depleted_balance recovery metadata,
-        top_up_products with provider-neutral price.amount_cents/currency, usage_limits, token_allowances, usage_charge_policies,
-        and pricing_catalog display metadata only.
+        top_up_products with provider-neutral price.amount_cents/currency,
+        add_on_products with provider-neutral price.amount_cents/currency,
+        usage_limits, token_allowances, usage_charge_policies, and
+        pricing_catalog display metadata only.
 
       **Mode R (workflow_integration_repair)**:
       - Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.

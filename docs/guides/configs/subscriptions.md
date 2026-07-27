@@ -1,8 +1,8 @@
 # Subscriptions
 
 `app/config/subscriptions.yaml` is the app-level catalog for paid access,
-capability gates, token wallets, token allowances, top-ups, and pricing-page
-groups.
+capability gates, token wallets, token allowances, top-ups, add-ons, and
+pricing-page groups.
 
 Add this file when the app is a SaaS app or when module actions need
 entitlement gates. Apps without paid access can omit it.
@@ -78,6 +78,19 @@ products:
             amount: 1000000
             cadence: monthly
 
+add_on_products:
+  - add_on_id: hero_weekly
+    label: Hero Placement - Weekly
+    kind: marketplace_placement
+    billing_mode: one_time
+    required_capability: marketplace.placements.order
+    capability_groups: [marketplace.placements]
+    duration_days: 7
+    price:
+      amount_cents: 9900
+      currency: usd
+      display: "$99/week"
+
 pricing_catalog:
   default_group_id: platform
   groups:
@@ -89,6 +102,10 @@ pricing_catalog:
       label: AI
       kind: subscription
       plan_ids: [included, ai_plus]
+    - group_id: marketing
+      label: Marketing
+      kind: add_on
+      add_on_ids: [hero_weekly]
 ```
 
 ## What Goes Here
@@ -103,6 +120,7 @@ pricing_catalog:
 | Included token grants | `products[].plans[].token_allowances[]` |
 | Token wallet metadata | `products[].token_wallets[]` |
 | Top-up products | `products[].top_up_products[]` |
+| Non-token add-ons | `add_on_products[]` |
 | Pricing-page grouping | `pricing_catalog.groups[]` or `products[].pricing_catalog_group` |
 
 ## Module Gate Example
@@ -118,13 +136,19 @@ Any active plan that grants `reports.export` allows the action to run.
 
 ## Custom Money Rules
 
-Subscription access belongs in `app/config/subscriptions.yaml`.
+Subscription access and provider-neutral add-on product definitions belong in
+`app/config/subscriptions.yaml`.
 
 Module-owned commercial behavior belongs with the owning module. Examples:
 marketplace placement rules, usage fees, campaign terms, payout policy, or
 revenue-share display metadata can live in
 `app/modules/{module_id}/contracts/commercial.yaml` when that module owns the
 behavior.
+
+Use `add_on_products[]` for the app-level purchasable add-on catalog shown by
+pricing and billing surfaces. Do not put provider product ids, provider price
+ids, checkout sessions, order state, fulfillment state, inventory policy,
+invoices, taxes, or settlement records in `subscriptions.yaml`.
 
 ## Read Next
 

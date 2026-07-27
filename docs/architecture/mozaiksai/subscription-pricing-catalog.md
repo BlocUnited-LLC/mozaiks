@@ -7,6 +7,7 @@ and entitlement contract. The contract answers:
 - which plan is the default
 - which capabilities each plan grants
 - which usage limits and token allowances apply
+- which provider-neutral non-token add-on products can be displayed or requested
 - which provider-neutral usage charge policies apply
 - where active subscription assignments are read from
 
@@ -23,6 +24,20 @@ entitlement files unless they are genuinely separate apps.
 schema_version: mozaiks.subscriptions.v1
 label: Example SaaS
 default_plan_id: free
+
+add_on_products:
+  - add_on_id: hero_weekly
+    label: Hero Placement - Weekly
+    description: Promoted placement for seven days.
+    kind: marketplace_placement
+    billing_mode: one_time
+    required_capability: marketplace.placements.order
+    capability_groups: [marketplace.placements]
+    duration_days: 7
+    price:
+      amount_cents: 9900
+      currency: usd
+      display: "$99/week"
 
 pricing_catalog:
   default_group_id: platform
@@ -43,11 +58,15 @@ pricing_catalog:
       label: Marketing
       description: Optional marketplace promotion add-ons.
       kind: add_on
-      add_on_ids: [hero_weekly, hero_monthly]
+      add_on_ids: [hero_weekly]
 ```
 
 `pricing_catalog` is display metadata only. It does not grant access, create
 prices, create payment-provider products, or replace `plans[].capabilities`.
+When root `add_on_products` are declared, `pricing_catalog.groups[].add_on_ids`
+must reference those add-on ids. `add_on_products` may carry provider-neutral
+cash price display metadata, but they still do not grant entitlements, reserve
+inventory, create orders, start checkout, or own fulfillment state.
 
 Usage-based customer charge policy belongs beside the plan contract, not in the
 provider pricing catalog:
@@ -83,8 +102,11 @@ plans, usage allowances, and markup policy.
   the generated provider reference plus local overrides.
 - Use `pricing_catalog.groups[]` for pricing tabs or service selectors.
 - Every `group.plan_ids[]` entry must reference a declared `plans[].plan_id`.
-- Add-ons can be referenced by `add_on_ids[]`, but add-on pricing and checkout
-  behavior remain app-owned or provider-pack-owned.
+- Put provider-neutral non-token add-on product metadata in root
+  `add_on_products[]`, then reference those ids from
+  `pricing_catalog.groups[].add_on_ids`.
+- Add-on checkout, order state, fulfillment, inventory, and settlement behavior
+  remain app-owned or provider-pack-owned.
 - Provider-specific price IDs, checkout URLs, invoices, settlement, and hosted
   product policy must not live in the OSS subscription enforcement schema.
 - Generated pages should render groups when present and fall back to a single
@@ -108,6 +130,8 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
 - `subscription_config_file`: the canonical `app/config/subscriptions.yaml`
   payload
 - `pricing_catalog`: optional display groups inside that same payload
+- `add_on_products`: optional provider-neutral non-token add-ons referenced by
+  pricing groups inside that same payload
 - `usage_charge_policies`: optional app-level usage markup or fixed token
   pricing policy inside that same payload
 - `plan_design_rationale`: traceable reasons that map upstream signals to plan,
@@ -116,10 +140,11 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
 When a chat UI is available, the workflow presents the normalized output as a
 `SubscriptionContractReview` artifact before downstream generators consume it.
 The review surface shows the subscription plans, token wallets, token
-allowances, gated module actions, workflow metering declarations, generated file
-preview, and guardrails. The user must confirm that the subscription plan
-contract matches what they want; requesting changes leaves downstream
-`subscription_contract` context empty until the agent revises the contract.
+allowances, add-on products, gated module actions, workflow metering
+declarations, generated file preview, and guardrails. The user must confirm
+that the subscription plan contract matches what they want; requesting changes
+leaves downstream `subscription_contract` context empty until the agent revises
+the contract.
 
 `AppGenerator` and `AgentGenerator` consume the saved contract. They may choose
 different UI primitive variants for the pricing surface, but the data source
@@ -133,6 +158,7 @@ OSS owns:
 - loading and validating `subscriptions.yaml`
 - provider-neutral entitlements, usage limits, and token allowances
 - provider-neutral customer usage charge estimate policy
+- provider-neutral non-token add-on product metadata
 - provider-neutral pricing catalog display grouping
 - generic UI primitives that can render grouped plan/add-on cards
 

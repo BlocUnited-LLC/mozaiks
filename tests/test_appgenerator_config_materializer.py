@@ -120,7 +120,35 @@ def _saas_subscription_config_file() -> dict:
         ],
         "token_wallets": [],
         "top_up_products": [],
+        "add_on_products": [
+            {
+                "add_on_id": "priority_review",
+                "label": "Priority Review",
+                "kind": "service",
+                "billing_mode": "one_time",
+                "price": {
+                    "amount_cents": 2500,
+                    "currency": "usd",
+                    "display": "$25",
+                    "interval": "one_time",
+                },
+                "active": True,
+            }
+        ],
         "usage_charge_policies": [],
+        "pricing_catalog": {
+            "default_group_id": "services",
+            "groups": [
+                {
+                    "group_id": "services",
+                    "label": "Services",
+                    "kind": "add_on",
+                    "plan_ids": [],
+                    "capability_groups": [],
+                    "add_on_ids": ["priority_review"],
+                }
+            ],
+        },
     }
 
 
@@ -163,6 +191,8 @@ def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app() -> None:
     assert len(doc["plans"]) == 2
     assert doc["plans"][1]["plan_id"] == "pro"
     assert doc["plans"][1]["capabilities"] == ["analytics.view", "exports.download"]
+    assert doc["add_on_products"][0]["add_on_id"] == "priority_review"
+    assert doc["pricing_catalog"]["groups"][0]["add_on_ids"] == ["priority_review"]
 
 
 def test_materialize_subscriptions_yaml_reads_artifact_fallback() -> None:

@@ -44,7 +44,7 @@ folder.
 | `app/config/auth.yaml` | Provider-neutral auth behavior and env handles | [Integrations](../integrations/01-overview.md) |
 | `app/config/integrations.yaml` | App service requirements and managed capability needs | [Integrations](../integrations/01-overview.md) |
 | `app/config/targets.json` | Runtime, deployment, health, domain, and environment intent | [Self-Hosting](../self-hosting.md) |
-| `app/config/subscriptions.yaml` | Products, plans, capabilities, usage limits, token wallets, top-ups | [Subscriptions](subscriptions.md) |
+| `app/config/subscriptions.yaml` | Products, plans, capabilities, usage limits, token wallets, top-ups, add-ons | [Subscriptions](subscriptions.md) |
 | `app/config/refinement_policy.yaml` | Refinement Engine enablement and model profiles | [Refinement](refinement.md) |
 | `app/security/secrets.yaml` | Secret names, env handles, provider policy | [Integrations](../integrations/01-overview.md) |
 | `app/data/contract.json` | Stable data aliases, indexes, aggregate ownership | [Add a Module](../adding-modules/01-overview.md) |
@@ -55,8 +55,9 @@ folder.
 
 - Secret files carry names and env handles only. Real values stay in the
   configured secret backend.
-- App-level paid access belongs in `app/config/subscriptions.yaml`. Module
-  actions reference entitlement gates by capability id.
+- App-level paid access and provider-neutral add-on product definitions belong
+  in `app/config/subscriptions.yaml`. Module actions reference entitlement gates
+  by capability id.
 - Modules own business actions, permissions, lifecycle state, emitted events,
   and persistence authority.
 - `app/services/` supports modules, workflows, and app-level routes. It is not

@@ -74,6 +74,16 @@ usage when a wallet opts into `auto_debit_usage`. This is token accounting, not
 payment processing: payment providers, checkout, invoices, and settlement remain
 app-owned or hosted-product behavior.
 
+Apps may also declare provider-neutral `add_on_products` at the same config
+root for non-token purchasable services such as placements, seats, feature
+unlocks, support, or credits. `pricing_catalog.groups[].add_on_ids` may
+reference those add-on product ids so pricing and billing surfaces can display a
+canonical product definition. Add-on products do not grant entitlements or
+replace module actions; modules still own request/order state, permissions,
+events, and fulfillment workflow. Payment-provider product ids, price ids,
+checkout sessions, invoices, taxes, and settlement details stay in app-owned or
+host-provided integration code outside `subscriptions.yaml`.
+
 During factory builds, `SubscriptionContractDesigner` is the generic workflow
 that decides whether this file is needed and emits the provider-neutral
 subscription contract artifact. `AppGenerator` may then materialize exactly

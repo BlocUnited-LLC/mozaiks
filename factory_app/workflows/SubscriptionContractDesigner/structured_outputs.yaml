@@ -168,6 +168,64 @@ models:
         type: bool
         description: Whether the token pack is available for new top-up starts.
 
+  AddOnProductPrice:
+    type: model
+    fields:
+      amount_cents:
+        type: int
+        description: Positive cash amount in the smallest currency unit; never a provider price id.
+      currency:
+        type: str
+        description: Lowercase ISO 4217 currency code, such as usd.
+      display:
+        type: union
+        variants: [str, 'null']
+        description: Optional display price derived from amount_cents/currency, not provider state.
+      interval:
+        type: literal
+        values: [one_time, day, week, month, year, custom]
+        description: Display billing interval for this provider-neutral price.
+
+  AddOnProduct:
+    type: model
+    fields:
+      add_on_id:
+        type: str
+        description: Stable app-owned add-on id referenced by pricing_catalog.groups[].add_on_ids; never a provider price id.
+      label:
+        type: str
+        description: Human-readable add-on label.
+      description:
+        type: union
+        variants: [str, 'null']
+        description: Optional display description.
+      kind:
+        type: str
+        description: App-owned display kind such as service, placement, seat, feature, or credit.
+      billing_mode:
+        type: literal
+        values: [one_time, recurring, manual]
+        description: Provider-neutral purchase cadence; provider-specific checkout remains outside this file.
+      price:
+        type: union
+        variants: [AddOnProductPrice, 'null']
+        description: Optional provider-neutral cash price used by app facades to start checkout.
+      required_capability:
+        type: union
+        variants: [str, 'null']
+        description: Optional capability required to request or manage this add-on; does not grant that capability.
+      capability_groups:
+        type: list
+        items: str
+        description: Semantic capability families represented by this add-on.
+      duration_days:
+        type: union
+        variants: [int, 'null']
+        description: Optional display or fulfillment duration in days.
+      active:
+        type: bool
+        description: Whether the add-on is available for new purchase starts.
+
   UsageChargePolicy:
     type: model
     fields:
@@ -278,7 +336,7 @@ models:
       add_on_ids:
         type: list
         items: str
-        description: App/provider-owned add-on ids displayed in this group.
+        description: App-owned add-on ids displayed in this group; when add_on_products is present, every id must reference it.
 
   PricingCatalog:
     type: model
@@ -317,6 +375,10 @@ models:
         type: list
         items: TokenTopUpProduct
         description: Provider-neutral app-owned token packs for top-up facades.
+      add_on_products:
+        type: list
+        items: AddOnProduct
+        description: Provider-neutral app-owned non-token add-ons referenced by pricing_catalog.groups[].add_on_ids.
       usage_charge_policies:
         type: list
         items: UsageChargePolicy
