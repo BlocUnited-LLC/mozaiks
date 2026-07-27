@@ -5,6 +5,7 @@ import { useNavigationActions } from "../../navigation/useNavigationActions";
 import { deriveShellActionContext, isShellItemVisible, resolveShellActions } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
+import { fetchNotificationCount } from "./notificationApi.js";
 import "./header-styles.css";
 
 const buildAutoItems = ({ headerPages, header, notifications, profile, actionContext }) => {
@@ -92,11 +93,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
     let mounted = true;
 
     const loadNotificationCount = () => {
-      fetch("/api/notifications/count", {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      })
-        .then((response) => (response.ok ? response.json() : null))
+      fetchNotificationCount({ signal: controller.signal })
         .then((payload) => {
           if (!mounted || !payload) return;
           const count = Number(payload.unread_count ?? payload.count ?? 0);
@@ -118,8 +115,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
 
   useAppEventBus('notification.count_changed', () => {
     if (notifications?.show === false) return;
-    fetch('/api/notifications/count', { headers: { Accept: 'application/json' } })
-      .then((r) => r.ok ? r.json() : null)
+    fetchNotificationCount()
       .then((payload) => {
         if (!payload) return;
         const count = Number(payload?.unread_count ?? payload?.count ?? 0);
