@@ -13,6 +13,7 @@ import {
 } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
+import { clearNotifications, fetchNotificationCount } from "./notificationApi.js";
 import "./header-styles.css";
 
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
@@ -253,12 +254,8 @@ const Header = ({
 
     const loadNotificationCount = async () => {
       try {
-        const response = await fetch("/api/notifications/count", {
-          signal: controller.signal,
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) return;
-        const payload = await response.json();
+        const payload = await fetchNotificationCount({ signal: controller.signal });
+        if (!payload) return;
         const count = Number(payload?.unread_count ?? payload?.count ?? 0);
         if (mounted && Number.isFinite(count)) {
           setNotificationCount(Math.max(0, count));
@@ -281,8 +278,7 @@ const Header = ({
 
   useAppEventBus('notification.count_changed', () => {
     if (notificationsConfig.show === false) return;
-    fetch('/api/notifications/count', { headers: { Accept: 'application/json' } })
-      .then((r) => r.ok ? r.json() : null)
+    fetchNotificationCount()
       .then((payload) => {
         if (!payload) return;
         const count = Number(payload?.unread_count ?? payload?.count ?? 0);
@@ -293,7 +289,7 @@ const Header = ({
 
   const handleClearAllNotifications = async () => {
     try {
-      await fetch('/api/notifications', { method: 'DELETE', headers: { Accept: 'application/json' } });
+      await clearNotifications();
       setNotificationCount(0);
       setIsNotificationsOpen(false);
     } catch (_) {}

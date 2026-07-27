@@ -42,6 +42,23 @@ def test_shell_notification_dropdown_links_to_yaml_notification_center() -> None
     assert "View all notifications" in source
 
 
+def test_shell_notification_fetches_use_authenticated_helper() -> None:
+    layout_dir = _workspace() / "chat-ui" / "src" / "components" / "layout"
+    helper = (layout_dir / "notificationApi.js").read_text(encoding="utf-8")
+    header = (layout_dir / "Header.js").read_text(encoding="utf-8")
+    mobile = (layout_dir / "MobileBottomBar.jsx").read_text(encoding="utf-8")
+
+    assert "platform.getAccessToken()" in helper
+    assert "headers.Authorization = `Bearer ${token}`;" in helper
+    assert 'fetch("/api/notifications/count"' in helper
+    assert 'fetch("/api/notifications"' in helper
+    assert "fetchNotificationCount" in header
+    assert "clearNotifications" in header
+    assert "fetchNotificationCount" in mobile
+    assert "fetch('/api/notifications/count'" not in header
+    assert "fetch('/api/notifications/count'" not in mobile
+
+
 def test_app_registry_yaml_page_does_not_duplicate_apps_console() -> None:
     page_path = _workspace() / "factory_app" / "app" / "ui" / "pages" / "app-registry.yaml"
 
