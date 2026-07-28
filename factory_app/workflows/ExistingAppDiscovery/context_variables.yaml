@@ -169,7 +169,9 @@ definitions:
 
   preloaded_context_ready:
     type: boolean
-    description: True when before_chat loaded any deterministic evidence.
+    description: >
+      True when before_chat loaded deterministic evidence. This is an intake
+      readiness flag, not proof that source-backed App Intelligence is ready.
     source:
       type: state
       default: false
@@ -183,7 +185,55 @@ definitions:
 
   preload_summary:
     type: string
-    description: Human-readable summary of evidence preloaded before agents start.
+    description: >
+      Human-readable deterministic intake summary. App Intelligence fields are
+      the canonical code-context status; repo/API/runtime summaries are fallback
+      evidence and diagnostics.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_ready:
+    type: boolean
+    description: >
+      True when a source-backed AppIntelligenceSnapshot and prompt-safe catalog
+      are available to discovery agents.
+    source:
+      type: state
+      default: false
+
+  app_intelligence_status:
+    type: string
+    description: >
+      App Intelligence indexing status: pending, indexing, ready, partial,
+      unavailable, or failed.
+    source:
+      type: state
+      default: "pending"
+
+  app_intelligence_summary:
+    type: string
+    description: >
+      Prompt-safe summary of indexed file, source chunk, symbol, graph, and
+      health coverage. Does not include raw source contents.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_progress:
+    type: object
+    description: >
+      Machine-readable indexing progress payload with schema_version, stage,
+      status, percent, message, details, and warnings for transition/chat UI.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_health:
+    type: object
+    description: >
+      Health report for source selection, parser coverage, graph coverage, and
+      scan blockers/warnings produced by the shared AppContext indexer.
     source:
       type: state
       default: null
@@ -765,6 +815,11 @@ agents:
       - preloaded_context_ready
       - preload_status
       - preload_summary
+      - app_intelligence_ready
+      - app_intelligence_status
+      - app_intelligence_summary
+      - app_intelligence_progress
+      - app_intelligence_health
       - context_graph_pack
       - source_context_catalog
       - app_intelligence_catalog
@@ -803,6 +858,11 @@ agents:
       - existing_experience_summary
       - preload_status
       - preload_summary
+      - app_intelligence_ready
+      - app_intelligence_status
+      - app_intelligence_summary
+      - app_intelligence_progress
+      - app_intelligence_health
       - context_graph_pack
       - source_context_catalog
       - app_intelligence_catalog
@@ -836,6 +896,10 @@ agents:
       - tech_stack
       - host_app_source
       - discovery_mode
+      - app_intelligence_ready
+      - app_intelligence_status
+      - app_intelligence_summary
+      - app_intelligence_health
       - context_graph_pack
       - source_context_catalog
       - app_intelligence_catalog
@@ -874,6 +938,10 @@ agents:
       - app_description
       - tech_stack
       - hosting_environment
+      - app_intelligence_ready
+      - app_intelligence_status
+      - app_intelligence_summary
+      - app_intelligence_health
       - context_graph_pack
       - source_context_catalog
       - app_intelligence_catalog
@@ -907,6 +975,11 @@ agents:
       - evidence_sources
       - preload_status
       - preload_summary
+      - app_intelligence_ready
+      - app_intelligence_status
+      - app_intelligence_summary
+      - app_intelligence_progress
+      - app_intelligence_health
       - context_graph_pack
       - source_context_catalog
       - app_intelligence_catalog

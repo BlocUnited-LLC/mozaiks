@@ -271,6 +271,65 @@ def _ctx_set(context_variables: Any, key: str, value: Any) -> None:
         setattr(store, key, value)
 
 
+_APP_INTELLIGENCE_PROGRESS_SCHEMA = "mozaiks.app_intelligence.progress.v1"
+_APP_INTELLIGENCE_STAGE_PROGRESS = {
+    "queued": ("pending", 0),
+    "resolving_sources": ("indexing", 10),
+    "collecting_evidence": ("indexing", 25),
+    "selecting_source_files": ("indexing", 40),
+    "extracting_symbols": ("indexing", 58),
+    "building_graph": ("indexing", 72),
+    "building_snapshot": ("indexing", 86),
+    "ready": ("ready", 100),
+    "partial": ("partial", 100),
+    "unavailable": ("unavailable", 100),
+    "failed": ("failed", 100),
+}
+
+
+def _set_app_intelligence_progress(
+    context_variables: Any,
+    stage: str,
+    *,
+    message: str | None = None,
+    details: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    status, percent = _APP_INTELLIGENCE_STAGE_PROGRESS.get(stage, ("indexing", 0))
+    payload = {
+        "schema_version": _APP_INTELLIGENCE_PROGRESS_SCHEMA,
+        "stage": stage,
+        "status": status,
+        "percent": percent,
+        "message": message or _default_app_intelligence_progress_message(stage),
+        "details": dict(details or {}),
+        "warnings": list(warnings or []),
+    }
+    _ctx_set(context_variables, "app_intelligence_progress", payload)
+    _ctx_set(context_variables, "app_intelligence_status", status)
+    if status == "ready":
+        _ctx_set(context_variables, "app_intelligence_ready", True)
+    elif status in {"unavailable", "failed"}:
+        _ctx_set(context_variables, "app_intelligence_ready", False)
+    return payload
+
+
+def _default_app_intelligence_progress_message(stage: str) -> str:
+    return {
+        "queued": "App Intelligence indexing is queued.",
+        "resolving_sources": "Resolving repository and AppContext inputs.",
+        "collecting_evidence": "Collecting deterministic intake evidence.",
+        "selecting_source_files": "Selecting safe source files for indexing.",
+        "extracting_symbols": "Extracting symbols, imports, and source chunks.",
+        "building_graph": "Building the AppContext graph.",
+        "building_snapshot": "Building the App Intelligence snapshot.",
+        "ready": "App Intelligence is ready for discovery agents.",
+        "partial": "App Intelligence is partial; agents may need user confirmation.",
+        "unavailable": "App Intelligence is unavailable for this run.",
+        "failed": "App Intelligence indexing failed.",
+    }.get(stage, "Updating App Intelligence status.")
+
+
 def _coerce_mapping(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -1134,6 +1193,15 @@ async def _preload_context_graph_pack(
     github_token: str | None,
     discovery_inputs: dict[str, Any],
 ) -> dict[str, Any]:
+    _set_app_intelligence_progress(
+        context_variables,
+        "selecting_source_files",
+        details={
+            "source": "local_source_scan" if roots else "github_source_scan",
+            "local_root_count": len(roots),
+            "github_source_count": len(github_sources or []),
+        },
+    )
     if not roots and not github_sources:
         return await _preload_prior_context_graph_pack(
             context_variables=context_variables,
@@ -1173,10 +1241,19 @@ async def _preload_context_graph_pack(
         _ctx_set(context_variables, "context_graph_status", "unavailable")
         _ctx_set(context_variables, "context_graph_reason", "context_graph_import_failed")
         _ctx_set(context_variables, "context_graph_warnings", [warning])
+        health = {"source": "existing_app_discovery_preload", "status": "unavailable", "reason": "context_graph_import_failed"}
         _ctx_set(
             context_variables,
             "context_graph_health",
-            {"source": "existing_app_discovery_preload", "status": "unavailable", "reason": "context_graph_import_failed"},
+            health,
+        )
+        _ctx_set(context_variables, "app_intelligence_health", health)
+        _set_app_intelligence_progress(
+            context_variables,
+            "failed",
+            message="App Intelligence indexing could not import the code-context runtime.",
+            details=health,
+            warnings=[warning],
         )
         return {"present": False, "reason": "context_graph_import_failed", "warnings": [warning]}
 
@@ -1210,6 +1287,14 @@ async def _preload_context_graph_pack(
         _ctx_set(context_variables, "context_graph_reason", "no_supported_source_files")
         _ctx_set(context_variables, "context_graph_warnings", warnings)
         _ctx_set(context_variables, "context_graph_health", dict(scan_result.health))
+        _ctx_set(context_variables, "app_intelligence_health", dict(scan_result.health))
+        _set_app_intelligence_progress(
+            context_variables,
+            "unavailable",
+            message="No supported source files were available for App Intelligence indexing.",
+            details=dict(scan_result.health),
+            warnings=warnings,
+        )
         return {"present": False, "reason": "no_supported_source_files", "warnings": warnings}
 
     app_id = str(
@@ -1226,12 +1311,33 @@ async def _preload_context_graph_pack(
         )
     )
     request_text = _context_graph_request_text(context_variables, discovery_inputs)
+    _set_app_intelligence_progress(
+        context_variables,
+        "extracting_symbols",
+        details={
+            "selected_file_count": len(file_map),
+            "candidate_file_count": scan_result.health.get("candidate_file_count"),
+            "source": scan_result.health.get("source") or ("local_source_scan" if roots else "github_source_scan"),
+        },
+        warnings=warnings,
+    )
     source_index = index_source_scan(
         app_id=app_id,
         scan_result=scan_result,
         artifact_version_id=artifact_version_id,
         artifact_kind="existing_app_source",
         artifact_key="existing_app_source",
+    )
+    _set_app_intelligence_progress(
+        context_variables,
+        "building_snapshot",
+        details={
+            "selected_file_count": len(file_map),
+            "source_context_bundle_id": source_index.source_corpus.bundle_id,
+            "graph_id": source_index.app_context_graph.graph_id,
+            "health_status": source_index.health_report.get("status"),
+        },
+        warnings=warnings,
     )
     source_corpus = source_index.source_corpus
     app_intelligence_snapshot = source_index.app_intelligence_snapshot
@@ -1274,6 +1380,22 @@ async def _preload_context_graph_pack(
     _ctx_set(context_variables, "context_graph_reason", None)
     _ctx_set(context_variables, "context_graph_warnings", warnings)
     _ctx_set(context_variables, "context_graph_health", scan_health)
+    _ctx_set(context_variables, "app_intelligence_health", source_index.health_report)
+    _set_app_intelligence_progress(
+        context_variables,
+        "ready",
+        details={
+            "source": "existing_app_discovery_preload",
+            "indexed_file_count": len(source_file_map),
+            "source_context_bundle_id": source_corpus.bundle_id,
+            "source_context_chunk_count": len(source_corpus.chunks),
+            "source_context_symbol_count": len(source_corpus.symbols),
+            "context_graph_id": catalog.get("graph_id"),
+            "app_intelligence_snapshot_id": app_intelligence_snapshot.snapshot_id,
+            "health_status": source_index.health_report.get("status"),
+        },
+        warnings=warnings,
+    )
     return {
         "present": True,
         "source": "existing_app_discovery_preload",
@@ -1285,6 +1407,7 @@ async def _preload_context_graph_pack(
         "app_intelligence_snapshot_id": app_intelligence_snapshot.snapshot_id,
         "warnings": warnings,
         "scan_health": scan_health,
+        "health_report": source_index.health_report,
     }
 
 
@@ -1437,6 +1560,20 @@ async def _preload_prior_context_graph_pack(
     _ctx_set(context_variables, "context_graph_reason", "context_refresh_prior_version")
     _ctx_set(context_variables, "context_graph_warnings", combined_warnings)
     _ctx_set(context_variables, "context_graph_health", health)
+    _ctx_set(context_variables, "app_intelligence_health", health)
+    _ctx_set(context_variables, "app_intelligence_ready", bool(app_intelligence_catalog))
+    _set_app_intelligence_progress(
+        context_variables,
+        "ready" if app_intelligence_catalog else "partial",
+        details={
+            "source": "previous_app_context_graph",
+            "current_context_version_id": context_version_id,
+            "context_graph_id": catalog.get("graph_id"),
+            "source_context_bundle_id": (source_context_catalog or {}).get("bundle_id"),
+            "app_intelligence_snapshot_id": (app_intelligence_catalog or {}).get("snapshot_id"),
+        },
+        warnings=combined_warnings,
+    )
     return {
         "present": True,
         "source": "previous_app_context_graph",
@@ -1483,6 +1620,13 @@ def _set_context_graph_unavailable(
     _ctx_set(context_variables, "context_graph_warnings", warnings)
     health = {"source": source, "status": "unavailable", "reason": reason, "warnings": warnings}
     _ctx_set(context_variables, "context_graph_health", health)
+    _ctx_set(context_variables, "app_intelligence_health", health)
+    _set_app_intelligence_progress(
+        context_variables,
+        "unavailable",
+        details=health,
+        warnings=warnings,
+    )
     return {"present": False, "reason": reason, "warnings": warnings, "scan_health": health}
 
 
@@ -1909,6 +2053,79 @@ def _merge_unresolved(existing: list[dict[str, Any]], question: str, context: st
     existing.append({"question": question, "context": context, "priority": priority})
 
 
+def _app_intelligence_source_location(
+    *,
+    repo_path: Any,
+    frontend_repo_path: Any,
+    backend_repo_path: Any,
+    github_repo: Any,
+    frontend_github_repo: Any,
+    backend_github_repo: Any,
+) -> str | None:
+    values = [
+        repo_path,
+        frontend_repo_path,
+        backend_repo_path,
+        github_repo,
+        frontend_github_repo,
+        backend_github_repo,
+    ]
+    locations = [str(value).strip() for value in values if value and str(value).strip()]
+    return ", ".join(locations[:3]) if locations else None
+
+
+def _build_app_intelligence_summary(
+    *,
+    context_variables: Any,
+    preload: dict[str, Any],
+) -> str | None:
+    catalog = _coerce_mapping(_ctx_get(context_variables, "app_intelligence_catalog"))
+    graph_catalog = _coerce_mapping(_ctx_get(context_variables, "context_graph_catalog"))
+    source_catalog = _coerce_mapping(_ctx_get(context_variables, "source_context_catalog"))
+    if not catalog and not preload.get("present"):
+        reason = preload.get("reason") or _ctx_get(context_variables, "context_graph_reason")
+        if reason:
+            return f"App Intelligence unavailable: {reason}."
+        return None
+
+    coverage = _coerce_mapping(catalog.get("coverage"))
+    file_count = int(
+        coverage.get("file_count")
+        or preload.get("indexed_file_count")
+        or source_catalog.get("file_count")
+        or graph_catalog.get("indexed_file_count")
+        or 0
+    )
+    chunk_count = int(
+        coverage.get("chunk_count")
+        or preload.get("source_context_chunk_count")
+        or source_catalog.get("chunk_count")
+        or graph_catalog.get("source_context_chunk_count")
+        or 0
+    )
+    symbol_count = int(
+        coverage.get("symbol_count")
+        or preload.get("source_context_symbol_count")
+        or source_catalog.get("symbol_count")
+        or graph_catalog.get("source_context_symbol_count")
+        or 0
+    )
+    node_count = int(coverage.get("node_count") or graph_catalog.get("node_count") or 0)
+    edge_count = int(coverage.get("edge_count") or graph_catalog.get("edge_count") or 0)
+    parts = [
+        f"App Intelligence indexed {file_count} files",
+        f"{chunk_count} source chunks",
+        f"{symbol_count} symbols",
+        f"{node_count} graph nodes",
+        f"{edge_count} graph edges",
+    ]
+    health = _coerce_mapping(_ctx_get(context_variables, "app_intelligence_health"))
+    status = health.get("status")
+    if status:
+        parts.append(f"health={status}")
+    return ", ".join(parts) + "."
+
+
 async def collect_prechat_discovery_context(context_variables: Any | None = None) -> dict[str, Any]:
     """Populate discovery context from deterministic pre-chat sources."""
     ctx = context_variables if context_variables is not None else {}
@@ -1927,6 +2144,12 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     discovery_mode = _first_nonempty(_ctx_get(ctx, "discovery_mode"), discovery_inputs.get("discovery_mode"), "guided")
 
     _ctx_set(ctx, "host_app_source", host_app_source)
+    _ctx_set(ctx, "app_intelligence_ready", False)
+    _set_app_intelligence_progress(
+        ctx,
+        "resolving_sources",
+        details={"host_app_source": host_app_source, "discovery_mode": discovery_mode},
+    )
 
     repo_path = _first_nonempty(_ctx_get(ctx, "repo_path"), discovery_inputs.get("repo_path"))
     frontend_repo_path = _first_nonempty(_ctx_get(ctx, "frontend_repo_path"), discovery_inputs.get("frontend_repo_path"))
@@ -1943,8 +2166,9 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         discovery_inputs.get("github_oauth_session"),
     )
     logger.info(
-        "[ExistingAppDiscovery] DIAG: github_repo=%s oauth_session_key=%s",
-        github_repo, str(_oauth_session)[:8] if _oauth_session else None,
+        "[ExistingAppDiscovery] GitHub discovery input resolved: repo=%s oauth_session_present=%s",
+        github_repo,
+        bool(_oauth_session),
     )
     if _oauth_session:
         try:
@@ -1974,6 +2198,15 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     theme_capture_status = "none"
     theme_capture_summary: str | None = None
     theme_capture_evidence: dict[str, Any] = {}
+    _set_app_intelligence_progress(
+        ctx,
+        "collecting_evidence",
+        details={
+            "has_local_repo": bool(repo_path or frontend_repo_path or backend_repo_path),
+            "has_github_repo": bool(github_repo or frontend_github_repo or backend_github_repo),
+            "has_api_input": bool(backend_base_url or openapi_url or uploaded_openapi_path),
+        },
+    )
 
     if frontend_repo_path or frontend_github_repo:
         frontend_repo_summary = await _scan_repo_source(frontend_repo_path, frontend_github_repo, github_ref, github_token=github_token)
@@ -2077,11 +2310,6 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
                 "medium",
             )
 
-    successful_sources = [item for item in evidence_sources if item.get("success")]
-    preload_status = "ready" if successful_sources else "none"
-    if evidence_sources and successful_sources and len(successful_sources) < len(evidence_sources):
-        preload_status = "partial"
-
     if not evidence_sources:
         _merge_unresolved(
             unresolved_questions,
@@ -2183,22 +2411,50 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
                 active_repo_root = candidate
                 break
 
+    app_intelligence_roots = _context_graph_roots(
+        repo_path=repo_path,
+        frontend_repo_path=frontend_repo_path,
+        backend_repo_path=backend_repo_path,
+    )
+    app_intelligence_github_sources = _context_graph_github_sources(
+        github_repo=github_repo,
+        frontend_github_repo=frontend_github_repo,
+        backend_github_repo=backend_github_repo,
+    )
     context_graph_preload = await _preload_context_graph_pack(
         context_variables=ctx,
-        roots=_context_graph_roots(
-            repo_path=repo_path,
-            frontend_repo_path=frontend_repo_path,
-            backend_repo_path=backend_repo_path,
-        ),
-        github_sources=_context_graph_github_sources(
-            github_repo=github_repo,
-            frontend_github_repo=frontend_github_repo,
-            backend_github_repo=backend_github_repo,
-        ),
+        roots=app_intelligence_roots,
+        github_sources=app_intelligence_github_sources,
         github_ref=str(github_ref) if github_ref else None,
         github_token=github_token,
         discovery_inputs=discovery_inputs,
     )
+    attempted_app_intelligence = bool(
+        app_intelligence_roots
+        or app_intelligence_github_sources
+        or _ctx_get(ctx, "current_context_version_id")
+        or _ctx_get(ctx, "context_refresh_request")
+    )
+    if context_graph_preload.get("present") or attempted_app_intelligence:
+        evidence_sources.append(
+            {
+                "kind": "app_intelligence_index",
+                "location": _app_intelligence_source_location(
+                    repo_path=repo_path,
+                    frontend_repo_path=frontend_repo_path,
+                    backend_repo_path=backend_repo_path,
+                    github_repo=github_repo,
+                    frontend_github_repo=frontend_github_repo,
+                    backend_github_repo=backend_github_repo,
+                ),
+                "success": bool(context_graph_preload.get("present")),
+                "status": _ctx_get(ctx, "app_intelligence_status"),
+                "reason": context_graph_preload.get("reason"),
+                "indexed_file_count": context_graph_preload.get("indexed_file_count"),
+                "source_context_bundle_id": context_graph_preload.get("source_context_bundle_id"),
+                "app_intelligence_snapshot_id": context_graph_preload.get("app_intelligence_snapshot_id"),
+            }
+        )
 
     if active_repo_root:
         try:
@@ -2237,10 +2493,26 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             f"Current experience appears to be organized around route/module surfaces such as {route_labels}.",
         )
 
+    successful_sources = [item for item in evidence_sources if item.get("success")]
+    preload_status = "ready" if successful_sources else "none"
+    if evidence_sources and successful_sources and len(successful_sources) < len(evidence_sources):
+        preload_status = "partial"
+
+    app_intelligence_ready = bool(_ctx_get(ctx, "app_intelligence_catalog"))
+    if app_intelligence_ready:
+        _ctx_set(ctx, "app_intelligence_ready", True)
+        _ctx_set(ctx, "app_intelligence_status", "ready")
+
     summary_lines = []
+    app_intelligence_summary = _build_app_intelligence_summary(
+        context_variables=ctx,
+        preload=context_graph_preload,
+    )
+    if app_intelligence_summary:
+        summary_lines.append(app_intelligence_summary)
     if repo_summary.get("success"):
         summary_lines.append(
-            f"Repo scan loaded from {repo_summary.get('source')}: {repo_summary.get('inferred_tech_stack') or 'stack not inferred'}"
+            f"Repository metadata loaded from {repo_summary.get('source')}: {repo_summary.get('inferred_tech_stack') or 'stack not inferred'}"
         )
         if inferred_route_surfaces:
             summary_lines.append(
@@ -2262,17 +2534,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         summary_lines.append(f"Theme evidence: {theme_capture_summary}")
     if context_graph_preload.get("present"):
         if context_graph_preload.get("source") == "previous_app_context_graph":
-            summary_lines.append("Context graph preload loaded the previous app context graph for refresh.")
-        else:
-            summary_lines.append(
-                f"Context graph preload indexed {context_graph_preload.get('indexed_file_count', 0)} source files."
-            )
-            if context_graph_preload.get("source_context_chunk_count"):
-                summary_lines.append(
-                    "Source corpus retained "
-                    f"{context_graph_preload.get('source_context_chunk_count')} code chunks and "
-                    f"{context_graph_preload.get('source_context_symbol_count', 0)} symbols for retrieval."
-                )
+            summary_lines.append("App Intelligence loaded the previous AppContext graph for refresh.")
     if unresolved_questions:
         summary_lines.append(
             f"Open questions remaining: {len(unresolved_questions)}"
@@ -2301,7 +2563,9 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     _ctx_set(ctx, "theme_capture_summary", theme_capture_summary)
     _ctx_set(ctx, "theme_capture_evidence", theme_capture_evidence if theme_capture_evidence else {})
     _ctx_set(ctx, "unresolved_questions", unresolved_questions)
-    _ctx_set(ctx, "preloaded_context_ready", bool(successful_sources))
+    _ctx_set(ctx, "app_intelligence_ready", app_intelligence_ready)
+    _ctx_set(ctx, "app_intelligence_summary", app_intelligence_summary)
+    _ctx_set(ctx, "preloaded_context_ready", bool(successful_sources or app_intelligence_ready))
     _ctx_set(ctx, "preload_status", preload_status)
     _ctx_set(ctx, "preload_summary", "\n".join(summary_lines) if summary_lines else "No deterministic evidence was preloaded.")
     # App pattern detection results
@@ -2323,4 +2587,6 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         "successful_sources": len(successful_sources),
         "total_sources": len(evidence_sources),
         "context_graph_status": _ctx_get(ctx, "context_graph_status"),
+        "app_intelligence_status": _ctx_get(ctx, "app_intelligence_status"),
+        "app_intelligence_ready": app_intelligence_ready,
     }

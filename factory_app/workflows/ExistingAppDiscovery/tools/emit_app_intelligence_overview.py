@@ -89,7 +89,7 @@ def _overview_payload(*, ctx: Any, preload_status: str, catalog: dict[str, Any])
     coverage = _dict_value(resolved_catalog.get("coverage"))
 
     return {
-        "status": preload_status if preload_status in {"ready", "partial", "none"} else "partial",
+        "status": _overview_status(ctx=ctx, preload_status=preload_status, catalog=resolved_catalog),
         "app_name": str(_ctx_get(ctx, "app_name") or primary.get("repo_name") or "").strip(),
         "github_repo": str(_ctx_get(ctx, "github_repo") or "").strip(),
         "repo_name": str(primary.get("repo_name") or "").strip(),
@@ -108,6 +108,11 @@ def _overview_payload(*, ctx: Any, preload_status: str, catalog: dict[str, Any])
             or primary.get("total_files_scanned")
             or 0
         ),
+        "app_intelligence_ready": bool(_ctx_get(ctx, "app_intelligence_ready")),
+        "app_intelligence_status": str(_ctx_get(ctx, "app_intelligence_status") or "").strip(),
+        "app_intelligence_summary": str(_ctx_get(ctx, "app_intelligence_summary") or "").strip(),
+        "app_intelligence_progress": _dict_value(_ctx_get(ctx, "app_intelligence_progress")),
+        "app_intelligence_health": _dict_value(_ctx_get(ctx, "app_intelligence_health")),
         "app_intelligence_catalog": resolved_catalog,
         "warnings": _dedupe(
             [
@@ -117,6 +122,15 @@ def _overview_payload(*, ctx: Any, preload_status: str, catalog: dict[str, Any])
             ]
         )[:12],
     }
+
+
+def _overview_status(*, ctx: Any, preload_status: str, catalog: dict[str, Any]) -> str:
+    app_status = str(_ctx_get(ctx, "app_intelligence_status") or "").strip()
+    if app_status in {"ready", "partial", "unavailable", "failed"}:
+        return "ready" if app_status == "ready" else "partial" if app_status == "partial" else "none"
+    if catalog.get("present"):
+        return "ready"
+    return preload_status if preload_status in {"ready", "partial", "none"} else "partial"
 
 
 def _fallback_catalog(
@@ -175,7 +189,7 @@ def _fallback_catalog(
                 {
                     "workflow_or_checkpoint": "ExistingAppDiscovery",
                     "default_context": ["source_context_catalog", "context_graph_catalog"],
-                    "tools": ["search_repo_source_context", "read_repo_source_file"],
+                    "tools": ["search_preloaded_source_context", "read_preloaded_source_file"],
                 }
             ],
         },

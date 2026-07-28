@@ -31,15 +31,17 @@ agents:
       The context variable `app_type` is "brownfield_app".
 
       **Preloaded Evidence** may already exist:
+      - `app_intelligence_ready`, `app_intelligence_status`,
+        `app_intelligence_summary`, `app_intelligence_catalog`
+      - `source_context_catalog` and `context_graph_pack`
       - `preload_status`, `preload_summary`
       - `theme_capture_status`, `theme_capture_summary`
-      - `repo_summary`
+      - `repo_summary` as fallback repository metadata only
       - `frontend_repo_summary`
       - `backend_repo_summary`
       - `api_inventory`
       - `runtime_observations`
       - `auth_hypothesis`
-      - `source_context_catalog` and `context_graph_pack`
       - `unresolved_questions`
 
       **Discovery Mode**:
@@ -62,34 +64,41 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      1. If `preloaded_context_ready` is true, your FIRST message MUST open by
-         presenting what was already found — do not ask the user to describe their
-         app from scratch. Structure your opening as:
+      1. If `app_intelligence_ready` is true, your FIRST message MUST open by
+         presenting what App Intelligence found. Do not ask the user to describe
+         their app from scratch. Structure your opening as:
 
          a) Name the app: use `app_name` if set, otherwise the repo name from
             `repo_summary.repo_name`, or the API title from `api_inventory.title`.
-         b) State the detected tech stack from `tech_stack` or
+         b) State the detected tech stack from `tech_stack`,
+            `app_intelligence_catalog.coverage.language_counts`, or
             `repo_summary.inferred_tech_stack`.
-         c) Report what was scanned: files, route surfaces, service entrypoints,
-            API paths (from `repo_summary`, `route_surfaces`, `service_surfaces`,
-            `api_inventory`).
-         d) List detected external connectors from `detected_connectors` if any.
-         e) State one or two open questions from `unresolved_questions` (high
+         c) Report App Intelligence coverage from `app_intelligence_summary`:
+            files, source chunks, symbols, graph nodes/edges, and health.
+         d) Report important indexed architecture/capability surfaces from
+            `app_intelligence_catalog` before falling back to `repo_summary`,
+            `route_surfaces`, `service_surfaces`, or `api_inventory`.
+         e) List detected external connectors from `detected_connectors` if any.
+         f) State one or two open questions from `unresolved_questions` (high
             priority first) that still need user input.
-         f) Ask the user to confirm, correct, or fill in what's missing.
+         g) Ask the user to confirm, correct, or fill in what's missing.
 
          Example opening structure (adapt to what was actually found):
-         "I scanned [repo name] and found [stack]. The codebase has [N] files
-         with [M] route surfaces and [P] service entrypoints. I detected [connector
-         list]. A few things I still need from you: [unresolved questions]. Does
-         this match your app?"
+         "I indexed [repo name] and found [stack]. App Intelligence captured
+         [N] files, [S] symbols, and [G] graph relationships. I detected
+         [connector list]. A few things I still need from you:
+         [unresolved questions]. Does this match your app?"
 
-      2. If `preloaded_context_ready` is false or no evidence was found, ask the
+      2. If `app_intelligence_status` is `partial`, `unavailable`, or `failed`
+         but `preloaded_context_ready` is true, explain what deterministic
+         evidence loaded and ask only for the missing code/source details.
+
+      3. If `preloaded_context_ready` is false or no evidence was found, ask the
          user to describe their app. If `discovery_mode` is `guided`, use plain
          language (live app URL, frontend codebase, backend codebase, not sure yet).
          Do not lead with OpenAPI, Swagger, or backend base URL unless the user uses those terms first.
 
-      3. Confirm identity and current experience:
+      4. Confirm identity and current experience:
          - what the app is called
          - what it does
          - what stack it uses
@@ -97,7 +106,8 @@ agents:
          - who maintains it
          - what the current user-facing experience looks like
 
-      4. Use repo/runtime evidence to anchor all follow-up questions:
+      5. Use App Intelligence, source/runtime evidence, and user corrections
+         to anchor all follow-up questions:
          - if routes, services, or modules were already found, ask for confirmation
            rather than re-asking what they are
          - if evidence is partial, ask only about the missing pieces
@@ -106,9 +116,9 @@ agents:
          - if theme evidence already exists, treat it as a clue about the current
            host experience rather than re-running a design interview
 
-      5. Summarize what came from deterministic evidence vs user correction.
+      6. Summarize what came from deterministic evidence vs user correction.
 
-      6. Emit NEXT only once the identity + current experience summary is confirmed.
+      7. Emit NEXT only once the identity + current experience summary is confirmed.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
@@ -138,9 +148,11 @@ agents:
     content: |
       Available context includes:
       - confirmed identity fields from the initial discovery stage
-      - `repo_summary`, `frontend_repo_summary`, `backend_repo_summary`
+      - `app_intelligence_catalog` as the compact app-understanding source
       - `source_context_catalog`, `context_graph_pack`, and retrieval tools
-        for exact source files/chunks when the summary is not enough
+        for exact source files/chunks when App Intelligence is not enough
+      - `repo_summary`, `frontend_repo_summary`, `backend_repo_summary` as
+        fallback metadata and diagnostics
       - `api_inventory`, `runtime_observations`, `auth_hypothesis`
       - `unresolved_questions`
 
@@ -157,7 +169,9 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      1. Start from what was preloaded. Treat repo/API/runtime evidence as the default source of truth unless the user corrects it.
+      1. Start from App Intelligence when it is ready. Treat source-backed
+         App Intelligence, repo/API/runtime evidence, and user corrections as
+         the evidence set, with code facts winning over docs or guesses.
          If separate frontend and backend repo summaries exist, use them that way:
          - frontend repo -> route surfaces, modules, current experience
          - backend repo -> services, APIs, hubs, workers
@@ -448,6 +462,10 @@ agents:
     heading: '[CONTEXT]'
     content: |
       Read from all upstream context:
+      - App Intelligence evidence: `app_intelligence_ready`,
+        `app_intelligence_status`, `app_intelligence_summary`,
+        `app_intelligence_catalog`, `source_context_catalog`,
+        `context_graph_pack`
       - preload evidence: `evidence_sources`, `preload_status`, `preload_summary`,
         `theme_capture_ready`, `theme_capture_status`, `theme_capture_summary`,
         `theme_capture_evidence`, `repo_summary`, `api_inventory`,

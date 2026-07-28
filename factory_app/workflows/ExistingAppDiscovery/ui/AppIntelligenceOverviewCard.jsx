@@ -200,6 +200,9 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
   const statusColor = STATUS_COLORS[status] || STATUS_COLORS.partial;
   const displayName = payload.app_name || payload.repo_name || payload.github_repo || catalog.app_id || 'Indexed app';
   const warnings = asArray(payload.warnings).length ? asArray(payload.warnings) : asArray(catalog.warnings);
+  const progress = asObject(payload.app_intelligence_progress);
+  const health = asObject(payload.app_intelligence_health);
+  const healthCoverage = asObject(health.coverage);
   const [activeTab, setActiveTab] = useState('architecture');
 
   const counts = useMemo(() => ({
@@ -254,6 +257,23 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
           <Metric label="Graph Nodes" value={coverage.node_count} />
           <Metric label="Graph Edges" value={coverage.edge_count} />
         </div>
+
+        {(payload.app_intelligence_summary || progress.message || health.status) && (
+          <div className="rounded-lg border border-border/50 bg-background/65 px-3 py-2">
+            {payload.app_intelligence_summary && (
+              <p className="text-xs leading-5 text-foreground">{payload.app_intelligence_summary}</p>
+            )}
+            {(progress.message || health.status) && (
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                {progress.message && <span>{progress.message}</span>}
+                {health.status && <span>Health: {labelize(health.status)}</span>}
+                {healthCoverage.core_surface_file_count !== undefined && (
+                  <span>Core files: {formatCount(healthCoverage.core_surface_file_count)}</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid gap-3 md:grid-cols-2">
           <CountStrip title="Languages" items={counts.languages} />

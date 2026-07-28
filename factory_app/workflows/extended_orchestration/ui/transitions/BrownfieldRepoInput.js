@@ -112,8 +112,9 @@ function ExtractionProgress({ mode, repo }) {
     : [
         'Connecting to repository',
         'Selecting safe source files',
-        'Building source corpus',
-        'Creating context graph',
+        'Extracting symbols and source chunks',
+        'Building AppContext graph',
+        'Creating App Intelligence snapshot',
         'Preparing agent overview',
       ];
 
@@ -123,7 +124,7 @@ function ExtractionProgress({ mode, repo }) {
         <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary animate-pulse" />
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">
-            {mode === 'manual' ? 'Starting discovery' : 'Extracting code context'}
+            {mode === 'manual' ? 'Starting discovery' : 'Indexing App Intelligence'}
           </p>
           <p className="mt-1 text-xs text-muted-foreground break-words">
             {repo || mode === 'manual'
@@ -237,11 +238,11 @@ export default function BrownfieldRepoInput({
     return (
       <TransitionChoicePanel
         eyebrow="Existing App"
-        title={startMode === 'manual' ? 'Starting discovery' : 'Extracting code context'}
+        title={startMode === 'manual' ? 'Starting discovery' : 'Indexing App Intelligence'}
         subtitle={
           startMode === 'manual'
             ? 'The discovery chat is being prepared.'
-            : 'Mozaiks is indexing the repository before the agents begin.'
+            : 'Mozaiks is indexing source files before the agents begin.'
         }
         overlayTitleId={overlayTitleId}
         overlayDescriptionId={overlayDescriptionId}

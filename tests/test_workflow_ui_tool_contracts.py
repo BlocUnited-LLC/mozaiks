@@ -537,8 +537,9 @@ def test_brownfield_repo_input_shows_extraction_state_while_starting_workflow() 
     route_renderer = _read("chat-ui/src/components/RouteRenderer.jsx")
 
     assert "function ExtractionProgress(" in content
-    assert "Extracting code context" in content
-    assert "Creating context graph" in content
+    assert "Indexing App Intelligence" in content
+    assert "Building AppContext graph" in content
+    assert "Creating App Intelligence snapshot" in content
     assert "Preparing agent overview" in content
     assert "Promise.resolve(onResolve(option.id, contextVariables))" in content
     assert "return onNavigate?.(option_id, contextVariables);" in transition_screen
