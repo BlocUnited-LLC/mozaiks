@@ -448,7 +448,11 @@ def _agent_context_policy() -> dict[str, Any]:
             {
                 "workflow_or_checkpoint": "ExistingAppDiscovery",
                 "default_context": ["app_intelligence_catalog", "context_graph_pack", "source_context_catalog"],
-                "tools": ["get_repo_app_intelligence", "search_repo_source_context", "read_repo_source_file"],
+                "tools": [
+                    "get_preloaded_app_intelligence",
+                    "search_preloaded_source_context",
+                    "read_preloaded_source_file",
+                ],
             },
             {
                 "workflow_or_checkpoint": "AppGenerator/AgentGenerator",

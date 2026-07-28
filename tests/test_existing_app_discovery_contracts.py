@@ -90,6 +90,11 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "context_graph_reason" in definitions
     assert "context_graph_warnings" in definitions
     assert "context_graph_health" in definitions
+    assert "app_intelligence_ready" in definitions
+    assert "app_intelligence_status" in definitions
+    assert "app_intelligence_summary" in definitions
+    assert "app_intelligence_progress" in definitions
+    assert "app_intelligence_health" in definitions
     assert "app_context_graph" in definitions
     assert "adoption_level" in definitions
     assert "ecosystem_bindings" in definitions
@@ -106,6 +111,8 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "Gradual Modernization" in agents
     assert "ExistingProductSpec" in agents
     assert "AgentAugmentationPlan" in agents
+    assert "app_intelligence_ready" in agents
+    assert "app_intelligence_summary" in agents
     assert "discovery_mode" in agents
     assert "host_app_source" in agents
     assert "workspace_app" in agents
@@ -117,6 +124,7 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
 def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_scan() -> None:
     tools = _read_yaml("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
     before_chat = [item for item in tools["lifecycle_tools"] if item["trigger"] == "before_chat"]
+    manifest_text = _read_text("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
 
     assert [(item["file"], item["function"]) for item in before_chat] == [
         ("preload_discovery_context.py", "collect_prechat_discovery_context"),
@@ -126,6 +134,13 @@ def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_
     assert overview_tool["tool_type"] == "UI_Surface"
     assert overview_tool["ui"]["component"] == "AppIntelligenceOverviewCard"
     assert "AppIntelligenceOverviewCard" in _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
+    assert "get_preloaded_app_intelligence" in manifest_text
+    assert "search_preloaded_source_context" in manifest_text
+    assert "read_preloaded_source_file" in manifest_text
+    assert "get_related_preloaded_source_files" in manifest_text
+    assert "get_repo_app_intelligence" not in manifest_text
+    assert "search_repo_source_context" not in manifest_text
+    assert "read_repo_source_file" not in manifest_text
 
 
 def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> None:
@@ -292,6 +307,9 @@ def test_existing_app_preload_mutates_an_empty_context_container() -> None:
     assert result["success"] is True
     assert context["host_app_source"] == "external"
     assert context["preload_status"] == "none"
+    assert context["app_intelligence_ready"] is False
+    assert context["app_intelligence_status"] == "unavailable"
+    assert context["app_intelligence_progress"]["stage"] == "unavailable"
 
 
 def test_create_route_enters_canonical_build_transition() -> None:
@@ -591,10 +609,15 @@ def test_existing_app_preload_builds_context_graph_pack_for_local_repo(tmp_path:
     assert context["source_context_catalog"]["file_count"] >= 1
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["coverage"]["file_count"] >= 1
+    assert context["app_intelligence_ready"] is True
+    assert context["app_intelligence_status"] == "ready"
+    assert context["app_intelligence_progress"]["stage"] == "ready"
+    assert context["app_intelligence_progress"]["schema_version"] == "mozaiks.app_intelligence.progress.v1"
+    assert context["app_intelligence_health"]["status"] in {"healthy", "warning"}
+    assert "App Intelligence indexed" in context["app_intelligence_summary"]
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
     assert "src/service.py" in context["context_graph_catalog"]["file_tree"]
-    assert "Context graph preload indexed" in context["preload_summary"]
-    assert "Source corpus retained" in context["preload_summary"]
+    assert "App Intelligence indexed" in context["preload_summary"]
 
 
 def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -657,6 +680,9 @@ def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(
     assert context["source_context_catalog"] is None
     assert context["app_intelligence_snapshot"] is None
     assert context["app_intelligence_catalog"] is None
+    assert context["app_intelligence_ready"] is False
+    assert context["app_intelligence_status"] == "partial"
+    assert context["app_intelligence_progress"]["stage"] == "partial"
     assert "modules/tasks/backend/service.py" in context["context_graph_catalog"]["file_tree"]
 
 
@@ -766,8 +792,11 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
     assert context["source_context_catalog"]["file_count"] >= 3
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["architecture"]["module_roots"]
+    assert context["app_intelligence_ready"] is True
+    assert context["app_intelligence_status"] == "ready"
+    assert context["app_intelligence_progress"]["stage"] == "ready"
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
-    assert "Context graph preload indexed" in context["preload_summary"]
+    assert "App Intelligence indexed" in context["preload_summary"]
 
 
 def test_existing_app_refresh_preloads_prior_source_context_bundle_when_available(
@@ -833,6 +862,8 @@ def test_existing_app_refresh_preloads_prior_source_context_bundle_when_availabl
     assert context["source_context_catalog"]["chunk_count"] >= 1
     assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
     assert context["app_intelligence_catalog"]["coverage"]["file_count"] >= 1
+    assert context["app_intelligence_ready"] is True
+    assert context["app_intelligence_status"] == "ready"
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
 
 

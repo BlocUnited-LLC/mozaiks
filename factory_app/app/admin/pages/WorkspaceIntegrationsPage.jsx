@@ -16,8 +16,8 @@ import {
 
 function statusTone(status) {
   if (status === 'configured' || status === 'healthy') return 'success'
-  if (status === 'partial' || status === 'pending_validation') return 'warning'
-  if (status === 'missing' || status === 'unhealthy' || status === 'not_configured') return 'destructive'
+  if (status === 'partial' || status === 'pending_validation' || status === 'expiring') return 'warning'
+  if (status === 'missing' || status === 'unhealthy' || status === 'not_configured' || status === 'expired') return 'destructive'
   return 'default'
 }
 
@@ -36,11 +36,23 @@ function displayTone(item) {
 }
 
 function withConnectorOverlay(item, connector) {
+  const lifecycle = connectorLifecycle(connector)
   if (connector?.ready) {
-    return { ...item, display_status: 'configured', workspace_connector_status: 'ready' }
+    return {
+      ...item,
+      display_status: lifecycle === 'expiring' ? 'expiring' : 'configured',
+      workspace_connector_status: lifecycle === 'expiring' ? 'expiring' : 'ready',
+      connector_lifecycle: lifecycle,
+      connector_days_until_expiry: connector?.days_until_expiry ?? null,
+    }
   }
   if (connector) {
-    return { ...item, workspace_connector_status: 'partial' }
+    return {
+      ...item,
+      workspace_connector_status: lifecycle === 'expired' ? 'expired' : 'partial',
+      connector_lifecycle: lifecycle,
+      connector_days_until_expiry: connector?.days_until_expiry ?? null,
+    }
   }
   return item
 }
@@ -61,12 +73,34 @@ function appUsageLabel(item) {
   return null
 }
 
-function needsAttention(item) {
+function connectorLifecycle(connector) {
+  return connector?.lifecycle_status || (connector?.ready ? 'active' : null)
+}
+
+function isExpired(connector) {
+  return connectorLifecycle(connector) === 'expired'
+}
+
+function isExpiring(connector) {
+  return connectorLifecycle(connector) === 'expiring'
+}
+
+function needsAttention(item, connector) {
   const usedByApps = Number(item?.app_usage_count || 0) > 0
+  if (isExpired(connector)) return true
+  if (isExpiring(connector)) return true
+  // When connector is not passed, fall back to merged fields from withConnectorOverlay
+  const lifecycle = item?.connector_lifecycle
+  if (lifecycle === 'expired' || lifecycle === 'expiring') return true
   return effectiveStatus(item) === 'partial' || (effectiveStatus(item) === 'missing' && usedByApps)
 }
 
 function connectorLabel(connector, item) {
+  if (isExpired(connector)) return 'Workspace connector (expired)'
+  if (isExpiring(connector)) {
+    const days = connector?.days_until_expiry
+    return `Workspace connector (expires in ${days != null ? `${days}d` : 'soon'})`
+  }
   if (connector?.ready) return 'Workspace connector (active)'
   if (connector) return 'Workspace connector (incomplete)'
   if (item?.status === 'configured') return 'Environment variable'
@@ -74,6 +108,13 @@ function connectorLabel(connector, item) {
 }
 
 function connectorDescription(connector, item) {
+  if (isExpired(connector)) {
+    return 'This connector has expired. Update the key to reconnect and restore app access to this service.'
+  }
+  if (isExpiring(connector)) {
+    const days = connector?.days_until_expiry
+    return `This connector expires in ${days != null ? `${days} day${days === 1 ? '' : 's'}` : 'less than a week'}. Update the key now to avoid service disruption.`
+  }
   if (connector?.ready) {
     return 'A workspace connector is saved for this service. Apps that declare this service can reuse it without collecting credentials again.'
   }
@@ -90,7 +131,9 @@ function connectorDescription(connector, item) {
 }
 
 function actionLabel(item, connector) {
-  if (needsAttention(item)) return 'Review setup'
+  if (isExpired(connector)) return 'Renew key'
+  if (isExpiring(connector)) return 'Renew key'
+  if (needsAttention(item, connector)) return 'Review setup'
   if (connector || effectiveStatus(item) === 'configured') return 'Manage'
   return 'Connect'
 }
@@ -280,7 +323,7 @@ function SetupSlideOver({
   const missingSecrets = secrets.filter((s) => !s.present)
   const hasStoredConnector = Boolean(connector?.service)
   const tone = displayTone(item)
-  const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item)
+  const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item, connector)
   // Primary secret key name for the inline connect form (first required secret)
   const primaryKeyName = secrets[0]?.name || item.connector_key || null
   const setupUrl = item.setup_url || null
@@ -528,8 +571,8 @@ function SetupSlideOver({
 
 function IntegrationCard({ item, connector, onOpen }) {
   const tone = displayTone(item)
-  const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item)
-  const isAttention = needsAttention(item)
+  const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item, connector)
+  const isAttention = needsAttention(item, connector)
   const usageLabel = appUsageLabel(item)
   const visibleStatusLabel = statusLabel(effectiveStatus(item), item)
 

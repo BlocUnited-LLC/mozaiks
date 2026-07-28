@@ -1,4 +1,4 @@
-"""Workflow tools for retrieving bounded existing-app source context."""
+"""Workflow tools for retrieving bounded preloaded App Intelligence context."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from mozaiksai.core.app_context.source_corpus import (
 )
 
 
-async def search_repo_source_context(
+async def search_preloaded_source_context(
     query: str,
     context_variables: Any | None = None,
     max_results: int = 12,
@@ -32,12 +32,12 @@ async def search_repo_source_context(
     }
 
 
-async def get_repo_app_intelligence(
+async def get_preloaded_app_intelligence(
     query: str | None = None,
     context_variables: Any | None = None,
     max_results: int = 12,
 ) -> dict[str, Any]:
-    """Return compact app intelligence for the preloaded repo context."""
+    """Return compact App Intelligence for the preloaded source context."""
     snapshot = _app_intelligence_snapshot(context_variables)
     if not snapshot:
         return {"present": False, "reason": "app_intelligence_snapshot_unavailable", "results": []}
@@ -60,7 +60,7 @@ async def get_repo_app_intelligence(
     }
 
 
-async def read_repo_source_file(
+async def read_preloaded_source_file(
     path: str,
     context_variables: Any | None = None,
     max_chars: int = 24_000,
@@ -73,7 +73,7 @@ async def read_repo_source_file(
     return read_source_file_from_bundle(bundle, str(path or ""), max_chars=bounded_chars)
 
 
-async def get_related_repo_source_files(
+async def get_related_preloaded_source_files(
     path: str,
     context_variables: Any | None = None,
     max_results: int = 16,
@@ -118,8 +118,8 @@ def _ctx_get(context_variables: Any | None, key: str) -> Any:
 
 
 __all__ = [
-    "get_repo_app_intelligence",
-    "get_related_repo_source_files",
-    "read_repo_source_file",
-    "search_repo_source_context",
+    "get_preloaded_app_intelligence",
+    "get_related_preloaded_source_files",
+    "read_preloaded_source_file",
+    "search_preloaded_source_context",
 ]
