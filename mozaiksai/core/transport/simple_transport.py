@@ -1150,9 +1150,17 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             websocket: WebSocket connection for response
         """
         data = event.get("data", {})
-        action = data.get("action")
+        if not isinstance(data, dict) or not data:
+            data = event if isinstance(event, dict) else {}
+        action = data.get("action") or data.get("tool")
+        params = data.get("params", {})
+        if not isinstance(params, dict):
+            params = {}
         payload = data.get("payload", {})
+        if not isinstance(payload, dict):
+            payload = {}
         artifact_id = data.get("artifact_id")
+        action_id = data.get("action_id")
         
         conn_meta = self.connections.get(chat_id, {})
         app_id = conn_meta.get("app_id")
@@ -1160,6 +1168,61 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         
         if not app_id or not user_id:
             logger.error("Missing app_id or user_id for artifact action in chat %s", chat_id)
+            return
+
+        if action == "media.promote":
+            asset_id = str(params.get("asset_id") or payload.get("asset_id") or "").strip()
+            promotion_target = str(params.get("promotion_target") or params.get("target") or "artifact").strip()
+            if action_id:
+                await websocket.send_json({
+                    "type": "artifact.action.started",
+                    "data": {
+                        "action_id": action_id,
+                        "artifact_id": artifact_id,
+                        "tool": action,
+                    },
+                    "chat_id": chat_id,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                })
+            try:
+                if not asset_id:
+                    raise ValueError("asset_id is required")
+                from mozaiksai.core.media.store import get_media_asset_store
+
+                updated = await get_media_asset_store().mark_asset_promoted(
+                    app_id=str(app_id),
+                    asset_id=asset_id,
+                    promotion_target=promotion_target,
+                    promoted_by=str(user_id),
+                )
+                await websocket.send_json({
+                    "type": "artifact.action.completed",
+                    "data": {
+                        "action_id": action_id,
+                        "artifact_id": artifact_id,
+                        "tool": action,
+                        "result": {
+                            "asset_id": asset_id,
+                            "promotion_target": promotion_target,
+                            "status": "promoted",
+                            "asset": updated.model_dump(by_alias=False, mode="json") if updated else None,
+                        },
+                    },
+                    "chat_id": chat_id,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                })
+            except Exception as exc:
+                await websocket.send_json({
+                    "type": "artifact.action.failed",
+                    "data": {
+                        "action_id": action_id,
+                        "artifact_id": artifact_id,
+                        "tool": action,
+                        "error": str(exc) or "Media promotion failed",
+                    },
+                    "chat_id": chat_id,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                })
             return
         
         # Route: launch_workflow (pause current, create new session)
@@ -1361,6 +1424,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             return all(field in message_data for field in ["chat_id", "lastClientIndex"]) and isinstance(message_data.get("lastClientIndex"), int)
         
         elif msg_type in (
+            "artifact.action",
             "chat.artifact_action",
             "chat.enter_general_mode",
             "chat.start_general_chat",

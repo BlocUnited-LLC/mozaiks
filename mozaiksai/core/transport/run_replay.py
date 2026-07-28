@@ -217,8 +217,20 @@ class WorkflowRunReplayer:
             role = str(message.get("role") or "").strip().lower()
             content = str(message.get("content") or "")
             agent_name = str(message.get("agent_name") or message.get("name") or "").strip().lower()
+            message_visibility = ""
+            if isinstance(metadata, dict):
+                message_visibility = str(metadata.get("ui_visibility") or "").strip().lower()
+            if not message_visibility:
+                message_visibility = str(message.get("ui_visibility") or "").strip().lower()
+            if message_visibility == "hidden":
+                self.logger.debug(
+                    "[RUN_REPLAY] Skipping ui-hidden message (index=%d, chat_id=%s)",
+                    absolute_index,
+                    chat_id,
+                )
+                should_skip = True
 
-            if normalized_startup_mode == "agentdriven":
+            if not should_skip and normalized_startup_mode == "agentdriven":
                 is_marked_initial_message = (
                     seed_kind == "initial_message" or metadata_seed_kind == "initial_message"
                 )
@@ -235,7 +247,7 @@ class WorkflowRunReplayer:
                         absolute_index, chat_id
                     )
                     should_skip = True
-            elif normalized_startup_mode == "userdriven":
+            elif not should_skip and normalized_startup_mode == "userdriven":
                 is_marked_userdriven_trigger = (
                     seed_kind == "userdriven_trigger" or metadata_seed_kind == "userdriven_trigger"
                 )

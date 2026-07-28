@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from mozaiksai.core.observability import configure_otel_from_env
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.resources import resolve_factory_app_root, resolve_factory_workflows_root
 
@@ -41,6 +42,8 @@ def configure_repo_host_defaults(host: str) -> None:
     normalized_host = str(host or "").strip().lower()
     if normalized_host not in {"platform", "studio"}:
         return
+
+    configure_otel_from_env()
 
     external_workspace_root = str(os.getenv("MOZAIKS_APP_WORKSPACE_PATH") or "").strip()
     platform_path = str(os.getenv("PLATFORM_PATH") or "").strip()

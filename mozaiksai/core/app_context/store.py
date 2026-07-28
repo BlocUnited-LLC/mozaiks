@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -20,6 +22,7 @@ from mozaiksai.core.artifacts.models import (
 )
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
+from .indexer import index_file_map, persist_app_context_index
 from .models import (
     AdoptionPath,
     AdoptionPhase,
@@ -47,6 +50,7 @@ from .models import (
     SurfaceRef,
     ValidationSummary,
 )
+from .scan_policy import safe_scan_relpath, skip_reason_for_path
 
 APP_CONTEXT_VERSION_ARTIFACT_KIND = "app_context_version"
 APP_CONTEXT_VERSION_ARTIFACT_KEY = "app_context_version"
@@ -142,6 +146,17 @@ def build_brownfield_app_context_version(
         )
         for artifact_kind in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     ]
+    artifact_refs.extend(
+        ArtifactRef(
+            artifact_kind=artifact_kind,
+            artifact_key=artifact_kind,
+            artifact_version_id=str(version_id),
+            lifecycle_status=ArtifactLifecycleStatus.DRAFT.value,
+        )
+        for artifact_kind, version_id in sorted(artifact_version_refs.items())
+        if artifact_kind not in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
+        and str(version_id or "").strip()
+    )
     graph_snapshot_ref = artifact_version_refs.get("app_context_graph")
     resolved_indexed_at = indexed_at or datetime.now(UTC)
     resolved_context_version_id = (
@@ -278,9 +293,37 @@ async def register_greenfield_app_context_version(
         app_bundle_artifact=app_bundle_artifact,
         files_manifest=files_manifest,
     )
+    source_file_map = _greenfield_source_file_map_from_artifact(app_bundle_artifact)
+    source_index = (
+        index_file_map(
+            app_id=drafts.app_id,
+            artifact_version_id=str(app_bundle_artifact.id),
+            artifact_kind="app_bundle",
+            artifact_key=str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+            file_map=source_file_map,
+            source="greenfield_app_bundle",
+            source_ref=drafts.application_inventory.source_refs[0],
+        )
+        if source_file_map
+        else None
+    )
     payloads = drafts.as_artifact_payloads()
     artifact_version_refs: dict[str, str] = {}
+    if source_index is not None:
+        persisted_source_index = await persist_app_context_index(
+            index=source_index,
+            artifact_store=store,
+            source_workflow=source_workflow,
+            source_chat_id=source_chat_id,
+            graph_path="app_context/greenfield/app_context_graph.json",
+        )
+        artifact_version_refs["source_context_bundle"] = persisted_source_index.source_context_artifact.id
+        artifact_version_refs["app_context_graph"] = persisted_source_index.graph_artifact.id
+        artifact_version_refs["app_intelligence_snapshot"] = persisted_source_index.intelligence_artifact.id
+
     for artifact_kind in GREENFIELD_APP_CONTEXT_ARTIFACT_KINDS:
+        if artifact_kind == "app_context_graph" and source_index is not None:
+            continue
         payload = payloads[artifact_kind]
         created = await _persist_context_payload_artifact(
             app_id=drafts.app_id,
@@ -327,7 +370,14 @@ async def register_greenfield_app_context_version(
         stale_status=AppContextStaleStatus.CURRENT,
         validation_summary=ValidationSummary(
             status="pending",
-            warnings=["Greenfield app context has not yet been consumed by control-plane validation."],
+            warnings=[
+                "Greenfield app context has not yet been consumed by control-plane validation.",
+                *(
+                    []
+                    if source_index is not None
+                    else ["Greenfield source context was unavailable; registration used manifest-only graph context."]
+                ),
+            ],
         ),
     )
     return await register_app_context_version(
@@ -337,6 +387,79 @@ async def register_greenfield_app_context_version(
         source_chat_id=source_chat_id,
         make_current=make_current,
     )
+
+
+def _greenfield_source_file_map_from_artifact(app_bundle_artifact: ArtifactVersionDoc | Any) -> dict[str, str]:
+    metadata = _artifact_metadata(app_bundle_artifact)
+    workspace_dir = metadata.get("workspace_dir")
+    if workspace_dir:
+        root = Path(str(workspace_dir)).expanduser()
+        if root.exists() and root.is_dir():
+            return _read_greenfield_source_dir(root)
+
+    artifact_path = metadata.get("artifact_path")
+    if artifact_path:
+        path = Path(str(artifact_path)).expanduser()
+        if path.exists() and path.is_file() and path.suffix.lower() == ".zip":
+            return _read_greenfield_source_zip(path)
+
+    return {}
+
+
+def _artifact_metadata(artifact: ArtifactVersionDoc | Any) -> dict[str, Any]:
+    commit_metadata = getattr(artifact, "commit_metadata", None)
+    metadata = getattr(commit_metadata, "metadata", None)
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    if isinstance(artifact, dict):
+        raw_commit = artifact.get("commit_metadata")
+        if isinstance(raw_commit, dict) and isinstance(raw_commit.get("metadata"), dict):
+            return dict(raw_commit["metadata"])
+    return {}
+
+
+def _read_greenfield_source_dir(root: Path) -> dict[str, str]:
+    file_map: dict[str, str] = {}
+    for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
+        try:
+            rel = path.relative_to(root).as_posix()
+        except Exception:
+            continue
+        normalized = _normalize_indexed_source_path(rel)
+        if normalized is None:
+            continue
+        try:
+            file_map[normalized] = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+    return file_map
+
+
+def _read_greenfield_source_zip(path: Path) -> dict[str, str]:
+    file_map: dict[str, str] = {}
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            for info in sorted(archive.infolist(), key=lambda item: item.filename):
+                if info.is_dir():
+                    continue
+                normalized = _normalize_indexed_source_path(info.filename)
+                if normalized is None:
+                    continue
+                try:
+                    file_map[normalized] = archive.read(info.filename).decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+    except zipfile.BadZipFile:
+        return {}
+    return file_map
+
+
+def _normalize_indexed_source_path(path: Any) -> str | None:
+    normalized = _normalize_app_bundle_path(path)
+    safe = safe_scan_relpath(normalized)
+    if safe is None or skip_reason_for_path(safe):
+        return None
+    return safe
 
 
 async def register_app_context_version(

@@ -65,6 +65,7 @@ from mozaiksai.core.artifacts import (
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id
+from mozaiksai.core.dashboard import load_dashboard_manifest
 from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
@@ -549,6 +550,24 @@ def _resolve_studio_scope(
 @app.get("/api/shell-config")
 async def get_studio_shell_config():
     return await build_shell_config(surface="studio")
+
+
+@app.get("/api/studio/dashboard")
+async def get_studio_dashboard_config(
+    scope: Literal["workspace", "app"] | None = None,
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    manifest = load_dashboard_manifest(resolve_app_root())
+    payload = manifest.model_dump(mode="json")
+    payload["resolved"] = {
+        "scope": scope,
+        "app_id": resolved_app_id if scope == "app" or app_id else None,
+    }
+    if scope:
+        payload["surface"] = manifest.surface_for_scope(scope).model_dump(mode="json")
+    return payload
 
 
 @app.get("/api/studio/overview")

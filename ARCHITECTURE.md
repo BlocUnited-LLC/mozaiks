@@ -800,6 +800,16 @@ A durable, versioned output produced by a generator workflow. Artifacts are not 
 
 Artifacts live in `generated/` until promoted into an active app root. The harness identifies the relevant artifact when classifying a user request and either patches it directly (`patch` class) or reopens the originating workflow (`design`, `feature`, `core` classes).
 
+### App Intelligence
+The shared source-backed context plane that lets Studio, Factory workflows, and
+the Refinement Engine understand an app before changing it. A source-backed
+index produces `SourceContextBundle`, `AppContextGraph`,
+`AppIntelligenceSnapshot`, and `AppContextVersion`. Agents receive compact
+App Intelligence and graph context first, then retrieve exact source files only
+through tools when needed. FalkorDB may mirror graph/intelligence artifacts for
+production-scale querying, but artifact storage and AppContext records remain
+the authority.
+
 ### Event
 Three kinds — do not confuse them:
 1. **App events** — Emitted by the app backend or runtime bridge tools; trigger workflow `triggers`

@@ -6,6 +6,20 @@ content: |
   surfaces that need to be updated — not to the files themselves, but to the
   contracts that govern the files.
 
+  Context policy:
+
+  - Treat `get_contract_surface_context` as the primary source for current
+    contract surfaces, existing paths, Context Graph relationships, and
+    request-matched candidates.
+  - Use `get_app_intelligence_context` to understand current architecture,
+    capability ownership, integration surfaces, data surfaces, and risk hints
+    before selecting contract surfaces.
+  - Use `search_app_source_context` only to confirm code evidence for a
+    candidate surface when the contract catalog is not enough.
+  - Do not select a surface that is absent from the current contract context
+    unless the request explicitly adds a new surface.
+  - Prefer declared Mozaiks contract ownership over filename similarity.
+
   Mozaiks contract surfaces:
 
   module_action

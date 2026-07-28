@@ -118,8 +118,10 @@ except Exception as exc:  # pragma: no cover
 from mozaiksai.hosts.routers.account import router as _account_router  # noqa: E402
 from mozaiksai.hosts.routers.billing import router as _billing_router  # noqa: E402
 from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
+from mozaiksai.hosts.routers.media import router as _media_router  # noqa: E402
 from mozaiksai.hosts.routers.modules import router as _modules_router  # noqa: E402
 from mozaiksai.hosts.routers.notifications import router as _notifications_router  # noqa: E402
+from mozaiksai.hosts.routers.oauth_github import router as _oauth_github_router  # noqa: E402
 from mozaiksai.hosts.routers.sessions import router as _sessions_router  # noqa: E402
 from mozaiksai.hosts.routers.shell import router as _shell_router  # noqa: E402
 from mozaiksai.hosts.routers.transitions import router as _transitions_router  # noqa: E402
@@ -127,8 +129,10 @@ from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noq
 
 app.include_router(_account_router)
 app.include_router(_billing_router)
+app.include_router(_media_router)
 app.include_router(_modules_router)
 app.include_router(_notifications_router)
+app.include_router(_oauth_github_router)
 app.include_router(_shell_router)
 app.include_router(_chat_router)
 app.include_router(_sessions_router)

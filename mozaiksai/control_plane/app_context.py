@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mozaiksai.core.app_context.intelligence import AppIntelligenceSnapshot
 from mozaiksai.core.app_context.models import (
     AppContextGraph,
     AppContextStaleStatus,
@@ -14,6 +15,7 @@ from mozaiksai.core.app_context.models import (
     OwnershipClass,
     SourceRef,
 )
+from mozaiksai.core.app_context.source_corpus import SourceCorpusBundle
 from mozaiksai.core.app_context.store import (
     get_app_context_version,
     get_current_app_context_version,
@@ -28,6 +30,12 @@ APP_CONTEXT_STALE_WARNING = (
 )
 APP_CONTEXT_GRAPH_LOAD_WARNING = (
     "Current AppContextGraph could not be loaded; graph impact hints are unavailable."
+)
+SOURCE_CONTEXT_LOAD_WARNING = (
+    "Current SourceContextBundle could not be loaded; source-code retrieval is unavailable."
+)
+APP_INTELLIGENCE_LOAD_WARNING = (
+    "Current AppIntelligenceSnapshot could not be loaded; app intelligence summaries are unavailable."
 )
 
 
@@ -76,6 +84,20 @@ class AppContextGraphLookupResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     graph: AppContextGraph | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SourceContextBundleLookupResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    bundle: SourceCorpusBundle | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AppIntelligenceSnapshotLookupResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    snapshot: AppIntelligenceSnapshot | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -136,6 +158,58 @@ async def get_current_app_context_graph(
     )
 
 
+async def get_current_source_context_bundle(
+    *,
+    app_id: str | None,
+    app_context_summary: AppContextSummary | dict[str, Any] | None = None,
+    artifact_store: ArtifactStore | None = None,
+) -> SourceContextBundleLookupResult:
+    """Best-effort load of the current SourceContextBundle artifact payload."""
+    resolved_app_id = str(app_id or "").strip() or None
+    if not resolved_app_id:
+        return SourceContextBundleLookupResult()
+
+    summary = (
+        app_context_summary
+        if isinstance(app_context_summary, AppContextSummary)
+        else AppContextSummary.model_validate(app_context_summary)
+        if app_context_summary is not None
+        else await get_current_app_context_summary(app_id=resolved_app_id, artifact_store=artifact_store)
+    )
+    bundle_ref = next((ref for ref in summary.artifact_refs if ref.kind == "source_context_bundle"), None)
+    return await _load_source_context_bundle_ref(
+        app_id=resolved_app_id,
+        bundle_ref=bundle_ref,
+        artifact_store=artifact_store,
+    )
+
+
+async def get_current_app_intelligence_snapshot(
+    *,
+    app_id: str | None,
+    app_context_summary: AppContextSummary | dict[str, Any] | None = None,
+    artifact_store: ArtifactStore | None = None,
+) -> AppIntelligenceSnapshotLookupResult:
+    """Best-effort load of the current AppIntelligenceSnapshot artifact payload."""
+    resolved_app_id = str(app_id or "").strip() or None
+    if not resolved_app_id:
+        return AppIntelligenceSnapshotLookupResult()
+
+    summary = (
+        app_context_summary
+        if isinstance(app_context_summary, AppContextSummary)
+        else AppContextSummary.model_validate(app_context_summary)
+        if app_context_summary is not None
+        else await get_current_app_context_summary(app_id=resolved_app_id, artifact_store=artifact_store)
+    )
+    snapshot_ref = next((ref for ref in summary.artifact_refs if ref.kind == "app_intelligence_snapshot"), None)
+    return await _load_app_intelligence_snapshot_ref(
+        app_id=resolved_app_id,
+        snapshot_ref=snapshot_ref,
+        artifact_store=artifact_store,
+    )
+
+
 async def get_app_context_graph_for_version(
     *,
     app_id: str | None,
@@ -171,6 +245,92 @@ async def get_app_context_graph_for_version(
     return await _load_app_context_graph_ref(
         app_id=resolved_app_id,
         graph_ref=graph_ref,
+        artifact_store=artifact_store,
+    )
+
+
+async def get_source_context_bundle_for_version(
+    *,
+    app_id: str | None,
+    context_version_id: str | None,
+    artifact_store: ArtifactStore | None = None,
+) -> SourceContextBundleLookupResult:
+    """Best-effort load of a SourceContextBundle for a specific AppContextVersion."""
+    resolved_app_id = str(app_id or "").strip() or None
+    resolved_context_version_id = str(context_version_id or "").strip() or None
+    if not resolved_app_id or not resolved_context_version_id:
+        return SourceContextBundleLookupResult()
+
+    try:
+        context_version = await get_app_context_version(
+            app_id=resolved_app_id,
+            context_version_id=resolved_context_version_id,
+            artifact_store=artifact_store,
+        )
+    except Exception as exc:
+        return SourceContextBundleLookupResult(
+            warnings=[f"{SOURCE_CONTEXT_LOAD_WARNING} Context version lookup failed: {exc}"]
+        )
+    if context_version is None:
+        return SourceContextBundleLookupResult(
+            warnings=[
+                f"{SOURCE_CONTEXT_LOAD_WARNING} Context version '{resolved_context_version_id}' was not found."
+            ]
+        )
+    bundle_ref = next(
+        (
+            ref
+            for ref in summarize_app_context_version(context_version).artifact_refs
+            if ref.kind == "source_context_bundle"
+        ),
+        None,
+    )
+    return await _load_source_context_bundle_ref(
+        app_id=resolved_app_id,
+        bundle_ref=bundle_ref,
+        artifact_store=artifact_store,
+    )
+
+
+async def get_app_intelligence_snapshot_for_version(
+    *,
+    app_id: str | None,
+    context_version_id: str | None,
+    artifact_store: ArtifactStore | None = None,
+) -> AppIntelligenceSnapshotLookupResult:
+    """Best-effort load of an AppIntelligenceSnapshot for a specific context version."""
+    resolved_app_id = str(app_id or "").strip() or None
+    resolved_context_version_id = str(context_version_id or "").strip() or None
+    if not resolved_app_id or not resolved_context_version_id:
+        return AppIntelligenceSnapshotLookupResult()
+
+    try:
+        context_version = await get_app_context_version(
+            app_id=resolved_app_id,
+            context_version_id=resolved_context_version_id,
+            artifact_store=artifact_store,
+        )
+    except Exception as exc:
+        return AppIntelligenceSnapshotLookupResult(
+            warnings=[f"{APP_INTELLIGENCE_LOAD_WARNING} Context version lookup failed: {exc}"]
+        )
+    if context_version is None:
+        return AppIntelligenceSnapshotLookupResult(
+            warnings=[
+                f"{APP_INTELLIGENCE_LOAD_WARNING} Context version '{resolved_context_version_id}' was not found."
+            ]
+        )
+    snapshot_ref = next(
+        (
+            ref
+            for ref in summarize_app_context_version(context_version).artifact_refs
+            if ref.kind == "app_intelligence_snapshot"
+        ),
+        None,
+    )
+    return await _load_app_intelligence_snapshot_ref(
+        app_id=resolved_app_id,
+        snapshot_ref=snapshot_ref,
         artifact_store=artifact_store,
     )
 
@@ -211,6 +371,84 @@ async def _load_app_context_graph_ref(
     except Exception as exc:
         return AppContextGraphLookupResult(
             warnings=[f"{APP_CONTEXT_GRAPH_LOAD_WARNING} Payload validation failed: {exc}"]
+        )
+
+
+async def _load_source_context_bundle_ref(
+    *,
+    app_id: str,
+    bundle_ref: AppContextRefSummary | None,
+    artifact_store: ArtifactStore | None = None,
+) -> SourceContextBundleLookupResult:
+    if bundle_ref is None:
+        return SourceContextBundleLookupResult()
+
+    try:
+        store = artifact_store or ArtifactStore()
+        artifact = await store.get_artifact_version(
+            app_id=app_id,
+            artifact_version_id=bundle_ref.ref_id,
+        )
+    except Exception as exc:
+        return SourceContextBundleLookupResult(
+            warnings=[f"{SOURCE_CONTEXT_LOAD_WARNING} Lookup failed: {exc}"]
+        )
+
+    if artifact is None:
+        return SourceContextBundleLookupResult(
+            warnings=[f"{SOURCE_CONTEXT_LOAD_WARNING} Artifact '{bundle_ref.ref_id}' was not found."]
+        )
+    payload = _artifact_summary_payload(artifact)
+    if payload is None:
+        return SourceContextBundleLookupResult(
+            warnings=[
+                f"{SOURCE_CONTEXT_LOAD_WARNING} Artifact '{bundle_ref.ref_id}' has no summary payload."
+            ]
+        )
+    try:
+        return SourceContextBundleLookupResult(bundle=SourceCorpusBundle.model_validate(payload))
+    except Exception as exc:
+        return SourceContextBundleLookupResult(
+            warnings=[f"{SOURCE_CONTEXT_LOAD_WARNING} Payload validation failed: {exc}"]
+        )
+
+
+async def _load_app_intelligence_snapshot_ref(
+    *,
+    app_id: str,
+    snapshot_ref: AppContextRefSummary | None,
+    artifact_store: ArtifactStore | None = None,
+) -> AppIntelligenceSnapshotLookupResult:
+    if snapshot_ref is None:
+        return AppIntelligenceSnapshotLookupResult()
+
+    try:
+        store = artifact_store or ArtifactStore()
+        artifact = await store.get_artifact_version(
+            app_id=app_id,
+            artifact_version_id=snapshot_ref.ref_id,
+        )
+    except Exception as exc:
+        return AppIntelligenceSnapshotLookupResult(
+            warnings=[f"{APP_INTELLIGENCE_LOAD_WARNING} Lookup failed: {exc}"]
+        )
+
+    if artifact is None:
+        return AppIntelligenceSnapshotLookupResult(
+            warnings=[f"{APP_INTELLIGENCE_LOAD_WARNING} Artifact '{snapshot_ref.ref_id}' was not found."]
+        )
+    payload = _artifact_summary_payload(artifact)
+    if payload is None:
+        return AppIntelligenceSnapshotLookupResult(
+            warnings=[
+                f"{APP_INTELLIGENCE_LOAD_WARNING} Artifact '{snapshot_ref.ref_id}' has no summary payload."
+            ]
+        )
+    try:
+        return AppIntelligenceSnapshotLookupResult(snapshot=AppIntelligenceSnapshot.model_validate(payload))
+    except Exception as exc:
+        return AppIntelligenceSnapshotLookupResult(
+            warnings=[f"{APP_INTELLIGENCE_LOAD_WARNING} Payload validation failed: {exc}"]
         )
 
 
@@ -306,15 +544,23 @@ __all__ = [
     "APP_CONTEXT_MISSING_WARNING",
     "APP_CONTEXT_GRAPH_LOAD_WARNING",
     "APP_CONTEXT_STALE_WARNING",
+    "APP_INTELLIGENCE_LOAD_WARNING",
+    "AppIntelligenceSnapshotLookupResult",
     "AppContextGraphLookupResult",
     "AppContextOwnershipBoundarySummary",
     "AppContextOwnershipSummary",
     "AppContextRefSummary",
     "AppContextSummary",
+    "SOURCE_CONTEXT_LOAD_WARNING",
+    "SourceContextBundleLookupResult",
     "app_context_summary_dump",
     "app_context_warnings",
     "get_app_context_graph_for_version",
     "get_current_app_context_graph",
+    "get_current_app_intelligence_snapshot",
     "get_current_app_context_summary",
+    "get_current_source_context_bundle",
+    "get_app_intelligence_snapshot_for_version",
+    "get_source_context_bundle_for_version",
     "summarize_app_context_version",
 ]

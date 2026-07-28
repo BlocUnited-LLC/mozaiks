@@ -131,6 +131,7 @@ nav:
           - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
+          - App Intelligence Plane: architecture/foundations/app-intelligence-plane.md
           - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
           - Context Graph and Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - App Context and Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
@@ -143,6 +144,7 @@ nav:
           - Platform Authoring: architecture/app/platform-authoring.md
           - Surface Model: architecture/app/surface-model.md
           - UI Surface and Layout Architecture: architecture/app/ui-surface-and-layout-architecture.md
+          - App Dashboard Contract: architecture/app/app-dashboard-contract.md
           - Platform Navigation Contract: architecture/app/platform-navigation-contract.md
           - Admin System: architecture/app/admin-system.md
           - Account, Admin, and Platform Services: architecture/app/account-admin-and-platform-services.md

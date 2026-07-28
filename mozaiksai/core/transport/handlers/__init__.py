@@ -46,6 +46,7 @@ MESSAGE_HANDLERS: dict[str, HandlerFunc] = {
     "user.input.submit": handle_user_input_submit,
     "user_input_submit": handle_user_input_submit,
     "tool_call_response": handle_tool_call_response,
+    "artifact.action": handle_artifact_action,
     "chat.artifact_action": handle_artifact_action,
     "chat.switch_workflow": handle_switch_workflow,
     "chat.enter_general_mode": handle_enter_general_mode,

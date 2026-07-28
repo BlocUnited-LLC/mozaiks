@@ -19,6 +19,7 @@ class RuntimeCollections:
     AG2_STREAM_HEADS = "AG2StreamHeads"
     GENERAL_CHAT_SESSIONS = "GeneralChatSessions"
     GENERAL_CHAT_COUNTERS = "GeneralChatCounters"
+    MEDIA_ASSETS = "MediaAssets"
     RUNTIME_USAGE_EVENTS = "RuntimeUsageEvents"
     RUNTIME_TOKEN_BUDGET_ALERTS = "RuntimeTokenBudgetAlerts"
     RUNTIME_TOKEN_WALLET_BALANCES = "RuntimeTokenWalletBalances"

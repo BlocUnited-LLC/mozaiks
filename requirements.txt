@@ -1,6 +1,6 @@
 ﻿# mozaiksai Requirements
 # Core runtime
-ag2[a2a,openai,tracing]==1.0.0b0
+ag2[a2a,openai,tracing]==1.0.0
 a2a-sdk[grpc]>=1.1.0,<2
 fastapi>=0.100.0
 uvicorn[standard]>=0.20.0
@@ -10,6 +10,10 @@ python-dotenv>=1.0.0
 pyyaml>=6.0
 httpx
 aiohttp>=3.8.0
+tree-sitter>=0.20.0
+tree-sitter-python
+tree-sitter-javascript
+tree-sitter-css
 
 # Database
 motor>=3.3.0

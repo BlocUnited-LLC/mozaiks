@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from mozaiksai.control_plane.context_graph.health import evaluate_context_graph_health
 from mozaiksai.core.app_context import (
     AllowedOperation,
     AppContextMode,
@@ -25,10 +24,11 @@ from mozaiksai.core.app_context import (
     SourceRef,
     SourceRefKind,
     ValidationSummary,
-    build_context_graph_from_file_map,
     collect_source_scan_file_map,
-    context_graph_parser_status,
     default_context_graph_scan_policy,
+    index_source_scan,
+    persist_app_context_index,
+    redact_source_text,
     register_app_context_version,
 )
 from mozaiksai.core.artifacts import (
@@ -44,6 +44,8 @@ from mozaiksai.core.artifacts import (
 class WorkspaceSnapshotRegistrationResult:
     app_id: str
     app_bundle_artifact_version_id: str
+    source_context_artifact_version_id: str
+    app_intelligence_artifact_version_id: str
     app_context_version_id: str
     app_context_artifact_version_id: str
     graph_artifact_version_id: str
@@ -84,15 +86,14 @@ async def register_workspace_snapshot(
     if not scan_result.file_map:
         raise ValueError("workspace snapshot found no supported source files")
 
-    scan_health = dict(scan_result.health)
-    scan_health["parser_status"] = context_graph_parser_status()
-    health_report = evaluate_context_graph_health(scan_health).model_dump(mode="json")
+    indexed_at = datetime.now(UTC)
+    safe_file_map = _redacted_scan_file_map(scan_result.file_map)
     bundle_root = _generated_artifacts_root(generated_artifacts_root)
-    snapshot_token = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    snapshot_token = indexed_at.strftime("%Y%m%d%H%M%S")
     snapshot_dir = bundle_root / "workspace_snapshots" / _safe_segment(resolved_app_id) / snapshot_token
     artifact_path = snapshot_dir / "artifact.zip"
     files_manifest, bundle_sha256, bundle_size_bytes = _write_file_map_zip(
-        file_map=scan_result.file_map,
+        file_map=safe_file_map,
         artifact_path=artifact_path,
     )
 
@@ -116,8 +117,6 @@ async def register_workspace_snapshot(
                 "source_workspace_root": root.as_posix(),
                 "bundle_sha256": bundle_sha256,
                 "bundle_size_bytes": bundle_size_bytes,
-                "scan_health": scan_health,
-                "context_graph_health_report": health_report,
             },
         },
     )
@@ -127,8 +126,8 @@ async def register_workspace_snapshot(
         kind=SourceRefKind.APP_ROOT,
         uri=root.as_uri(),
         ref=snapshot_token,
-        checksum=_file_map_checksum(scan_result.file_map),
-        indexed_at=datetime.now(UTC),
+        checksum=_file_map_checksum(safe_file_map),
+        indexed_at=indexed_at,
         metadata={
             "artifact_kind": "app_bundle",
             "artifact_key": artifact_key,
@@ -136,24 +135,23 @@ async def register_workspace_snapshot(
             "scan_policy": policy.policy_id,
         },
     )
-    graph = build_context_graph_from_file_map(
+    source_index = index_source_scan(
         app_id=resolved_app_id,
+        scan_result=scan_result,
         artifact_version_id=app_bundle_artifact.id,
         artifact_kind="app_bundle",
         artifact_key=artifact_key,
-        file_map=scan_result.file_map,
         source_ref=source_ref,
+        indexed_at=indexed_at,
     )
-    graph_artifact = await _persist_summary_artifact(
-        store=store,
-        app_id=resolved_app_id,
-        artifact_kind="app_context_graph",
-        artifact_key="app_context_graph",
-        payload=graph.model_dump(mode="json"),
-        path="app_context/workspace_snapshot/app_context_graph.json",
+    scan_health = source_index.scan_health
+    health_report = source_index.health_report
+    persisted_index = await persist_app_context_index(
+        index=source_index,
+        artifact_store=store,
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
-        metadata={"scan_health": scan_health, "context_graph_health_report": health_report},
+        graph_path="app_context/workspace_snapshot/app_context_graph.json",
     )
 
     context_version = AppContextVersion(
@@ -170,19 +168,38 @@ async def register_workspace_snapshot(
                 source_ref_id=source_ref.source_ref_id,
             ),
             ArtifactRef(
+                artifact_kind="source_context_bundle",
+                artifact_key="source_context_bundle",
+                artifact_version_id=persisted_index.source_context_artifact.id,
+                lifecycle_status=persisted_index.source_context_artifact.lifecycle_status.value,
+                source_ref_id=source_ref.source_ref_id,
+            ),
+            ArtifactRef(
                 artifact_kind="app_context_graph",
                 artifact_key="app_context_graph",
-                artifact_version_id=graph_artifact.id,
-                lifecycle_status=graph_artifact.lifecycle_status.value,
+                artifact_version_id=persisted_index.graph_artifact.id,
+                lifecycle_status=persisted_index.graph_artifact.lifecycle_status.value,
+                source_ref_id=source_ref.source_ref_id,
+            ),
+            ArtifactRef(
+                artifact_kind="app_intelligence_snapshot",
+                artifact_key="app_intelligence_snapshot",
+                artifact_version_id=persisted_index.intelligence_artifact.id,
+                lifecycle_status=persisted_index.intelligence_artifact.lifecycle_status.value,
                 source_ref_id=source_ref.source_ref_id,
             ),
         ],
-        graph_snapshot_ref=graph_artifact.id,
-        ownership_boundaries=_ownership_boundaries(scan_result.file_map, source_ref.source_ref_id),
+        graph_snapshot_ref=persisted_index.graph_artifact.id,
+        ownership_boundaries=_ownership_boundaries(safe_file_map, source_ref.source_ref_id),
         stale_status=AppContextStaleStatus.CURRENT,
         validation_summary=ValidationSummary(
             status="passed",
-            evidence_refs=[app_bundle_artifact.id, graph_artifact.id],
+            evidence_refs=[
+                app_bundle_artifact.id,
+                persisted_index.source_context_artifact.id,
+                persisted_index.graph_artifact.id,
+                persisted_index.intelligence_artifact.id,
+            ],
             warnings=[*list(scan_result.warnings), *health_report.get("warnings", []), *health_report.get("blockers", [])],
         ),
     )
@@ -196,9 +213,11 @@ async def register_workspace_snapshot(
     return WorkspaceSnapshotRegistrationResult(
         app_id=resolved_app_id,
         app_bundle_artifact_version_id=app_bundle_artifact.id,
+        source_context_artifact_version_id=persisted_index.source_context_artifact.id,
+        app_intelligence_artifact_version_id=persisted_index.intelligence_artifact.id,
         app_context_version_id=registered.context_version.context_version_id,
         app_context_artifact_version_id=registered.artifact_version.id,
-        graph_artifact_version_id=graph_artifact.id,
+        graph_artifact_version_id=persisted_index.graph_artifact.id,
         artifact_path=artifact_path.as_posix(),
         indexed_file_count=len(scan_result.file_map),
         scan_health=scan_health,
@@ -240,47 +259,11 @@ def _write_file_map_zip(
     return manifest, hashlib.sha256(bundle).hexdigest(), len(bundle)
 
 
-async def _persist_summary_artifact(
-    *,
-    store: ArtifactStore,
-    app_id: str,
-    artifact_kind: str,
-    artifact_key: str,
-    payload: dict[str, Any],
-    path: str,
-    source_workflow: str | None,
-    source_chat_id: str | None,
-    metadata: dict[str, Any] | None = None,
-) -> Any:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    return await store.create_artifact_version(
-        app_id=app_id,
-        artifact_kind=artifact_kind,
-        artifact_key=artifact_key,
-        files_manifest=[
-            {
-                "path": path,
-                "sha256": hashlib.sha256(raw).hexdigest(),
-                "size_bytes": len(raw),
-                "content_type": "application/json",
-            }
-        ],
-        source_workflow=source_workflow,
-        source_chat_id=source_chat_id,
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=ArtifactValidationStatus.PASSED,
-        commit_metadata={
-            "message": f"Workspace snapshot: {artifact_kind}",
-            "source_workflow": source_workflow,
-            "source_chat_id": source_chat_id,
-            "metadata": {
-                "summary_payload": payload,
-                "summary_format": "json",
-                "artifact_contract": "mozaiksai/core/app_context/models.py",
-                **dict(metadata or {}),
-            },
-        },
-    )
+def _redacted_scan_file_map(file_map: dict[str, str]) -> dict[str, str]:
+    return {
+        path: redact_source_text(path=path, content=content)
+        for path, content in sorted((file_map or {}).items())
+    }
 
 
 def _ownership_boundaries(file_map: dict[str, str], source_ref_id: str) -> list[OwnershipBoundary]:

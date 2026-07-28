@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mozaiksai.control_plane.context_graph.health import evaluate_context_graph_health
+from mozaiksai.core.app_context.health import evaluate_context_graph_health
 from mozaiksai.core.app_context.scan_policy import (
     collect_source_scan_file_map,
     default_context_graph_scan_policy,

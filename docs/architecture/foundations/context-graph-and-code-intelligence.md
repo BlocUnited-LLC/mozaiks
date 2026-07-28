@@ -17,8 +17,14 @@ deterministic syntax extraction
 -> scoped refinement and coding context
 ```
 
-Graph databases such as FalkorDB or Neo4j may accelerate or visualize this
-graph later. They are not the product contract. `AppContextGraph` is.
+Graph backends such as FalkorDB or Neo4j may accelerate or visualize this graph
+later. They are not the product contract. `AppContextGraph` is. FalkorDB is the
+recommended production backend mirror when teams need shared, large-repo graph
+queries or Studio visualization beyond embedded artifact snapshots.
+
+Tree-sitter is part of the baseline Mozaiks code-context runtime. It powers
+deeper source extraction during indexing, while deterministic fallbacks remain
+available only as resilience when a parser package is unavailable at runtime.
 
 ## Goals
 
@@ -143,12 +149,13 @@ Syntax extraction reads source files and produces deterministic facts:
 - references
 - call targets
 
-Tree-sitter should be used when the optional parser extras are installed. The
-default OSS path must still work without those extras:
+Tree-sitter is the baseline parser path for supported languages. The OSS
+runtime still records parser health and falls back deterministically if a parser
+package is missing at runtime:
 
 - Python uses `ast` fallback extraction.
-- JavaScript and TypeScript use conservative regex extraction until deeper
-  parser coverage is installed.
+- JavaScript and TypeScript use conservative regex extraction only when the
+  Tree-sitter parser is unavailable.
 - YAML and JSON use structured parsing for declarative contracts.
 
 The extractor should never ask an LLM to parse code. LLMs operate only after
@@ -263,6 +270,17 @@ The Refinement Engine consumes the Context Graph through compact packs:
 The coding worker still edits only explicit scoped files. Graph context informs
 what should be included in scope; it does not grant permission to mutate
 additional files.
+
+Checkpoint context is intentionally staged:
+
+| Checkpoint or workflow | Context provided | Purpose | What is not provided |
+| --- | --- | --- | --- |
+| `request_submitted` refinement classifier | revision context, artifact summary, stale artifact families, AppContext freshness and ownership warnings | classify `patch`, `design`, `feature`, or `core` and choose a workflow sequence | raw source snippets or full graph dumps |
+| `scope_requested` refinement checkpoint | Context Graph catalog, artifact workspace catalog, bounded source search results | choose the narrowest safe file scope | full file contents and edit permission for related files |
+| `contract_surface_requested` refinement checkpoint | contract surface context, Context Graph catalog, bounded source search | map the request to module/page/workflow/config contract surfaces | arbitrary source browsing or code patching |
+| `coding_requested` refinement checkpoint | explicit scoped files, Context Graph scope, exact source reads for selected paths, related-file/source search as read-only context | produce a bounded patch | scope widening without reroute or human review |
+| `ExistingAppDiscovery` before chat | repo/API/runtime summaries, compact graph pack, source-context catalog, source retrieval tools | ground discovery and adoption mapping in code evidence | final authority over adoption or generated output |
+| `AppGenerator` and `AgentGenerator` startup | compact `context_graph_pack` from the current AppContext or selected artifact workspace | preserve existing app/workflow context during revision runs | raw `AppContextGraph` payloads or full source repositories |
 
 Scope selection is not allowed to trust LLM-selected paths blindly. The first
 party scope proposer normalizes proposed paths, checks them against the current
@@ -393,7 +411,9 @@ Recommended UX:
 5. In advanced settings, allow operators to configure graph backend storage.
 
 Users should see "Mozaiks understands the code relationships." Operators may
-choose embedded graph snapshots, FalkorDB, Neo4j, or another backend later.
+run embedded graph snapshots locally and use FalkorDB for production-scale graph
+queries or Studio visualization when configured. Backend choice should not be a
+normal build-flow question.
 
 ## Graph Backend Boundary
 
@@ -403,7 +423,7 @@ The default OSS backend is embedded/artifact-backed:
 - store them as artifacts when needed
 - query them in process for scope and coding packs
 
-Optional graph databases may provide:
+Graph backend mirrors such as FalkorDB may provide:
 
 - faster multi-hop queries on large brownfield repos
 - cross-app analytics
@@ -422,7 +442,7 @@ or promotion.
 | graph builder and code-intelligence pipeline | `mozaiksai/core/app_context/context_graph.py` |
 | deterministic source scan policy | `mozaiksai/core/app_context/scan_policy.py` |
 | Refinement Engine graph query packs | `mozaiksai/control_plane/context_graph/query.py` |
-| context graph health gate | `mozaiksai/control_plane/context_graph/health.py` |
+| context graph health gate | `mozaiksai/core/app_context/health.py` |
 | workspace snapshot registration | `mozaiksai/control_plane/workspace_snapshot.py` |
 | CLI dogfood snapshot command | `mozaiks_cli/commands/context.py` |
 | factory graph loading tools | `factory_app/refinement_harness/tools/_context_graph.py` |

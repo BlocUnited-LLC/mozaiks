@@ -50,6 +50,13 @@ def get_ag2_runtime_log_path() -> Path:
 # Toggle file format via env: when true, file contents are JSON lines; otherwise, human-readable text.
 LOGS_AS_JSON = os.getenv("LOGS_AS_JSON", "").lower() in ("1", "true", "yes", "on")
 
+
+def agent_transcript_logging_enabled() -> bool:
+    """Return whether full agent conversation transcripts may be persisted locally."""
+    return os.getenv("MOZAIKS_AGENT_TRANSCRIPT_LOGGING_ENABLED", "false").lower() in (
+        "1", "true", "yes", "on"
+    )
+
 # Single log file for everything
 MAIN_LOG_FILE = LOGS_DIR / "mozaiks.log"
 
@@ -195,13 +202,14 @@ _GUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 # Common secret/value redaction patterns in log messages (not just extras)
 # 1) JSON-like key/value pairs: api_key, token, secret, password, authorization, clientSecret, etc.
 _JSON_SECRET_KV_RE = re.compile(
-    r"(\b(?:api[_-]?key|authorization|secret|password|token|client[_-]?secret|accountkey)\b\s*[:=]\s*[\"']?)([^\"'\s;]+)([\"']?)",
+    r"((?:[\"'])?\b(?:api[_-]?key|authorization|secret|password|token|client[_-]?secret|accountkey)\b(?:[\"'])?\s*[:=]\s*[\"']?)([^\"'\s,;}]+)([\"']?)",
     re.IGNORECASE,
 )
 # 2) Bearer tokens
 _BEARER_RE = re.compile(r"(Bearer\s+)([A-Za-z0-9._\-~+/=]+)", re.IGNORECASE)
 # 3) sk- style OpenAI keys
-_OPENAI_SK_RE = re.compile(r"(sk-[A-Za-z0-9]{4})([A-Za-z0-9]+)([A-Za-z0-9]{4})")
+_OPENAI_SK_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
+_GITHUB_TOKEN_RE = re.compile(r"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")
 # 4) Mongo connection strings with credentials
 _MONGO_RE = re.compile(r"(mongodb\+srv://)([^:@/]+):([^@/]+)(@)", re.IGNORECASE)
 # 5) Azure Storage connection string AccountKey
@@ -216,8 +224,14 @@ def _sanitize_log_message(message: str, *, max_length: int | None = None) -> str
     msg = _JSON_SECRET_KV_RE.sub(lambda m: m.group(1) + "***REDACTED***" + m.group(3), msg)
     # Redact common bearer tokens
     msg = _BEARER_RE.sub(lambda m: m.group(1) + "***REDACTED***", msg)
-    # Redact sk- OpenAI keys while keeping short prefix/suffix for diagnostics
-    msg = _OPENAI_SK_RE.sub(lambda m: m.group(1) + "***REDACTED***" + m.group(3), msg)
+    # Redact OpenAI keys while keeping a short prefix/suffix for diagnostics.
+    msg = _OPENAI_SK_RE.sub(
+        lambda m: m.group(0)[:6] + "***REDACTED***" + m.group(0)[-4:],
+        msg,
+    )
+    # Redact GitHub OAuth/personal access tokens when third-party client logs
+    # include an Authorization value outside the standard Bearer form.
+    msg = _GITHUB_TOKEN_RE.sub("***REDACTED***", msg)
     # Redact credentials in Mongo URIs
     msg = _MONGO_RE.sub(lambda m: m.group(1) + "***:***" + m.group(4), msg)
     # Redact Azure Storage AccountKey
@@ -295,7 +309,19 @@ class KeywordFilter(logging.Filter):
             return True
         return any(k in msg or k in name for k in self.kw)
 
-# No filters needed for single log file
+
+class AgentConversationFilter(logging.Filter):
+    """Keep safe agent summaries while gating full prompt transcripts."""
+
+    def __init__(self, *, allow_full_transcripts: bool) -> None:
+        super().__init__()
+        self.allow_full_transcripts = bool(allow_full_transcripts)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        scope = str(getattr(record, "agent_transcript_scope", "") or "").strip().lower()
+        if scope in {"full", "system_prompt", "prompt"} and not self.allow_full_transcripts:
+            return False
+        return True
 
 # ----------------------------------------------------------------------
 # Handler factory
@@ -451,22 +477,25 @@ def setup_logging(
     ch.setFormatter(console_fmt)
     root.addHandler(ch)
     
-    # Dedicated handler for agent conversation messages
-    agent_conv_file = LOGS_DIR / "agent_conversations.log"
-    agent_conv_handler = _make_handler(
-        agent_conv_file,
-        logging.INFO,
-        PrettyConsoleFormatter(no_color=True, max_length=0),  # Keep conversation transcripts intact
-        log_filter=None,
-        max_bytes=max_file_size,
-        backup_count=backup_count
-    )
-    # Only attach to the agent_messages logger (created in log_conversation_to_agent_chat_file)
     agent_messages_logger = _reset_named_logger_state("mozaiks.workflow.agent_messages")
-    agent_messages_logger.addHandler(agent_conv_handler)
     agent_messages_logger.setLevel(logging.INFO)
-    # Don't propagate to root to avoid duplication in mozaiks.log
+    transcripts_enabled = agent_transcript_logging_enabled()
+    agent_conv_handler = _make_handler(
+        LOGS_DIR / "agent_conversations.log",
+        logging.INFO,
+        PrettyConsoleFormatter(no_color=True, max_length=0),
+        log_filter=AgentConversationFilter(allow_full_transcripts=transcripts_enabled),
+        max_bytes=max_file_size,
+        backup_count=backup_count,
+    )
+    agent_messages_logger.addHandler(agent_conv_handler)
+    # Full prompts are intentionally not sent to the root sink.
     agent_messages_logger.propagate = False
+    agent_messages_logger.info(
+        "AGENT_CONVERSATION_LOG_READY full_transcripts=%s",
+        transcripts_enabled,
+        extra={"agent_transcript_scope": "summary"},
+    )
     
     for noisy in ("openai","httpx","urllib3","azure","motor","pymongo","uvicorn.access","msal","autogen","autogen.logger.file_logger"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -477,6 +506,7 @@ def setup_logging(
             "files_as_json": LOGS_AS_JSON,
             "file_extension": ".log",
             "file_format": "jsonl" if LOGS_AS_JSON else "pretty",
+            "agent_transcript_logging_enabled": transcripts_enabled,
             "cleared_on_start": clear_flag,
             "cleared_files_count": len(cleared_files),
             "cleared_agent_outputs_count": cleared_runtime_artifacts["agent_outputs"],

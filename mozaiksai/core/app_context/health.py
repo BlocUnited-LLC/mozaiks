@@ -1,4 +1,4 @@
-"""Health evaluation for Context Graph source coverage."""
+"""Health evaluation for AppContext source and graph coverage."""
 
 from __future__ import annotations
 
@@ -93,8 +93,8 @@ def _parser_fallback_warning(
     if js_like_count <= python_count:
         return None
     languages = parser_status.get("languages") if isinstance(parser_status.get("languages"), dict) else {}
-    javascript = languages.get("javascript") if isinstance(languages.get("javascript"), dict) else {}  # type: ignore[union-attr]
-    if str(javascript.get("active_parser") or "") == "regex":  # type: ignore[union-attr]
+    javascript = languages.get("javascript") if isinstance(languages.get("javascript"), dict) else {}
+    if str(javascript.get("active_parser") or "") == "regex":
         return "context_graph_javascript_parser_fallback"
     return None
 
@@ -105,9 +105,8 @@ def _dict_ints(value: Any) -> dict[str, int]:
     out: dict[str, int] = {}
     for key, item in value.items():
         text = str(key or "").strip()
-        if not text:
-            continue
-        out[text] = _int(item)
+        if text:
+            out[text] = _int(item)
     return out
 
 

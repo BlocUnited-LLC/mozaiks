@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from factory_app.refinement_harness.tools.app_intelligence import get_app_intelligence_context
 from factory_app.refinement_harness.tools.get_artifact_workspace_catalog import (
     get_artifact_workspace_catalog,
 )
@@ -13,6 +14,14 @@ from factory_app.refinement_harness.tools.get_artifact_workspace_scope import (
 )
 from factory_app.refinement_harness.tools.get_context_graph_catalog import get_context_graph_catalog
 from factory_app.refinement_harness.tools.get_context_graph_scope import get_context_graph_scope
+from factory_app.refinement_harness.tools.get_contract_surface_context import (
+    get_contract_surface_context,
+)
+from factory_app.refinement_harness.tools.source_context import (
+    get_related_app_source_files,
+    read_app_source_file,
+    search_app_source_context,
+)
 from mozaiksai.control_plane import (
     ControlPlaneArtifactChangeRoutesManifest,
     ControlPlaneArtifactRoutingManifest,
@@ -531,6 +540,60 @@ async def test_context_graph_catalog_tool_ranks_graph_files_from_artifact_zip(tm
 
 
 @pytest.mark.asyncio
+async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> None:
+    zip_path = tmp_path / "artifact.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "GeneratedApp/app/modules/reports/module.yaml",
+            "id: reports\nactions:\n  - id: export_csv\n",
+        )
+        archive.writestr(
+            "GeneratedApp/app/modules/reports/backend/handler.py",
+            "def export_csv(payload):\n    return payload\n",
+        )
+        archive.writestr(
+            "GeneratedApp/app/services/adapters/email/smtp.py",
+            "def send_report_email():\n    return None\n",
+        )
+
+    class _ZipArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                version_number=10,
+                lineage_root_id="av_root",
+                parent_version_id="av_parent",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="AppGenerator",
+                commit_metadata={
+                    "metadata": {"artifact_path": str(zip_path)},
+                },
+            )
+
+    intelligence = await get_app_intelligence_context(
+        context=ControlPlaneToolContext(
+            checkpoint="scope_requested",
+            app_id="app_1",
+            artifact_kind="app_bundle",
+            artifact_key="app_bundle",
+            artifact_version_id="av_intelligence_1",
+            raw_user_request="Update reports email export",
+        ),
+        artifact_store=_ZipArtifactStore(),
+    )
+
+    assert intelligence["present"] is True
+    assert intelligence["source"] == "artifact_zip"
+    assert intelligence["app_intelligence_catalog"]["coverage"]["file_count"] == 3
+    assert intelligence["app_intelligence_catalog"]["architecture"]["module_roots"][0]["module_id"] == "reports"
+    assert any(result["section"] == "capabilities" for result in intelligence["results"])
+
+
+@pytest.mark.asyncio
 async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_path: Path) -> None:
     zip_path = tmp_path / "artifact.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -579,3 +642,119 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
     assert "src/Header.jsx" in scope["related_file_paths"]
     assert any(edge["edge_type"] == "imports" for edge in scope["related_edges"])
     assert scope["semantic_annotation_request"]["schema_version"] == "mozaiks.context_graph.semantic_annotations.v1"
+
+
+@pytest.mark.asyncio
+async def test_source_context_tools_search_read_and_related_files_from_artifact_zip(tmp_path: Path) -> None:
+    zip_path = tmp_path / "artifact.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "GeneratedApp/src/pages/Dashboard.jsx",
+            "import { fetchMetrics } from '../api/metrics';\n"
+            "export default function Dashboard() { return fetchMetrics(); }\n",
+        )
+        archive.writestr(
+            "GeneratedApp/src/api/metrics.js",
+            "export function fetchMetrics() { return fetch('/api/metrics'); }\n",
+        )
+
+    class _ZipArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                version_number=8,
+                lineage_root_id="av_root",
+                parent_version_id="av_parent",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="AppGenerator",
+                commit_metadata={
+                    "metadata": {"artifact_path": str(zip_path)},
+                },
+            )
+
+    context = ControlPlaneToolContext(
+        checkpoint="coding_requested",
+        app_id="app_1",
+        artifact_kind="app_bundle",
+        artifact_key="app_bundle",
+        artifact_version_id="av_source_1",
+        raw_user_request="Update dashboard metrics loading",
+    )
+    store = _ZipArtifactStore()
+
+    search = await search_app_source_context(context=context, artifact_store=store)
+    assert search["present"] is True
+    assert search["source"] == "artifact_zip"
+    assert any(result["path"] == "src/pages/Dashboard.jsx" for result in search["results"])
+
+    read = await read_app_source_file(
+        path="src/pages/Dashboard.jsx",
+        context=context,
+        artifact_store=store,
+    )
+    assert read["present"] is True
+    assert "fetchMetrics" in read["content"]
+
+    related = await get_related_app_source_files(
+        path="src/pages/Dashboard.jsx",
+        context=context,
+        artifact_store=store,
+    )
+    assert related["present"] is True
+    assert any(item["path"] == "src/api/metrics.js" and item["relationship"] == "imports" for item in related["files"])
+
+
+@pytest.mark.asyncio
+async def test_contract_surface_context_uses_canonical_context_graph_loader(tmp_path: Path) -> None:
+    zip_path = tmp_path / "artifact.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "GeneratedApp/app/modules/reports/module.yaml",
+            "id: reports\nactions:\n  - id: export_csv\n",
+        )
+        archive.writestr(
+            "GeneratedApp/app/modules/reports/backend/handler.py",
+            "def export_csv(payload):\n    return payload\n",
+        )
+
+    class _ZipArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                version_number=9,
+                lineage_root_id="av_root",
+                parent_version_id="av_parent",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="AppGenerator",
+                commit_metadata={
+                    "metadata": {"artifact_path": str(zip_path)},
+                },
+            )
+
+    surface_context = await get_contract_surface_context(
+        context=ControlPlaneToolContext(
+            checkpoint="contract_surface_requested",
+            app_id="app_1",
+            artifact_kind="app_bundle",
+            artifact_key="app_bundle",
+            artifact_version_id="av_contract_graph",
+            raw_user_request="Update reports export csv action",
+        ),
+        artifact_store=_ZipArtifactStore(),
+    )
+
+    assert surface_context["present"] is True
+    assert surface_context["context_graph"]["present"] is True
+    assert surface_context["context_graph"]["file_count"] == 2
+    assert any(
+        item["path"] == "app/modules/reports/backend/handler.py"
+        for item in surface_context["context_graph"]["candidate_files"]
+    )

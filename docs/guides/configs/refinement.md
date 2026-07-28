@@ -71,15 +71,54 @@ checkpoints:
     tool_ids:
       - get_revision_context
       - get_artifact_summary
+      - get_app_intelligence_context
+      - get_stale_artifact_families
+  - event: scope_requested
+    prompt_id: coding_scope_selection_system
+    tool_ids:
+      - get_revision_context
+      - get_artifact_summary
+      - get_app_intelligence_context
+      - get_artifact_workspace_catalog
+      - get_context_graph_catalog
+      - search_app_source_context
+  - event: contract_surface_requested
+    prompt_id: contract_surface_selection_system
+    tool_ids:
+      - get_contract_surface_context
+      - get_app_intelligence_context
+      - search_app_source_context
   - event: coding_requested
     prompt_id: coding_refinement_system
     tool_ids:
       - get_revision_context
+      - get_artifact_summary
+      - get_app_intelligence_context
       - get_artifact_workspace_scope
+      - get_context_graph_scope
+      - search_app_source_context
+      - read_app_source_file
+      - get_related_app_source_files
 ```
 
 Every `workflow_sequence` referenced by the harness must exist in
 `workflows/extended_orchestration/extension_registry.json`.
+
+## Code Context By Checkpoint
+
+Refinement should use code context progressively:
+
+| Checkpoint | Context tools | Purpose |
+| --- | --- | --- |
+| `request_submitted` | `get_revision_context`, `get_artifact_summary`, `get_app_intelligence_context`, `get_stale_artifact_families` | classify request scope from builder state, App Intelligence freshness, and staleness, without raw code snippets |
+| `scope_requested` | `get_app_intelligence_context`, `get_artifact_workspace_catalog`, `get_context_graph_catalog`, `search_app_source_context` | choose the smallest safe file scope from app shape, graph relationships, and bounded source search |
+| `contract_surface_requested` | `get_contract_surface_context`, `get_app_intelligence_context`, `search_app_source_context` | map the request to module/page/workflow/config contract surfaces |
+| `coding_requested` | `get_artifact_summary`, `get_app_intelligence_context`, `get_artifact_workspace_scope`, `get_context_graph_scope`, `read_app_source_file`, `get_related_app_source_files`, `search_app_source_context` | patch only explicit scoped files while using exact source reads and related files as read-only context |
+
+Do not dump a repository into prompts. The current `AppIntelligenceSnapshot`
+summarizes architecture and ownership; `SourceContextBundle` stores selected
+redacted files, chunks, symbols, and imports; agents retrieve exact evidence
+through tools only when their checkpoint needs it.
 
 ## Boundaries
 

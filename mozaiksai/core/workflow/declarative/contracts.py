@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from mozaiksai.core.media.types import MediaPromotionTargetValue
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     infer_workflow_ui_realization,
     validate_workflow_renderable_primitive_ids,
@@ -113,6 +114,22 @@ class PromptSectionSpec(DeclarativeModel):
         return _required_text(value, field_name=info.field_name)
 
 
+class ImageGenerationSpec(DeclarativeModel):
+    quality: Literal["low", "medium", "high", "auto"] | None = None
+    size: str | None = None
+    background: Literal["transparent", "opaque", "auto"] | None = None
+    output_format: Literal["png", "jpeg", "webp"] | None = None
+    output_compression: int | None = Field(default=None, ge=0, le=100)
+    partial_images: int | None = Field(default=None, ge=1, le=3)
+    promotion_targets: list[MediaPromotionTargetValue] = Field(default_factory=list)
+    image_config: dict[str, Any] | None = None
+
+    @field_validator("size", mode="before")
+    @classmethod
+    def _normalize_size(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+
 class AgentSpec(DeclarativeModel):
     name: str
     prompt_sections: list[PromptSectionSpec] = Field(default_factory=list)
@@ -122,7 +139,9 @@ class AgentSpec(DeclarativeModel):
     human_input_mode: str | None = None
     max_consecutive_auto_reply: int = 2
     structured_outputs_required: bool = False
+    multimodal_inputs_enabled: bool = False
     image_generation_enabled: bool = False
+    image_generation: ImageGenerationSpec | None = None
     sandbox_shell: bool = False
     web_search: bool = False
     web_fetch: bool = False
@@ -153,6 +172,8 @@ class AgentSpec(DeclarativeModel):
             raise ValueError(
                 f"agent '{self.name}' must provide prompt_sections/prompt_sections_custom or system_message"
             )
+        if self.image_generation is not None:
+            self.image_generation_enabled = True
         return self
 
 

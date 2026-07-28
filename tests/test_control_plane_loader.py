@@ -31,6 +31,7 @@ def test_load_default_factory_refinement_harness() -> None:
     assert request_intake.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
+        "get_app_intelligence_context",
         "get_stale_artifact_families",
     ]
     scope = pack.checkpoint_by_event("scope_requested")
@@ -41,8 +42,10 @@ def test_load_default_factory_refinement_harness() -> None:
     assert scope.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
+        "get_app_intelligence_context",
         "get_artifact_workspace_catalog",
         "get_context_graph_catalog",
+        "search_app_source_context",
     ]
     assert pack.policies.scope.max_selected_paths == 3
     assert pack.policies.scope.auto_apply_max_paths == 1
@@ -55,8 +58,12 @@ def test_load_default_factory_refinement_harness() -> None:
     assert coding.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
+        "get_app_intelligence_context",
         "get_artifact_workspace_scope",
         "get_context_graph_scope",
+        "search_app_source_context",
+        "read_app_source_file",
+        "get_related_app_source_files",
     ]
     assert pack.prompt_by_id("change_classifier_system") is not None
     assert pack.prompt_by_id("coding_refinement_system") is not None
@@ -66,7 +73,11 @@ def test_load_default_factory_refinement_harness() -> None:
         "get_artifact_workspace_scope",
         "get_artifact_workspace_catalog",
         "get_context_graph_catalog",
+        "get_app_intelligence_context",
         "get_context_graph_scope",
+        "search_app_source_context",
+        "read_app_source_file",
+        "get_related_app_source_files",
         "get_stale_artifact_families",
         "get_contract_surface_context",
         "get_carry_forward_candidates",
@@ -77,7 +88,11 @@ def test_load_default_factory_refinement_harness() -> None:
     assert contract_surface_checkpoint.mode == "ag2_structured_agent"
     assert contract_surface_checkpoint.prompt_id == "contract_surface_selection_system"
     assert contract_surface_checkpoint.output_contract == "ContractSurfaceClassification"
-    assert contract_surface_checkpoint.tool_ids == ["get_contract_surface_context"]
+    assert contract_surface_checkpoint.tool_ids == [
+        "get_contract_surface_context",
+        "get_app_intelligence_context",
+        "search_app_source_context",
+    ]
     assert pack.prompt_by_id("contract_surface_selection_system") is not None
 
 

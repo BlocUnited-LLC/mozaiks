@@ -198,6 +198,17 @@ class TestValidateAgentStructuredOutput:
         assert result is not None
         assert result.validation_passed is True
 
+    def test_fenced_json_string_reply_decoded(self):
+        registry = {"MyAgent": _SampleModel}
+        result = validate_agent_structured_output(
+            agent_name="MyAgent",
+            reply='```json\n{"name": "Bob", "value": 5}\n```',
+            structured_registry=registry,
+        )
+        assert result is not None
+        assert result.validation_passed is True
+        assert result.structured_data == {"name": "Bob", "value": 5}
+
 
 # ---------------------------------------------------------------------------
 # 3. merge_persisted_extra_context

@@ -241,6 +241,62 @@ async def test_handle_resume_request_skips_marked_agentdriven_seed_message(monke
 
 
 @pytest.mark.asyncio
+async def test_handle_resume_request_skips_ui_hidden_messages(monkeypatch):
+    replayer = WorkflowRunReplayer()
+    emitted = []
+
+    async def _fake_send(event, chat_id):  # noqa: ANN001
+        emitted.append((chat_id, event))
+
+    async def _fake_fetch(chat_id, app_id, projection=None):  # noqa: ANN001
+        return {
+            "status": 0,
+            "workflow_name": "ValueEngine",
+            "user_id": "user_1",
+        }
+
+    async def _fake_resume_state(app_id, user_id):  # noqa: ANN001
+        return None
+
+    class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {
+                    "role": "assistant",
+                    "name": "GapAnalysisAgent",
+                    "content": '{"app_name": "ContractorFlow CRM"}',
+                    "metadata": {
+                        "ui_visibility": "hidden",
+                        "trace_reason": "structured_output_artifact",
+                    },
+                },
+                {
+                    "role": "assistant",
+                    "name": "ResearchAgent",
+                    "content": "Visible research summary.",
+                },
+            ]
+
+        async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
+            return None
+
+    monkeypatch.setattr(replayer, "_fetch_chat_doc", _fake_fetch)
+    monkeypatch.setattr(replayer, "_load_resume_state", _fake_resume_state)
+    monkeypatch.setattr(replayer, "_get_persistence_manager", lambda: _FakePM())
+
+    await replayer.handle_resume_request(
+        chat_id="chat_1",
+        app_id="app_1",
+        last_client_index=-1,
+        send_event=_fake_send,
+    )
+
+    text_events = [event for _chat_id, event in emitted if event.get("kind") == "text"]
+    assert len(text_events) == 1
+    assert text_events[0]["content"] == "Visible research summary."
+
+
+@pytest.mark.asyncio
 async def test_handle_resume_request_skips_unmarked_agentdriven_primer_match(monkeypatch):
     replayer = WorkflowRunReplayer()
     emitted = []

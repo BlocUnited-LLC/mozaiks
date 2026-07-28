@@ -148,10 +148,12 @@ def _ownership() -> list[OwnershipBoundary]:
 
 
 def _artifact_refs(suffix: str) -> dict[str, str]:
-    return {
+    refs = {
         artifact_kind: f"av_{artifact_kind}_{suffix}"
         for artifact_kind in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     }
+    refs["source_context_bundle"] = f"av_source_context_bundle_{suffix}"
+    return refs
 
 
 def _context_version(

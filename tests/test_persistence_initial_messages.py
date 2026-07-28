@@ -169,6 +169,16 @@ async def test_load_run_history_filters_hidden_control_and_structured_projection
             ),
             ModelResponse(
                 ModelMessage(
+                    '```json\n{"app_name": "ContractorFlow CRM"}\n```',
+                    metadata={
+                        "agent_name": "GapAnalysisAgent",
+                        "source": "ag2_network_wal",
+                    },
+                ),
+                model="mozaiks.runtime",
+            ),
+            ModelResponse(
+                ModelMessage(
                     "## Competitor Landscape\n\nUseful narrative.",
                     metadata={
                         "agent_name": "ResearchAgent",

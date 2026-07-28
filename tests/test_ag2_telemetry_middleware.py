@@ -8,6 +8,7 @@ telemetry_mod = importlib.import_module("mozaiksai.core.observability.performanc
 AG2TelemetryConfig = telemetry_mod.AG2TelemetryConfig
 build_ag2_span_attributes = telemetry_mod.build_ag2_span_attributes
 build_ag2_telemetry_middleware = telemetry_mod.build_ag2_telemetry_middleware
+configure_otel_from_env = telemetry_mod.configure_otel_from_env
 
 
 class _ContextBridge:
@@ -21,8 +22,18 @@ class _ContextBridge:
 
 
 def test_ag2_telemetry_config_defaults_to_safe_content_capture(monkeypatch):
-    monkeypatch.delenv("MOZAIKS_AG2_TELEMETRY_ENABLED", raising=False)
-    monkeypatch.delenv("MOZAIKS_AG2_TELEMETRY_CAPTURE_CONTENT", raising=False)
+    monkeypatch.delenv("AG2_OTEL_ENABLED", raising=False)
+    monkeypatch.delenv("AG2_OTEL_CAPTURE_MESSAGES", raising=False)
+
+    config = AG2TelemetryConfig.from_env()
+
+    assert config.enabled is False
+    assert config.capture_content is False
+
+
+def test_ag2_telemetry_config_enabled_via_env(monkeypatch):
+    monkeypatch.setenv("AG2_OTEL_ENABLED", "true")
+    monkeypatch.delenv("AG2_OTEL_CAPTURE_MESSAGES", raising=False)
 
     config = AG2TelemetryConfig.from_env()
 
@@ -108,3 +119,20 @@ def test_ag2_telemetry_middleware_factory_accepts_ag2_event_context_call_shape()
     instance = middleware(object(), object())
 
     assert instance.__class__.__name__ == "_TelemetryMiddlewareInstance"
+
+
+def test_configure_otel_from_env_no_ops_when_disabled(monkeypatch):
+    monkeypatch.setenv("AG2_OTEL_ENABLED", "false")
+    result = configure_otel_from_env()
+    assert result is False
+
+
+def test_configure_otel_from_env_console_exporter(monkeypatch):
+    monkeypatch.setenv("AG2_OTEL_ENABLED", "true")
+    monkeypatch.setenv("AG2_OTEL_EXPORTER", "console")
+    monkeypatch.setenv("AG2_OTEL_SERVICE_NAME", "test-svc")
+    try:
+        result = configure_otel_from_env()
+    except ImportError:
+        pytest.skip("opentelemetry-sdk not installed")
+    assert result is True

@@ -19,7 +19,9 @@ CONTEXT_REFRESH_EXPECTED_ARTIFACTS = (
     "risk_report",
     "adoption_plan",
     "brownfield_registration",
+    "source_context_bundle",
     "app_context_graph",
+    "app_intelligence_snapshot",
     "app_context_version",
 )
 

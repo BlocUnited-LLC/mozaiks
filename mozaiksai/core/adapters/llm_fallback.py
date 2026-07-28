@@ -225,24 +225,63 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     api_key = entry.get("api_key") or None
     base_url = entry.get("base_url") or None
     temperature = llm_config.get("temperature")
+    streaming_raw = llm_config.get("streaming")
+    streaming = True if streaming_raw is None else bool(streaming_raw)
+    timeout = llm_config.get("timeout")
 
     if api_type == "google":
         from ag2.config import GeminiConfig  # type: ignore[attr-defined]
-        return GeminiConfig(model=model, api_key=api_key, temperature=temperature, streaming=True)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,
+            "temperature": temperature,
+            "streaming": streaming,
+        }
+        if llm_config.get("response_modalities"):
+            kwargs["response_modalities"] = llm_config["response_modalities"]
+        if llm_config.get("image_config") is not None:
+            kwargs["image_config"] = llm_config["image_config"]
+        return GeminiConfig(**kwargs)
     if api_type == "anthropic":
         from ag2.config import AnthropicConfig  # type: ignore[attr-defined]
-        return AnthropicConfig(model=model, api_key=api_key, temperature=temperature, streaming=True)
+        return AnthropicConfig(model=model, api_key=api_key, temperature=temperature, streaming=streaming)
     if api_type == "ollama":
         from ag2.config import OllamaConfig  # type: ignore[attr-defined]
         return OllamaConfig(
             model=model,
             host=base_url or "http://localhost:11434",
             temperature=temperature,
-            streaming=True,
+            streaming=streaming,
         )
     # openai / azure / default
+    if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
+        from ag2.config import OpenAIResponsesConfig
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "temperature": temperature,
+            "streaming": streaming,
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        for key in ("max_output_tokens", "max_tool_calls", "parallel_tool_calls", "store"):
+            if key in llm_config:
+                kwargs[key] = llm_config[key]
+        return OpenAIResponsesConfig(**kwargs)
+
     from ag2.config import OpenAIConfig
-    return OpenAIConfig(model=model, api_key=api_key, base_url=base_url, temperature=temperature, streaming=True)
+    kwargs = {
+        "model": model,
+        "api_key": api_key,
+        "base_url": base_url,
+        "temperature": temperature,
+        "streaming": streaming,
+    }
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return OpenAIConfig(**kwargs)
 
 
 # ---------------------------------------------------------------------------

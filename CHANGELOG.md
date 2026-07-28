@@ -14,6 +14,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Added the App Intelligence Plane: source-backed indexing now produces an `app_intelligence_snapshot` artifact alongside `source_context_bundle` and `app_context_graph`, with discovery and refinement tools exposing compact architecture, capability, ownership, integration, data, and risk context before agents read exact files.
 - Added a provider-neutral generated app auth contract (`app/config/auth.yaml`) and hardened OIDC PKCE adapter output so authenticated apps keep auth behavior deterministic while leaving provider setup to operators or hosted services.
 - Added workspace handler extension system: `workspace_extensions_contract.yaml` declares the schema for `app/build_context/{pack_id}/extensions.yaml` files that workspace apps use to express extra params, param overrides, and extra actions on top of OSS-generated base handlers without editing generated files.
 - All capability packs (social, messaging, commerce, entitlement_dispatch, mozaikspay/billing_portal, support) now ship a `base_handler.py` / `handler.py` split: the base class contains the full implementation and is always regenerated; the workspace subclass is a thin preserved subclass for app-local overrides. `contract.yaml` for each pack declares `base_handler.py` as `owner: templates` and `handler.py` as `owner: workspace`.
@@ -25,6 +26,10 @@ This project follows a practical pre-1.0 changelog format:
 - Fixed messaging and support pack `module.yaml` handler entrypoints: after the `base_handler.py`/`handler.py` split renamed workspace subclasses from `MessagesModule`/`SupportModule` to `MessagesHandler`/`SupportHandler`, `module.yaml` still declared the old class names, causing `ModuleLoadError` at runtime and in tests.
 - Fixed `scripts/run-infra.ps1` to propagate the `docker compose up` exit code and print an actionable error message when Docker Desktop is not running. Previously the script silently continued on failure.
 - Fixed Vite 8 dev-server startup: added `optimizeDeps.rolldownOptions.moduleTypes: { '.js': 'jsx' }` so the Rolldown pre-scan can parse first-party JSX-in-.js UI files before the transform plugin runs.
+
+### Changed
+
+- Tree-sitter parser packages are now installed with the core Mozaiks package so source-backed Context Graph indexing is part of the default code-context setup.
 
 ### Removed
 

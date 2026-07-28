@@ -1,0 +1,93 @@
+schema_version: mozaiks.module.v1
+module:
+  id: user_onboarding
+  display_name: User Onboarding
+  version: 1.0.0
+  description: >
+    Tracks per-user onboarding tour state. Records which steps a user has
+    completed and whether they have dismissed the tour. Consumed by the
+    installTour() runtime overlay which reads app/config/onboarding.yaml
+    for step definitions and this module for per-user progress.
+  user_data_scope: true
+  handler: backend.handler:UserOnboardingHandler
+
+permissions:
+  - id: onboarding.read
+    description: Read your own onboarding status and step progress.
+  - id: onboarding.manage
+    description: Complete steps and dismiss the onboarding tour.
+
+actions:
+  - id: get_onboarding_status
+    api_surface: public_readonly
+    description: >
+      Return the current onboarding record for the authenticated user.
+      Creates the record on first call.
+    handler_method: get_onboarding_status
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [seen_welcome, dismissed, steps, progress]
+      properties:
+        seen_welcome: { type: boolean }
+        dismissed: { type: boolean }
+        steps: { type: object }
+        progress: { type: integer }
+        completed_at: { type: string }
+    permissions: [onboarding.read]
+
+  - id: complete_step
+    api_surface: public
+    description: Mark a named onboarding step as complete.
+    handler_method: complete_step
+    input_schema:
+      type: object
+      required: [step_id]
+      properties:
+        step_id:
+          type: string
+          enum: [create_app, explore_apps, open_support]
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        steps: { type: object }
+        progress: { type: integer }
+        error: { type: string }
+    permissions: [onboarding.manage]
+    emits: [domain.onboarding.step_completed]
+
+  - id: dismiss_onboarding
+    api_surface: public
+    description: Dismiss the onboarding tour without completing all steps.
+    handler_method: dismiss_onboarding
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+    permissions: [onboarding.manage]
+    emits: [domain.onboarding.dismissed]
+
+capabilities:
+  - capability_id: onboarding.tour.progress.read
+    kind: action
+    target: get_onboarding_status
+    title: Get Onboarding Status
+    permissions: [onboarding.read]
+  - capability_id: onboarding.tour.show
+    kind: action
+    target: complete_step
+    title: Complete Onboarding Step
+    permissions: [onboarding.manage]
+  - capability_id: onboarding.tour.dismiss
+    kind: action
+    target: dismiss_onboarding
+    title: Dismiss Onboarding Tour
+    permissions: [onboarding.manage]

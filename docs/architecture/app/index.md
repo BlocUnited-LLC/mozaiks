@@ -16,6 +16,7 @@ app manifests, app lifecycle, or app-owned service surfaces.
 | [Platform Authoring](platform-authoring.md) | Rules for app, page, admin, and platform authoring |
 | [Surface Model](surface-model.md) | Page, workflow, and module surface ownership |
 | [UI Surface and Layout Architecture](ui-surface-and-layout-architecture.md) | Shell, pages, workflow UI, and layout boundaries |
+| [App Dashboard Contract](app-dashboard-contract.md) | Canonical Workspace/App Dashboard manifest, portal lanes, panels, and workflow-launch boundaries |
 | [Admin System](admin-system.md) | Admin surface ownership and contract |
 | [Platform Navigation Contract](platform-navigation-contract.md) | Canonical ownership for Profile, Admin Portal, Studio, App Shell, Create, and resume |
 | [Account, Admin, and Platform Services](account-admin-and-platform-services.md) | Account/admin/platform service boundaries |

@@ -21,6 +21,7 @@ the peer architecture sections for details:
 | [Platform Terminology and Brand Language](platform-terminology-and-brand-language.md) | Customer-facing and internal vocabulary |
 | [Platform Information Architecture](platform-information-architecture.md) | Studio and app-level IA contracts |
 | [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md) | Ownership boundaries between runtime, product, and app bundle |
+| [App Intelligence Plane](app-intelligence-plane.md) | Shared code-context, graph, intelligence snapshot, and agent retrieval substrate |
 | [Graph Authority Boundaries](graph-authority-boundaries.md) | Source-of-truth boundaries for config, runtime, DB, and derived graph indexes |
 | [Context Graph and Code Intelligence](context-graph-and-code-intelligence.md) | Context Graph contract, deterministic code extraction, contract mapping, and advisory semantic annotations |
 | [App Context and Brownfield Adoption](app-context-and-brownfield-adoption.md) | Unified app context, brownfield onboarding, and Refinement Engine ownership boundaries |

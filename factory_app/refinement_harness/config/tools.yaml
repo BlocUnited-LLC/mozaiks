@@ -35,10 +35,40 @@ tools:
     entrypoint: factory_app.refinement_harness.tools.get_context_graph_catalog:get_context_graph_catalog
     available_to:
       - scope_requested
+  - id: get_app_intelligence_context
+    kind: context_tool
+    description: Load compact App Intelligence for the current app or selected artifact, including architecture, capability, ownership, integration, data, risk, and agent-context policy summaries without raw source contents.
+    entrypoint: factory_app.refinement_harness.tools.app_intelligence:get_app_intelligence_context
+    available_to:
+      - request_submitted
+      - scope_requested
+      - contract_surface_requested
+      - coding_requested
   - id: get_context_graph_scope
     kind: context_tool
     description: Load graph-neighborhood context for explicitly scoped files, including related files, symbols, and edges from the current app/artifact Context Graph.
     entrypoint: factory_app.refinement_harness.tools.get_context_graph_scope:get_context_graph_scope
+    available_to:
+      - coding_requested
+  - id: search_app_source_context
+    kind: context_tool
+    description: Search the current persisted SourceContextBundle, falling back to the selected artifact workspace when current app context is unavailable.
+    entrypoint: factory_app.refinement_harness.tools.source_context:search_app_source_context
+    available_to:
+      - scope_requested
+      - contract_surface_requested
+      - coding_requested
+  - id: read_app_source_file
+    kind: context_tool
+    description: Read one exact file from the current SourceContextBundle or selected artifact workspace source corpus by indexed path.
+    entrypoint: factory_app.refinement_harness.tools.source_context:read_app_source_file
+    available_to:
+      - scope_requested
+      - coding_requested
+  - id: get_related_app_source_files
+    kind: context_tool
+    description: Return related indexed source files for a selected path using SourceContextBundle import and directory relationships.
+    entrypoint: factory_app.refinement_harness.tools.source_context:get_related_app_source_files
     available_to:
       - coding_requested
   - id: get_stale_artifact_families

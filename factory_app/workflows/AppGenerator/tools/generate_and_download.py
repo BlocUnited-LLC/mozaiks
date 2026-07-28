@@ -656,6 +656,8 @@ async def _register_app_bundle_artifact_version(
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
     }
+    if app_dir is not None:
+        bundle_content_metadata["workspace_dir"] = str(app_dir.resolve())
     build_registry_id = _context_get(context_variables, "build_registry_id")
     if build_registry_id:
         bundle_content_metadata["build_registry_id"] = str(build_registry_id)

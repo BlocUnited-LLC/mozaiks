@@ -1,6 +1,6 @@
 # AG2 Execution Alignment Plan
 
-This document audits Mozaiks workflow execution against AG2 1.0 beta Network and
+This document audits Mozaiks workflow execution against AG2 1.0 Network and
 Task APIs. The goal is to shrink Mozaiks-owned agentic runtime code and keep
 Mozaiks focused on deterministic contracts around AG2.
 
@@ -18,7 +18,7 @@ Reviewed against:
   - <https://docs.ag2.ai/latest/docs/beta/network/task_observation/>
   - <https://docs.ag2.ai/latest/docs/beta/tasks/>
   - <https://docs.ag2.ai/latest/docs/beta/task_delegation/>
-- Installed AG2 package inspected locally: `ag2==1.0.0b0`.
+- Installed AG2 package inspected locally: `ag2==1.0.0`.
 
 Important AG2 facts:
 

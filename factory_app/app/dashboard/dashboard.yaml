@@ -1,0 +1,82 @@
+schema_version: mozaiks.dashboard.v1
+extends: default
+
+# Factory app intentionally uses the canonical Workspace Dashboard + App
+# Dashboard lanes. App Zero and customer app workspaces can overlay individual
+# portals by id without replacing the whole default contract.
+
+workspace:
+  portals:
+    - id: portfolio
+      label: Apps
+      route: /apps
+      icon: apps
+      order: 0
+
+    - id: usage
+      label: Usage
+      route: /usage
+      icon: chart
+      order: 20
+
+    - id: integrations
+      label: Integrations
+      route: /integrations
+      icon: plug
+      order: 30
+
+app:
+  portals:
+    - id: overview
+      label: Overview
+      route: /apps/:appId/overview
+      icon: dashboard
+      order: 0
+
+    - id: building
+      label: Building
+      route: /apps/:appId/building
+      icon: hammer
+      order: 10
+
+    - id: branding
+      label: Branding
+      route: /apps/:appId/branding
+      icon: palette
+      order: 20
+
+    - id: launch
+      label: Launch
+      route: /apps/:appId/launch
+      icon: rocket
+      order: 30
+
+    - id: growth
+      label: Growth
+      route: /apps/:appId/growth
+      icon: megaphone
+      order: 40
+
+    - id: users
+      label: Users
+      route: /apps/:appId/access
+      icon: users
+      order: 50
+
+    - id: usage
+      label: Usage
+      route: /apps/:appId/usage
+      icon: chart
+      order: 60
+
+    - id: support
+      label: Support
+      route: /apps/:appId/support
+      icon: support
+      order: 70
+
+    - id: settings
+      label: Settings
+      route: /apps/:appId/settings
+      icon: settings
+      order: 90

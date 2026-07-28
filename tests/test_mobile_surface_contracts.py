@@ -259,6 +259,8 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
+        # ExistingAppDiscovery on_start preload card — emitted before agent speaks
+        "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryPreloadCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
         # SubscriptionContractDesigner agentic UI artifact — approval card for contract review

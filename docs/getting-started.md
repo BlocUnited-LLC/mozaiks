@@ -6,6 +6,11 @@
 - Node.js 18+
 - Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) (used to run MongoDB)
 
+Mozaiks installs Tree-sitter parser packages with the core Python package so
+Studio can build source-backed App Intelligence for generated and existing
+apps.
+No separate parser setup is required.
+
 ## 1. Install
 
 === "Windows"
@@ -95,6 +100,19 @@ Studio in your browser at `http://localhost:3000`.
 4. Review and promote the generated app when it's ready
 
 In-progress builds stay in **Apps** so you can always pick up where you left off.
+
+## Code Context Infrastructure
+
+Mozaiks indexes app source into a `SourceContextBundle`, `AppContextGraph`, and
+`AppIntelligenceSnapshot` after generated artifacts, workspace snapshots, or
+existing-app discovery. This is automatic and uses Tree-sitter-backed parsing
+where supported.
+
+For local quickstarts, graph snapshots are stored with Mozaiks artifacts. For
+team or production deployments with large repositories, plan to run FalkorDB as
+the graph-query mirror for faster multi-hop queries and Studio visualization.
+FalkorDB mirrors canonical AppContext and App Intelligence artifacts; it does
+not replace them.
 
 !!! tip "Coming back to an existing workspace"
 

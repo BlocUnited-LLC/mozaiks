@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   TransitionChoicePanel,
   useTransitionMotion,
@@ -18,9 +19,45 @@ const DISCOVERY_STEPS = [
   },
 ];
 
-export default function BrownfieldDiscoveryIntro({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
+function useGithubOauthPopup() {
+  const popupRef = useRef(null);
+  const [sessionKey, setSessionKey] = useState(null);
+
+  const handleMessage = useCallback((event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'github_oauth_complete' && data.session_key) {
+      setSessionKey(data.session_key);
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      popupRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [handleMessage]);
+
+  return sessionKey;
+}
+
+export default function BrownfieldDiscoveryIntro({
+  transition,
+  onResolve,
+  overlayTitleId,
+  overlayDescriptionId,
+}) {
   const option = Array.isArray(transition?.options) ? transition.options[0] : null;
   const motion = useTransitionMotion();
+  const sessionKey = useGithubOauthPopup();
+
+  const handleStart = () => {
+    if (!option) return;
+    const contextVariables = {};
+    if (sessionKey) contextVariables.github_oauth_session = sessionKey;
+    onResolve(option.id, contextVariables);
+  };
 
   return (
     <TransitionChoicePanel
@@ -50,7 +87,7 @@ export default function BrownfieldDiscoveryIntro({ transition, onResolve, overla
         <div className="mx-auto w-full max-w-3xl">
           <button
             type="button"
-            onClick={() => onResolve(option.id)}
+            onClick={handleStart}
             className="w-full rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:ring-offset-2 focus:ring-offset-background"
           >
             Start Discovery

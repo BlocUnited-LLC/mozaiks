@@ -1,0 +1,26 @@
+context_id: onboarding
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+pack:
+  id: onboarding
+  status: active
+  capability_source: config_file
+  description: >
+    Lightweight optional pack that produces a declarative tour-step config file
+    and a thin state-tracking module. The OSS runtime reads app/config/onboarding.yaml
+    at startup and runs the built-in installTour() overlay. If the file is absent
+    the tour is entirely disabled — no runtime cost.
+capabilities:
+  - capability_id: onboarding.tour.show
+    facade_recommended: user_onboarding
+  - capability_id: onboarding.tour.dismiss
+    facade_recommended: user_onboarding
+  - capability_id: onboarding.tour.progress.read
+    facade_recommended: user_onboarding
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

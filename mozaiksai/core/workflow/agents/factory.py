@@ -6,13 +6,19 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 from typing import Any
 
 from ag2 import Agent
 
 from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
+from mozaiksai.core.media.ag2 import (
+    build_ag2_image_generation_tools,
+    image_generation_enabled,
+    prepare_llm_config_for_media,
+)
+from mozaiksai.core.media.middleware import build_ag2_media_harvest_middleware
 
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
@@ -29,6 +35,72 @@ from ..workflow_manager import workflow_manager
 from .a2a import create_a2a_remote_agent, load_a2a_agent_specs
 
 logger = logging.getLogger(__name__)
+_conv_logger = logging.getLogger("mozaiks.workflow.agent_messages")
+
+_SENSITIVE_CONTEXT_KEY_PARTS = (
+    "authorization",
+    "cookie",
+    "credential",
+    "key",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _safe_context_keys(context_dict: dict[str, Any]) -> list[str]:
+    """Return context keys that are useful for debugging and safe to list."""
+
+    keys: list[str] = []
+    for key in sorted(str(raw_key) for raw_key in context_dict):
+        lowered = key.lower()
+        if any(part in lowered for part in _SENSITIVE_CONTEXT_KEY_PARTS):
+            continue
+        keys.append(key)
+    return keys
+
+
+def _log_existing_app_discovery_projection(
+    *,
+    agent_name: str,
+    agent_variables: list[str],
+    context_dict: dict[str, Any],
+    system_message: str,
+) -> None:
+    """Log evidence coverage without writing repository content or credentials."""
+    if agent_name != "DiscoveryHostAgent":
+        return
+
+    evidence_keys = (
+        "preload_summary",
+        "repo_summary",
+        "frontend_repo_summary",
+        "backend_repo_summary",
+        "api_inventory",
+        "runtime_observations",
+        "auth_hypothesis",
+        "app_name",
+        "tech_stack",
+        "existing_experience_summary",
+    )
+    present = [key for key in evidence_keys if context_dict.get(key)]
+    missing = [key for key in evidence_keys if key not in present]
+    prompt_markers = [key for key in evidence_keys if f"{key.upper()}:" in system_message]
+    repo_summary = context_dict.get("repo_summary")
+    logger.info(
+        "[EXISTING_APP_DISCOVERY_CONTEXT_PROJECTION] agent=%s preload_status=%s "
+        "ready=%s declared=%s evidence_present=%s evidence_missing=%s "
+        "prompt_markers=%s repo_scan_success=%s prompt_chars=%s",
+        agent_name,
+        context_dict.get("preload_status"),
+        bool(context_dict.get("preloaded_context_ready")),
+        len(agent_variables),
+        present,
+        missing,
+        prompt_markers,
+        bool(isinstance(repo_summary, dict) and repo_summary.get("success")),
+        len(system_message),
+    )
 
 
 # ------------------------------------------------------------------
@@ -193,6 +265,7 @@ async def create_agents(
     """Create AG2 Agent instances for a workflow."""
 
     logger.debug("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
+
     from time import perf_counter
 
     start_time = perf_counter()
@@ -295,6 +368,8 @@ async def create_agents(
             llm_config_dict = base_llm_config
 
         try:
+            if agent_name not in auto_tool_agent_names:
+                llm_config_dict = prepare_llm_config_for_media(agent_config, llm_config_dict)
             model_config = llm_config_to_ag2_config(llm_config_dict)
         except Exception as cfg_err:
             logger.error("[AGENTS] Cannot build AG2 ModelConfig for '%s': %s", agent_name, cfg_err)
@@ -316,6 +391,44 @@ async def create_agents(
             system_message = _apply_context_exposures(
                 system_message, agent_exposures, context_dict, agent_variables,
             )
+
+        _log_existing_app_discovery_projection(
+            agent_name=agent_name,
+            agent_variables=agent_variables,
+            context_dict=context_dict,
+            system_message=system_message,
+        )
+        visible_context_keys = _safe_context_keys(context_dict)
+        _conv_logger.info(
+            "[%s] AGENT_CONTEXT_READY agent=%s context_keys=%s exposed=%s declared=%s "
+            "prompt_chars=%s",
+            workflow_name,
+            agent_name,
+            visible_context_keys,
+            agent_exposures,
+            agent_variables,
+            len(system_message),
+            extra={
+                "agent_transcript_scope": "summary",
+                "workflow_name": workflow_name,
+                "agent_name": agent_name,
+                "context_key_count": len(visible_context_keys),
+            },
+        )
+
+        # Full prompt transcripts are only written when their dedicated logger
+        # has been explicitly enabled by the local operator.
+        _conv_logger.info(
+            "[%s] AGENT_SYSTEM_PROMPT agent=%s\n%s",
+            workflow_name,
+            agent_name,
+            system_message,
+            extra={
+                "agent_transcript_scope": "full",
+                "workflow_name": workflow_name,
+                "agent_name": agent_name,
+            },
+        )
 
         # Tool binding (skip for auto_tool_call agents — they don't call tools directly)
         auto_tool_call_enabled = agent_name in auto_tool_agent_names
@@ -387,10 +500,26 @@ async def create_agents(
                     dd_err,
                 )
 
+        image_generation_tools: list[Any] = []
+        if not auto_tool_call_enabled:
+            image_generation_tools = build_ag2_image_generation_tools(
+                agent_config,
+                llm_config_dict,
+                logger=logger,
+                agent_name=agent_name,
+            )
+            if image_generation_tools:
+                logger.debug("[AGENTS] ImageGenerationTool attached to '%s'", agent_name)
+        elif image_generation_enabled(agent_config):
+            logger.warning(
+                "[AGENTS] image_generation_enabled ignored for auto_tool_call agent '%s'",
+                agent_name,
+            )
+
         # Wrap tools to inject context_variables
         wrapped_tools: list[Any] = [
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
-        ] + shell_tools + web_tools
+        ] + shell_tools + web_tools + image_generation_tools
 
         # Load workflow-local AG2 1.0 beta prompt middleware declarations.
         prompt_middleware_functions: list[Callable] = []
@@ -472,6 +601,32 @@ async def create_agents(
             )
         except Exception as usage_err:
             logger.debug("[AGENTS] AG2 usage middleware skipped for '%s': %s", agent_name, usage_err)
+
+        if not auto_tool_call_enabled and image_generation_enabled(agent_config):
+            try:
+                raw_media_config = agent_config.get("image_generation") if isinstance(agent_config, Mapping) else None
+                media_generation_params = dict(raw_media_config) if isinstance(raw_media_config, Mapping) else {}
+                media_promotion_targets = media_generation_params.get("promotion_targets")
+                middleware.append(
+                    build_ag2_media_harvest_middleware(
+                        agent_name=agent_name,
+                        workflow_name=workflow_name,
+                        context_variables=context_bridge,
+                        generation_params=media_generation_params,
+                        promotion_targets=media_promotion_targets if isinstance(media_promotion_targets, list) else None,
+                    )
+                )
+            except Exception as media_err:
+                logger.debug("[AGENTS] AG2 media harvest middleware skipped for '%s': %s", agent_name, media_err)
+
+        try:
+            from mozaiksai.core.observability import build_ag2_metrics_middleware
+
+            metrics_middleware = build_ag2_metrics_middleware()
+            if metrics_middleware is not None:
+                middleware.append(metrics_middleware)
+        except Exception as metrics_err:
+            logger.debug("[AGENTS] AG2 metrics middleware skipped for '%s': %s", agent_name, metrics_err)
 
         try:
             from mozaiksai.core.observability import build_ag2_token_watchdog_observers

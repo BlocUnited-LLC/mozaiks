@@ -44,6 +44,18 @@ def _set_context_value(context_variables: Any, key: str, value: Any) -> None:
         return
 
 
+def _get_context_value(context_variables: Any, key: str, default: Any = None) -> Any:
+    try:
+        if hasattr(context_variables, "get"):
+            return context_variables.get(key, default)
+    except Exception:
+        pass
+    try:
+        return context_variables[key]
+    except Exception:
+        return default
+
+
 def _artifact_version_id(version_doc: Any) -> str | None:
     if hasattr(version_doc, "id"):
         return str(version_doc.id)
@@ -198,8 +210,8 @@ async def save_existing_app_artifacts(
     context_variables["existing_app_discovery_artifact"] = data
 
     # ------------------------------------------------------------------
-    # Derive canonical app-context contract drafts for future control-plane use.
-    # Existing workflow outputs remain unchanged; these drafts are additive.
+    # Derive canonical app-context artifacts for the App Intelligence Plane.
+    # Workflow-local discovery output remains evidence; AppContext is the handoff.
     # ------------------------------------------------------------------
     try:
         app_context_artifacts = build_existing_app_context_artifacts(
@@ -207,6 +219,12 @@ async def save_existing_app_artifacts(
             context_variables=context_variables,
         )
         app_context_payloads = app_context_artifacts.as_artifact_payloads()
+        source_context_bundle = _get_context_value(context_variables, "source_context_bundle")
+        if isinstance(source_context_bundle, dict) and source_context_bundle:
+            app_context_payloads["source_context_bundle"] = source_context_bundle
+        app_intelligence_snapshot = _get_context_value(context_variables, "app_intelligence_snapshot")
+        if isinstance(app_intelligence_snapshot, dict) and app_intelligence_snapshot:
+            app_context_payloads["app_intelligence_snapshot"] = app_intelligence_snapshot
         _set_context_value(context_variables, "application_inventory", app_context_payloads["application_inventory"])
         _set_context_value(context_variables, "ownership_boundary", app_context_payloads["ownership_boundary"])
         _set_context_value(
@@ -226,6 +244,18 @@ async def save_existing_app_artifacts(
                 context_variables,
                 "app_context_graph",
                 app_context_payloads["app_context_graph"],
+            )
+        if "source_context_bundle" in app_context_payloads:
+            _set_context_value(
+                context_variables,
+                "source_context_bundle",
+                app_context_payloads["source_context_bundle"],
+            )
+        if "app_intelligence_snapshot" in app_context_payloads:
+            _set_context_value(
+                context_variables,
+                "app_intelligence_snapshot",
+                app_context_payloads["app_intelligence_snapshot"],
             )
         _set_context_value(
             context_variables,

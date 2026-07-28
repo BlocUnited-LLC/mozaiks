@@ -1,7 +1,16 @@
 # App Dashboard
 
-App dashboard pages manage one app. The header always shows which app you are
-viewing, its current lifecycle state, and what to do next.
+App Dashboard is the canonical owner/operator portal for one Mozaiks app. It is
+paired with the Workspace Dashboard, which manages the full app portfolio.
+
+Dashboard structure is declared by the OSS dashboard manifest contract:
+
+```text
+app/dashboard/dashboard.yaml
+```
+
+See [App Dashboard Contract](../architecture/app/app-dashboard-contract.md) for
+the runtime schema, manifest overlay rules, and ownership boundaries.
 
 ## Overview
 
@@ -14,6 +23,25 @@ configure integrations.
 
 Secondary panels link to deeper diagnostic and history pages, but the primary
 action appears only once.
+
+## Portals
+
+The default App Dashboard has these portal lanes:
+
+| Portal | Route | Purpose |
+| --- | --- | --- |
+| Overview | `/apps/:appId/overview` | App identity, lifecycle state, KPIs, and next step. |
+| Building | `/apps/:appId/building` | Build threads, artifact versions, approvals, votes, and build workflow launches. |
+| Branding | `/apps/:appId/branding` | Brand kit, themes, logos, generated media, and promoted assets. |
+| Launch | `/apps/:appId/launch` | Landing page, hosting, domains, and deployment readiness. |
+| Growth | `/apps/:appId/growth` | Marketing campaigns, landing page improvement, and campaign assets. |
+| Users | `/apps/:appId/access` | Users, roles, invitations, access blockers, and policy summaries. |
+| Usage | `/apps/:appId/usage` | App chats, workflows, tokens, cost, quotas, and usage limits. |
+| Support | `/apps/:appId/support` | App-scoped support threads and follow-up. |
+| Settings | `/apps/:appId/settings` | App configuration and management forms. |
+
+Apps may hide or extend portals through the dashboard manifest. Capability packs
+can contribute panels without taking over the whole dashboard.
 
 ## Support
 

@@ -31,6 +31,7 @@ import mozaiksai.core.transport.simple_transport as simple_transport_module
 import mozaiksai.core.workflow.orchestration_patterns as orchestration_patterns_module
 import mozaiksai.core.workflow.outputs.structured as structured_outputs_module
 import mozaiksai.core.workflow.task_batches as task_batches_module
+import mozaiksai.core.workflow.workflow_manager as workflow_manager_module
 from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -60,6 +61,10 @@ class _PlannerOutput(BaseModel):
 
 class _WorkerOutput(BaseModel):
     worker_done: bool
+
+
+class _ConceptBlueprintLite(BaseModel):
+    app_name: str
 
 
 class _ContextMutatingAgent(_DeterministicAgent):
@@ -117,6 +122,14 @@ class _HiddenTextManager:
         return agent_name == "ValueInterviewAgent" and str(text).strip() == "NEXT"
 
 
+class _StructuredOutputDispatcher:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def emit(self, kind: str, payload: dict[str, Any]) -> None:
+        self.calls.append((kind, payload))
+
+
 @pytest.mark.asyncio
 async def test_ag2_projection_hides_control_signal_and_structured_json() -> None:
     runner_result = SimpleNamespace(
@@ -131,6 +144,11 @@ async def test_ag2_projection_hides_control_signal_and_structured_json() -> None
                 "event_type": "ag2.packet",
                 "sender_id": "agent-2",
                 "event_data": {"body": json.dumps({"app_name": "ContractorFlow CRM"})},
+            },
+            {
+                "event_type": "ag2.packet",
+                "sender_id": "agent-2-alias",
+                "event_data": {"body": '```json\n{"app_name": "ContractorFlow CRM"}\n```'},
             },
             {
                 "event_type": "ag2.packet",
@@ -151,6 +169,7 @@ async def test_ag2_projection_hides_control_signal_and_structured_json() -> None
         agent_name_by_id={
             "agent-1": "ValueInterviewAgent",
             "agent-2": "GapAnalysisAgent",
+            "agent-2-alias": "gap_analysis_agent",
             "agent-3": "ResearchAgent",
         },
         initial_sequence=0,
@@ -170,11 +189,65 @@ async def test_ag2_projection_hides_control_signal_and_structured_json() -> None
     assert [item["content"] for item in hidden] == [
         "NEXT",
         '{"app_name": "ContractorFlow CRM"}',
+        '```json\n{"app_name": "ContractorFlow CRM"}\n```',
     ]
     assert [item["metadata"]["trace_reason"] for item in hidden] == [
         "ui_hidden_agent_text",
         "structured_output_artifact",
+        "structured_output_artifact",
     ]
+
+
+@pytest.mark.asyncio
+async def test_ag2_structured_outputs_emit_runtime_event_and_update_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dispatcher = _StructuredOutputDispatcher()
+    context_dict = {"workflow_name": "ValueEngine", "app_id": "app-1", "chat_id": "chat-1"}
+    context_bridge = ContextVariablesBridge(dict(context_dict))
+    runner_result = SimpleNamespace(
+        structured_outputs=[
+            {
+                "agent": "GapAnalysisAgent",
+                "model_name": "_ConceptBlueprintLite",
+                "structured_data": {"app_name": "ContractorFlow CRM"},
+            }
+        ],
+    )
+
+    monkeypatch.setattr(
+        "mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher",
+        lambda: dispatcher,
+    )
+    monkeypatch.setattr(
+        workflow_manager_module.workflow_manager,
+        "get_auto_tool_agents",
+        lambda workflow_name: {"GapAnalysisAgent"},
+    )
+
+    await orchestration_patterns_module._emit_validated_structured_outputs_from_runner_result(
+        runner_result=runner_result,
+        workflow_name="ValueEngine",
+        chat_id="chat-1",
+        app_id="app-1",
+        user_id="user-1",
+        turn_sequence_start=4,
+        context_vars_dict=context_dict,
+        context_bridge=context_bridge,
+        structured_registry={"GapAnalysisAgent": _ConceptBlueprintLite},
+        wf_logger=SimpleNamespace(debug=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
+    )
+
+    assert context_dict["structured_output"] == {"app_name": "ContractorFlow CRM"}
+    assert context_dict["_ConceptBlueprintLite"] == {"app_name": "ContractorFlow CRM"}
+    assert context_bridge.get("structured_output") == {"app_name": "ContractorFlow CRM"}
+    assert context_bridge.get("_ConceptBlueprintLite") == {"app_name": "ContractorFlow CRM"}
+    assert len(dispatcher.calls) == 1
+    kind, payload = dispatcher.calls[0]
+    assert kind == "runtime.agent_output_validated"
+    assert payload["agent_name"] == "GapAnalysisAgent"
+    assert payload["auto_tool_call"] is True
+    assert payload["structured_data"] == {"app_name": "ContractorFlow CRM"}
 
 
 class _FailingContextMutatingAgent(Agent):
@@ -745,6 +818,16 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     transport = _Transport()
     planner_agent = _DeterministicAgent("PlannerAgent", '{"plan_ready": true}')
     worker_agent = _DeterministicAgent("WorkerAgent", '{"worker_done": true}')
+    observed_preload: dict[str, Any] = {}
+
+    class _PreloadLifecycle:
+        async def trigger_before_chat(self, *, context_variables: dict[str, Any]) -> None:
+            context_variables["preload_status"] = "ready"
+            context_variables["preload_summary"] = "Repo scan loaded React and FastAPI evidence."
+            context_variables["preloaded_context_ready"] = True
+
+        async def execute_trigger(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
 
     async def _get_transport() -> _Transport:
         return transport
@@ -752,6 +835,7 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     async def _agents_factory(workflow_name: str, context: Any, cache_seed: int) -> dict[str, Agent]:
         assert workflow_name == "AlignmentSmoke"
         assert cache_seed == 7
+        observed_preload.update(dict(context))
         return {"PlannerAgent": planner_agent, "WorkerAgent": worker_agent}
 
     monkeypatch.setattr(orchestration_patterns_module, "AG2PersistenceManager", lambda: persistence)
@@ -786,6 +870,8 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     )
     monkeypatch.setattr(task_batches_module, "load_task_batches_config", lambda workflow_name: None)
     monkeypatch.setattr(structured_outputs_module, "load_workflow_structured_outputs", lambda workflow_name: ({}, {}))
+    from mozaiksai.core.workflow.execution import lifecycle as lifecycle_module
+    monkeypatch.setattr(lifecycle_module, "get_lifecycle_manager", lambda _workflow: _PreloadLifecycle())
 
     result = await run_workflow_orchestration(
         workflow_name="AlignmentSmoke",
@@ -801,6 +887,9 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     assert result["run_completed"] is True
     assert result["ag2_channel_id"]
     assert result["ag2_close_reason"] == "workflow_complete"
+    assert observed_preload["preload_status"] == "ready"
+    assert observed_preload["preload_summary"] == "Repo scan loaded React and FastAPI evidence."
+    assert observed_preload["preloaded_context_ready"] is True
     assert planner_agent.ask_calls
     assert worker_agent.ask_calls
     assert [event["kind"] for _, event in transport.events].count("chat.text") == 2

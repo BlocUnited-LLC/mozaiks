@@ -142,7 +142,7 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
 
   const onResolve = useCallback(
     (option_id, contextVariables = {}) => {
-      onNavigate?.(option_id, contextVariables);
+      return onNavigate?.(option_id, contextVariables);
     },
     [onNavigate]
   );
