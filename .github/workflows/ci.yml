@@ -264,7 +264,7 @@ jobs:
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
 
       - name: Upload visual diff artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: visual-regression-diffs
