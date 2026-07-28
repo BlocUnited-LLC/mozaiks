@@ -443,10 +443,12 @@ async def save_connector(
                 vault_provider,
                 error,
             )
+
     return {
         "success": success,
         "connector": record,
         "error": error,
+        "health_check_supported": success and connector_health_check_supported(normalized_service),
     }
 
 

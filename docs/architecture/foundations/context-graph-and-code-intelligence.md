@@ -304,6 +304,15 @@ The local developer CLI exposes the same bootstrap path:
 mozaiks context snapshot --app-id mozaiks-app --workspace C:/path/to/mozaiks-app --json
 ```
 
+The local App Intelligence acceptance gate exercises the same path end to end
+and verifies that refinement tools and the `ExistingAppDiscovery` chat overview
+consume the registered context:
+
+```bash
+MOZAIKS_APP_WORKSPACE_PATH=C:/path/to/mozaiks-app \
+  python -m pytest --no-cov tests/test_workspace_app_intelligence_acceptance.py -q
+```
+
 That helper creates:
 
 - a current `app_bundle` artifact containing the selected code-context
