@@ -80,7 +80,7 @@ def test_agent_conversation_filter_keeps_summary_and_gates_full_prompt_records()
 
 
 def test_pretty_formatter_redacts_quoted_modern_api_keys() -> None:
-    key = "sk-proj-abcdefghijklmno123456789"
+    key = "sk-proj-test-redaction-key"
     record = logging.LogRecord(
         name="tests.logging",
         level=logging.DEBUG,
