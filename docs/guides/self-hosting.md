@@ -243,9 +243,9 @@ Mozaiks instance.
 **Grafana** is a free tool for visualizing metrics — think of it as a live
 dashboard showing request rates, error rates, latency, and token usage.
 
-The Mozaiks container exposes Prometheus metrics at `/metrics` when
-`PROMETHEUS_METRICS_ENABLED=true`. Grafana reads those metrics and renders
-the charts.
+The Mozaiks container exposes AG2-level Prometheus metrics at `/metrics/ag2` when
+`AG2_METRICS_ENABLED=true` (requires `pip install "ag2[metrics]"`). Grafana reads
+those metrics and renders the charts. Set `AG2_METRICS_PATH` to override the path.
 
 To use it:
 

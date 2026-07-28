@@ -424,6 +424,96 @@ async def purge_orphaned_usage(
 
 
 # ---------------------------------------------------------------------------
+# Runtime metrics — live AG2 agent/LLM/tool signals from MetricsMiddleware
+# ---------------------------------------------------------------------------
+
+@router.get("/metrics/runtime")
+async def get_runtime_agent_metrics(
+    user: UserPrincipal = Depends(_require_admin),
+):
+    """Return a structured summary of live AG2 agent/LLM/tool metrics.
+
+    Reads from the in-process Prometheus CollectorRegistry populated by
+    AG2 MetricsMiddleware. Returns ``{"available": false}`` when
+    AG2_METRICS_ENABLED is not set or ag2[metrics] is not installed.
+
+    Metrics reset on server restart — use /api/admin/usage for durable token history.
+    """
+    try:
+        from mozaiksai.core.observability import get_metrics_registry
+
+        registry = get_metrics_registry()
+        if registry is None:
+            return {"available": False, "reason": "AG2_METRICS_ENABLED is not enabled"}
+
+        agent_turns: dict[str, Any] = {"total": 0, "by_outcome": {}}
+        llm_calls: dict[str, Any] = {"total": 0, "duration_sum": 0.0, "duration_count": 0, "by_model": {}}
+        llm_tokens: dict[str, int] = {"input": 0, "output": 0, "total": 0}
+        tool_calls: dict[str, Any] = {"total": 0, "by_outcome": {}}
+
+        for metric_family in registry.collect():
+            name: str = metric_family.name
+            for sample in metric_family.samples:
+                val = float(sample.value or 0)
+                labels: dict = sample.labels or {}
+
+                if name == "ag2_agent_turns_total":
+                    agent_turns["total"] += val
+                    outcome = labels.get("outcome", "unknown")
+                    agent_turns["by_outcome"][outcome] = agent_turns["by_outcome"].get(outcome, 0) + val
+
+                elif name == "ag2_llm_calls_total":
+                    llm_calls["total"] += val
+                    model = labels.get("model", "unknown")
+                    llm_calls["by_model"][model] = llm_calls["by_model"].get(model, 0) + val
+
+                elif name == "ag2_llm_call_duration_seconds_sum":
+                    llm_calls["duration_sum"] += val
+                elif name == "ag2_llm_call_duration_seconds_count":
+                    llm_calls["duration_count"] += val
+
+                elif name == "ag2_llm_tokens_total":
+                    token_type = labels.get("token_type", "total")
+                    if token_type == "input":
+                        llm_tokens["input"] += int(val)
+                    elif token_type == "output":
+                        llm_tokens["output"] += int(val)
+                    llm_tokens["total"] = llm_tokens["input"] + llm_tokens["output"]
+
+                elif name == "ag2_tool_calls_total":
+                    tool_calls["total"] += val
+                    outcome = labels.get("outcome", "unknown")
+                    tool_calls["by_outcome"][outcome] = tool_calls["by_outcome"].get(outcome, 0) + val
+
+        avg_llm_duration = (
+            round(llm_calls["duration_sum"] / llm_calls["duration_count"], 3)
+            if llm_calls["duration_count"] > 0
+            else None
+        )
+
+        return {
+            "available": True,
+            "agent_turns": {
+                "total": int(agent_turns["total"]),
+                "by_outcome": {k: int(v) for k, v in agent_turns["by_outcome"].items()},
+            },
+            "llm_calls": {
+                "total": int(llm_calls["total"]),
+                "avg_duration_seconds": avg_llm_duration,
+                "by_model": {k: int(v) for k, v in llm_calls["by_model"].items()},
+            },
+            "llm_tokens": llm_tokens,
+            "tool_calls": {
+                "total": int(tool_calls["total"]),
+                "by_outcome": {k: int(v) for k, v in tool_calls["by_outcome"].items()},
+            },
+        }
+    except Exception as exc:
+        logger.warning("[admin] runtime metrics unavailable: %s", exc)
+        return {"available": False, "reason": str(exc)}
+
+
+# ---------------------------------------------------------------------------
 # Sessions — persisted chat sessions from MongoDB
 # ---------------------------------------------------------------------------
 

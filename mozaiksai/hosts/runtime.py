@@ -48,7 +48,6 @@ from mozaiksai.core.cache.redis_cache import get_redis_cache
 from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
-from mozaiksai.core.metrics.prometheus_exporter import build_metrics_router
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.event_bus import get_event_bus
 from mozaiksai.core.runtime.persistence.artifact_version import ensure_artifact_version_indexes
@@ -93,7 +92,7 @@ simple_transport: SimpleTransport | None = None
 
 
 logging.getLogger("ag2").setLevel(logging.DEBUG)
-wf_logger.info("ag2 version: %s", getattr(ag2, "__version__", "unknown"))
+wf_logger.info("ag2 version: %s", ag2.__version__)
 
 app = FastAPI(
     title="Mozaiks Runtime Host",
@@ -102,10 +101,18 @@ app = FastAPI(
 )
 app.state.persistence_manager = persistence_manager
 
-# Prometheus /metrics endpoint — disabled by PROMETHEUS_METRICS_ENABLED=false.
-_metrics_router = build_metrics_router()
-if _metrics_router is not None:
-    app.include_router(_metrics_router)
+# AG2 per-agent Prometheus metrics — enabled by AG2_METRICS_ENABLED=true.
+# Requires: pip install "ag2[metrics]"
+# Mounted at AG2_METRICS_PATH (default: /metrics/ag2).
+try:
+    from mozaiksai.core.observability import make_metrics_asgi_app
+
+    _ag2_metrics_app = make_metrics_asgi_app()
+    if _ag2_metrics_app is not None:
+        _ag2_metrics_path = os.getenv("AG2_METRICS_PATH", "/metrics/ag2")
+        app.mount(_ag2_metrics_path, _ag2_metrics_app)
+except Exception as _ag2_metrics_err:
+    logger.debug("AG2 metrics ASGI mount skipped: %s", _ag2_metrics_err)
 
 
 @app.exception_handler(HTTPException)
@@ -299,6 +306,15 @@ async def _runtime_startup() -> None:
 
     # Connect distributed cache (Redis) — falls back to in-memory silently.
     await get_redis_cache().connect()
+
+    # Register built-in connector health providers for all catalog services.
+    try:
+        from mozaiksai.core.workflow.generator_support.connector_health_providers import (
+            register_builtin_providers,
+        )
+        register_builtin_providers()
+    except Exception as _chp_err:
+        wf_logger.warning("Connector health providers registration failed: %s", _chp_err)
 
     # Start inter-instance event bus.
     event_bus = get_event_bus()
