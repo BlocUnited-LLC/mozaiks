@@ -1,14 +1,13 @@
 /**
- * OnboardingTour — in-place spotlight tour overlay for the factory app.
+ * OnboardingTour - in-place spotlight tour overlay for the factory app.
  *
  * Mounts as a separate React root via installOnboardingTour.jsx.
  * Step selectors match the factory_app shell.json nav surface.
- * Prototype of the OSS installTour() primitive.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-// Module API — mirrors mozaiks-app pattern but inlined to avoid cross-package dep
+// Module API mirrors mozaiks-app pattern but is inlined to avoid cross-package deps.
 async function moduleAction(moduleName, actionName, input = {}) {
   const token =
     window.mozaiksAuth?.getAccessToken?.() ||
@@ -25,7 +24,7 @@ async function moduleAction(moduleName, actionName, input = {}) {
     headers,
     body: JSON.stringify(input),
   })
-  if (!res.ok) throw new Error(`${moduleName}.${actionName} → ${res.status}`)
+  if (!res.ok) throw new Error(`${moduleName}.${actionName} ${res.status}`)
   return res.json()
 }
 
@@ -122,7 +121,7 @@ function Tooltip({ rect, step, stepIndex, totalSteps, onNext, onSkip, acting }) 
         disabled={acting}
         className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
       >
-        {acting ? 'Saving…' : stepIndex < totalSteps - 1 ? 'Next' : 'Done'}
+        {acting ? 'Saving...' : stepIndex < totalSteps - 1 ? 'Next' : 'Done'}
       </button>
     </div>
   )
@@ -139,7 +138,6 @@ export default function OnboardingTour() {
   useEffect(() => {
     moduleAction('user_onboarding', 'get_onboarding_status', {})
       .then((status) => {
-        console.log('[OnboardingTour] status:', status)
         if (!status || status.dismissed || status.progress === 100) return
         const steps = status.steps || {}
         const firstIncomplete = TOUR_STEPS.findIndex((s) => !steps[s.id]?.completed)
@@ -147,9 +145,7 @@ export default function OnboardingTour() {
         setStepIndex(firstIncomplete)
         setReady(true)
       })
-      .catch((err) => {
-        console.warn('[OnboardingTour] get_onboarding_status failed:', err)
-      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -158,7 +154,6 @@ export default function OnboardingTour() {
       const step = TOUR_STEPS[stepIndex]
       if (!step) return
       const r = getRect(step.selector)
-      if (!r) console.warn('[OnboardingTour] selector not found:', step.selector)
       setRect(r)
       setVisible(Boolean(r))
     }

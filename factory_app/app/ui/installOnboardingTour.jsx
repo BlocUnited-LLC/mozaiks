@@ -4,7 +4,6 @@ import OnboardingTour from './components/OnboardingTour.jsx'
 let installed = false
 
 export function installOnboardingTour() {
-  console.log('[installOnboardingTour] called, installed:', installed)
   if (installed || typeof window === 'undefined' || typeof document === 'undefined') return
   installed = true
 
