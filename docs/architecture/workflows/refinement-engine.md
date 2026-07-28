@@ -609,7 +609,7 @@ Current first-party coding worker path:
     payload or the `scope_requested` checkpoint can infer a bounded file set from
     artifact workspace context
 - when it executes successfully, the worker returns concrete `updated_files`,
-  validates the merged workspace snapshot, and can persist a child artifact
+  validates the merged staged artifact workspace, and can persist a child artifact
   version for the refined bundle
 - persisted child artifact versions enter Studio review as `draft`
 - Studio review is now a first-class lifecycle step with:

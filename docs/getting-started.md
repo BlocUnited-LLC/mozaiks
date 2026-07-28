@@ -104,8 +104,8 @@ In-progress builds stay in **Apps** so you can always pick up where you left off
 ## Code Context Infrastructure
 
 Mozaiks indexes app source into a `SourceContextBundle`, `AppContextGraph`, and
-`AppIntelligenceSnapshot` after generated artifacts, workspace snapshots, or
-existing-app discovery. This is automatic and uses Tree-sitter-backed parsing
+`AppIntelligenceSnapshot` after generated artifacts, App Intelligence indexing,
+or existing-app discovery. This is automatic and uses Tree-sitter-backed parsing
 where supported.
 
 For local quickstarts, graph snapshots are stored with Mozaiks artifacts. For

@@ -93,15 +93,14 @@ def test_can_create_override_for_block_requires_context_refresh() -> None:
     assert APP_CONTEXT_POLICY_OVERRIDE_WARNING in override.warnings
 
 
-def test_can_create_override_for_block_requires_human_override() -> None:
+def test_human_override_request_still_requires_context_refresh_block() -> None:
     policy = evaluate_app_context_policy(
         app_context_summary=_missing_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
         affected_bundle_paths=["data/contract.json"],
-        human_override_requested=True,
     )
-    assert policy.decision is AppContextPolicyDecision.BLOCK_REQUIRES_HUMAN_OVERRIDE
+    assert policy.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
 
     override = create_app_context_policy_override(
         policy_result=policy,
@@ -112,17 +111,16 @@ def test_can_create_override_for_block_requires_human_override() -> None:
         reviewer="reviewer@example.invalid",
     )
 
-    assert override.original_policy_decision is AppContextPolicyDecision.BLOCK_REQUIRES_HUMAN_OVERRIDE
+    assert override.original_policy_decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
     assert override.override_decision is AppContextPolicyOverrideDecision.ALLOW_WITH_WARNING
 
 
-def test_allow_with_warning_attaches_to_human_override_block() -> None:
+def test_allow_with_warning_attaches_to_missing_context_refresh_block() -> None:
     policy = evaluate_app_context_policy(
         app_context_summary=_missing_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
         affected_bundle_paths=["data/contract.json"],
-        human_override_requested=True,
     )
     plan = _blocked_execution_plan().model_copy(
         update={
@@ -145,7 +143,7 @@ def test_allow_with_warning_attaches_to_human_override_block() -> None:
     updated = apply_app_context_policy_override(plan, override)
 
     assert updated.context_policy_decision.decision is AppContextPolicyDecision.WARN
-    assert updated.context_policy_decision.requires_human_override is False
+    assert updated.context_policy_decision.requires_context_refresh is False
     assert updated.app_context_policy_override == override
 
 

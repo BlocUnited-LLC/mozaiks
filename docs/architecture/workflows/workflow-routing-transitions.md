@@ -254,13 +254,14 @@ Brownfield generation/build sequences remain separate:
 The existing-app intake path has two user-facing context surfaces:
 
 1. `BrownfieldRepoInput` stays mounted after the user selects a repository and
-   shows an extraction state while the workflow start request performs
-   source-backed indexing.
+   shows an App Intelligence indexing state while the workflow start request performs
+   source-backed indexing and registers a current `AppContextVersion`.
 2. `ExistingAppDiscovery` emits `AppIntelligenceOverviewCard` in chat after the
    `before_chat` preload completes and before the first agent message. The card
    renders the prompt-safe App Intelligence catalog: coverage, architecture
-   surfaces, capability boundaries, integrations, data surfaces, risk hints, and
-   agent context policy. It does not render raw source contents.
+   surfaces, capability boundaries, integrations, data surfaces, risk hints,
+   durable context refs, and agent context policy. It does not render raw source
+   contents.
 
 These surfaces are not AppPages. `BrownfieldRepoInput` is transition UI owned by
 the build journey, and `AppIntelligenceOverviewCard` is workflow chat UI owned

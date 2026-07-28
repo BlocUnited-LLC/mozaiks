@@ -1,4 +1,4 @@
-"""Register a local workspace snapshot as a Context Graph-backed refinement target."""
+"""Index local app workspaces into the App Intelligence plane."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from typing import Any
 
 from mozaiksai.core.app_context import (
     AllowedOperation,
+    AppContextIndex,
     AppContextMode,
     AppContextStaleStatus,
     AppContextVersion,
@@ -39,9 +40,27 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 
+APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY = "app_intelligence_workspace"
+APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW = "app_intelligence_index"
+APP_INTELLIGENCE_SOURCE_REF_ID = "src_app_intelligence_workspace"
+
 
 @dataclass(frozen=True)
-class WorkspaceSnapshotRegistrationResult:
+class AppIntelligenceContextRegistrationResult:
+    app_id: str
+    source_context_artifact_version_id: str
+    app_intelligence_artifact_version_id: str
+    app_context_version_id: str
+    app_context_artifact_version_id: str
+    graph_artifact_version_id: str
+    indexed_file_count: int
+    scan_health: dict[str, Any]
+    health_report: dict[str, Any]
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class AppIntelligenceIndexResult:
     app_id: str
     app_bundle_artifact_version_id: str
     source_context_artifact_version_id: str
@@ -56,23 +75,24 @@ class WorkspaceSnapshotRegistrationResult:
     warnings: list[str]
 
 
-async def register_workspace_snapshot(
+async def index_workspace_app_intelligence(
     *,
     app_id: str,
     workspace_root: str | Path,
     artifact_store: ArtifactStore | None = None,
-    artifact_key: str = "workspace_snapshot",
-    source_workflow: str = "workspace_snapshot",
+    artifact_key: str = APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+    source_workflow: str = APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW,
     source_chat_id: str | None = None,
     scan_policy: dict[str, Any] | None = None,
     generated_artifacts_root: str | Path | None = None,
     make_current: bool = True,
-) -> WorkspaceSnapshotRegistrationResult:
-    """Create a current app artifact and AppContextVersion from a local workspace.
+) -> AppIntelligenceIndexResult:
+    """Create current App Intelligence artifacts and an AppContextVersion.
 
-    The snapshot is a code-context artifact, not a direct source mutation path. It
-    gives the Refinement Engine a durable artifact_version_id plus a deterministic
-    Context Graph for scoped patch planning.
+    The index is the canonical app-context bootstrap for generated and existing
+    app workspaces. It produces a safe app_bundle evidence artifact,
+    SourceContextBundle, AppContextGraph, AppIntelligenceSnapshot, and current
+    AppContextVersion before agents plan or edit source.
     """
     resolved_app_id = str(app_id or "").strip()
     if not resolved_app_id:
@@ -84,14 +104,14 @@ async def register_workspace_snapshot(
     policy = default_context_graph_scan_policy(scan_policy)
     scan_result = collect_source_scan_file_map([("", root)], policy=policy)
     if not scan_result.file_map:
-        raise ValueError("workspace snapshot found no supported source files")
+        raise ValueError("App Intelligence indexing found no supported source files")
 
     indexed_at = datetime.now(UTC)
     safe_file_map = _redacted_scan_file_map(scan_result.file_map)
     bundle_root = _generated_artifacts_root(generated_artifacts_root)
-    snapshot_token = indexed_at.strftime("%Y%m%d%H%M%S")
-    snapshot_dir = bundle_root / "workspace_snapshots" / _safe_segment(resolved_app_id) / snapshot_token
-    artifact_path = snapshot_dir / "artifact.zip"
+    index_token = indexed_at.strftime("%Y%m%d%H%M%S")
+    index_dir = bundle_root / "app_intelligence" / _safe_segment(resolved_app_id) / index_token
+    artifact_path = index_dir / "artifact.zip"
     files_manifest, bundle_sha256, bundle_size_bytes = _write_file_map_zip(
         file_map=safe_file_map,
         artifact_path=artifact_path,
@@ -108,12 +128,12 @@ async def register_workspace_snapshot(
         lifecycle_status=ArtifactLifecycleStatus.CURRENT if make_current else ArtifactLifecycleStatus.DRAFT,
         validation_status=ArtifactValidationStatus.PASSED,
         commit_metadata={
-            "message": "Workspace code-context snapshot",
+            "message": "App Intelligence workspace index",
             "source_workflow": source_workflow,
             "source_chat_id": source_chat_id,
             "metadata": {
                 "artifact_path": artifact_path.as_posix(),
-                "bundle_mode": "workspace_code_context_snapshot",
+                "bundle_mode": "app_intelligence_workspace_index",
                 "source_workspace_root": root.as_posix(),
                 "bundle_sha256": bundle_sha256,
                 "bundle_size_bytes": bundle_size_bytes,
@@ -122,10 +142,10 @@ async def register_workspace_snapshot(
     )
 
     source_ref = SourceRef(
-        source_ref_id="src_workspace_snapshot",
+        source_ref_id=APP_INTELLIGENCE_SOURCE_REF_ID,
         kind=SourceRefKind.APP_ROOT,
         uri=root.as_uri(),
-        ref=snapshot_token,
+        ref=index_token,
         checksum=_file_map_checksum(safe_file_map),
         indexed_at=indexed_at,
         metadata={
@@ -144,63 +164,134 @@ async def register_workspace_snapshot(
         source_ref=source_ref,
         indexed_at=indexed_at,
     )
-    scan_health = source_index.scan_health
-    health_report = source_index.health_report
+    app_bundle_ref = ArtifactRef(
+        artifact_kind="app_bundle",
+        artifact_key=artifact_key,
+        artifact_version_id=app_bundle_artifact.id,
+        lifecycle_status=app_bundle_artifact.lifecycle_status.value,
+        source_ref_id=source_ref.source_ref_id,
+    )
+    registration = await register_app_intelligence_context(
+        source_index=source_index,
+        artifact_store=store,
+        source_workflow=source_workflow,
+        source_chat_id=source_chat_id,
+        make_current=make_current,
+        context_version_id=_context_version_id(resolved_app_id, app_bundle_artifact.id),
+        mode=AppContextMode.HYBRID,
+        additional_artifact_refs=[app_bundle_ref],
+        ownership_boundaries=_ownership_boundaries(safe_file_map, source_ref.source_ref_id),
+        graph_path="app_context/app_intelligence/app_context_graph.json",
+    )
+    return AppIntelligenceIndexResult(
+        app_id=resolved_app_id,
+        app_bundle_artifact_version_id=app_bundle_artifact.id,
+        source_context_artifact_version_id=registration.source_context_artifact_version_id,
+        app_intelligence_artifact_version_id=registration.app_intelligence_artifact_version_id,
+        app_context_version_id=registration.app_context_version_id,
+        app_context_artifact_version_id=registration.app_context_artifact_version_id,
+        graph_artifact_version_id=registration.graph_artifact_version_id,
+        artifact_path=artifact_path.as_posix(),
+        indexed_file_count=registration.indexed_file_count,
+        scan_health=registration.scan_health,
+        health_report=registration.health_report,
+        warnings=registration.warnings,
+    )
+
+
+async def register_app_intelligence_context(
+    *,
+    source_index: AppContextIndex,
+    artifact_store: ArtifactStore | None = None,
+    source_workflow: str | None = None,
+    source_chat_id: str | None = None,
+    make_current: bool = True,
+    context_version_id: str | None = None,
+    mode: AppContextMode = AppContextMode.HYBRID,
+    additional_artifact_refs: list[ArtifactRef] | None = None,
+    ownership_boundaries: list[OwnershipBoundary] | None = None,
+    source_context_path: str = "app_context/source_context/source_context_bundle.json",
+    graph_path: str = "app_context/app_intelligence/app_context_graph.json",
+    intelligence_path: str = "app_context/intelligence/app_intelligence_snapshot.json",
+) -> AppIntelligenceContextRegistrationResult:
+    """Persist an AppContextIndex and register it as current App Intelligence.
+
+    Workflow preload, Studio indexing, CLI dogfooding, and future hosted
+    source-control ingestion should converge here once they have a bounded
+    SourceScanResult and AppContextIndex. Raw source stays in the persisted
+    SourceContextBundle; agents receive catalogs and retrieve exact files only
+    through source-context tools.
+    """
+    if not source_index.app_id:
+        raise ValueError("source_index.app_id is required")
+    if not source_index.safe_file_map:
+        raise ValueError("source_index contains no indexed files")
+
+    store = artifact_store or get_artifact_store()
     persisted_index = await persist_app_context_index(
         index=source_index,
         artifact_store=store,
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
-        graph_path="app_context/workspace_snapshot/app_context_graph.json",
+        source_context_path=source_context_path,
+        graph_path=graph_path,
+        intelligence_path=intelligence_path,
     )
+    source_ref = source_index.source_ref
+    source_ref_id = source_ref.source_ref_id
 
     context_version = AppContextVersion(
-        context_version_id=_context_version_id(resolved_app_id, app_bundle_artifact.id),
-        app_id=resolved_app_id,
-        mode=AppContextMode.HYBRID,
+        context_version_id=context_version_id
+        or _context_version_id(source_index.app_id, persisted_index.intelligence_artifact.id),
+        app_id=source_index.app_id,
+        mode=mode,
         source_refs=[source_ref],
         artifact_refs=[
-            ArtifactRef(
-                artifact_kind="app_bundle",
-                artifact_key=artifact_key,
-                artifact_version_id=app_bundle_artifact.id,
-                lifecycle_status=app_bundle_artifact.lifecycle_status.value,
-                source_ref_id=source_ref.source_ref_id,
-            ),
+            *list(additional_artifact_refs or []),
             ArtifactRef(
                 artifact_kind="source_context_bundle",
                 artifact_key="source_context_bundle",
                 artifact_version_id=persisted_index.source_context_artifact.id,
                 lifecycle_status=persisted_index.source_context_artifact.lifecycle_status.value,
-                source_ref_id=source_ref.source_ref_id,
+                source_ref_id=source_ref_id,
             ),
             ArtifactRef(
                 artifact_kind="app_context_graph",
                 artifact_key="app_context_graph",
                 artifact_version_id=persisted_index.graph_artifact.id,
                 lifecycle_status=persisted_index.graph_artifact.lifecycle_status.value,
-                source_ref_id=source_ref.source_ref_id,
+                source_ref_id=source_ref_id,
             ),
             ArtifactRef(
                 artifact_kind="app_intelligence_snapshot",
                 artifact_key="app_intelligence_snapshot",
                 artifact_version_id=persisted_index.intelligence_artifact.id,
                 lifecycle_status=persisted_index.intelligence_artifact.lifecycle_status.value,
-                source_ref_id=source_ref.source_ref_id,
+                source_ref_id=source_ref_id,
             ),
         ],
         graph_snapshot_ref=persisted_index.graph_artifact.id,
-        ownership_boundaries=_ownership_boundaries(safe_file_map, source_ref.source_ref_id),
+        ownership_boundaries=ownership_boundaries
+        if ownership_boundaries is not None
+        else _ownership_boundaries(source_index.safe_file_map, source_ref_id),
         stale_status=AppContextStaleStatus.CURRENT,
         validation_summary=ValidationSummary(
             status="passed",
             evidence_refs=[
-                app_bundle_artifact.id,
+                *[
+                    ref.artifact_version_id
+                    for ref in additional_artifact_refs or []
+                    if ref.artifact_version_id
+                ],
                 persisted_index.source_context_artifact.id,
                 persisted_index.graph_artifact.id,
                 persisted_index.intelligence_artifact.id,
             ],
-            warnings=[*list(scan_result.warnings), *health_report.get("warnings", []), *health_report.get("blockers", [])],
+            warnings=[
+                *list(source_index.scan_result.warnings),
+                *source_index.health_report.get("warnings", []),
+                *source_index.health_report.get("blockers", []),
+            ],
         ),
     )
     registered = await register_app_context_version(
@@ -210,19 +301,17 @@ async def register_workspace_snapshot(
         source_chat_id=source_chat_id,
         make_current=make_current,
     )
-    return WorkspaceSnapshotRegistrationResult(
-        app_id=resolved_app_id,
-        app_bundle_artifact_version_id=app_bundle_artifact.id,
+    return AppIntelligenceContextRegistrationResult(
+        app_id=source_index.app_id,
         source_context_artifact_version_id=persisted_index.source_context_artifact.id,
         app_intelligence_artifact_version_id=persisted_index.intelligence_artifact.id,
         app_context_version_id=registered.context_version.context_version_id,
         app_context_artifact_version_id=registered.artifact_version.id,
         graph_artifact_version_id=persisted_index.graph_artifact.id,
-        artifact_path=artifact_path.as_posix(),
-        indexed_file_count=len(scan_result.file_map),
-        scan_health=scan_health,
-        health_report=health_report,
-        warnings=list(scan_result.warnings),
+        indexed_file_count=len(source_index.safe_file_map),
+        scan_health=source_index.scan_health,
+        health_report=source_index.health_report,
+        warnings=list(source_index.scan_result.warnings),
     )
 
 
@@ -235,7 +324,7 @@ def _write_file_map_zip(
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise RuntimeError(
-            f"WORKSPACE_SNAPSHOT_ZIP_FAILED: could not create snapshot directory {artifact_path.parent} — {exc}"
+            f"APP_INTELLIGENCE_INDEX_ZIP_FAILED: could not create index directory {artifact_path.parent} — {exc}"
         ) from exc
     manifest: list[ArtifactFileManifestEntry] = []
     try:
@@ -253,7 +342,7 @@ def _write_file_map_zip(
                 )
     except OSError as exc:
         raise RuntimeError(
-            f"WORKSPACE_SNAPSHOT_ZIP_FAILED: could not write snapshot zip at {artifact_path} — {exc}"
+            f"APP_INTELLIGENCE_INDEX_ZIP_FAILED: could not write index zip at {artifact_path} — {exc}"
         ) from exc
     bundle = artifact_path.read_bytes()
     return manifest, hashlib.sha256(bundle).hexdigest(), len(bundle)
@@ -280,7 +369,7 @@ def _ownership_boundaries(file_map: dict[str, str], source_ref_id: str) -> list[
             source_ref=source_ref_id,
             allowed_operations=allowed,
             requires_review=True,
-            notes="Workspace snapshot source selected for graph-aware scoped refinement.",
+            notes="App Intelligence indexed source selected for graph-aware scoped refinement.",
         )
         for root in roots[:24]
     ]
@@ -323,4 +412,12 @@ def _file_map_checksum(file_map: dict[str, str]) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
-__all__ = ["WorkspaceSnapshotRegistrationResult", "register_workspace_snapshot"]
+__all__ = [
+    "APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW",
+    "APP_INTELLIGENCE_SOURCE_REF_ID",
+    "APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY",
+    "AppIntelligenceContextRegistrationResult",
+    "AppIntelligenceIndexResult",
+    "index_workspace_app_intelligence",
+    "register_app_intelligence_context",
+]

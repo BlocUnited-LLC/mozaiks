@@ -203,6 +203,14 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
   const progress = asObject(payload.app_intelligence_progress);
   const health = asObject(payload.app_intelligence_health);
   const healthCoverage = asObject(health.coverage);
+  const artifactVersionIds = asObject(payload.artifact_version_ids);
+  const contextRefs = [
+    { label: 'Context', value: payload.current_app_context_version_id },
+    { label: 'Context artifact', value: artifactVersionIds.app_context_version },
+    { label: 'Source artifact', value: artifactVersionIds.source_context_bundle },
+    { label: 'Graph artifact', value: artifactVersionIds.app_context_graph },
+    { label: 'Intelligence artifact', value: artifactVersionIds.app_intelligence_snapshot },
+  ].filter((item) => item.value);
   const [activeTab, setActiveTab] = useState('architecture');
 
   const counts = useMemo(() => ({
@@ -279,6 +287,20 @@ export default function AppIntelligenceOverviewCard({ payload = {} }) {
           <CountStrip title="Languages" items={counts.languages} />
           <CountStrip title="File roles" items={counts.roles} />
         </div>
+
+        {contextRefs.length > 0 && (
+          <div className="rounded-lg border border-border/50 bg-background/65 px-3 py-2">
+            <p className="text-xs font-medium text-muted-foreground">Context refs</p>
+            <div className="mt-2 grid gap-1.5 md:grid-cols-2">
+              {contextRefs.map((item) => (
+                <div key={item.label} className="min-w-0">
+                  <p className="text-[11px] text-muted-foreground">{item.label}</p>
+                  <p className="truncate font-mono text-[11px] text-foreground">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-border/45 bg-background/55 p-1">
           {tabs.map((tab) => (

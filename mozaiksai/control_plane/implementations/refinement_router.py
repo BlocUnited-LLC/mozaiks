@@ -1702,7 +1702,9 @@ class RefinementTriggerRouteResolver:
             "change_intent": change_intent.model_dump(mode="python"),
             "impact_set": impact_set.model_dump(mode="python"),
             "revision_origin_workflow": request.requested_workflow_id,
+            "app_context_required": True,
         }
+        context_seed.update(await self._current_app_context_seed(request))
         if request.artifact_version_id:
             context_seed["artifact_version_id"] = request.artifact_version_id
         # When the app is in 'review' (pre-promotion), revisions must operate on
@@ -1780,6 +1782,34 @@ class RefinementTriggerRouteResolver:
             else:
                 context_seed["carry_forward_modules"] = []
         return context_seed
+
+    @staticmethod
+    async def _current_app_context_seed(request: RefinementRequest) -> dict[str, Any]:
+        app_id = str(request.app_id or "").strip()
+        if not app_id:
+            return {
+                "app_context_summary": {
+                    "available": False,
+                    "warnings": ["No app_id was provided for App Intelligence context lookup."],
+                }
+            }
+        try:
+            from mozaiksai.control_plane.app_context import get_current_app_context_summary
+
+            summary = await get_current_app_context_summary(app_id=app_id)
+        except Exception as exc:
+            return {
+                "app_context_summary": {
+                    "app_id": app_id,
+                    "available": False,
+                    "warnings": [f"App Intelligence context lookup failed: {exc}"],
+                }
+            }
+        payload = summary.model_dump(mode="python")
+        seed: dict[str, Any] = {"app_context_summary": payload}
+        if summary.context_version_id:
+            seed["current_app_context_version_id"] = summary.context_version_id
+        return seed
 
     async def route(self, request: RefinementRequest) -> RefinementRoutingDecision:
         # Stale-upstream check: bypass LLM if upstream artifacts need rebuilding first.

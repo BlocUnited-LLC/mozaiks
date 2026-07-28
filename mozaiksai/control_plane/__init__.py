@@ -12,6 +12,15 @@ from .app_context_refresh_execution import (
     complete_context_refresh,
     launch_context_refresh_plan,
 )
+from .app_intelligence import (
+    APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW,
+    APP_INTELLIGENCE_SOURCE_REF_ID,
+    APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+    AppIntelligenceContextRegistrationResult,
+    AppIntelligenceIndexResult,
+    index_workspace_app_intelligence,
+    register_app_intelligence_context,
+)
 from .artifact_promotion import (
     AcceptedStagedAppBundleArtifactVersionError,
     AcceptedStagedAppBundleArtifactVersionResult,
@@ -121,9 +130,11 @@ from .staged_coding_worker import (
     select_staged_coding_worker_reason,
 )
 from .tools import get_revision_context
-from .workspace_snapshot import WorkspaceSnapshotRegistrationResult, register_workspace_snapshot
 
 __all__ = [
+    "APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW",
+    "APP_INTELLIGENCE_SOURCE_REF_ID",
+    "APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY",
     "ArtifactKind",
     "ArtifactInvalidationService",
     "ArtifactScopeProposer",
@@ -132,6 +143,8 @@ __all__ = [
     "AcceptedStagedAppBundleArtifactVersionResult",
     "AppContextPolicyOverride",
     "AppContextPolicyOverrideDecision",
+    "AppIntelligenceContextRegistrationResult",
+    "AppIntelligenceIndexResult",
     "DraftAppBundleArtifactVersionError",
     "DraftAppBundleArtifactVersionResult",
     "ChangeClass",
@@ -192,7 +205,6 @@ __all__ = [
     "create_app_context_policy_override",
     "StagedCodingWorkerChange",
     "StagedCodingWorkerResult",
-    "WorkspaceSnapshotRegistrationResult",
     "build_scoped_changes_from_worker_result",
     "run_deterministic_staged_coding_worker",
     "run_live_staged_coding_worker",
@@ -223,5 +235,6 @@ __all__ = [
     "resolve_control_plane_tool_entrypoint",
     "resolve_factory_control_plane_root",
     "resolve_factory_refinement_harness_root",
-    "register_workspace_snapshot",
+    "index_workspace_app_intelligence",
+    "register_app_intelligence_context",
 ]

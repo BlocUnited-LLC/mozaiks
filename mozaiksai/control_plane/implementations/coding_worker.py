@@ -435,7 +435,7 @@ class ScopedRefinementCodingWorker:
         commit_content_metadata: dict[str, Any] = {
             "artifact_path": str(zip_path.resolve()),
             "workspace_dir": str(workspace_dir.resolve()),
-            "bundle_mode": "workspace_snapshot",
+            "bundle_mode": "staged_refinement_bundle",
             "applied_paths": sorted(applied_files.keys()),
             "validation_strategy": plan.validation_strategy,
             "validation_status": "",  # filled after status is resolved below
@@ -488,7 +488,7 @@ class ScopedRefinementCodingWorker:
             "artifact_version_id": artifact_version.id,
             "artifact_path": str(zip_path.resolve()),
             "workspace_dir": str(workspace_dir.resolve()),
-            "bundle_mode": "workspace_snapshot",
+            "bundle_mode": "staged_refinement_bundle",
         }
 
     @staticmethod

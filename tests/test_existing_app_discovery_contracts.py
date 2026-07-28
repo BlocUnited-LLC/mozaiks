@@ -4,9 +4,16 @@ import asyncio
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import yaml
+
+from mozaiksai.core.artifacts.models import (
+    ArtifactLifecycleStatus,
+    ArtifactValidationStatus,
+    ArtifactVersionDoc,
+)
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 
@@ -32,6 +39,81 @@ def _load_module(relative_path: str, module_name: str):
 class _Context(dict):
     def get(self, key, default=None):
         return super().get(key, default)
+
+
+class _MemoryArtifactStore:
+    def __init__(self) -> None:
+        self.created: list[ArtifactVersionDoc] = []
+
+    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+        artifact_id = f"av_{len(self.created) + 1}"
+        artifact = ArtifactVersionDoc(
+            _id=artifact_id,
+            app_id=kwargs["app_id"],
+            artifact_kind=kwargs["artifact_kind"],
+            artifact_key=kwargs["artifact_key"],
+            version_number=len(self.created) + 1,
+            lineage_root_id=artifact_id,
+            source_workflow=kwargs.get("source_workflow"),
+            source_chat_id=kwargs.get("source_chat_id"),
+            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            files_manifest=list(kwargs.get("files_manifest") or []),
+            commit_metadata=kwargs.get("commit_metadata") or {},
+        )
+        self.created.append(artifact)
+        return artifact
+
+    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str) -> ArtifactVersionDoc | None:
+        for artifact in self.created:
+            if artifact.app_id == app_id and artifact.id == artifact_version_id:
+                return artifact
+        return None
+
+    async def list_artifact_versions(
+        self,
+        *,
+        app_id: str,
+        artifact_kind: str | None = None,
+        artifact_key: str | None = None,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        limit: int = 50,
+        **_kwargs: Any,
+    ) -> list[ArtifactVersionDoc]:
+        rows = [
+            artifact
+            for artifact in self.created
+            if artifact.app_id == app_id
+            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
+            and (artifact_key is None or artifact.artifact_key == artifact_key)
+            and (lifecycle_status is None or artifact.lifecycle_status == lifecycle_status)
+        ]
+        return rows[:limit]
+
+    async def accept_artifact_version(
+        self,
+        *,
+        app_id: str,
+        artifact_version_id: str,
+        commit_metadata: dict[str, Any] | None = None,
+    ) -> ArtifactVersionDoc | None:
+        artifact = await self.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+        if artifact is None:
+            return None
+        updates: dict[str, Any] = {"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+        if commit_metadata is not None:
+            updates["commit_metadata"] = commit_metadata
+        refreshed = artifact.model_copy(update=updates)
+        self.created = [refreshed if item.id == artifact.id else item for item in self.created]
+        return refreshed
+
+
+def _install_memory_app_intelligence_store(monkeypatch: pytest.MonkeyPatch) -> _MemoryArtifactStore:
+    from mozaiksai.control_plane import app_intelligence as app_intelligence_mod
+
+    store = _MemoryArtifactStore()
+    monkeypatch.setattr(app_intelligence_mod, "get_artifact_store", lambda: store)
+    return store
 
 
 def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -> None:
@@ -570,11 +652,15 @@ def test_existing_app_preload_supports_workspace_app_preset() -> None:
     assert context["theme_capture_evidence"]["appearance"] == "dark"
 
 
-def test_existing_app_preload_builds_context_graph_pack_for_local_repo(tmp_path: Path) -> None:
+def test_existing_app_preload_builds_context_graph_pack_for_local_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
         "tests.preload_discovery_context_graph_direct",
     )
+    store = _install_memory_app_intelligence_store(monkeypatch)
 
     repo = tmp_path / "sample-existing-app"
     (repo / "src").mkdir(parents=True)
@@ -613,6 +699,25 @@ def test_existing_app_preload_builds_context_graph_pack_for_local_repo(tmp_path:
     assert context["app_intelligence_status"] == "ready"
     assert context["app_intelligence_progress"]["stage"] == "ready"
     assert context["app_intelligence_progress"]["schema_version"] == "mozaiks.app_intelligence.progress.v1"
+    assert context["app_intelligence_progress"]["details"]["app_context_persisted"] is True
+    assert context["current_context_version_id"].startswith("ctx_")
+    assert context["current_app_context_version_id"] == context["current_context_version_id"]
+    assert context["app_context_version_artifact_version_id"] == store.created[-1].id
+    assert context["source_context_artifact_version_id"] == store.created[0].id
+    assert context["graph_artifact_version_id"] == store.created[1].id
+    assert context["app_intelligence_artifact_version_id"] == store.created[2].id
+    assert context["app_intelligence_registration"]["persisted"] is True
+    assert [artifact.artifact_kind for artifact in store.created] == [
+        "source_context_bundle",
+        "app_context_graph",
+        "app_intelligence_snapshot",
+        "app_context_version",
+    ]
+    assert store.created[-1].lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    context_payload = store.created[-1].commit_metadata.metadata["summary_payload"]
+    assert context_payload["mode"] == "brownfield"
+    assert any(ref["artifact_kind"] == "source_context_bundle" for ref in context_payload["artifact_refs"])
+    assert any(ref["artifact_kind"] == "app_intelligence_snapshot" for ref in context_payload["artifact_refs"])
     assert context["app_intelligence_health"]["status"] in {"healthy", "warning"}
     assert "App Intelligence indexed" in context["app_intelligence_summary"]
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
@@ -711,6 +816,7 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
         "tests.preload_discovery_github_context_graph",
     )
+    store = _install_memory_app_intelligence_store(monkeypatch)
 
     class _FakeResponse:
         def __init__(self, status_code: int, payload: dict):
@@ -795,6 +901,18 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
     assert context["app_intelligence_ready"] is True
     assert context["app_intelligence_status"] == "ready"
     assert context["app_intelligence_progress"]["stage"] == "ready"
+    assert context["app_intelligence_progress"]["details"]["app_context_persisted"] is True
+    assert context["current_app_context_version_id"] == context["current_context_version_id"]
+    assert context["app_intelligence_registration"]["app_context_version_id"] == context["current_context_version_id"]
+    assert [artifact.artifact_kind for artifact in store.created] == [
+        "source_context_bundle",
+        "app_context_graph",
+        "app_intelligence_snapshot",
+        "app_context_version",
+    ]
+    context_payload = store.created[-1].commit_metadata.metadata["summary_payload"]
+    assert context_payload["source_refs"][0]["kind"] == "repo"
+    assert context_payload["source_refs"][0]["uri"] == "https://github.com/Example/demo"
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
     assert "App Intelligence indexed" in context["preload_summary"]
 

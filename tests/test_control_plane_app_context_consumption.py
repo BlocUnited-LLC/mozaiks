@@ -220,7 +220,7 @@ async def test_missing_context_warns_without_failure() -> None:
     assert APP_CONTEXT_MISSING_WARNING in summary.warnings
 
 
-def test_stale_context_warns_without_blocking() -> None:
+def test_stale_context_summary_carries_warning() -> None:
     context_version = AppContextVersion(
         context_version_id="ctx_stale",
         app_id="stale_app",

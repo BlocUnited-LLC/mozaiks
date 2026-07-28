@@ -279,7 +279,7 @@ def test_refresh_request_can_be_built_from_policy_and_summary() -> None:
 
     assert request.app_id == "ops_studio"
     assert request.current_context_version_id == "ctx_ops_stale"
-    assert request.reason == "High-risk refinement requires current app-context evidence."
+    assert request.reason == "Refinement requires current App Intelligence context."
     assert request.refresh_scope is ContextRefreshScope.SOURCE_REF_RESCAN
 
 

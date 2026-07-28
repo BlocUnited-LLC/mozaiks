@@ -10,8 +10,11 @@ from factory_app.refinement_harness.tools.source_context import (
     read_app_source_file,
     search_app_source_context,
 )
+from mozaiksai.control_plane.app_intelligence import (
+    APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+    index_workspace_app_intelligence,
+)
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
-from mozaiksai.control_plane.workspace_snapshot import register_workspace_snapshot
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -87,7 +90,7 @@ class _MemoryArtifactStore:
 
 
 @pytest.mark.asyncio
-async def test_register_workspace_snapshot_creates_artifact_and_context_graph(tmp_path: Path) -> None:
+async def test_index_workspace_app_intelligence_creates_artifacts_and_context_version(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "app" / "modules" / "wallet" / "backend").mkdir(parents=True)
     (workspace / "tests").mkdir()
@@ -98,7 +101,7 @@ async def test_register_workspace_snapshot_creates_artifact_and_context_graph(tm
     (workspace / "tests" / "test_wallet.py").write_text("def test_checkout():\n    assert True\n", encoding="utf-8")
 
     store = _MemoryArtifactStore()
-    result = await register_workspace_snapshot(
+    result = await index_workspace_app_intelligence(
         app_id="app_1",
         workspace_root=workspace,
         artifact_store=store,
@@ -110,6 +113,7 @@ async def test_register_workspace_snapshot_creates_artifact_and_context_graph(tm
     assert result.health_report["status"] == "healthy"
     assert result.health_report["coverage"]["core_surface_file_count"] == 1
     assert Path(result.artifact_path).exists()
+    assert "app_intelligence" in Path(result.artifact_path).parts
 
     kinds = [artifact.artifact_kind for artifact in store.created]
     assert kinds == [
@@ -137,7 +141,7 @@ async def test_register_workspace_snapshot_creates_artifact_and_context_graph(tm
 
 
 @pytest.mark.asyncio
-async def test_workspace_snapshot_feeds_graph_aware_scope_catalog(tmp_path: Path) -> None:
+async def test_app_intelligence_index_feeds_graph_aware_scope_catalog(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "app" / "modules" / "wallet" / "backend").mkdir(parents=True)
     (workspace / "tests").mkdir()
@@ -152,7 +156,7 @@ async def test_workspace_snapshot_feeds_graph_aware_scope_catalog(tmp_path: Path
     (workspace / "tests" / "test_wallet.py").write_text("def test_checkout_entitlement():\n    assert True\n", encoding="utf-8")
 
     store = _MemoryArtifactStore()
-    result = await register_workspace_snapshot(
+    result = await index_workspace_app_intelligence(
         app_id="app_1",
         workspace_root=workspace,
         artifact_store=store,
@@ -164,7 +168,7 @@ async def test_workspace_snapshot_feeds_graph_aware_scope_catalog(tmp_path: Path
             checkpoint="scope_requested",
             app_id="app_1",
             artifact_kind="app_bundle",
-            artifact_key="workspace_snapshot",
+            artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
             artifact_version_id=result.app_bundle_artifact_version_id,
             raw_user_request="Update wallet checkout entitlement behavior",
         ),
@@ -178,7 +182,7 @@ async def test_workspace_snapshot_feeds_graph_aware_scope_catalog(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_workspace_snapshot_feeds_persisted_source_context_tools(tmp_path: Path) -> None:
+async def test_app_intelligence_index_feeds_persisted_source_context_tools(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "app" / "ui" / "pages").mkdir(parents=True)
     (workspace / "app" / "ui" / "services").mkdir(parents=True)
@@ -193,7 +197,7 @@ async def test_workspace_snapshot_feeds_persisted_source_context_tools(tmp_path:
     )
 
     store = _MemoryArtifactStore()
-    result = await register_workspace_snapshot(
+    result = await index_workspace_app_intelligence(
         app_id="app_1",
         workspace_root=workspace,
         artifact_store=store,
@@ -203,7 +207,7 @@ async def test_workspace_snapshot_feeds_persisted_source_context_tools(tmp_path:
         checkpoint="coding_requested",
         app_id="app_1",
         artifact_kind="app_bundle",
-        artifact_key="workspace_snapshot",
+        artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
         artifact_version_id=result.app_bundle_artifact_version_id,
         raw_user_request="Update dashboard metrics",
     )

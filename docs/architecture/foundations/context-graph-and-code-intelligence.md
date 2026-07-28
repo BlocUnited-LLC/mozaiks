@@ -1,6 +1,6 @@
 # Context Graph and Code Intelligence
 
-Status: Active Architecture (Still WIP)
+Status: Active Architecture
 
 The Context Graph is Mozaiks' canonical code-context intelligence layer. It
 captures app, artifact, file, symbol, contract, provenance, and advisory
@@ -62,7 +62,7 @@ Refinement Engine policy directly.
 | `mozaiksai.core.app_context.context_graph` | deterministic graph construction, syntax extraction, contract mapping, semantic annotation request/apply helpers |
 | `mozaiksai.core.app_context.scan_policy` | deterministic, bounded, secret-safe source selection for graph indexing |
 | `mozaiksai.control_plane.context_graph` | compact retrieval packs for scope selection and coding |
-| `mozaiksai.control_plane.workspace_snapshot` | local workspace snapshot registration for dogfooding and scoped refinement |
+| `mozaiksai.control_plane.app_intelligence` | local workspace App Intelligence indexing for dogfooding and scoped refinement |
 | `factory_app/refinement_harness/tools` | first-party Refinement Engine tools that load artifact workspaces and current app context graphs |
 | `factory_app/workflows/_shared/context_graph` | shared workflow prompt injection for preloaded graph packs |
 | Studio UX | inspection, impact visualization, and build-sequence surfacing |
@@ -128,7 +128,7 @@ The policy is used by:
 
 - ExistingAppDiscovery local source preloads
 - Refinement Engine artifact Context Graph loading
-- workspace snapshot registration
+- App Intelligence workspace indexing
 
 `context_graph_health` is the workflow-visible health surface. Agents get the
 small prompt-safe scan summary inside `context_graph_pack.summary.scan`; tools
@@ -279,7 +279,7 @@ Checkpoint context is intentionally staged:
 | `scope_requested` refinement checkpoint | Context Graph catalog, artifact workspace catalog, bounded source search results | choose the narrowest safe file scope | full file contents and edit permission for related files |
 | `contract_surface_requested` refinement checkpoint | contract surface context, Context Graph catalog, bounded source search | map the request to module/page/workflow/config contract surfaces | arbitrary source browsing or code patching |
 | `coding_requested` refinement checkpoint | explicit scoped files, Context Graph scope, exact source reads for selected paths, related-file/source search as read-only context | produce a bounded patch | scope widening without reroute or human review |
-| `ExistingAppDiscovery` before chat | repo/API/runtime summaries, compact graph pack, source-context catalog, source retrieval tools | ground discovery and adoption mapping in code evidence | final authority over adoption or generated output |
+| `ExistingAppDiscovery` before chat | App Intelligence catalog, compact graph pack, source-context catalog, source retrieval tools, and repo/API/runtime evidence as fallback diagnostics | ground discovery and adoption mapping in code evidence | final authority over adoption or generated output |
 | `AppGenerator` and `AgentGenerator` startup | compact `context_graph_pack` from the current AppContext or selected artifact workspace | preserve existing app/workflow context during revision runs | raw `AppContextGraph` payloads or full source repositories |
 
 Scope selection is not allowed to trust LLM-selected paths blindly. The first
@@ -289,10 +289,10 @@ paths into a clarification instead of passing them to the coding worker. Artifac
 workspace readers also skip dependency directories, minified/lock files, and
 secret-sensitive paths before building catalogs or prompt context.
 
-The first dogfood entrypoint is workspace snapshot registration:
+The first dogfood entrypoint is App Intelligence workspace indexing:
 
 ```python
-await register_workspace_snapshot(
+await index_workspace_app_intelligence(
     app_id="mozaiks-app",
     workspace_root="C:/path/to/mozaiks-app",
 )
@@ -301,7 +301,7 @@ await register_workspace_snapshot(
 The local developer CLI exposes the same bootstrap path:
 
 ```bash
-mozaiks context snapshot --app-id mozaiks-app --workspace C:/path/to/mozaiks-app --json
+mozaiks context index --app-id mozaiks-app --workspace C:/path/to/mozaiks-app --json
 ```
 
 The local App Intelligence acceptance gate exercises the same path end to end
@@ -313,10 +313,9 @@ MOZAIKS_APP_WORKSPACE_PATH=C:/path/to/mozaiks-app \
   python -m pytest --no-cov tests/test_workspace_app_intelligence_acceptance.py -q
 ```
 
-That helper creates:
+That index operation creates:
 
-- a current `app_bundle` artifact containing the selected code-context
-  snapshot
+- a current `app_bundle` artifact containing the selected source evidence
 - an `app_context_graph` artifact built from deterministic AST/contract facts
 - a current `hybrid` `AppContextVersion` that points to the graph and snapshot
 - a `context_graph_health_report` that marks whether core app surfaces were
@@ -326,7 +325,7 @@ That helper creates:
 Studio exposes the same operation through:
 
 ```text
-POST /api/studio/apps/{app_id}/context/workspace-snapshot
+POST /api/studio/apps/{app_id}/context/app-intelligence/index
 ```
 
 Both the CLI and Studio response include artifact ids, indexed file count,
@@ -371,8 +370,12 @@ through its own lifecycle preload.
 
 ExistingAppDiscovery is both a producer and an early consumer:
 
-- during `before_chat`, its deterministic preload builds an advisory source
-  graph pack from local repo inputs when source files are available
+- during `before_chat`, its deterministic preload builds source-backed
+  `SourceContextBundle`, `AppContextGraph`, and `AppIntelligenceSnapshot`
+  artifacts when source files are available
+- that preload registers a current `AppContextVersion` before the first
+  discovery agent turn, so later refinement and generator checkpoints can reuse
+  the same durable context handle
 - during `brownfield_discovery_refresh`, if local source roots are not available
   but `current_context_version_id` is seeded, the preload loads the previous
   `AppContextGraph` for that exact context version so refresh agents can reason
@@ -380,12 +383,12 @@ ExistingAppDiscovery is both a producer and an early consumer:
 - the shared Context Graph hook injects that compact pack into discovery agents
   for mid-discovery grounding
 - after `DiscoveryArtifactAssemblerAgent` completes, `save_existing_app_artifacts`
-  produces the final canonical `app_context_graph` artifact and registers the
-  current `AppContextVersion`
+  can enrich the current app context with adoption, ownership, risk, and
+  inventory artifacts
 
-The preloaded source graph is not the final authority. It is a bounded prompt
-context pack for discovery. The saved `app_context_graph` remains the canonical
-artifact used by downstream Refinement Engine and generator workflows.
+The preloaded prompt pack is compact and bounded, but the source-backed
+artifacts it points at are canonical App Intelligence records. The saved
+discovery artifacts enrich that context; they do not replace source truth.
 
 The shared context hook injects:
 
@@ -408,8 +411,8 @@ capability, not a database choice.
 
 Recommended UX:
 
-1. When a local workspace is selected for dogfooding, run workspace snapshot
-   registration and show the selected roots, file count, graph id, and scan
+1. When a local workspace is selected for dogfooding, run App Intelligence
+   indexing and show the selected roots, file count, graph id, and scan
    warnings.
 2. After generated app/workflow artifacts are created, show "Context Graph
    indexing" as a post-artifact step.
@@ -452,7 +455,7 @@ or promotion.
 | deterministic source scan policy | `mozaiksai/core/app_context/scan_policy.py` |
 | Refinement Engine graph query packs | `mozaiksai/control_plane/context_graph/query.py` |
 | context graph health gate | `mozaiksai/core/app_context/health.py` |
-| workspace snapshot registration | `mozaiksai/control_plane/workspace_snapshot.py` |
+| App Intelligence workspace indexing | `mozaiksai/control_plane/app_intelligence.py` |
 | CLI dogfood snapshot command | `mozaiks_cli/commands/context.py` |
 | factory graph loading tools | `factory_app/refinement_harness/tools/_context_graph.py` |
 | scope-selection tool | `factory_app/refinement_harness/tools/get_context_graph_catalog.py` |
@@ -474,15 +477,15 @@ Changes to this layer should include targeted tests for:
 - deterministic scan policy and scan health
 - Context Graph health reports and blocked/warning coverage states
 - Refinement Engine catalog and scope packs
-- workspace snapshot registration
-- CLI snapshot registration command wiring
+- App Intelligence workspace indexing
+- CLI App Intelligence index command wiring
 - shared hook injection behavior
 
 Recommended slices:
 
 ```bash
-python -m pytest tests/test_context_graph_scan_policy.py tests/test_workspace_snapshot.py -q
-python -m pytest tests/test_cli_context_snapshot.py -q
+python -m pytest tests/test_context_graph_scan_policy.py tests/test_app_intelligence_index.py -q
+python -m pytest tests/test_cli_context_index.py -q
 python -m pytest tests/test_context_graph.py -q
 python -m pytest tests/test_control_plane_tools.py tests/test_control_plane_loader.py -q
 python -m pytest tests/test_declarative_config_fallbacks.py -q

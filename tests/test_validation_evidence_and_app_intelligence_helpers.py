@@ -1,7 +1,7 @@
 """
 Pure helper unit tests for:
   mozaiksai/control_plane/validation_evidence.py
-  mozaiksai/control_plane/workspace_snapshot.py (pure helpers only)
+  mozaiksai/control_plane/app_intelligence.py (pure helpers only)
 
 Covers:
 
@@ -34,26 +34,26 @@ Covers:
     - ValidationEvidence passthrough
     - other type → TypeError
 
-  _safe_segment (workspace_snapshot):
+  _safe_segment (app_intelligence):
     - alphanumeric/dot/underscore/hyphen preserved
     - special chars replaced with hyphen
     - leading/trailing ".-" stripped
     - empty after strip → "app"
 
-  _context_version_id (workspace_snapshot):
+  _context_version_id (app_intelligence):
     - starts with "ctx_"
     - contains normalized app_id and artifact_version_id
     - special chars replaced
     - lowercased
     - max 80 chars after "ctx_" prefix
 
-  _file_map_checksum (workspace_snapshot):
+  _file_map_checksum (app_intelligence):
     - returns "sha256:" prefixed string
     - deterministic for same input
     - different file maps → different checksums
     - key order doesn't affect result (sorted internally)
 
-  _ownership_boundaries (workspace_snapshot):
+  _ownership_boundaries (app_intelligence):
     - each boundary has path ending with "/"
     - top-level dirs extracted correctly
     - deduplicates roots
@@ -63,17 +63,17 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.control_plane.app_intelligence import (
+    _context_version_id,
+    _file_map_checksum,
+    _ownership_boundaries,
+    _safe_segment,
+)
 from mozaiksai.control_plane.validation_evidence import (
     ValidationEvidence,
     _normalize_artifact_name,
     _normalize_name,
     normalize_validation_evidence,
-)
-from mozaiksai.control_plane.workspace_snapshot import (
-    _context_version_id,
-    _file_map_checksum,
-    _ownership_boundaries,
-    _safe_segment,
 )
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ class TestNormalizeValidationEvidence:
 
 
 # ---------------------------------------------------------------------------
-# 5. _safe_segment (workspace_snapshot)
+# 5. _safe_segment (app_intelligence)
 # ---------------------------------------------------------------------------
 
 class TestSafeSegment:
@@ -228,7 +228,7 @@ class TestSafeSegment:
 
 
 # ---------------------------------------------------------------------------
-# 6. _context_version_id (workspace_snapshot)
+# 6. _context_version_id (app_intelligence)
 # ---------------------------------------------------------------------------
 
 class TestContextVersionId:
@@ -266,7 +266,7 @@ class TestContextVersionId:
 
 
 # ---------------------------------------------------------------------------
-# 7. _file_map_checksum (workspace_snapshot)
+# 7. _file_map_checksum (app_intelligence)
 # ---------------------------------------------------------------------------
 
 class TestFileMapChecksum:
@@ -296,7 +296,7 @@ class TestFileMapChecksum:
 
 
 # ---------------------------------------------------------------------------
-# 8. _ownership_boundaries (workspace_snapshot)
+# 8. _ownership_boundaries (app_intelligence)
 # ---------------------------------------------------------------------------
 
 class TestOwnershipBoundaries:

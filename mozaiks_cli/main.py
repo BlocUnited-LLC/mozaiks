@@ -20,7 +20,7 @@ Commands:
     mozaiks add <feature>     Add feature to existing project
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
-    mozaiks context snapshot Register a local workspace Context Graph snapshot
+    mozaiks context index    Index local workspace App Intelligence
     mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
 """
@@ -390,9 +390,9 @@ def create_parser():
     # mozaiks context
     context_parser = subparsers.add_parser(
         "context",
-        help="Manage local app context snapshots",
+        help="Manage local App Intelligence context",
         description=(
-            "Developer operations for registering local workspace app context. "
+            "Developer operations for indexing local workspace App Intelligence. "
             "Studio remains the management UI; this command is a local dogfood/bootstrap helper."
         ),
     )
@@ -400,44 +400,44 @@ def create_parser():
         dest="context_action",
         help="Context actions",
     )
-    context_snapshot_parser = context_subparsers.add_parser(
-        "snapshot",
-        help="Register a local workspace Context Graph snapshot",
+    context_index_parser = context_subparsers.add_parser(
+        "index",
+        help="Index local workspace App Intelligence",
         description=(
-            "Scan a local workspace, persist a code-context app_bundle artifact, "
-            "build an app_context_graph, and register a current AppContextVersion."
+            "Scan a local workspace, persist safe source-context artifacts, "
+            "build an app_context_graph and AppIntelligenceSnapshot, and register a current AppContextVersion."
         ),
     )
-    context_snapshot_parser.add_argument(
+    context_index_parser.add_argument(
         "--app-id",
         required=True,
-        help="Managed app id to register the snapshot under",
+        help="Managed app id to index",
     )
-    context_snapshot_parser.add_argument(
+    context_index_parser.add_argument(
         "--workspace",
         default=".",
         help="Workspace root to scan (default: current directory)",
     )
-    context_snapshot_parser.add_argument(
+    context_index_parser.add_argument(
         "--artifact-key",
-        default="workspace_snapshot",
-        help="Artifact key for the snapshot app_bundle (default: workspace_snapshot)",
+        default="app_intelligence_workspace",
+        help="Artifact key for the indexed app_bundle evidence artifact (default: app_intelligence_workspace)",
     )
-    context_snapshot_parser.add_argument(
+    context_index_parser.add_argument(
         "--draft",
         action="store_true",
         help="Create the AppContextVersion as draft instead of making it current",
     )
-    context_snapshot_parser.add_argument(
+    context_index_parser.add_argument(
         "--generated-artifacts-root",
         default=None,
-        help="Override generated artifact output root for the snapshot zip",
+        help="Override generated artifact output root for the indexed source bundle",
     )
-    context_snapshot_parser.add_argument(
+    context_index_parser.add_argument(
         "--json",
         dest="json_output",
         action="store_true",
-        help="Emit the snapshot registration result as JSON",
+        help="Emit the App Intelligence index result as JSON",
     )
 
     # mozaiks sync-agent-guidance
