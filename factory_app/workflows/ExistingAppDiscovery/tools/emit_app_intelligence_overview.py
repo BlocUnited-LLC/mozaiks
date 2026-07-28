@@ -55,6 +55,7 @@ async def emit_app_intelligence_overview_card(
             chat_id=str(chat_id) if chat_id else None,
             workflow_name="ExistingAppDiscovery",
             agent_name="ExistingAppDiscovery",
+            display="artifact",
         )
         logger.info(
             "[ExistingAppDiscovery] App Intelligence overview emitted: status=%s app=%s files=%s",

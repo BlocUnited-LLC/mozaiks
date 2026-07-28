@@ -668,8 +668,13 @@ export default function WorkspaceIntegrationsPage() {
     setSaving(true)
     setActionError(null)
     try {
-      await saveConnectorKey(service, keyValue.trim(), displayName)
+      const saveResult = await saveConnectorKey(service, keyValue.trim(), displayName)
       setActiveItem(null)
+      // Auto-validate immediately when a provider health check is available.
+      // Fire-and-forget: the health result updates the store; the reload picks it up.
+      if (saveResult?.health_check_supported) {
+        checkWorkspaceConnector(service).catch(() => {})
+      }
       await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Key could not be saved.')

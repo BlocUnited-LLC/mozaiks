@@ -195,6 +195,7 @@ def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> N
     assert emitted["payload"]["app_intelligence_catalog"]["coverage"]["file_count"] == 3
     assert "file_contents" not in str(emitted["payload"])
     assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
+    assert emitted["kwargs"]["display"] == "artifact"
 
 
 def test_app_intelligence_overview_uses_real_workflow_ui_surface(monkeypatch) -> None:
