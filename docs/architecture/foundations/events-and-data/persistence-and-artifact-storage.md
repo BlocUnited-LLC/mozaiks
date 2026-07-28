@@ -97,21 +97,37 @@ Durable connector secrets are a separate framework-owned backend:
 
 - default contract: `mozaiksai.core.secrets.connector_vault`
 - default provider mode: `MOZAIKS_CONNECTOR_SECRET_BACKEND=auto`
-- first real provider: Azure Key Vault when `AZURE_KEY_VAULT_NAME` is set
-- required package extras for Azure: `mozaiks[azure]`
+
+Backends selected by `auto`:
+
+| Condition | Backend |
+| --- | --- |
+| `AZURE_KEY_VAULT_NAME` is set | `AzureKeyVaultConnectorVaultBackend` |
+| No Azure vault configured | `MongoConnectorVaultBackend` (default) |
+
+`MongoConnectorVaultBackend` stores Fernet-encrypted secrets in the `ConnectorSecrets`
+collection in the same MongoDB instance. Encryption key priority:
+
+1. `MOZAIKS_CONNECTOR_SECRET_KEY` — explicit 32-byte URL-safe base64 or hex key
+2. Derived via HMAC-SHA256 from `SECRET_KEY`
+3. Dev-only deterministic fallback with a loud warning (not for production)
+
+To generate an explicit key:
+```
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 Rules:
 
-- MongoDB stores connector metadata, status, timestamps, and ownership only.
-- Raw API keys and refresh tokens are stored in the connector vault backend or
-  remain ephemeral for the current session.
-- Studio, Build, Integrations, and Admin surfaces may manage
-  connector metadata even when no vault is configured.
-- when a vault backend is configured, the visible Integrations surface may
-  create, rotate, and delete durable connector secrets while keeping MongoDB
-  limited to sanitized metadata.
-- A connector can therefore be `metadata_only` in local/dev runtimes and
-  `active` in vault-backed runtimes.
+- MongoDB (`Connectors` collection) stores connector metadata, status, timestamps,
+  and ownership only — never raw secrets.
+- `ConnectorSecrets` collection stores encrypted secret values managed by
+  `MongoConnectorVaultBackend`. These are framework-internal records, not app data.
+- Azure Key Vault remains the recommended backend for production deployments that
+  already operate Key Vault infrastructure.
+- A connector is `active` when `secret_available: true` (secret stored in vault).
+  It is `metadata_only` only when the save itself failed — not simply because no
+  external vault is configured.
 
 ### 3. App Business Data
 
