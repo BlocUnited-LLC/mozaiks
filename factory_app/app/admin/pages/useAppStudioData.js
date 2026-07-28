@@ -123,6 +123,7 @@ export function useAppStudioData(appId) {
           buildRes,
           historyRes,
           integrationsRes,
+          runtimeMetricsRes,
         ] = await Promise.allSettled([
           fetch(`${API_BASE}/api/studio/overview?app_id=${encodeURIComponent(appId)}`),
           fetch(`${API_BASE}/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
@@ -132,6 +133,7 @@ export function useAppStudioData(appId) {
           fetch(`${API_BASE}/api/studio/build?app_id=${encodeURIComponent(appId)}`),
           fetch(`${API_BASE}/api/studio/build/history?app_id=${encodeURIComponent(appId)}&limit=8`),
           fetch(`${API_BASE}/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
+          fetch(`${API_BASE}/api/admin/metrics/runtime`),
         ])
 
         const overview = overviewRes.status === 'fulfilled' && overviewRes.value.ok ? await overviewRes.value.json() : null
@@ -142,6 +144,7 @@ export function useAppStudioData(appId) {
         const buildState = buildRes.status === 'fulfilled' && buildRes.value.ok ? await buildRes.value.json() : null
         const buildHistory = historyRes.status === 'fulfilled' && historyRes.value.ok ? await historyRes.value.json() : null
         const integrations = integrationsRes.status === 'fulfilled' && integrationsRes.value.ok ? await integrationsRes.value.json() : null
+        const runtimeMetrics = runtimeMetricsRes.status === 'fulfilled' && runtimeMetricsRes.value.ok ? await runtimeMetricsRes.value.json() : null
 
         if (!overview) {
           throw new Error('App summary unavailable.')
@@ -157,6 +160,7 @@ export function useAppStudioData(appId) {
             buildState,
             buildHistory,
             integrations,
+            runtimeMetrics,
             activity: [],
           })
           setDataMode('live')

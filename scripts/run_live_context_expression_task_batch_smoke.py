@@ -337,8 +337,8 @@ async def run_live_context_expression_task_batch_smoke(
 ) -> dict[str, Any]:
     load_dotenv(REPO_ROOT / ".env")
     _require_live_env()
-    if not enable_telemetry:
-        os.environ["MOZAIKS_AG2_TELEMETRY_ENABLED"] = "false"
+    if enable_telemetry:
+        os.environ["AG2_OTEL_ENABLED"] = "true"
     os.environ["USAGE_EVENTS_ENABLED"] = "false"
     os.environ["MOZAIKS_LLM_CONFIG_SKIP_MONGO"] = "true"
     try:

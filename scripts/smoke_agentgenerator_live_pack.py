@@ -705,8 +705,8 @@ async def run_live_agentgenerator_pack_smoke(
 ) -> dict[str, Any]:
     load_dotenv(REPO_ROOT / ".env")
     _require_live_env()
-    if not enable_telemetry:
-        os.environ["MOZAIKS_AG2_TELEMETRY_ENABLED"] = "false"
+    if enable_telemetry:
+        os.environ["AG2_OTEL_ENABLED"] = "true"
     os.environ["USAGE_EVENTS_ENABLED"] = "false"
     os.environ["MOZAIKS_LLM_CONFIG_SKIP_MONGO"] = "true"
     if int(str(os.getenv("LLM_CONFIG_CACHE_TTL") or "0") or "0") <= 0:

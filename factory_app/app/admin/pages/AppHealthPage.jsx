@@ -15,6 +15,38 @@ import { buildHealthState, formatPercentValue } from './studioHealthModel.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
+function RuntimeSignalsRow({ metrics }) {
+  if (!metrics?.available) return null
+
+  const turns = metrics.agent_turns || {}
+  const llm = metrics.llm_calls || {}
+
+  const errorTurns = Object.entries(turns.by_outcome || {})
+    .filter(([k]) => k !== 'success')
+    .reduce((sum, [, v]) => sum + v, 0)
+  const hasErrors = errorTurns > 0
+  const turnErrorRate = turns.total > 0 ? Math.round((errorTurns / turns.total) * 100) : 0
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-2xl border border-border/70 bg-card/60 px-5 py-3 text-sm">
+      <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Live runtime</span>
+      <span className="text-foreground">
+        <span className="font-medium">{formatCompactNumber(turns.total, '0')}</span>
+        <span className="ml-1 text-muted-foreground">agent turns</span>
+      </span>
+      {llm.avg_duration_seconds != null && (
+        <span className="text-foreground">
+          <span className="font-medium">{llm.avg_duration_seconds}s</span>
+          <span className="ml-1 text-muted-foreground">avg latency</span>
+        </span>
+      )}
+      <span className={hasErrors ? 'font-medium text-destructive' : 'text-muted-foreground'}>
+        {hasErrors ? `${turnErrorRate}% error rate (${errorTurns} errors)` : 'No agent errors'}
+      </span>
+    </div>
+  )
+}
+
 export default function AppHealthPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
@@ -105,6 +137,8 @@ export default function AppHealthPage() {
             </div>
           </Panel>
         </div>
+
+        <RuntimeSignalsRow metrics={data?.runtimeMetrics} />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
           <Panel eyebrow="Workflows" title="Workflow reliability" subtitle="Use the workflow panel to spot run volume, latency, and error concentration without opening raw traces.">

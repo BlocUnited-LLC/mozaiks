@@ -108,7 +108,7 @@ env:
   WORKFLOW_QUEUE_BACKEND: "mongo"
   ARTIFACT_STORE_BACKEND: "local"
   REDIS_CACHE_ENABLED: "true"
-  PROMETHEUS_METRICS_ENABLED: "true"
+  AG2_METRICS_ENABLED: "false"
   LLM_FALLBACK_ENABLED: "true"
 
 # ──────────────────────────────────────────────────────────────────────────────
