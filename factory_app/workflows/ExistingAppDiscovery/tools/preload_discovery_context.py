@@ -17,6 +17,7 @@ values are not merged by the runtime.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib.util
 import json
@@ -24,8 +25,9 @@ import logging
 import os
 import tomllib
 import xml.etree.ElementTree as ET
+from collections import Counter
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import httpx
@@ -758,12 +760,38 @@ async def _fetch_github_file(owner: str, repo: str, path: str, ref: str, token: 
     return None
 
 
-async def _scan_github_repo(github_repo: str, github_ref: str | None) -> dict[str, Any]:
-    if "/" not in github_repo:
+def _normalize_github_repo_identifier(github_repo: str | None) -> str | None:
+    raw = str(github_repo or "").strip()
+    if not raw:
+        return None
+    normalized = raw
+    if normalized.startswith("git@github.com:"):
+        normalized = normalized.removeprefix("git@github.com:")
+    elif normalized.startswith("https://github.com/"):
+        normalized = normalized.removeprefix("https://github.com/")
+    elif normalized.startswith("http://github.com/"):
+        normalized = normalized.removeprefix("http://github.com/")
+    elif normalized.startswith("github.com/"):
+        normalized = normalized.removeprefix("github.com/")
+    normalized = normalized.split("#", 1)[0].split("?", 1)[0].strip().strip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    parts = [part for part in normalized.split("/") if part]
+    if len(parts) < 2:
+        return None
+    owner, repo = parts[0], parts[1]
+    if not owner or not repo:
+        return None
+    return f"{owner}/{repo}"
+
+
+async def _scan_github_repo(github_repo: str, github_ref: str | None, github_token: str | None = None) -> dict[str, Any]:
+    normalized_repo = _normalize_github_repo_identifier(github_repo)
+    if not normalized_repo:
         return {"success": False, "error": f"Invalid github_repo '{github_repo}'"}
 
-    owner, repo = github_repo.split("/", 1)
-    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    owner, repo = normalized_repo.split("/", 1)
+    token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
     repo_resp = await _github_request(f"https://api.github.com/repos/{owner}/{repo}", token)
     if repo_resp.status_code != 200:
         return {
@@ -810,7 +838,9 @@ async def _scan_github_repo(github_repo: str, github_ref: str | None) -> dict[st
         {
             "success": True,
             "source": "github_repo_scan",
-            "github_repo": github_repo,
+            "github_repo": normalized_repo,
+            "github_repo_input": github_repo,
+            "github_url": f"https://github.com/{normalized_repo}",
             "github_ref": ref,
             "repo_name": repo_info.get("name") or repo,
             "default_branch": repo_info.get("default_branch"),
@@ -823,11 +853,11 @@ async def _scan_github_repo(github_repo: str, github_ref: str | None) -> dict[st
     return summary
 
 
-async def _scan_repo_source(local_repo_path: str | None, github_repo: str | None, github_ref: str | None) -> dict[str, Any]:
+async def _scan_repo_source(local_repo_path: str | None, github_repo: str | None, github_ref: str | None, github_token: str | None = None) -> dict[str, Any]:
     if local_repo_path:
         return _scan_local_repo(str(local_repo_path))
     if github_repo:
-        return await _scan_github_repo(str(github_repo), str(github_ref) if github_ref else None)
+        return await _scan_github_repo(str(github_repo), str(github_ref) if github_ref else None, github_token=github_token)
     return {}
 
 
@@ -860,6 +890,32 @@ def _context_graph_roots(
     return roots
 
 
+def _context_graph_github_sources(
+    *,
+    github_repo: Any,
+    frontend_github_repo: Any,
+    backend_github_repo: Any,
+) -> list[tuple[str, str]]:
+    sources: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for label, raw_repo in (
+        ("frontend", frontend_github_repo),
+        ("backend", backend_github_repo),
+    ):
+        normalized = _normalize_github_repo_identifier(str(raw_repo)) if raw_repo else None
+        if normalized and normalized not in seen:
+            sources.append((label, normalized))
+            seen.add(normalized)
+
+    if not sources and github_repo:
+        normalized = _normalize_github_repo_identifier(str(github_repo))
+        if normalized:
+            sources.append(("", normalized))
+
+    return sources
+
+
 def _collect_context_graph_file_map(
     roots: list[tuple[str, Path]],
     *,
@@ -874,6 +930,176 @@ def _collect_context_graph_file_map(
         roots,
         policy=default_context_graph_scan_policy(scan_policy_inputs),
     )
+
+
+async def _collect_github_context_graph_file_map(
+    repos: list[tuple[str, str | None]],
+    *,
+    github_ref: str | None,
+    github_token: str | None,
+    scan_policy_inputs: dict[str, Any] | None = None,
+) -> Any:
+    from mozaiksai.core.app_context.scan_policy import (
+        SourceScanResult,
+        default_context_graph_scan_policy,
+        priority_for_source_path,
+        safe_scan_relpath,
+        skip_reason_for_path,
+    )
+
+    policy = default_context_graph_scan_policy(scan_policy_inputs)
+    token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    candidates: list[tuple[int, int, str, str, str, str, str, str]] = []
+    warnings: list[str] = []
+    skipped = Counter()
+    roots_summary: list[dict[str, Any]] = []
+
+    for label, raw_repo in repos:
+        normalized_repo = _normalize_github_repo_identifier(raw_repo)
+        if not normalized_repo:
+            if raw_repo:
+                skipped["invalid_github_repo"] += 1
+            continue
+        owner, repo = normalized_repo.split("/", 1)
+        repo_resp = await _github_request(f"https://api.github.com/repos/{owner}/{repo}", token)
+        if repo_resp.status_code != 200:
+            warnings.append(f"github_repo_lookup_failed:{normalized_repo}:{repo_resp.status_code}")
+            skipped["github_repo_lookup_failed"] += 1
+            continue
+        repo_info = repo_resp.json()
+        ref = str(github_ref or repo_info.get("default_branch") or "main")
+        tree_resp = await _github_request(
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1",
+            token,
+        )
+        if tree_resp.status_code != 200:
+            warnings.append(f"github_tree_lookup_failed:{normalized_repo}:{tree_resp.status_code}")
+            skipped["github_tree_lookup_failed"] += 1
+            continue
+        roots_summary.append(
+            {
+                "label": str(label or ""),
+                "repo": normalized_repo,
+                "github_url": f"https://github.com/{normalized_repo}",
+                "ref": ref,
+                "default_branch": repo_info.get("default_branch"),
+            }
+        )
+        for item in tree_resp.json().get("tree", []) or []:
+            if item.get("type") != "blob":
+                continue
+            safe_rel = safe_scan_relpath(item.get("path"))
+            if safe_rel is None:
+                skipped["unsafe_path"] += 1
+                continue
+            reason = skip_reason_for_path(safe_rel, policy=policy)
+            if reason:
+                skipped[reason] += 1
+                continue
+            size = int(item.get("size") or 0)
+            if size > policy.max_file_bytes:
+                skipped["large_file"] += 1
+                continue
+            graph_path = f"{label}/{safe_rel}" if label else safe_rel
+            priority, priority_label = priority_for_source_path(safe_rel, policy=policy)
+            candidates.append(
+                (
+                    priority,
+                    _path_depth_for_sort(graph_path),
+                    graph_path,
+                    priority_label,
+                    owner,
+                    repo,
+                    safe_rel,
+                    ref,
+                )
+            )
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    file_map: dict[str, str] = {}
+    selected_by_priority = Counter()
+    selected_by_extension = Counter()
+    total_chars = 0
+    limit_reached = len(candidates) > policy.max_files
+    fetch_candidates = candidates[: policy.max_files]
+    if limit_reached:
+        warnings.append(f"context_graph_file_limit_reached:{policy.max_files}")
+
+    semaphore = asyncio.Semaphore(12)
+
+    async def _fetch_candidate(candidate: tuple[int, int, str, str, str, str, str, str]):
+        _priority, _depth, graph_path, priority_label, owner, repo, github_path, ref = candidate
+        try:
+            async with semaphore:
+                raw_bytes = await _fetch_github_file(owner, repo, github_path, ref, token)
+            return graph_path, priority_label, raw_bytes, None
+        except Exception as exc:
+            return graph_path, priority_label, None, f"{type(exc).__name__}:{graph_path}"
+
+    fetched_candidates = await asyncio.gather(
+        *(_fetch_candidate(candidate) for candidate in fetch_candidates)
+    )
+
+    fetch_error_warnings = 0
+    for graph_path, priority_label, raw_bytes, fetch_error in fetched_candidates:
+        if len(file_map) >= policy.max_files:
+            limit_reached = True
+            break
+        if fetch_error:
+            skipped["github_file_fetch_failed"] += 1
+            if fetch_error_warnings < 8:
+                warnings.append(f"context_graph_github_file_fetch_failed:{fetch_error}")
+                fetch_error_warnings += 1
+            continue
+        if not raw_bytes:
+            skipped["github_file_fetch_failed"] += 1
+            continue
+        if len(raw_bytes) > policy.max_file_bytes:
+            skipped["large_file"] += 1
+            continue
+        text = raw_bytes.decode("utf-8", errors="ignore")
+        if not text.strip():
+            skipped["empty_file"] += 1
+            continue
+        if total_chars + len(text) > policy.max_total_chars:
+            warnings.append(f"context_graph_char_limit_reached:{policy.max_total_chars}")
+            limit_reached = True
+            break
+        file_map[graph_path] = text
+        total_chars += len(text)
+        selected_by_priority[priority_label] += 1
+        selected_by_extension[PurePosixPath(graph_path).suffix.lower() or "<none>"] += 1
+
+    if skipped.get("large_file"):
+        warnings.append(f"context_graph_large_files_skipped:{skipped['large_file']}")
+    if skipped.get("sensitive_path"):
+        warnings.append(f"context_graph_sensitive_files_skipped:{skipped['sensitive_path']}")
+
+    health = {
+        "policy_id": policy.policy_id,
+        "source": "github_source_scan",
+        "roots": roots_summary,
+        "candidate_file_count": len(candidates),
+        "fetch_candidate_count": len(fetch_candidates),
+        "selected_file_count": len(file_map),
+        "total_chars": total_chars,
+        "limit_reached": limit_reached,
+        "limits": {
+            "max_files": policy.max_files,
+            "max_file_bytes": policy.max_file_bytes,
+            "max_total_chars": policy.max_total_chars,
+        },
+        "selected_by_priority": dict(sorted(selected_by_priority.items())),
+        "selected_by_extension": dict(sorted(selected_by_extension.items())),
+        "skipped": dict(sorted(skipped.items())),
+        "warnings": list(warnings),
+    }
+    return SourceScanResult(file_map=file_map, health=health, warnings=warnings)
+
+
+def _path_depth_for_sort(path: str) -> int:
+    safe = str(path or "").replace("\\", "/").strip("/")
+    return len([part for part in safe.split("/") if part]) if safe else 999
 
 
 def _context_graph_scan_policy_inputs(context_variables: Any, discovery_inputs: dict[str, Any]) -> dict[str, Any]:
@@ -903,9 +1129,12 @@ async def _preload_context_graph_pack(
     *,
     context_variables: Any,
     roots: list[tuple[str, Path]],
+    github_sources: list[tuple[str, str]] | None,
+    github_ref: str | None,
+    github_token: str | None,
     discovery_inputs: dict[str, Any],
 ) -> dict[str, Any]:
-    if not roots:
+    if not roots and not github_sources:
         return await _preload_prior_context_graph_pack(
             context_variables=context_variables,
             discovery_inputs=discovery_inputs,
@@ -918,9 +1147,10 @@ async def _preload_context_graph_pack(
             build_context_graph_unavailable_pack,
         )
         from mozaiksai.control_plane.context_graph import build_context_graph_catalog
-        from mozaiksai.core.app_context.context_graph import (
-            build_context_graph_from_file_map,
-            context_graph_parser_status,
+        from mozaiksai.core.app_context import (
+            build_app_intelligence_catalog,
+            build_source_corpus_catalog,
+            index_source_scan,
         )
     except Exception as exc:
         warning = f"context_graph_import_failed:{exc}"
@@ -936,6 +1166,10 @@ async def _preload_context_graph_pack(
             },
         )
         _ctx_set(context_variables, "context_graph_catalog", None)
+        _ctx_set(context_variables, "source_context_bundle", None)
+        _ctx_set(context_variables, "source_context_catalog", None)
+        _ctx_set(context_variables, "app_intelligence_snapshot", None)
+        _ctx_set(context_variables, "app_intelligence_catalog", None)
         _ctx_set(context_variables, "context_graph_status", "unavailable")
         _ctx_set(context_variables, "context_graph_reason", "context_graph_import_failed")
         _ctx_set(context_variables, "context_graph_warnings", [warning])
@@ -946,15 +1180,21 @@ async def _preload_context_graph_pack(
         )
         return {"present": False, "reason": "context_graph_import_failed", "warnings": [warning]}
 
-    scan_result = _collect_context_graph_file_map(
-        roots,
-        scan_policy_inputs=_context_graph_scan_policy_inputs(context_variables, discovery_inputs),
-    )
+    scan_policy_inputs = _context_graph_scan_policy_inputs(context_variables, discovery_inputs)
+    if roots:
+        scan_result = _collect_context_graph_file_map(
+            roots,
+            scan_policy_inputs=scan_policy_inputs,
+        )
+    else:
+        scan_result = await _collect_github_context_graph_file_map(
+            github_sources or [],
+            github_ref=github_ref,
+            github_token=github_token,
+            scan_policy_inputs=scan_policy_inputs,
+        )
     file_map = scan_result.file_map
     warnings = list(scan_result.warnings)
-    scan_health = dict(scan_result.health)
-    parser_status = context_graph_parser_status()
-    scan_health["parser_status"] = parser_status
     if not file_map:
         _ctx_set(
             context_variables,
@@ -962,10 +1202,14 @@ async def _preload_context_graph_pack(
             build_context_graph_unavailable_pack(reason="no_supported_source_files", warnings=warnings),
         )
         _ctx_set(context_variables, "context_graph_catalog", None)
+        _ctx_set(context_variables, "source_context_bundle", None)
+        _ctx_set(context_variables, "source_context_catalog", None)
+        _ctx_set(context_variables, "app_intelligence_snapshot", None)
+        _ctx_set(context_variables, "app_intelligence_catalog", None)
         _ctx_set(context_variables, "context_graph_status", "unavailable")
         _ctx_set(context_variables, "context_graph_reason", "no_supported_source_files")
         _ctx_set(context_variables, "context_graph_warnings", warnings)
-        _ctx_set(context_variables, "context_graph_health", scan_health)
+        _ctx_set(context_variables, "context_graph_health", dict(scan_result.health))
         return {"present": False, "reason": "no_supported_source_files", "warnings": warnings}
 
     app_id = str(
@@ -982,23 +1226,35 @@ async def _preload_context_graph_pack(
         )
     )
     request_text = _context_graph_request_text(context_variables, discovery_inputs)
-
-    graph = build_context_graph_from_file_map(
+    source_index = index_source_scan(
         app_id=app_id,
+        scan_result=scan_result,
         artifact_version_id=artifact_version_id,
         artifact_kind="existing_app_source",
-        file_map=file_map,
+        artifact_key="existing_app_source",
     )
+    source_corpus = source_index.source_corpus
+    app_intelligence_snapshot = source_index.app_intelligence_snapshot
+    source_file_map = source_index.safe_file_map
+    scan_health = source_index.scan_health
+    parser_status = source_index.parser_status
+
     catalog = build_context_graph_catalog(
-        graph=graph,
+        graph=source_index.app_context_graph,
         raw_user_request=request_text,
-        file_map=file_map,
+        file_map=source_file_map,
     )
+    source_context_catalog = build_source_corpus_catalog(source_corpus)
+    app_intelligence_catalog = build_app_intelligence_catalog(app_intelligence_snapshot)
     catalog.update(
         {
             "source": "existing_app_discovery_preload",
             "warnings": warnings,
-            "indexed_file_count": len(file_map),
+            "indexed_file_count": len(source_file_map),
+            "source_context_bundle_id": source_corpus.bundle_id,
+            "source_context_chunk_count": len(source_corpus.chunks),
+            "source_context_symbol_count": len(source_corpus.symbols),
+            "app_intelligence_snapshot_id": app_intelligence_snapshot.snapshot_id,
             "scan_health": scan_health,
             "parser_status": parser_status,
         }
@@ -1010,6 +1266,10 @@ async def _preload_context_graph_pack(
     )
     _ctx_set(context_variables, "context_graph_pack", pack)
     _ctx_set(context_variables, "context_graph_catalog", catalog)
+    _ctx_set(context_variables, "source_context_bundle", source_corpus.model_dump(mode="json"))
+    _ctx_set(context_variables, "source_context_catalog", source_context_catalog)
+    _ctx_set(context_variables, "app_intelligence_snapshot", app_intelligence_snapshot.model_dump(mode="json"))
+    _ctx_set(context_variables, "app_intelligence_catalog", app_intelligence_catalog)
     _ctx_set(context_variables, "context_graph_status", "loaded")
     _ctx_set(context_variables, "context_graph_reason", None)
     _ctx_set(context_variables, "context_graph_warnings", warnings)
@@ -1018,7 +1278,11 @@ async def _preload_context_graph_pack(
         "present": True,
         "source": "existing_app_discovery_preload",
         "graph_id": catalog.get("graph_id"),
-        "indexed_file_count": len(file_map),
+        "source_context_bundle_id": source_corpus.bundle_id,
+        "indexed_file_count": len(source_file_map),
+        "source_context_chunk_count": len(source_corpus.chunks),
+        "source_context_symbol_count": len(source_corpus.symbols),
+        "app_intelligence_snapshot_id": app_intelligence_snapshot.snapshot_id,
         "warnings": warnings,
         "scan_health": scan_health,
     }
@@ -1060,8 +1324,17 @@ async def _preload_prior_context_graph_pack(
         from factory_app.workflows._shared.context_graph.prompt_pack import (
             build_context_graph_prompt_pack,
         )
-        from mozaiksai.control_plane.app_context import get_app_context_graph_for_version
+        from mozaiksai.control_plane.app_context import (
+            get_app_context_graph_for_version,
+            get_app_intelligence_snapshot_for_version,
+            get_source_context_bundle_for_version,
+        )
         from mozaiksai.control_plane.context_graph import build_context_graph_catalog
+        from mozaiksai.core.app_context import (
+            build_app_intelligence_catalog,
+            build_app_intelligence_snapshot,
+            build_source_corpus_catalog,
+        )
     except Exception as exc:
         warning = f"context_graph_import_failed:{exc}"
         return _set_context_graph_unavailable(
@@ -1084,6 +1357,46 @@ async def _preload_prior_context_graph_pack(
             source="previous_app_context_graph",
         )
 
+    source_context_bundle = None
+    source_context_catalog = None
+    app_intelligence_snapshot = None
+    app_intelligence_catalog = None
+    source_warnings: list[str] = []
+    try:
+        source_lookup = await get_source_context_bundle_for_version(
+            app_id=app_id,
+            context_version_id=context_version_id,
+        )
+        source_warnings = list(source_lookup.warnings)
+        if source_lookup.bundle is not None:
+            source_context_bundle = source_lookup.bundle.model_dump(mode="json")
+            source_context_catalog = build_source_corpus_catalog(source_lookup.bundle)
+    except Exception as exc:
+        source_warnings = [f"previous_source_context_bundle_unavailable:{exc}"]
+
+    intelligence_warnings: list[str] = []
+    try:
+        intelligence_lookup = await get_app_intelligence_snapshot_for_version(
+            app_id=app_id,
+            context_version_id=context_version_id,
+        )
+        intelligence_warnings = list(intelligence_lookup.warnings)
+        if intelligence_lookup.snapshot is not None:
+            app_intelligence_snapshot = intelligence_lookup.snapshot.model_dump(mode="json")
+            app_intelligence_catalog = build_app_intelligence_catalog(intelligence_lookup.snapshot)
+        elif source_context_bundle and lookup.graph is not None:
+            rebuilt_snapshot = build_app_intelligence_snapshot(
+                source_corpus=source_context_bundle,
+                app_context_graph=lookup.graph,
+                app_id=app_id,
+                warnings=[*list(lookup.warnings), *source_warnings, *intelligence_warnings],
+            )
+            app_intelligence_snapshot = rebuilt_snapshot.model_dump(mode="json")
+            app_intelligence_catalog = build_app_intelligence_catalog(rebuilt_snapshot)
+    except Exception as exc:
+        intelligence_warnings = [f"previous_app_intelligence_snapshot_unavailable:{exc}"]
+
+    combined_warnings = [*list(lookup.warnings), *source_warnings, *intelligence_warnings]
     catalog = build_context_graph_catalog(
         graph=lookup.graph,
         raw_user_request=_context_graph_request_text(context_variables, discovery_inputs),
@@ -1094,33 +1407,45 @@ async def _preload_prior_context_graph_pack(
         "selected_file_count": catalog.get("file_count"),
         "node_count": catalog.get("node_count"),
         "edge_count": catalog.get("edge_count"),
-        "warnings": list(lookup.warnings),
+        "warnings": combined_warnings,
     }
     catalog.update(
         {
             "source": "previous_app_context_graph",
             "current_context_version_id": context_version_id,
-            "warnings": list(lookup.warnings),
+            "warnings": combined_warnings,
             "scan_health": health,
+            "source_context_bundle_id": (source_context_catalog or {}).get("bundle_id"),
+            "source_context_chunk_count": (source_context_catalog or {}).get("chunk_count"),
+            "source_context_symbol_count": (source_context_catalog or {}).get("symbol_count"),
+            "app_intelligence_snapshot_id": (app_intelligence_catalog or {}).get("snapshot_id"),
         }
     )
     pack = build_context_graph_prompt_pack(
         catalog=catalog,
         source="previous_app_context_graph",
         reason="context_refresh_prior_version",
-        warnings=list(lookup.warnings),
+        warnings=combined_warnings,
     )
     _ctx_set(context_variables, "context_graph_pack", pack)
     _ctx_set(context_variables, "context_graph_catalog", catalog)
+    _ctx_set(context_variables, "source_context_bundle", source_context_bundle)
+    _ctx_set(context_variables, "source_context_catalog", source_context_catalog)
+    _ctx_set(context_variables, "app_intelligence_snapshot", app_intelligence_snapshot)
+    _ctx_set(context_variables, "app_intelligence_catalog", app_intelligence_catalog)
     _ctx_set(context_variables, "context_graph_status", "loaded")
     _ctx_set(context_variables, "context_graph_reason", "context_refresh_prior_version")
-    _ctx_set(context_variables, "context_graph_warnings", list(lookup.warnings))
+    _ctx_set(context_variables, "context_graph_warnings", combined_warnings)
     _ctx_set(context_variables, "context_graph_health", health)
     return {
         "present": True,
         "source": "previous_app_context_graph",
         "graph_id": catalog.get("graph_id"),
-        "warnings": list(lookup.warnings),
+        "source_context_bundle_id": (source_context_catalog or {}).get("bundle_id"),
+        "source_context_chunk_count": (source_context_catalog or {}).get("chunk_count"),
+        "source_context_symbol_count": (source_context_catalog or {}).get("symbol_count"),
+        "app_intelligence_snapshot_id": (app_intelligence_catalog or {}).get("snapshot_id"),
+        "warnings": combined_warnings,
         "scan_health": health,
     }
 
@@ -1149,6 +1474,10 @@ def _set_context_graph_unavailable(
         }
     _ctx_set(context_variables, "context_graph_pack", pack)
     _ctx_set(context_variables, "context_graph_catalog", None)
+    _ctx_set(context_variables, "source_context_bundle", None)
+    _ctx_set(context_variables, "source_context_catalog", None)
+    _ctx_set(context_variables, "app_intelligence_snapshot", None)
+    _ctx_set(context_variables, "app_intelligence_catalog", None)
     _ctx_set(context_variables, "context_graph_status", "unavailable")
     _ctx_set(context_variables, "context_graph_reason", reason)
     _ctx_set(context_variables, "context_graph_warnings", warnings)
@@ -1582,7 +1911,7 @@ def _merge_unresolved(existing: list[dict[str, Any]], question: str, context: st
 
 async def collect_prechat_discovery_context(context_variables: Any | None = None) -> dict[str, Any]:
     """Populate discovery context from deterministic pre-chat sources."""
-    ctx = context_variables or {}
+    ctx = context_variables if context_variables is not None else {}
     discovery_inputs = _coerce_mapping(_ctx_get(ctx, "discovery_inputs", {}))
     host_app_source = _first_nonempty(
         discovery_inputs.get("host_app_source"),
@@ -1606,6 +1935,29 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     frontend_github_repo = _first_nonempty(_ctx_get(ctx, "frontend_github_repo"), discovery_inputs.get("frontend_github_repo"))
     backend_github_repo = _first_nonempty(_ctx_get(ctx, "backend_github_repo"), discovery_inputs.get("backend_github_repo"))
     github_ref = _first_nonempty(_ctx_get(ctx, "github_ref"), discovery_inputs.get("github_ref"))
+
+    # Resolve OAuth session key -> GitHub access token (consumed once, then cleared)
+    github_token: str | None = None
+    _oauth_session = _first_nonempty(
+        _ctx_get(ctx, "github_oauth_session"),
+        discovery_inputs.get("github_oauth_session"),
+    )
+    logger.info(
+        "[ExistingAppDiscovery] DIAG: github_repo=%s oauth_session_key=%s",
+        github_repo, str(_oauth_session)[:8] if _oauth_session else None,
+    )
+    if _oauth_session:
+        try:
+            from mozaiksai.hosts.routers.oauth_github import consume_github_token
+            github_token = consume_github_token(str(_oauth_session))
+            logger.info(
+                "[ExistingAppDiscovery] OAuth token resolved: session=%s present=%s",
+                str(_oauth_session)[:8], bool(github_token),
+            )
+        except Exception as _exc:
+            logger.warning("[ExistingAppDiscovery] OAuth token resolution failed: %s", _exc)
+        _ctx_set(ctx, "github_oauth_session", None)
+
     backend_base_url = _first_nonempty(_ctx_get(ctx, "backend_base_url"), discovery_inputs.get("backend_base_url"), _ctx_get(ctx, "app_url"))
     openapi_url = _first_nonempty(_ctx_get(ctx, "openapi_url"), discovery_inputs.get("openapi_url"))
     uploaded_openapi_path = _first_nonempty(_ctx_get(ctx, "uploaded_openapi_path"), discovery_inputs.get("uploaded_openapi_path"))
@@ -1624,7 +1976,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     theme_capture_evidence: dict[str, Any] = {}
 
     if frontend_repo_path or frontend_github_repo:
-        frontend_repo_summary = await _scan_repo_source(frontend_repo_path, frontend_github_repo, github_ref)
+        frontend_repo_summary = await _scan_repo_source(frontend_repo_path, frontend_github_repo, github_ref, github_token=github_token)
         evidence_sources.append({
             "kind": "frontend_repo_scan",
             "location": frontend_repo_path or frontend_github_repo,
@@ -1639,7 +1991,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             )
 
     if backend_repo_path or backend_github_repo:
-        backend_repo_summary = await _scan_repo_source(backend_repo_path, backend_github_repo, github_ref)
+        backend_repo_summary = await _scan_repo_source(backend_repo_path, backend_github_repo, github_ref, github_token=github_token)
         evidence_sources.append({
             "kind": "backend_repo_scan",
             "location": backend_repo_path or backend_github_repo,
@@ -1668,7 +2020,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
                 "high",
             )
     elif github_repo and not frontend_repo_summary and not backend_repo_summary:
-        repo_summary = await _scan_github_repo(str(github_repo), str(github_ref) if github_ref else None)
+        repo_summary = await _scan_github_repo(str(github_repo), str(github_ref) if github_ref else None, github_token=github_token)
         evidence_sources.append({
             "kind": "github_repo_scan",
             "location": str(github_repo),
@@ -1838,6 +2190,13 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             frontend_repo_path=frontend_repo_path,
             backend_repo_path=backend_repo_path,
         ),
+        github_sources=_context_graph_github_sources(
+            github_repo=github_repo,
+            frontend_github_repo=frontend_github_repo,
+            backend_github_repo=backend_github_repo,
+        ),
+        github_ref=str(github_ref) if github_ref else None,
+        github_token=github_token,
         discovery_inputs=discovery_inputs,
     )
 
@@ -1908,6 +2267,12 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             summary_lines.append(
                 f"Context graph preload indexed {context_graph_preload.get('indexed_file_count', 0)} source files."
             )
+            if context_graph_preload.get("source_context_chunk_count"):
+                summary_lines.append(
+                    "Source corpus retained "
+                    f"{context_graph_preload.get('source_context_chunk_count')} code chunks and "
+                    f"{context_graph_preload.get('source_context_symbol_count', 0)} symbols for retrieval."
+                )
     if unresolved_questions:
         summary_lines.append(
             f"Open questions remaining: {len(unresolved_questions)}"

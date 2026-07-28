@@ -8,7 +8,9 @@
  */
 
 import { registerAdminComponents } from '../admin/index.js'
+import { installOnboardingTour } from './installOnboardingTour.jsx'
 
 export function register(registerComponent) {
   registerAdminComponents(registerComponent)
+  installOnboardingTour()
 }

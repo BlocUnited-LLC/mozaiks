@@ -114,6 +114,103 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "brand_theme_summary" in agents
 
 
+def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_scan() -> None:
+    tools = _read_yaml("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
+    before_chat = [item for item in tools["lifecycle_tools"] if item["trigger"] == "before_chat"]
+
+    assert [(item["file"], item["function"]) for item in before_chat] == [
+        ("preload_discovery_context.py", "collect_prechat_discovery_context"),
+        ("emit_app_intelligence_overview.py", "emit_app_intelligence_overview_card"),
+    ]
+    overview_tool = before_chat[1]
+    assert overview_tool["tool_type"] == "UI_Surface"
+    assert overview_tool["ui"]["component"] == "AppIntelligenceOverviewCard"
+    assert "AppIntelligenceOverviewCard" in _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
+
+
+def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_app_intelligence_overview_direct",
+    )
+
+    emitted = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["component"] = component
+        emitted["payload"] = payload
+        emitted["kwargs"] = kwargs
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_123",
+        preload_status="ready",
+        app_id="app_1",
+        github_repo="acme/app",
+        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
+        app_intelligence_catalog={
+            "present": True,
+            "snapshot_id": "app_intelligence_1",
+            "source_context_bundle_id": "source_context_1",
+            "graph_id": "graph_1",
+            "coverage": {
+                "file_count": 3,
+                "chunk_count": 4,
+                "symbol_count": 5,
+                "node_count": 6,
+                "edge_count": 7,
+                "language_counts": {"python": 2, "javascript": 1},
+                "role_counts": {"source": 2, "route": 1},
+            },
+            "architecture": {
+                "module_roots": [{"module_id": "billing", "paths": ["app/modules/billing/module.yaml"]}],
+                "service_roots": [],
+                "ui_surfaces": [],
+                "workflow_roots": [],
+            },
+            "capabilities": [{"capability_id": "module:billing", "label": "billing"}],
+            "integration_surfaces": [],
+            "data_surfaces": [],
+            "risk_hints": [],
+            "agent_context_policy": {
+                "policy": "retrieve_not_dump",
+                "authority": {
+                    "facts": "SourceContextBundle and AppContextGraph",
+                    "summary": "AppIntelligenceSnapshot",
+                    "exact_code": "source retrieval tools",
+                },
+                "surfaces": [],
+            },
+            "warnings": [],
+        },
+        source_context_bundle={"file_contents": {"app.py": "secret source must not be emitted"}},
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+
+    assert result["success"] is True
+    assert result["app_intelligence_snapshot_id"] == "app_intelligence_1"
+    assert emitted["component"] == "AppIntelligenceOverviewCard"
+    assert emitted["payload"]["github_repo"] == "acme/app"
+    assert emitted["payload"]["app_intelligence_catalog"]["coverage"]["file_count"] == 3
+    assert "file_contents" not in str(emitted["payload"])
+    assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
+
+
+def test_existing_app_preload_mutates_an_empty_context_container() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_empty_context",
+    )
+    context: dict[str, object] = {}
+
+    result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
+
+    assert result["success"] is True
+    assert context["host_app_source"] == "external"
+    assert context["preload_status"] == "none"
+
+
 def test_create_route_enters_canonical_build_transition() -> None:
     registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
     create_page = next(item for item in registry["entrypoints"] if item["path"] == "/create")
@@ -168,13 +265,13 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
 
     adoption_journey = next(item for item in workflow_sequences if item["id"] == "brownfield_app_adoption")
     assert adoption_journey["steps"][0]["transition"] == "app_type_selector"
-    assert adoption_journey["steps"][1]["transition"] == "brownfield_discovery_intro"
+    assert adoption_journey["steps"][1]["transition"] == "brownfield_repo_input"
     assert adoption_journey["steps"][2]["workflows"] == ["ExistingAppDiscovery"]
     assert adoption_journey["steps"][3]["transition"] == "brownfield_path_selector"
 
     app_type_selector = transition_map["app_type_selector"]
     existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "brownfield_app")
-    assert existing_app_option["route_to"] == "brownfield_discovery_intro"
+    assert existing_app_option["route_to"] == "brownfield_repo_input"
     assert existing_app_option["sequence"] == "brownfield_app_adoption"
     assert existing_app_option["context_variables"] == {"app_type": "brownfield_app"}
 
@@ -407,8 +504,14 @@ def test_existing_app_preload_builds_context_graph_pack_for_local_repo(tmp_path:
     assert context["context_graph_catalog"]["indexed_file_count"] >= 1
     assert context["context_graph_health"]["selected_file_count"] >= 1
     assert context["context_graph_pack"]["summary"]["scan"]["selected_file_count"] >= 1
+    assert context["source_context_bundle"]["schema_version"] == "mozaiks.source_context.bundle.v1"
+    assert context["source_context_catalog"]["file_count"] >= 1
+    assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
+    assert context["app_intelligence_catalog"]["coverage"]["file_count"] >= 1
+    assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
     assert "src/service.py" in context["context_graph_catalog"]["file_tree"]
     assert "Context graph preload indexed" in context["preload_summary"]
+    assert "Source corpus retained" in context["preload_summary"]
 
 
 def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -434,7 +537,19 @@ def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(
         assert kwargs["context_version_id"] == "ctx_before_refresh"
         return SimpleNamespace(graph=graph, warnings=[])
 
+    async def _prior_source_bundle(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["context_version_id"] == "ctx_before_refresh"
+        return SimpleNamespace(bundle=None, warnings=[])
+
+    async def _prior_intelligence(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["context_version_id"] == "ctx_before_refresh"
+        return SimpleNamespace(snapshot=None, warnings=[])
+
     monkeypatch.setattr(app_context_mod, "get_app_context_graph_for_version", _prior_graph)
+    monkeypatch.setattr(app_context_mod, "get_source_context_bundle_for_version", _prior_source_bundle)
+    monkeypatch.setattr(app_context_mod, "get_app_intelligence_snapshot_for_version", _prior_intelligence)
     context = _Context(
         app_id="app_1",
         current_context_version_id="ctx_before_refresh",
@@ -455,7 +570,187 @@ def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(
     assert context["context_graph_pack"]["reason"] == "context_refresh_prior_version"
     assert context["context_graph_catalog"]["current_context_version_id"] == "ctx_before_refresh"
     assert context["context_graph_health"]["source"] == "previous_app_context_graph"
+    assert context["source_context_bundle"] is None
+    assert context["source_context_catalog"] is None
+    assert context["app_intelligence_snapshot"] is None
+    assert context["app_intelligence_catalog"] is None
     assert "modules/tasks/backend/service.py" in context["context_graph_catalog"]["file_tree"]
+
+
+def test_existing_app_github_repo_identifier_accepts_urls_and_owner_repo() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_github_identifier",
+    )
+
+    assert module._normalize_github_repo_identifier("BlocUnited-LLC/mozaiks-app") == "BlocUnited-LLC/mozaiks-app"
+    assert (
+        module._normalize_github_repo_identifier("https://github.com/BlocUnited-LLC/mozaiks-app")
+        == "BlocUnited-LLC/mozaiks-app"
+    )
+    assert (
+        module._normalize_github_repo_identifier("git@github.com:BlocUnited-LLC/mozaiks-app.git")
+        == "BlocUnited-LLC/mozaiks-app"
+    )
+    assert module._normalize_github_repo_identifier("not-a-repo") is None
+
+
+def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_github_context_graph",
+    )
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self) -> dict:
+            return self._payload
+
+    tree = {
+        "tree": [
+            {"type": "blob", "path": "package.json", "size": 74},
+            {"type": "blob", "path": "app/modules/listings/backend/service.py", "size": 84},
+            {"type": "blob", "path": "app/ui/pages/Listings.jsx", "size": 110},
+            {"type": "blob", "path": "README.md", "size": 40},
+            {"type": "blob", "path": ".env", "size": 20},
+            {"type": "blob", "path": "node_modules/react/index.js", "size": 20},
+        ]
+    }
+    contents = {
+        "package.json": b'{"dependencies": {"react": "^18.0.0", "fastapi": "^1.0.0"}}',
+        "app/modules/listings/backend/service.py": (
+            b"class ListingService:\n"
+            b"    def list_listings(self):\n"
+            b"        return []\n"
+        ),
+        "app/ui/pages/Listings.jsx": (
+            b"export function ListingsPage() {\n"
+            b"  return <main>Listings</main>;\n"
+            b"}\n"
+        ),
+        "README.md": b"# Demo\nExisting app repository.\n",
+    }
+
+    async def _fake_github_request(url: str, token: str | None):
+        assert token is None
+        if "/git/trees/" in url:
+            return _FakeResponse(200, tree)
+        if url.endswith("/repos/Example/demo"):
+            return _FakeResponse(
+                200,
+                {
+                    "name": "demo",
+                    "default_branch": "main",
+                },
+            )
+        return _FakeResponse(404, {})
+
+    async def _fake_fetch_github_file(owner: str, repo: str, path: str, ref: str, token: str | None):
+        assert owner == "Example"
+        assert repo == "demo"
+        assert ref == "main"
+        assert token is None
+        return contents.get(path)
+
+    monkeypatch.setattr(module, "_github_request", _fake_github_request)
+    monkeypatch.setattr(module, "_fetch_github_file", _fake_fetch_github_file)
+
+    context = _Context(
+        app_id="app_1",
+        github_repo="https://github.com/Example/demo",
+        discovery_inputs={
+            "github_repo": "https://github.com/Example/demo",
+            "context_graph_scan_policy": {"max_files": 50},
+        },
+    )
+
+    result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
+
+    assert result["success"] is True
+    assert result["context_graph_status"] == "loaded"
+    assert context["repo_summary"]["github_repo"] == "Example/demo"
+    assert context["repo_summary"]["github_repo_input"] == "https://github.com/Example/demo"
+    assert context["context_graph_health"]["source"] == "github_source_scan"
+    assert context["context_graph_health"]["selected_file_count"] >= 3
+    assert context["context_graph_health"]["skipped"]["sensitive_path"] == 1
+    assert context["source_context_bundle"]["schema_version"] == "mozaiks.source_context.bundle.v1"
+    assert "app/modules/listings/backend/service.py" in context["source_context_bundle"]["file_contents"]
+    assert context["source_context_catalog"]["file_count"] >= 3
+    assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
+    assert context["app_intelligence_catalog"]["architecture"]["module_roots"]
+    assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
+    assert "Context graph preload indexed" in context["preload_summary"]
+
+
+def test_existing_app_refresh_preloads_prior_source_context_bundle_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_context_source_refresh",
+    )
+
+    from mozaiksai.control_plane import app_context as app_context_mod
+    from mozaiksai.core.app_context import SourceCorpusBundle, build_source_corpus_bundle
+    from mozaiksai.core.app_context.context_graph import build_context_graph_from_file_map
+    from mozaiksai.core.app_context.scan_policy import select_source_file_map
+
+    file_map = {
+        "modules/tasks/backend/service.py": "def list_tasks():\n    return []\n",
+    }
+    graph = build_context_graph_from_file_map(
+        app_id="app_1",
+        artifact_version_id="av_graph_1",
+        artifact_kind="app_context_graph",
+        file_map=file_map,
+    )
+    bundle = build_source_corpus_bundle(
+        app_id="app_1",
+        scan_result=select_source_file_map(file_map, source="previous_app_context_graph"),
+    )
+
+    async def _prior_graph(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["context_version_id"] == "ctx_before_refresh"
+        return SimpleNamespace(graph=graph, warnings=[])
+
+    async def _prior_source_bundle(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["context_version_id"] == "ctx_before_refresh"
+        return SimpleNamespace(bundle=SourceCorpusBundle.model_validate(bundle.model_dump(mode="json")), warnings=[])
+
+    async def _prior_intelligence(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["context_version_id"] == "ctx_before_refresh"
+        return SimpleNamespace(snapshot=None, warnings=[])
+
+    monkeypatch.setattr(app_context_mod, "get_app_context_graph_for_version", _prior_graph)
+    monkeypatch.setattr(app_context_mod, "get_source_context_bundle_for_version", _prior_source_bundle)
+    monkeypatch.setattr(app_context_mod, "get_app_intelligence_snapshot_for_version", _prior_intelligence)
+    context = _Context(
+        app_id="app_1",
+        current_context_version_id="ctx_before_refresh",
+        context_refresh_request={
+            "app_id": "app_1",
+            "current_context_version_id": "ctx_before_refresh",
+            "reason": "Refresh repository snapshot.",
+        },
+        discovery_inputs={},
+    )
+
+    result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
+
+    assert result["context_graph_status"] == "loaded"
+    assert context["source_context_bundle"]["bundle_id"] == bundle.bundle_id
+    assert context["source_context_catalog"]["chunk_count"] >= 1
+    assert context["app_intelligence_snapshot"]["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
+    assert context["app_intelligence_catalog"]["coverage"]["file_count"] >= 1
+    assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
 
 
 def test_existing_app_artifact_saver_persists_canonical_fields() -> None:

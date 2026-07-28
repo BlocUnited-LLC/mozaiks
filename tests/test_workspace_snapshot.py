@@ -6,6 +6,10 @@ from typing import Any
 import pytest
 
 from factory_app.refinement_harness.tools.get_context_graph_catalog import get_context_graph_catalog
+from factory_app.refinement_harness.tools.source_context import (
+    read_app_source_file,
+    search_app_source_context,
+)
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.control_plane.workspace_snapshot import register_workspace_snapshot
 from mozaiksai.core.artifacts.models import (
@@ -108,12 +112,27 @@ async def test_register_workspace_snapshot_creates_artifact_and_context_graph(tm
     assert Path(result.artifact_path).exists()
 
     kinds = [artifact.artifact_kind for artifact in store.created]
-    assert kinds == ["app_bundle", "app_context_graph", "app_context_version"]
-    graph_payload = store.created[1].commit_metadata.metadata["summary_payload"]
+    assert kinds == [
+        "app_bundle",
+        "source_context_bundle",
+        "app_context_graph",
+        "app_intelligence_snapshot",
+        "app_context_version",
+    ]
+    source_context_payload = store.created[1].commit_metadata.metadata["summary_payload"]
+    assert source_context_payload["schema_version"] == "mozaiks.source_context.bundle.v1"
+    assert source_context_payload["file_contents"]["app/modules/wallet/backend/handler.py"]
+    assert result.source_context_artifact_version_id == store.created[1].id
+    graph_payload = store.created[2].commit_metadata.metadata["summary_payload"]
     assert len(graph_payload["nodes"]) > 0
-    assert store.created[1].commit_metadata.metadata["context_graph_health_report"]["status"] == "healthy"
-    context_payload = store.created[2].commit_metadata.metadata["summary_payload"]
+    assert store.created[2].commit_metadata.metadata["context_graph_health_report"]["status"] == "healthy"
+    intelligence_payload = store.created[3].commit_metadata.metadata["summary_payload"]
+    assert intelligence_payload["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
+    assert result.app_intelligence_artifact_version_id == store.created[3].id
+    context_payload = store.created[4].commit_metadata.metadata["summary_payload"]
     assert context_payload["graph_snapshot_ref"] == result.graph_artifact_version_id
+    assert any(ref["artifact_kind"] == "source_context_bundle" for ref in context_payload["artifact_refs"])
+    assert any(ref["artifact_kind"] == "app_intelligence_snapshot" for ref in context_payload["artifact_refs"])
     assert context_payload["mode"] == "hybrid"
 
 
@@ -156,4 +175,49 @@ async def test_workspace_snapshot_feeds_graph_aware_scope_catalog(tmp_path: Path
     assert candidate_paths[0].startswith("app/modules/wallet/")
     assert candidate_paths.index("app/modules/wallet/backend/handler.py") < candidate_paths.index("tests/test_wallet.py")
     assert catalog["scan_health"]["selected_by_priority"]["app_modules"] == 2
+
+
+@pytest.mark.asyncio
+async def test_workspace_snapshot_feeds_persisted_source_context_tools(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "app" / "ui" / "pages").mkdir(parents=True)
+    (workspace / "app" / "ui" / "services").mkdir(parents=True)
+    (workspace / "app" / "ui" / "pages" / "Dashboard.jsx").write_text(
+        "import { fetchMetrics } from '../services/metrics';\n"
+        "export default function Dashboard() { return fetchMetrics(); }\n",
+        encoding="utf-8",
+    )
+    (workspace / "app" / "ui" / "services" / "metrics.js").write_text(
+        "export function fetchMetrics() { return fetch('/api/metrics'); }\n",
+        encoding="utf-8",
+    )
+
+    store = _MemoryArtifactStore()
+    result = await register_workspace_snapshot(
+        app_id="app_1",
+        workspace_root=workspace,
+        artifact_store=store,
+        generated_artifacts_root=tmp_path / "generated",
+    )
+    context = ControlPlaneToolContext(
+        checkpoint="coding_requested",
+        app_id="app_1",
+        artifact_kind="app_bundle",
+        artifact_key="workspace_snapshot",
+        artifact_version_id=result.app_bundle_artifact_version_id,
+        raw_user_request="Update dashboard metrics",
+    )
+
+    search = await search_app_source_context(context=context, artifact_store=store)
+    assert search["present"] is True
+    assert search["source"] == "current_app_context"
+    assert any(item["path"] == "app/ui/pages/Dashboard.jsx" for item in search["results"])
+
+    read = await read_app_source_file(
+        path="app/ui/pages/Dashboard.jsx",
+        context=context,
+        artifact_store=store,
+    )
+    assert read["present"] is True
+    assert "fetchMetrics" in read["content"]
 

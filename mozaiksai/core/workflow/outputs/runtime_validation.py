@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -22,6 +23,22 @@ class StructuredOutputValidation:
     error: str | None = None
 
 
+_JSON_FENCE_RE = re.compile(
+    r"^\s*```(?:json|JSON)?\s*(?P<body>.*?)\s*```\s*$",
+    re.DOTALL,
+)
+
+
+def normalize_json_candidate_text(value: str) -> str:
+    """Return JSON text from a raw or fenced JSON candidate."""
+
+    text = str(value or "").strip()
+    match = _JSON_FENCE_RE.match(text)
+    if match:
+        return match.group("body").strip()
+    return text
+
+
 def reply_body_to_data(reply: Any) -> Any:
     """Normalize an AG2 reply, envelope body, dict, list, or Pydantic model."""
 
@@ -31,7 +48,7 @@ def reply_body_to_data(reply: Any) -> Any:
     if isinstance(body, (dict, list)):
         return body
     if isinstance(body, str):
-        text = body.strip()
+        text = normalize_json_candidate_text(body)
         if not text:
             return text
         try:
@@ -93,6 +110,7 @@ def validate_agent_structured_output(
 
 __all__ = [
     "StructuredOutputValidation",
+    "normalize_json_candidate_text",
     "reply_body_to_data",
     "validate_agent_structured_output",
 ]

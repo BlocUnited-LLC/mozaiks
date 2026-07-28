@@ -253,6 +253,55 @@ async def test_register_greenfield_app_context_version_persists_and_sets_current
     )
 
 
+async def test_register_greenfield_app_context_version_indexes_source_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "GeneratedApp"
+    (workspace / "app" / "ui" / "pages").mkdir(parents=True)
+    (workspace / "app" / "ui" / "pages" / "home.yaml").write_text("title: Home\n", encoding="utf-8")
+    (workspace / "app" / "ui" / "components").mkdir(parents=True)
+    (workspace / "app" / "ui" / "components" / "Home.jsx").write_text(
+        "export default function Home() { return <main>Home</main>; }\n",
+        encoding="utf-8",
+    )
+    (workspace / "app" / "app.json").write_text('{"app_id": "field_service"}\n', encoding="utf-8")
+    app_bundle = ArtifactVersionDoc(
+        _id="av_app_bundle_1",
+        app_id="field_service",
+        artifact_kind="app_bundle",
+        artifact_key="app_bundle",
+        version_number=1,
+        lineage_root_id="av_app_bundle_1",
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.PASSED,
+        files_manifest=_file_manifest(),
+        commit_metadata={
+            "metadata": {
+                "workspace_dir": str(workspace),
+                "bundle_name": "GeneratedApp",
+            }
+        },
+    )
+    store = _MemoryArtifactStore()
+
+    registered = await register_greenfield_app_context_version(
+        app_bundle_artifact=app_bundle,
+        artifact_store=store,
+        source_workflow="AppGenerator",
+        source_chat_id="chat_greenfield_1",
+    )
+
+    persisted_kinds = [call["artifact_kind"] for call in store.create_calls]
+    assert "source_context_bundle" in persisted_kinds
+    assert registered.context_version.graph_snapshot_ref
+    assert any(ref.artifact_kind == "source_context_bundle" for ref in registered.context_version.artifact_refs)
+    source_payload = next(
+        doc.commit_metadata.metadata["summary_payload"]
+        for doc in store.versions.values()
+        if doc.artifact_kind == "source_context_bundle"
+    )
+    assert source_payload["file_contents"]["ui/components/Home.jsx"]
+    assert source_payload["schema_version"] == "mozaiks.source_context.bundle.v1"
+
+
 def test_greenfield_registration_has_no_graph_database_or_proprietary_dependency() -> None:
     paths = [
         ROOT / "mozaiksai/core/app_context/store.py",

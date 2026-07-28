@@ -496,6 +496,7 @@ class WorkflowBridgeMixin:
 
         from mozaiksai.core.ports.orchestration import RunStatus
         from mozaiksai.core.workflow.orchestration_patterns import (
+            _emit_validated_structured_outputs_from_runner_result,
             _last_agent_name_from_runner_result,
             _project_ag2_wal_to_mozaiks_transport,
         )
@@ -533,6 +534,19 @@ class WorkflowBridgeMixin:
             _, structured_registry = load_workflow_structured_outputs(workflow_name)
         except Exception:
             structured_registry = {}
+        ctx = dict(getattr(runner_result, "context_variables", {}) or {})
+        await _emit_validated_structured_outputs_from_runner_result(
+            runner_result=runner_result,
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+            user_id=user_id,
+            turn_sequence_start=0,
+            context_vars_dict=ctx,
+            context_bridge=None,
+            structured_registry=structured_registry,
+            wf_logger=logger,
+        )
         await _project_ag2_wal_to_mozaiks_transport(
             runner_result=runner_result,
             transport=self,
@@ -545,7 +559,6 @@ class WorkflowBridgeMixin:
             structured_registry=structured_registry,
         )
 
-        ctx = dict(getattr(runner_result, "context_variables", {}) or {})
         if ctx:
             try:
                 await pm.persist_context_variables(

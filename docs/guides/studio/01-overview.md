@@ -22,9 +22,12 @@ In-progress builds stay in **Apps** so you can return any time.
 | **Apps** | All your app workspaces and their build state |
 | **Usage** | Workspace-level model usage, token volume, and cost estimates |
 | **Integrations** | Shared provider setup and safe credential-presence status |
-| **App Overview** | Single-app state, next action, health, build context, and connected services |
+| **App Dashboard** | Single-app portals for Overview, Building, Branding, Launch, Growth, Users, Usage, Support, and Settings |
 | **Access** | Single-app account access, plan assignment, and access blockers |
 | **App Usage** | Single-app chats, workflows, tokens, and cost detail |
+
+Dashboard structure comes from `app/dashboard/dashboard.yaml`. When that file is
+missing, Studio uses the OSS default dashboard manifest.
 
 ## Coming Back to a Build
 

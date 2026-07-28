@@ -207,3 +207,39 @@ capabilities:
       - commerce.cart.manage
       - commerce.checkout.start
       - commerce.orders.manage
+
+  - id: onboarding_pack
+    label: User Onboarding Tour
+    capability_kind: operator_pack
+    recommendation_rank: 8
+    domains:
+      - onboarding
+      - ux
+      - first_time_user
+    intent_signals:
+      - App has multiple sections or a non-trivial navigation surface that first-time users may find unfamiliar.
+      - App is aimed at end-users discovering features for the first time.
+      - User asks for onboarding tour, getting started guide, product tour, walkthrough, or first-time user experience.
+      - App targets non-technical end-users who benefit from guided first use.
+    selection_aliases:
+      - onboarding
+      - onboarding_pack
+      - product tour
+      - getting started
+      - guided tour
+      - walkthrough
+      - first time user
+      - user onboarding
+      - ftu
+    generator_notes:
+      - Select onboarding_pack only when the app has a meaningful navigation surface and targets users who benefit from guided first use.
+      - Do not select for single-page tools, admin-only dashboards, developer tools, or operator-facing surfaces.
+      - The primary generated output is app/config/onboarding.yaml — a declarative list of tour steps. This file's presence enables the tour; its absence disables it entirely.
+      - Scaffold step selectors from the app's declared shell.json nav items and app/ui/pages/*.yaml routes. Use href-based selectors (e.g. a[href="/dashboard"]).
+      - Limit to 3–5 steps covering the most important entry points visible to a new user on the free plan.
+      - The OSS runtime provides installTour() and the tour overlay. Do not generate a custom React tour component or a separate /welcome page.
+      - The user_onboarding state module follows the standard archetype. Step ids in its complete_step enum must match config/onboarding.yaml step ids exactly.
+    capabilities_provided:
+      - onboarding.tour.show
+      - onboarding.tour.dismiss
+      - onboarding.tour.progress.read

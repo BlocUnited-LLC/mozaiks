@@ -1,0 +1,38 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.onboarding.step_completed
+    version: 1
+    description: Emitted when a user completes an onboarding step.
+    producer: user_onboarding
+    payload_schema:
+      type: object
+      required:
+        - user_id
+        - step_id
+        - progress
+      properties:
+        user_id:
+          type: string
+        step_id:
+          type: string
+        progress:
+          type: integer
+        completed_at:
+          type: string
+
+  - type: domain.onboarding.dismissed
+    version: 1
+    description: Emitted when a user dismisses the onboarding tour.
+    producer: user_onboarding
+    payload_schema:
+      type: object
+      required:
+        - user_id
+        - dismissed_at
+      properties:
+        user_id:
+          type: string
+        dismissed_at:
+          type: string
+        progress:
+          type: integer

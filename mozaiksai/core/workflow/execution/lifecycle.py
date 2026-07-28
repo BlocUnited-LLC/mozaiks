@@ -364,7 +364,7 @@ class LifecycleToolManager:
                 param.kind is inspect.Parameter.VAR_KEYWORD
                 for param in sig.parameters.values()
             )
-            if tool.accepts_context and context_variables:
+            if tool.accepts_context and context_variables is not None:
                 kwargs['context_variables'] = context_variables
             for key, value in (call_kwargs or {}).items():
                 if accepts_var_kwargs or key in sig.parameters:

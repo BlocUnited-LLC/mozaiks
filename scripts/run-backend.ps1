@@ -87,11 +87,10 @@ function Confirm-PortAvailable {
     Write-Host "[backend] ForceStop enabled - terminating existing listeners on port $LocalPort..." -ForegroundColor Yellow
     $listeners | ForEach-Object {
       try {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         Write-Host ("  Stopped PID {0}" -f $_.ProcessId) -ForegroundColor Green
       } catch {
-        Write-Host ("  Failed to stop PID {0}: {1}" -f $_.ProcessId, $_.Exception.Message) -ForegroundColor Red
-        throw
+        Write-Host ("  Could not stop PID {0} (may have already exited): {1}" -f $_.ProcessId, $_.Exception.Message) -ForegroundColor DarkYellow
       }
     }
     Start-Sleep -Milliseconds 350

@@ -12,8 +12,8 @@ Studio has two scopes:
 
 | Scope | Routes | Purpose |
 | --- | --- | --- |
-| Workspace Studio | `/apps`, `/usage`, `/integrations` | Manage the portfolio: app records, workspace-wide usage, and shared provider setup. |
-| App Studio | `/apps/:appId/overview`, `/apps/:appId/access`, `/apps/:appId/usage`, `/apps/:appId/support` | Manage one app: current state, access, usage, and support follow-up. |
+| Workspace Dashboard | `/apps`, `/usage`, `/integrations` | Manage the portfolio: app records, workspace-wide usage, and shared provider setup. |
+| App Dashboard | `/apps/:appId/overview`, `/apps/:appId/...` | Manage one app through portals such as Overview, Building, Branding, Launch, Growth, Users, Usage, Support, and Settings. |
 
 Hidden detail routes can exist when a task needs deeper diagnostics:
 
@@ -47,3 +47,4 @@ drill-down, hover/detail state, or a different page.
 ---
 
 Working on Studio itself? See [Studio Product Model](../architecture/builder/studio-product-model.md) and [Admin System](../architecture/app/admin-system.md) for design rules, UI primitives, and implementation sources.
+For the canonical dashboard manifest, see [App Dashboard Contract](../architecture/app/app-dashboard-contract.md).

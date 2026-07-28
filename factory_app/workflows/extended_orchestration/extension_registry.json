@@ -2,37 +2,154 @@
   "pack_name": "DefaultPack",
   "version": 3,
   "description": "Universal workflow routing layer. Defines workflow registry entries, dependencies, transition routes, and optional workflow sequence metadata. NOT agent routing; that lives in transition_graph.yaml.",
-
   "artifact_dependency_graph": {
-    "concept":                 [],
-    "build_plan":              ["concept"],
-    "brand":                   ["concept"],
-    "design_docs":             ["concept", "build_plan"],
-    "experience_spec":         ["concept", "design_docs"],
-    "workflow_bundle":         ["design_docs", "subscription_contract"],
-    "subscription_contract":   ["concept", "build_plan", "design_docs"],
-    "app_bundle":              ["design_docs", "experience_spec", "workflow_bundle", "subscription_contract", "brand"],
-    "application_inventory":   [],
-    "ownership_boundary":      ["application_inventory"],
-    "integration_inventory":   ["application_inventory"],
-    "risk_report":             ["application_inventory", "ownership_boundary", "integration_inventory"],
-    "adoption_plan":           ["application_inventory", "ownership_boundary", "integration_inventory", "risk_report"],
-    "brownfield_registration": ["application_inventory", "ownership_boundary", "integration_inventory", "risk_report", "adoption_plan"],
-    "app_context_graph":       ["application_inventory", "ownership_boundary", "integration_inventory", "risk_report", "adoption_plan"],
-    "app_context_version":     ["application_inventory", "ownership_boundary", "integration_inventory", "risk_report", "adoption_plan", "brownfield_registration", "app_context_graph"]
+    "concept": [],
+    "build_plan": [
+      "concept"
+    ],
+    "brand": [
+      "concept"
+    ],
+    "design_docs": [
+      "concept",
+      "build_plan"
+    ],
+    "experience_spec": [
+      "concept",
+      "design_docs"
+    ],
+    "workflow_bundle": [
+      "design_docs",
+      "subscription_contract"
+    ],
+    "subscription_contract": [
+      "concept",
+      "build_plan",
+      "design_docs"
+    ],
+    "app_bundle": [
+      "design_docs",
+      "experience_spec",
+      "workflow_bundle",
+      "subscription_contract",
+      "brand"
+    ],
+    "application_inventory": [],
+    "ownership_boundary": [
+      "application_inventory"
+    ],
+    "integration_inventory": [
+      "application_inventory"
+    ],
+    "risk_report": [
+      "application_inventory",
+      "ownership_boundary",
+      "integration_inventory"
+    ],
+    "adoption_plan": [
+      "application_inventory",
+      "ownership_boundary",
+      "integration_inventory",
+      "risk_report"
+    ],
+    "brownfield_registration": [
+      "application_inventory",
+      "ownership_boundary",
+      "integration_inventory",
+      "risk_report",
+      "adoption_plan"
+    ],
+    "source_context_bundle": [
+      "application_inventory"
+    ],
+    "app_context_graph": [
+      "application_inventory",
+      "ownership_boundary",
+      "integration_inventory",
+      "risk_report",
+      "adoption_plan",
+      "source_context_bundle"
+    ],
+    "app_intelligence_snapshot": [
+      "source_context_bundle",
+      "app_context_graph"
+    ],
+    "app_context_version": [
+      "application_inventory",
+      "ownership_boundary",
+      "integration_inventory",
+      "risk_report",
+      "adoption_plan",
+      "brownfield_registration",
+      "source_context_bundle",
+      "app_context_graph",
+      "app_intelligence_snapshot"
+    ]
   },
-
   "workflows": [
-    { "id": "ValueEngine",          "description": "Concept & value decomposition", "startup_mode": "UserDriven" },
-    { "id": "ThemeCapture",         "description": "Captures visual identity and produces theme_config.json", "startup_mode": "AgentDriven", "dependencies": ["ValueEngine"] },
-    { "id": "DesignDocs",           "description": "Frontend, backend, database design docs", "startup_mode": "AgentDriven", "dependencies": ["ValueEngine"] },
-    { "id": "SubscriptionContractDesigner", "description": "Generates provider-neutral subscription, access, and token contract artifacts", "startup_mode": "AgentDriven", "dependencies": ["DesignDocs"] },
-    { "id": "AgentGenerator",       "description": "Generates workflow artifacts and agent specs", "startup_mode": "AgentDriven", "dependencies": ["DesignDocs", "SubscriptionContractDesigner"] },
-    { "id": "AppGenerator",         "description": "Generates app schema and module files", "startup_mode": "AgentDriven", "dependencies": ["DesignDocs", "SubscriptionContractDesigner", "AgentGenerator", "ThemeCapture"] },
-    { "id": "ExistingAppDiscovery", "description": "Discovery workflow for existing-app adopters", "startup_mode": "UserDriven" },
-    { "id": "AppReview",            "description": "In-chat build review and promote-or-revise HITL step", "startup_mode": "AgentDriven", "dependencies": ["AppGenerator"] }
+    {
+      "id": "ValueEngine",
+      "description": "Concept & value decomposition",
+      "startup_mode": "UserDriven"
+    },
+    {
+      "id": "ThemeCapture",
+      "description": "Captures visual identity and produces theme_config.json",
+      "startup_mode": "AgentDriven",
+      "dependencies": [
+        "ValueEngine"
+      ]
+    },
+    {
+      "id": "DesignDocs",
+      "description": "Frontend, backend, database design docs",
+      "startup_mode": "AgentDriven",
+      "dependencies": [
+        "ValueEngine"
+      ]
+    },
+    {
+      "id": "SubscriptionContractDesigner",
+      "description": "Generates provider-neutral subscription, access, and token contract artifacts",
+      "startup_mode": "AgentDriven",
+      "dependencies": [
+        "DesignDocs"
+      ]
+    },
+    {
+      "id": "AgentGenerator",
+      "description": "Generates workflow artifacts and agent specs",
+      "startup_mode": "AgentDriven",
+      "dependencies": [
+        "DesignDocs",
+        "SubscriptionContractDesigner"
+      ]
+    },
+    {
+      "id": "AppGenerator",
+      "description": "Generates app schema and module files",
+      "startup_mode": "AgentDriven",
+      "dependencies": [
+        "DesignDocs",
+        "SubscriptionContractDesigner",
+        "AgentGenerator",
+        "ThemeCapture"
+      ]
+    },
+    {
+      "id": "ExistingAppDiscovery",
+      "description": "Discovery workflow for existing-app adopters",
+      "startup_mode": "UserDriven"
+    },
+    {
+      "id": "AppReview",
+      "description": "In-chat build review and promote-or-revise HITL step",
+      "startup_mode": "AgentDriven",
+      "dependencies": [
+        "AppGenerator"
+      ]
+    }
   ],
-
   "entrypoints": [
     {
       "id": "create_app",
@@ -52,175 +169,446 @@
       }
     }
   ],
-
   "workflow_sequences": [
     {
       "id": "build",
-      "description": "Full build pipeline: app path context → value → brand → coding participation → database setup intent → design → generation → review and promote.",
-      "affected_declarative_families": ["concept", "build_plan", "brand", "design_docs", "experience_spec", "subscription_contract", "workflow_bundle", "app_bundle"],
+      "description": "Full build pipeline: app path context -> value -> brand -> coding participation -> database setup intent -> design -> generation -> review and promote.",
+      "affected_declarative_families": [
+        "concept",
+        "build_plan",
+        "brand",
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "transition": "app_type_selector" },
-        { "workflows": ["ValueEngine"] },
-        { "workflows": ["ThemeCapture"] },
-        { "transition": "coding_journey_selector" },
-        { "transition": "database_setup_selector" },
-        { "workflows": ["DesignDocs"] },
-        { "workflows": ["SubscriptionContractDesigner"] },
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] },
-        { "transition": "app_review" },
-        { "transition": "build_satisfaction_rating" }
+        {
+          "transition": "app_type_selector"
+        },
+        {
+          "workflows": [
+            "ValueEngine"
+          ]
+        },
+        {
+          "workflows": [
+            "ThemeCapture"
+          ]
+        },
+        {
+          "transition": "coding_journey_selector"
+        },
+        {
+          "transition": "database_setup_selector"
+        },
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        },
+        {
+          "transition": "app_review"
+        },
+        {
+          "transition": "build_satisfaction_rating"
+        }
       ]
     },
     {
       "id": "brownfield_app_adoption",
-      "description": "Brownfield app adoption pipeline: app path context → discovery intro → discovery chat → generation path selection.",
-      "affected_declarative_families": ["concept", "app_bundle"],
+      "description": "Brownfield app adoption pipeline: app path context -> repo link -> App Intelligence indexing -> discovery chat -> generation path selection.",
+      "affected_declarative_families": [
+        "application_inventory",
+        "ownership_boundary",
+        "integration_inventory",
+        "risk_report",
+        "adoption_plan",
+        "brownfield_registration",
+        "source_context_bundle",
+        "app_context_graph",
+        "app_intelligence_snapshot",
+        "app_context_version"
+      ],
       "steps": [
-        { "transition": "app_type_selector" },
-        { "transition": "brownfield_discovery_intro" },
-        { "workflows": ["ExistingAppDiscovery"] },
-        { "transition": "brownfield_path_selector" }
+        {
+          "transition": "app_type_selector"
+        },
+        {
+          "transition": "brownfield_repo_input"
+        },
+        {
+          "workflows": [
+            "ExistingAppDiscovery"
+          ]
+        },
+        {
+          "transition": "brownfield_path_selector"
+        }
       ]
     },
     {
       "id": "brownfield_discovery_refresh",
       "description": "Non-mutating brownfield context refresh: reruns ExistingAppDiscovery for a registered brownfield app to refresh app-context artifacts and the current AppContextVersion. Does not run generation, create staged patches, or mutate source repositories.",
-      "affected_declarative_families": ["application_inventory", "ownership_boundary", "integration_inventory", "risk_report", "adoption_plan", "brownfield_registration", "app_context_graph", "app_context_version"],
+      "affected_declarative_families": [
+        "application_inventory",
+        "ownership_boundary",
+        "integration_inventory",
+        "risk_report",
+        "adoption_plan",
+        "brownfield_registration",
+        "source_context_bundle",
+        "app_context_graph",
+        "app_intelligence_snapshot",
+        "app_context_version"
+      ],
       "steps": [
-        { "workflows": ["ExistingAppDiscovery"] }
+        {
+          "workflows": [
+            "ExistingAppDiscovery"
+          ]
+        }
       ]
     },
     {
       "id": "brownfield_overlay_generation",
       "description": "Brownfield overlay-generation build: generates AI workflow bundles and overlay surfaces alongside the existing app without architectural rebuild. Grounded in AdoptionPlan and AppContextVersion context.",
-      "affected_declarative_families": ["workflow_bundle", "app_bundle"],
+      "affected_declarative_families": [
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] },
-        { "transition": "app_review" }
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        },
+        {
+          "transition": "app_review"
+        }
       ]
     },
     {
       "id": "brownfield_module_generation",
-      "description": "Brownfield module-generation build: runs the full DesignDocs → AgentGenerator → AppGenerator pipeline grounded in AdoptionPlan ownership and impact scope.",
-      "affected_declarative_families": ["design_docs", "experience_spec", "subscription_contract", "workflow_bundle", "app_bundle"],
+      "description": "Brownfield module-generation build: runs the full DesignDocs -> AgentGenerator -> AppGenerator pipeline grounded in AdoptionPlan ownership and impact scope.",
+      "affected_declarative_families": [
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["DesignDocs"] },
-        { "workflows": ["SubscriptionContractDesigner"] },
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] },
-        { "transition": "app_review" }
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        },
+        {
+          "transition": "app_review"
+        }
       ]
     },
     {
       "id": "full_rebuild",
       "description": "Revision pipeline for concept-level changes that need the full build stack refreshed without onboarding transitions.",
-      "affected_declarative_families": ["concept", "build_plan", "brand", "design_docs", "experience_spec", "subscription_contract", "workflow_bundle", "app_bundle"],
+      "affected_declarative_families": [
+        "concept",
+        "build_plan",
+        "brand",
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["ValueEngine"] },
-        { "workflows": ["ThemeCapture"] },
-        { "workflows": ["DesignDocs"] },
-        { "workflows": ["SubscriptionContractDesigner"] },
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] },
-        { "transition": "app_review" }
+        {
+          "workflows": [
+            "ValueEngine"
+          ]
+        },
+        {
+          "workflows": [
+            "ThemeCapture"
+          ]
+        },
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        },
+        {
+          "transition": "app_review"
+        }
       ]
     },
     {
       "id": "conceptual_replan",
       "description": "Concept-level pivot that re-plans from existing app context, preserving brand and reusable generic modules. Runs the same workflow chain as full_rebuild but is semantically distinct so later work can inject preservation context (pivot_description, preserve_families, carry_forward_modules).",
-      "affected_declarative_families": ["concept", "build_plan", "brand", "design_docs", "experience_spec", "subscription_contract", "workflow_bundle", "app_bundle"],
+      "affected_declarative_families": [
+        "concept",
+        "build_plan",
+        "brand",
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["ValueEngine"] },
-        { "workflows": ["ThemeCapture"] },
-        { "workflows": ["DesignDocs"] },
-        { "workflows": ["SubscriptionContractDesigner"] },
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] },
-        { "transition": "app_review" }
+        {
+          "workflows": [
+            "ValueEngine"
+          ]
+        },
+        {
+          "workflows": [
+            "ThemeCapture"
+          ]
+        },
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        },
+        {
+          "transition": "app_review"
+        }
       ]
     },
     {
       "id": "concept_patch",
       "description": "Scoped concept revision owned by ValueEngine.",
-      "affected_declarative_families": ["concept", "build_plan"],
+      "affected_declarative_families": [
+        "concept",
+        "build_plan"
+      ],
       "steps": [
-        { "workflows": ["ValueEngine"] }
+        {
+          "workflows": [
+            "ValueEngine"
+          ]
+        }
       ]
     },
     {
       "id": "design_patch",
       "description": "Scoped design-document revision owned by DesignDocs.",
-      "affected_declarative_families": ["design_docs"],
+      "affected_declarative_families": [
+        "design_docs"
+      ],
       "steps": [
-        { "workflows": ["DesignDocs"] }
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        }
       ]
     },
     {
       "id": "design_revision",
       "description": "Design-intent revision that refreshes downstream workflow and app artifacts.",
-      "affected_declarative_families": ["design_docs", "experience_spec", "subscription_contract", "workflow_bundle", "app_bundle"],
+      "affected_declarative_families": [
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["DesignDocs"] },
-        { "workflows": ["SubscriptionContractDesigner"] },
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] }
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
       ]
     },
     {
       "id": "app_surface_revision",
       "description": "App-surface revision that reopens DesignDocs and regenerates app artifacts.",
-      "affected_declarative_families": ["experience_spec", "app_bundle"],
+      "affected_declarative_families": [
+        "experience_spec",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["DesignDocs"] },
-        { "workflows": ["AppGenerator"] }
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
       ]
     },
     {
       "id": "workflow_patch",
       "description": "Scoped workflow-bundle revision owned by AgentGenerator.",
-      "affected_declarative_families": ["workflow_bundle"],
+      "affected_declarative_families": [
+        "workflow_bundle"
+      ],
       "steps": [
-        { "workflows": ["AgentGenerator"] }
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        }
       ]
     },
     {
       "id": "workflow_revision",
       "description": "Workflow-bundle revision that refreshes generated app wiring.",
-      "affected_declarative_families": ["workflow_bundle", "app_bundle"],
+      "affected_declarative_families": [
+        "workflow_bundle",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["AgentGenerator"] },
-        { "workflows": ["AppGenerator"] }
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
       ]
     },
     {
       "id": "app_revision",
       "description": "Scoped app-bundle revision owned by AppGenerator.",
-      "affected_declarative_families": ["app_bundle"],
+      "affected_declarative_families": [
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["AppGenerator"] }
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
       ]
     },
     {
       "id": "theme_revision",
       "description": "Theme revision pipeline: re-runs ThemeCapture to refresh brand tokens, then rebuilds the app bundle with the updated theme.",
-      "affected_declarative_families": ["brand", "app_bundle"],
+      "affected_declarative_families": [
+        "brand",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["ThemeCapture"] },
-        { "workflows": ["AppGenerator"] }
+        {
+          "workflows": [
+            "ThemeCapture"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
       ]
     },
     {
       "id": "theme_patch",
       "description": "Scoped theme patch applied within AppGenerator without re-running ThemeCapture.",
-      "affected_declarative_families": ["brand", "app_bundle"],
+      "affected_declarative_families": [
+        "brand",
+        "app_bundle"
+      ],
       "steps": [
-        { "workflows": ["AppGenerator"] }
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
       ]
     }
   ],
-
   "transitions": [
     {
       "id": "app_type_selector",
@@ -246,7 +634,7 @@
         },
         {
           "id": "brownfield_app",
-          "route_to": "brownfield_discovery_intro",
+          "route_to": "brownfield_repo_input",
           "sequence": "brownfield_app_adoption",
           "context_variables": {
             "app_type": "brownfield_app"
@@ -291,6 +679,23 @@
       "transition_type": "user_choice_context",
       "ui": {
         "component": "BrownfieldDiscoveryIntro",
+        "mode": "screen",
+        "shell_mode": "focused"
+      },
+      "options": [
+        {
+          "id": "start_discovery",
+          "route_to": "brownfield_repo_input",
+          "sequence": "brownfield_app_adoption",
+          "context_variables": {}
+        }
+      ]
+    },
+    {
+      "id": "brownfield_repo_input",
+      "transition_type": "user_choice_context",
+      "ui": {
+        "component": "BrownfieldRepoInput",
         "mode": "screen",
         "shell_mode": "focused"
       },

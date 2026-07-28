@@ -520,6 +520,7 @@ def test_core_ui_index_exports_shipped_workflow_components() -> None:
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
     files = [
+        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
         "factory_app/workflows/AgentGenerator/ui/ActionPlan.js",
@@ -528,6 +529,20 @@ def test_workflow_ui_components_use_payload_prop_contract() -> None:
         content = _read(relative_path)
         assert "({ data" not in content
         assert "payload" in content
+
+
+def test_brownfield_repo_input_shows_extraction_state_while_starting_workflow() -> None:
+    content = _read("factory_app/workflows/extended_orchestration/ui/transitions/BrownfieldRepoInput.js")
+    transition_screen = _read("chat-ui/src/ui/screens/TransitionScreen.jsx")
+    route_renderer = _read("chat-ui/src/components/RouteRenderer.jsx")
+
+    assert "function ExtractionProgress(" in content
+    assert "Extracting code context" in content
+    assert "Creating context graph" in content
+    assert "Preparing agent overview" in content
+    assert "Promise.resolve(onResolve(option.id, contextVariables))" in content
+    assert "return onNavigate?.(option_id, contextVariables);" in transition_screen
+    assert "return true;" in route_renderer
 
 
 def test_transition_shell_screens_stay_workflow_agnostic() -> None:

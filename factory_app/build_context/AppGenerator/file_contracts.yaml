@@ -27,6 +27,7 @@ task_contracts:
       - ui/index.js
       - ui/lib/moduleApi.js
       - brand/theme_config.json
+      - dashboard/dashboard.yaml
       - config/shell.json
       - config/asset_manifest.json
     hard_constraints:
@@ -36,6 +37,8 @@ task_contracts:
       - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as home, apps, workspace, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Use dashboard only when the app declares a route/page with id dashboard; it is not a built-in shortcut. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.
       - Do not put profile-owned social surfaces such as friends, direct messages, user posts, or activity feed into config/shell.json shortcuts or generated global nav by default. They belong in contracts/profile.yaml tabs unless the product explicitly asks for a separate app-wide discovery route.
       - Prefer route-level AppPageSchema.navigation for page-owned global/local/profile/footer nav contributions; keep config/shell.json focused on app-wide navigation policy and built-in chrome shortcuts.
+      - Workspace/App Dashboard portal structure belongs in dashboard/dashboard.yaml, not in config/shell.json, ui/route_manifest.json, admin/admin_registry.yaml, or workflows/extended_orchestration/extension_registry.json.
+      - Dashboard manifests may reference workflow_sequence actions, but those sequences must already exist in workflows/extended_orchestration/extension_registry.json.
       - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
       - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
       - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.

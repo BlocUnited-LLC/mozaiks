@@ -243,6 +243,7 @@ export default function AppsPage() {
   const [importOpen, setImportOpen] = useState(false)
 
   const portfolio = useMemo(() => buildWorkspacePortfolio(apps), [apps])
+
   const visibleRows = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
     const filtered = portfolio.rows.filter((row) => {
@@ -320,6 +321,11 @@ export default function AppsPage() {
           />
           {visibleRows.length > 0 ? (
             <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={handleDelete} />
+          ) : portfolio.rows.length === 0 ? (
+            <InlineEmptyState
+              title="No apps yet"
+              description="Hit Create App above to get started. Describe what you want to build and Mozaiks handles the scaffold."
+            />
           ) : (
             <InlineEmptyState
               title="No apps match this search"

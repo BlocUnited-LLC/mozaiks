@@ -25,7 +25,7 @@ classifiers = [
 keywords = ["mozaiks", "ag2", "ai", "agents", "workflows", "multi-tenant", "runtime"]
 
 dependencies = [
-    "ag2[a2a,openai,tracing]==1.0.0b0",
+    "ag2[a2a,openai,tracing]==1.0.0",
     "a2a-sdk[grpc]>=1.1.0,<2",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
@@ -44,14 +44,18 @@ dependencies = [
     "python-dateutil>=2.8.0",
     "limits>=3.6.0",
     "jsonschema>=4.0.0",
+    "tree-sitter>=0.20.0",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-css",
 ]
 
 [project.optional-dependencies]
 gemini = [
-    "ag2[gemini]==1.0.0b0",
+    "ag2[gemini]==1.0.0",
 ]
 anthropic = [
-    "ag2[anthropic]==1.0.0b0",
+    "ag2[anthropic]==1.0.0",
 ]
 azure = [
     "azure-identity>=1.15.0",
@@ -81,12 +85,6 @@ monitoring = [
 tracing = [
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp>=1.27.0",
-]
-tree-sitter = [
-    "tree-sitter>=0.20.0",
-    "tree-sitter-python",
-    "tree-sitter-javascript",
-    "tree-sitter-css",
 ]
 e2b = [
     "e2b-code-interpreter>=0.0.10",

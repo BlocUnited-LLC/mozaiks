@@ -61,6 +61,36 @@ async def test_lifecycle_tools_execute_in_declared_order(monkeypatch: pytest.Mon
     assert ctx.data["order"] == ["one", "two"]
 
 
+@pytest.mark.asyncio
+async def test_lifecycle_tool_receives_empty_context_container(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
+
+    workflow_dir = tmp_path / "EmptyContext"
+    tools_dir = workflow_dir / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "preload.py").write_text(
+        "def preload(context_variables=None):\n"
+        "    context_variables['preloaded'] = True\n",
+        encoding="utf-8",
+    )
+    (workflow_dir / "tools.yaml").write_text(
+        "lifecycle_tools:\n"
+        "  - trigger: before_chat\n"
+        "    agent: null\n"
+        "    file: preload.py\n"
+        "    function: preload\n",
+        encoding="utf-8",
+    )
+
+    manager = LifecycleToolManager("EmptyContext")
+    manager.load_lifecycle_tools()
+    context: dict[str, object] = {}
+
+    await manager.trigger_before_chat(context_variables=context)
+
+    assert context["preloaded"] is True
+
+
 def test_lifecycle_manager_skips_missing_tool_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When tools.yaml lists a tool file that doesn't exist, no bindings are registered."""
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))

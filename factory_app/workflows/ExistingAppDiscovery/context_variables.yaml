@@ -136,6 +136,16 @@ definitions:
       type: state
       default: null
 
+  github_oauth_session:
+    type: string
+    description: >
+      Short-lived session key from the GitHub OAuth popup flow. Consumed once
+      by the before_chat hook to retrieve the OAuth access token from the
+      server-side token store. Never persisted beyond the initial preload phase.
+    source:
+      type: state
+      default: null
+
   backend_base_url:
     type: string
     description: Optional backend base URL used for health and OpenAPI probes.
@@ -194,6 +204,49 @@ definitions:
     description: >
       Rich machine-readable Context Graph catalog for diagnostics and tooling.
       This is intentionally distinct from context_graph_pack.
+    source:
+      type: state
+      default: null
+
+  source_context_bundle:
+    type: object
+    description: >
+      Bounded source-backed repo corpus produced during before_chat. It stores
+      selected redacted file contents, chunks, symbols, imports, source refs,
+      scan health, and parser status for retrieval tools. This is code-context
+      evidence only; the existing repo remains source of truth until explicit
+      overlay, staged patch, PR, or migration approval.
+    source:
+      type: state
+      default: null
+
+  source_context_catalog:
+    type: object
+    description: >
+      Compact source-context catalog derived from source_context_bundle for
+      prompts, diagnostics, and Studio inspection. It intentionally summarizes
+      important files and representative chunks without replacing file retrieval.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_snapshot:
+    type: object
+    description: >
+      Versioned App Intelligence summary derived from SourceContextBundle and
+      AppContextGraph. It contains architecture, capability, ownership,
+      integration, data, risk, and agent-context policy summaries without raw
+      source contents.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_catalog:
+    type: object
+    description: >
+      Prompt-safe App Intelligence catalog used by discovery agents to
+      understand the app shape before requesting exact source files through
+      retrieval tools.
     source:
       type: state
       default: null
@@ -712,6 +765,9 @@ agents:
       - preloaded_context_ready
       - preload_status
       - preload_summary
+      - context_graph_pack
+      - source_context_catalog
+      - app_intelligence_catalog
       - theme_capture_ready
       - theme_capture_status
       - theme_capture_summary
@@ -747,6 +803,9 @@ agents:
       - existing_experience_summary
       - preload_status
       - preload_summary
+      - context_graph_pack
+      - source_context_catalog
+      - app_intelligence_catalog
       - evidence_sources
       - repo_summary
       - frontend_repo_summary
@@ -777,6 +836,9 @@ agents:
       - tech_stack
       - host_app_source
       - discovery_mode
+      - context_graph_pack
+      - source_context_catalog
+      - app_intelligence_catalog
       - theme_capture_ready
       - theme_capture_status
       - theme_capture_summary
@@ -812,6 +874,9 @@ agents:
       - app_description
       - tech_stack
       - hosting_environment
+      - context_graph_pack
+      - source_context_catalog
+      - app_intelligence_catalog
       - capabilities
       - service_surfaces
       - route_surfaces
@@ -842,6 +907,9 @@ agents:
       - evidence_sources
       - preload_status
       - preload_summary
+      - context_graph_pack
+      - source_context_catalog
+      - app_intelligence_catalog
       - theme_capture_ready
       - theme_capture_status
       - theme_capture_summary

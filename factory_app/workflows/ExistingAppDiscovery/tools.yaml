@@ -1,10 +1,118 @@
 # ExistingAppDiscovery Tools
 #
-# before_chat collector preloads deterministic evidence into context.
-# DiscoveryArtifactAssemblerAgent then persists the canonical existing-app
-# augmentation artifacts and emits the DiscoveryBriefCard UI summary.
+# before_chat collector builds deterministic App Intelligence context.
+# ExistingAppDiscovery first emits an AppIntelligenceOverviewCard so users can
+# see the compact context agents receive, then the DiscoveryArtifactAssemblerAgent
+# persists canonical artifacts and emits the final DiscoveryBriefCard.
 
 tools:
+- agent: DiscoveryHostAgent
+  file: source_context_retrieval.py
+  function: get_repo_app_intelligence
+  description: >
+    Load the compact App Intelligence catalog for the preloaded repository,
+    including architecture, capability, ownership, integration, data, risk, and
+    agent-context policy summaries. Use this before requesting exact files.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DiscoveryHostAgent
+  file: source_context_retrieval.py
+  function: search_repo_source_context
+  description: >
+    Search the preloaded source corpus for exact code chunks, file paths,
+    symbols, and evidence relevant to a product or technical question. Use this
+    when the compact preload summary is insufficient.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DiscoveryHostAgent
+  file: source_context_retrieval.py
+  function: read_repo_source_file
+  description: >
+    Read one indexed source file from the preloaded source corpus. Use only
+    after selecting a path from source_context_catalog, context_graph_pack, or
+    search_repo_source_context.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: CapabilityMapperAgent
+  file: source_context_retrieval.py
+  function: get_repo_app_intelligence
+  description: >
+    Load compact App Intelligence before mapping current capabilities to exact
+    code evidence.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: CapabilityMapperAgent
+  file: source_context_retrieval.py
+  function: search_repo_source_context
+  description: >
+    Search the preloaded source corpus for exact code chunks, file paths,
+    symbols, and evidence relevant to existing app capabilities.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: CapabilityMapperAgent
+  file: source_context_retrieval.py
+  function: read_repo_source_file
+  description: >
+    Read one indexed source file from the preloaded source corpus when mapping
+    current capabilities to source evidence.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationPlannerAgent
+  file: source_context_retrieval.py
+  function: get_repo_app_intelligence
+  description: >
+    Load compact App Intelligence before planning overlays, adapters,
+    modernization, or workflow build handoffs.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationPlannerAgent
+  file: source_context_retrieval.py
+  function: search_repo_source_context
+  description: >
+    Search source code evidence before recommending adoption level, bridge,
+    overlay, adapter, or gradual modernization work.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationPlannerAgent
+  file: source_context_retrieval.py
+  function: read_repo_source_file
+  description: >
+    Read one indexed source file when adoption planning depends on exact code
+    evidence.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ModuleDecomposerAgent
+  file: source_context_retrieval.py
+  function: get_repo_app_intelligence
+  description: >
+    Load compact App Intelligence before proposing module, page, adapter, or
+    workflow boundaries.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ModuleDecomposerAgent
+  file: source_context_retrieval.py
+  function: search_repo_source_context
+  description: >
+    Search exact source chunks before proposing candidate overlays, adapters,
+    or migrated surfaces.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ModuleDecomposerAgent
+  file: source_context_retrieval.py
+  function: read_repo_source_file
+  description: >
+    Read one indexed source file when decomposition depends on exact source
+    boundaries.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ModuleDecomposerAgent
+  file: source_context_retrieval.py
+  function: get_related_repo_source_files
+  description: >
+    List source files related to a selected path through relative imports or
+    same-directory proximity.
+  tool_type: Agent_Tool
+  auto_tool_call: false
 - agent: DiscoveryArtifactAssemblerAgent
   file: save_existing_app_artifacts.py
   function: save_existing_app_artifacts
@@ -28,6 +136,19 @@ lifecycle_tools:
   description: >
     Deterministically preload discovery context from explicit inputs such as
     repo_path, github_repo, backend_base_url, openapi_url, or uploaded spec paths.
+- trigger: before_chat
+  agent: null
+  file: emit_app_intelligence_overview.py
+  function: emit_app_intelligence_overview_card
+  description: >
+    Show the deterministic App Intelligence overview after indexing and before
+    the agent speaks.
+  tool_type: UI_Surface
+  ui:
+    component: AppIntelligenceOverviewCard
+    mode: artifact
+    workflow_primitive: document_preview
+    realization: generated_component
 - trigger: on_start
   agent: null
   file: ../_shared/platform/build_lifecycle.py

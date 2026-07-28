@@ -53,6 +53,7 @@ ERROR_CODES: dict[str, str] = {
     "user.input.submit": "USER_INPUT_FAILED",
     "user_input_submit": "USER_INPUT_FAILED",
     "tool_call_response": "TOOL_CALL_RESPONSE_FAILED",
+    "artifact.action": "ARTIFACT_ACTION_FAILED",
     "chat.artifact_action": "ARTIFACT_ACTION_FAILED",
     "chat.switch_workflow": "SWITCH_WORKFLOW_FAILED",
     "chat.enter_general_mode": "GENERAL_MODE_FAILED",

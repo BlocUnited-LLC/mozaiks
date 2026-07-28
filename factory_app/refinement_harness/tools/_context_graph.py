@@ -4,11 +4,11 @@ from typing import Any
 
 from mozaiksai.control_plane.app_context import get_current_app_context_graph
 from mozaiksai.core.app_context.context_graph import (
-    build_context_graph_from_file_map,
-    context_graph_parser_status,
     merge_context_graphs,
 )
-from mozaiksai.core.app_context.scan_policy import select_source_file_map
+from mozaiksai.core.app_context.indexer import index_file_map
+from mozaiksai.core.app_context.intelligence import build_app_intelligence_catalog
+from mozaiksai.core.app_context.source_corpus import build_source_corpus_catalog
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
 from ._artifact_workspace import load_artifact_workspace, safe_relpath
@@ -37,19 +37,13 @@ async def load_context_graph_for_tool(
         return workspace
 
     artifact = workspace["artifact"]
-    scan_result = select_source_file_map(
-        workspace["file_map"],
-        source=workspace.get("source") or "artifact_workspace",
-    )
-    file_map = scan_result.file_map
-    scan_health = dict(scan_result.health)
-    scan_health["parser_status"] = context_graph_parser_status()
-    artifact_graph = build_context_graph_from_file_map(
+    indexed = index_file_map(
         app_id=app_id,
+        file_map=workspace["file_map"],
         artifact_version_id=artifact.id,
         artifact_kind=artifact.artifact_kind,
         artifact_key=artifact.artifact_key,
-        file_map=file_map,
+        source=workspace.get("source") or "artifact_workspace",
     )
     current_graph_lookup = await get_current_app_context_graph(
         app_id=app_id,
@@ -58,16 +52,24 @@ async def load_context_graph_for_tool(
     merged_graph = merge_context_graphs(
         app_id=app_id,
         graph_id=f"context_graph:{app_id}:{artifact.id}",
-        graphs=[current_graph_lookup.graph, artifact_graph],
+        graphs=[current_graph_lookup.graph, indexed.app_context_graph],
     )
 
     return {
         "present": True,
         "artifact": artifact,
-        "file_map": file_map,
-        "workspace": {**workspace, "scan_health": scan_health},
+        "file_map": indexed.safe_file_map,
+        "source_context_bundle": indexed.source_corpus,
+        "source_context_catalog": build_source_corpus_catalog(indexed.source_corpus, max_files=40, max_chunks=8),
+        "app_intelligence_snapshot": indexed.app_intelligence_snapshot,
+        "app_intelligence_catalog": build_app_intelligence_catalog(indexed.app_intelligence_snapshot, max_items=24),
+        "workspace": {
+            **workspace,
+            "scan_health": indexed.scan_health,
+            "context_graph_health_report": indexed.health_report,
+        },
         "graph": merged_graph,
-        "warnings": [*list(current_graph_lookup.warnings), *list(scan_result.warnings)],
+        "warnings": [*list(current_graph_lookup.warnings), *list(indexed.scan_result.warnings)],
     }
 
 

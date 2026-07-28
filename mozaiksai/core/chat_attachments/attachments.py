@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from mozaiksai.core.media.types import CHAT_ATTACHMENT_MIME_TYPES
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,26 +63,7 @@ def _max_bytes_from_env(env_key: str, default_bytes: int) -> int:
 # Default MIME type allowlist for chat attachments.
 # Covers text/code files, images, PDFs, and structured data — types that make
 # sense as AI context. Binary executables and archives are intentionally excluded.
-_DEFAULT_ALLOWED_MIME_TYPES: frozenset[str] = frozenset({
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "text/html",
-    "text/xml",
-    "text/x-python",
-    "text/x-java",
-    "text/javascript",
-    "text/typescript",
-    "application/json",
-    "application/pdf",
-    "application/xml",
-    "application/yaml",
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "image/svg+xml",
-})
+_DEFAULT_ALLOWED_MIME_TYPES: frozenset[str] = CHAT_ATTACHMENT_MIME_TYPES
 
 
 def _allowed_mime_types_from_env() -> frozenset[str]:

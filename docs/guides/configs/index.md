@@ -15,6 +15,7 @@ folder.
 | App name, default route, auth-required flag, admins | `app/app.json` |
 | Ask/chat startup or the default workflow | `app/config/ai.json` |
 | Navigation, header actions, footer, mobile shell | `app/config/shell.json` |
+| Workspace/App Dashboard portals | `app/dashboard/dashboard.yaml` |
 | Colors, fonts, logo, density, radius | `app/brand/theme_config.json` |
 | Pages and routes | `app/ui/pages/`, `app/ui/route_manifest.json` |
 | Backend actions and durable app behavior | `app/modules/{module_id}/` |
@@ -23,8 +24,8 @@ folder.
 ## Build a Mozaiks App Checklist
 
 1. Set identity and startup: `app/app.json` and `app/config/ai.json`.
-2. Shape the experience: `app/config/shell.json`, `app/brand/theme_config.json`,
-   and `app/ui/`.
+2. Shape the experience: `app/config/shell.json`,
+   `app/dashboard/dashboard.yaml`, `app/brand/theme_config.json`, and `app/ui/`.
 3. Add durable behavior: `app/modules/{module_id}/module.yaml` plus module
    backend files.
 4. Add AI work: `workflows/{workflow_id}/`.
@@ -41,6 +42,7 @@ folder.
 | `app/app.json` | App identity, auth-required flag, default route, admin bootstrap | [Canonical App Structure](../../architecture/app/canonical-app-structure.md) |
 | `app/config/ai.json` | Ask mode prompt, chat startup mode, default workflow entry point | [AI Startup](ai-startup.md) |
 | `app/config/shell.json` | Header, footer, profile menu, notifications, mobile shell | [App Shell and Branding](../custom-brand-integration/01-overview.md) |
+| `app/dashboard/dashboard.yaml` | Workspace/App Dashboard portals, panels, and dashboard actions | [App Dashboard Contract](../../architecture/app/app-dashboard-contract.md) |
 | `app/config/auth.yaml` | Provider-neutral auth behavior and env handles | [Integrations](../integrations/01-overview.md) |
 | `app/config/integrations.yaml` | App service requirements and managed capability needs | [Integrations](../integrations/01-overview.md) |
 | `app/config/targets.json` | Runtime, deployment, health, domain, and environment intent | [Self-Hosting](../self-hosting.md) |

@@ -15,63 +15,35 @@ import { buildHealthState, formatPercentValue } from './studioHealthModel.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
-function RuntimeSignalsPanel({ metrics }) {
+function RuntimeSignalsRow({ metrics }) {
   if (!metrics?.available) return null
 
   const turns = metrics.agent_turns || {}
   const llm = metrics.llm_calls || {}
-  const tokens = metrics.llm_tokens || {}
-  const tools = metrics.tool_calls || {}
 
   const errorTurns = Object.entries(turns.by_outcome || {})
     .filter(([k]) => k !== 'success')
     .reduce((sum, [, v]) => sum + v, 0)
+  const hasErrors = errorTurns > 0
   const turnErrorRate = turns.total > 0 ? Math.round((errorTurns / turns.total) * 100) : 0
-  const toolErrors = Object.entries(tools.by_outcome || {})
-    .filter(([k]) => k !== 'success')
-    .reduce((sum, [, v]) => sum + v, 0)
-
-  const topModels = Object.entries(llm.by_model || {})
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 3)
 
   return (
-    <Panel eyebrow="Live" title="Runtime signals" subtitle="Real-time agent and LLM call metrics since last server start. Enable AG2_METRICS_ENABLED to activate.">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Agent turns</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(turns.total, '0')}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{turnErrorRate}% error rate</div>
-        </div>
-        <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">LLM calls</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(llm.total, '0')}</div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            {llm.avg_duration_seconds != null ? `${llm.avg_duration_seconds}s avg` : 'No latency yet'}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tokens used</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(tokens.total, '0')}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{formatCompactNumber(tokens.input, '0')} in · {formatCompactNumber(tokens.output, '0')} out</div>
-        </div>
-        <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-          <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tool calls</div>
-          <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(tools.total, '0')}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{toolErrors > 0 ? `${toolErrors} errors` : 'No errors'}</div>
-        </div>
-      </div>
-      {topModels.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {topModels.map(([model, count]) => (
-            <div key={model} className="flex items-center justify-between rounded-2xl border border-border/70 bg-background/60 px-4 py-2 text-sm">
-              <span className="font-medium text-foreground">{model}</span>
-              <span className="text-muted-foreground">{formatCompactNumber(count, '0')} calls</span>
-            </div>
-          ))}
-        </div>
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-2xl border border-border/70 bg-card/60 px-5 py-3 text-sm">
+      <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Live runtime</span>
+      <span className="text-foreground">
+        <span className="font-medium">{formatCompactNumber(turns.total, '0')}</span>
+        <span className="ml-1 text-muted-foreground">agent turns</span>
+      </span>
+      {llm.avg_duration_seconds != null && (
+        <span className="text-foreground">
+          <span className="font-medium">{llm.avg_duration_seconds}s</span>
+          <span className="ml-1 text-muted-foreground">avg latency</span>
+        </span>
       )}
-    </Panel>
+      <span className={hasErrors ? 'font-medium text-destructive' : 'text-muted-foreground'}>
+        {hasErrors ? `${turnErrorRate}% error rate (${errorTurns} errors)` : 'No agent errors'}
+      </span>
+    </div>
   )
 }
 
@@ -166,7 +138,7 @@ export default function AppHealthPage() {
           </Panel>
         </div>
 
-        <RuntimeSignalsPanel metrics={data?.runtimeMetrics} />
+        <RuntimeSignalsRow metrics={data?.runtimeMetrics} />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
           <Panel eyebrow="Workflows" title="Workflow reliability" subtitle="Use the workflow panel to spot run volume, latency, and error concentration without opening raw traces.">

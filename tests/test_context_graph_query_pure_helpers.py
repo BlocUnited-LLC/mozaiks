@@ -1,6 +1,6 @@
 """
 Pure helper unit tests for mozaiksai/control_plane/context_graph/query.py
-and mozaiksai/control_plane/context_graph/health.py.
+and mozaiksai/core/app_context/health.py.
 
 Covers (query.py):
   _contract_role_boost:
@@ -74,11 +74,6 @@ Covers (health.py):
 """
 from __future__ import annotations
 
-from mozaiksai.control_plane.context_graph.health import (
-    _dict_ints,
-    _int,
-    _parser_fallback_warning,
-)
 from mozaiksai.control_plane.context_graph.query import (
     _contract_role_boost,
     _dedupe,
@@ -87,15 +82,22 @@ from mozaiksai.control_plane.context_graph.query import (
     _normalize_path,
     _path_priority_score,
 )
+from mozaiksai.core.app_context.health import (
+    _dict_ints,
+    _int,
+    _parser_fallback_warning,
+)
 
 # ---------------------------------------------------------------------------
 # 1. _contract_role_boost
 # ---------------------------------------------------------------------------
 
+
 class TestContractRoleBoost:
     def _node(self, role: str | None):
         class FakeNode:
             metadata = {"contract_role": role}
+
         return FakeNode()
 
     def test_module_action_handler(self):

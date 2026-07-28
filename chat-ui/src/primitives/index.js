@@ -4,5 +4,6 @@ export { default as CoreTable } from './CoreTable';
 export { default as CoreForm } from './CoreForm';
 export { default as CoreComposite } from './CoreComposite';
 export { default as CoreMarkdown } from './CoreMarkdown';
+export { default as CoreMediaGeneratedAsset } from './CoreMediaGeneratedAsset';
 export { default as PrimitiveRenderer } from './PrimitiveRenderer';
 export { isCoreArtifact, resolveArtifactType, getArtifactValue, getArtifactArray, normalizeActions } from './utils';

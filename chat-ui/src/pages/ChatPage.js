@@ -1822,8 +1822,11 @@ const ChatPage = () => {
         return;
       }
       case 'print': {
-        const printVisibility = data.ui_visibility || data.data?.ui_visibility || null;
+        const printVisibility = data.ui_visibility || data.data?.ui_visibility || data.metadata?.ui_visibility || null;
         const showTraceMessages = debugFlag('mozaiks.show_trace_messages') || debugFlag('mozaiks.debug_pipeline');
+        if (printVisibility === 'hidden') {
+          return;
+        }
         if (printVisibility === 'trace' && !showTraceMessages) {
           return;
         }
@@ -1877,6 +1880,9 @@ const ChatPage = () => {
       case 'text': {
         const textVisibility = data.ui_visibility || data.data?.ui_visibility || data.metadata?.ui_visibility || null;
         const showTraceMessages = debugFlag('mozaiks.show_trace_messages') || debugFlag('mozaiks.debug_pipeline');
+        if (textVisibility === 'hidden') {
+          return;
+        }
         if (textVisibility === 'trace' && !showTraceMessages) {
           return;
         }
@@ -4635,14 +4641,14 @@ useEffect(() => {
 
   const handlePendingTransitionNavigate = useCallback(
     async (option_id = null, contextVariables = {}) => {
-      if (!pendingTransitionId) return;
+      if (!pendingTransitionId) return false;
 
       // workflow_complete is a client-terminal transition — dismiss the overlay
       // without hitting the backend. The run is already finished.
       if (pendingTransitionId === 'workflow_complete') {
         setPendingTransitionId(null);
         setPendingTransitionContext({});
-        return;
+        return true;
       }
 
       const mergedContext = {
@@ -4681,7 +4687,7 @@ useEffect(() => {
         if (data.resolution_type === 'transition' && data.transition?.id) {
           setPendingTransitionContext(data.context_variables ?? mergedContext);
           setPendingTransitionId(data.transition.id);
-          return;
+          return true;
         }
 
         if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
@@ -4698,7 +4704,7 @@ useEffect(() => {
             chat_id: String(data.chat_id),
           });
           navigate(`/chat?${chatParams.toString()}`);
-          return;
+          return true;
         }
 
         if (data.resolution_type === 'chat_session' && data.chat_id && data.workflow_id) {
@@ -4709,12 +4715,13 @@ useEffect(() => {
           setCurrentWorkflowName(data.workflow_id);
           setActiveWorkflowName(data.workflow_id);
           setConversationMode('workflow');
-          return;
+          return true;
         }
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
         console.error('[ChatPage] transition resolution failed:', err);
+        return false;
       }
     },
     [

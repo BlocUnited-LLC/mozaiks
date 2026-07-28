@@ -37,6 +37,14 @@ set `MONGO_URI` and launch repo scripts with `-SkipInfra`.
 - MongoDB Atlas or a local MongoDB server
 - one LLM provider key — `GEMINI_API_KEY` (free, default), `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
 
+Tree-sitter parser packages are installed with Mozaiks itself. They are the
+baseline parser path for source-backed App Intelligence; deterministic
+fallbacks only cover parser-package failures.
+
+FalkorDB is recommended for production or team-scale App Intelligence querying
+and Studio visualization. Local setup can use artifact-backed snapshots until
+you need a shared graph service.
+
 Check local tools:
 
 === "Windows"

@@ -32,6 +32,7 @@ from pymongo import ReturnDocument, UpdateOne
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
+from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from ..models import WorkflowStatus, WorkflowUIState
 from .namespaces import SYSTEM_DATABASE, RuntimeCollections
@@ -770,7 +771,7 @@ class AG2PersistenceManager:
 
     @staticmethod
     def _is_json_container_text(content: str) -> bool:
-        candidate = str(content or "").strip()
+        candidate = normalize_json_candidate_text(str(content or ""))
         if not candidate or candidate[0] not in "{[":
             return False
         try:

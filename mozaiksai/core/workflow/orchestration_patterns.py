@@ -31,6 +31,7 @@ from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
+from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from .context import DerivedContextManager
 from .execution.run_bootstrap import bootstrap_run_messages, merge_persisted_extra_context
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 chat_logger = get_workflow_logger("orchestration")
 performance_logger = get_workflow_logger("performance.orchestration")
+_conv_logger = logging.getLogger("mozaiks.workflow.agent_messages")
 
 __all__ = [
     "run_workflow_orchestration",
@@ -52,6 +54,10 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _SPECIAL_USER_AGENT_NAMES = frozenset({"user", "user_proxy", "userproxy", "userproxyagent"})
+
+
+def _normalized_agent_name(value: str) -> str:
+    return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
     """Render persisted Mozaiks messages into one AG2 workflow-channel prompt."""
@@ -88,7 +94,7 @@ def _first_agent_payload_from_runner_result(runner_result: Any, agent_name: str)
             return dict(body)
         if isinstance(body, str):
             try:
-                parsed = json.loads(body)
+                parsed = json.loads(normalize_json_candidate_text(body))
             except json.JSONDecodeError:
                 return None
             return dict(parsed) if isinstance(parsed, dict) else None
@@ -257,9 +263,14 @@ def _structured_agent_json_visibility_reason(
     content: str,
     structured_registry: dict[str, Any] | None,
 ) -> str | None:
-    if not structured_registry or agent_name not in structured_registry:
+    if not structured_registry:
         return None
-    candidate = str(content or "").strip()
+
+    agent_key = _normalized_agent_name(agent_name)
+    if not any(_normalized_agent_name(key) == agent_key for key in structured_registry):
+        return None
+
+    candidate = normalize_json_candidate_text(str(content or ""))
     if not candidate or candidate[0] not in "{[":
         return None
     try:
@@ -291,6 +302,153 @@ def _agent_text_visibility_reason(
     )
 
 
+_SENSITIVE_CONTEXT_KEY_PARTS = (
+    "authorization",
+    "cookie",
+    "credential",
+    "key",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _safe_context_keys(context_variables: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in sorted(str(raw_key) for raw_key in context_variables):
+        lowered = key.lower()
+        if any(part in lowered for part in _SENSITIVE_CONTEXT_KEY_PARTS):
+            continue
+        keys.append(key)
+    return keys
+
+
+def _set_context_value(context_ref: Any, key: str, value: Any) -> None:
+    if context_ref is None or not key:
+        return
+    try:
+        if hasattr(context_ref, "set"):
+            context_ref.set(key, value)
+            return
+    except Exception:
+        pass
+    try:
+        if hasattr(context_ref, "__setitem__"):
+            context_ref[key] = value
+    except Exception:
+        return
+
+
+def _structured_model_for_agent(
+    structured_registry: dict[str, Any] | None,
+    agent_name: str,
+) -> Any | None:
+    if not structured_registry:
+        return None
+    if agent_name in structured_registry:
+        return structured_registry[agent_name]
+    agent_key = _normalized_agent_name(agent_name)
+    for candidate_name, model_cls in structured_registry.items():
+        if _normalized_agent_name(candidate_name) == agent_key:
+            return model_cls
+    return None
+
+
+async def _emit_validated_structured_outputs_from_runner_result(
+    *,
+    runner_result: Any,
+    workflow_name: str,
+    chat_id: str,
+    app_id: str,
+    user_id: str | None,
+    turn_sequence_start: int,
+    context_vars_dict: dict[str, Any],
+    context_bridge: Any | None,
+    structured_registry: dict[str, Any] | None,
+    wf_logger: Any,
+) -> None:
+    """Emit runtime structured-output events from AG2 Network results."""
+
+    structured_outputs = list(getattr(runner_result, "structured_outputs", []) or [])
+    if not structured_outputs:
+        return
+
+    try:
+        from .outputs.runtime_events import emit_validated_agent_output
+        from .workflow_manager import workflow_manager
+
+        auto_tool_agent_keys = {
+            _normalized_agent_name(name)
+            for name in workflow_manager.get_auto_tool_agents(workflow_name)
+        }
+    except Exception as err:
+        wf_logger.debug(
+            "[%s] STRUCTURED_OUTPUT_EVENT_SETUP_FAILED: %s",
+            workflow_name.upper(),
+            err,
+        )
+        return
+
+    for output_index, entry in enumerate(structured_outputs):
+        if not isinstance(entry, dict):
+            continue
+        agent_name = str(entry.get("agent") or "").strip()
+        structured_data = entry.get("structured_data")
+        if not agent_name or not isinstance(structured_data, dict):
+            continue
+        model_cls = _structured_model_for_agent(structured_registry, agent_name)
+        if model_cls is None:
+            wf_logger.debug(
+                "[%s] STRUCTURED_OUTPUT_MODEL_LOOKUP_MISSED agent=%s",
+                workflow_name.upper(),
+                agent_name,
+            )
+            continue
+
+        model_name = str(entry.get("model_name") or getattr(model_cls, "__name__", "") or "").strip()
+        if model_name:
+            _set_context_value(context_vars_dict, model_name, structured_data)
+            _set_context_value(context_bridge, model_name, structured_data)
+        _set_context_value(context_vars_dict, "structured_output", structured_data)
+        _set_context_value(context_vars_dict, "structured_output_agent", agent_name)
+        _set_context_value(context_vars_dict, "structured_output_model", model_name)
+        _set_context_value(context_bridge, "structured_output", structured_data)
+        _set_context_value(context_bridge, "structured_output_agent", agent_name)
+        _set_context_value(context_bridge, "structured_output_model", model_name)
+
+        auto_tool_enabled = _normalized_agent_name(agent_name) in auto_tool_agent_keys
+        _conv_logger.info(
+            "[%s] STRUCTURED_OUTPUT_VALIDATED agent=%s model=%s keys=%s auto_tool=%s",
+            workflow_name,
+            agent_name,
+            model_name,
+            sorted(str(key) for key in structured_data),
+            auto_tool_enabled,
+            extra={
+                "agent_transcript_scope": "summary",
+                "workflow_name": workflow_name,
+                "chat_id": chat_id,
+                "app_id": app_id,
+                "agent_name": agent_name,
+            },
+        )
+
+        await emit_validated_agent_output(
+            current_agent_name=agent_name,
+            last_reply=structured_data,
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+            user_id=user_id,
+            turn_sequence=int(turn_sequence_start) + output_index,
+            context_vars_dict=context_vars_dict,
+            context_bridge=context_bridge,
+            structured_registry={agent_name: model_cls},
+            auto_tool_agents={agent_name} if auto_tool_enabled else set(),
+            wf_logger=wf_logger,
+        )
+
+
 async def _project_ag2_wal_to_mozaiks_transport(
     *,
     runner_result: Any,
@@ -306,6 +464,7 @@ async def _project_ag2_wal_to_mozaiks_transport(
     """Project AG2 round-end packets into Mozaiks chat events and run storage."""
 
     sequence = initial_sequence
+    runner_workflow_name = str(getattr(runner_result, "workflow_name", "") or "workflow")
     for envelope in runner_result.wal:
         if not isinstance(envelope, dict) or envelope.get("event_type") != "ag2.packet":
             continue
@@ -331,6 +490,20 @@ async def _project_ag2_wal_to_mozaiks_transport(
             structured_registry=structured_registry,
         )
         if hidden_reason:
+            _conv_logger.info(
+                "[%s] AGENT_REPLY_HIDDEN agent=%s reason=%s chars=%s",
+                runner_workflow_name,
+                agent_name,
+                hidden_reason,
+                len(content),
+                extra={
+                    "agent_transcript_scope": "summary",
+                    "workflow_name": runner_workflow_name,
+                    "chat_id": chat_id,
+                    "app_id": app_id,
+                    "agent_name": agent_name,
+                },
+            )
             await persistence_manager.append_run_assistant_message(
                 chat_id=chat_id,
                 app_id=app_id,
@@ -344,6 +517,19 @@ async def _project_ag2_wal_to_mozaiks_transport(
             )
             continue
 
+        _conv_logger.info(
+            "[%s] AGENT_REPLY_VISIBLE agent=%s chars=%s",
+            runner_workflow_name,
+            agent_name,
+            len(content),
+            extra={
+                "agent_transcript_scope": "summary",
+                "workflow_name": runner_workflow_name,
+                "chat_id": chat_id,
+                "app_id": app_id,
+                "agent_name": agent_name,
+            },
+        )
         await transport.send_event_to_ui(
             {
                 "kind": "chat.text",
@@ -567,7 +753,57 @@ async def run_workflow_orchestration(
                 except Exception as _ctx_exc:
                     wf_logger.debug("[%s] CONTEXT_SEED_FAILED key=%s: %s", workflow_name_upper, key, _ctx_exc)
 
-        # 6) Create agents
+        # 6) Preload deterministic context before agent prompts are composed.
+        try:
+            from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
+
+            lifecycle_manager = get_lifecycle_manager(workflow_name)
+            wf_logger.info("[%s] PRE_AGENT_LIFECYCLE_START", workflow_name_upper)
+            await lifecycle_manager.trigger_before_chat(context_variables=context)
+            wf_logger.info("[%s] PRE_AGENT_LIFECYCLE_DONE", workflow_name_upper)
+        except Exception as lifecycle_error:
+            wf_logger.warning(
+                "[%s] PRE_AGENT_LIFECYCLE_FAILED: %s",
+                workflow_name_upper,
+                lifecycle_error,
+            )
+
+        # Lifecycle tools mutate the context container in place. Refresh the
+        # bridge source before agent prompts and AG2 channel state are created.
+        if context is not None:
+            if hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
+                ctx_dict.update(context.data)
+            elif hasattr(context, "to_dict"):
+                ctx_dict.update(context.to_dict())
+            elif isinstance(context, dict):
+                ctx_dict.update(context)
+
+        _conv_logger.info(
+            "[%s] PRE_AGENT_CONTEXT_READY keys=%s key_count=%s",
+            workflow_name,
+            _safe_context_keys(ctx_dict),
+            len(_safe_context_keys(ctx_dict)),
+            extra={
+                "agent_transcript_scope": "summary",
+                "workflow_name": workflow_name,
+                "chat_id": chat_id,
+                "app_id": app_id,
+            },
+        )
+
+        if workflow_name == "ExistingAppDiscovery":
+            repo_summary = ctx_dict.get("repo_summary")
+            wf_logger.info(
+                "[EXISTING_APP_DISCOVERY_PRELOAD] status=%s ready=%s repo_scan_success=%s "
+                "summary_present=%s unresolved_count=%s",
+                ctx_dict.get("preload_status"),
+                bool(ctx_dict.get("preloaded_context_ready")),
+                bool(isinstance(repo_summary, dict) and repo_summary.get("success")),
+                bool(ctx_dict.get("preload_summary")),
+                len(ctx_dict.get("unresolved_questions") or []),
+            )
+
+        # 7) Create agents after deterministic preloads have populated context.
         if agents_factory:
             agents = await agents_factory(workflow_name, context, cache_seed)
         else:
@@ -664,15 +900,6 @@ async def run_workflow_orchestration(
         # 8) Normalize initial messages
         initial_messages = _normalize_to_strict_ag2(initial_messages, default_user_name="user")
 
-        # 9) Lifecycle before_chat
-        try:
-            from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
-            lifecycle_manager = get_lifecycle_manager(workflow_name)
-            await lifecycle_manager.trigger_before_chat(context_variables=context_bridge)
-            wf_logger.debug("[%s] Lifecycle before_chat completed", workflow_name_upper)
-        except Exception as lc_err:
-            wf_logger.debug("[%s] Lifecycle before_chat failed: %s", workflow_name_upper, lc_err)
-
         wf_lifecycle_logger.info(
             "[%s] Starting beta agent orchestration",
             workflow_name_upper,
@@ -680,6 +907,26 @@ async def run_workflow_orchestration(
             max_turns=max_turns,
             is_resume=resumed_mode,
         )
+
+        emitted_structured_result_ids: set[int] = set()
+
+        async def _emit_structured_once(runner_result_for_emit: Any, sequence_start: int) -> None:
+            result_id = id(runner_result_for_emit)
+            if result_id in emitted_structured_result_ids:
+                return
+            emitted_structured_result_ids.add(result_id)
+            await _emit_validated_structured_outputs_from_runner_result(
+                runner_result=runner_result_for_emit,
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                app_id=app_id,
+                user_id=user_id,
+                turn_sequence_start=sequence_start,
+                context_vars_dict=ctx_dict,
+                context_bridge=context_bridge,
+                structured_registry=structured_registry,
+                wf_logger=wf_logger,
+            )
 
         # 10) Execute AG2 Network workflow channel
         network_prompt = _messages_to_network_prompt(initial_messages)
@@ -708,6 +955,7 @@ async def run_workflow_orchestration(
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
             else:
+                await _emit_structured_once(first_phase_result, projected_sequence)
                 projected_sequence = await _project_ag2_wal_to_mozaiks_transport(
                     runner_result=first_phase_result,
                     transport=transport,
@@ -787,6 +1035,8 @@ async def run_workflow_orchestration(
                 structured_registry=structured_registry,
                 max_turns=max_turns,
             )
+
+        await _emit_structured_once(runner_result, projected_sequence)
 
         if project_final_runner_result:
             sequence_counter = await _project_ag2_wal_to_mozaiks_transport(

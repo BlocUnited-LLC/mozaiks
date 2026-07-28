@@ -1,0 +1,179 @@
+contract_id: onboarding
+contract_type: build_pack_instructions
+
+description: >
+  Onboarding tour pack. Produces a declarative step config (app/config/onboarding.yaml)
+  and a thin user_onboarding state module. The OSS runtime's installTour() primitive
+  reads the config and renders the tour overlay automatically. Apps that do not select
+  this pack incur zero cost — the runtime skips the tour entirely when the config is absent.
+
+  The config file is the feature flag. Its presence enables the tour; its absence disables it.
+
+# ── Step config format ──────────────────────────────────────────────────────
+#
+# app/config/onboarding.yaml schema:
+#
+#   version: 1
+#   steps:
+#     - id: <snake_case string — unique, used for state tracking>
+#       selector: <CSS selector — must resolve to a visible element at runtime>
+#       title: <short label, ~30 chars>
+#       description: <one sentence explaining what the element does>
+#       placement: bottom | top | left | right   # default: bottom
+#
+# Selector guidance:
+#   - Prefer href-based selectors (e.g. a[href="/dashboard"]) — reliable across themes.
+#   - Avoid class-based selectors — Tailwind classes are not stable identifiers.
+#   - Avoid deeply nested structural selectors — they break on layout changes.
+#   - If a target element may not be visible on all roles/plans, omit that step.
+#
+# ────────────────────────────────────────────────────────────────────────────
+
+selection_rules:
+  - id: select_for_guided_ux
+    when:
+      intent_any:
+        - onboarding
+        - product tour
+        - getting started
+        - guided tour
+        - walkthrough
+        - first time user
+        - user onboarding
+        - ftu
+        - new user experience
+    action: select_pack
+
+  - id: confirm_for_feature_rich_apps
+    when:
+      intent_any:
+        - help users discover features
+        - complex navigation
+        - multiple sections
+        - non-technical users
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - consumer
+  - marketplace
+  - community
+  - saas
+  - creator
+
+avoid_when:
+  - App is a single-page tool with one primary action.
+  - App surface is operator-only or admin-only.
+  - App navigation has fewer than three distinct sections.
+  - App is a CLI, API, or developer-facing tool with no meaningful UI.
+
+required_outputs:
+  - path: config/onboarding.yaml
+    owner: generator
+    notes: >
+      AppGenerator writes step definitions derived from the app's declared
+      shell.json nav items and app/ui/pages/*.yaml route paths. Use href-based
+      selectors. Limit to 3–5 steps covering the most important entry points.
+      Do not include admin-only or plan-gated steps that are invisible to new users.
+
+  - path: modules/user_onboarding/module.yaml
+    owner: generator
+    notes: >
+      Standard archetype module. Three actions: get_onboarding_status,
+      complete_step (input: step_id enum from config steps), dismiss_onboarding.
+      user_data_scope: true. Emits hosted.onboarding.step_completed and
+      hosted.onboarding.dismissed. Step IDs in the enum must match the ids
+      declared in config/onboarding.yaml.
+
+  - path: modules/user_onboarding/backend/handler.py
+    owner: workspace
+    notes: Preserved across regeneration. Subclasses base_handler if present, otherwise thin dispatch only.
+
+  - path: modules/user_onboarding/backend/service.py
+    owner: generator
+
+  - path: modules/user_onboarding/backend/repo.py
+    owner: generator
+
+  - path: modules/user_onboarding/backend/policy.py
+    owner: generator
+
+  - path: modules/user_onboarding/backend/schemas.py
+    owner: generator
+    notes: >
+      Declares VALID_STEPS set (must match config/onboarding.yaml step ids),
+      default_steps() factory, compute_progress() helper, and timestamp_now().
+
+  - path: modules/user_onboarding/contracts/events.yaml
+    owner: generator
+
+forbidden_outputs:
+  - path: ui/pages/custom/WelcomePage.jsx
+    reason: >
+      Do not generate a separate welcome page. The tour runs in-place over the
+      app's real UI via the OSS installTour() overlay. A dedicated page breaks
+      the in-context learning intent and duplicates navigation.
+
+  - path_prefix: ui/components/OnboardingTour
+    reason: >
+      The tour overlay primitive lives in the OSS runtime. Do not generate a
+      custom React tour component — it will conflict with installTour().
+
+  - path_prefix: ui/components/Spotlight
+    reason: Same as OnboardingTour — OSS-provided.
+
+  - path: config/shell.json
+    reason: >
+      Do not add a /welcome route or onboarding nav item to shell.json. The tour
+      is an overlay, not a navigation destination.
+
+runtime_boundaries:
+  - id: tour_overlay_is_oss
+    rule: >
+      The tour spotlight, tooltip, backdrop, step progression, and installTour()
+      mount point are OSS runtime primitives. The generated app must not
+      re-implement any of these. The app's only runtime artifact is
+      config/onboarding.yaml (step data) and the user_onboarding module (state).
+
+  - id: config_file_is_the_feature_flag
+    rule: >
+      The presence of app/config/onboarding.yaml enables the tour at runtime.
+      Do not add conditionals, feature flags, or environment variables to
+      control the tour. Delete the file to disable; add it to enable.
+
+  - id: step_ids_must_be_consistent
+    rule: >
+      The step id values in config/onboarding.yaml must exactly match the
+      step_id enum values declared in the user_onboarding module.yaml
+      complete_step action input_schema. If steps are added or removed, both
+      files must be updated together.
+
+  - id: selectors_must_be_href_based
+    rule: >
+      CSS selectors must use href attributes (a[href="/path"]) or stable data
+      attributes. Never use Tailwind class names, structural nth-child selectors,
+      or generated component IDs as tour targets.
+
+  - id: no_auth_redirect_change
+    rule: >
+      Do not change the post-login default redirect to /welcome or any other
+      onboarding page. The tour shows as an overlay on whatever page the user
+      lands on after login. Changing the auth redirect to a dedicated page
+      violates the in-context learning intent.
+
+  - id: user_data_scope
+    rule: >
+      The user_onboarding module always sets user_data_scope: true and generates
+      backend/account_data_handler.py implementing delete_user_data and
+      export_user_data per the standard archetype constraint.
+
+cross_pack_integrations:
+  - pack_id: mozaikspay
+    description: >
+      When both packs are selected, one of the onboarding steps should point at
+      the pricing or billing page (a[href="/pricing"]) to guide users toward
+      plan selection. The step should appear after create/explore steps.
+
+  - pack_id: social
+    description: >
+      When the social pack is present, consider a step pointing at the friends or
+      community section to orient users toward the social graph entry point.

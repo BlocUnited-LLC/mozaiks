@@ -46,6 +46,10 @@ content: |
   ## General rules
   - Use the request text as the primary signal.
   - Use any provided `refinement_context_json` as canonical persisted builder state.
+  - Use `get_app_intelligence_context` for AppContext freshness, ownership
+    warnings, capability shape, and artifact lineage as routing evidence only.
+    Do not classify from raw source snippets at this checkpoint; exact source
+    retrieval belongs to scope selection and coding.
   - Treat a user-declared hint as advisory only, never authoritative.
   - Be conservative about `core`, but choose it when the request changes what the product fundamentally is.
   - Return JSON only.

@@ -222,6 +222,8 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     persisted_kinds = {call["artifact_kind"] for call in store.create_calls}
     assert persisted_kinds == {
         "app_bundle",
+        "source_context_bundle",
+        "app_intelligence_snapshot",
         *GREENFIELD_APP_CONTEXT_ARTIFACT_KINDS,
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     }
@@ -272,6 +274,11 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     assert store.versions["av_app_bundle_1"].commit_metadata.metadata["artifact_path"] == str(
         zip_path.resolve()
     )
+    assert store.versions["av_app_bundle_1"].commit_metadata.metadata["workspace_dir"] == str(
+        app_dir.resolve()
+    )
+    assert any(ref.artifact_kind == "source_context_bundle" for ref in current_context.artifact_refs)
+    assert any(ref.artifact_kind == "app_intelligence_snapshot" for ref in current_context.artifact_refs)
     for rel_path, content in original_contents.items():
         assert (app_dir / rel_path).read_text(encoding="utf-8") == content
 

@@ -39,6 +39,7 @@ agents:
       - `api_inventory`
       - `runtime_observations`
       - `auth_hypothesis`
+      - `source_context_catalog` and `context_graph_pack`
       - `unresolved_questions`
 
       **Discovery Mode**:
@@ -61,15 +62,32 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      1. Start from preloaded evidence if it exists. Do not restart discovery from zero.
+      1. If `preloaded_context_ready` is true, your FIRST message MUST open by
+         presenting what was already found — do not ask the user to describe their
+         app from scratch. Structure your opening as:
 
-      2. If `discovery_mode` is `guided`, speak in plain language.
-         Offer beginner-friendly options such as:
-         - "live app URL"
-         - "frontend codebase"
-         - "backend codebase"
-         - "not sure yet"
-         Do not lead with terms like OpenAPI, Swagger, repo path, or backend base URL unless the user already uses them.
+         a) Name the app: use `app_name` if set, otherwise the repo name from
+            `repo_summary.repo_name`, or the API title from `api_inventory.title`.
+         b) State the detected tech stack from `tech_stack` or
+            `repo_summary.inferred_tech_stack`.
+         c) Report what was scanned: files, route surfaces, service entrypoints,
+            API paths (from `repo_summary`, `route_surfaces`, `service_surfaces`,
+            `api_inventory`).
+         d) List detected external connectors from `detected_connectors` if any.
+         e) State one or two open questions from `unresolved_questions` (high
+            priority first) that still need user input.
+         f) Ask the user to confirm, correct, or fill in what's missing.
+
+         Example opening structure (adapt to what was actually found):
+         "I scanned [repo name] and found [stack]. The codebase has [N] files
+         with [M] route surfaces and [P] service entrypoints. I detected [connector
+         list]. A few things I still need from you: [unresolved questions]. Does
+         this match your app?"
+
+      2. If `preloaded_context_ready` is false or no evidence was found, ask the
+         user to describe their app. If `discovery_mode` is `guided`, use plain
+         language (live app URL, frontend codebase, backend codebase, not sure yet).
+         Do not lead with OpenAPI, Swagger, or backend base URL unless the user uses those terms first.
 
       3. Confirm identity and current experience:
          - what the app is called
@@ -79,11 +97,14 @@ agents:
          - who maintains it
          - what the current user-facing experience looks like
 
-      4. Use repo/runtime evidence to anchor questions:
+      4. Use repo/runtime evidence to anchor all follow-up questions:
          - if routes, services, or modules were already found, ask for confirmation
+           rather than re-asking what they are
          - if evidence is partial, ask only about the missing pieces
-        - if `host_app_source` is `workspace_app`, explicitly say Mozaiks already loaded the local workspace app inputs before discovery started
-         - if theme evidence already exists, treat it as a clue about the current host experience instead of re-running a design interview
+         - if `host_app_source` is `workspace_app`, explicitly say Mozaiks already
+           loaded the local workspace app inputs before discovery started
+         - if theme evidence already exists, treat it as a clue about the current
+           host experience rather than re-running a design interview
 
       5. Summarize what came from deterministic evidence vs user correction.
 
@@ -118,6 +139,8 @@ agents:
       Available context includes:
       - confirmed identity fields from the initial discovery stage
       - `repo_summary`, `frontend_repo_summary`, `backend_repo_summary`
+      - `source_context_catalog`, `context_graph_pack`, and retrieval tools
+        for exact source files/chunks when the summary is not enough
       - `api_inventory`, `runtime_observations`, `auth_hypothesis`
       - `unresolved_questions`
 

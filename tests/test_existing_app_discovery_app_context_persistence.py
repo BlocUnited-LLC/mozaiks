@@ -193,6 +193,41 @@ def _context() -> dict:
         },
         "scan_policy_ref": "scan_policy_ops",
         "preload_status": "ready",
+        "source_context_bundle": {
+            "schema_version": "mozaiks.source_context.bundle.v1",
+            "bundle_id": "source_context_ops_studio",
+            "app_id": "ops_studio",
+            "source_refs": [],
+            "indexed_at": "2026-01-01T00:00:00Z",
+            "files": [],
+            "chunks": [],
+            "symbols": [],
+            "imports": [],
+            "file_contents": {},
+            "health": {"source_context_file_count": 0},
+            "warnings": [],
+            "parser_status": {},
+        },
+        "app_intelligence_snapshot": {
+            "schema_version": "mozaiks.app_intelligence.snapshot.v1",
+            "snapshot_id": "app_intelligence_ops_studio",
+            "app_id": "ops_studio",
+            "indexed_at": "2026-01-01T00:00:00Z",
+            "source_context_bundle_id": "source_context_ops_studio",
+            "graph_id": "graph_ops_studio",
+            "graph_hash": "sha256:graph",
+            "source_ref_ids": [],
+            "coverage": {"file_count": 0},
+            "architecture": {},
+            "capabilities": [],
+            "ownership": {},
+            "integration_surfaces": [],
+            "data_surfaces": [],
+            "risk_hints": [],
+            "agent_context_policy": {"policy": "retrieve_not_dump"},
+            "warnings": [],
+            "metadata": {},
+        },
         "module_decomposition_plan": json.dumps(_decomposition_evidence()),
         "structured_output": _discovery_output(),
     }
@@ -292,11 +327,21 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     }
     assert "module_decomposition_plan" not in persisted_kinds
     assert context["brownfield_app_context_artifact_version_refs"]["application_inventory"]
+    assert context["brownfield_app_context_artifact_version_refs"]["source_context_bundle"]
+    assert context["brownfield_app_context_artifact_version_refs"]["app_intelligence_snapshot"]
     assert context["app_context_version_artifact_version_id"]
     assert context["current_app_context_version_id"] == context["brownfield_registration"][
         "context_version_id"
     ]
     assert context["app_context_version"]["mode"] == "brownfield"
+    assert any(
+        ref["artifact_kind"] == "source_context_bundle"
+        for ref in context["app_context_version"]["artifact_refs"]
+    )
+    assert any(
+        ref["artifact_kind"] == "app_intelligence_snapshot"
+        for ref in context["app_context_version"]["artifact_refs"]
+    )
     assert context["app_context_version"]["stale_status"] == "current"
     assert context["application_inventory"]["app_id"] == "ops_studio"
     assert context["ownership_boundary"]["ownership_boundaries"]

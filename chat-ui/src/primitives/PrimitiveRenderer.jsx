@@ -5,6 +5,7 @@ import CoreTable from './CoreTable';
 import CoreForm from './CoreForm';
 import CoreComposite from './CoreComposite';
 import CoreMarkdown from './CoreMarkdown';
+import CoreMediaGeneratedAsset from './CoreMediaGeneratedAsset';
 import { resolveArtifactType } from './utils';
 
 const PrimitiveRenderer = ({ payload, onAction, actionStatusMap, className = '' }) => {
@@ -39,6 +40,8 @@ const PrimitiveRenderer = ({ payload, onAction, actionStatusMap, className = '' 
       );
     case 'core.markdown':
       return <CoreMarkdown {...sharedProps} />;
+    case 'core.media.generated_asset':
+      return <CoreMediaGeneratedAsset {...sharedProps} />;
     default:
       return (
         <div className={`rounded-lg border border-[var(--core-primitive-border,var(--color-border-subtle))] bg-[var(--core-primitive-surface,var(--color-surface))] p-3 text-xs text-[var(--core-primitive-muted,var(--color-text-muted))] ${className}`}>

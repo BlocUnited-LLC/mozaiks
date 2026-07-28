@@ -207,6 +207,7 @@ function TransitionRoute({ route }) {
   const navigate = useNavigate();
   const { user, config } = useChatUI();
   const [currentTransitionId, setCurrentTransitionId] = useState(null);
+  const [currentJourneyId, setCurrentJourneyId] = useState(route.sequence || null);
   const [accumulatedContext, setAccumulatedContext] = useState({});
   const entryTransitionId = route.transition || null;
   const resolvedAppId = resolveRouteAppId(config, user);
@@ -229,7 +230,7 @@ function TransitionRoute({ route }) {
           body: JSON.stringify({
             transition_id: currentTransitionId,
             option_id,
-            journey_id: route.sequence || null,
+            journey_id: currentJourneyId,
             context_variables: mergedContext,
             app_id: resolvedAppId,
             user_id: resolvedUserId,
@@ -245,21 +246,25 @@ function TransitionRoute({ route }) {
         if (data.resolution_type === 'transition' && data.transition?.id) {
           setAccumulatedContext(data.context_variables ?? mergedContext);
           setCurrentTransitionId(data.transition.id);
-          return;
+          if (data.journey_id && data.journey_id !== currentJourneyId) {
+            setCurrentJourneyId(data.journey_id);
+          }
+          return true;
         }
 
         if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
           setAccumulatedContext({});
           navigate(buildWorkflowChatPath(data.workflow_id, data.chat_id));
-          return;
+          return true;
         }
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
         console.error('[TransitionRoute] transition resolution failed:', err);
+        return false;
       }
     },
-    [accumulatedContext, currentTransitionId, navigate, resolvedAppId, resolvedUserId, route]
+    [accumulatedContext, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
   );
 
   if (!currentTransitionId) return null;
