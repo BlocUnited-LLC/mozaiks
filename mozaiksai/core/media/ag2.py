@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .types import (
     MediaInputRef,
@@ -137,7 +137,7 @@ def media_input_ref_to_ag2_input(ref: MediaInputRef) -> Any:
         MediaKind.VIDEO: VideoInput,
         MediaKind.DOCUMENT: DocumentInput,
     }
-    factory = factory_by_kind[ref.kind]
+    factory = cast(Any, factory_by_kind[ref.kind])
     if ref.data is not None:
         ag2_input = factory(data=ref.data, media_type=ref.media_type)
     elif ref.path:

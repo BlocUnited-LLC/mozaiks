@@ -6,4 +6,4 @@ def actor_id(ctx) -> str:
     uid = getattr(ctx, "user_id", None)
     if not uid:
         raise PermissionError("Unauthenticated")
-    return uid
+    return str(uid)

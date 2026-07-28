@@ -603,7 +603,7 @@ def _matched_excerpt(text: str, matched_terms: list[str], *, max_length: int = 9
     lower = text.lower()
     first = min((lower.find(term) for term in matched_terms if term in lower), default=0)
     start = max(0, first - 180)
-    return _excerpt(text[start:], max_length=max_length)
+    return _excerpt(text[start:], max_length=max_length) or ""
 
 
 def _excerpt(text: str | None, *, max_length: int | None) -> str | None:
@@ -611,7 +611,7 @@ def _excerpt(text: str | None, *, max_length: int | None) -> str | None:
         return None
     if max_length is None or max_length <= 0 or len(text) <= max_length:
         return text
-    return text[: max(0, max_length - 20)].rstrip() + "\n... [truncated]"
+    return f"{text[: max(0, max_length - 20)].rstrip()}\n... [truncated]"
 
 
 def _contains_any(value: str, needles: tuple[str, ...]) -> bool:

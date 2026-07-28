@@ -951,7 +951,7 @@ async def _collect_github_context_graph_file_map(
     token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
     candidates: list[tuple[int, int, str, str, str, str, str, str]] = []
     warnings: list[str] = []
-    skipped = Counter()
+    skipped: Counter[str] = Counter()
     roots_summary: list[dict[str, Any]] = []
 
     for label, raw_repo in repos:
@@ -1017,8 +1017,8 @@ async def _collect_github_context_graph_file_map(
 
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     file_map: dict[str, str] = {}
-    selected_by_priority = Counter()
-    selected_by_extension = Counter()
+    selected_by_priority: Counter[str] = Counter()
+    selected_by_extension: Counter[str] = Counter()
     total_chars = 0
     limit_reached = len(candidates) > policy.max_files
     fetch_candidates = candidates[: policy.max_files]
@@ -1188,7 +1188,7 @@ async def _preload_context_graph_pack(
         )
     else:
         scan_result = await _collect_github_context_graph_file_map(
-            github_sources or [],
+            list(github_sources or []),
             github_ref=github_ref,
             github_token=github_token,
             scan_policy_inputs=scan_policy_inputs,

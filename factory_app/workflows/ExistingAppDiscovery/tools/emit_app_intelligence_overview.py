@@ -183,7 +183,7 @@ def _fallback_catalog(
 
 
 def _fallback_risks(warnings: list[str]) -> list[dict[str, Any]]:
-    risks = []
+    risks: list[dict[str, Any]] = []
     if any("file_limit" in warning for warning in warnings):
         risks.append(
             {

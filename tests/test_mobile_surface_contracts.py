@@ -258,6 +258,8 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/PricingHealthPanel.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
+        "factory_app/app/ui/components/OnboardingTour.jsx",
+        "factory_app/app/ui/installOnboardingTour.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         # ExistingAppDiscovery App Intelligence overview — emitted before agent speaks
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
