@@ -153,6 +153,7 @@ def _artifact_refs(suffix: str) -> dict[str, str]:
         for artifact_kind in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     }
     refs["source_context_bundle"] = f"av_source_context_bundle_{suffix}"
+    refs["app_intelligence_snapshot"] = f"av_app_intelligence_snapshot_{suffix}"
     return refs
 
 

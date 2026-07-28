@@ -233,6 +233,8 @@ This sequence is non-mutating by shape:
 - when source files are available, it persists `source_context_bundle` before
   `app_context_graph` so refinement tools can search and read exact code
 
+It does not run `AppGenerator`, `AgentGenerator`, or `DesignDocs`.
+
 After workflow completion, the Refinement Engine can call `complete_context_refresh`
 to compare the previous context version with the new current
 `AppContextVersion` and produce a `ContextRefreshResult`. That result records

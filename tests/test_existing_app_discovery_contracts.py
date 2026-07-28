@@ -197,6 +197,88 @@ def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> N
     assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
 
 
+def test_app_intelligence_overview_uses_real_workflow_ui_surface(monkeypatch) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_app_intelligence_overview_transport",
+    )
+
+    from mozaiksai.core.transport import simple_transport as transport_mod
+
+    class _FakeTransport:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def send_tool_call_event(
+            self,
+            *,
+            event_id,
+            chat_id,
+            tool_name,
+            component_name,
+            display_type,
+            payload,
+            awaiting_response=True,
+            agent_name=None,
+        ):
+            self.events.append(
+                {
+                    "event_id": event_id,
+                    "chat_id": chat_id,
+                    "tool_name": tool_name,
+                    "component_name": component_name,
+                    "display_type": display_type,
+                    "payload": payload,
+                    "awaiting_response": awaiting_response,
+                    "agent_name": agent_name,
+                }
+            )
+
+    fake_transport = _FakeTransport()
+
+    async def _get_instance():
+        return fake_transport
+
+    monkeypatch.setattr(transport_mod.SimpleTransport, "get_instance", staticmethod(_get_instance))
+
+    context = _Context(
+        chat_id="chat_real_ui_surface",
+        app_id="app_1",
+        preload_status="ready",
+        github_repo="acme/app",
+        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
+        app_intelligence_catalog={
+            "present": True,
+            "snapshot_id": "app_intelligence_1",
+            "coverage": {"file_count": 8, "symbol_count": 21, "node_count": 13, "edge_count": 34},
+            "architecture": {"module_roots": [], "service_roots": [], "ui_surfaces": [], "workflow_roots": []},
+            "capabilities": [],
+            "integration_surfaces": [],
+            "data_surfaces": [],
+            "risk_hints": [],
+            "agent_context_policy": {"policy": "retrieve_not_dump", "authority": {}, "surfaces": []},
+            "warnings": [],
+        },
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+
+    assert result["success"] is True
+    assert len(fake_transport.events) == 1
+    event = fake_transport.events[0]
+    assert event["chat_id"] == "chat_real_ui_surface"
+    assert event["tool_name"] == "AppIntelligenceOverviewCard"
+    assert event["component_name"] == "AppIntelligenceOverviewCard"
+    assert event["display_type"] == "artifact"
+    assert event["awaiting_response"] is False
+    assert event["agent_name"] == "ExistingAppDiscovery"
+    assert event["payload"]["workflow_name"] == "ExistingAppDiscovery"
+    assert event["payload"]["interaction_type"] == "ui_surface"
+    assert event["payload"]["component_type"] == "AppIntelligenceOverviewCard"
+    assert event["payload"]["workflow_primitive"] == "document_preview"
+    assert event["payload"]["ui_realization"] == "generated_component"
+
+
 def test_existing_app_preload_mutates_an_empty_context_container() -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
