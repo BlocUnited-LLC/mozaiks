@@ -128,6 +128,75 @@ def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_
     assert "AppIntelligenceOverviewCard" in _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
 
 
+def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_app_intelligence_overview_direct",
+    )
+
+    emitted = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["component"] = component
+        emitted["payload"] = payload
+        emitted["kwargs"] = kwargs
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_123",
+        preload_status="ready",
+        app_id="app_1",
+        github_repo="acme/app",
+        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
+        app_intelligence_catalog={
+            "present": True,
+            "snapshot_id": "app_intelligence_1",
+            "source_context_bundle_id": "source_context_1",
+            "graph_id": "graph_1",
+            "coverage": {
+                "file_count": 3,
+                "chunk_count": 4,
+                "symbol_count": 5,
+                "node_count": 6,
+                "edge_count": 7,
+                "language_counts": {"python": 2, "javascript": 1},
+                "role_counts": {"source": 2, "route": 1},
+            },
+            "architecture": {
+                "module_roots": [{"module_id": "billing", "paths": ["app/modules/billing/module.yaml"]}],
+                "service_roots": [],
+                "ui_surfaces": [],
+                "workflow_roots": [],
+            },
+            "capabilities": [{"capability_id": "module:billing", "label": "billing"}],
+            "integration_surfaces": [],
+            "data_surfaces": [],
+            "risk_hints": [],
+            "agent_context_policy": {
+                "policy": "retrieve_not_dump",
+                "authority": {
+                    "facts": "SourceContextBundle and AppContextGraph",
+                    "summary": "AppIntelligenceSnapshot",
+                    "exact_code": "source retrieval tools",
+                },
+                "surfaces": [],
+            },
+            "warnings": [],
+        },
+        source_context_bundle={"file_contents": {"app.py": "secret source must not be emitted"}},
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+
+    assert result["success"] is True
+    assert result["app_intelligence_snapshot_id"] == "app_intelligence_1"
+    assert emitted["component"] == "AppIntelligenceOverviewCard"
+    assert emitted["payload"]["github_repo"] == "acme/app"
+    assert emitted["payload"]["app_intelligence_catalog"]["coverage"]["file_count"] == 3
+    assert "file_contents" not in str(emitted["payload"])
+    assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
+
+
 def test_existing_app_preload_mutates_an_empty_context_container() -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
