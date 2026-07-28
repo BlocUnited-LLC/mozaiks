@@ -92,8 +92,10 @@ def _parser_fallback_warning(
     python_count = selected_by_extension.get(".py", 0)
     if js_like_count <= python_count:
         return None
-    languages = parser_status.get("languages") if isinstance(parser_status.get("languages"), dict) else {}
-    javascript = languages.get("javascript") if isinstance(languages.get("javascript"), dict) else {}
+    raw_languages = parser_status.get("languages")
+    languages = raw_languages if isinstance(raw_languages, dict) else {}
+    raw_javascript = languages.get("javascript")
+    javascript = raw_javascript if isinstance(raw_javascript, dict) else {}
     if str(javascript.get("active_parser") or "") == "regex":
         return "context_graph_javascript_parser_fallback"
     return None

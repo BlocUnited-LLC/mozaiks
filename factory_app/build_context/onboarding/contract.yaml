@@ -1,13 +1,11 @@
 contract_id: onboarding
 contract_type: build_pack_instructions
 
-description: >
-  Onboarding tour pack. Produces a declarative step config (app/config/onboarding.yaml)
-  and a thin user_onboarding state module. The OSS runtime's installTour() primitive
-  reads the config and renders the tour overlay automatically. Apps that do not select
-  this pack incur zero cost — the runtime skips the tour entirely when the config is absent.
-
-  The config file is the feature flag. Its presence enables the tour; its absence disables it.
+# Onboarding tour pack. Produces a declarative step config (app/config/onboarding.yaml)
+# and a thin user_onboarding state module. The OSS runtime's installTour() primitive
+# reads the config and renders the tour overlay automatically. Apps that do not select
+# this pack incur zero cost — the runtime skips the tour entirely when the config is absent.
+# The config file is the feature flag. Its presence enables the tour; its absence disables it.
 
 # ── Step config format ──────────────────────────────────────────────────────
 #
@@ -165,6 +163,8 @@ runtime_boundaries:
       The user_onboarding module always sets user_data_scope: true and generates
       backend/account_data_handler.py implementing delete_user_data and
       export_user_data per the standard archetype constraint.
+
+facades: []
 
 cross_pack_integrations:
   - pack_id: mozaikspay

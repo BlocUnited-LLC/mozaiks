@@ -301,7 +301,7 @@ def _capability_summaries(*, bundle: SourceCorpusBundle, graph: AppContextGraph)
 
 
 def _ownership_summary(*, bundle: SourceCorpusBundle, graph: AppContextGraph) -> dict[str, Any]:
-    ownership_counts = Counter()
+    ownership_counts: Counter[str] = Counter()
     review_paths: list[str] = []
     for node in graph.nodes:
         metadata = node.metadata or {}

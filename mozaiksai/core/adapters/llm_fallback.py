@@ -257,7 +257,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
         from ag2.config import OpenAIResponsesConfig
 
-        kwargs: dict[str, Any] = {
+        response_kwargs: dict[str, Any] = {
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
@@ -265,11 +265,11 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "streaming": streaming,
         }
         if timeout is not None:
-            kwargs["timeout"] = timeout
+            response_kwargs["timeout"] = timeout
         for key in ("max_output_tokens", "max_tool_calls", "parallel_tool_calls", "store"):
             if key in llm_config:
-                kwargs[key] = llm_config[key]
-        return OpenAIResponsesConfig(**kwargs)
+                response_kwargs[key] = llm_config[key]
+        return OpenAIResponsesConfig(**response_kwargs)
 
     from ag2.config import OpenAIConfig
     kwargs = {

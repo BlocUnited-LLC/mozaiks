@@ -239,8 +239,32 @@ to compare the previous context version with the new current
 whether stale context was actually resolved. It does not relaunch workflows,
 mutate source repositories, or retry the blocked refinement automatically.
 
-Brownfield generation/build sequences remain separate and should be cleaned up
-in a later architecture slice.
+Brownfield generation/build sequences remain separate:
+
+| Sequence | Purpose |
+| --- | --- |
+| `brownfield_app_adoption` | Capture source refs, index App Intelligence, run discovery chat, and pause for build-path selection. |
+| `brownfield_overlay_generation` | Generate an overlay or bridge around selected existing-app surfaces. |
+| `brownfield_module_generation` | Generate Mozaiks-owned modules from approved existing-app surfaces. |
+
+### Brownfield App Intelligence UX
+
+The existing-app intake path has two user-facing context surfaces:
+
+1. `BrownfieldRepoInput` stays mounted after the user selects a repository and
+   shows an extraction state while the workflow start request performs
+   source-backed indexing.
+2. `ExistingAppDiscovery` emits `AppIntelligenceOverviewCard` in chat after the
+   `before_chat` preload completes and before the first agent message. The card
+   renders the prompt-safe App Intelligence catalog: coverage, architecture
+   surfaces, capability boundaries, integrations, data surfaces, risk hints, and
+   agent context policy. It does not render raw source contents.
+
+These surfaces are not AppPages. `BrownfieldRepoInput` is transition UI owned by
+the build journey, and `AppIntelligenceOverviewCard` is workflow chat UI owned
+by `ExistingAppDiscovery`. The Refinement Engine consumes the same App
+Intelligence through checkpoint tools when the user later asks to revise or
+extend the app.
 
 ## Navigation Entry
 
@@ -314,5 +338,3 @@ to workflow-local `ui/` plus Python tools. If AgentGenerator emits a transition,
 it must keep routing/context deterministic and bind `ui.component` to a
 registered transition component key. Product-specific copy/images/layout belong
 in the React stub.
-
-

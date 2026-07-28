@@ -167,7 +167,7 @@ generated images, promoted assets, campaign media, and landing page visuals. The
 user-facing operation is still deterministic: review an asset, promote it to a
 target, or launch a workflow sequence.
 
-## Legacy Cleanup Direction
+## Cleanup Direction
 
 The long-term target is:
 

@@ -611,7 +611,7 @@ def _excerpt(text: str | None, *, max_length: int | None) -> str | None:
         return None
     if max_length is None or max_length <= 0 or len(text) <= max_length:
         return text
-    return text[: max(0, max_length - 20)].rstrip() + "\n... [truncated]"
+    return f"{text[: max(0, max_length - 20)].rstrip()}\n... [truncated]"
 
 
 def _contains_any(value: str, needles: tuple[str, ...]) -> bool:

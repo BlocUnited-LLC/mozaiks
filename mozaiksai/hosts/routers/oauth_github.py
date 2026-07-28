@@ -18,7 +18,7 @@ import time
 
 import httpx
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 router = APIRouter(tags=["oauth"])
 logger = logging.getLogger(__name__)
@@ -144,7 +144,7 @@ async def github_oauth_status() -> JSONResponse:
 
 
 @router.get("/api/oauth/github/connect")
-async def github_oauth_connect(session_key: str = "") -> HTMLResponse:
+async def github_oauth_connect(session_key: str = "") -> Response:
     """Redirect to GitHub OAuth authorization page."""
     client_id = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
     if not client_id:

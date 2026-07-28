@@ -745,7 +745,7 @@ class _MongoDBProvider:
         try:
             from motor.motor_asyncio import AsyncIOMotorClient  # type: ignore[import]
 
-            client = AsyncIOMotorClient(
+            client: Any = AsyncIOMotorClient(
                 uri,
                 serverSelectionTimeoutMS=int(_TIMEOUT * 1000),
                 connectTimeoutMS=int(_TIMEOUT * 1000),

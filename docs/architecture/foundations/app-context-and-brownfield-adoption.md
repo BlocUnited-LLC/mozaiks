@@ -178,21 +178,23 @@ Every workflow should consume the smallest useful context:
 The durable rule: summaries guide agents, graph relationships scope the work,
 and exact source retrieval provides proof.
 
-## Brownfield Sequence Registry
+## Build Journey Placement
 
-The `extension_registry.json` workflow sequences for brownfield adoption were
-renamed when the refinement layer was unified. Current canonical names:
+App Intelligence is not an `AppPage`. It is workflow and control-plane context:
 
-| Legacy sequence | Current name |
-| --- | --- |
-| `brownfield_build_light` | renamed → `brownfield_overlay_generation` |
-| `brownfield_build_full` | renamed → `brownfield_module_generation` |
+- transition UI keeps the user on an intake screen while repository extraction
+  and indexing start
+- `ExistingAppDiscovery` owns the chat-visible App Intelligence overview as a
+  workflow UI surface
+- the Refinement Engine consumes App Intelligence through checkpoint tools
+  before classifying, scoping, or coding a requested change
+- AppPages remain persistent generated app surfaces under `app/ui/`; they do
+  not own builder indexing or refinement context
 
-The discovery refresh sequence (`brownfield_discovery_refresh`) runs only
-`ExistingAppDiscovery`. It does not run `AppGenerator`, `AgentGenerator`, or
-`DesignDocs`. It does not promote or mutate source repositories. The
-`brownfield_overlay_generation` and `brownfield_module_generation` sequences
-own the subsequent generation work.
+The create journey enters `app_type_selector`, then the brownfield branch enters
+`brownfield_repo_input`, launches `ExistingAppDiscovery`, runs pre-chat indexing,
+emits `AppIntelligenceOverviewCard`, and then lets agents use retrieval tools
+for exact files.
 
 ## Implementation Map
 

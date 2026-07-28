@@ -83,6 +83,8 @@ def _unique_ids(items: Iterable[Any], *, owner: str) -> None:
     seen: set[str] = set()
     for item in items:
         item_id = getattr(item, "id", None)
+        if not isinstance(item_id, str):
+            raise ValueError(f"{owner} contains an item without a string id")
         if item_id in seen:
             raise ValueError(f"{owner} contains duplicate id '{item_id}'")
         seen.add(item_id)
