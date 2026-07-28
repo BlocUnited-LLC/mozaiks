@@ -284,6 +284,244 @@ class AzureKeyVaultConnectorVaultBackend:
             }
 
 
+def _derive_fernet_key() -> bytes:
+    """Derive a 32-byte Fernet key from MOZAIKS_CONNECTOR_SECRET_KEY or SECRET_KEY.
+
+    Priority:
+    1. MOZAIKS_CONNECTOR_SECRET_KEY — explicit 32-byte hex or URL-safe base64 key
+    2. SECRET_KEY — application secret, HKDF-derived to 32 bytes
+    3. Fallback — deterministic dev-only key with a loud warning
+    """
+    import base64
+    import hmac as _hmac
+
+    raw = os.getenv("MOZAIKS_CONNECTOR_SECRET_KEY", "").strip()
+    if raw:
+        # Accept URL-safe base64 directly (Fernet key format) or hex
+        try:
+            decoded = base64.urlsafe_b64decode(raw + "==")
+            if len(decoded) == 32:
+                return base64.urlsafe_b64encode(decoded)
+        except Exception:
+            pass
+        try:
+            decoded = bytes.fromhex(raw)
+            if len(decoded) == 32:
+                return base64.urlsafe_b64encode(decoded)
+        except Exception:
+            pass
+
+    app_secret = os.getenv("SECRET_KEY", "").strip()
+    if app_secret:
+        # HKDF-lite: HMAC-SHA256(key=app_secret, msg=b"mozaiks-connector-vault")
+        digest = _hmac.new(app_secret.encode(), b"mozaiks-connector-vault", "sha256").digest()
+        return base64.urlsafe_b64encode(digest)
+
+    logger.warning(
+        "MOZAIKS_CONNECTOR_SECRET_KEY and SECRET_KEY are not set. "
+        "Using a deterministic dev-only key — DO NOT use in production."
+    )
+    digest = _hmac.new(b"mozaiks-dev-only", b"mozaiks-connector-vault", "sha256").digest()
+    return base64.urlsafe_b64encode(digest)
+
+
+class MongoConnectorVaultBackend:
+    """Connector secret backend that stores Fernet-encrypted secrets in MongoDB.
+
+    Used automatically when MOZAIKS_CONNECTOR_SECRET_BACKEND is 'auto' or 'mongo'
+    and no external vault is configured. Suitable for local dev and OSS self-hosters.
+
+    Encryption key priority:
+    1. MOZAIKS_CONNECTOR_SECRET_KEY (explicit 32-byte hex or URL-safe base64)
+    2. SECRET_KEY (derived via HMAC-SHA256)
+    3. Dev-only deterministic fallback (warns loudly)
+    """
+
+    def __init__(self) -> None:
+        self._fernet: Any | None = None
+        self._fernet_error: str | None = None
+
+    def _get_fernet(self) -> Any | None:
+        if self._fernet is not None or self._fernet_error is not None:
+            return self._fernet
+        try:
+            from cryptography.fernet import Fernet  # type: ignore[import]
+            key = _derive_fernet_key()
+            self._fernet = Fernet(key)
+        except Exception as exc:
+            self._fernet_error = f"Fernet init failed: {exc}"
+            logger.error("MongoConnectorVaultBackend: %s", self._fernet_error)
+        return self._fernet
+
+    async def _collection(self) -> Any:
+        from mozaiksai.core.data.persistence import AG2PersistenceManager
+        from mozaiksai.core.data.persistence.namespaces import (
+            SYSTEM_DATABASE,
+            PlatformCollections,
+        )
+        pm = AG2PersistenceManager()
+        await pm.persistence._ensure_client()  # noqa: SLF001
+        client = pm.persistence.client
+        if client is None:
+            raise RuntimeError("Mongo client not initialized")
+        return client[SYSTEM_DATABASE][PlatformCollections.CONNECTOR_SECRETS]
+
+    def _encrypt(self, value: str) -> str | None:
+        f = self._get_fernet()
+        if f is None:
+            return None
+        return f.encrypt(value.encode()).decode()
+
+    def _decrypt(self, token: str) -> str | None:
+        f = self._get_fernet()
+        if f is None:
+            return None
+        try:
+            return f.decrypt(token.encode()).decode()
+        except Exception:
+            return None
+
+    async def describe(self) -> dict[str, Any]:
+        fernet = self._get_fernet()
+        return {
+            "provider": "mongo",
+            "configured": fernet is not None,
+            "mode": _backend_mode(),
+            "vault_name": None,
+            "secret_prefix": _secret_prefix(),
+            "error": self._fernet_error,
+        }
+
+    async def store_secret(
+        self,
+        *,
+        scope_id: str,
+        service: str,
+        secret_value: str,
+        display_name: str | None = None,
+        ttl_days: int = 30,
+    ) -> dict[str, Any]:
+        fernet = self._get_fernet()
+        if fernet is None:
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": _secret_name(scope_id, service),
+                "expires_at": None,
+                "error": self._fernet_error or "Encryption backend unavailable.",
+            }
+        encrypted = self._encrypt(secret_value)
+        if encrypted is None:
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": _secret_name(scope_id, service),
+                "expires_at": None,
+                "error": "Encryption failed.",
+            }
+        secret_name = _secret_name(scope_id, service)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(days=max(int(ttl_days), 1))
+        try:
+            coll = await self._collection()
+            await coll.update_one(
+                {"scope_id": str(scope_id), "service": _slug(service, default="service")},
+                {
+                    "$set": {
+                        "scope_id": str(scope_id),
+                        "service": _slug(service, default="service"),
+                        "secret_name": secret_name,
+                        "encrypted_value": encrypted,
+                        "display_name": display_name,
+                        "stored_at": now.isoformat(),
+                        "expires_at": expires_at.isoformat(),
+                    }
+                },
+                upsert=True,
+            )
+            return {
+                "success": True,
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "expires_at": expires_at.isoformat(),
+                "secret_available": True,
+            }
+        except Exception as exc:
+            logger.error("MongoConnectorVaultBackend.store_secret failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": _secret_name(scope_id, service),
+                "expires_at": None,
+                "error": "Secret could not be stored.",
+            }
+
+    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+        fernet = self._get_fernet()
+        secret_name = _secret_name(scope_id, service)
+        if fernet is None:
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "secret_value": None,
+                "error": self._fernet_error or "Encryption backend unavailable.",
+            }
+        try:
+            coll = await self._collection()
+            doc = await coll.find_one(
+                {"scope_id": str(scope_id), "service": _slug(service, default="service")}
+            )
+        except Exception as exc:
+            logger.error("MongoConnectorVaultBackend.get_secret failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "secret_value": None,
+                "error": "Secret could not be retrieved.",
+            }
+        if not doc:
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "secret_value": None,
+                "error": "Secret not found.",
+            }
+        decrypted = self._decrypt(doc.get("encrypted_value") or "")
+        return {
+            "success": bool(decrypted),
+            "provider": "mongo",
+            "secret_name": secret_name,
+            "secret_value": decrypted,
+            "expires_at": doc.get("expires_at"),
+            "error": None if decrypted else "Secret could not be decrypted.",
+        }
+
+    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
+        secret_name = _secret_name(scope_id, service)
+        try:
+            coll = await self._collection()
+            result = await coll.delete_one(
+                {"scope_id": str(scope_id), "service": _slug(service, default="service")}
+            )
+            return {
+                "success": result.deleted_count > 0,
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "error": None if result.deleted_count > 0 else "Secret not found.",
+            }
+        except Exception as exc:
+            logger.error("MongoConnectorVaultBackend.delete_secret failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "provider": "mongo",
+                "secret_name": secret_name,
+                "error": "Secret could not be deleted.",
+            }
+
+
 def get_connector_vault_backend() -> ConnectorVaultBackend:
     global _backend_singleton, _backend_signature
     signature = _build_signature()
@@ -295,11 +533,16 @@ def get_connector_vault_backend() -> ConnectorVaultBackend:
         backend: ConnectorVaultBackend = NoopConnectorVaultBackend()
     elif mode in {"azure", "azure_key_vault", "key_vault"}:
         backend = AzureKeyVaultConnectorVaultBackend()
+    elif mode in {"mongo", "mongodb"}:
+        backend = MongoConnectorVaultBackend()
     elif mode == "auto":
-        backend = AzureKeyVaultConnectorVaultBackend() if vault_name else NoopConnectorVaultBackend()
+        if vault_name:
+            backend = AzureKeyVaultConnectorVaultBackend()
+        else:
+            backend = MongoConnectorVaultBackend()
     else:
-        logger.warning("Unknown connector secret backend mode '%s'; falling back to disabled.", mode)
-        backend = NoopConnectorVaultBackend()
+        logger.warning("Unknown connector secret backend mode '%s'; falling back to mongo.", mode)
+        backend = MongoConnectorVaultBackend()
 
     _backend_singleton = backend
     _backend_signature = signature
@@ -320,6 +563,7 @@ def reset_connector_vault_backend() -> None:
 __all__ = [
     "AzureKeyVaultConnectorVaultBackend",
     "ConnectorVaultBackend",
+    "MongoConnectorVaultBackend",
     "NoopConnectorVaultBackend",
     "describe_connector_vault_backend",
     "get_connector_vault_backend",
