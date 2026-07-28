@@ -42,6 +42,7 @@ class PlatformCollections:
     BUILD_EVENTS_OUTBOX = "PlatformBuildEventsOutbox"
     BUILD_STATE = "BuildState"
     CONNECTORS = "Connectors"
+    CONNECTOR_SECRETS = "ConnectorSecrets"
 
 
 __all__ = [
