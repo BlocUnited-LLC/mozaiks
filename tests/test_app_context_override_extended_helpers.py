@@ -321,9 +321,9 @@ class TestPlanPolicyResult:
 
     def test_missing_context_policy_decision_returns_fallback(self):
         plan = SimpleNamespace()
-        result = _plan_policy_result(plan, AppContextPolicyDecision.BLOCK_REQUIRES_HUMAN_OVERRIDE)
+        result = _plan_policy_result(plan, AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH)
         assert isinstance(result, AppContextPolicyResult)
-        assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_HUMAN_OVERRIDE
+        assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
         assert result.allowed is False
         assert result.blocking is True
 

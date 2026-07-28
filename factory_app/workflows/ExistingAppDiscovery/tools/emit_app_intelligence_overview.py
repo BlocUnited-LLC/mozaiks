@@ -101,6 +101,18 @@ def _overview_payload(*, ctx: Any, preload_status: str, catalog: dict[str, Any])
         "app_intelligence_snapshot_id": resolved_catalog.get("snapshot_id"),
         "source_context_bundle_id": resolved_catalog.get("source_context_bundle_id") or source_catalog.get("bundle_id"),
         "context_graph_id": resolved_catalog.get("graph_id") or graph_catalog.get("graph_id"),
+        "current_app_context_version_id": str(
+            _ctx_get(ctx, "current_app_context_version_id")
+            or _ctx_get(ctx, "current_context_version_id")
+            or ""
+        ).strip(),
+        "artifact_version_ids": {
+            "app_context_version": str(_ctx_get(ctx, "app_context_version_artifact_version_id") or "").strip(),
+            "source_context_bundle": str(_ctx_get(ctx, "source_context_artifact_version_id") or "").strip(),
+            "app_context_graph": str(_ctx_get(ctx, "graph_artifact_version_id") or "").strip(),
+            "app_intelligence_snapshot": str(_ctx_get(ctx, "app_intelligence_artifact_version_id") or "").strip(),
+        },
+        "app_intelligence_registration": _dict_value(_ctx_get(ctx, "app_intelligence_registration")),
         "total_files_scanned": int(
             coverage.get("file_count")
             or source_catalog.get("file_count")

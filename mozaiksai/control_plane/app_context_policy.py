@@ -15,8 +15,8 @@ from mozaiksai.control_plane.app_context import (
 )
 from mozaiksai.control_plane.app_context_impact import AppContextImpactHints
 
-APP_CONTEXT_HIGH_RISK_BLOCK_WARNING = (
-    "Current app context must be refreshed before high-risk refinement can proceed."
+APP_CONTEXT_REQUIRED_BLOCK_WARNING = (
+    "Current App Intelligence context must be indexed and current before refinement can proceed."
 )
 
 
@@ -24,7 +24,6 @@ class AppContextPolicyDecision(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     BLOCK_REQUIRES_CONTEXT_REFRESH = "block_requires_context_refresh"
-    BLOCK_REQUIRES_HUMAN_OVERRIDE = "block_requires_human_override"
 
 
 class AppContextPolicyResult(BaseModel):
@@ -50,7 +49,6 @@ def evaluate_app_context_policy(
     refinement_lane: str | None,
     affected_bundle_paths: list[str] | None = None,
     validation_warnings: list[str] | None = None,
-    human_override_requested: bool = False,
 ) -> AppContextPolicyResult:
     summary = _normalize_summary(app_context_summary)
     paths = [_normalize_path(path) for path in affected_bundle_paths or []]
@@ -75,36 +73,13 @@ def evaluate_app_context_policy(
             risky_signals=risky_signals,
         )
 
-    if risk_level == "low":
-        return AppContextPolicyResult(
-            decision=AppContextPolicyDecision.WARN,
-            allowed=True,
-            blocking=False,
-            risk_level=risk_level,
-            reasons=["Low-risk refinement may continue with stale or missing app-context evidence."],
-            warnings=warnings,
-            risky_signals=risky_signals,
-        )
-
-    if human_override_requested and context_state == "missing":
-        return AppContextPolicyResult(
-            decision=AppContextPolicyDecision.BLOCK_REQUIRES_HUMAN_OVERRIDE,
-            allowed=False,
-            blocking=True,
-            risk_level=risk_level,
-            reasons=["Missing app context on high-risk refinement requires explicit human override."],
-            warnings=_dedupe([*warnings, APP_CONTEXT_HIGH_RISK_BLOCK_WARNING]),
-            risky_signals=risky_signals,
-            requires_human_override=True,
-        )
-
     return AppContextPolicyResult(
         decision=AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH,
         allowed=False,
         blocking=True,
         risk_level=risk_level,
-        reasons=["High-risk refinement requires current app-context evidence."],
-        warnings=_dedupe([*warnings, APP_CONTEXT_HIGH_RISK_BLOCK_WARNING]),
+        reasons=["Refinement requires current App Intelligence context."],
+        warnings=_dedupe([*warnings, APP_CONTEXT_REQUIRED_BLOCK_WARNING]),
         risky_signals=risky_signals,
         requires_context_refresh=True,
     )
@@ -288,7 +263,7 @@ def _dedupe(values: list[str]) -> list[str]:
 
 
 __all__ = [
-    "APP_CONTEXT_HIGH_RISK_BLOCK_WARNING",
+    "APP_CONTEXT_REQUIRED_BLOCK_WARNING",
     "AppContextPolicyDecision",
     "AppContextPolicyResult",
     "enrich_app_context_policy_with_graph_hints",

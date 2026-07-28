@@ -9,7 +9,7 @@ from mozaiksai.control_plane.app_context import (
     AppContextSummary,
 )
 from mozaiksai.control_plane.app_context_policy import (
-    APP_CONTEXT_HIGH_RISK_BLOCK_WARNING,
+    APP_CONTEXT_REQUIRED_BLOCK_WARNING,
     AppContextPolicyDecision,
     evaluate_app_context_policy,
 )
@@ -48,7 +48,7 @@ def _fresh_greenfield_context() -> AppContextSummary:
     )
 
 
-def test_missing_context_ui_patch_warns_without_blocking() -> None:
+def test_missing_context_ui_patch_blocks_for_refresh() -> None:
     result = evaluate_app_context_policy(
         app_context_summary=_missing_context(),
         change_class="patch",
@@ -56,13 +56,15 @@ def test_missing_context_ui_patch_warns_without_blocking() -> None:
         affected_bundle_paths=["ui/pages/home.yaml"],
     )
 
-    assert result.decision is AppContextPolicyDecision.WARN
-    assert result.allowed is True
-    assert result.blocking is False
+    assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
+    assert result.allowed is False
+    assert result.blocking is True
+    assert result.requires_context_refresh is True
     assert APP_CONTEXT_MISSING_WARNING in result.warnings
+    assert APP_CONTEXT_REQUIRED_BLOCK_WARNING in result.warnings
 
 
-def test_stale_context_ui_patch_warns_without_blocking() -> None:
+def test_stale_context_ui_patch_blocks_for_refresh() -> None:
     result = evaluate_app_context_policy(
         app_context_summary=_stale_context(),
         change_class="patch",
@@ -70,10 +72,12 @@ def test_stale_context_ui_patch_warns_without_blocking() -> None:
         affected_bundle_paths=["ui/pages/home.yaml"],
     )
 
-    assert result.decision is AppContextPolicyDecision.WARN
-    assert result.allowed is True
-    assert result.blocking is False
+    assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
+    assert result.allowed is False
+    assert result.blocking is True
+    assert result.requires_context_refresh is True
     assert APP_CONTEXT_STALE_WARNING in result.warnings
+    assert APP_CONTEXT_REQUIRED_BLOCK_WARNING in result.warnings
 
 
 def test_missing_context_data_model_migration_blocks_for_refresh() -> None:
@@ -86,7 +90,7 @@ def test_missing_context_data_model_migration_blocks_for_refresh() -> None:
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
     assert result.requires_context_refresh is True
-    assert APP_CONTEXT_HIGH_RISK_BLOCK_WARNING in result.warnings
+    assert APP_CONTEXT_REQUIRED_BLOCK_WARNING in result.warnings
 
 
 def test_stale_context_data_model_migration_blocks_for_refresh() -> None:
@@ -196,7 +200,7 @@ def test_context_policy_result_attaches_to_execution_plan_without_rerouting() ->
 
     assert stale_plan.context_policy_decision is not None
     assert stale_plan.context_policy_decision.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
-    assert APP_CONTEXT_HIGH_RISK_BLOCK_WARNING in stale_plan.warnings
+    assert APP_CONTEXT_REQUIRED_BLOCK_WARNING in stale_plan.warnings
     assert fresh_plan.workflow_sequence == stale_plan.workflow_sequence == "app_revision"
     assert fresh_plan.target_workflow == stale_plan.target_workflow == "AppGenerator"
     assert fresh_plan.affected_bundle_paths == stale_plan.affected_bundle_paths

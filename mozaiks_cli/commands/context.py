@@ -1,4 +1,4 @@
-"""mozaiks context - local app-context and Context Graph developer operations."""
+"""mozaiks context - local App Intelligence developer operations."""
 
 from __future__ import annotations
 
@@ -7,17 +7,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mozaiksai.control_plane.workspace_snapshot import register_workspace_snapshot
+from mozaiksai.control_plane.app_intelligence import (
+    APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+    index_workspace_app_intelligence,
+)
 
 
 def run(args: Any) -> int:
     action = str(getattr(args, "context_action", "") or "").strip()
-    if action == "snapshot":
-        return asyncio.run(_run_snapshot(args))
-    raise ValueError("context command requires an action, such as 'snapshot'")
+    if action == "index":
+        return asyncio.run(_run_index(args))
+    raise ValueError("context command requires an action, such as 'index'")
 
 
-async def _run_snapshot(args: Any) -> int:
+async def _run_index(args: Any) -> int:
     app_id = str(getattr(args, "app_id", "") or "").strip()
     if not app_id:
         raise ValueError("--app-id is required")
@@ -25,17 +28,22 @@ async def _run_snapshot(args: Any) -> int:
     if not workspace.exists() or not workspace.is_dir():
         raise ValueError(f"workspace does not exist or is not a directory: {workspace}")
 
-    result = await register_workspace_snapshot(
+    result = await index_workspace_app_intelligence(
         app_id=app_id,
         workspace_root=workspace,
-        artifact_key=str(getattr(args, "artifact_key", "") or "workspace_snapshot").strip() or "workspace_snapshot",
+        artifact_key=(
+            str(getattr(args, "artifact_key", "") or APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY).strip()
+            or APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY
+        ),
         make_current=not bool(getattr(args, "draft", False)),
         generated_artifacts_root=getattr(args, "generated_artifacts_root", None),
-        source_workflow="cli_context_snapshot",
+        source_workflow="cli_app_intelligence_index",
     )
     payload = {
         "app_id": result.app_id,
         "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
+        "source_context_artifact_version_id": result.source_context_artifact_version_id,
+        "app_intelligence_artifact_version_id": result.app_intelligence_artifact_version_id,
         "app_context_version_id": result.app_context_version_id,
         "app_context_artifact_version_id": result.app_context_artifact_version_id,
         "graph_artifact_version_id": result.graph_artifact_version_id,
@@ -51,9 +59,11 @@ async def _run_snapshot(args: Any) -> int:
 
     health = result.health_report or {}
     coverage = health.get("coverage") if isinstance(health.get("coverage"), dict) else {}
-    print("Workspace context snapshot registered.")
+    print("App Intelligence index registered.")
     print(f"  app_id: {result.app_id}")
     print(f"  app_bundle_artifact_version_id: {result.app_bundle_artifact_version_id}")
+    print(f"  source_context_artifact_version_id: {result.source_context_artifact_version_id}")
+    print(f"  app_intelligence_artifact_version_id: {result.app_intelligence_artifact_version_id}")
     print(f"  app_context_version_id: {result.app_context_version_id}")
     print(f"  graph_artifact_version_id: {result.graph_artifact_version_id}")
     print(f"  indexed_file_count: {result.indexed_file_count}")

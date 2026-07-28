@@ -360,7 +360,7 @@ def _build_refinement_metadata(
     return {
         "artifact_path": bundle_path.as_posix(),
         "workspace_dir": workspace_dir.as_posix(),
-        "bundle_mode": "staged_refinement_workspace_snapshot",
+        "bundle_mode": "staged_refinement_bundle",
         "bundle_sha256": bundle_sha256,
         "bundle_hmac_sha256": bundle_hmac_sha256,
         "bundle_size_bytes": bundle_size_bytes,

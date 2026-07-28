@@ -53,6 +53,11 @@ their prompt.
 The `AppIntelligenceSnapshot` is the compact summary agents see first. It does
 not contain raw source contents.
 
+During existing-app discovery, the preload registers a current source-backed
+`AppContextVersion` before the first agent turn. The chat overview shows the
+compact catalog and durable context refs; exact source remains behind retrieval
+tools.
+
 ## Why It Matters
 
 App Intelligence is what lets Mozaiks act like it understands the app before it
@@ -72,7 +77,7 @@ Mozaiks stages code context by workflow/checkpoint:
 
 | Surface | Context given |
 | --- | --- |
-| Existing-app discovery | repo/API/runtime summaries, compact graph pack, source catalog, and retrieval tools |
+| Existing-app discovery | App Intelligence catalog, compact graph pack, source catalog, retrieval tools, and repo/API/runtime evidence as fallback diagnostics |
 | App and workflow generation revisions | App Intelligence catalog and compact graph pack from the current AppContext or selected artifact |
 | Refinement classification | revision state, artifact summary, stale families, App Intelligence freshness, and context freshness |
 | Scope selection | App Intelligence catalog, graph catalog, workspace catalog, and bounded source search |

@@ -47,7 +47,56 @@ definitions:
 
   current_context_version_id:
     type: string
-    description: Optional current AppContextVersion id preserved when refreshing stale brownfield context.
+    description: >
+      Optional AppContextVersion id supplied for refresh or created by
+      source-backed App Intelligence preload.
+    source:
+      type: state
+      default: null
+
+  current_app_context_version_id:
+    type: string
+    description: >
+      Current AppContextVersion id created or loaded by App Intelligence
+      preload. This is the durable source-backed context handle for downstream
+      refinement and exact source retrieval.
+    source:
+      type: state
+      default: null
+
+  app_context_version_artifact_version_id:
+    type: string
+    description: ArtifactVersion id for the persisted AppContextVersion payload created during indexing.
+    source:
+      type: state
+      default: null
+
+  source_context_artifact_version_id:
+    type: string
+    description: ArtifactVersion id for the persisted SourceContextBundle created during indexing.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_artifact_version_id:
+    type: string
+    description: ArtifactVersion id for the persisted AppIntelligenceSnapshot created during indexing.
+    source:
+      type: state
+      default: null
+
+  graph_artifact_version_id:
+    type: string
+    description: ArtifactVersion id for the persisted AppContextGraph created during indexing.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_registration:
+    type: object
+    description: >
+      Durable App Intelligence registration result with source, graph,
+      snapshot, and AppContextVersion artifact refs.
     source:
       type: state
       default: null
@@ -796,6 +845,12 @@ agents:
       - discovery_inputs
       - context_refresh_request
       - current_context_version_id
+      - current_app_context_version_id
+      - app_context_version_artifact_version_id
+      - source_context_artifact_version_id
+      - app_intelligence_artifact_version_id
+      - graph_artifact_version_id
+      - app_intelligence_registration
       - source_refs
       - refresh_scope
       - refresh_reason
@@ -966,6 +1021,12 @@ agents:
       - discovery_inputs
       - context_refresh_request
       - current_context_version_id
+      - current_app_context_version_id
+      - app_context_version_artifact_version_id
+      - source_context_artifact_version_id
+      - app_intelligence_artifact_version_id
+      - graph_artifact_version_id
+      - app_intelligence_registration
       - source_refs
       - refresh_scope
       - refresh_reason

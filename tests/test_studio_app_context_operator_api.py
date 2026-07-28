@@ -144,10 +144,10 @@ def test_get_app_context_status_handles_missing_context(monkeypatch) -> None:
     assert APP_CONTEXT_MISSING_WARNING in body["warnings"]
 
 
-def test_workspace_snapshot_endpoint_registers_context(monkeypatch) -> None:
+def test_app_intelligence_index_endpoint_registers_context(monkeypatch) -> None:
     studio_app, client = _client(monkeypatch)
 
-    async def fake_register(**kwargs):
+    async def fake_index(**kwargs):
         assert kwargs["app_id"] == "app_1"
         assert kwargs["workspace_root"] == "C:/workspace/app"
         return type(
@@ -155,10 +155,12 @@ def test_workspace_snapshot_endpoint_registers_context(monkeypatch) -> None:
             (),
             {
                 "app_bundle_artifact_version_id": "av_bundle",
+                "source_context_artifact_version_id": "av_source",
+                "app_intelligence_artifact_version_id": "av_intelligence",
                 "app_context_version_id": "ctx_app_1",
                 "app_context_artifact_version_id": "av_context",
                 "graph_artifact_version_id": "av_graph",
-                "artifact_path": "generated/workspace_snapshots/app_1/artifact.zip",
+                "artifact_path": "generated/app_intelligence/app_1/artifact.zip",
                 "indexed_file_count": 42,
                 "scan_health": {"selected_file_count": 42},
                 "health_report": {"status": "healthy", "warnings": [], "blockers": [], "coverage": {}},
@@ -166,19 +168,21 @@ def test_workspace_snapshot_endpoint_registers_context(monkeypatch) -> None:
             },
         )()
 
-    monkeypatch.setattr(studio_app, "register_workspace_snapshot", fake_register)
+    monkeypatch.setattr(studio_app, "index_workspace_app_intelligence", fake_index)
 
     response = client.post(
-        "/api/studio/apps/app_1/context/workspace-snapshot",
+        "/api/studio/apps/app_1/context/app-intelligence/index",
         json={"workspace_root": "C:/workspace/app"},
     )
 
     assert response.status_code == 200
-    snapshot = response.json()["workspace_snapshot"]
-    assert snapshot["app_bundle_artifact_version_id"] == "av_bundle"
-    assert snapshot["graph_artifact_version_id"] == "av_graph"
-    assert snapshot["scan_health"]["selected_file_count"] == 42
-    assert snapshot["health_report"]["status"] == "healthy"
+    intelligence = response.json()["app_intelligence"]
+    assert intelligence["app_bundle_artifact_version_id"] == "av_bundle"
+    assert intelligence["source_context_artifact_version_id"] == "av_source"
+    assert intelligence["app_intelligence_artifact_version_id"] == "av_intelligence"
+    assert intelligence["graph_artifact_version_id"] == "av_graph"
+    assert intelligence["scan_health"]["selected_file_count"] == 42
+    assert intelligence["health_report"]["status"] == "healthy"
 
 
 def test_refresh_plan_is_non_mutating_and_does_not_launch(monkeypatch) -> None:

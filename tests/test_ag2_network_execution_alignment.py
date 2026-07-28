@@ -823,7 +823,7 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     class _PreloadLifecycle:
         async def trigger_before_chat(self, *, context_variables: dict[str, Any]) -> None:
             context_variables["preload_status"] = "ready"
-            context_variables["preload_summary"] = "Repo scan loaded React and FastAPI evidence."
+            context_variables["preload_summary"] = "App Intelligence preload loaded React and FastAPI evidence."
             context_variables["preloaded_context_ready"] = True
 
         async def execute_trigger(self, *_args: Any, **_kwargs: Any) -> None:
@@ -888,7 +888,7 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     assert result["ag2_channel_id"]
     assert result["ag2_close_reason"] == "workflow_complete"
     assert observed_preload["preload_status"] == "ready"
-    assert observed_preload["preload_summary"] == "Repo scan loaded React and FastAPI evidence."
+    assert observed_preload["preload_summary"] == "App Intelligence preload loaded React and FastAPI evidence."
     assert observed_preload["preloaded_context_ready"] is True
     assert planner_agent.ask_calls
     assert worker_agent.ask_calls

@@ -206,7 +206,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.applied_files["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.validation_result["validation_status"] == "passed"
     assert result.metadata["artifact_version_id"] == "av_child_1"
-    assert result.metadata["bundle_mode"] == "workspace_snapshot"
+    assert result.metadata["bundle_mode"] == "staged_refinement_bundle"
 
     assert len(created) == 1
     assert created[0].system_prompt == "coding system prompt from pack"

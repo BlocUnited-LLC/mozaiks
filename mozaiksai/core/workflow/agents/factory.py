@@ -72,6 +72,12 @@ def _log_existing_app_discovery_projection(
         return
 
     evidence_keys = (
+        "app_intelligence_summary",
+        "app_intelligence_catalog",
+        "app_intelligence_progress",
+        "app_intelligence_health",
+        "source_context_catalog",
+        "context_graph_pack",
         "preload_summary",
         "repo_summary",
         "frontend_repo_summary",
@@ -87,13 +93,18 @@ def _log_existing_app_discovery_projection(
     missing = [key for key in evidence_keys if key not in present]
     prompt_markers = [key for key in evidence_keys if f"{key.upper()}:" in system_message]
     repo_summary = context_dict.get("repo_summary")
+    app_intelligence_catalog = context_dict.get("app_intelligence_catalog")
     logger.info(
         "[EXISTING_APP_DISCOVERY_CONTEXT_PROJECTION] agent=%s preload_status=%s "
-        "ready=%s declared=%s evidence_present=%s evidence_missing=%s "
-        "prompt_markers=%s repo_scan_success=%s prompt_chars=%s",
+        "intake_ready=%s app_intelligence_status=%s app_intelligence_ready=%s "
+        "app_intelligence_present=%s declared=%s evidence_present=%s evidence_missing=%s "
+        "prompt_markers=%s repo_metadata_present=%s prompt_chars=%s",
         agent_name,
         context_dict.get("preload_status"),
         bool(context_dict.get("preloaded_context_ready")),
+        context_dict.get("app_intelligence_status"),
+        bool(context_dict.get("app_intelligence_ready")),
+        bool(isinstance(app_intelligence_catalog, dict) and app_intelligence_catalog.get("present")),
         len(agent_variables),
         present,
         missing,

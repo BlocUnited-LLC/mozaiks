@@ -28,7 +28,7 @@ from mozaiksai.control_plane import (
     AcceptedStagedAppBundleArtifactVersionError,
     accept_staged_refinement_artifact_version,
     get_orchestration_control_harness,
-    register_workspace_snapshot,
+    index_workspace_app_intelligence,
 )
 from mozaiksai.control_plane.app_context import (
     get_current_app_context_graph,
@@ -784,9 +784,9 @@ class AppContextRefreshCompleteRequest(BaseModel):
     workflow_context_variables: dict[str, Any] = Field(default_factory=dict)
 
 
-class AppContextWorkspaceSnapshotRequest(BaseModel):
+class AppIntelligenceIndexRequest(BaseModel):
     workspace_root: str = Field(..., min_length=1)
-    artifact_key: str = "workspace_snapshot"
+    artifact_key: str = "app_intelligence_workspace"
     make_current: bool = True
     scan_policy: dict[str, Any] | None = None
 
@@ -914,33 +914,35 @@ async def get_studio_app_context_status(
     )
 
 
-@app.post("/api/studio/apps/{app_id}/context/workspace-snapshot")
-async def create_studio_workspace_snapshot_context(
+@app.post("/api/studio/apps/{app_id}/context/app-intelligence/index")
+async def index_studio_app_intelligence_context(
     app_id: str,
-    body: AppContextWorkspaceSnapshotRequest,
+    body: AppIntelligenceIndexRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     try:
-        result = await register_workspace_snapshot(
+        result = await index_workspace_app_intelligence(
             app_id=resolved_app_id,
             workspace_root=body.workspace_root,
             artifact_store=get_artifact_store(),
             artifact_key=body.artifact_key,
-            source_workflow="studio_workspace_snapshot",
+            source_workflow="studio_app_intelligence_index",
             source_chat_id=user_id,
             scan_policy=body.scan_policy,
             make_current=body.make_current,
         )
     except ValueError as exc:
-        logger.warning("register_workspace_snapshot validation error app=%s: %s", app_id, exc)
-        raise HTTPException(status_code=400, detail="Invalid workspace snapshot parameters.") from exc
+        logger.warning("index_workspace_app_intelligence validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid App Intelligence indexing parameters.") from exc
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
-            "workspace_snapshot": {
+            "app_intelligence": {
                 "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
+                "source_context_artifact_version_id": result.source_context_artifact_version_id,
+                "app_intelligence_artifact_version_id": result.app_intelligence_artifact_version_id,
                 "app_context_version_id": result.app_context_version_id,
                 "app_context_artifact_version_id": result.app_context_artifact_version_id,
                 "graph_artifact_version_id": result.graph_artifact_version_id,

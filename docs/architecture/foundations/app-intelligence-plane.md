@@ -68,7 +68,7 @@ summaries plus retrieval tools.
 
 | Surface | Context |
 | --- | --- |
-| `ExistingAppDiscovery` | repo/API/runtime summaries, `app_intelligence_catalog`, compact graph pack, source catalog, and source retrieval tools |
+| `ExistingAppDiscovery` | `app_intelligence_catalog`, compact graph pack, source catalog, source retrieval tools, and repo/API/runtime evidence as fallback diagnostics |
 | `AppGenerator` | current or generated AppContext summary, App Intelligence catalog, and selected source or artifact context for the generation surface |
 | `AgentGenerator` | workflow/module/service/page context from App Intelligence plus exact files only when selected |
 | Refinement classifier | revision context, artifact summary, stale families, and App Intelligence freshness |
@@ -90,9 +90,12 @@ code.
 3. Tree-sitter extracts code facts.
 4. Mozaiks builds `SourceContextBundle`, `AppContextGraph`, and
    `AppIntelligenceSnapshot`.
-5. `ExistingAppDiscovery` uses those artifacts to produce adoption evidence.
-6. The saved discovery registers the current `AppContextVersion`.
-7. Later factory workflows and refinement checkpoints retrieve context from the
+5. The preload registers a current source-backed `AppContextVersion` before
+   the first discovery agent turn.
+6. `ExistingAppDiscovery` uses those artifacts to produce adoption evidence.
+7. The saved discovery may enrich the context with adoption, ownership, and
+   inventory artifacts.
+8. Later factory workflows and refinement checkpoints retrieve context from the
    current AppContext instead of rerunning discovery by default.
 
 ### Greenfield App

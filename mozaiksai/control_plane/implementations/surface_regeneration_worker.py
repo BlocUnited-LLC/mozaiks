@@ -11,7 +11,7 @@ surfaces (e.g. module_action).
 
 Each surface call:
 1. Loads current file content for the surface's affected_paths from the
-   provided workspace snapshot (empty string for new files).
+   provided staged artifact workspace (empty string for new files).
 2. Calls the LLM with the coding_refinement_system prompt and a
    surface-specific task context (generation_hint, rationale, kind).
 3. Validates that the LLM only writes to declared affected_paths.

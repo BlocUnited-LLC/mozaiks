@@ -119,7 +119,7 @@ def _refresh_reason(
         return resolved_reason
     if policy_result is not None and policy_result.reasons:
         return " ".join(policy_result.reasons)
-    return "Refresh app context before retrying high-risk refinement."
+    return "Refresh App Intelligence context before retrying refinement."
 
 
 def _source_refs_from_summary(summary: AppContextSummary | None) -> list[SourceRef]:

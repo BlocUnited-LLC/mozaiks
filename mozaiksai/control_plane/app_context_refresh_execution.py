@@ -26,7 +26,7 @@ from mozaiksai.core.workflow.pack.schema import normalize_step_groups
 
 EXISTING_APP_DISCOVERY_WORKFLOW = "ExistingAppDiscovery"
 CONTEXT_REFRESH_TRIGGER_SOURCE = "context_refresh"
-DEFAULT_CONTEXT_REFRESH_REASON = "Refresh app context before retrying high-risk refinement."
+DEFAULT_CONTEXT_REFRESH_REASON = "Refresh App Intelligence context before retrying refinement."
 
 
 class ContextRefreshLaunchStatus(StrEnum):

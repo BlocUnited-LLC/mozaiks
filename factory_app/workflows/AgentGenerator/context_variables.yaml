@@ -187,6 +187,73 @@ definitions:
     source:
       type: state
       default: null
+  current_app_context_version_id:
+    type: string
+    description: >
+      Current AppContextVersion id evaluated before a revision workflow starts.
+      Revision agents use this as the durable handle for source-backed App
+      Intelligence, Context Graph, and source retrieval tools.
+    source:
+      type: state
+      default: null
+  app_context_summary:
+    type: object
+    description: >
+      Prompt-safe summary of the current AppContextVersion, including artifact
+      refs, source refs, ownership boundaries, stale status, and warnings.
+      This is context authority for revision startup, not raw source content.
+    source:
+      type: state
+      default: null
+  app_context_required:
+    type: boolean
+    description: >
+      True when this run is a refinement or revision route that must have a
+      current AppContextVersion before agents perform build or edit work.
+    source:
+      type: state
+      default: false
+  app_intelligence_ready:
+    type: boolean
+    description: True when startup loaded an App Intelligence catalog.
+    source:
+      type: state
+      default: false
+  app_intelligence_status:
+    type: string
+    description: Startup load status for App Intelligence context.
+    source:
+      type: state
+      default: null
+  app_intelligence_summary:
+    type: string
+    description: Compact human-readable summary of indexed source coverage.
+    source:
+      type: state
+      default: null
+  app_intelligence_health:
+    type: object
+    description: App Intelligence coverage, scan health, and startup warnings.
+    source:
+      type: state
+      default: null
+  app_intelligence_catalog:
+    type: object
+    description: >
+      Prompt-safe App Intelligence catalog containing architecture, capability,
+      ownership, integration, data, and risk summaries. Exact code is not
+      embedded here; agents use source retrieval tools for selected files.
+    source:
+      type: state
+      default: null
+  source_context_catalog:
+    type: object
+    description: >
+      Prompt-safe source corpus catalog for indexed files, chunks, symbols, and
+      imports. It is an index for retrieval, not full source content.
+    source:
+      type: state
+      default: null
   context_aware:
     type: boolean
     description: Flag indicating if the application is opensource (in which the llm

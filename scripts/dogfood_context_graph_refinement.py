@@ -1,4 +1,4 @@
-"""Dogfood Context Graph snapshot -> scope -> coding-worker smoke.
+"""Dogfood App Intelligence index -> scope -> coding-worker smoke.
 
 This is a deterministic local smoke for proving the code-intelligence path
 against a real workspace without requiring MongoDB, API keys, Playwright, or
@@ -46,8 +46,11 @@ from mozaiksai.control_plane import (
     ScopedRefinementCodingWorker,
     load_selected_refinement_harness,
 )
+from mozaiksai.control_plane.app_intelligence import (
+    APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+    index_workspace_app_intelligence,
+)
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
-from mozaiksai.control_plane.workspace_snapshot import register_workspace_snapshot
 from mozaiksai.core.artifacts.models import (
     ArtifactCommitMetadata,
     ArtifactLifecycleStatus,
@@ -246,19 +249,19 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 
     output_root = Path(args.output_root).expanduser().resolve() if args.output_root else Path(tempfile.mkdtemp(prefix="mozaiks_context_dogfood_"))
     store = _MemoryArtifactStore()
-    result = await register_workspace_snapshot(
+    result = await index_workspace_app_intelligence(
         app_id=args.app_id,
         workspace_root=workspace,
         artifact_store=store,
         generated_artifacts_root=output_root / "generated",
-        source_workflow="dogfood_context_graph_refinement",
+        source_workflow="dogfood_app_intelligence_refinement",
     )
 
     catalog_context = ControlPlaneToolContext(
         checkpoint="scope_requested",
         app_id=args.app_id,
         artifact_kind="app_bundle",
-        artifact_key="workspace_snapshot",
+        artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
         artifact_version_id=result.app_bundle_artifact_version_id,
         requested_workflow_id="AppGenerator",
         source_surface="dogfood_context_graph_refinement",
@@ -273,7 +276,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         request_kind="refinement",
         declared_change_class=ChangeClass.PATCH,
         artifact_kind=ArtifactKind.APP_BUNDLE,
-        artifact_key="workspace_snapshot",
+        artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
         artifact_version_id=result.app_bundle_artifact_version_id,
         raw_user_request=args.request,
         source_surface="dogfood_context_graph_refinement",
@@ -345,7 +348,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         CodingWorkerRequest(
             app_id=args.app_id,
             artifact_kind="app_bundle",
-            artifact_key="workspace_snapshot",
+            artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
             artifact_version_id=result.app_bundle_artifact_version_id,
             requested_workflow_id="AppGenerator",
             raw_user_request=args.request,
@@ -368,7 +371,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "workspace": workspace.as_posix(),
         "output_root": output_root.as_posix(),
         "request": args.request,
-        "snapshot": {
+        "app_intelligence": {
             "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
             "app_context_version_id": result.app_context_version_id,
             "graph_artifact_version_id": result.graph_artifact_version_id,
@@ -510,8 +513,8 @@ def main() -> int:
     print("Dogfood Context Graph refinement smoke passed.")
     print(f"  workspace: {payload['workspace']}")
     print(f"  output_root: {payload['output_root']}")
-    print(f"  indexed_file_count: {payload['snapshot']['indexed_file_count']}")
-    print(f"  graph_health: {payload['snapshot']['health_report'].get('status')}")
+    print(f"  indexed_file_count: {payload['app_intelligence']['indexed_file_count']}")
+    print(f"  graph_health: {payload['app_intelligence']['health_report'].get('status')}")
     print(f"  candidate_count: {payload['catalog']['candidate_count']}")
     print(f"  target_path: {payload['scope']['target_path']}")
     print(f"  coding_worker_status: {payload['coding_worker']['status']}")

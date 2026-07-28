@@ -182,8 +182,8 @@ and exact source retrieval provides proof.
 
 App Intelligence is not an `AppPage`. It is workflow and control-plane context:
 
-- transition UI keeps the user on an intake screen while repository extraction
-  and indexing start
+- transition UI keeps the user on an intake screen while App Intelligence
+  indexing runs
 - `ExistingAppDiscovery` owns the chat-visible App Intelligence overview as a
   workflow UI surface
 - the Refinement Engine consumes App Intelligence through checkpoint tools
@@ -193,8 +193,9 @@ App Intelligence is not an `AppPage`. It is workflow and control-plane context:
 
 The create journey enters `app_type_selector`, then the brownfield branch enters
 `brownfield_repo_input`, launches `ExistingAppDiscovery`, runs pre-chat indexing,
-emits `AppIntelligenceOverviewCard`, and then lets agents use retrieval tools
-for exact files.
+registers a current source-backed `AppContextVersion`, emits
+`AppIntelligenceOverviewCard`, and then lets agents use retrieval tools for
+exact files.
 
 ## Implementation Map
 

@@ -7,9 +7,15 @@ from factory_app.workflows._shared.context_graph.prompt_pack import (
     build_context_graph_prompt_pack,
     build_context_graph_unavailable_pack,
 )
-from mozaiksai.control_plane.app_context import get_current_app_context_graph
+from mozaiksai.control_plane.app_context import (
+    get_current_app_context_graph,
+    get_current_app_context_summary,
+    get_current_app_intelligence_snapshot,
+    get_current_source_context_bundle,
+)
 from mozaiksai.control_plane.context_graph import build_context_graph_catalog
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.core.app_context import build_app_intelligence_catalog, build_source_corpus_catalog
 
 
 async def load_context_graph_context(context_variables: Any = None) -> dict[str, Any]:
@@ -17,6 +23,7 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
     data = _context_data(context_variables)
     app_id = _text(data.get("app_id"))
     if not app_id:
+        _set_app_intelligence_unavailable(context_variables, reason="missing_app_id", warnings=["missing_app_id"])
         _set_context_value(
             context_variables,
             "context_graph_pack",
@@ -35,6 +42,19 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
 
     request_text = _request_text(data)
     artifact_version_id = _text(data.get("artifact_version_id"))
+    current_summary = await get_current_app_context_summary(app_id=app_id)
+    _set_context_value(context_variables, "app_context_summary", current_summary.model_dump(mode="json"))
+    _set_context_value(context_variables, "current_app_context_version_id", current_summary.context_version_id)
+    _set_context_value(
+        context_variables,
+        "app_context_required",
+        _requires_current_app_context(data),
+    )
+    await _load_current_app_intelligence_context(
+        app_id=app_id,
+        app_context_summary=current_summary,
+        context_variables=context_variables,
+    )
 
     if artifact_version_id:
         loaded = await load_context_graph_for_tool(
@@ -51,6 +71,7 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
             )
         )
         if loaded.get("present"):
+            _set_artifact_workspace_intelligence_context(context_variables, loaded)
             catalog = build_context_graph_catalog(
                 graph=loaded["graph"],
                 raw_user_request=request_text,
@@ -144,6 +165,110 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
     _set_context_value(context_variables, "context_graph_warnings", list(lookup.warnings))
     _set_context_value(context_variables, "context_graph_health", health)
     return {"present": True, "source": "current_app_context_graph", "graph_id": pack.get("graph_id")}
+
+
+async def _load_current_app_intelligence_context(
+    *,
+    app_id: str,
+    app_context_summary: Any,
+    context_variables: Any,
+) -> None:
+    intelligence = await get_current_app_intelligence_snapshot(
+        app_id=app_id,
+        app_context_summary=app_context_summary,
+    )
+    source = await get_current_source_context_bundle(
+        app_id=app_id,
+        app_context_summary=app_context_summary,
+    )
+    warnings = [*list(intelligence.warnings), *list(source.warnings)]
+    if intelligence.snapshot is None:
+        _set_app_intelligence_unavailable(
+            context_variables,
+            reason="current_app_intelligence_unavailable",
+            warnings=warnings,
+        )
+    else:
+        catalog = build_app_intelligence_catalog(intelligence.snapshot, max_items=24)
+        _set_context_value(context_variables, "app_intelligence_ready", True)
+        _set_context_value(context_variables, "app_intelligence_status", "loaded")
+        _set_context_value(context_variables, "app_intelligence_catalog", catalog)
+        _set_context_value(context_variables, "app_intelligence_summary", _app_intelligence_summary(catalog))
+        _set_context_value(context_variables, "app_intelligence_health", _app_intelligence_health(catalog, warnings))
+    if source.bundle is not None:
+        _set_context_value(
+            context_variables,
+            "source_context_catalog",
+            build_source_corpus_catalog(source.bundle, max_files=40, max_chunks=8),
+        )
+
+
+def _set_artifact_workspace_intelligence_context(context_variables: Any, loaded: dict[str, Any]) -> None:
+    catalog = loaded.get("app_intelligence_catalog")
+    source_catalog = loaded.get("source_context_catalog")
+    warnings = list(loaded.get("warnings") or [])
+    if isinstance(catalog, dict):
+        _set_context_value(context_variables, "app_intelligence_ready", True)
+        _set_context_value(context_variables, "app_intelligence_status", "loaded")
+        _set_context_value(context_variables, "app_intelligence_catalog", catalog)
+        _set_context_value(context_variables, "app_intelligence_summary", _app_intelligence_summary(catalog))
+        _set_context_value(context_variables, "app_intelligence_health", _app_intelligence_health(catalog, warnings))
+    if isinstance(source_catalog, dict):
+        _set_context_value(context_variables, "source_context_catalog", source_catalog)
+
+
+def _set_app_intelligence_unavailable(context_variables: Any, *, reason: str, warnings: list[str]) -> None:
+    _set_context_value(context_variables, "app_intelligence_ready", False)
+    _set_context_value(context_variables, "app_intelligence_status", reason)
+    _set_context_value(context_variables, "app_intelligence_summary", "")
+    _set_context_value(
+        context_variables,
+        "app_intelligence_health",
+        {"source": "workflow_startup", "status": "unavailable", "reason": reason, "warnings": list(warnings)},
+    )
+    _set_context_value(context_variables, "app_intelligence_catalog", None)
+    _set_context_value(context_variables, "source_context_catalog", None)
+
+
+def _app_intelligence_summary(catalog: dict[str, Any]) -> str:
+    coverage = catalog.get("coverage") if isinstance(catalog.get("coverage"), dict) else {}
+    architecture = catalog.get("architecture") if isinstance(catalog.get("architecture"), dict) else {}
+    file_count = int(coverage.get("file_count") or 0)
+    symbol_count = int(coverage.get("symbol_count") or 0)
+    edge_count = int(coverage.get("edge_count") or 0)
+    module_count = len(architecture.get("module_roots") or [])
+    service_count = len(architecture.get("service_roots") or [])
+    return (
+        "App Intelligence indexed "
+        f"{file_count} files, {symbol_count} symbols, {edge_count} graph edges, "
+        f"{module_count} module roots, and {service_count} service roots."
+    )
+
+
+def _app_intelligence_health(catalog: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    coverage = catalog.get("coverage") if isinstance(catalog.get("coverage"), dict) else {}
+    return {
+        "source": "app_intelligence",
+        "status": "loaded",
+        "file_count": coverage.get("file_count"),
+        "symbol_count": coverage.get("symbol_count"),
+        "import_count": coverage.get("import_count"),
+        "node_count": coverage.get("node_count"),
+        "edge_count": coverage.get("edge_count"),
+        "scan_health": coverage.get("scan_health"),
+        "warnings": list(warnings),
+    }
+
+
+def _requires_current_app_context(data: dict[str, Any]) -> bool:
+    build_mode = _text(data.get("build_mode"))
+    trigger_source = _text(data.get("trigger_source"))
+    workflow_sequence = _text(data.get("workflow_sequence"))
+    return (
+        build_mode == "revision"
+        or trigger_source == "refinement"
+        or bool(workflow_sequence and workflow_sequence.endswith("_revision"))
+    )
 
 
 def _context_data(context_variables: Any) -> dict[str, Any]:

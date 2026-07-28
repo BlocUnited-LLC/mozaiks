@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import importlib.util
 import json
 import logging
@@ -27,6 +28,7 @@ import tomllib
 import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -1184,6 +1186,127 @@ def _context_graph_request_text(context_variables: Any, discovery_inputs: dict[s
     return "\n".join(parts[:4])
 
 
+def _scan_file_map_checksum(file_map: dict[str, str]) -> str:
+    payload = json.dumps(
+        {path: file_map[path] for path in sorted(file_map)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def _stable_context_token(*parts: Any) -> str:
+    raw = "\n".join(str(part or "") for part in parts)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_preload_source_ref(
+    *,
+    app_id: str,
+    roots: list[tuple[str, Path]],
+    github_sources: list[tuple[str, str]] | None,
+    github_ref: str | None,
+    file_map: dict[str, str],
+    scan_health: dict[str, Any],
+    indexed_at: datetime,
+):
+    from mozaiksai.core.app_context import SourceRef, SourceRefKind
+
+    github = list(github_sources or [])
+    token = _stable_context_token(
+        app_id,
+        [(label, root.as_posix()) for label, root in roots],
+        github,
+        github_ref,
+        _scan_file_map_checksum(file_map),
+    )
+    local_roots = [
+        {"label": label or "", "path": root.as_posix()}
+        for label, root in roots
+    ]
+    github_refs = [
+        {
+            "label": label or "",
+            "repo": repo,
+            "github_url": f"https://github.com/{repo}",
+            "ref": github_ref,
+        }
+        for label, repo in github
+    ]
+    if roots and not github and len(roots) == 1:
+        kind = SourceRefKind.APP_ROOT
+        uri = roots[0][1].as_uri()
+        ref = roots[0][0] or roots[0][1].name
+    elif github and not roots and len(github) == 1:
+        kind = SourceRefKind.REPO
+        uri = f"https://github.com/{github[0][1]}"
+        ref = github_ref
+    else:
+        kind = SourceRefKind.DISCOVERY_SNAPSHOT
+        uri = f"mozaiks://app-intelligence/existing-app-discovery/{app_id}/{token}"
+        ref = github_ref
+
+    return SourceRef(
+        source_ref_id=f"src_existing_app_{token}",
+        kind=kind,
+        uri=uri,
+        ref=ref,
+        checksum=_scan_file_map_checksum(file_map),
+        indexed_at=indexed_at,
+        metadata={
+            "source": "existing_app_discovery_preload",
+            "local_roots": local_roots,
+            "github_sources": github_refs,
+            "scan_policy": scan_health.get("policy_id"),
+            "selected_file_count": len(file_map),
+        },
+    )
+
+
+async def _register_preloaded_app_intelligence_context(
+    *,
+    context_variables: Any,
+    source_index: Any,
+    source_chat_id: str | None,
+) -> dict[str, Any]:
+    try:
+        from mozaiksai.control_plane.app_intelligence import register_app_intelligence_context
+        from mozaiksai.core.app_context import AppContextMode
+    except Exception as exc:
+        return {"persisted": False, "warning": f"app_intelligence_registration_import_failed:{exc}"}
+
+    try:
+        registration = await register_app_intelligence_context(
+            source_index=source_index,
+            source_workflow="ExistingAppDiscovery",
+            source_chat_id=source_chat_id,
+            make_current=True,
+            mode=AppContextMode.BROWNFIELD,
+            source_context_path="existing_app_discovery/app_context/source_context_bundle.json",
+            graph_path="existing_app_discovery/app_context/app_context_graph.json",
+            intelligence_path="existing_app_discovery/app_context/app_intelligence_snapshot.json",
+        )
+    except Exception as exc:
+        return {"persisted": False, "warning": f"app_intelligence_registration_failed:{exc}"}
+
+    payload = {
+        "persisted": True,
+        "source_context_artifact_version_id": registration.source_context_artifact_version_id,
+        "app_intelligence_artifact_version_id": registration.app_intelligence_artifact_version_id,
+        "app_context_version_id": registration.app_context_version_id,
+        "app_context_artifact_version_id": registration.app_context_artifact_version_id,
+        "graph_artifact_version_id": registration.graph_artifact_version_id,
+    }
+    _ctx_set(context_variables, "current_context_version_id", registration.app_context_version_id)
+    _ctx_set(context_variables, "current_app_context_version_id", registration.app_context_version_id)
+    _ctx_set(context_variables, "app_context_version_artifact_version_id", registration.app_context_artifact_version_id)
+    _ctx_set(context_variables, "source_context_artifact_version_id", registration.source_context_artifact_version_id)
+    _ctx_set(context_variables, "app_intelligence_artifact_version_id", registration.app_intelligence_artifact_version_id)
+    _ctx_set(context_variables, "graph_artifact_version_id", registration.graph_artifact_version_id)
+    _ctx_set(context_variables, "app_intelligence_registration", payload)
+    return payload
+
+
 async def _preload_context_graph_pack(
     *,
     context_variables: Any,
@@ -1321,12 +1444,24 @@ async def _preload_context_graph_pack(
         },
         warnings=warnings,
     )
+    indexed_at = datetime.now(UTC)
+    source_ref = _build_preload_source_ref(
+        app_id=app_id,
+        roots=roots,
+        github_sources=github_sources,
+        github_ref=github_ref,
+        file_map=file_map,
+        scan_health=dict(scan_result.health),
+        indexed_at=indexed_at,
+    )
     source_index = index_source_scan(
         app_id=app_id,
         scan_result=scan_result,
-        artifact_version_id=artifact_version_id,
+        artifact_version_id=f"{artifact_version_id}_{source_ref.source_ref_id}",
         artifact_kind="existing_app_source",
         artifact_key="existing_app_source",
+        source_ref=source_ref,
+        indexed_at=indexed_at,
     )
     _set_app_intelligence_progress(
         context_variables,
@@ -1381,6 +1516,14 @@ async def _preload_context_graph_pack(
     _ctx_set(context_variables, "context_graph_warnings", warnings)
     _ctx_set(context_variables, "context_graph_health", scan_health)
     _ctx_set(context_variables, "app_intelligence_health", source_index.health_report)
+    registration = await _register_preloaded_app_intelligence_context(
+        context_variables=context_variables,
+        source_index=source_index,
+        source_chat_id=str(_ctx_get(context_variables, "chat_id") or "") or None,
+    )
+    if registration.get("warning"):
+        warnings = [*warnings, str(registration["warning"])]
+        _ctx_set(context_variables, "context_graph_warnings", warnings)
     _set_app_intelligence_progress(
         context_variables,
         "ready",
@@ -1392,6 +1535,8 @@ async def _preload_context_graph_pack(
             "source_context_symbol_count": len(source_corpus.symbols),
             "context_graph_id": catalog.get("graph_id"),
             "app_intelligence_snapshot_id": app_intelligence_snapshot.snapshot_id,
+            "app_context_version_id": registration.get("app_context_version_id"),
+            "app_context_persisted": bool(registration.get("persisted")),
             "health_status": source_index.health_report.get("status"),
         },
         warnings=warnings,
@@ -1401,10 +1546,16 @@ async def _preload_context_graph_pack(
         "source": "existing_app_discovery_preload",
         "graph_id": catalog.get("graph_id"),
         "source_context_bundle_id": source_corpus.bundle_id,
+        "source_context_artifact_version_id": registration.get("source_context_artifact_version_id"),
         "indexed_file_count": len(source_file_map),
         "source_context_chunk_count": len(source_corpus.chunks),
         "source_context_symbol_count": len(source_corpus.symbols),
         "app_intelligence_snapshot_id": app_intelligence_snapshot.snapshot_id,
+        "app_intelligence_artifact_version_id": registration.get("app_intelligence_artifact_version_id"),
+        "app_context_version_id": registration.get("app_context_version_id"),
+        "app_context_artifact_version_id": registration.get("app_context_artifact_version_id"),
+        "graph_artifact_version_id": registration.get("graph_artifact_version_id"),
+        "app_context_persisted": bool(registration.get("persisted")),
         "warnings": warnings,
         "scan_health": scan_health,
         "health_report": source_index.health_report,

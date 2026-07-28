@@ -442,7 +442,7 @@ def _experience_spec_validation(
             return _result(
                 name="experience_spec_validation",
                 status="warning",
-                reason="No staged ExperienceSpec artifact was found; validation cannot be completed from the current workspace snapshot.",
+                reason="No staged ExperienceSpec artifact was found; validation cannot be completed from the current staged artifact workspace.",
             )
         return _result(
             name="experience_spec_validation",

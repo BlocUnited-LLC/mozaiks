@@ -32,21 +32,21 @@ async function moduleAction(moduleName, actionName, input = {}) {
 const TOUR_STEPS = [
   {
     id: 'create_app',
-    selector: 'a[href="/create"]',
+    selector: 'a[href="/apps"]',
     title: 'Create your first app',
-    description: 'Describe what you want to build. Mozaiks scaffolds the modules, pages, and deployment for you.',
+    description: 'Hit Create App from here any time to describe what you want to build. Mozaiks scaffolds the modules, pages, and deployment for you.',
   },
   {
     id: 'explore_apps',
-    selector: 'a[href="/apps"]',
-    title: 'Your apps live here',
-    description: 'Come back any time to continue builds, check status, and open App Studio.',
+    selector: 'a[href="/usage"]',
+    title: 'Track your usage',
+    description: 'Monitor LLM token usage and cost across all your apps in one place.',
   },
   {
     id: 'open_support',
-    selector: 'a[href="/support"], button[data-id="support"]',
+    selector: 'a[href="/support"]',
     title: 'Get help any time',
-    description: 'Open a support conversation directly from the profile menu.',
+    description: 'Open a support conversation directly from the Support page.',
   },
 ]
 

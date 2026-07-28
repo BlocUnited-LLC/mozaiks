@@ -155,7 +155,7 @@ forcing a full workflow fallback.
 If the request should not auto-run, the builder session loop can return a typed
 `HarnessDecision` instead of launching either a workflow or coding worker.
 The worker now produces concrete `updated_files`, validates the merged
-workspace snapshot, and can persist a child artifact version for the refined
+staged artifact workspace, and can persist a child artifact version for the refined
 bundle. First-party builder surfaces can now supply explicit file payloads from
 persisted artifact workbenches and in-flight workflow UI, or let the harness
 infer scope when artifact lineage is available.

@@ -793,11 +793,16 @@ async def run_workflow_orchestration(
 
         if workflow_name == "ExistingAppDiscovery":
             repo_summary = ctx_dict.get("repo_summary")
+            app_intelligence_catalog = ctx_dict.get("app_intelligence_catalog")
             wf_logger.info(
-                "[EXISTING_APP_DISCOVERY_PRELOAD] status=%s ready=%s repo_scan_success=%s "
-                "summary_present=%s unresolved_count=%s",
+                "[EXISTING_APP_DISCOVERY_PRELOAD] preload_status=%s intake_ready=%s "
+                "app_intelligence_status=%s app_intelligence_ready=%s app_intelligence_present=%s "
+                "repo_metadata_present=%s summary_present=%s unresolved_count=%s",
                 ctx_dict.get("preload_status"),
                 bool(ctx_dict.get("preloaded_context_ready")),
+                ctx_dict.get("app_intelligence_status"),
+                bool(ctx_dict.get("app_intelligence_ready")),
+                bool(isinstance(app_intelligence_catalog, dict) and app_intelligence_catalog.get("present")),
                 bool(isinstance(repo_summary, dict) and repo_summary.get("success")),
                 bool(ctx_dict.get("preload_summary")),
                 len(ctx_dict.get("unresolved_questions") or []),

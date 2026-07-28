@@ -572,6 +572,21 @@ function buildWorkspaceSupportPayload() {
   };
 }
 
+function buildOnboardingStatusPayload({ dismissed = false, progress = 0, steps = {} } = {}) {
+  const defaultSteps = {
+    create_app: { completed: false, completed_at: null },
+    explore_apps: { completed: false, completed_at: null },
+    open_support: { completed: false, completed_at: null },
+  };
+  return {
+    seen_welcome: true,
+    dismissed,
+    steps: Object.keys(steps).length ? steps : defaultSteps,
+    progress,
+    completed_at: null,
+  };
+}
+
 async function mockStudioApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
@@ -778,6 +793,23 @@ async function mockStudioApis(page) {
       contentType: 'application/json',
       body: JSON.stringify(buildWorkspaceSupportPayload()),
     });
+  });
+
+  // Default: fresh user — tour should appear
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildOnboardingStatusPayload()),
+    });
+  });
+
+  await page.route('**/api/modules/user_onboarding/complete_step**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+
+  await page.route('**/api/modules/user_onboarding/dismiss_onboarding**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
   });
 
 }
@@ -1297,4 +1329,81 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
     await routeCheck.detail();
     await expectNoHorizontalOverflow(page);
   }
+});
+
+// ── Onboarding tour ─────────────────────────────────────────────────────────
+
+test('onboarding tour appears for a fresh user and shows step 1', async ({ page }) => {
+  await page.goto('/apps');
+
+  // Tour mounts asynchronously after status fetch — wait for the dialog
+  const dialog = page.getByRole('dialog', { name: /Onboarding step 1 of 3/i });
+  await expect(dialog).toBeVisible({ timeout: 5000 });
+
+  await expect(dialog).toContainText('Create your first app');
+  await expect(dialog).toContainText('1 / 3');
+  await expect(dialog.getByRole('button', { name: 'Next' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Skip tour' })).toBeVisible();
+});
+
+test('onboarding tour advances to step 2 on Next', async ({ page }) => {
+  await page.goto('/apps');
+
+  const dialog = page.getByRole('dialog', { name: /Onboarding step 1 of 3/i });
+  await expect(dialog).toBeVisible({ timeout: 5000 });
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+
+  const step2 = page.getByRole('dialog', { name: /Onboarding step 2 of 3/i });
+  await expect(step2).toBeVisible({ timeout: 3000 });
+  await expect(step2).toContainText('Track your usage');
+  await expect(step2).toContainText('2 / 3');
+});
+
+test('onboarding tour dismisses on Skip tour', async ({ page }) => {
+  await page.goto('/apps');
+
+  const dialog = page.getByRole('dialog', { name: /Onboarding step 1 of 3/i });
+  await expect(dialog).toBeVisible({ timeout: 5000 });
+
+  await dialog.getByRole('button', { name: 'Skip tour' }).click();
+
+  await expect(dialog).toBeHidden({ timeout: 3000 });
+});
+
+test('onboarding tour does not appear for a dismissed user', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildOnboardingStatusPayload({ dismissed: true, progress: 0 })),
+    });
+  });
+
+  await page.goto('/apps');
+  await expect(page.locator('main').getByRole('heading', { name: 'Apps' })).toBeVisible();
+
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
+});
+
+test('onboarding tour does not appear for a completed user', async ({ page }) => {
+  const completedSteps = {
+    create_app: { completed: true, completed_at: '2026-07-28T00:00:00Z' },
+    explore_apps: { completed: true, completed_at: '2026-07-28T00:00:00Z' },
+    open_support: { completed: true, completed_at: '2026-07-28T00:00:00Z' },
+  };
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildOnboardingStatusPayload({ progress: 100, steps: completedSteps })),
+    });
+  });
+
+  await page.goto('/apps');
+  await expect(page.locator('main').getByRole('heading', { name: 'Apps' })).toBeVisible();
+
+  await page.waitForTimeout(1000);
+  await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
 });

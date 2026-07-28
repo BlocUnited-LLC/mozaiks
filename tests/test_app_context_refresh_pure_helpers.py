@@ -112,11 +112,11 @@ class TestRefreshReason:
     def test_no_reason_empty_policy_reasons_returns_default(self):
         policy = AppContextPolicyResult(reasons=[])
         result = _refresh_reason(reason=None, policy_result=policy)
-        assert result == "Refresh app context before retrying high-risk refinement."
+        assert result == "Refresh App Intelligence context before retrying refinement."
 
     def test_no_reason_none_policy_returns_default(self):
         result = _refresh_reason(reason=None, policy_result=None)
-        assert result == "Refresh app context before retrying high-risk refinement."
+        assert result == "Refresh App Intelligence context before retrying refinement."
 
     def test_whitespace_only_reason_falls_through_to_policy(self):
         policy = AppContextPolicyResult(reasons=["Stale context"])
@@ -125,7 +125,7 @@ class TestRefreshReason:
 
     def test_empty_reason_falls_through_to_default(self):
         result = _refresh_reason(reason="", policy_result=None)
-        assert result == "Refresh app context before retrying high-risk refinement."
+        assert result == "Refresh App Intelligence context before retrying refinement."
 
 
 # ---------------------------------------------------------------------------
