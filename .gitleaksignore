@@ -8,6 +8,8 @@ a385d81b03a6419a09fd82740da806dd357d9721:tests/test_review_redact_and_scan_polic
 13a383ade56fc1601b92eccb3b879b771e35ff89:docs/ai-runtime/observability.md:generic-api-key:415
 13a383ade56fc1601b92eccb3b879b771e35ff89:docs/reference/api.md:generic-api-key:22
 5daa33442a14556afc7ffff798b65a277936ba57:docs/core/authentication.md:generic-api-key:104
+2a87b6bb89f9f1d452a0ba4990ccdd0a0fffca8a:tests/test_logging_config.py:generic-api-key:83
+eaadceb724d84cec06a725cc6e1b27e3bef7de07:tests/test_logging_config.py:generic-api-key:83
 05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api.Tests/bin/Debug/net10.0/firebase-credentials.example.json:private-key:5
 05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api.Tests/bin/Debug/net8.0/firebase-credentials.example.json:private-key:5
 05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api/bin/Debug/net8.0/firebase-credentials.example.json:private-key:5
