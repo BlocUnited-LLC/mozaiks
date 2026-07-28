@@ -70,6 +70,10 @@
       "adoption_plan",
       "source_context_bundle"
     ],
+    "app_intelligence_snapshot": [
+      "source_context_bundle",
+      "app_context_graph"
+    ],
     "app_context_version": [
       "application_inventory",
       "ownership_boundary",
@@ -78,7 +82,8 @@
       "adoption_plan",
       "brownfield_registration",
       "source_context_bundle",
-      "app_context_graph"
+      "app_context_graph",
+      "app_intelligence_snapshot"
     ]
   },
   "workflows": [
@@ -167,7 +172,7 @@
   "workflow_sequences": [
     {
       "id": "build",
-      "description": "Full build pipeline: app path context \u00e2\u2020\u2019 value \u00e2\u2020\u2019 brand \u00e2\u2020\u2019 coding participation \u00e2\u2020\u2019 database setup intent \u00e2\u2020\u2019 design \u00e2\u2020\u2019 generation \u00e2\u2020\u2019 review and promote.",
+      "description": "Full build pipeline: app path context -> value -> brand -> coding participation -> database setup intent -> design -> generation -> review and promote.",
       "affected_declarative_families": [
         "concept",
         "build_plan",
@@ -228,10 +233,18 @@
     },
     {
       "id": "brownfield_app_adoption",
-      "description": "Brownfield app adoption pipeline: app path context \u00e2\u2020\u2019 repo link \u00e2\u2020\u2019 discovery chat \u00e2\u2020\u2019 generation path selection.",
+      "description": "Brownfield app adoption pipeline: app path context -> repo link -> App Intelligence indexing -> discovery chat -> generation path selection.",
       "affected_declarative_families": [
-        "concept",
-        "app_bundle"
+        "application_inventory",
+        "ownership_boundary",
+        "integration_inventory",
+        "risk_report",
+        "adoption_plan",
+        "brownfield_registration",
+        "source_context_bundle",
+        "app_context_graph",
+        "app_intelligence_snapshot",
+        "app_context_version"
       ],
       "steps": [
         {
@@ -262,6 +275,7 @@
         "brownfield_registration",
         "source_context_bundle",
         "app_context_graph",
+        "app_intelligence_snapshot",
         "app_context_version"
       ],
       "steps": [
@@ -297,7 +311,7 @@
     },
     {
       "id": "brownfield_module_generation",
-      "description": "Brownfield module-generation build: runs the full DesignDocs \u00e2\u2020\u2019 AgentGenerator \u00e2\u2020\u2019 AppGenerator pipeline grounded in AdoptionPlan ownership and impact scope.",
+      "description": "Brownfield module-generation build: runs the full DesignDocs -> AgentGenerator -> AppGenerator pipeline grounded in AdoptionPlan ownership and impact scope.",
       "affected_declarative_families": [
         "design_docs",
         "experience_spec",

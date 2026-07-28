@@ -1,8 +1,9 @@
 # ExistingAppDiscovery Tools
 #
-# before_chat collector preloads deterministic evidence into context.
-# DiscoveryArtifactAssemblerAgent then persists the canonical existing-app
-# augmentation artifacts and emits the DiscoveryBriefCard UI summary.
+# before_chat collector builds deterministic App Intelligence context.
+# ExistingAppDiscovery first emits an AppIntelligenceOverviewCard so users can
+# see the compact context agents receive, then the DiscoveryArtifactAssemblerAgent
+# persists canonical artifacts and emits the final DiscoveryBriefCard.
 
 tools:
 - agent: DiscoveryHostAgent
@@ -137,10 +138,17 @@ lifecycle_tools:
     repo_path, github_repo, backend_base_url, openapi_url, or uploaded spec paths.
 - trigger: before_chat
   agent: null
-  file: emit_preload_card.py
-  function: emit_discovery_preload_card
+  file: emit_app_intelligence_overview.py
+  function: emit_app_intelligence_overview_card
   description: >
-    Show the deterministic scan summary after preload and before the agent speaks.
+    Show the deterministic App Intelligence overview after indexing and before
+    the agent speaks.
+  tool_type: UI_Surface
+  ui:
+    component: AppIntelligenceOverviewCard
+    mode: artifact
+    workflow_primitive: document_preview
+    realization: generated_component
 - trigger: on_start
   agent: null
   file: ../_shared/platform/build_lifecycle.py

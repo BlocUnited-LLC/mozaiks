@@ -114,7 +114,7 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "brand_theme_summary" in agents
 
 
-def test_existing_app_discovery_runs_preload_card_after_repository_scan() -> None:
+def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_scan() -> None:
     tools = _read_yaml("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
     before_chat = [item for item in tools["lifecycle_tools"] if item["trigger"] == "before_chat"]
 
@@ -122,7 +122,10 @@ def test_existing_app_discovery_runs_preload_card_after_repository_scan() -> Non
         ("preload_discovery_context.py", "collect_prechat_discovery_context"),
         ("emit_app_intelligence_overview.py", "emit_app_intelligence_overview_card"),
     ]
-    assert "DiscoveryPreloadCard" in _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
+    overview_tool = before_chat[1]
+    assert overview_tool["tool_type"] == "UI_Surface"
+    assert overview_tool["ui"]["component"] == "AppIntelligenceOverviewCard"
+    assert "AppIntelligenceOverviewCard" in _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
 
 
 def test_existing_app_preload_mutates_an_empty_context_container() -> None:
