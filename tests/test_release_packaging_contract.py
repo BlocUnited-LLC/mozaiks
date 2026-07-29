@@ -26,3 +26,12 @@ def test_manifest_includes_packaged_frontend_sources() -> None:
     assert "recursive-include web_shell *.js *.jsx *.css *.html *.json *.md" in manifest
     assert "recursive-include chat-ui/src *" in manifest
     assert "include chat-ui/package.json" in manifest
+
+
+def test_manifest_includes_factory_defaults_used_by_app_overlays() -> None:
+    manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+    assert "recursive-include factory_app/app *" in manifest
+    assert "recursive-include factory_app/build_context *" in manifest
+    assert "recursive-include factory_app/refinement_harness *" in manifest
+    assert "recursive-include factory_app/workflows *" in manifest
