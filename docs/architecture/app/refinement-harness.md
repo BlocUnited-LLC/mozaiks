@@ -2,55 +2,88 @@
 title: App-Local Refinement Harness
 status: Authoritative - Pre-Production, Canonical Contract
 created: 2026-06-02
-updated: 2026-07-29
 depends_on: ../workflows/refinement-harness-architecture.md, ../workflows/refinement-engine.md
 ---
 
 # App-Local Refinement Harness
 
-Most Mozaiks apps do not need an app-local refinement harness. The packaged OSS
-default `mozaiks.default_refinement_harness` owns the standard artifact routes,
-checkpoints, prompts, tools, and deterministic policies used by generated apps.
+This document defines what an app-local refinement harness looks like for a
+generated app workspace. It is the canonical reference for AppGenerator when
+emitting a `refinement_harness` build task.
 
-Generated apps that enable refinement should carry an explicit
-`refinement_harness/config/harness.yaml` overlay. When there is no app-specific
-delta, the overlay is just `extends: mozaiks.default_refinement_harness` plus
-`overrides: {}`. The app-local file is an overlay, not a copied pack.
+Read [refinement-harness-architecture.md](../workflows/refinement-harness-architecture.md)
+first — it covers the ownership model, harness model, and AG2 implementation
+details that this document builds on.
+
+---
+
+## When An App Needs A Refinement Harness
+
+Most generated apps do **not** need an app-local refinement harness. Default to
+ordinary workflow launches, module actions, and `extension_registry.json`
+workflow sequences.
+
+Add an app-local harness only when the generated app explicitly needs:
+
+- checkpointed refinement routing (classify → route → decide → patch/plan)
+- scoped coding worker support (bounded patch refinement against owned files)
+- contract surface planning (map a request to specific contract surfaces before
+  re-entering a workflow sequence)
+- multi-artifact routing (concept, design_docs, workflow_bundle, app_bundle each
+  needing separate change-class routes)
+
+If the app only needs to launch a single workflow in response to user input,
+use `extension_registry.json` sequences and transitions instead.
+
+---
 
 ## File Layout
+
+A generated app refinement harness lives at the workspace root:
 
 ```text
 app/
   config/
-    ai.json
-    refinement_policy.yaml
+    refinement_policy.yaml required — LLM profiles and capability feature flags
 refinement_harness/
   config/
-    harness.yaml
-    tools.yaml
-    policies.yaml
+    harness.yaml    required — app overlay over mozaiks.default_refinement_harness
+    tools.yaml      optional — app-specific tool deltas only
+    policies.yaml   optional — app-specific policy deltas only
   prompts/
-    *.yaml
-workflows/
-  extended_orchestration/
-    extension_registry.json
+    *.yaml          optional — app-specific prompt overrides only
 ```
 
-Required for refinement:
+The `app/config/ai.json` file owns ask/chat/workflow startup. The LLM profile
+policy lives beside it in `app/config/refinement_policy.yaml`; both files are
+separate from the `refinement_harness/` directory.
 
-- `app/config/refinement_policy.yaml`
-- `refinement_harness/config/harness.yaml`
+---
 
-Optional overlay files:
+## `app/config/ai.json` — Startup Boundary
 
-- `refinement_harness/config/tools.yaml`
-- `refinement_harness/config/policies.yaml`
-- `refinement_harness/prompts/*.yaml`
+Startup config does not declare refinement routing, checkpoints, prompt content,
+or policy. Keep ask/chat/workflow startup in `app/config/ai.json`; put
+refinement model policy in `app/config/refinement_policy.yaml`; put refinement
+routes and checkpoint overrides under `refinement_harness/`.
 
-`app/config/ai.json` owns ask/chat/workflow startup. It does not declare
-refinement routing, checkpoint prompts, or scoped coding policy.
+```json
+{
+  "chat": {
+    "chat_startup_mode": "ask"
+  },
+  "workflows": {
+    "entry_point": "ValueEngine"
+  }
+}
+```
 
-## Minimal Policy
+---
+
+## `app/config/refinement_policy.yaml` — Minimal Starter
+
+Declares LLM profiles for each capability. The classifier and codegen profiles
+are the two required for refinement-capable apps.
 
 ```yaml
 schema_version: mozaiks.refinement.policy.v1
@@ -59,7 +92,7 @@ profile: default
 
 llm_profiles:
   classifier:
-    purpose: Classify refinement requests into stable change classes.
+    purpose: Classify refinement requests into the stable change classes.
     expected_behavior: deterministic structured classification
     llm_config:
       model: gpt-5-nano
@@ -81,17 +114,19 @@ coding:
   llm_profile: codegen
 ```
 
-Add `contract_surface` only when the app uses contract-surface planning:
+Add `contract_surface` when `contract_surface_requested` is included:
 
 ```yaml
-contract_surface:
-  enabled: true
-  llm_profile: codegen
+  contract_surface:
+    enabled: true
+    llm_profile: codegen
 ```
 
-## Minimal Overlay
+---
 
-Use this when the packaged default is acceptable:
+## `refinement_harness/config/harness.yaml` — Default Overlay
+
+The minimal generated harness consumes the packaged OSS defaults:
 
 ```yaml
 schema_version: mozaiks.refinement_harness.v1
@@ -99,125 +134,207 @@ extends: mozaiks.default_refinement_harness
 overrides: {}
 ```
 
-Add only real app-specific deltas, such as an app-local context tool:
+The default OSS harness supplies routing for the standard artifact families,
+the checkpoint chain, deterministic handlers, tools, policies, and prompt text.
+The `workflow_sequence` ids used by the effective harness must exist in the
+effective `workflows/extended_orchestration/extension_registry.json`.
+
+### Adding Contract Surface Planning
+
+The default harness includes contract surface planning. Only add a local
+checkpoint override when an app needs a different prompt or a real app-specific
+tool delta:
 
 ```yaml
-schema_version: mozaiks.refinement_harness.v1
-extends: mozaiks.default_refinement_harness
 overrides:
   checkpoints:
-    - event: coding_requested
-      append_tool_ids:
-        - app_local_context
+  - event: contract_surface_requested
+    prompt_id: contract_surface_selection_system
+    tool_ids:
+      - get_contract_surface_context
+      - get_app_intelligence_context
 ```
 
-The default harness continues to supply the standard routes, prompts, tools, and
-checkpoint declarations. The overlay only states what changes.
+And add `contract_surface` to `refinement_policy.yaml` as shown above.
 
-## Routing Deltas
-
-Add or adjust artifact routes under `overrides.routing.artifacts`.
-`artifact_kind` is the merge key.
+Prompt overrides can be declared inline or by path:
 
 ```yaml
-schema_version: mozaiks.refinement_harness.v1
-extends: mozaiks.default_refinement_harness
+overrides:
+  prompts:
+    contract_surface_selection_system: refinement_harness/prompts/contract_surface_selection_system.yaml
+```
+
+The override file uses the same prompt shape:
+
+```yaml
+id: contract_surface_selection_system
+content: |
+  You are the contract surface planner for <AppName>.
+```
+
+Do not copy the default prompt when the default behavior is sufficient.
+
+### Multi-Artifact Routing
+
+For apps with non-default artifact kinds or product-specific route changes, add
+only the changed artifact entries under `overrides.routing.artifacts`. Each
+artifact kind routes independently:
+
+```yaml
 overrides:
   routing:
     artifacts:
-      - artifact_kind: report_bundle
-        label: report bundle
+      - artifact_kind: custom_report
+        label: custom report
         routes:
           patch:
-            workflow_sequence: report_patch
+            workflow_sequence: custom_report_patch
           design:
-            workflow_sequence: report_revision
+            workflow_sequence: custom_report_revision
           feature:
-            workflow_sequence: report_revision
+            workflow_sequence: custom_report_revision
           core:
             workflow_sequence: full_rebuild
 ```
 
-Every `workflow_sequence` referenced by the effective harness must exist in
-`workflows/extended_orchestration/extension_registry.json` and must declare
-`affected_declarative_families`.
+---
 
-## Tool Deltas
+## `refinement_harness/config/tools.yaml` — Optional Tool Delta
 
-App-local tools live in `refinement_harness/config/tools.yaml`. They merge with
-the packaged tool manifest by `id`.
+Default context tools come from `factory_app/refinement_harness/config/tools.yaml`.
+Create an app-local `tools.yaml` only when the app declares an app-specific
+context tool, and include only the delta:
 
 ```yaml
 schema_version: mozaiks.refinement_harness.tools.v1
 tools:
-  - id: app_local_context
+  - id: get_domain_context
     kind: context_tool
-    description: Load app-local refinement context.
-    entrypoint: app.refinement_tools:app_local_context
+    description: Load app-specific domain facts needed by a refinement checkpoint.
+    entrypoint: app.services.refinement_context:get_domain_context
     available_to:
+      - scope_requested
       - coding_requested
 ```
 
-Do not add custom harness runtime Python. If a tool is generally useful to
-future generated apps, add it to the OSS default harness instead.
+Do not copy the default OSS tools file into an app workspace.
 
-## Prompt Deltas
+---
 
-Prompt overrides must be referenced explicitly from `overrides.prompts`.
+## `refinement_harness/config/policies.yaml` — Optional
 
-```yaml
-schema_version: mozaiks.refinement_harness.v1
-extends: mozaiks.default_refinement_harness
-overrides:
-  prompts:
-    coding_refinement_system: refinement_harness/prompts/coding_refinement_system.yaml
-```
-
-The prompt file must declare the same id:
-
-```yaml
-id: coding_refinement_system
-content: |
-  You are the scoped coding refinement worker for this app.
-```
-
-## Policy Deltas
-
-Use `refinement_harness/config/policies.yaml` only for deterministic scope
-policy differences:
+Scope size limits and overflow behavior. Omit when defaults are acceptable.
 
 ```yaml
 schema_version: mozaiks.refinement_harness.policies.v1
 scope:
-  max_selected_paths: 5
+  max_selected_paths: 3
+  auto_apply_max_paths: 1
+  overflow_behavior: clarify
 ```
 
-Unspecified policy fields keep the packaged default values.
+- `max_selected_paths` — maximum file paths allowed in a scoped refinement
+- `auto_apply_max_paths` — auto-apply without confirmation at or below this count
+- `overflow_behavior` — `clarify` (ask user) or `workflow` (escalate to full workflow)
 
-## Merge Rules
+---
 
-- `schema_version` must match the packaged schema.
-- `extends` must be `mozaiks.default_refinement_harness`.
-- manifest deltas live under `overrides`.
-- scalar values override the packaged value.
-- object values merge recursively by key.
-- `routing.artifacts` merge by `artifact_kind`.
-- `checkpoints` merge by `event`.
-- checkpoint `tool_ids` replace the packaged list.
-- checkpoint `append_tool_ids` adds tool ids while preserving packaged order.
-- `config/tools.yaml` merges tools by `id`.
-- `config/policies.yaml` merges policy objects by key.
-- `overrides.prompts` maps prompt id to app-local prompt path.
+## Prompts
+
+LLM-backed checkpoints use the default prompt text from
+`factory_app/refinement_harness/prompts/`. Generated apps should not copy those
+files. Add app-local prompt files only when product semantics genuinely require
+different instructions, then reference the override from `harness.yaml`.
+
+### `prompts/change_classifier_system.yaml`
+
+Example override:
+
+```yaml
+id: change_classifier_system
+content: |
+  You are the authoritative refinement change classifier for <AppName>.
+
+  Classify the request into exactly one of:
+  - patch: targeted fix or localized correction within the current artifact boundary
+  - design: visual, UX, or schema revision without changing the product concept
+  - feature: additive capability within the current product direction
+  - core: change in value proposition, target user, product identity, or architecture
+
+  Rules:
+  - Use the request text as the primary signal.
+  - Use any provided refinement_context_json as canonical persisted builder state.
+  - Treat any user-declared hint as advisory only.
+  - Be conservative about core, but choose it when the request changes what the product fundamentally is.
+  - Return JSON only. Do not include markdown fences.
+  - Keep signals short and semantic.
+```
+
+The factory_app `change_classifier_system.yaml` already includes staleness-aware
+routing rules and artifact family dependency guidance.
+
+### `prompts/coding_scope_selection_system.yaml`
+
+```yaml
+id: coding_scope_selection_system
+content: |
+  You are the scope selection agent for <AppName> patch refinements.
+
+  Your job is to pick the narrowest safe file scope for a patch request.
+
+  Rules:
+  - Prefer one file when possible.
+  - Only choose file paths that appear in the provided workspace catalog.
+  - Use the Context Graph catalog when available to identify related files.
+  - Resolution options: scoped_files, clarify, workflow.
+  - Return JSON only. Do not include markdown fences.
+```
+
+### `prompts/coding_refinement_system.yaml`
+
+```yaml
+id: coding_refinement_system
+content: |
+  You are the scoped coding refinement worker for <AppName>.
+
+  Your job is to produce a bounded patch-style refinement against explicit file inputs.
+
+  Rules:
+  - Stay scoped to the provided file paths.
+  - Return complete updated file content for every changed file in updated_files.
+  - Only edit files that appear in the provided explicit file inputs.
+  - Use refinement_context, especially Context Graph scope, to understand nearby files and symbols.
+  - Prefer the smallest safe validation strategy.
+  - Return JSON only. Do not include markdown fences.
+```
+
+---
+
+## Route Rules
+
+- `workflow_sequence` values in `harness.yaml` must exist in
+  `workflows/extended_orchestration/extension_registry.json`.
+- Apps that consume default factory sequences should set
+  `"extends": "mozaiks.default_workflow_registry"` in the workflow registry and
+  declare only app-local sequence, transition, workflow, or entrypoint deltas.
+- `affected_declarative_families` and `affected_workflows` belong on the
+  sequence in `extension_registry.json`, not in `harness.yaml`.
+- Do not declare `requires_replanning` or `requires_rebuild` in route manifests;
+  these are derived from the typed change class at runtime.
+- `patch` → does not require replanning; eligible for scoped coding worker.
+- `design`, `feature`, `core` → require replanning; route to workflow re-entry.
+
+---
 
 ## What Not To Generate
 
-Generated refinement harness overlays are declarative only:
+Generated refinement harnesses are declarative only:
 
-- no `module.yaml`; the harness is not a module
-- no `app/modules/*`
-- no `backend/control_plane/*.py`
-- no custom harness Python
-- no business-domain logic in generic prompts
-- no model names in prompt content; model config belongs in `refinement_policy.yaml`
-- no `affected_workflows` or `affected_declarative_families` in harness routes
-- no `context_variables.yaml`; the harness is not a workflow
+- no `module.yaml` — the harness is not a module
+- no `app/modules/*/backend/control_plane*.py` — no custom harness Python
+- no business-domain logic in prompts
+- no hardcoded model names as prompt content — model config belongs in `refinement_policy.yaml`
+- no copied default `tools.yaml`, `policies.yaml`, or prompt files
+- no `affected_workflows` or `affected_families` in `harness.yaml` routes
+- no `context_variables.yaml` — the harness is not a workflow

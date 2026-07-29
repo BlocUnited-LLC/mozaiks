@@ -311,9 +311,11 @@ refinement_harness/config/harness.yaml  artifact routes and LLM-backed checkpoin
 `app/config/refinement_policy.yaml` provides model config. `harness.yaml` does
 not point to Python implementation files.
 
-The packaged default pack lives under `factory_app/refinement_harness/`. An
-app-local `<workspace>/refinement_harness/` directory is an overlay when
-`config/harness.yaml` declares `extends: mozaiks.default_refinement_harness`.
+The default declarative pack lives under `factory_app/refinement_harness/`.
+Apps that need local refinement behavior add
+`<workspace>/refinement_harness/config/harness.yaml` as an overlay with
+`extends: mozaiks.default_refinement_harness` and only app-specific
+`overrides`.
 
 ## Generated App Authoring
 
@@ -321,14 +323,12 @@ Most generated apps do not need an app-local Refinement Engine. They should use
 ordinary workflow launches, module actions, and `extension_registry.json`
 workflow sequences first.
 
-AppGenerator may emit an app-local harness overlay only when the product
-explicitly needs checkpointed lifecycle, refinement, session, or coding-control
-behavior that cannot be expressed by the packaged default harness plus normal
-workflow transitions.
+AppGenerator may emit an app-local harness overlay only when the product explicitly
+needs checkpointed lifecycle, refinement, session, or coding-control behavior
+that cannot be expressed as normal workflow transitions.
 
 See [app/refinement-harness.md](../../architecture/app/refinement-harness.md)
-for the overlay contract and guidance on which deltas a generated app should
-include.
+for the overlay contract and guidance on which app-specific deltas are allowed.
 
 ### Ownership Split
 
@@ -336,7 +336,7 @@ Keep startup separate from the harness pack:
 
 - `app/config/ai.json` owns `ask`, `chat`, and `workflows` startup
 - `app/config/refinement_policy.yaml` owns runtime policy (LLM profiles, feature flags)
-- `refinement_harness/config/harness.yaml` owns app-local checkpoint and routing deltas
+- `refinement_harness/config/harness.yaml` owns declarative checkpoints and routing
 
 ### AppGenerator Build Task
 
@@ -348,7 +348,7 @@ surface_kind: refinement
 capability_pack_id: null
 initial_agent: RefinementHarnessAgent
 owned_paths:
-  - app/config/refinement_policy.yaml
+  - config/refinement_policy.yaml
   - refinement_harness/config/harness.yaml
 ```
 
@@ -360,6 +360,17 @@ Optional owned paths:
 - refinement_harness/prompts/*.yaml
 ```
 
+The default generated harness manifest is:
+
+```yaml
+schema_version: mozaiks.refinement_harness.v1
+extends: mozaiks.default_refinement_harness
+overrides: {}
+```
+
+Optional files must contain only app-specific deltas. Do not copy default OSS
+routes, checkpoints, policies, tools, or prompts into generated app workspaces.
+
 ### Pack Constraints
 
 Generated refinement harnesss are declarative only:
@@ -370,8 +381,8 @@ Generated refinement harnesss are declarative only:
 - no custom harness Python
 - no business-domain logic
 
-The generated overlay uses shipped `mozaiksai.control_plane` implementations
-and declared tool entrypoints from `mozaiksai.control_plane.tools.*` and
+The generated pack uses shipped `mozaiksai.control_plane` implementations and
+declared tool entrypoints from `mozaiksai.control_plane.tools.*` and
 `factory_app.refinement_harness.tools.*`. Custom harness Python is not a v1
 generator contract.
 
@@ -389,30 +400,22 @@ generator contract.
 
 ### `config/harness.yaml`
 
-Declares:
+The factory default pack declares:
 
 - artifact routing
 - checkpoint events
 - prompt ids
 - tool ids
 
-Example:
+App-local packs normally declare only an overlay:
 
 ```yaml
 schema_version: mozaiks.refinement_harness.v1
 extends: mozaiks.default_refinement_harness
-overrides:
-  routing:
-    artifacts:
-      - artifact_kind: app_bundle
-        label: app bundle
-  checkpoints:
-    - event: coding_requested
-      append_tool_ids:
-        - app_local_context
+overrides: {}
 ```
 
-The packaged default expands to an effective manifest with this shape:
+Factory default example:
 
 ```yaml
 schema_version: mozaiks.refinement_harness.v1
@@ -430,53 +433,35 @@ routing:
           workflow_sequence: app_revision
         core:
           workflow_sequence: full_rebuild
-    - artifact_kind: theme_config
-      label: theme config
-      routes:
-        patch:
-          workflow_sequence: theme_patch
-        design:
-          workflow_sequence: theme_revision
-        feature:
-          workflow_sequence: theme_revision
-        core:
-          workflow_sequence: full_rebuild
 checkpoints:
   - event: request_submitted
     prompt_id: change_classifier_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
-      - get_app_intelligence_context
-      - get_stale_artifact_families
+
   - event: route_requested
+
   - event: decision_requested
+
   - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
-      - get_app_intelligence_context
       - get_artifact_workspace_catalog
-      - get_context_graph_catalog
-      - search_app_source_context
+
   - event: contract_surface_requested
     prompt_id: contract_surface_selection_system
     tool_ids:
       - get_contract_surface_context
-      - get_app_intelligence_context
-      - search_app_source_context
+
   - event: coding_requested
     prompt_id: coding_refinement_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
-      - get_app_intelligence_context
       - get_artifact_workspace_scope
-      - get_context_graph_scope
-      - search_app_source_context
-      - read_app_source_file
-      - get_related_app_source_files
 ```
 
 Route rules:
@@ -494,42 +479,30 @@ Route rules:
 - Do not declare `requires_rebuild`; Refinement Engine rebuild decisions are
   runtime decision outputs, not route manifest inputs.
 
-Overlay merge rules:
-
-- overlays must declare `schema_version: mozaiks.refinement_harness.v1`
-- overlays must declare `extends: mozaiks.default_refinement_harness`
-- overlay manifest deltas live under `overrides`
-- scalar values override the packaged default
-- object values merge recursively by key
-- `routing.artifacts` merge by `artifact_kind`
-- `checkpoints` merge by `event`
-- checkpoint `tool_ids` replace the packaged list
-- checkpoint `append_tool_ids` adds tools while preserving packaged order
-- `config/tools.yaml` merges tools by `id`
-- `config/policies.yaml` merges policy objects by key
-- `overrides.prompts` maps prompt id to an app-local prompt file
-
 ### `config/tools.yaml`
 
-Declares app-local tool additions. The packaged default declares the standard
-first-party tools.
+Declares harness-owned tools. The default file lives in
+`factory_app/refinement_harness/config/tools.yaml`; app-local `tools.yaml`
+files are deltas only.
 
 Example:
 
 ```yaml
-schema_version: mozaiks.refinement_harness.tools.v1
 tools:
-  - id: app_local_context
+  - id: get_artifact_summary
     kind: context_tool
-    description: Load app-local refinement context.
-    entrypoint: app.refinement_tools:app_local_context
+    description: Load artifact lineage and version metadata.
+    entrypoint: factory_app.refinement_harness.tools.get_artifact_summary:get_artifact_summary
     available_to:
-      - coding_requested
+      - request_submitted
+      - route_requested
 ```
 
 ### `prompts/*.yaml`
 
-One prompt per file.
+One prompt per file. The default prompts live in
+`factory_app/refinement_harness/prompts/`; app-local prompt files are overrides
+only.
 
 Example:
 
@@ -773,10 +746,10 @@ At runtime:
 
 1. `mozaiksai/core/runtime/app/ai_config.py` resolves startup from `app/config/ai.json`
 2. `mozaiksai/control_plane/config.py` resolves runtime policy from `app/config/refinement_policy.yaml`
-3. `mozaiksai/control_plane/loader.py` resolves the packaged default harness and any app-local overlay
+3. `mozaiksai/control_plane/loader.py` resolves the active pack from `refinement_harness/config/harness.yaml`
 4. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
-5. checkpoint handlers are resolved from first-party runtime bindings by event
-6. the harness binds and runs the checkpoints it needs
+5. `OrchestrationControlHarness` binds the loaded declarative pack
+6. the harness runs the checkpoints it needs
 
 Current Studio refinement flow:
 

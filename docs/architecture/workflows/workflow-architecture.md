@@ -127,6 +127,24 @@ app workspace and `factory_app`: a given host/session executes one selected
 workflow root, and `factory_app/workflows/` remains the shared builder layer
 for Studio/builder execution.
 
+An app/product workflow registry may explicitly inherit the shipped factory
+registry by declaring:
+
+```json
+{
+  "extends": "mozaiks.default_workflow_registry"
+}
+```
+
+That is explicit registry inheritance, not implicit root auto-merge. The loader
+merges `workflows[]`, `entrypoints[]`, `workflow_sequences[]`, and
+`transitions[]` by `id`, and supports `{ "id": "...", "remove": true }`
+tombstones for default entries the app intentionally hides. If the effective
+registry references a factory workflow folder that does not exist in the app
+workflow root, workflow path lookup resolves that folder from the packaged
+`factory_app/workflows/` root. App-local workflow folders still win for matching
+workflow ids.
+
 Builder workflows may generate new workflow bundles, but generated output is
 staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until
 explicitly promoted into an active app root's `workflows/` directory.

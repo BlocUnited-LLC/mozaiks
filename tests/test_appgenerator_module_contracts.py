@@ -256,7 +256,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "shell_preset_hint" in source
     assert "[SHELL PRESET CONTEXT]" in source
     assert "initial_agent` must be `RefinementHarnessAgent`" in source
-    assert "app/config/refinement_policy.yaml" in source
+    assert "config/refinement_policy.yaml" in source
     assert "Output MUST be a valid JSON object matching `RefinementHarnessOutput`" in source
     assert "`current_build_task_type` must equal `refinement_harness`" in source
     assert "RefinementHarnessBundle" in source
@@ -354,7 +354,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     refinement_harness = file_contracts["task_contracts"]["refinement_harness"]
     assert module_contract["required_outputs"] == ["modules/{pack_name}/module.yaml"]
     assert refinement_harness["required_outputs"] == [
-        "app/config/refinement_policy.yaml",
+        "config/refinement_policy.yaml",
         "refinement_harness/config/harness.yaml",
     ]
     assert "refinement_harness/config/tools.yaml" in refinement_harness["optional_outputs"]
@@ -426,24 +426,19 @@ def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
             "harness_yaml": {
                 "schema_version": "mozaiks.refinement_harness.v1",
                 "extends": "mozaiks.default_refinement_harness",
-                "overrides": None,
+                "overrides": {},
             },
+            "tools_yaml": None,
         }
     )
 
     file_map = {item["filename"]: item["content"] for item in files}
 
-    assert "app/config/refinement_policy.yaml" in file_map
-    runtime_yaml = yaml.safe_load(file_map["app/config/refinement_policy.yaml"])
+    assert "config/refinement_policy.yaml" in file_map
+    assert "refinement_harness/config/tools.yaml" not in file_map
+    runtime_yaml = yaml.safe_load(file_map["config/refinement_policy.yaml"])
     assert runtime_yaml["schema_version"] == "mozaiks.refinement.policy.v1"
     assert runtime_yaml["classifier"]["llm_profile"] == "classifier"
-    harness_yaml = yaml.safe_load(file_map["refinement_harness/config/harness.yaml"])
-    assert harness_yaml == {
-        "schema_version": "mozaiks.refinement_harness.v1",
-        "extends": "mozaiks.default_refinement_harness",
-        "overrides": {},
-    }
-    assert "refinement_harness/config/tools.yaml" not in file_map
 
 
 def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> None:

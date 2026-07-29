@@ -50,6 +50,10 @@ Canonical target:
 - shared generation core lives outside app workspaces
 - app workspaces keep app bundle files under `app/` and app-local workflows at
   the workspace root under `workflows/`
+- app/product workflow registries may explicitly extend
+  `mozaiks.default_workflow_registry`; those overlays declare only product
+  deltas and `{id, remove: true}` tombstones, not copied factory registry
+  entries or copied factory workflow folders
 - workspace build contexts, when present, live at workspace root
   `build_context/{context_name}/` and project operator/product-specific build
   input into declared workflow context variables

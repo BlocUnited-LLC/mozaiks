@@ -295,6 +295,8 @@ def test_workspace_extensions_contract_schema_exists() -> None:
     assert schema.exists(), "workspace_extensions_contract.yaml must exist in AppGenerator build context"
     data = yaml.safe_load(schema.read_text(encoding="utf-8")) or {}
     assert data.get("schema_version") == 1
+    assert data.get("file_location") == "build_context/{pack_id}/extensions.yaml"
+    assert "app/build_context" not in schema.read_text(encoding="utf-8")
     assert "module_extensions" in (data.get("schema") or {})
     assert "regeneration_semantics" in data
     regen = data["regeneration_semantics"]
@@ -308,6 +310,8 @@ def test_appgenerator_agents_document_handler_split_rule() -> None:
     assert "Handler split rule" in agents
     assert "workspace subclass" in agents
     assert "preserved across regeneration" in agents
+    assert "build_context/{pack_id}/extensions.yaml" in agents
+    assert "app/build_context/{pack_id}/extensions.yaml" not in agents
 
 
 def test_ai_pack_workflow_hook_uses_current_startup_contract() -> None:

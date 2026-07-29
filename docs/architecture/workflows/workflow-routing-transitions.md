@@ -2,7 +2,7 @@
 title: Workflow Routing Transitions
 status: Authoritative - Pre-Production
 created: 2026-04-13
-updated: 2026-04-20
+updated: 2026-07-29
 depends_on: ../frontend/ui-system/generated-frontend-surface-contract.md, session-router.md
 ---
 
@@ -14,6 +14,30 @@ App/workspace roots may overlay it with their own
 `workflows/extended_orchestration/extension_registry.json`.
 
 It is not agent routing, not app navigation, and not workflow-local task batching.
+
+## Overlay Contract
+
+App/product workspaces that need hosted or operator-specific workflow entries
+without copying the shared factory registry declare:
+
+```json
+{
+  "extends": "mozaiks.default_workflow_registry"
+}
+```
+
+The OSS loader then builds one effective registry:
+
+- `workflows[]`, `entrypoints[]`, `workflow_sequences[]`, and `transitions[]`
+  merge by `id`.
+- `{ "id": "...", "remove": true }` removes an inherited item.
+- `artifact_dependency_graph` merges by family key.
+- App-local workflow folders override matching inherited workflow folders.
+- Referenced inherited factory workflows resolve from packaged
+  `factory_app/workflows/`.
+
+Do not copy default factory workflow registry entries into an app repo just to
+make hosted routes work.
 
 ## Contract
 

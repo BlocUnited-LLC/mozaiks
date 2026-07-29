@@ -833,9 +833,8 @@ def test_app_build_plan_tool_accepts_refinement_harness_task() -> None:
                 "description": "Generate app-local refinement harness pack.",
                 "initial_message": "Route scoped refinements to app_revision.",
                 "owned_paths": [
-                    "app/config/refinement_policy.yaml",
+                    "config/refinement_policy.yaml",
                     "refinement_harness/config/harness.yaml",
-                    "refinement_harness/prompts/change_classifier_system.yaml",
                 ],
                 "depends_on": [],
                 "acceptance_criteria": ["Routes use workflow_sequence only"],
@@ -868,7 +867,7 @@ def test_app_build_plan_tool_rejects_refinement_harness_with_capability_pack_id(
                     "description": "Generate app-local refinement harness pack.",
                     "initial_message": "Route scoped refinements to app_revision.",
                     "owned_paths": [
-                        "app/config/refinement_policy.yaml",
+                        "config/refinement_policy.yaml",
                         "refinement_harness/config/harness.yaml",
                     ],
                     "depends_on": [],
@@ -899,7 +898,7 @@ def test_app_build_plan_tool_rejects_refinement_harness_wrong_initial_agent() ->
                     "description": "Generate app-local refinement harness pack.",
                     "initial_message": "Route scoped refinements to app_revision.",
                     "owned_paths": [
-                        "app/config/refinement_policy.yaml",
+                        "config/refinement_policy.yaml",
                         "refinement_harness/config/harness.yaml",
                     ],
                     "depends_on": [],
@@ -930,8 +929,9 @@ def test_app_build_plan_tool_rejects_refinement_harness_invalid_owned_path() -> 
                     "description": "Generate app-local refinement harness pack.",
                     "initial_message": "Route scoped refinements to app_revision.",
                     "owned_paths": [
-                        "app/config/refinement_policy.yaml",
+                        "config/refinement_policy.yaml",
                         "refinement_harness/config/harness.yaml",
+                        "refinement_harness/config/tools.yaml",
                         "backend/refinement_harness/custom.py",
                     ],
                     "depends_on": [],
@@ -992,7 +992,7 @@ def test_app_build_plan_tool_rejects_refinement_harness_non_yaml_prompt() -> Non
                     "description": "Generate app-local refinement harness pack.",
                     "initial_message": "Route scoped refinements to app_revision.",
                     "owned_paths": [
-                        "app/config/refinement_policy.yaml",
+                        "config/refinement_policy.yaml",
                         "refinement_harness/config/harness.yaml",
                         "refinement_harness/prompts/change_classifier_system.txt",
                     ],

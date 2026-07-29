@@ -454,7 +454,7 @@ def test_appgenerator_extract_code_file_map_materializes_typed_refinement_harnes
     file_map = extract_appgenerator_code_file_map(payload)
 
     assert set(file_map) == {
-        "app/config/refinement_policy.yaml",
+        "config/refinement_policy.yaml",
         "refinement_harness/config/harness.yaml",
         "refinement_harness/config/tools.yaml",
         "refinement_harness/config/policies.yaml",
