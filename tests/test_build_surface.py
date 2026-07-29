@@ -160,11 +160,22 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
 
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     source = _read("factory_app/app/admin/pages/AppsPage.jsx")
+    studio_page_source = _read("factory_app/app/admin/pages/StudioPage.jsx")
+    model_source = _read("factory_app/app/admin/pages/workspaceStudioModel.js")
     hook_source = _read("factory_app/app/admin/pages/useWorkspaceApps.js")
     create_hook_source = _read("factory_app/workflows/ValueEngine/tools/create_app_record.py")
     update_hook_source = _read("factory_app/workflows/AppGenerator/tools/update_app_record.py")
     layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
+    assert "/api/studio/dashboard" in _read("factory_app/app/admin/pages/dashboardRoutes.js")
+    assert "getDefaultPortalRoute(dashboardConfig, 'app')" in source
+    assert "buildWorkspacePortfolio(apps, { appDashboardRoute })" in source
+    assert "buildAppDashboardHref(options.appDashboardRoute, appId)" in model_source
+    assert "/apps/${encodeURIComponent(appId)}/overview" not in source
+    assert "/apps/${encodeURIComponent(appId)}/overview" not in model_source
+    assert "manifest-declared default App Dashboard portal" in studio_page_source
+    assert "getDefaultPortalRoute(payload, 'app')" in studio_page_source
+    assert "location.pathname}/overview" not in studio_page_source
     assert "/api/studio/apps" in create_hook_source
     assert "_provisional_build_app_id" in create_hook_source
     assert "No persisted user build intent" not in create_hook_source

@@ -6,6 +6,7 @@ import {
   isAppInBuild,
   normalizeAppStatus,
 } from './appStudioModel.js'
+import { buildAppDashboardHref } from './dashboardRoutes.js'
 
 function parseTimestamp(value) {
   if (!value) return 0
@@ -155,7 +156,7 @@ function getFilterBucket(status, operationsState) {
   return 'other'
 }
 
-function buildRow(app) {
+function buildRow(app, options = {}) {
   const status = normalizeAppStatus(app?.status || app?.lifecycle_state)
   const snapshot = getAppRecordSnapshot(app)
   const operationsState = getOperationsState(status)
@@ -166,9 +167,9 @@ function buildRow(app) {
   const description = getAppDisplayDescription(app) || snapshot.guidance
 
   const appId = app?.app_id || app?.id || null
-  // Build-state apps expose an "Access Dashboard" secondary action pointing at the
-  // overview page. The dashboard may be incomplete during build, but still navigable.
-  const dashboardHref = appId && isAppInBuild(status) ? `/apps/${encodeURIComponent(appId)}/overview` : null
+  const dashboardHref = appId && isAppInBuild(status)
+    ? buildAppDashboardHref(options.appDashboardRoute, appId)
+    : null
 
   return {
     app,
@@ -194,8 +195,10 @@ function sortRowsByUpdatedAt(rows) {
   return [...rows].sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
 }
 
-export function buildWorkspacePortfolio(apps) {
-  const rows = sortRowsByUpdatedAt((Array.isArray(apps) ? apps : []).map(buildRow))
+export function buildWorkspacePortfolio(apps, options = {}) {
+  const rows = sortRowsByUpdatedAt(
+    (Array.isArray(apps) ? apps : []).map((app) => buildRow(app, options)),
+  )
   const totalApps = rows.length
   const activeCount = rows.filter((row) => row.status === 'active').length
   const buildCount = rows.filter((row) => isAppInBuild(row.status)).length

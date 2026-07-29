@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
@@ -23,6 +23,12 @@ DASHBOARD_MANIFEST_RELATIVE_PATH = Path("dashboard") / "dashboard.yaml"
 DashboardScope = Literal["workspace", "app"]
 DashboardActionType = Literal["route", "workflow_sequence", "workflow", "module_action", "external_url"]
 DashboardPanelSource = Literal["runtime", "module", "workflow", "media", "custom"]
+DashboardRouteValidationCode = Literal[
+    "enabled_portal_route_missing",
+    "enabled_portal_route_hidden",
+    "enabled_portal_route_group_mismatch",
+    "visible_route_missing_enabled_portal",
+]
 DashboardPanelType = Literal[
     "summary_strip",
     "kpi_grid",
@@ -187,6 +193,7 @@ class DashboardPortal(BaseModel):
     id: str
     label: str
     route: str
+    description: str | None = None
     icon: str = "dashboard"
     order: int = 0
     enabled: bool = True
@@ -205,6 +212,11 @@ class DashboardPortal(BaseModel):
     @classmethod
     def _required_text(cls, value: Any, info: Any) -> str:
         return _clean_text(value, field_name=f"dashboard portal {info.field_name}")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _description(cls, value: Any) -> str | None:
+        return _clean_optional_text(value)
 
     @field_validator("capabilities", mode="before")
     @classmethod
@@ -300,6 +312,34 @@ class DashboardManifest(BaseModel):
         return self.workspace if scope == "workspace" else self.app
 
 
+class DashboardRouteValidationIssue(BaseModel):
+    """A dashboard/route-manifest alignment issue."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: DashboardRouteValidationCode
+    scope: DashboardScope
+    route: str
+    message: str
+    portal_id: str | None = None
+    page_id: str | None = None
+
+
+class DashboardRouteValidationResult(BaseModel):
+    """Result from validating a dashboard manifest against mounted routes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    issues: list[DashboardRouteValidationIssue] = Field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.issues
+
+    def messages(self) -> list[str]:
+        return [issue.message for issue in self.issues]
+
+
 def _default_manifest_dict() -> dict[str, Any]:
     return {
         "schema_version": DASHBOARD_SCHEMA_VERSION,
@@ -315,6 +355,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "portfolio",
                     "label": "Apps",
                     "route": "/apps",
+                    "description": "Portfolio-level list of apps in the workspace.",
                     "icon": "apps",
                     "order": 0,
                     "panels": [
@@ -325,6 +366,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "usage",
                     "label": "Usage",
                     "route": "/usage",
+                    "description": "Workspace-level usage, cost, and activity signals.",
                     "icon": "chart",
                     "order": 20,
                     "panels": [
@@ -335,6 +377,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "integrations",
                     "label": "Integrations",
                     "route": "/integrations",
+                    "description": "Shared integration readiness across workspace apps.",
                     "icon": "plug",
                     "order": 30,
                     "panels": [
@@ -358,6 +401,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "overview",
                     "label": "Overview",
                     "route": "/apps/:appId/overview",
+                    "description": "App identity, lifecycle, metrics, alerts, and next step.",
                     "icon": "dashboard",
                     "order": 0,
                     "panels": [
@@ -370,6 +414,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "building",
                     "label": "Building",
                     "route": "/apps/:appId/building",
+                    "description": "Build threads, artifact versions, approvals, and workflow launch actions.",
                     "icon": "hammer",
                     "order": 10,
                     "capabilities": ["build_threads", "artifact_versions", "approval_votes"],
@@ -399,6 +444,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "branding",
                     "label": "Branding",
                     "route": "/apps/:appId/branding",
+                    "description": "Brand kit, generated media, themes, and promoted brand assets.",
                     "icon": "palette",
                     "order": 20,
                     "capabilities": ["brand_kit", "media_assets"],
@@ -411,6 +457,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "launch",
                     "label": "Launch",
                     "route": "/apps/:appId/launch",
+                    "description": "Landing page status, hosting, domains, and launch readiness.",
                     "icon": "rocket",
                     "order": 30,
                     "capabilities": ["landing_page", "hosting", "domains"],
@@ -424,6 +471,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "growth",
                     "label": "Growth",
                     "route": "/apps/:appId/growth",
+                    "description": "Marketing campaigns, growth experiments, and campaign assets.",
                     "icon": "megaphone",
                     "order": 40,
                     "capabilities": ["marketing_campaigns"],
@@ -435,6 +483,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "users",
                     "label": "Users",
                     "route": "/apps/:appId/access",
+                    "description": "App users, roles, invitations, and access policy summaries.",
                     "icon": "users",
                     "order": 50,
                     "panels": [
@@ -445,6 +494,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "usage",
                     "label": "Usage",
                     "route": "/apps/:appId/usage",
+                    "description": "App-scoped chats, workflow usage, token consumption, and cost.",
                     "icon": "chart",
                     "order": 60,
                     "panels": [
@@ -455,6 +505,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "support",
                     "label": "Support",
                     "route": "/apps/:appId/support",
+                    "description": "App-specific support threads, follow-up, and service diagnostics.",
                     "icon": "support",
                     "order": 70,
                     "panels": [
@@ -465,6 +516,7 @@ def _default_manifest_dict() -> dict[str, Any]:
                     "id": "settings",
                     "label": "Settings",
                     "route": "/apps/:appId/settings",
+                    "description": "App-level settings and configuration forms.",
                     "icon": "settings",
                     "order": 90,
                     "panels": [
@@ -563,6 +615,159 @@ def load_dashboard_manifest(app_root: Path) -> DashboardManifest:
         return build_default_dashboard_manifest()
 
 
+def _dashboard_route_group(scope: DashboardScope) -> str:
+    return "workspace-studio" if scope == "workspace" else "app-studio"
+
+
+def _route_page_navigation(page: Mapping[str, Any]) -> Mapping[str, Any]:
+    navigation = page.get("navigation")
+    if isinstance(navigation, Mapping):
+        return navigation
+
+    meta = page.get("meta")
+    if isinstance(meta, Mapping):
+        nested_navigation = meta.get("navigation")
+        if isinstance(nested_navigation, Mapping):
+            return nested_navigation
+    return {}
+
+
+def _route_page_id(page: Mapping[str, Any]) -> str | None:
+    value = page.get("id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    value = page.get("component")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _route_pages_by_path(route_pages: Iterable[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+    pages_by_path: dict[str, Mapping[str, Any]] = {}
+    for page in route_pages:
+        path = page.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            continue
+        pages_by_path.setdefault(path, page)
+    return pages_by_path
+
+
+def validate_dashboard_manifest_routes(
+    manifest: DashboardManifest,
+    route_pages: Iterable[Mapping[str, Any]],
+    *,
+    scopes: Iterable[DashboardScope] | None = None,
+    require_visible_route_portals: bool = True,
+) -> DashboardRouteValidationResult:
+    """Validate dashboard portals against concrete route-manifest pages.
+
+    The dashboard manifest owns Studio portal semantics, while
+    ``ui/route_manifest.json`` owns concrete React route mounting. This validator
+    makes the boundary executable for CI:
+
+    - every enabled portal must resolve to a mounted route;
+    - every enabled portal shown in navigation must be visible in the expected
+      Studio navigation group;
+    - every visible Studio navigation route must be represented by an enabled
+      portal when ``require_visible_route_portals`` is true.
+
+    Route pages may use either top-level ``navigation`` or nested
+    ``meta.navigation`` metadata. The returned issue list is deterministic and
+    safe to render in CI output.
+    """
+
+    selected_scopes = set(scopes or ("workspace", "app"))
+    pages_by_path = _route_pages_by_path(route_pages)
+    issues: list[DashboardRouteValidationIssue] = []
+
+    for surface in (manifest.workspace, manifest.app):
+        if surface.scope not in selected_scopes:
+            continue
+
+        expected_group = _dashboard_route_group(surface.scope)
+        enabled_portal_routes: set[str] = set()
+
+        for portal in surface.enabled_portals():
+            enabled_portal_routes.add(portal.route)
+            route_page = pages_by_path.get(portal.route)
+            if route_page is None:
+                issues.append(
+                    DashboardRouteValidationIssue(
+                        code="enabled_portal_route_missing",
+                        scope=surface.scope,
+                        portal_id=portal.id,
+                        route=portal.route,
+                        message=(
+                            f"{surface.scope} dashboard portal '{portal.id}' points to "
+                            f"unregistered route '{portal.route}'."
+                        ),
+                    )
+                )
+                continue
+
+            if not portal.show_in_navigation:
+                continue
+
+            navigation = _route_page_navigation(route_page)
+            if navigation.get("include") is False:
+                issues.append(
+                    DashboardRouteValidationIssue(
+                        code="enabled_portal_route_hidden",
+                        scope=surface.scope,
+                        portal_id=portal.id,
+                        page_id=_route_page_id(route_page),
+                        route=portal.route,
+                        message=(
+                            f"{surface.scope} dashboard portal '{portal.id}' points to "
+                            f"route '{portal.route}', but that route is hidden from navigation."
+                        ),
+                    )
+                )
+
+            actual_group = navigation.get("group")
+            if actual_group != expected_group:
+                issues.append(
+                    DashboardRouteValidationIssue(
+                        code="enabled_portal_route_group_mismatch",
+                        scope=surface.scope,
+                        portal_id=portal.id,
+                        page_id=_route_page_id(route_page),
+                        route=portal.route,
+                        message=(
+                            f"{surface.scope} dashboard portal '{portal.id}' points to "
+                            f"route '{portal.route}' in navigation group {actual_group!r}; "
+                            f"expected {expected_group!r}."
+                        ),
+                    )
+                )
+
+        if not require_visible_route_portals:
+            continue
+
+        for route, route_page in sorted(pages_by_path.items()):
+            navigation = _route_page_navigation(route_page)
+            if navigation.get("include") is False:
+                continue
+            if navigation.get("group") != expected_group:
+                continue
+            if route in enabled_portal_routes:
+                continue
+            issues.append(
+                DashboardRouteValidationIssue(
+                    code="visible_route_missing_enabled_portal",
+                    scope=surface.scope,
+                    page_id=_route_page_id(route_page),
+                    route=route,
+                    message=(
+                        f"visible {surface.scope} Studio route '{route}' is not represented "
+                        "by an enabled dashboard portal."
+                    ),
+                )
+            )
+
+    return DashboardRouteValidationResult(issues=issues)
+
+
 def build_dashboard_shell_routes(
     manifest: DashboardManifest,
     *,
@@ -615,9 +820,12 @@ __all__ = [
     "DashboardManifest",
     "DashboardPanel",
     "DashboardPortal",
+    "DashboardRouteValidationIssue",
+    "DashboardRouteValidationResult",
     "DashboardSurface",
     "build_dashboard_shell_routes",
     "build_default_dashboard_manifest",
     "load_dashboard_manifest",
     "merge_dashboard_manifest_overlay",
+    "validate_dashboard_manifest_routes",
 ]

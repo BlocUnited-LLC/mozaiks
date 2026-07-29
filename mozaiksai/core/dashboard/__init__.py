@@ -7,11 +7,14 @@ from .manifest import (
     DashboardManifest,
     DashboardPanel,
     DashboardPortal,
+    DashboardRouteValidationIssue,
+    DashboardRouteValidationResult,
     DashboardSurface,
     build_dashboard_shell_routes,
     build_default_dashboard_manifest,
     load_dashboard_manifest,
     merge_dashboard_manifest_overlay,
+    validate_dashboard_manifest_routes,
 )
 
 __all__ = [
@@ -21,9 +24,12 @@ __all__ = [
     "DashboardManifest",
     "DashboardPanel",
     "DashboardPortal",
+    "DashboardRouteValidationIssue",
+    "DashboardRouteValidationResult",
     "DashboardSurface",
     "build_dashboard_shell_routes",
     "build_default_dashboard_manifest",
     "load_dashboard_manifest",
     "merge_dashboard_manifest_overlay",
+    "validate_dashboard_manifest_routes",
 ]

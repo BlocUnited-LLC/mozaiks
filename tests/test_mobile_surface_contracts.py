@@ -162,7 +162,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "create app transition overlay can return to Apps" in smoke_source
     assert "workspace billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
-    assert "app Studio root redirects to overview" in smoke_source
+    assert "app Studio root redirects to manifest default portal" in smoke_source
     assert "app overview route stays responsive across desktop and mobile widths" in smoke_source
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
     assert "app integrations route stays responsive across desktop and mobile widths" in smoke_source
@@ -192,7 +192,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
-        "StudioPage": "app Studio root redirects to overview",
+        "StudioPage": "app Studio root redirects to manifest default portal",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppAccessPage": "app access route stays responsive across desktop and mobile widths",
