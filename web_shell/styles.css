@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "./tailwind.config.js";
 
 /* Base document styling driven entirely by brand.json CSS variables.
    These values are set at runtime by applyTheme() — nothing is hardcoded here.
