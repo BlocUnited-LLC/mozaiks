@@ -53,6 +53,7 @@ task_contracts:
       - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
       - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), navigate to insufficientTokensRecoveryPath(err), and return without retrying automatically.
+      - Custom routes that call entitlement-gated module actions must detect ENTITLEMENT_REQUIRED with isEntitlementRequiredError(err), navigate to entitlementUpgradePath(err), and return without retrying automatically. Both helpers are exported from ui/lib/moduleApi.js.
 
   subscription_config:
     owner_agent: ConfigMiddlewareAgent

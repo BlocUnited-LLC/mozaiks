@@ -17,6 +17,8 @@ Behavioral contract:
       err.data        — full parsed body for caller inspection
       isInsufficientTokensError(err) detects runtime token depletion.
       insufficientTokensRecoveryPath(err) returns the app-local recovery route.
+      isEntitlementRequiredError(err) detects plan entitlement denial.
+      entitlementUpgradePath(err) returns the app-local upgrade/pricing route.
     This lets generated custom-route JSX branch on backend states:
       try { ... } catch (err) {
         if (err.error_code === 'RECORD_NOT_FOUND') { ... }
@@ -54,6 +56,8 @@ _MODULE_API_TEMPLATE = """\
  *     err.data        — full parsed response body
  *   Catch and branch on err.error_code to handle specific backend states.
  *   For INSUFFICIENT_TOKENS, navigate to insufficientTokensRecoveryPath(err)
+ *   and do not retry the action automatically.
+ *   For ENTITLEMENT_REQUIRED, navigate to entitlementUpgradePath(err)
  *   and do not retry the action automatically.
  *
  *   Example:
@@ -125,6 +129,24 @@ export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
     metadata.billing_route ||
     metadata.upgrade_route ||
     metadata.contact_route ||
+    fallback
+  )
+}
+
+export function isEntitlementRequiredError(err) {
+  return (
+    err?.error_code === 'ENTITLEMENT_REQUIRED' ||
+    err?.code === 'ENTITLEMENT_REQUIRED' ||
+    err?.data?.error_code === 'ENTITLEMENT_REQUIRED'
+  )
+}
+
+export function entitlementUpgradePath(err, fallback = '/pricing') {
+  const metadata = tokenRecoveryMetadata(err)
+  return (
+    metadata.upgrade_route ||
+    metadata.billing_route ||
+    metadata.pricing_route ||
     fallback
   )
 }
