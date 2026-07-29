@@ -14,6 +14,8 @@ lib/
 lib64/
 !chat-ui/src/ui/lib/
 !chat-ui/src/ui/lib/**
+!web_shell/playwright/fixtures/generated-app/app/ui/lib/
+!web_shell/playwright/fixtures/generated-app/app/ui/lib/**
 parts/
 sdist/
 var/
