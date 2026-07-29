@@ -1240,11 +1240,11 @@ def _build_preload_source_ref(
     elif github and not roots and len(github) == 1:
         kind = SourceRefKind.REPO
         uri = f"https://github.com/{github[0][1]}"
-        ref = github_ref
+        ref = github_ref or github[0][1].split("/")[-1]
     else:
         kind = SourceRefKind.DISCOVERY_SNAPSHOT
         uri = f"mozaiks://app-intelligence/existing-app-discovery/{app_id}/{token}"
-        ref = github_ref
+        ref = github_ref or token
 
     return SourceRef(
         source_ref_id=f"src_existing_app_{token}",

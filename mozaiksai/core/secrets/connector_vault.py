@@ -370,14 +370,14 @@ class MongoConnectorVaultBackend:
         f = self._get_fernet()
         if f is None:
             return None
-        return f.encrypt(value.encode()).decode()
+        return str(f.encrypt(value.encode()).decode())
 
     def _decrypt(self, token: str) -> str | None:
         f = self._get_fernet()
         if f is None:
             return None
         try:
-            return f.decrypt(token.encode()).decode()
+            return str(f.decrypt(token.encode()).decode())
         except Exception:
             return None
 
