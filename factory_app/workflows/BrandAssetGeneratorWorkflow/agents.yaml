@@ -13,6 +13,3 @@ agents:
       size: "1024x1024"
       background: opaque
       output_format: png
-      promotion_targets:
-        - app_asset
-        - brand_asset

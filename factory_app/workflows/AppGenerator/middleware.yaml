@@ -68,6 +68,24 @@ prompt_middleware:
   filename: hook_domain_catalog_context.py
   function: inject_module_file_manifest_guard
 - agent: ConfigMiddlewareAgent
+  filename: hook_language_profile_context.py
+  function: inject_language_profile_context
+- agent: ModelAgent
+  filename: hook_language_profile_context.py
+  function: inject_language_profile_context
+- agent: ServiceAgent
+  filename: hook_language_profile_context.py
+  function: inject_language_profile_context
+- agent: FrontendStubAgent
+  filename: hook_language_profile_context.py
+  function: inject_language_profile_context
+- agent: ControllerAgent
+  filename: hook_language_profile_context.py
+  function: inject_language_profile_context
+- agent: DatabaseAgent
+  filename: hook_language_profile_context.py
+  function: inject_language_profile_context
+- agent: ConfigMiddlewareAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
 - agent: ServiceAgent
