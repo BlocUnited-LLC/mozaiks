@@ -1,5 +1,58 @@
-@import "tailwindcss";
-@config "./tailwind.config.js";
+@import "tailwindcss" source(none);
+
+/*
+   Tailwind v4 scans source files automatically by default. The web shell is
+   often copied out of the Python package and built beside large dependency
+   trees, so automatic detection can traverse the wrong build context. Keep
+   source detection explicit and let vite.config.js populate
+   .mozaiks-tailwind-sources with links to packaged chat UI, Factory UI, active
+   app UI, and workflow UI roots.
+*/
+@source "./";
+@source "./.mozaiks-tailwind-sources";
+@source not "./node_modules";
+@source not "./dist";
+@source not "./test-results";
+@source not "./playwright-report";
+
+@theme {
+  --color-background: hsl(var(--mz-background));
+  --color-foreground: hsl(var(--mz-foreground));
+  --color-primary: hsl(var(--mz-primary));
+  --color-primary-foreground: hsl(var(--mz-primary-foreground));
+  --color-secondary: hsl(var(--mz-secondary));
+  --color-secondary-foreground: hsl(var(--mz-secondary-foreground));
+  --color-muted: hsl(var(--mz-muted));
+  --color-muted-foreground: hsl(var(--mz-muted-foreground));
+  --color-accent: hsl(var(--mz-accent));
+  --color-accent-foreground: hsl(var(--mz-accent-foreground));
+  --color-destructive: hsl(var(--mz-destructive));
+  --color-destructive-foreground: hsl(var(--mz-destructive-foreground));
+  --color-success: hsl(var(--mz-success));
+  --color-success-foreground: hsl(var(--mz-success-foreground));
+  --color-warning: hsl(var(--mz-warning));
+  --color-warning-foreground: hsl(var(--mz-warning-foreground));
+  --color-card: hsl(var(--mz-card));
+  --color-card-foreground: hsl(var(--mz-card-foreground));
+  --color-popover: hsl(var(--mz-popover));
+  --color-popover-foreground: hsl(var(--mz-popover-foreground));
+  --color-border: hsl(var(--mz-border));
+  --color-input: hsl(var(--mz-input));
+  --color-ring: hsl(var(--mz-ring));
+
+  --radius-lg: var(--mz-radius);
+  --radius-md: calc(var(--mz-radius) - 2px);
+  --radius-sm: calc(var(--mz-radius) - 4px);
+
+  --font-sans: var(--mz-font-sans), system-ui, sans-serif;
+  --font-heading: var(--mz-font-heading), var(--mz-font-sans), system-ui, sans-serif;
+  --font-mono: var(--mz-font-mono), monospace;
+  --font-chat-body: var(--font-body, Rajdhani), ui-sans-serif, system-ui, sans-serif;
+  --font-chat-heading: var(--font-heading, Orbitron), ui-sans-serif, system-ui, sans-serif;
+  --font-logo: var(--font-logo, Fagrak Inline), ui-sans-serif, system-ui, sans-serif;
+
+  --border-width-3: 3px;
+}
 
 /* Base document styling driven entirely by brand.json CSS variables.
    These values are set at runtime by applyTheme() — nothing is hardcoded here.

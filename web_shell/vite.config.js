@@ -117,6 +117,37 @@ function normalizeFaviconPath(value) {
   return out || 'favicon.ico';
 }
 
+function tailwindSourceLinkType(target) {
+  const stats = fs.statSync(target);
+  if (!stats.isDirectory()) return 'file';
+  return process.platform === 'win32' ? 'junction' : 'dir';
+}
+
+function ensureTailwindSourceLinks(entries) {
+  const linkRoot = path.resolve(__dirname, '.mozaiks-tailwind-sources');
+
+  try {
+    fs.rmSync(linkRoot, { recursive: true, force: true });
+    fs.mkdirSync(linkRoot, { recursive: true });
+  } catch (error) {
+    console.warn(`[mozaiks-web-shell] Failed to prepare Tailwind source links: ${error.message}`);
+    return linkRoot;
+  }
+
+  for (const [name, target] of entries) {
+    if (!target || !fs.existsSync(target)) continue;
+
+    try {
+      const linkPath = path.join(linkRoot, name);
+      fs.symlinkSync(fs.realpathSync(target), linkPath, tailwindSourceLinkType(target));
+    } catch (error) {
+      console.warn(`[mozaiks-web-shell] Failed to link Tailwind source '${name}': ${error.message}`);
+    }
+  }
+
+  return linkRoot;
+}
+
 // Favicon — read from brand/theme_config.json if available (best-effort; runtime
 // theme loading via /api/theme-config is the authoritative source).
 export default defineConfig(({ mode }) => {
@@ -176,6 +207,13 @@ export default defineConfig(({ mode }) => {
 
   // Public (static) assets come from the active app bundle: <app>/brand
   const platformBrandDir = resolveBrandDir(platformAppDir, factoryBrandDir);
+  const tailwindSourceLinkRoot = ensureTailwindSourceLinks([
+    ['chat-ui-src', chatUiSrcRoot],
+    ['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')],
+    ['factory-workflows', factoryWorkflowsRoot],
+    ['platform-ui', path.resolve(platformAppDir, 'ui')],
+    ['platform-workflows', platformWorkflowRoot],
+  ]);
   const viteFsAllow = Array.from(new Set([
     __dirname,
     projectRoot,
@@ -189,6 +227,7 @@ export default defineConfig(({ mode }) => {
     chatUiRoot,
     chatUiSrcRoot,
     chatUiNodeModules,
+    tailwindSourceLinkRoot,
     path.resolve(__dirname, 'node_modules'),
   ]));
 

@@ -19,6 +19,10 @@ def _vite_config() -> str:
     return (_workspace() / "web_shell" / "vite.config.js").read_text(encoding="utf-8")
 
 
+def _styles_css() -> str:
+    return (_workspace() / "web_shell" / "styles.css").read_text(encoding="utf-8")
+
+
 # ── resolve.dedupe ──────────────────────────────────────────────────────────
 
 class TestResolveDedupe:
@@ -133,6 +137,52 @@ class TestDependencyScannerJsx:
         assert re.search(r"['\"]\.js['\"]\s*:\s*['\"]jsx['\"]", optimize_deps_region), (
             "optimizeDeps.rolldownOptions.moduleTypes must map '.js' to 'jsx' "
             "or Vite dev startup fails while scanning chat-ui/factory_app UI files."
+        )
+
+
+# ── Tailwind v4 source detection ─────────────────────────────────────────────
+
+class TestTailwindV4PackagedSourceDetection:
+    """
+    The web shell is built from both repo-local source and pip-installed package
+    source. Tailwind v4 automatic detection can traverse the wrong tree when
+    web_shell is copied into a Docker build workspace, so styles.css must use
+    explicit v4 CSS-first source detection and vite.config.js must expose the
+    same chat/factory/app source roots that Vite aliases.
+    """
+
+    def test_stylesheet_uses_css_first_tailwind_v4_contract(self) -> None:
+        styles = _styles_css()
+        assert '@import "tailwindcss" source(none);' in styles
+        assert "@config" not in styles, (
+            "web_shell/styles.css must not load tailwind.config.js through "
+            "@config. The legacy JS content contract can hang packaged "
+            "production builds under Tailwind v4."
+        )
+        assert '@source "./.mozaiks-tailwind-sources";' in styles
+        assert '@source not "./node_modules";' in styles
+        assert "@theme" in styles
+        assert "--color-primary: hsl(var(--mz-primary));" in styles
+        assert "--color-muted-foreground: hsl(var(--mz-muted-foreground));" in styles
+        assert "--radius-lg: var(--mz-radius);" in styles
+        assert "--font-chat-body:" in styles
+        assert "--border-width-3: 3px;" in styles
+
+    def test_vite_config_populates_tailwind_source_links(self) -> None:
+        source = _vite_config()
+        assert "ensureTailwindSourceLinks" in source
+        assert "tailwindSourceLinkRoot" in source
+        assert "fs.symlinkSync" in source
+        assert "'.mozaiks-tailwind-sources'" in source
+        assert "['chat-ui-src', chatUiSrcRoot]" in source
+        assert "['factory-app-ui', path.resolve(factoryAppRoot, 'app/ui')]" in source
+        assert "['factory-workflows', factoryWorkflowsRoot]" in source
+        assert "['platform-ui', path.resolve(platformAppDir, 'ui')]" in source
+        assert "['platform-workflows', platformWorkflowRoot]" in source
+        assert re.search(
+            r"viteFsAllow\s*=\s*Array\.from\(new Set\(\[.*tailwindSourceLinkRoot",
+            source,
+            re.DOTALL,
         )
 
 
