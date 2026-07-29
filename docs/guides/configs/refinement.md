@@ -12,11 +12,10 @@ checkpoint decisions, or workflow re-entry based on request meaning.
 | File | Owns |
 |------|------|
 | `app/config/refinement_policy.yaml` | Enables refinement capabilities and selects model profiles. |
-| `refinement_harness/config/harness.yaml` | Optional overlay that extends the packaged default harness. |
-| `refinement_harness/config/tools.yaml` | Optional app-local tool additions referenced by overlay checkpoints. |
-| `refinement_harness/config/policies.yaml` | Optional deterministic scope policy overrides. |
-| `refinement_harness/prompts/*.yaml` | Optional prompt overrides referenced from `overrides.prompts`. |
-| `workflows/extended_orchestration/extension_registry.json` | Workflow sequences that the harness can route into. |
+| `refinement_harness/config/harness.yaml` | Optional app-local overlay over `mozaiks.default_refinement_harness`. |
+| `refinement_harness/config/tools.yaml` | Optional app-specific tool delta. Default tools come from OSS. |
+| `refinement_harness/prompts/*.yaml` | Optional app-specific prompt overrides. Default prompts come from OSS. |
+| `workflows/extended_orchestration/extension_registry.json` | Workflow sequences that the effective harness can route into. |
 
 ## Minimal Policy
 
@@ -47,43 +46,21 @@ coding:
   llm_profile: codegen
 ```
 
-## Minimal Harness Overlay
-
-Most apps should use the packaged default harness. Add an app-local
-`refinement_harness/config/harness.yaml` only when the app needs to extend the
-default routing, checkpoint, or prompt behavior:
+## Minimal Harness
 
 ```yaml
 schema_version: mozaiks.refinement_harness.v1
 extends: mozaiks.default_refinement_harness
-overrides:
-  routing:
-    artifacts:
-      - artifact_kind: app_bundle
-        label: app bundle
-  checkpoints:
-    - event: coding_requested
-      append_tool_ids:
-        - app_local_context
+overrides: {}
 ```
 
-`extends: mozaiks.default_refinement_harness` loads the packaged
-`factory_app/refinement_harness` pack from the installed `mozaiks` package and
-then applies deterministic app-local deltas. Every new `workflow_sequence`
-referenced by an overlay must exist in
-`workflows/extended_orchestration/extension_registry.json`.
+The default OSS harness supplies the standard artifact routes, checkpoint chain,
+tools, policies, and prompts. Add local `overrides.routing`,
+`overrides.checkpoints`, `config/tools.yaml`, `config/policies.yaml`, or
+`prompts/*.yaml` only for real app-specific deltas.
 
-Overlay merge rules:
-
-- scalar values override the default
-- object values merge recursively by key
-- `routing.artifacts` merge by `artifact_kind`
-- `checkpoints` merge by `event`
-- checkpoint `tool_ids` replace the default list
-- checkpoint `append_tool_ids` adds tools without replacing the default list
-- `config/tools.yaml` merges tools by `id`
-- `config/policies.yaml` merges policy objects by key
-- `overrides.prompts` maps prompt id to an app-local prompt file
+Every `workflow_sequence` referenced by the effective harness must exist in the
+effective `workflows/extended_orchestration/extension_registry.json`.
 
 ## Code Context By Checkpoint
 
@@ -107,8 +84,7 @@ through tools only when their checkpoint needs it.
 |---------|------|
 | Ask/chat/workflow startup | `app/config/ai.json` |
 | Model profile selection | `app/config/refinement_policy.yaml` |
-| Default artifact routing and checkpoints | packaged `mozaiks.default_refinement_harness` |
-| App-specific routing and checkpoint deltas | `refinement_harness/config/harness.yaml` |
+| Artifact routing and checkpoints | `refinement_harness/config/harness.yaml` |
 | Sequence impact metadata | `workflows/extended_orchestration/extension_registry.json` |
 
 ## Read Next

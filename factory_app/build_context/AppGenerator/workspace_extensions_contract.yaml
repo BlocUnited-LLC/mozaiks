@@ -2,7 +2,7 @@ schema_version: 1
 
 description: >
   Contract schema for workspace-level build context extension files.
-  Any app workspace may place an extensions.yaml beside its build context
+  Any app workspace may place an extensions.yaml in a root named build context
   pack to declare module-level customizations on top of OSS pack templates.
 
   AppGenerator reads both the OSS pack template and the workspace extension
@@ -21,7 +21,7 @@ description: >
     module.handler: backend.handler:ClassName
   pointing at the subclass in handler.py. The runtime is unaffected.
 
-file_location: "app/build_context/{pack_id}/extensions.yaml"
+file_location: "build_context/{pack_id}/extensions.yaml"
 
 schema:
   schema_version:
@@ -132,7 +132,7 @@ regeneration_semantics:
 
 examples:
   - description: Messages module with extra create_thread and send_message params
-    file: app/build_context/messaging/extensions.yaml
+    file: build_context/messaging/extensions.yaml
     content: |
       schema_version: mozaiks.workspace_extensions.v1
 

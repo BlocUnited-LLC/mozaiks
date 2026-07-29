@@ -165,6 +165,10 @@ Canonical target:
 - shared generation core lives outside any individual app workspace
 - app workspaces keep app bundle files under `app/` and app-local workflows at
   the workspace root under `workflows/`
+- app/product workflow registries may explicitly extend
+  `mozaiks.default_workflow_registry`; such overlays declare only product deltas
+  and `{id, remove: true}` tombstones, never copied factory workflow registry
+  entries or copied factory workflow folders
 - workspace build contexts, when present, live beside `app/` under
   `build_context/{context_name}/`; they are launch-time build input registries
   for operator/product-specific build input, not generated app runtime output
@@ -557,6 +561,11 @@ When working in or generating workflows:
   ```
 - `ui_config.yaml` must declare `visual_agents`. Only agents listed there have messages and UI-bearing outputs streamed through the websocket to the user-facing UI.
 - `middleware.yaml` and `extended_orchestration/task_batches.yaml` are canonical workflow surfaces when lifecycle hooks or workflow-local task batches are needed.
+- `workflows/extended_orchestration/extension_registry.json` is single-root by
+  default. App/product overlays can explicitly extend
+  `mozaiks.default_workflow_registry`; only then may the runtime inherit default
+  registry entries and resolve inherited factory workflow folders from
+  `factory_app/workflows/`.
 - Treat workflow YAMLs as structured-output-first contracts. They should map cleanly to strict models that generators can emit and runtime code can validate deterministically.
 - Tools stay dumb. Reasoning belongs in prompts and structured outputs, not in Python tool code.
 
