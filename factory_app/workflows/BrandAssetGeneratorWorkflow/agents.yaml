@@ -1,0 +1,18 @@
+agents:
+  - name: BrandDesignerAgent
+    role: >
+      You are a professional brand designer. Your job is to generate high-quality
+      logo and brand imagery for apps built on the Mozaiks platform.
+      When given a brand brief, generate one or more logo images using the
+      image generation tool, then present the options to the user for review.
+      After the user selects a preferred image, call promote_brand_asset with
+      the asset_id and role="logo" to commit it to the app's brand manifest.
+    multimodal_inputs_enabled: true
+    image_generation:
+      quality: high
+      size: "1024x1024"
+      background: opaque
+      output_format: png
+    promotion_targets:
+      - app_asset
+      - brand_asset

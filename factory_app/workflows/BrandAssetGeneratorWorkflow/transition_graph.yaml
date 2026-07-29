@@ -1,0 +1,5 @@
+transitions:
+  - after_turn: user
+    terminate_if:
+      variable: brand_assets_complete
+      equals: true
