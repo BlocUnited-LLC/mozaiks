@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 
 def _make_backend(env: dict[str, str] | None = None):
     """Create a MongoConnectorVaultBackend with controlled env and a mock collection."""
-    from mozaiksai.core.secrets.connector_vault import MongoConnectorVaultBackend, reset_connector_vault_backend
+    from mozaiksai.core.secrets.connector_vault import (
+        MongoConnectorVaultBackend,
+        reset_connector_vault_backend,
+    )
 
     reset_connector_vault_backend()
 
@@ -128,7 +131,7 @@ def test_mongo_backend_store_sets_ttl_expiry() -> None:
     expires_at = doc.get("expires_at")
     assert expires_at is not None
     expires_dt = datetime.datetime.fromisoformat(expires_at)
-    delta = expires_dt - datetime.datetime.now(datetime.timezone.utc)
+    delta = expires_dt - datetime.datetime.now(datetime.UTC)
     # Should be 14 days ± a few seconds
     assert 13 <= delta.days <= 14
 
