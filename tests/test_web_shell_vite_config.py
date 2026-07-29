@@ -156,7 +156,7 @@ class TestTailwindV4PackagedSourceDetection:
         assert '@import "tailwindcss" source(none);' in styles
         assert "@config" not in styles, (
             "web_shell/styles.css must not load tailwind.config.js through "
-            "@config. The legacy JS content contract can hang packaged "
+            "@config. The JavaScript content contract can hang packaged "
             "production builds under Tailwind v4."
         )
         assert '@source "./.mozaiks-tailwind-sources";' in styles

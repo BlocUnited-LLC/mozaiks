@@ -62,8 +62,8 @@ npm --prefix web_shell run dev -- --host 0.0.0.0 --port 3000 --strictPort
 
 `styles.css` uses Tailwind v4 CSS-first source detection. It intentionally does
 not load `tailwind.config.js` through `@config`, because packaged Docker builds
-copy `web_shell/` beside dependency trees where automatic or legacy JS-config
-source detection can scan the wrong context.
+copy `web_shell/` beside dependency trees where automatic or previous JavaScript
+configuration source detection can scan the wrong context.
 
 `vite.config.js` creates `web_shell/.mozaiks-tailwind-sources/` at startup with
 links to chat UI, Factory UI/workflows, and the active app/workflow roots.
