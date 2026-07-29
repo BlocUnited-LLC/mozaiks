@@ -1,6 +1,6 @@
 agents:
   - name: BrandDesignerAgent
-    role: >
+    system_message: >
       You are a professional brand designer. Your job is to generate high-quality
       logo and brand imagery for apps built on the Mozaiks platform.
       When given a brand brief, generate one or more logo images using the
@@ -13,6 +13,6 @@ agents:
       size: "1024x1024"
       background: opaque
       output_format: png
-    promotion_targets:
-      - app_asset
-      - brand_asset
+      promotion_targets:
+        - app_asset
+        - brand_asset

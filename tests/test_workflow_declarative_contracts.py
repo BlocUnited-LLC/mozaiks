@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from tests.import_utils import import_module_directly
 
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
+from mozaiksai.core.workflow.declarative import parse_agents_config  # noqa: E402
 
 
 def _write_yaml(path: Path, content: str) -> None:
@@ -685,3 +688,18 @@ def test_build_workflows_load_from_workspace_bundle() -> None:
     assert discovery_config.get("tools")
     assert app_generator_config.get("tools")
     assert (agent_generator_config.get("structured_outputs") or {}).get("registry")
+
+
+def test_factory_workflow_agent_manifests_match_current_schema() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    failures: list[str] = []
+
+    for agents_path in sorted(workflows_root.rglob("agents.yaml")):
+        raw = yaml.safe_load(agents_path.read_text(encoding="utf-8")) or {}
+        try:
+            parse_agents_config(raw)
+        except ValueError as exc:
+            rel_path = agents_path.relative_to(workflows_root.parent.parent)
+            failures.append(f"{rel_path.as_posix()}: {exc}")
+
+    assert not failures, "Factory workflow agents.yaml schema drift:\n" + "\n".join(failures)
