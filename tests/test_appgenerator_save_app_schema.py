@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 def _load_save_app_schema_module():
@@ -1137,6 +1138,10 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
 
     output_dir = generated_root / "apps" / "app-one" / "build-one" / "app"
     assert (output_dir / "app.json").exists()
+    provenance = yaml.safe_load((output_dir / "provenance.yaml").read_text(encoding="utf-8"))
+    assert provenance["schema_version"] == "mozaiks.provenance.v1"
+    assert provenance["created_with"]["workflow"] == "AppGenerator"
+    assert provenance["created_with"]["build_id"] == "build one"
     assert (output_dir / "ui" / "pages" / "Dashboard.yaml").exists()
     assert context.data["generated_app_dir"] == str(output_dir)
 
@@ -1156,6 +1161,7 @@ def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> N
     (source / "config").mkdir()
     (source / "services" / "integrations").mkdir(parents=True)
     (source / "app.json").write_text('{"appName": "Demo"}', encoding="utf-8")
+    (source / "provenance.yaml").write_text("schema_version: mozaiks.provenance.v1\n", encoding="utf-8")
     (source / "ui" / "pages" / "Dashboard.yaml").write_text("name: Dashboard\n", encoding="utf-8")
     (source / "brand" / "theme_config.json").write_text("{}", encoding="utf-8")
     (source / "config" / "shell.json").write_text("{}", encoding="utf-8")
@@ -1167,8 +1173,9 @@ def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> N
     result = save_app_schema_module.promote_generated_app(source, target)
 
     assert result["status"] == "success"
-    assert sorted(result["copied"]) == ["app.json", "brand", "config", "services", "ui"]
+    assert sorted(result["copied"]) == ["app.json", "brand", "config", "provenance.yaml", "services", "ui"]
     assert (target / "app.json").exists()
+    assert (target / "provenance.yaml").exists()
     assert (target / "ui" / "pages" / "Dashboard.yaml").exists()
     assert (target / "services" / "integrations" / "email_client.py").exists()
 

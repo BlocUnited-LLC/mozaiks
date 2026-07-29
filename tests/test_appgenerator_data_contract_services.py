@@ -150,6 +150,7 @@ def test_structured_outputs_expose_data_contract() -> None:
 
 
 def test_config_is_the_promotable_data_contract_entry() -> None:
+    assert "provenance.yaml" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
     assert "config" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
     assert "data" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
     assert "security" in save_app_schema_module.PROMOTABLE_APP_ENTRIES

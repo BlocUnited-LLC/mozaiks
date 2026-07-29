@@ -7,11 +7,16 @@ import shutil
 import sys
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from mozaiks_cli.agent_guidance import build_agent_guidance_files
 from mozaiks_cli.workspace import is_framework_repo_root
+from mozaiksai.core.runtime.app.provenance import (
+    build_default_app_provenance,
+    dump_app_provenance_yaml,
+)
 from mozaiksai.resources import resolve_factory_app_root, resolve_factory_brand_root
 
 # Tier definitions
@@ -289,6 +294,18 @@ def _create_bundle_scaffold(
   }
   _write_json(app_root / "app.json", app_json)
   print(f"Created app/app.json (preset={preset})")
+
+  _write_text(
+    app_root / "provenance.yaml",
+    dump_app_provenance_yaml(
+      build_default_app_provenance(
+        app_kind="hand_authored",
+        created_mode="cli",
+        overlays={"refinement_policy": "config/refinement_policy.yaml"},
+      )
+    ),
+  )
+  print("Created app/provenance.yaml")
 
   _write_json(config_dir / "ai.json", _build_ai_config(app_name, starter=starter))
   print("Created app/config/ai.json")
@@ -962,7 +979,7 @@ def _build_shell_config(app_name: str) -> dict:
 def _resolve_default_brand_template_dir() -> Path:
     resolved = resolve_factory_brand_root()
     if resolved is not None:
-        return resolved
+        return Path(resolved)
     return (Path(__file__).resolve().parents[2] / "factory_app" / "app" / "brand").resolve()
 
 
@@ -971,7 +988,9 @@ def _load_default_brand_theme_config(app_name: str) -> dict:
     if not template_path.exists():
         raise FileNotFoundError(f"Default brand template not found: {template_path}")
 
-    payload = json.loads(template_path.read_text(encoding="utf-8"))
+    payload: Any = json.loads(template_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Default brand theme config must be a JSON object: {template_path}")
 
     identity = payload.get("identity")
     if isinstance(identity, dict):

@@ -38,9 +38,11 @@ Two-terminal mode:
 This repo owns app-specific behavior only:
 
 - `app/app.json` - app identity and runtime flags
+- `app/provenance.yaml` - optional origin/refinement/contract lineage metadata
 - `app/config/` - AI, shell, and app config
 - `app/security/secrets.yaml` - names-only secret management contract; never stores raw values
 - `app/brand/` - app branding assets and theme config
+- `app/dashboard/dashboard.yaml` - optional Workspace/App Dashboard portal overlay
 - `app/services/` - optional app-owned support code such as thin integrations, provider adapters, and app-level routes
 - `app/modules/` - deterministic app capabilities
 - `app/data/contract.json` and `app/data/migrations/` - canonical app data contract and additive migration artifacts
@@ -70,6 +72,7 @@ See `.claude/rules/multi-agent-coordination.md` for the full protocol.
 - Do not copy hosted platform provider adapters into this app. Hosted deployment, DNS/domain, billing, wallet, and platform operations should be consumed through hosted API clients/facade modules and host-owned records.
 - Do not put business actions, lifecycle state, emitted events, or persistence authority in app-level service support code; modules own those behaviors.
 - Use `app/security/secrets.yaml` only as a names-only contract for secret provider/vault policy, env handles, and secret names. Never store raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets in source.
+- Keep `app/provenance.yaml` to lineage, contract refs, and overlay refs only. Do not put secrets, local absolute paths, or provider execution state in provenance.
 - Prefer declarative page schemas before custom React.
 - Mount custom React only through `app/ui/route_manifest.json` and `app/ui/index.js`.
 - Keep shell/navigation changes in `app/config/shell.json`.

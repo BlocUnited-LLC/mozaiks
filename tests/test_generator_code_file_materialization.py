@@ -279,10 +279,15 @@ def test_extract_code_file_map_materializes_app_schema_output() -> None:
 
     assert set(file_map) == {
         "app.json",
+        "provenance.yaml",
         "brand/theme_config.json",
         "ui/pages/tickets.yaml",
     }
     assert '"appName": "Support Operations"' in file_map["app.json"]
+    provenance = yaml.safe_load(file_map["provenance.yaml"])
+    assert provenance["schema_version"] == "mozaiks.provenance.v1"
+    assert provenance["app_kind"] == "generated"
+    assert provenance["created_with"]["workflow"] == "AppGenerator"
     assert "name: Tickets" in file_map["ui/pages/tickets.yaml"]
 
 

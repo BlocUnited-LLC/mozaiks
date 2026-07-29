@@ -13,6 +13,7 @@ folder.
 | I want to change... | Edit this |
 |---------------------|-----------|
 | App name, default route, auth-required flag, admins | `app/app.json` |
+| App origin, contract refs, generated/refined lineage | `app/provenance.yaml` |
 | Ask/chat startup or the default workflow | `app/config/ai.json` |
 | Navigation, header actions, footer, mobile shell | `app/config/shell.json` |
 | Workspace/App Dashboard portals | `app/dashboard/dashboard.yaml` |
@@ -23,7 +24,8 @@ folder.
 
 ## Build a Mozaiks App Checklist
 
-1. Set identity and startup: `app/app.json` and `app/config/ai.json`.
+1. Set identity, lineage, and startup: `app/app.json`, `app/provenance.yaml`,
+   and `app/config/ai.json`.
 2. Shape the experience: `app/config/shell.json`,
    `app/dashboard/dashboard.yaml`, `app/brand/theme_config.json`, and `app/ui/`.
 3. Add durable behavior: `app/modules/{module_id}/module.yaml` plus module
@@ -40,6 +42,7 @@ folder.
 | File | Owns | Read |
 |------|------|------|
 | `app/app.json` | App identity, auth-required flag, default route, admin bootstrap | [Canonical App Structure](../../architecture/app/canonical-app-structure.md) |
+| `app/provenance.yaml` | App-bundle origin, refinement lineage, validation refs, and contract refs | [App Provenance](provenance.md) |
 | `app/config/ai.json` | Ask mode prompt, chat startup mode, default workflow entry point | [AI Startup](ai-startup.md) |
 | `app/config/shell.json` | Header, footer, profile menu, notifications, mobile shell | [App Shell and Branding](../custom-brand-integration/01-overview.md) |
 | `app/dashboard/dashboard.yaml` | Workspace/App Dashboard portals, panels, and dashboard actions | [App Dashboard Contract](../../architecture/app/app-dashboard-contract.md) |
@@ -70,6 +73,7 @@ folder.
 | Task | Read |
 |------|------|
 | Configure ask/chat/workflow startup | [AI Startup](ai-startup.md) |
+| Explain where an app bundle came from | [App Provenance](provenance.md) |
 | Add paid plans or token usage | [Subscriptions](subscriptions.md) |
 | Add refinement routing | [Refinement](refinement.md) |
 | Add module service or commercial metadata | [Module Contracts](module-contracts.md) |

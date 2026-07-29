@@ -15,6 +15,7 @@ from mozaiksai.core.dashboard import (
     load_dashboard_manifest,
     merge_dashboard_manifest_overlay,
 )
+from mozaiksai.core.runtime.app.paths import noncanonical_app_root_paths
 
 
 def _portal_ids(manifest: DashboardManifest, scope: str) -> list[str]:
@@ -145,6 +146,7 @@ def test_generator_file_contract_keeps_dashboard_separate_from_workflow_routing(
     )
 
     assert "dashboard/dashboard.yaml" in contract
+    assert noncanonical_app_root_paths(["dashboard/dashboard.yaml"]) == []
     assert "Workspace/App Dashboard portal structure belongs in dashboard/dashboard.yaml" in contract
     assert "workflows/extended_orchestration/extension_registry.json" in contract
     assert "The dashboard manifest may reference workflow sequences, but it does not define" in architecture_doc

@@ -1,6 +1,8 @@
 import json
 from argparse import Namespace
 
+import yaml
+
 from mozaiks_cli.commands import add as add_command
 from mozaiks_cli.commands import init_command
 from mozaiks_cli.main import create_parser
@@ -32,10 +34,16 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
 
     target_dir = tmp_path / "prompted-app"
     app_json = _load_json(target_dir / "app" / "app.json")
+    provenance = yaml.safe_load((target_dir / "app" / "provenance.yaml").read_text(encoding="utf-8"))
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
     control_plane_runtime = (target_dir / "app" / "config" / "refinement_policy.yaml").read_text(encoding="utf-8")
     shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
     assert app_json["appName"] == "prompted-app"
+    assert provenance["schema_version"] == "mozaiks.provenance.v1"
+    assert provenance["app_kind"] == "hand_authored"
+    assert provenance["created_with"]["mode"] == "cli"
+    assert provenance["contracts"]["dashboard"] == "mozaiks.dashboard.v1"
+    assert provenance["overlays"]["refinement_policy"] == "config/refinement_policy.yaml"
     assert ai_json["workflows"]["entry_point"] == "ValueEngine"
     assert "control_plane" not in ai_json
     assert "enabled: true" in control_plane_runtime
@@ -144,6 +152,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "Standalone Workspace Setup" in agents_md
     assert "Do not assume a sibling checkout" in agents_md
     assert "app/modules/" in agents_md
+    assert "app/provenance.yaml" in agents_md
+    assert "app/dashboard/dashboard.yaml" in agents_md
     assert "app/services/" in agents_md
     assert "app/services/adapters/" in agents_md
     assert "app/services/security/" not in agents_md
@@ -161,6 +171,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "app/services/integrations/<service>_client.py" in claude_md
     assert "app/services/adapters/<area>/<provider>.py" in claude_md
     assert "app/services/adapters/auth/<provider>.py" in claude_md
+    assert "app/provenance.yaml" in claude_md
+    assert "app/dashboard/dashboard.yaml" in claude_md
     assert "Secret management contract, names only" in claude_md
     assert "app/services/security/" not in claude_md
     assert "app/security/secrets.yaml" in claude_md

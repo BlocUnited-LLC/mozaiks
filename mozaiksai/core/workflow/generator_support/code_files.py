@@ -7,6 +7,11 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.provenance import (
+    build_default_app_provenance,
+    dump_app_provenance_yaml,
+)
+
 _MODULE_CONTRACT_FILENAMES = {
     "admin.yaml",
     "events.yaml",
@@ -81,6 +86,13 @@ def _materialize_app_schema_file_map(payload: dict[str, Any]) -> dict[str, str]:
         "admins": [],
     }
     file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
+    file_map["provenance.yaml"] = dump_app_provenance_yaml(
+        build_default_app_provenance(
+            app_kind="generated",
+            created_mode="factory",
+            workflow="AppGenerator",
+        )
+    )
 
     for page in pages:
         if not isinstance(page, dict):

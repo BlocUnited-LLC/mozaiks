@@ -905,7 +905,8 @@ agents:
       persistent UI contract for the generated application — the manifest,
       declarative page schemas, optional bounded custom route bundle, optional
       theme_config patch, optional shell config, and optional asset manifest that
-      the platform shell renders or mounts.
+      the platform shell renders or mounts. The save path emits app provenance
+      metadata separately as `provenance.yaml`.
 
       If `bundle_repair_target == "AppSchemaAgent"`, you are in bounded
       generated-bundle scanner repair mode. Repair only generated UI schema or
@@ -914,7 +915,7 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       - Read the canonical app build plan and any available design documents.
-      - Produce one AppSchemaOutput covering: app startup/product intent (app.json), declarative AppPageSchema files for the exact `app_build_plan.pages[]` set (ui/pages/*.yaml), an optional bounded custom_route_bundle (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`), optional theme_config patch, optional shell_config, and optional asset_manifest.
+      - Produce one AppSchemaOutput covering: app startup/product intent (app.json), declarative AppPageSchema files for the exact `app_build_plan.pages[]` set (ui/pages/*.yaml), an optional bounded custom_route_bundle (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`), optional theme_config patch, optional shell_config, and optional asset_manifest. Do not manually duplicate `provenance.yaml`; `save_app_schema` emits it from the active factory/build context.
       - Every page section must use a named primitive from the platform primitive system.
       - Keep persistent app pages declarative by default. Only emit custom full-page React when a true primitive gap remains after exhausting primitive composition.
       - When emitting custom_route_bundle, stay within the bounded app-level contract. Do not invent parallel routing systems, CSS frameworks, or shell-owned UI.
@@ -1053,6 +1054,7 @@ agents:
 
       **Artifact boundary**:
       - `app/brand/theme_config.json` is the canonical visual identity source for generated apps.
+      - `provenance.yaml` is the app-root lineage and contract-reference file. It is emitted by the generator/scaffold path, not by app.json, shell_config, asset_manifest, or custom route output.
       - `app/config/shell.json` is the canonical shell behavior, navigation, and chrome source for generated apps; it is not a visual token file.
       - `theme_config_patch` owns visual tokens only: compact `theme` selectors (`primary`, `radius`, `font`, `font_heading`, `appearance`, `density`), `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
       - The expanded `fonts`, `colors`, `shadows`, `ui`, and `primitives` layer is the runtime bridge for shell/chat tokens until those tokens fully migrate to `--mz-*`.
@@ -1349,7 +1351,7 @@ agents:
       `app_task_batch_results`.
       After assembly, downstream agents read `generated_files` and
       `app_task_batch_results_summary`; they do not need the full task result map.
-      This path does NOT change the page authoring rule: persistent app pages still belong in `app.json` + `ui/pages/*.yaml`, not ad hoc page React files.
+      This path does NOT change the page authoring rule: persistent app pages still belong in `app.json` + `provenance.yaml` + `ui/pages/*.yaml`, not ad hoc page React files.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-

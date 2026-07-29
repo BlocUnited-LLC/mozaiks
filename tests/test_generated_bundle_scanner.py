@@ -311,6 +311,8 @@ def test_scan_generated_bundle_accepts_runtime_project_manifests() -> None:
     errors = scan_generated_bundle(
         {
             "app.json": '{"name":"Demo"}',
+            "provenance.yaml": "schema_version: mozaiks.provenance.v1\ncreated_with:\n  mode: factory\n",
+            "dashboard/dashboard.yaml": "schema_version: mozaiks.dashboard.v1\n",
             "package.json": '{"scripts":{"build":"vite"}}',
             "requirements.txt": "fastapi\n",
             "vite.config.js": "export default {};\n",

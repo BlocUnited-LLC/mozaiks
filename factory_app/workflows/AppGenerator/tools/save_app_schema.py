@@ -21,6 +21,10 @@ from factory_app.workflows._shared.generated_ui_contract import (
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
 )
+from mozaiksai.core.runtime.app.provenance import (
+    build_default_app_provenance,
+    dump_app_provenance_yaml,
+)
 from mozaiksai.core.workflow.ui_primitives import (
     get_page_ui_primitive_names,
     validate_page_ui_primitives,
@@ -28,7 +32,16 @@ from mozaiksai.core.workflow.ui_primitives import (
 
 _logger = logging.getLogger("tools.save_app_schema")
 
-PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config", "data", "security", "services")
+PROMOTABLE_APP_ENTRIES = (
+    "app.json",
+    "provenance.yaml",
+    "ui",
+    "brand",
+    "config",
+    "data",
+    "security",
+    "services",
+)
 
 
 def _repo_root() -> Path:
@@ -63,6 +76,14 @@ def _context_get(context_variables: Any | None, key: str) -> Any | None:
     if isinstance(context_variables, dict):
         return context_variables.get(key)
     return None
+
+
+def _context_text(context_variables: Any | None, key: str) -> str | None:
+    value = _context_get(context_variables, key)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
 
 
 def _safe_path_segment(value: Any, *, fallback: str) -> str:
@@ -1415,6 +1436,7 @@ def _persist_to_filesystem(
     asset_manifest: dict[str, Any] | None,
     data_contract: dict[str, Any] | None,
     custom_route_bundle: dict[str, Any] | None,
+    context_variables: Any | None = None,
     profile_layout: str | None = None,
 ) -> list[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
@@ -1446,6 +1468,40 @@ def _persist_to_filesystem(
     app_json_path.parent.mkdir(parents=True, exist_ok=True)
     app_json_path.write_text(json.dumps(app_json, indent=2, ensure_ascii=False), encoding="utf-8")
     written.append("app.json")
+
+    workflow_sequence = _context_text(context_variables, "workflow_sequence")
+    build_id = _context_text(context_variables, "build_id")
+    generated_artifact_id = _context_text(context_variables, "generated_artifact_id")
+    artifact_version_id = _context_text(context_variables, "artifact_version_id")
+    app_context_version_id = _context_text(context_variables, "app_context_version_id")
+
+    provenance_path = output_dir / "provenance.yaml"
+    provenance_path.write_text(
+        dump_app_provenance_yaml(
+            build_default_app_provenance(
+                app_kind="generated",
+                created_mode="factory",
+                workflow="AppGenerator",
+                workflow_sequence=workflow_sequence,
+                build_id=build_id,
+                artifact_version_id=artifact_version_id,
+                app_context_version_id=app_context_version_id,
+                artifact_refs={
+                    "generated_artifact_ids": [generated_artifact_id]
+                    if generated_artifact_id
+                    else [],
+                    "accepted_artifact_version_ids": [artifact_version_id]
+                    if artifact_version_id
+                    else [],
+                    "app_context_version_ids": [app_context_version_id]
+                    if app_context_version_id
+                    else [],
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    written.append("provenance.yaml")
 
     # config/ai.json — runtime startup contract seeded from the current factory default.
     ai_config_path = output_dir / "config" / "ai.json"
@@ -1782,6 +1838,7 @@ def save_app_schema(
             asset_manifest,
             resolved_data_contract,
             custom_route_bundle,
+            context_variables=context_variables,
             profile_layout=_profile_layout,
         )
         _logger.info(

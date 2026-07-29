@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from mozaiksai.core.runtime.app.paths import (
+    APP_PROVENANCE_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
     noncanonical_app_config_paths,
@@ -1419,8 +1420,9 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
             raise ValueError(
                 "Build task "
                 f"'{task_id}' owns path(s) outside canonical app planes: {invalid_roots}. "
-                "Allowed app-root planes are admin, backend, brand, config, data, "
-                "modules, refinement_harness, security, services, and ui."
+                "Allowed app-root planes are admin, backend, brand, config, dashboard, "
+                "data, modules, refinement_harness, security, services, and ui, plus "
+                f"canonical root files such as app.json and {APP_PROVENANCE_PATH}."
             )
 
         invalid_config_paths = noncanonical_app_config_paths(owned_paths)
