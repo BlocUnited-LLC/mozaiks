@@ -959,6 +959,7 @@ def _optional_task_output_paths(task: dict[str, Any]) -> set[str]:
             "brand/theme_config.json",
             "config/asset_manifest.json",
             "data/contract.json",
+            "provenance.yaml",
             "config/shell.json",
             "ui/index.js",
             "ui/route_manifest.json",

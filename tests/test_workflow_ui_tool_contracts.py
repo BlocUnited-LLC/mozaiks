@@ -198,7 +198,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     assert "`AppBuildPlan.pages[]` is the authoritative persistent page inventory" in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "Persistent page materialization is exclusively AppBuildPlan-driven" in content
-    assert "persistent app pages still belong in `app.json` + `ui/pages/*.yaml`" in content
+    assert "persistent app pages still belong in `app.json` + `provenance.yaml` + `ui/pages/*.yaml`" in content
     assert "ui/index.js" in content
     assert "theme_config_patch" in content
     assert "shell_config" in content

@@ -618,7 +618,7 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
     code_files = context["app_task_batch_results"]["pages"]["code_files"]
     output = context["app_task_batch_results"]["pages"]
     file_map = {entry["filename"]: entry["content"] for entry in code_files}
-    assert set(file_map) >= {"ui/pages/tickets.yaml", "ui/pages/settings.yaml"}
+    assert set(file_map) >= {"provenance.yaml", "ui/pages/tickets.yaml", "ui/pages/settings.yaml"}
     assert output["_page_materialization_source"] == "app_build_plan.pages"
     assert output["_page_materialized_paths"] == [
         "ui/pages/tickets.yaml",

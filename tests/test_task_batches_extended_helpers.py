@@ -246,6 +246,7 @@ class TestOptionalTaskOutputPaths:
         result = _optional_task_output_paths({"task_type": "page_bundle"})
         assert "config/shell.json" in result
         assert "data/contract.json" in result
+        assert "provenance.yaml" in result
 
     def test_module_contract_with_module_id_returns_paths(self):
         task = {"task_type": "module_contract", "capability_pack_id": "billing"}
