@@ -8,7 +8,7 @@ import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 from uuid import uuid4
 
 from logs.logging_config import get_core_logger
@@ -399,7 +399,7 @@ class AzureBlobMediaContentStore:
         blob_client = client.get_blob_client(container=self._container_name, blob=blob_name)
         try:
             stream = await blob_client.download_blob()
-            return await stream.readall()
+            return cast(bytes, await stream.readall())
         except Exception as exc:
             raise MediaContentNotFoundError(
                 f"Azure Blob media content not found: {content_ref!r}"
@@ -410,7 +410,7 @@ class AzureBlobMediaContentStore:
         blob_name = self._blob_name_from_ref(content_ref)
         blob_client = client.get_blob_client(container=self._container_name, blob=blob_name)
         try:
-            return await blob_client.exists()
+            return bool(await blob_client.exists())
         except Exception:
             return False
 

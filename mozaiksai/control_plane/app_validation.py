@@ -815,12 +815,12 @@ def _aggregate_status(
     command_results: Sequence[AppValidationCommandResult],
     fallback_checks: Sequence[AppValidationFallbackCheckResult],
 ) -> AppValidationStatus:
-    results = [*list(command_results), *list(fallback_checks)]
-    if any(item.status == "failed" for item in results):
+    statuses = [item.status for item in command_results] + [item.status for item in fallback_checks]
+    if any(status == "failed" for status in statuses):
         return "failed"
-    if any(item.status == "passed" for item in results):
+    if any(status == "passed" for status in statuses):
         return "passed"
-    if any(item.status == "warning" for item in results):
+    if any(status == "warning" for status in statuses):
         return "warning"
     return "skipped"
 
