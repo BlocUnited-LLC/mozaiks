@@ -35,7 +35,8 @@ folder.
    `app/security/secrets.yaml`, and optional `app/services/` support code.
 6. Add paid access only when needed: `app/config/subscriptions.yaml`.
 7. Add artifact-aware refinement only when the app needs routed revisions:
-   `app/config/refinement_policy.yaml` and `refinement_harness/config/`.
+   `app/config/refinement_policy.yaml` and, when default routes need app-local
+   deltas, `refinement_harness/config/`.
 
 ## Config Ownership
 
@@ -54,7 +55,7 @@ folder.
 | `app/security/secrets.yaml` | Secret names, env handles, provider policy | [Integrations](../integrations/01-overview.md) |
 | `app/data/contract.json` | Stable data aliases, indexes, aggregate ownership | [Add a Module](../adding-modules/01-overview.md) |
 | `app/modules/{module_id}/contracts/` | Module companion manifests | [Module Contracts](module-contracts.md) |
-| `refinement_harness/config/` | Refinement routes, checkpoints, prompt ids, tool ids | [Refinement](refinement.md) |
+| `refinement_harness/config/` | Optional overlays for packaged refinement routes, checkpoints, prompt ids, and tool ids | [Refinement](refinement.md) |
 
 ## Current Rules
 

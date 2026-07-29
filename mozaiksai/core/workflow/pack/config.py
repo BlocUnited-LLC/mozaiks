@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from mozaiksai.resources import resolve_factory_workflows_root
 
 from ..paths import primary_workflows_root
 from .schema import (
@@ -26,6 +29,7 @@ class _CacheEntry:
 
 
 _GLOBAL_CACHE: _CacheEntry | None = None
+DEFAULT_WORKFLOW_REGISTRY_EXTENDS = "mozaiks.default_workflow_registry"
 
 def _workflows_root() -> Path:
     """Resolve canonical workflows root.
@@ -69,20 +73,141 @@ def load_global_pack_graph(workflows_root: Path | None = None) -> GlobalPackGrap
     if not path.exists():
         return None
 
-    signature = ((str(path), path.stat().st_mtime),)
+    raw = _load_json_file(path)
+    if raw is None:
+        return None
+    base_path = _resolve_default_registry_path(path, raw)
+    signature_items = [(str(path), path.stat().st_mtime)]
+    if base_path is not None:
+        signature_items.append((str(base_path), base_path.stat().st_mtime))
+    signature = tuple(signature_items)
     cached = _GLOBAL_CACHE
     if cached and cached.source == signature:
         payload = cached.payload
         if isinstance(payload, GlobalPackGraph):
             return payload
 
-    raw = _load_json_file(path)
-    if raw is None:
-        return None
+    if base_path is not None:
+        base_raw = _load_json_file(base_path)
+        if base_raw is None:
+            raise ValueError(f"Default workflow registry could not be loaded: {base_path}")
+        raw = _merge_registry_overlay(base_raw, raw)
 
     graph = parse_global_pack_graph(raw)
     _GLOBAL_CACHE = _CacheEntry(source=signature, payload=graph)
     return graph
+
+
+def _resolve_default_registry_path(path: Path, raw: dict[str, Any]) -> Path | None:
+    extends = str(raw.get("extends") or "").strip()
+    if not extends:
+        return None
+    if extends != DEFAULT_WORKFLOW_REGISTRY_EXTENDS:
+        raise ValueError(
+            f"extension_registry.json extends must be {DEFAULT_WORKFLOW_REGISTRY_EXTENDS!r}"
+        )
+    factory_root = resolve_factory_workflows_root()
+    if factory_root is None:
+        raise ValueError("Default workflow registry was not found in the installed mozaiks package")
+    base_path = get_global_pack_graph_path(factory_root)
+    if base_path.resolve() == path.resolve():
+        raise ValueError("Default workflow registry cannot extend itself")
+    return base_path
+
+
+def _merge_registry_overlay(base_raw: dict[str, Any], overlay_raw: dict[str, Any]) -> dict[str, Any]:
+    base = deepcopy(base_raw)
+    overlay = deepcopy(overlay_raw)
+    overlay.pop("extends", None)
+
+    base_version = base.get("version")
+    overlay_version = overlay.get("version", base_version)
+    if overlay_version != base_version:
+        raise ValueError("extension_registry.json overlay cannot change version")
+
+    merged = base
+    for key in ("pack_name", "description"):
+        if key in overlay:
+            merged[key] = overlay[key]
+
+    merged["artifact_dependency_graph"] = _merge_artifact_dependency_graph(
+        base.get("artifact_dependency_graph") or {},
+        overlay.get("artifact_dependency_graph") or {},
+    )
+    for key in ("workflows", "entrypoints", "workflow_sequences", "transitions"):
+        merged[key] = _merge_registry_list_by_id(base.get(key) or [], overlay.get(key) or [])
+    return merged
+
+
+def _merge_artifact_dependency_graph(
+    base_graph: dict[str, Any],
+    overlay_graph: dict[str, Any],
+) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {
+        str(family): [str(dep) for dep in dependencies]
+        for family, dependencies in base_graph.items()
+        if isinstance(dependencies, list)
+    }
+    for raw_family, raw_dependencies in overlay_graph.items():
+        family = str(raw_family or "").strip()
+        if not family:
+            raise ValueError("artifact_dependency_graph overlay family ids must be non-empty")
+        if not isinstance(raw_dependencies, list):
+            raise ValueError(f"artifact_dependency_graph family {family!r} dependencies must be a list")
+        dependencies = merged.setdefault(family, [])
+        for raw_dependency in raw_dependencies:
+            dependency = str(raw_dependency or "").strip()
+            if dependency and dependency not in dependencies:
+                dependencies.append(dependency)
+    return merged
+
+
+def _merge_registry_list_by_id(base_items: list[Any], overlay_items: list[Any]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for item in base_items:
+        normalized = _normalize_registry_item(item)
+        item_id = normalized["id"]
+        positions[item_id] = len(merged)
+        merged.append(normalized)
+
+    for item in overlay_items:
+        normalized = _normalize_registry_item(item)
+        item_id = normalized["id"]
+        if normalized.get("remove") is True:
+            if item_id in positions:
+                index = positions.pop(item_id)
+                merged.pop(index)
+                positions = {entry["id"]: idx for idx, entry in enumerate(merged)}
+            continue
+        normalized.pop("remove", None)
+        if item_id in positions:
+            merged[positions[item_id]] = _deep_merge_mapping(merged[positions[item_id]], normalized)
+        else:
+            positions[item_id] = len(merged)
+            merged.append(normalized)
+    return merged
+
+
+def _normalize_registry_item(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("extension_registry.json list entries must be objects")
+    normalized = deepcopy(item)
+    item_id = str(normalized.get("id") or "").strip()
+    if not item_id:
+        raise ValueError("extension_registry.json list entries must declare id")
+    normalized["id"] = item_id
+    return normalized
+
+
+def _deep_merge_mapping(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged = deepcopy(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_mapping(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
 
 
 def list_workflow_ids(pack: GlobalPackGraph) -> list[str]:
@@ -228,6 +353,7 @@ def journey_next_step(journey: GlobalJourney, current_workflow: str) -> str | No
 __all__ = [
     "get_global_pack_graph_path",
     "load_global_pack_graph",
+    "DEFAULT_WORKFLOW_REGISTRY_EXTENDS",
     "list_workflow_ids",
     "get_workflow_entry",
     "list_workflow_sequences",

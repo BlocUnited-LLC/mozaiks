@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 from mozaiksai.resources import resolve_factory_workflows_root
+
+DEFAULT_WORKFLOW_REGISTRY_EXTENDS = "mozaiks.default_workflow_registry"
 
 
 def repo_root() -> Path:
@@ -103,6 +106,38 @@ def primary_workflows_root(
     return resolve_workflows_root(root)
 
 
+def _registry_extends_default(workflows_root: Path) -> bool:
+    registry_path = workflows_root / "extended_orchestration" / "extension_registry.json"
+    if not registry_path.exists():
+        return False
+    try:
+        raw = json.loads(registry_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(raw, dict):
+        return False
+    return str(raw.get("extends") or "").strip() == DEFAULT_WORKFLOW_REGISTRY_EXTENDS
+
+
+def workflow_resolution_roots(
+    root: str | os.PathLike[str] | None = None,
+) -> tuple[Path, ...]:
+    """Return workflow roots searched for declarative workflow folders.
+
+    A registry overlay can extend the packaged default workflow registry. In
+    that case the active app root owns app-local workflows and the installed
+    package owns the default Factory workflows referenced by the effective
+    registry.
+    """
+    primary_root = resolve_workflows_root(root)
+    roots = [primary_root]
+    if _registry_extends_default(primary_root):
+        factory_root = _repo_factory_workflows_root()
+        if factory_root.is_dir() and factory_root.resolve() != primary_root.resolve():
+            roots.append(factory_root)
+    return tuple(roots)
+
+
 def resolve_workflow_path(
     workflow_name: str,
     root: str | os.PathLike[str] | None = None,
@@ -111,40 +146,38 @@ def resolve_workflow_path(
     if not wf:
         return None
 
-    root_path = resolve_workflows_root(root)
-    candidate = (root_path / wf).resolve()
-    if candidate.is_dir() and (candidate / "orchestrator.yaml").exists():
-        return candidate
+    for root_path in workflow_resolution_roots(root):
+        candidate = (root_path / wf).resolve()
+        if candidate.is_dir() and (candidate / "orchestrator.yaml").exists():
+            return candidate
     return None
 
 
 def discover_workflow_paths(
     root: str | os.PathLike[str] | None = None,
 ) -> dict[str, Path]:
-    discovered: dict[str, Path] = {}
-    seen: set[str] = set()
-    root_path = resolve_workflows_root(root)
-    if not root_path.exists():
-        return discovered
-    for item in sorted(root_path.iterdir(), key=lambda value: value.name.lower()):
-        if not item.is_dir() or item.name.startswith(".") or item.name == "extended_orchestration":
+    discovered: dict[str, tuple[str, Path]] = {}
+    for root_path in reversed(workflow_resolution_roots(root)):
+        if not root_path.exists():
             continue
-        if not (item / "orchestrator.yaml").exists():
-            continue
-        normalized = item.name.lower()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        discovered[item.name] = item.resolve()
-    return discovered
+        for item in sorted(root_path.iterdir(), key=lambda value: value.name.lower()):
+            if not item.is_dir() or item.name.startswith(".") or item.name == "extended_orchestration":
+                continue
+            if not (item / "orchestrator.yaml").exists():
+                continue
+            normalized = item.name.lower()
+            discovered[normalized] = (item.name, item.resolve())
+    return {name: path for name, path in discovered.values()}
 
 
 __all__ = [
     "candidate_app_workflows_roots",
     "discover_workflow_paths",
+    "DEFAULT_WORKFLOW_REGISTRY_EXTENDS",
     "primary_workflows_root",
     "repo_root",
     "resolve_active_app_root",
     "resolve_workflow_path",
     "resolve_workflows_root",
+    "workflow_resolution_roots",
 ]

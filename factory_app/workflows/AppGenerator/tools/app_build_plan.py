@@ -29,6 +29,7 @@ _FRONTEND_JS_TS_SEGMENTS = (
     "/src/components/",
 )
 _OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
+_REFINEMENT_POLICY_CODE_FILE_PATH = "app/config/refinement_policy.yaml"
 _APP_SERVICE_ADMIN_PATHS = {"services/admin_config.py", "services/routes/admin.py"}
 _INTEGRATIONS_PREFIX = "services/integrations/"
 _ADAPTERS_PREFIX = "services/adapters/"
@@ -1415,7 +1416,8 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 f"and {APP_SECURITY_SECRETS_PATH}."
             )
 
-        invalid_roots = noncanonical_app_root_paths(owned_paths)
+        root_guard_paths = [path for path in owned_paths if path != _REFINEMENT_POLICY_CODE_FILE_PATH]
+        invalid_roots = noncanonical_app_root_paths(root_guard_paths)
         if invalid_roots:
             raise ValueError(
                 "Build task "
@@ -1478,6 +1480,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
 
         if task_type == "refinement_harness":
             allowed_config_paths = {
+                _REFINEMENT_POLICY_CODE_FILE_PATH,
                 "refinement_harness/config/harness.yaml",
                 "refinement_harness/config/tools.yaml",
                 "refinement_harness/config/policies.yaml",
@@ -1507,12 +1510,12 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 raise ValueError(
                     "Build task "
                     f"'{task_id}' owns invalid refinement harness paths: {invalid}. "
-                    "Refinement harness tasks may only own refinement_harness/config/* and "
-                    "refinement_harness/prompts/*.yaml."
+                    "Refinement harness tasks may only own app/config/refinement_policy.yaml, "
+                    "refinement_harness/config/*, and refinement_harness/prompts/*.yaml."
                 )
             required = {
+                _REFINEMENT_POLICY_CODE_FILE_PATH,
                 "refinement_harness/config/harness.yaml",
-                "refinement_harness/config/tools.yaml",
             }
             missing = sorted(required.difference(owned_paths))
             if missing:

@@ -284,8 +284,8 @@ task_contracts:
     required_outputs:
       - app/config/refinement_policy.yaml
       - refinement_harness/config/harness.yaml
-      - refinement_harness/config/tools.yaml
     optional_outputs:
+      - refinement_harness/config/tools.yaml
       - refinement_harness/config/policies.yaml
       - refinement_harness/prompts/*.yaml
     hard_constraints:
@@ -294,8 +294,10 @@ task_contracts:
       - Do NOT register this surface as a runtime module under app/modules/.
       - Stay within current_build_task.owned_paths.
       - app/config/refinement_policy.yaml is the app-local refinement policy seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into harness.yaml.
-      - harness.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
-      - Every workflow_sequence referenced by harness.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
+      - harness.yaml must be an overlay with schema_version mozaiks.refinement_harness.v1, extends mozaiks.default_refinement_harness, and overrides only for routing, checkpoints, or prompts.
+      - Do not copy packaged default routing, checkpoint, prompt, tool, or policy manifests into generated apps.
+      - harness.yaml route overrides declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
+      - Every workflow_sequence referenced by harness.yaml overrides must exist in the effective workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
       - Use shipped mozaiksai.control_plane implementations and tool entrypoints unless a future custom-harness Python contract is explicitly introduced.
       - Refinement harness artifacts coordinate app-level lifecycle, refinement, or session state only — no business domain logic.
       - Do not duplicate host-universal refinement engine behavior already provided by the platform.

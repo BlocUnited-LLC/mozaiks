@@ -356,8 +356,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert refinement_harness["required_outputs"] == [
         "app/config/refinement_policy.yaml",
         "refinement_harness/config/harness.yaml",
-        "refinement_harness/config/tools.yaml",
     ]
+    assert "refinement_harness/config/tools.yaml" in refinement_harness["optional_outputs"]
     assert "modules/{pack_name}/contracts/reactions.yaml" in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/subscriptions.yaml" not in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/admin.yaml" in module_contract["optional_outputs"]
@@ -425,15 +425,8 @@ def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
         {
             "harness_yaml": {
                 "schema_version": "mozaiks.refinement_harness.v1",
-                "routing": {
-                    "default_artifact_kind": "app_bundle",
-                    "artifacts": [],
-                },
-                "checkpoints": [],
-            },
-            "tools_yaml": {
-                "schema_version": "mozaiks.refinement_harness.tools.v1",
-                "tools": [],
+                "extends": "mozaiks.default_refinement_harness",
+                "overrides": None,
             },
         }
     )
@@ -444,6 +437,13 @@ def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
     runtime_yaml = yaml.safe_load(file_map["app/config/refinement_policy.yaml"])
     assert runtime_yaml["schema_version"] == "mozaiks.refinement.policy.v1"
     assert runtime_yaml["classifier"]["llm_profile"] == "classifier"
+    harness_yaml = yaml.safe_load(file_map["refinement_harness/config/harness.yaml"])
+    assert harness_yaml == {
+        "schema_version": "mozaiks.refinement_harness.v1",
+        "extends": "mozaiks.default_refinement_harness",
+        "overrides": {},
+    }
+    assert "refinement_harness/config/tools.yaml" not in file_map
 
 
 def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> None:

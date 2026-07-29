@@ -55,8 +55,9 @@ in scope and escalates to a full workflow if the request is broader than a patch
 
 ## For Builders: Opting In
 
-An app opts into app-local refinement by adding a refinement policy and, when
-needed, a refinement harness:
+An app opts into refinement by adding a refinement policy. The packaged default
+harness handles the standard artifact families and checkpoints. Add an app-local
+harness file only when the app has real overlay deltas:
 
 ```text
 app/config/refinement_policy.yaml
@@ -64,9 +65,10 @@ refinement_harness/config/harness.yaml
 ```
 
 `app/config/ai.json` still owns ask/chat/workflow startup only. LLM profiles live
-in `app/config/refinement_policy.yaml`; checkpoint declarations live in
-`refinement_harness/config/`. See
+in `app/config/refinement_policy.yaml`; app-specific checkpoint and route deltas
+live in `refinement_harness/config/harness.yaml` with
+`extends: mozaiks.default_refinement_harness`. See
 [App-Local Refinement Harness](../../architecture/app/refinement-harness.md)
-for the full generated app starter pack template.
+for the overlay contract.
 
 For the full runtime behavior, see [Refinement Engine](../../architecture/workflows/refinement-engine.md).
