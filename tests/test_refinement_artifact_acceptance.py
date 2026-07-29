@@ -281,6 +281,39 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_acceptance_requires_override_for_skipped_validation(tmp_path: Path) -> None:
+    context = await _build_acceptance_context(tmp_path)
+    context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
+        update={"validation_status": ArtifactValidationStatus.SKIPPED}
+    )
+
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="explicit validation override"):
+        await accept_staged_refinement_artifact_version(
+            app_id=context["app_id"],
+            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            review_record=context["review_record"],
+            request_id=context["plan"].request_id,
+            artifact_store=context["artifact_store"],
+            accepted_by="operator-1",
+        )
+
+    result = await accept_staged_refinement_artifact_version(
+        app_id=context["app_id"],
+        draft_artifact_version_id=context["draft_result"].artifact_version_id,
+        review_record=context["review_record"],
+        request_id=context["plan"].request_id,
+        artifact_store=context["artifact_store"],
+        accepted_by="operator-1",
+        allow_validation_override=True,
+    )
+
+    acceptance = result.metadata["acceptance"]
+    assert result.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert acceptance["validation_override"] is True
+    assert acceptance["validation_status"] == ArtifactValidationStatus.SKIPPED.value
+
+
+@pytest.mark.asyncio
 async def test_previous_current_app_bundle_is_superseded(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     await accept_staged_refinement_artifact_version(

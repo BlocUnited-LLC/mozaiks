@@ -86,13 +86,16 @@ class _FakeToolExecutor:
         return ControlPlaneToolResult(success=True, output={"tool_id": call.tool_id, "artifact_version_id": context.artifact_version_id})
 
 
-async def _fake_validation_runner(**kwargs):  # noqa: ANN003
+async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
+    assert kwargs["app_id"] == "app_1"
+    assert "app/ui/pages/Dashboard.jsx" in kwargs["overlay_files"]
     return {
         "success": True,
-        "validation_strategy": kwargs["validation_strategy"],
         "validation_status": "passed",
-        "preview_url": None,
-        "errors": [],
+        "execution_mode": "isolated_workspace_copy",
+        "overlay_file_count": len(kwargs["overlay_files"]),
+        "command_results": [],
+        "fallback_checks": [],
         "warnings": [],
     }
 
@@ -176,7 +179,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=tool_executor,
-        validation_runner=_fake_validation_runner,
+        source_validation_runner=_fake_source_validation_runner,
         artifact_store=artifact_store,
         output_root=tmp_path,
     )
@@ -205,8 +208,11 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert updated_dict["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.applied_files["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.validation_result["validation_status"] == "passed"
+    assert result.validation_result["validation_strategy"] == "local"
+    assert result.validation_result["overlay_file_count"] == 1
     assert result.metadata["artifact_version_id"] == "av_child_1"
     assert result.metadata["bundle_mode"] == "staged_refinement_bundle"
+    assert result.metadata["source_validation_status"] == "passed"
 
     assert len(created) == 1
     assert created[0].system_prompt == "coding system prompt from pack"
@@ -222,6 +228,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert artifact_store.calls[0]["commit_metadata"]["metadata"]["applied_paths"] == [
         "app/ui/pages/Dashboard.jsx"
     ]
+    assert artifact_store.calls[0]["commit_metadata"]["metadata"]["source_validation_result"]["validation_status"] == "passed"
 
 
 @pytest.mark.asyncio
@@ -231,7 +238,7 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_fake_validation_runner,
+        source_validation_runner=_fake_source_validation_runner,
     )
 
     result = await worker.execute(
@@ -260,7 +267,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_fake_validation_runner,
+        source_validation_runner=_fake_source_validation_runner,
         artifact_store=_FakeArtifactStore(),
         output_root=tmp_path,
     )
@@ -296,7 +303,7 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_fake_validation_runner,
+        source_validation_runner=_fake_source_validation_runner,
         artifact_store=_BrokenArtifactStore(),
         output_root=tmp_path,
     )

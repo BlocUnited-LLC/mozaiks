@@ -1961,6 +1961,68 @@ across the build flow.
 
 ---
 
+## Revision Context
+
+Before the refinement harness routes a request to an LLM checkpoint, the
+control plane assembles a **revision context** — a structured snapshot of
+everything the checkpoint needs to reason about the current state of the app.
+
+`assemble_revision_context()` (`mozaiksai/control_plane/revision_context.py`)
+builds and returns this dict. It is called by the `get_revision_context`
+refinement harness tool, which makes it available to the LLM as a tool result.
+
+### What revision context contains
+
+| Key | Source | Purpose |
+| --- | --- | --- |
+| `current_artifact` | Latest artifact for the targeted kind, from session refs or artifact store | What the agent is modifying |
+| `tracked_artifacts` | All artifact kinds declared in the harness routing config + session refs | Prior build outputs the agent can reference |
+| `stale_families` | `get_stale_artifact_families()` | Which artifact families need regeneration |
+| `session` | Current `SessionState` | Journey step, app_id, user_id, run count |
+| `routing` | Pack routing config | Available change classes, default artifact kind |
+| `change_request` | Most recent `ChangeRequestDoc` | User intent and classification already applied |
+| `app_intelligence` | `AppIntelligenceSnapshot` summary (if present) | Architecture, capability map, risk hints |
+
+### How it informs the checkpoint
+
+The revision context is injected into the LLM checkpoint's tool results, not
+into the system prompt directly. The checkpoint reads it via the
+`get_revision_context` tool call to understand:
+
+- which artifact it is editing and what its current content is
+- whether any upstream families are stale (requiring a rebuild, not just a patch)
+- the classification already applied to the current change request
+- what the App Intelligence plane says about the app's architecture
+
+This prevents the checkpoint from having to rediscover this state by asking
+follow-up questions or re-reading context variables directly.
+
+### Scoped Execution
+
+After a coding checkpoint produces a set of file changes, the control plane
+applies them through **scoped execution** (`mozaiksai/control_plane/scoped_execution.py`)
+rather than writing directly to the workspace.
+
+`apply_scoped_refinement_changes()` takes a list of `ScopedRefinementChange`
+records (path + new_content) and writes each file into a **staging area**
+(never the live workspace). It enforces:
+
+- **Path containment** — no `..` traversal, no absolute paths, no Windows drive qualifiers
+- **Secret path rejection** — paths matching `.env`, `.pem`, `.key`, `id_rsa`, etc.
+  are marked `skipped_secret` and never written
+- **Allowed directory scoping** — new files may only be created inside directories
+  already referenced by the change set
+
+The result is a `ScopedRefinementResult` with per-file statuses
+(`written`, `skipped_unsafe`, `skipped_secret`, `skipped_ignored`) and a
+`staging_area` path. The staged files are never written to the live source
+root — they become the `overlay_files` passed to the source validation runner.
+
+`source_mutated: False` and `mutation_allowed: False` are always set on the
+result, making the contract explicit: scoped execution is staging-only.
+
+---
+
 ## Artifact Workspace Durability (Phase D)
 
 ### Problem

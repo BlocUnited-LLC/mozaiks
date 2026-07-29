@@ -9,6 +9,15 @@ from .context_graph import (
     extract_file_context,
     merge_context_graphs,
 )
+from .framework_detection import (
+    FRAMEWORK_DETECTION_SCHEMA_VERSION,
+    DetectedFramework,
+    FrameworkDetectionResult,
+    FrameworkEntrypoint,
+    FrameworkEvidence,
+    FrameworkValidationCommand,
+    detect_frameworks_from_file_map,
+)
 from .health import ContextGraphHealthReport, evaluate_context_graph_health
 from .indexer import (
     APP_CONTEXT_GRAPH_ARTIFACT_KEY,
@@ -161,12 +170,18 @@ __all__ = [
     "ExtractedFileContext",
     "ExtractedReference",
     "ExtractedSymbol",
+    "FRAMEWORK_DETECTION_SCHEMA_VERSION",
+    "DetectedFramework",
     "DEFAULT_CONTEXT_GRAPH_EXTENSIONS",
     "DEFAULT_CONTEXT_GRAPH_PRIORITY_RULES",
     "GREENFIELD_APP_CONTEXT_ARTIFACT_KINDS",
     "GraphEdgeType",
     "GraphNodeType",
     "GreenfieldAppContextDrafts",
+    "FrameworkDetectionResult",
+    "FrameworkEntrypoint",
+    "FrameworkEvidence",
+    "FrameworkValidationCommand",
     "IntegrationInventory",
     "IntegrationReadinessStatus",
     "OwnershipBoundary",
@@ -201,6 +216,7 @@ __all__ = [
     "collect_source_scan_file_map",
     "context_graph_parser_status",
     "default_context_graph_scan_policy",
+    "detect_frameworks_from_file_map",
     "is_excluded_source_directory_path",
     "is_sensitive_source_path",
     "extract_file_context",

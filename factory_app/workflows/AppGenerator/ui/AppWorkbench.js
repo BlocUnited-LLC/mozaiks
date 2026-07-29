@@ -57,6 +57,13 @@ const AppWorkbench = ({
   const [artifactReview, setArtifactReview] = useState(payload?.review || null);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
   const [artifactReviewError, setArtifactReviewError] = useState(null);
+  const artifactValidationResult = artifactReview?.validation_result || null;
+  const artifactValidationCommands = Array.isArray(artifactValidationResult?.command_results)
+    ? artifactValidationResult.command_results
+    : [];
+  const artifactValidationFallbacks = Array.isArray(artifactValidationResult?.fallback_checks)
+    ? artifactValidationResult.fallback_checks
+    : [];
   const { startWorkflow, starting: refinementStarting, error: workflowStartError } = useWorkflowStart();
   const { user } = useChatUI();
   const [activeArtifactVersionId, setActiveArtifactVersionId] = useState(
@@ -389,6 +396,29 @@ const AppWorkbench = ({
             {artifactReview.coding_summary && (
               <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-[var(--color-text-muted)]">
                 {artifactReview.coding_summary}
+              </div>
+            )}
+
+            {artifactReview.validation_blocker && (
+              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+                {artifactReview.validation_blocker}
+              </div>
+            )}
+
+            {(artifactValidationCommands.length > 0 || artifactValidationFallbacks.length > 0) && (
+              <div className="mt-3 grid gap-2 text-xs text-[var(--color-text-muted)] sm:grid-cols-2">
+                {artifactValidationCommands.slice(0, 4).map((item) => (
+                  <div key={`${item.kind}:${item.command}`} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+                    <div className="break-all font-mono text-[11px] text-white">{item.command}</div>
+                    <div className="mt-1">{item.status} · {item.reason}</div>
+                  </div>
+                ))}
+                {artifactValidationFallbacks.slice(0, 4).map((item) => (
+                  <div key={item.name} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+                    <div className="break-all font-mono text-[11px] text-white">{item.name}</div>
+                    <div className="mt-1">{item.status} · {item.reason}</div>
+                  </div>
+                ))}
               </div>
             )}
 

@@ -793,7 +793,16 @@ async def test_accept_staged_refinement_rejects_non_draft_version(tmp_path: Path
     )
 
     draft_result = await create_draft_app_bundle_from_staged_refinement(
-        plan, staging_result, scoped_result, review_record, None,
+        plan,
+        staging_result,
+        scoped_result,
+        review_record,
+        ValidationEvidence(
+            completed=["route_component_validation", "ui_theme_primitive_validation"],
+            failed=[],
+            warnings=[],
+            artifacts=[],
+        ),
         artifact_store=artifact_store,
         source_artifact_version_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
@@ -841,7 +850,16 @@ async def test_accept_staged_refinement_rejects_request_id_mismatch(tmp_path: Pa
     )
 
     draft_result = await create_draft_app_bundle_from_staged_refinement(
-        plan, staging_result, scoped_result, review_record, None,
+        plan,
+        staging_result,
+        scoped_result,
+        review_record,
+        ValidationEvidence(
+            completed=["route_component_validation", "ui_theme_primitive_validation"],
+            failed=[],
+            warnings=[],
+            artifacts=[],
+        ),
         artifact_store=artifact_store,
         source_artifact_version_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",

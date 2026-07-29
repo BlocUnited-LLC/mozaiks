@@ -112,6 +112,7 @@ async def test_index_workspace_app_intelligence_creates_artifacts_and_context_ve
     assert result.scan_health["selected_by_priority"]["app_modules"] == 1
     assert result.health_report["status"] == "healthy"
     assert result.health_report["coverage"]["core_surface_file_count"] == 1
+    assert result.framework_detection["schema_version"] == "mozaiks.framework_detection.v1"
     assert Path(result.artifact_path).exists()
     assert "app_intelligence" in Path(result.artifact_path).parts
 
@@ -123,6 +124,8 @@ async def test_index_workspace_app_intelligence_creates_artifacts_and_context_ve
         "app_intelligence_snapshot",
         "app_context_version",
     ]
+    app_bundle_metadata = store.created[0].commit_metadata.metadata
+    assert app_bundle_metadata["framework_detection"]["schema_version"] == "mozaiks.framework_detection.v1"
     source_context_payload = store.created[1].commit_metadata.metadata["summary_payload"]
     assert source_context_payload["schema_version"] == "mozaiks.source_context.bundle.v1"
     assert source_context_payload["file_contents"]["app/modules/wallet/backend/handler.py"]
@@ -163,6 +166,8 @@ async def test_app_intelligence_index_feeds_graph_aware_scope_catalog(tmp_path: 
         generated_artifacts_root=tmp_path / "generated",
     )
 
+    assert result.framework_detection["primary_framework_id"] == "mozaiks_app"
+    assert any(item["framework_id"] == "mozaiks_app" for item in result.framework_detection["frameworks"])
     catalog = await get_context_graph_catalog(
         context=ControlPlaneToolContext(
             checkpoint="scope_requested",
@@ -178,7 +183,8 @@ async def test_app_intelligence_index_feeds_graph_aware_scope_catalog(tmp_path: 
     candidate_paths = [item["path"] for item in catalog["candidate_files"]]
     assert candidate_paths[0].startswith("app/modules/wallet/")
     assert candidate_paths.index("app/modules/wallet/backend/handler.py") < candidate_paths.index("tests/test_wallet.py")
-    assert catalog["scan_health"]["selected_by_priority"]["app_modules"] == 2
+    assert catalog["scan_health"]["selected_by_priority"]["app_modules"] == 1
+    assert catalog["scan_health"]["selected_by_priority"]["manifests"] == 1
 
 
 @pytest.mark.asyncio

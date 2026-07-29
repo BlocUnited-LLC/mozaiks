@@ -43,6 +43,7 @@ class PlatformCollections:
     BUILD_STATE = "BuildState"
     CONNECTORS = "Connectors"
     CONNECTOR_SECRETS = "ConnectorSecrets"
+    APP_CONTEXT_INDEX_JOBS = "AppContextIndexJobs"
 
 
 __all__ = [

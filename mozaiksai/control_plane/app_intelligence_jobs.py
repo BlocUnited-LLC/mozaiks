@@ -12,6 +12,8 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, PlatformCollections
 from mozaiksai.core.multitenant import build_app_scope_filter
 
+from .source_import import SourceImportKind, public_source_import_result
+
 logger = get_workflow_logger("app_intelligence_jobs")
 
 APP_INTELLIGENCE_INDEX_JOB_SCHEMA_VERSION: Literal["mozaiks.app_context_index_job.v1"] = "mozaiks.app_context_index_job.v1"
@@ -55,8 +57,13 @@ class AppIntelligenceIndexJob(BaseModel):
     job_id: str
     app_id: str
     requested_by: str | None = None
-    source_kind: Literal["local_workspace"] = "local_workspace"
+    source_kind: SourceImportKind = "local_workspace"
     workspace_root: str | None = None
+    repo_url: str | None = None
+    branch: str | None = None
+    monorepo_path: str | None = None
+    auth_connector_id: str | None = None
+    ignored_paths: list[str] = Field(default_factory=list)
     artifact_key: str = "app_intelligence_workspace"
     make_current: bool = True
     scan_policy: dict[str, Any] | None = None
@@ -70,6 +77,7 @@ class AppIntelligenceIndexJob(BaseModel):
     completed_at: datetime | None = None
     app_intelligence: dict[str, Any] | None = None
     context_readiness: dict[str, Any] | None = None
+    import_result: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
 
@@ -78,9 +86,15 @@ def create_app_intelligence_index_job(
     *,
     app_id: str,
     requested_by: str | None,
-    workspace_root: str,
-    artifact_key: str,
-    make_current: bool,
+    source_kind: SourceImportKind = "local_workspace",
+    workspace_root: str | None = None,
+    repo_url: str | None = None,
+    branch: str | None = None,
+    monorepo_path: str | None = None,
+    auth_connector_id: str | None = None,
+    ignored_paths: list[str] | None = None,
+    artifact_key: str = "app_intelligence_workspace",
+    make_current: bool = True,
     scan_policy: dict[str, Any] | None = None,
 ) -> AppIntelligenceIndexJob:
     resolved_app_id = str(app_id or "").strip()
@@ -90,8 +104,10 @@ def create_app_intelligence_index_job(
         AppIntelligenceIndexJobPhase(
             id=phase_id,
             label=label,
-            status="skipped" if phase_id == "repo_clone" else "pending",
-            message="Local workspace indexing does not clone a repository." if phase_id == "repo_clone" else "",
+            status="skipped" if phase_id == "repo_clone" and source_kind == "local_workspace" else "pending",
+            message="Local workspace indexing does not clone a repository."
+            if phase_id == "repo_clone" and source_kind == "local_workspace"
+            else "",
         )
         for phase_id, label in APP_INTELLIGENCE_INDEX_PHASES
     ]
@@ -99,7 +115,13 @@ def create_app_intelligence_index_job(
         job_id=f"aij_{uuid4().hex[:24]}",
         app_id=resolved_app_id,
         requested_by=str(requested_by or "").strip() or None,
-        workspace_root=str(workspace_root or "").strip(),
+        source_kind=source_kind,
+        workspace_root=str(workspace_root or "").strip() or None,
+        repo_url=str(repo_url or "").strip() or None,
+        branch=str(branch or "").strip() or None,
+        monorepo_path=str(monorepo_path or "").strip().strip("/\\") or None,
+        auth_connector_id=str(auth_connector_id or "").strip() or None,
+        ignored_paths=[str(item or "").strip() for item in ignored_paths or [] if str(item or "").strip()],
         artifact_key=str(artifact_key or "app_intelligence_workspace").strip() or "app_intelligence_workspace",
         make_current=bool(make_current),
         scan_policy=dict(scan_policy or {}) if scan_policy else None,
@@ -145,7 +167,7 @@ def advance_app_intelligence_index_job(
             "phases": phases,
             "started_at": job.started_at or now,
             "updated_at": now,
-            "warnings": [*job.warnings, *list((details or {}).get("warnings") or [])],
+            "warnings": _dedupe([*job.warnings, *list((details or {}).get("warnings") or [])]),
         }
     )
 
@@ -178,7 +200,7 @@ def complete_app_intelligence_index_job(
             "updated_at": now,
             "app_intelligence": dict(app_intelligence or {}),
             "context_readiness": dict(context_readiness or {}),
-            "warnings": list(warnings or []),
+            "warnings": _dedupe([*job.warnings, *list(warnings or [])]),
             "error": None,
         }
     )
@@ -212,7 +234,7 @@ def fail_app_intelligence_index_job(
             "phases": phases,
             "completed_at": now,
             "updated_at": now,
-            "warnings": list(warnings or job.warnings),
+            "warnings": _dedupe([*job.warnings, *list(warnings or [])]),
             "error": error,
         }
     )
@@ -224,9 +246,16 @@ def public_app_intelligence_index_job(job: AppIntelligenceIndexJob | None) -> di
     payload = job.model_dump(mode="json")
     payload.pop("workspace_root", None)
     payload.pop("scan_policy", None)
+    payload.pop("auth_connector_id", None)
+    payload["import_result"] = public_source_import_result(job.import_result)
     payload["source"] = {
         "kind": job.source_kind,
         "workspace_root_present": bool(job.workspace_root),
+        "repo_url": job.repo_url,
+        "branch": job.branch,
+        "monorepo_path": job.monorepo_path,
+        "auth_connector_present": bool(job.auth_connector_id),
+        "ignored_paths": list(job.ignored_paths),
     }
     return payload
 
@@ -271,7 +300,7 @@ async def get_app_intelligence_index_job(
 
 async def get_latest_app_intelligence_index_job(*, app_id: str) -> AppIntelligenceIndexJob | None:
     memory_jobs = [job for job in _JOBS_BY_ID.values() if job.app_id == app_id]
-    memory_jobs.sort(key=lambda job: job.created_at, reverse=True)
+    memory_jobs.sort(key=lambda job: _datetime_sort_key(job.created_at), reverse=True)
     try:
         coll = await _jobs_collection()
         rows = await coll.find(build_app_scope_filter(app_id)).sort("created_at", -1).limit(1).to_list(length=1)
@@ -320,6 +349,25 @@ def _default_phase_message(phase_id: str) -> str:
         "app_intelligence": "Synthesizing app intelligence.",
         "ready": "App context is ready.",
     }.get(phase_id, "Indexing app context.")
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _datetime_sort_key(value: datetime | None) -> float:
+    if value is None:
+        return 0.0
+    candidate = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return candidate.timestamp()
 
 
 __all__ = [

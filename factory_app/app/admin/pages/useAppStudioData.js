@@ -87,6 +87,23 @@ function buildDemoPayload(appId) {
     buildState: { build: buildDemoBuildState(appId, summary) },
     buildHistory: getStudioDemoBuildHistory(appId),
     integrations: null,
+    context: {
+      app_id: appId,
+      context_readiness: {
+        status: 'ready',
+        indexed_file_count: 42,
+        primary_framework_label: 'Mozaiks App',
+        framework_count: 2,
+        validation_command_count: 3,
+        warnings: [],
+      },
+      context_graph_status: {
+        available: true,
+        node_count: 96,
+        edge_count: 148,
+      },
+      index_job: null,
+    },
     activity: getStudioDemoActivity(appId),
   }
 }
@@ -123,6 +140,7 @@ export function useAppStudioData(appId) {
           buildRes,
           historyRes,
           integrationsRes,
+          contextRes,
           runtimeMetricsRes,
         ] = await Promise.allSettled([
           fetch(`${API_BASE}/api/studio/overview?app_id=${encodeURIComponent(appId)}`),
@@ -133,6 +151,7 @@ export function useAppStudioData(appId) {
           fetch(`${API_BASE}/api/studio/build?app_id=${encodeURIComponent(appId)}`),
           fetch(`${API_BASE}/api/studio/build/history?app_id=${encodeURIComponent(appId)}&limit=8`),
           fetch(`${API_BASE}/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
+          fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(appId)}/context`),
           fetch(`${API_BASE}/api/admin/metrics/runtime`),
         ])
 
@@ -144,6 +163,7 @@ export function useAppStudioData(appId) {
         const buildState = buildRes.status === 'fulfilled' && buildRes.value.ok ? await buildRes.value.json() : null
         const buildHistory = historyRes.status === 'fulfilled' && historyRes.value.ok ? await historyRes.value.json() : null
         const integrations = integrationsRes.status === 'fulfilled' && integrationsRes.value.ok ? await integrationsRes.value.json() : null
+        const context = contextRes.status === 'fulfilled' && contextRes.value.ok ? await contextRes.value.json() : null
         const runtimeMetrics = runtimeMetricsRes.status === 'fulfilled' && runtimeMetricsRes.value.ok ? await runtimeMetricsRes.value.json() : null
 
         if (!overview) {
@@ -160,6 +180,7 @@ export function useAppStudioData(appId) {
             buildState,
             buildHistory,
             integrations,
+            context,
             runtimeMetrics,
             activity: [],
           })

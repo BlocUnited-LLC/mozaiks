@@ -31,6 +31,7 @@ Use this section as the web navigation layer for that architecture.
 - [Core, Product, and App Bundle Boundary](foundations/core-product-app-bundle-boundary.md)
 - [Relationship Provider Contract](foundations/relationship-provider-contract.md)
 - [App Intelligence Plane](foundations/app-intelligence-plane.md)
+- [App Intelligence User Journey](foundations/app-intelligence-user-journey.md)
 - [Graph Authority Boundaries](foundations/graph-authority-boundaries.md)
 - [Context Graph and Code Intelligence](foundations/context-graph-and-code-intelligence.md)
 - [App Context and Brownfield Adoption](foundations/app-context-and-brownfield-adoption.md)

@@ -21,6 +21,18 @@ from .app_intelligence import (
     index_workspace_app_intelligence,
     register_app_intelligence_context,
 )
+from .app_validation import (
+    APP_SOURCE_VALIDATION_SCHEMA_VERSION,
+    AppSourceValidationResult,
+    AppValidationCommandCandidate,
+    AppValidationCommandPlanItem,
+    AppValidationCommandResult,
+    AppValidationFallbackCheckResult,
+    plan_app_source_validation_commands,
+    run_app_source_validation,
+    run_app_validation_fallback_checks,
+    run_current_app_source_validation,
+)
 from .artifact_promotion import (
     AcceptedStagedAppBundleArtifactVersionError,
     AcceptedStagedAppBundleArtifactVersionResult,
@@ -121,6 +133,13 @@ from .schema import (
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
 )
+from .source_import import (
+    SourceImportRequest,
+    SourceImportResult,
+    public_source_import_result,
+    resolve_source_import,
+    source_import_scan_policy,
+)
 from .staged_coding_worker import (
     StagedCodingWorkerChange,
     StagedCodingWorkerResult,
@@ -135,6 +154,7 @@ __all__ = [
     "APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW",
     "APP_INTELLIGENCE_SOURCE_REF_ID",
     "APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY",
+    "APP_SOURCE_VALIDATION_SCHEMA_VERSION",
     "ArtifactKind",
     "ArtifactInvalidationService",
     "ArtifactScopeProposer",
@@ -145,6 +165,13 @@ __all__ = [
     "AppContextPolicyOverrideDecision",
     "AppIntelligenceContextRegistrationResult",
     "AppIntelligenceIndexResult",
+    "AppSourceValidationResult",
+    "AppValidationCommandCandidate",
+    "AppValidationCommandPlanItem",
+    "AppValidationCommandResult",
+    "AppValidationFallbackCheckResult",
+    "SourceImportRequest",
+    "SourceImportResult",
     "DraftAppBundleArtifactVersionError",
     "DraftAppBundleArtifactVersionResult",
     "ChangeClass",
@@ -236,5 +263,12 @@ __all__ = [
     "resolve_factory_control_plane_root",
     "resolve_factory_refinement_harness_root",
     "index_workspace_app_intelligence",
+    "public_source_import_result",
     "register_app_intelligence_context",
+    "resolve_source_import",
+    "plan_app_source_validation_commands",
+    "run_app_source_validation",
+    "run_app_validation_fallback_checks",
+    "run_current_app_source_validation",
+    "source_import_scan_policy",
 ]

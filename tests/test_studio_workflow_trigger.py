@@ -1459,7 +1459,12 @@ class _ReviewArtifactStore:
         return True
 
 
-def _build_review_store(tmp_path: Path, *, lifecycle_status: ArtifactLifecycleStatus) -> _ReviewArtifactStore:
+def _build_review_store(
+    tmp_path: Path,
+    *,
+    lifecycle_status: ArtifactLifecycleStatus,
+    validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
+) -> _ReviewArtifactStore:
     parent_zip = tmp_path / "parent_bundle.zip"
     child_zip = tmp_path / "child_bundle.zip"
     _make_bundle_zip(
@@ -1488,6 +1493,7 @@ def _build_review_store(tmp_path: Path, *, lifecycle_status: ArtifactLifecycleSt
         version_number=2,
         parent_version_id="av_parent_1",
         lifecycle_status=lifecycle_status,
+        validation_status=validation_status,
     )
     change_request = _change_request_doc(artifact_version_id="av_parent_1")
     session_status = (
@@ -1561,6 +1567,33 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
     assert body["review"]["changed_files"][0]["path"] == "src/App.jsx"
     assert "Builder Workspace" in body["review"]["changed_files"][0]["diff_preview"]
     assert body["refinement_session"]["status"] == "validated"
+
+
+def test_studio_artifact_review_marks_skipped_validation_as_override_required(monkeypatch, tmp_path: Path):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    store = _build_review_store(
+        tmp_path,
+        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+        validation_status=ArtifactValidationStatus.SKIPPED,
+    )
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+
+    client = TestClient(studio_app.app)
+    response = client.get("/api/studio/build/artifacts/av_child_1/review")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["review"]["can_accept"] is False
+    assert body["review"]["validation_override_required"] is True
+    assert "Validation has not passed" in body["review"]["validation_blocker"]
 
 
 def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monkeypatch, tmp_path: Path):

@@ -124,10 +124,11 @@ class _FakeToolExecutor:
 async def _skip_validation(**kwargs: Any) -> dict[str, Any]:
     return {
         "success": True,
-        "validation_strategy": kwargs.get("validation_strategy", "skip"),
         "validation_status": "skipped",
-        "preview_url": None,
-        "errors": [],
+        "execution_mode": "not_executed",
+        "overlay_file_count": len(kwargs.get("overlay_files") or {}),
+        "command_results": [],
+        "fallback_checks": [],
         "warnings": ["Validation skipped in integration test."],
     }
 
@@ -284,7 +285,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_skip_validation,
+        source_validation_runner=_skip_validation,
         artifact_store=artifact_store,
         output_root=tmp_path / "output",
     )
@@ -392,7 +393,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_skip_validation,
+        source_validation_runner=_skip_validation,
         artifact_store=artifact_store,
         output_root=tmp_path / "output",
     )
@@ -453,7 +454,7 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_skip_validation,
+        source_validation_runner=_skip_validation,
         artifact_store=_BrokenStore(),
         output_root=tmp_path / "output",
     )
@@ -674,7 +675,7 @@ async def test_coding_worker_rejects_out_of_scope_edits_in_integration(tmp_path:
         config_loader=_config,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
-        validation_runner=_skip_validation,
+        source_validation_runner=_skip_validation,
         artifact_store=_CapturingArtifactStore(),
         output_root=tmp_path / "output",
     )
