@@ -8,7 +8,7 @@ import zipfile
 
 logger = logging.getLogger(__name__)
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from mozaiksai.control_plane.app_validation import run_current_app_source_validation
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
@@ -411,7 +411,7 @@ class ScopedRefinementCodingWorker:
             copy_workspace=True,
         )
         if hasattr(result, "model_dump"):
-            payload = result.model_dump(mode="json")
+            payload = cast(dict[str, Any], result.model_dump(mode="json"))
         elif isinstance(result, dict):
             payload = dict(result)
         else:

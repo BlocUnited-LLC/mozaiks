@@ -14,6 +14,7 @@ FRAMEWORK_DETECTION_SCHEMA_VERSION: Literal["mozaiks.framework_detection.v1"] = 
 
 FrameworkCategory = Literal["app_runtime", "frontend", "backend", "fullstack", "build_tool", "test", "mozaiks"]
 FrameworkEvidenceKind = Literal["manifest", "dependency", "script", "source", "path"]
+FrameworkValidationKind = Literal["install", "lint", "test", "build", "typecheck", "dev", "start"]
 
 
 class FrameworkEvidence(BaseModel):
@@ -46,7 +47,7 @@ class FrameworkEntrypoint(BaseModel):
 class FrameworkValidationCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["install", "lint", "test", "build", "typecheck", "dev", "start"]
+    kind: FrameworkValidationKind
     command: str
     working_directory: str = "."
     confidence: float = Field(ge=0.0, le=1.0)
@@ -145,7 +146,12 @@ def _detect_node(
         if not data:
             continue
         workdir = _dirname(package_path)
-        scripts = data.get("scripts") if isinstance(data.get("scripts"), dict) else {}
+        scripts_raw = data.get("scripts")
+        scripts = (
+            {str(key): value for key, value in scripts_raw.items()}
+            if isinstance(scripts_raw, dict)
+            else {}
+        )
         deps = _dependencies(data)
         evidence["node"].append(_ev("manifest", package_path, "Node package manifest"))
         _script_commands(scripts, workdir, _node_pm(package_managers), validation_commands)
@@ -278,7 +284,7 @@ def _script_commands(
     package_manager: str,
     commands: list[FrameworkValidationCommand],
 ) -> None:
-    script_map = {
+    script_map: dict[str, FrameworkValidationKind] = {
         "lint": "lint",
         "test": "test",
         "build": "build",
