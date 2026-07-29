@@ -38,11 +38,11 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.4",
-    "autoprefixer": "^10.5.4",
     "esbuild": "^0.28.1",
     "postcss": "^8.5.23",
-    "tailwindcss": "^3.4.13",
+    "tailwindcss": "^4.3.3",
     "vite": "^8.1.5",
     "yaml": "^2.4.2"
   }
