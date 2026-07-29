@@ -896,7 +896,7 @@ test('create app transition overlay can return to Apps', async ({ page }) => {
   await expect(page).toHaveURL(/\/create$/);
   await expect(page.getByRole('heading', { name: 'Choose Your App Journey' })).toBeVisible();
 
-  const closeBtn = page.getByRole('button', { name: 'Close overlay' });
+  const closeBtn = page.getByRole('button', { name: 'Back to Apps' });
   await expect(closeBtn).toBeVisible();
   await closeBtn.click();
 
