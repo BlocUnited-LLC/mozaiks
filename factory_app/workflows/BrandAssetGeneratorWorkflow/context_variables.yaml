@@ -1,36 +1,48 @@
-variables:
-  - name: app_id
+definitions:
+  app_id:
     type: str
-    default: ""
     description: ID of the app whose brand assets are being generated.
+    source:
+      type: state
+      default: ""
 
-  - name: chat_id
+  chat_id:
     type: str
-    default: ""
     description: Active workflow chat/session ID.
+    source:
+      type: state
+      default: ""
 
-  - name: brand_brief
+  brand_brief:
     type: str
-    default: ""
     description: >
       User-supplied brand brief describing the app identity, style, and
       visual direction for logo generation.
+    source:
+      type: state
+      default: ""
 
-  - name: generated_brand_assets
+  generated_brand_assets:
     type: list
-    default: []
     description: >
       List of asset records generated in this session. Each entry has
       asset_id, role, content_url, and promoted flag.
+    source:
+      type: state
+      default: []
 
-  - name: promoted_brand_assets
+  promoted_brand_assets:
     type: list
-    default: []
     description: >
       Subset of generated_brand_assets that have been promoted to
       asset_manifest.json.
+    source:
+      type: state
+      default: []
 
-  - name: brand_assets_complete
+  brand_assets_complete:
     type: bool
-    default: false
     description: Set to true when the user confirms brand assets are finalized.
+    source:
+      type: state
+      default: false

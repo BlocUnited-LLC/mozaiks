@@ -1,28 +1,8 @@
 tools:
-  - id: promote_brand_asset
-    kind: Agent_Tool
-    auto_tool_call: false
+  - agent: BrandDesignerAgent
+    file: promote_brand_asset.py
+    function: promote_brand_asset
+    tool_type: Agent_Tool
     description: >
       Promote a generated brand asset to the deterministic asset_manifest.json,
       making it the canonical brand asset for this role (logo, icon, hero, etc.).
-    input_schema:
-      - name: asset_id
-        type: str
-        required: true
-        description: asset_id from generated_brand_assets to promote.
-      - name: role
-        type: str
-        required: true
-        description: Asset role — logo, icon, hero, splash, or og_image.
-      - name: alt_text
-        type: str
-        required: false
-        description: Optional alt text for the asset.
-
-  - id: on_workflow_start
-    kind: Lifecycle_Tool
-    trigger: workflow_start
-
-  - id: on_workflow_end
-    kind: Lifecycle_Tool
-    trigger: workflow_end

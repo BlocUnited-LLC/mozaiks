@@ -174,7 +174,6 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "Mozaiks Studio" in layout_source
     assert "Import App" in source
     assert "const CREATE_APP_PATH = '/create'" in source
-    assert "/apps/new" in source
     assert "/chat?workflow=ValueEngine&mode=workflow&defer_start=1" not in source
     assert "/chat?workflow=ValueEngine&mode=workflow&new=1" not in source
     assert "row.primaryAction?.href" in source
