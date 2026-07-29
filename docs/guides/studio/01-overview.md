@@ -27,7 +27,9 @@ In-progress builds stay in **Apps** so you can return any time.
 | **App Usage** | Single-app chats, workflows, tokens, and cost detail |
 
 Dashboard structure comes from `app/dashboard/dashboard.yaml`. When that file is
-missing, Studio uses the OSS default dashboard manifest.
+missing, Studio uses the OSS default dashboard manifest. CI can validate that
+enabled dashboard portals resolve to mounted routes and that visible Studio
+navigation routes are represented in the dashboard manifest.
 
 ## Coming Back to a Build
 

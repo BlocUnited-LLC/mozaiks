@@ -35,6 +35,35 @@ const composedShellConfig = {
   ...shellConfig,
   pages: [...(routeManifest.pages || []), ...transitionRoutes],
 };
+const dashboardPayload = {
+  schema_version: 'mozaiks.dashboard.v1',
+  workspace: {
+    scope: 'workspace',
+    route_pattern: '/apps',
+    default_portal: 'portfolio',
+    portals: [
+      {
+        id: 'portfolio',
+        label: 'Apps',
+        route: '/apps',
+        enabled: true,
+      },
+    ],
+  },
+  app: {
+    scope: 'app',
+    route_pattern: '/apps/:appId',
+    default_portal: 'overview',
+    portals: [
+      {
+        id: 'overview',
+        label: 'Overview',
+        route: '/apps/:appId/overview',
+        enabled: true,
+      },
+    ],
+  },
+};
 const APP_ID = 'campaign-revision-workbench';
 const INTEGRATIONS_QA_DIR = process.env.INTEGRATIONS_UI_QA_DIR
   || path.join(repoRoot, '.logs', 'ui-qa', 'integrations-health-check');
@@ -658,6 +687,14 @@ async function mockStudioApis(page) {
     });
   });
 
+  await page.route('**/api/studio/dashboard', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(dashboardPayload),
+    });
+  });
+
   await page.route('**/api/studio/overview?**', async (route) => {
     const url = new URL(route.request().url());
     const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
@@ -1030,7 +1067,7 @@ test('workspace support route stays responsive across desktop and mobile widths'
   }
 });
 
-test('app Studio root redirects to overview', async ({ page }) => {
+test('app Studio root redirects to manifest default portal', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}`);
 
   await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/overview$`));

@@ -2,7 +2,7 @@
  * AppsPage — curated workspace app directory.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import {
@@ -21,6 +21,12 @@ import {
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
 import { API_BASE } from './studioApi.js'
+import {
+  buildAppDashboardHref,
+  fetchDashboardConfig,
+  getDefaultPortalRoute,
+  getSurfaceRoutePattern,
+} from './dashboardRoutes.js'
 import buildWorkspacePortfolio from './workspaceStudioModel.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 
@@ -269,13 +275,38 @@ function ImportAppOverlay({ open, onClose, onImport, error, busy }) {
 export default function AppsPage() {
   const navigate = useNavigate()
   const { apps, loading, error, deleteApp } = useWorkspaceApps('Could not load your apps.')
+  const [dashboardConfig, setDashboardConfig] = useState(null)
   const [searchValue, setSearchValue] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
   const [importOpen, setImportOpen] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState(null)
 
-  const portfolio = useMemo(() => buildWorkspacePortfolio(apps), [apps])
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchDashboardConfig({ signal: controller.signal })
+      .then((payload) => setDashboardConfig(payload))
+      .catch((err) => {
+        if (err?.name !== 'AbortError') {
+          console.error('[AppsPage] dashboard manifest load failed:', err)
+        }
+      })
+    return () => controller.abort()
+  }, [])
+
+  const appDashboardRoute = useMemo(
+    () => getDefaultPortalRoute(dashboardConfig, 'app'),
+    [dashboardConfig],
+  )
+  const appRootRoute = useMemo(
+    () => getSurfaceRoutePattern(dashboardConfig, 'app'),
+    [dashboardConfig],
+  )
+
+  const portfolio = useMemo(
+    () => buildWorkspacePortfolio(apps, { appDashboardRoute }),
+    [appDashboardRoute, apps],
+  )
 
   const visibleRows = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
@@ -372,7 +403,11 @@ export default function AppsPage() {
       })
       if (!importRes.ok) throw new Error('Source import job could not be started.')
       setImportOpen(false)
-      navigate(`/apps/${encodeURIComponent(appId)}/overview`)
+      navigate(
+        buildAppDashboardHref(appDashboardRoute, appId) ||
+        buildAppDashboardHref(appRootRoute, appId) ||
+        '/apps',
+      )
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Repository import could not be started.')
     } finally {

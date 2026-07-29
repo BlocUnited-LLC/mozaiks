@@ -14,12 +14,50 @@ from mozaiksai.core.dashboard import (
     build_default_dashboard_manifest,
     load_dashboard_manifest,
     merge_dashboard_manifest_overlay,
+    validate_dashboard_manifest_routes,
 )
 from mozaiksai.core.runtime.app.paths import noncanonical_app_root_paths
 
 
 def _portal_ids(manifest: DashboardManifest, scope: str) -> list[str]:
     return [portal.id for portal in manifest.surface_for_scope(scope).enabled_portals()]
+
+
+def _minimal_dashboard_manifest() -> DashboardManifest:
+    return DashboardManifest.model_validate(
+        {
+            "schema_version": "mozaiks.dashboard.v1",
+            "extends": None,
+            "workspace": {
+                "id": "workspace",
+                "label": "Workspace Dashboard",
+                "scope": "workspace",
+                "route_pattern": "/apps",
+                "default_portal": "portfolio",
+                "portals": [
+                    {
+                        "id": "portfolio",
+                        "label": "Apps",
+                        "route": "/apps",
+                    },
+                ],
+            },
+            "app": {
+                "id": "app",
+                "label": "App Dashboard",
+                "scope": "app",
+                "route_pattern": "/apps/:appId",
+                "default_portal": "overview",
+                "portals": [
+                    {
+                        "id": "overview",
+                        "label": "Overview",
+                        "route": "/apps/:appId/overview",
+                    },
+                ],
+            },
+        }
+    )
 
 
 def test_default_dashboard_manifest_declares_workspace_and_app_scopes() -> None:
@@ -134,6 +172,92 @@ def test_dashboard_shell_routes_are_route_manifest_compatible() -> None:
         "panel_count": 2,
     }
     assert by_path["/apps/:appId/branding"]["meta"]["navigation"]["group"] == "app-studio"
+
+
+def test_dashboard_route_alignment_accepts_top_level_and_nested_navigation() -> None:
+    manifest = _minimal_dashboard_manifest()
+    route_pages = [
+        {
+            "id": "workspace-studio",
+            "path": "/apps",
+            "navigation": {"group": "workspace-studio", "scope": "local"},
+        },
+        {
+            "id": "app-overview",
+            "path": "/apps/:appId/overview",
+            "meta": {"navigation": {"group": "app-studio", "scope": "local"}},
+        },
+    ]
+
+    result = validate_dashboard_manifest_routes(manifest, route_pages)
+
+    assert result.ok
+    assert result.issues == []
+
+
+def test_dashboard_route_alignment_reports_enabled_portal_without_route() -> None:
+    manifest = _minimal_dashboard_manifest()
+    route_pages = [
+        {
+            "id": "workspace-studio",
+            "path": "/apps",
+            "navigation": {"group": "workspace-studio", "scope": "local"},
+        },
+    ]
+
+    result = validate_dashboard_manifest_routes(manifest, route_pages)
+
+    assert [issue.code for issue in result.issues] == ["enabled_portal_route_missing"]
+    assert result.issues[0].portal_id == "overview"
+    assert result.issues[0].route == "/apps/:appId/overview"
+
+
+def test_dashboard_route_alignment_reports_hidden_enabled_portal_route() -> None:
+    manifest = _minimal_dashboard_manifest()
+    route_pages = [
+        {
+            "id": "workspace-studio",
+            "path": "/apps",
+            "navigation": {"group": "workspace-studio", "scope": "local"},
+        },
+        {
+            "id": "app-overview",
+            "path": "/apps/:appId/overview",
+            "navigation": {"group": "app-studio", "scope": "local", "include": False},
+        },
+    ]
+
+    result = validate_dashboard_manifest_routes(manifest, route_pages)
+
+    assert [issue.code for issue in result.issues] == ["enabled_portal_route_hidden"]
+    assert result.issues[0].page_id == "app-overview"
+
+
+def test_dashboard_route_alignment_reports_visible_route_without_enabled_portal() -> None:
+    manifest = _minimal_dashboard_manifest()
+    route_pages = [
+        {
+            "id": "workspace-studio",
+            "path": "/apps",
+            "navigation": {"group": "workspace-studio", "scope": "local"},
+        },
+        {
+            "id": "app-overview",
+            "path": "/apps/:appId/overview",
+            "navigation": {"group": "app-studio", "scope": "local"},
+        },
+        {
+            "id": "app-usage",
+            "path": "/apps/:appId/usage",
+            "navigation": {"group": "app-studio", "scope": "local"},
+        },
+    ]
+
+    result = validate_dashboard_manifest_routes(manifest, route_pages)
+
+    assert [issue.code for issue in result.issues] == ["visible_route_missing_enabled_portal"]
+    assert result.issues[0].page_id == "app-usage"
+    assert result.issues[0].route == "/apps/:appId/usage"
 
 
 def test_generator_file_contract_keeps_dashboard_separate_from_workflow_routing() -> None:

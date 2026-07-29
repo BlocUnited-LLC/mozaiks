@@ -10,7 +10,8 @@ app/dashboard/dashboard.yaml
 ```
 
 See [App Dashboard Contract](../architecture/app/app-dashboard-contract.md) for
-the runtime schema, manifest overlay rules, and ownership boundaries.
+the runtime schema, manifest overlay rules, route-alignment validator, and
+ownership boundaries.
 
 ## Overview
 
@@ -42,6 +43,10 @@ The default App Dashboard has these portal lanes:
 
 Apps may hide or extend portals through the dashboard manifest. Capability packs
 can contribute panels without taking over the whole dashboard.
+
+Apps that mount concrete Studio routes should run the dashboard route validator
+in CI. Enabled portals must point to registered routes, and visible Studio
+navigation routes must be declared as enabled dashboard portals.
 
 ## Support
 
