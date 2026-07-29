@@ -231,8 +231,10 @@ def _set_app_intelligence_unavailable(context_variables: Any, *, reason: str, wa
 
 
 def _app_intelligence_summary(catalog: dict[str, Any]) -> str:
-    coverage = catalog.get("coverage") if isinstance(catalog.get("coverage"), dict) else {}
-    architecture = catalog.get("architecture") if isinstance(catalog.get("architecture"), dict) else {}
+    _cov = catalog.get("coverage")
+    coverage: dict[str, Any] = _cov if isinstance(_cov, dict) else {}
+    _arch = catalog.get("architecture")
+    architecture: dict[str, Any] = _arch if isinstance(_arch, dict) else {}
     file_count = int(coverage.get("file_count") or 0)
     symbol_count = int(coverage.get("symbol_count") or 0)
     edge_count = int(coverage.get("edge_count") or 0)
@@ -246,7 +248,8 @@ def _app_intelligence_summary(catalog: dict[str, Any]) -> str:
 
 
 def _app_intelligence_health(catalog: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
-    coverage = catalog.get("coverage") if isinstance(catalog.get("coverage"), dict) else {}
+    _cov2 = catalog.get("coverage")
+    coverage: dict[str, Any] = _cov2 if isinstance(_cov2, dict) else {}
     return {
         "source": "app_intelligence",
         "status": "loaded",
