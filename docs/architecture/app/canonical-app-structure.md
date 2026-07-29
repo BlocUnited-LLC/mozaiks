@@ -11,6 +11,7 @@ orchestration lives in workflows.
 workspace/
 ├── app/
 │   ├── app.json
+│   ├── provenance.yaml        ← optional origin/refinement/contract lineage
 │   ├── config/
 │   │   ├── ai.json
 │   │   ├── auth.yaml           ← authenticated apps only
@@ -47,6 +48,8 @@ workspace/
 │   │   ├── admin_registry.yaml
 │   │   ├── index.js          ← admin/index.js registers custom page components
 │   │   └── pages/            ← admin/pages/ holds custom admin page files
+│   ├── dashboard/
+│   │   └── dashboard.yaml     ← optional App Dashboard portal overlay
 │   ├── brand/
 │   └── services/
 │       ├── platform_hooks.py  ← optional host/platform hook bundle
@@ -78,6 +81,12 @@ workspace/
 
 - `app/modules/` owns deterministic app behavior: actions, state, permissions,
   emitted events, lifecycle transitions, and persistence authority.
+- `app/provenance.yaml` owns optional origin, refinement, validation, and
+  contract-reference metadata for the app bundle. It does not own runtime
+  behavior, package installation, live hosted state, secrets, absolute local
+  paths, or provider execution state.
+- `app/dashboard/dashboard.yaml` owns optional Workspace/App Dashboard portal
+  overlays.
 - `app/services/` owns app service implementations: thin external clients,
   provider adapters, callback routes, and long-running workers. Services do
   not create business actions, own durable app facts, or hold first-class data
@@ -198,6 +207,12 @@ other operator capabilities.
 
 ## Config Contract
 
+- `app/provenance.yaml` sits beside `app.json` because it describes app-bundle
+  lineage, not runtime configuration. `requirements.txt` remains the package
+  version source, app registry/artifact records remain the live hosted state,
+  and app contracts remain the source of actual behavior. Provenance can
+  reference those contracts so Studio, CI, and refinement workflows can explain
+  which defaults and overlays shaped the bundle.
 - `app/config/integrations.yaml` declares external services and hosted
   capability requirements.
 - `app/config/auth.yaml` (authenticated apps only) is the canonical

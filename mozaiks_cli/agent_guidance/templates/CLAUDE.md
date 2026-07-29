@@ -12,9 +12,11 @@ Keep app logic inside the canonical app workspace:
 ```text
 app/
   app.json
+  provenance.yaml
   config/
   security/
   brand/
+  dashboard/
   services/  # optional integrations/adapters/routes support code
   modules/
   ui/
@@ -29,7 +31,9 @@ and web shell behavior.
 | Work | Location |
 |------|----------|
 | App identity/config | `app/app.json`, `app/config/` |
+| App provenance and contract refs | `app/provenance.yaml` |
 | Shell, navigation, footer, mobile chrome | `app/config/shell.json` |
+| Workspace/App Dashboard portals | `app/dashboard/dashboard.yaml` |
 | Secret management contract, names only | `app/security/secrets.yaml` |
 | Branding/theme assets | `app/brand/` |
 | App-owned external clients | `app/services/integrations/<service>_client.py` |
@@ -56,6 +60,7 @@ and web shell behavior.
 - Do not copy hosted platform provider adapters into this app; consume hosted deployment, DNS/domain, billing, wallet, and platform operations through hosted API clients/facade modules and host-owned records.
 - Do not copy framework runtime auth into the app; generic auth belongs in the installed `mozaiks` package.
 - Do not put raw secret values in `app/security/secrets.yaml`; it is a names-only contract.
+- Do not put secrets, local absolute paths, or provider execution state in `app/provenance.yaml`.
 - Do not use custom React when a declarative page schema is sufficient.
 - Do not mutate generated artifacts without review/promotion.
 

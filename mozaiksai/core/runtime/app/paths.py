@@ -12,6 +12,7 @@ APP_DATA_MIGRATIONS_GLOB = "data/migrations/*.json"
 APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
+APP_PROVENANCE_PATH = "provenance.yaml"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
     {
@@ -35,6 +36,7 @@ CANONICAL_APP_ROOT_FILES = frozenset(
         ".env.staging.example",
         "__init__.py",
         "app.json",
+        APP_PROVENANCE_PATH,
         "deployment.manifest.json",
         "docker-compose.yml",
         "index.html",
@@ -57,6 +59,7 @@ CANONICAL_APP_ROOT_DIRS = frozenset(
         ".github",
         "config",
         "data",
+        "dashboard",
         "modules",
         "refinement_harness",
         "security",
@@ -169,6 +172,7 @@ __all__ = [
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",
     "APP_AUTH_CONFIG_PATH",
+    "APP_PROVENANCE_PATH",
     "APP_REFINEMENT_POLICY_CONFIG_PATH",
     "APP_SECURITY_SECRETS_PATH",
     "CANONICAL_APP_CONFIG_FILES",

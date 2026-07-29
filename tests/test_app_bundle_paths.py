@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 from mozaiksai.core.runtime.app.paths import (
+    APP_PROVENANCE_PATH,
     disallowed_legacy_app_paths,
     is_canonical_app_config_path,
     is_data_migration_path,
@@ -247,13 +248,18 @@ class TestNoncanonicalAppConfigPaths:
 
 class TestNoncanonicalAppRootPaths:
     def test_canonical_root_dir_excluded(self):
-        paths = ["modules/wallet/module.yaml", "config/ai.json"]
+        paths = [
+            "modules/wallet/module.yaml",
+            "config/ai.json",
+            "dashboard/dashboard.yaml",
+        ]
         result = noncanonical_app_root_paths(paths)
         assert not result  # both are under canonical root dirs
 
     def test_canonical_root_file_excluded(self):
         paths = [
             "app.json",
+            APP_PROVENANCE_PATH,
             "Dockerfile",
             "package.json",
             "requirements.txt",

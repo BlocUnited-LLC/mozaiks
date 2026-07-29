@@ -2,7 +2,7 @@
 title: App Dashboard Contract
 status: Authoritative - Pre-Production
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-07-29
 depends_on: surface-model.md, platform-navigation-contract.md, ../workflows/workflow-routing-transitions.md
 ---
 
@@ -50,6 +50,9 @@ schema_version: mozaiks.dashboard.v1
 
 When the file is missing, Studio uses the OSS default manifest. App-owned files
 can overlay the default with `extends: default` and override portals by id.
+The `dashboard/` directory is a canonical app-root plane, and
+`app/provenance.yaml` can reference `dashboard/dashboard.yaml` as the app's
+dashboard overlay.
 
 ## Ownership Boundaries
 

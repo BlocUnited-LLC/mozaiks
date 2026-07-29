@@ -11,6 +11,22 @@ from .definition import (
 from .entitlements import ConfiguredEntitlementAdapter
 from .loader import AppLoader, AppLoadError, AppLoadResult
 from .module_loader import ActionDef, LoadedModule, ModuleDefinition, ModuleLoader, ModuleLoadError
+from .provenance import (
+    DEFAULT_APP_CONTRACTS,
+    PROVENANCE_SCHEMA_VERSION,
+    AppProvenance,
+    AppProvenanceArtifactRefs,
+    AppProvenanceKind,
+    AppProvenanceLoadError,
+    AppProvenanceMode,
+    AppProvenanceRunRef,
+    build_default_app_provenance,
+    current_mozaiks_package_ref,
+    dump_app_provenance_yaml,
+    load_app_provenance,
+    resolve_app_provenance_path,
+    write_app_provenance,
+)
 
 _STUDIO_SUMMARY_EXPORTS = {
     "build_app_overview_summary",
@@ -37,6 +53,20 @@ __all__ = [
     "ModuleDefinition",
     "ActionDef",
     "ConfiguredEntitlementAdapter",
+    "DEFAULT_APP_CONTRACTS",
+    "PROVENANCE_SCHEMA_VERSION",
+    "AppProvenance",
+    "AppProvenanceArtifactRefs",
+    "AppProvenanceKind",
+    "AppProvenanceLoadError",
+    "AppProvenanceMode",
+    "AppProvenanceRunRef",
+    "build_default_app_provenance",
+    "current_mozaiks_package_ref",
+    "dump_app_provenance_yaml",
+    "load_app_provenance",
+    "resolve_app_provenance_path",
+    "write_app_provenance",
     *_STUDIO_SUMMARY_EXPORTS,
 ]
 

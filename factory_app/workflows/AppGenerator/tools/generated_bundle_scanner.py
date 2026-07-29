@@ -292,8 +292,8 @@ def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
         errors.append(
             "Generated app bundle contains files outside the canonical app planes: "
             f"{invalid_root_paths}. Allowed app-root planes are admin, backend, brand, "
-            "config, control_plane, data, modules, security, services, and ui, plus "
-            "explicit deployment files."
+            "config, dashboard, data, modules, refinement_harness, security, services, "
+            "and ui, plus provenance.yaml and explicit deployment files."
         )
     return errors
 

@@ -22,6 +22,7 @@ task_contracts:
       - app.json
       - ui/pages/*.yaml
     optional_outputs:
+      - provenance.yaml
       - ui/route_manifest.json
       - ui/pages/custom/*.jsx
       - ui/index.js
@@ -32,6 +33,7 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - provenance.yaml is app-root metadata emitted by the scaffold/generator path. It records creation/refinement/validation lineage and declared contract refs; it must not contain secrets, absolute local paths, or provider execution state.
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
       - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as home, apps, workspace, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Use dashboard only when the app declares a route/page with id dashboard; it is not a built-in shortcut. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.

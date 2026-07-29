@@ -100,7 +100,7 @@ def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
 def collect_generated_app_file_map(
     generated_app_dir: Any,
     *,
-    allowed_roots: tuple[str, ...] = ("app.json", "ui", "brand", "config"),
+    allowed_roots: tuple[str, ...] = ("app.json", "provenance.yaml", "ui", "brand", "config"),
 ) -> dict[str, str]:
     """Read persisted schema artifacts from generated/apps/{app_id}/{build_id}/app.
 

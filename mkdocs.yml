@@ -100,6 +100,7 @@ nav:
       - Use Studio: guides/studio/01-overview.md
       - Config Files:
           - Overview: guides/configs/index.md
+          - App Provenance: guides/configs/provenance.md
           - AI Startup: guides/configs/ai-startup.md
           - Subscriptions: guides/configs/subscriptions.md
           - Refinement: guides/configs/refinement.md
