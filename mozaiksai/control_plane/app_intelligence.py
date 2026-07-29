@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import zipfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,6 +44,7 @@ from mozaiksai.core.artifacts import (
 APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY = "app_intelligence_workspace"
 APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW = "app_intelligence_index"
 APP_INTELLIGENCE_SOURCE_REF_ID = "src_app_intelligence_workspace"
+AppIntelligenceProgressCallback = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,7 @@ async def index_workspace_app_intelligence(
     scan_policy: dict[str, Any] | None = None,
     generated_artifacts_root: str | Path | None = None,
     make_current: bool = True,
+    progress_callback: AppIntelligenceProgressCallback | None = None,
 ) -> AppIntelligenceIndexResult:
     """Create current App Intelligence artifacts and an AppContextVersion.
 
@@ -101,11 +104,25 @@ async def index_workspace_app_intelligence(
     if not root.exists() or not root.is_dir():
         raise ValueError(f"workspace_root does not exist or is not a directory: {root}")
 
+    await _emit_progress(
+        progress_callback,
+        "workspace_scan",
+        {"message": "Scanning selected source files.", "workspace_root": root.as_posix()},
+    )
     policy = default_context_graph_scan_policy(scan_policy)
     scan_result = collect_source_scan_file_map([("", root)], policy=policy)
     if not scan_result.file_map:
         raise ValueError("App Intelligence indexing found no supported source files")
 
+    await _emit_progress(
+        progress_callback,
+        "source_index",
+        {
+            "message": "Building redacted source context.",
+            "selected_file_count": len(scan_result.file_map),
+            "warnings": list(scan_result.warnings),
+        },
+    )
     indexed_at = datetime.now(UTC)
     safe_file_map = _redacted_scan_file_map(scan_result.file_map)
     bundle_root = _generated_artifacts_root(generated_artifacts_root)
@@ -141,6 +158,14 @@ async def index_workspace_app_intelligence(
         },
     )
 
+    await _emit_progress(
+        progress_callback,
+        "symbol_parse",
+        {
+            "message": "Parsing symbols, imports, and source chunks.",
+            "selected_file_count": len(safe_file_map),
+        },
+    )
     source_ref = SourceRef(
         source_ref_id=APP_INTELLIGENCE_SOURCE_REF_ID,
         kind=SourceRefKind.APP_ROOT,
@@ -171,6 +196,15 @@ async def index_workspace_app_intelligence(
         lifecycle_status=app_bundle_artifact.lifecycle_status.value,
         source_ref_id=source_ref.source_ref_id,
     )
+    await _emit_progress(
+        progress_callback,
+        "context_graph",
+        {
+            "message": "Persisting graph relationships.",
+            "node_count": len(source_index.app_context_graph.nodes),
+            "edge_count": len(source_index.app_context_graph.edges),
+        },
+    )
     registration = await register_app_intelligence_context(
         source_index=source_index,
         artifact_store=store,
@@ -182,6 +216,15 @@ async def index_workspace_app_intelligence(
         additional_artifact_refs=[app_bundle_ref],
         ownership_boundaries=_ownership_boundaries(safe_file_map, source_ref.source_ref_id),
         graph_path="app_context/app_intelligence/app_context_graph.json",
+    )
+    await _emit_progress(
+        progress_callback,
+        "app_intelligence",
+        {
+            "message": "Registering current app context version.",
+            "app_context_version_id": registration.app_context_version_id,
+            "indexed_file_count": registration.indexed_file_count,
+        },
     )
     return AppIntelligenceIndexResult(
         app_id=resolved_app_id,
@@ -197,6 +240,18 @@ async def index_workspace_app_intelligence(
         health_report=registration.health_report,
         warnings=registration.warnings,
     )
+
+
+async def _emit_progress(
+    callback: AppIntelligenceProgressCallback | None,
+    phase_id: str,
+    details: dict[str, Any],
+) -> None:
+    if callback is None:
+        return
+    result = callback(phase_id, dict(details or {}))
+    if hasattr(result, "__await__"):
+        await result  # type: ignore[misc]
 
 
 async def register_app_intelligence_context(
