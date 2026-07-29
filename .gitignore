@@ -114,3 +114,4 @@ tmpdist/
 # Playwright test outputs
 web_shell/test-results/
 web_shell/playwright-report/
+web_shell/.mozaiks-tailwind-sources/
