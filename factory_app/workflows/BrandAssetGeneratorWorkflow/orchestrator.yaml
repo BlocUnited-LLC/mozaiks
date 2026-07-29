@@ -1,0 +1,6 @@
+workflow_name: BrandAssetGeneratorWorkflow
+max_turns: 30
+human_in_the_loop: true
+workflow_startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_agent: BrandDesignerAgent
