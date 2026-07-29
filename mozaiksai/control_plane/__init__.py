@@ -94,6 +94,7 @@ from .implementations import (
 )
 from .invalidation import ArtifactInvalidationService, get_artifact_invalidation_service
 from .loader import (
+    DEFAULT_REFINEMENT_HARNESS_EXTENDS,
     ControlPlanePackLoadError,
     load_refinement_harness,
     load_selected_refinement_harness,
@@ -194,6 +195,7 @@ __all__ = [
     "ControlPlaneLLMProfileConfig",
     "ControlPlaneManifest",
     "ControlPlanePackLoadError",
+    "DEFAULT_REFINEMENT_HARNESS_EXTENDS",
     "ControlPlanePoliciesManifest",
     "ControlPlanePromptDefinition",
     "ControlPlanePromptsManifest",

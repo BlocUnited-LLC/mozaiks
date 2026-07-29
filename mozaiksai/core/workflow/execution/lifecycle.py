@@ -46,7 +46,7 @@ from logs.logging_config import get_workflow_logger
 from logs.tools_logs import get_tool_logger, log_tool_event
 
 from ..declarative import parse_tools_config
-from ..paths import primary_workflows_root as _primary_workflows_root
+from ..paths import resolve_workflow_path
 
 logger = logging.getLogger(__name__)
 
@@ -88,8 +88,8 @@ class LifecycleToolManager:
         if self._loaded:
             return
 
-        base_dir = _primary_workflows_root() / self.workflow_name
-        if not base_dir.is_dir():
+        base_dir = resolve_workflow_path(self.workflow_name)
+        if base_dir is None or not base_dir.is_dir():
             logger.debug("[LIFECYCLE] Workflow path not found for '%s'", self.workflow_name)
             self._loaded = True
             return

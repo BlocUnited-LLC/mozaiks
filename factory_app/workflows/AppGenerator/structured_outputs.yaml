@@ -3030,6 +3030,20 @@ models:
         items: RefinementHarnessArtifactRouting
         description: Artifact routing policies for the harness.
 
+  RefinementHarnessRoutingOverlay:
+    type: model
+    fields:
+      default_artifact_kind:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional default artifact kind override. Use null when unchanged.
+      artifacts:
+        type: optional_list
+        items: RefinementHarnessArtifactRouting
+        description: Optional artifact route overrides merged by artifact_kind.
+
   RefinementHarnessCheckpointManifestOutput:
     type: model
     fields:
@@ -3051,6 +3065,10 @@ models:
         type: optional_list
         items: str
         description: Tool ids from refinement_harness/config/tools.yaml available to this checkpoint.
+      append_tool_ids:
+        type: optional_list
+        items: str
+        description: Tool ids appended to the packaged checkpoint tool list without replacing defaults.
 
   RefinementHarnessManifestOutput:
     type: model
@@ -3060,15 +3078,37 @@ models:
         values:
         - mozaiks.refinement_harness.v1
         description: Refinement harness manifest schema version.
+      extends:
+        type: literal
+        values:
+        - mozaiks.default_refinement_harness
+        description: >
+          Required default harness marker. Generated apps must extend the
+          packaged default harness instead of copying it.
+      overrides:
+        type: union
+        variants:
+        - RefinementHarnessOverlayOverrides
+        - 'null'
+        description: >
+          App-specific routing/checkpoint overrides only. Use null when the
+          packaged default is sufficient.
+
+  RefinementHarnessOverlayOverrides:
+    type: model
+    fields:
       routing:
-        type: RefinementHarnessRoutingManifest
-        description: Artifact routing policy. Routes may contain workflow_sequence only.
+        type: union
+        variants:
+        - RefinementHarnessRoutingOverlay
+        - 'null'
+        description: Optional artifact routing overrides. Routes may contain workflow_sequence only.
       checkpoints:
-        type: list
+        type: optional_list
         items: RefinementHarnessCheckpointManifestOutput
         description: >
-          LLM-backed checkpoint prompts/tools. Do not declare deterministic
-          handler checkpoints; Mozaiks supplies them in runtime.
+          Optional LLM-backed checkpoint prompt/tool overrides. Do not declare
+          deterministic handler checkpoints; Mozaiks supplies them in runtime.
 
   RefinementHarnessToolDefinition:
     type: model
@@ -3151,8 +3191,11 @@ models:
         type: RefinementHarnessManifestOutput
         description: Serialized to refinement_harness/config/harness.yaml.
       tools_yaml:
-        type: RefinementHarnessToolsManifestOutput
-        description: Serialized to refinement_harness/config/tools.yaml.
+        type: union
+        variants:
+        - RefinementHarnessToolsManifestOutput
+        - 'null'
+        description: Optional manifest serialized to refinement_harness/config/tools.yaml.
       policies_yaml:
         type: union
         variants:

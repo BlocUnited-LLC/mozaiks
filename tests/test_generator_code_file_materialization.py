@@ -397,26 +397,35 @@ def test_appgenerator_extract_code_file_map_materializes_typed_refinement_harnes
         "refinement_harness": {
             "harness_yaml": {
                 "schema_version": "mozaiks.refinement_harness.v1",
-                "routing": {
-                    "default_artifact_kind": "app_bundle",
-                    "artifacts": [
+                "extends": "mozaiks.default_refinement_harness",
+                "overrides": {
+                    "routing": {
+                        "artifacts": [
+                            {
+                                "artifact_kind": "app_bundle",
+                                "label": "custom app bundle",
+                            }
+                        ],
+                    },
+                    "checkpoints": [
                         {
-                            "artifact_kind": "app_bundle",
-                            "label": "app bundle",
-                            "routes": {
-                                "patch": {"workflow_sequence": "app_revision"},
-                                "design": {"workflow_sequence": "app_surface_revision"},
-                                "feature": {"workflow_sequence": "app_revision"},
-                                "core": {"workflow_sequence": "full_rebuild"},
-                            },
+                            "event": "coding_requested",
+                            "append_tool_ids": ["app_local_context"],
                         }
                     ],
                 },
-                "checkpoints": [],
             },
             "tools_yaml": {
                 "schema_version": "mozaiks.refinement_harness.tools.v1",
-                "tools": [],
+                "tools": [
+                    {
+                        "id": "app_local_context",
+                        "kind": "context_tool",
+                        "description": "Load app-local refinement context.",
+                        "entrypoint": "app.refinement_tools:app_local_context",
+                        "available_to": ["coding_requested"],
+                    }
+                ],
             },
             "policies_yaml": {
                 "schema_version": "mozaiks.refinement_harness.policies.v1",
@@ -428,9 +437,9 @@ def test_appgenerator_extract_code_file_map_materializes_typed_refinement_harnes
             },
             "prompt_files": [
                 {
-                    "id": "change classifier system",
+                    "id": "coding_refinement_system",
                     "filename": "",
-                    "content": "Classify the refinement request.",
+                    "content": "Use app-local coding guidance.",
                 }
             ],
         },
@@ -449,18 +458,30 @@ def test_appgenerator_extract_code_file_map_materializes_typed_refinement_harnes
         "refinement_harness/config/harness.yaml",
         "refinement_harness/config/tools.yaml",
         "refinement_harness/config/policies.yaml",
-        "refinement_harness/prompts/change_classifier_system.yaml",
+        "refinement_harness/prompts/coding_refinement_system.yaml",
     }
-    assert yaml.safe_load(file_map["refinement_harness/config/harness.yaml"])["routing"]["artifacts"][0]["routes"]["patch"] == {
-        "workflow_sequence": "app_revision",
+    harness_yaml = yaml.safe_load(file_map["refinement_harness/config/harness.yaml"])
+    assert harness_yaml["extends"] == "mozaiks.default_refinement_harness"
+    assert harness_yaml["overrides"]["routing"]["artifacts"][0]["label"] == "custom app bundle"
+    assert harness_yaml["overrides"]["checkpoints"][0]["append_tool_ids"] == ["app_local_context"]
+    assert harness_yaml["overrides"]["prompts"] == {
+        "coding_refinement_system": "refinement_harness/prompts/coding_refinement_system.yaml"
     }
     assert yaml.safe_load(file_map["refinement_harness/config/tools.yaml"]) == {
         "schema_version": "mozaiks.refinement_harness.tools.v1",
-        "tools": [],
+        "tools": [
+            {
+                "id": "app_local_context",
+                "kind": "context_tool",
+                "description": "Load app-local refinement context.",
+                "entrypoint": "app.refinement_tools:app_local_context",
+                "available_to": ["coding_requested"],
+            }
+        ],
     }
-    assert yaml.safe_load(file_map["refinement_harness/prompts/change_classifier_system.yaml"]) == {
-        "id": "change classifier system",
-        "content": "Classify the refinement request.",
+    assert yaml.safe_load(file_map["refinement_harness/prompts/coding_refinement_system.yaml"]) == {
+        "id": "coding_refinement_system",
+        "content": "Use app-local coding guidance.",
     }
 
 
@@ -469,12 +490,8 @@ def test_appgenerator_refinement_harness_rejects_prompt_paths_outside_pack() -> 
         "refinement_harness": {
             "harness_yaml": {
                 "schema_version": "mozaiks.refinement_harness.v1",
-                "routing": {"default_artifact_kind": "app_bundle", "artifacts": []},
-                "checkpoints": [],
-            },
-            "tools_yaml": {
-                "schema_version": "mozaiks.refinement_harness.tools.v1",
-                "tools": [],
+                "extends": "mozaiks.default_refinement_harness",
+                "overrides": None,
             },
             "prompt_files": [
                 {
@@ -490,45 +507,22 @@ def test_appgenerator_refinement_harness_rejects_prompt_paths_outside_pack() -> 
         extract_appgenerator_code_file_map(payload)
 
 
-def test_appgenerator_refinement_harness_rejects_schema_violations() -> None:
-    """Schema round-trip in codegen catches extra fields and wrong field names at generation time."""
+def test_appgenerator_refinement_harness_rejects_missing_extends() -> None:
     payload = {
         "refinement_harness": {
             "harness_yaml": {
                 "schema_version": "mozaiks.refinement_harness.v1",
-                "routing": {
-                    "default_artifact_kind": "app_bundle",
-                    "artifacts": [
-                        {
-                            "artifact_kind": "app_bundle",
-                            "label": "app bundle",
-                            "routes": {
-                                "patch": {
-                                    # Wrong field name: route_to instead of workflow_sequence
-                                    "route_to": "app_revision",
-                                },
-                                "design": {"workflow_sequence": "app_surface_revision"},
-                                "feature": {"workflow_sequence": "app_revision"},
-                                "core": {"workflow_sequence": "full_rebuild"},
-                            },
-                        }
-                    ],
-                },
-                "checkpoints": [],
-            },
-            "tools_yaml": {
-                "schema_version": "mozaiks.refinement_harness.tools.v1",
-                "tools": [],
+                "extends": "app.local_refinement_harness",
+                "overrides": {},
             },
         }
     }
 
-    with pytest.raises(ValueError, match="schema validation"):
+    with pytest.raises(ValueError, match="must extend"):
         extract_appgenerator_code_file_map(payload)
 
 
-def test_appgenerator_refinement_harness_rejects_extra_route_fields() -> None:
-    """Extra fields on route objects are rejected by the strict runtime schema."""
+def test_appgenerator_refinement_harness_rejects_full_pack_manifest() -> None:
     payload = {
         "refinement_harness": {
             "harness_yaml": {
@@ -554,14 +548,10 @@ def test_appgenerator_refinement_harness_rejects_extra_route_fields() -> None:
                 },
                 "checkpoints": [],
             },
-            "tools_yaml": {
-                "schema_version": "mozaiks.refinement_harness.tools.v1",
-                "tools": [],
-            },
         }
     }
 
-    with pytest.raises(ValueError, match="schema validation"):
+    with pytest.raises(ValueError, match="extends overlay"):
         extract_appgenerator_code_file_map(payload)
 
 

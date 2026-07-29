@@ -46,6 +46,17 @@ routing:
           workflow_sequence: app_revision
         core:
           workflow_sequence: full_rebuild
+    - artifact_kind: theme_config
+      label: theme config
+      routes:
+        patch:
+          workflow_sequence: theme_patch
+        design:
+          workflow_sequence: theme_revision
+        feature:
+          workflow_sequence: theme_revision
+        core:
+          workflow_sequence: full_rebuild
 checkpoints:
   - event: request_submitted
     prompt_id: change_classifier_system
@@ -54,6 +65,8 @@ checkpoints:
       - get_artifact_summary
       - get_app_intelligence_context
       - get_stale_artifact_families
+  - event: route_requested
+  - event: decision_requested
   - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:

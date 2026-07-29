@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from mozaiksai.control_plane import (
+    DEFAULT_REFINEMENT_HARNESS_EXTENDS,
     ControlPlanePackLoadError,
     load_refinement_harness,
     load_selected_refinement_harness,
@@ -23,6 +24,10 @@ def test_load_default_factory_refinement_harness() -> None:
     assert app_bundle is not None
     assert app_bundle.routes.core.workflow_sequence == "full_rebuild"
     assert app_bundle.routes.patch.workflow_sequence == "app_revision"
+    theme_config = pack.routing_for_artifact("theme_config")
+    assert theme_config is not None
+    assert theme_config.routes.patch.workflow_sequence == "theme_patch"
+    assert theme_config.routes.design.workflow_sequence == "theme_revision"
     request_intake = pack.checkpoint_by_event("request_submitted")
     assert request_intake is not None
     assert request_intake.mode == "ag2_structured_agent"
@@ -34,6 +39,14 @@ def test_load_default_factory_refinement_harness() -> None:
         "get_app_intelligence_context",
         "get_stale_artifact_families",
     ]
+    route = pack.checkpoint_by_event("route_requested")
+    assert route is not None
+    assert route.mode == "deterministic_handler"
+    assert route.tool_ids == []
+    decision = pack.checkpoint_by_event("decision_requested")
+    assert decision is not None
+    assert decision.mode == "deterministic_handler"
+    assert decision.tool_ids == []
     scope = pack.checkpoint_by_event("scope_requested")
     assert scope is not None
     assert scope.mode == "ag2_structured_agent"
@@ -156,6 +169,139 @@ def test_load_selected_refinement_harness_uses_app_override(tmp_path: Path) -> N
 
     assert pack.path == (workspace_root / "refinement_harness").resolve()
     assert pack.policies.scope.max_selected_paths == 2
+
+
+def test_load_selected_refinement_harness_extends_default_with_overlay(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    workspace_root = tmp_path
+    overlay_root = workspace_root / "refinement_harness"
+    (app_root / "config").mkdir(parents=True)
+    (overlay_root / "config").mkdir(parents=True)
+    (overlay_root / "prompts").mkdir(parents=True)
+
+    (app_root / "config" / "ai.json").write_text(
+        json.dumps(
+            {
+                "control_plane": {
+                    "enabled": True,
+                    "classifier": {"enabled": True, "llm_config": {"model": "gpt-5-nano"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (overlay_root / "config" / "harness.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "mozaiks.refinement_harness.v1",
+                "extends": DEFAULT_REFINEMENT_HARNESS_EXTENDS,
+                "overrides": {
+                    "routing": {
+                        "artifacts": [
+                            {
+                                "artifact_kind": "app_bundle",
+                                "label": "App Zero app bundle",
+                            }
+                        ]
+                    },
+                    "checkpoints": [
+                        {
+                            "event": "route_requested",
+                            "tool_ids": ["get_carry_forward_candidates"],
+                        },
+                        {
+                            "event": "coding_requested",
+                            "append_tool_ids": ["read_artifact_file", "app_local_context"],
+                        },
+                    ],
+                    "prompts": {
+                        "coding_refinement_system": "refinement_harness/prompts/coding_refinement_system.yaml"
+                    },
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    (overlay_root / "prompts" / "coding_refinement_system.yaml").write_text(
+        "\n".join(
+            [
+                "id: coding_refinement_system",
+                "content: App-local coding prompt override.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (overlay_root / "config" / "tools.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "mozaiks.refinement_harness.tools.v1",
+                "tools": [
+                    {
+                        "id": "app_local_context",
+                        "kind": "context_tool",
+                        "description": "App-local context tool.",
+                        "entrypoint": "app.refinement_tools:app_local_context",
+                        "available_to": ["coding_requested"],
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    (overlay_root / "config" / "policies.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "mozaiks.refinement_harness.policies.v1",
+                "scope": {
+                    "max_selected_paths": 5,
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    pack = load_selected_refinement_harness(app_root=app_root)
+
+    assert pack.path == overlay_root.resolve()
+    app_bundle = pack.routing_for_artifact("app_bundle")
+    assert app_bundle is not None
+    assert app_bundle.label == "App Zero app bundle"
+    assert app_bundle.routes.patch.workflow_sequence == "app_revision"
+    assert pack.routing_for_artifact("theme_config") is not None
+    route = pack.checkpoint_by_event("route_requested")
+    assert route is not None
+    assert route.tool_ids == ["get_carry_forward_candidates"]
+    coding = pack.checkpoint_by_event("coding_requested")
+    assert coding is not None
+    assert coding.tool_ids[-2:] == ["read_artifact_file", "app_local_context"]
+    assert pack.tool_by_id("app_local_context") is not None
+    assert pack.prompt_by_id("coding_refinement_system").content == "App-local coding prompt override."
+    assert pack.policies.scope.max_selected_paths == 5
+    assert pack.policies.scope.auto_apply_max_paths == 1
+
+
+def test_extended_refinement_harness_rejects_whole_pack_fields(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    overlay_root = tmp_path / "refinement_harness"
+    (app_root / "config").mkdir(parents=True)
+    (overlay_root / "config").mkdir(parents=True)
+    (overlay_root / "config" / "harness.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "mozaiks.refinement_harness.v1",
+                "extends": DEFAULT_REFINEMENT_HARNESS_EXTENDS,
+                "routing": {"default_artifact_kind": "app_bundle"},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ControlPlanePackLoadError, match="may only declare"):
+        load_selected_refinement_harness(app_root=app_root)
 
 
 def test_load_refinement_harness_validates_prompt_references(tmp_path: Path) -> None:

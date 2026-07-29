@@ -501,9 +501,10 @@ agents:
         - `surface_kind` must be `refinement`.
         - `initial_agent` must be `RefinementHarnessAgent`.
         - Treat this task as app-local harness materialization, not workflow generation. AgentGenerator owns workflow bundles; AppGenerator emits only the harness files that route into declared workflow_sequences.
-        - `owned_paths` must include `app/config/refinement_policy.yaml`, `refinement_harness/config/harness.yaml`, and `refinement_harness/config/tools.yaml`; add `refinement_harness/config/policies.yaml` and `refinement_harness/prompts/*.yaml` only when needed.
+        - `owned_paths` must include `app/config/refinement_policy.yaml` and `refinement_harness/config/harness.yaml`; add `refinement_harness/config/tools.yaml`, `refinement_harness/config/policies.yaml`, and `refinement_harness/prompts/*.yaml` only when the app has real harness deltas.
         - `app/config/refinement_policy.yaml` is the app-local LLM profile config (co-located with `app/config/ai.json`). Keep `ask`, `chat`, and `workflows` startup in `app/config/ai.json`; do not move startup into `harness.yaml`.
-        - `initial_message` must identify the exact workflow_sequences this harness can route to. Those sequences must exist in `workflows/extended_orchestration/extension_registry.json`; route impact metadata belongs on the sequence there, not in `harness.yaml`.
+        - `harness.yaml` must extend `mozaiks.default_refinement_harness` and declare only App-specific `overrides`. Do not copy packaged default routes, checkpoints, tools, policies, or prompts.
+        - `initial_message` must identify the exact workflow_sequences this harness can route to when route overrides are needed. Those sequences must exist in the effective `workflows/extended_orchestration/extension_registry.json`; route impact metadata belongs on the sequence there, not in `harness.yaml`.
         - Do NOT generate custom harness Python, module files, backend/refinement_harness files, or app business logic in this task. Use shipped `mozaiksai.control_plane` implementations and declared context tools.
       12d. **event architecture rule**:
         - Populate `event_flows` for every durable state change that other modules, notifications, integrations, or workflows may react to.
@@ -726,7 +727,7 @@ agents:
               "initial_agent": "RefinementHarnessAgent",
               "description": "Generate the optional app-local refinement harness pack.",
               "initial_message": "Generate a declarative refinement harness that routes scoped refinements to existing workflow_sequences only.",
-              "owned_paths": ["refinement_harness/config/harness.yaml", "refinement_harness/config/tools.yaml"],
+              "owned_paths": ["app/config/refinement_policy.yaml", "refinement_harness/config/harness.yaml"],
               "depends_on": [],
               "acceptance_criteria": ["Routes use workflow_sequence only", "No custom harness Python"]
             }
@@ -2163,33 +2164,34 @@ agents:
       1. If `current_build_task_type` is not `refinement_harness`, fail instead of generating a fallback surface.
       2. Generate exactly the files listed in `current_build_task.owned_paths`.
       3. Required owned paths:
-        - `app/config/refinement_policy.yaml`
+         - `app/config/refinement_policy.yaml`
          - `refinement_harness/config/harness.yaml`
-         - `refinement_harness/config/tools.yaml`
       4. Optional owned paths:
+         - `refinement_harness/config/tools.yaml`
          - `refinement_harness/config/policies.yaml`
          - `refinement_harness/prompts/*.yaml`
       5. Do not emit any files outside `app/config/refinement_policy.yaml`, `refinement_harness/config/`, or `refinement_harness/prompts/*.yaml`.
       5a. `app/config/refinement_policy.yaml` is the LLM profile config for the harness. It is seeded from the current factory default (`factory_app/app/config/refinement_policy.yaml`). Do not put `ask`, `chat`, or `workflows` startup in `harness.yaml`.
       6. Set `harness_yaml.schema_version` to `mozaiks.refinement_harness.v1`.
-      7. Set `tools_yaml.schema_version` to `mozaiks.refinement_harness.tools.v1`.
-      8. Do not emit `profile`, `harness`, Python handler entrypoints, checkpoint ids, checkpoint modes, or output contracts. Mozaiks runtime infers those from canonical checkpoint events.
-      9. Declare only LLM-backed checkpoints that need app-specific prompts/tools:
+      7. Set `harness_yaml.extends` to `mozaiks.default_refinement_harness` and put all app-specific changes under `harness_yaml.overrides`.
+      8. Omit `tools_yaml`, `policies_yaml`, and `prompt_files` unless the current task owns those files and needs real app-specific deltas.
+      9. Do not emit `profile`, `harness`, Python handler entrypoints, checkpoint ids, checkpoint modes, output contracts, or copied default routes/checkpoints/tools/prompts. Mozaiks runtime supplies defaults from the packaged harness.
+      10. Declare only checkpoint overrides that need app-specific prompts/tools:
          - `request_submitted` for change classification.
          - `scope_requested` for file/scope selection.
          - `contract_surface_requested` for contract-surface planning.
          - `coding_requested` for scoped coding plans.
          Do not declare deterministic router or decision checkpoints; runtime supplies them.
-      10. Use tool entrypoints only from shipped context tools:
+      11. Use tool entrypoints only from shipped context tools or explicitly approved app-owned extensions:
          - `mozaiksai.control_plane.tools.get_revision_context:get_revision_context`
          - `factory_app.refinement_harness.tools.get_artifact_summary:get_artifact_summary`
          - `factory_app.refinement_harness.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog`
          - `factory_app.refinement_harness.tools.get_artifact_workspace_scope:get_artifact_workspace_scope`
-      11. In `routing.artifacts[].routes`, every route object must contain only `workflow_sequence`.
-      12. Do not emit `route_to`, `affected_workflows`, `affected_declarative_families`, `requires_replanning`, `requires_rebuild`, or `scope_summary`.
-      13. Every `workflow_sequence` referenced by routes must already exist in `workflows/extended_orchestration/extension_registry.json` and declare `affected_declarative_families` there.
-      14. Do not generate module files, backend/refinement_harness Python files, custom harness implementation files, or business-domain logic.
-      15. Mirror the typed `refinement_harness` into `code_files`.
+      12. In `overrides.routing.artifacts[].routes`, every route object must contain only `workflow_sequence`.
+      13. Do not emit `route_to`, `affected_workflows`, `affected_declarative_families`, `requires_replanning`, `requires_rebuild`, or `scope_summary`.
+      14. Every `workflow_sequence` referenced by route overrides must already exist in the effective `workflows/extended_orchestration/extension_registry.json` and declare `affected_declarative_families` there.
+      15. Do not generate module files, backend/refinement_harness Python files, custom harness implementation files, or business-domain logic.
+      16. Mirror the typed `refinement_harness` into `code_files`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -2200,40 +2202,16 @@ agents:
         "refinement_harness": {
           "harness_yaml": {
             "schema_version": "mozaiks.refinement_harness.v1",
-            "routing": {
-              "default_artifact_kind": "app_bundle",
-              "artifacts": [
-                {
-                  "artifact_kind": "app_bundle",
-                  "label": "app bundle",
-                  "routes": {
-                    "patch": { "workflow_sequence": "app_revision" },
-                    "design": { "workflow_sequence": "app_surface_revision" },
-                    "feature": { "workflow_sequence": "app_revision" },
-                    "core": { "workflow_sequence": "full_rebuild" }
-                  }
-                }
-              ]
-            },
-            "checkpoints": [
-              {
-                "event": "request_submitted",
-                "prompt_id": "change_classifier_system",
-                "tool_ids": ["get_revision_context", "get_artifact_summary"]
-              }
-            ]
+            "extends": "mozaiks.default_refinement_harness",
+            "overrides": {}
           },
-          "tools_yaml": {
-            "schema_version": "mozaiks.refinement_harness.tools.v1",
-            "tools": []
-          },
+          "tools_yaml": null,
           "policies_yaml": null,
           "prompt_files": []
         },
         "code_files": [
           { "filename": "app/config/refinement_policy.yaml", "content": "..." },
-          { "filename": "refinement_harness/config/harness.yaml", "content": "..." },
-          { "filename": "refinement_harness/config/tools.yaml", "content": "..." }
+          { "filename": "refinement_harness/config/harness.yaml", "content": "..." }
         ],
         "agent_message": "Generated refinement harness."
       }

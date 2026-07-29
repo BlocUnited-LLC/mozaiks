@@ -14,6 +14,10 @@ _resources = import_module_directly("mozaiksai.resources")
 get_global_pack_graph_path = _config.get_global_pack_graph_path
 load_global_pack_graph = _config.load_global_pack_graph
 list_workflow_sequences = _config.list_workflow_sequences
+DEFAULT_WORKFLOW_REGISTRY_EXTENDS = _config.DEFAULT_WORKFLOW_REGISTRY_EXTENDS
+discover_workflow_paths = _paths.discover_workflow_paths
+resolve_workflow_path = _paths.resolve_workflow_path
+workflow_resolution_roots = _paths.workflow_resolution_roots
 
 
 def _use_repo_factory_workflows(monkeypatch) -> None:
@@ -96,6 +100,117 @@ def test_single_root_registry_path_uses_explicit_override_without_factory_merge(
     assert graph is not None
     assert {workflow.id for workflow in graph.workflows} == {"HostedOnly"}
     assert graph.journeys == []
+
+
+def test_registry_extends_packaged_default_with_app_overlay(monkeypatch, tmp_path: Path) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+
+    workflows_root = tmp_path / "workflows"
+    registry_dir = workflows_root / "extended_orchestration"
+    registry_dir.mkdir(parents=True)
+    hosted_workflow_dir = workflows_root / "HostedOnly"
+    hosted_workflow_dir.mkdir()
+    (hosted_workflow_dir / "orchestrator.yaml").write_text(
+        "workflow_name: HostedOnly\nworkflow_startup_mode: BackendOnly\n",
+        encoding="utf-8",
+    )
+    target_registry = registry_dir / "extension_registry.json"
+    target_registry.write_text(
+        json.dumps(
+            {
+                "pack_name": "AppOverlay",
+                "version": 3,
+                "extends": DEFAULT_WORKFLOW_REGISTRY_EXTENDS,
+                "workflows": [
+                    {"id": "HostedOnly", "description": "Product workflow"},
+                ],
+                "entrypoints": [
+                    {"id": "create_app", "remove": True},
+                    {
+                        "id": "hosted_only",
+                        "workflow": "HostedOnly",
+                        "path": "/hosted-only",
+                        "label": "Hosted Only",
+                    },
+                ],
+                "workflow_sequences": [
+                    {
+                        "id": "hosted_sequence",
+                        "affected_declarative_families": ["hosted_artifact"],
+                        "steps": [{"workflows": ["HostedOnly"]}],
+                    }
+                ],
+                "artifact_dependency_graph": {
+                    "hosted_artifact": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
+    _config._GLOBAL_CACHE = None
+
+    graph = load_global_pack_graph()
+
+    assert graph is not None
+    workflow_ids = {workflow.id for workflow in graph.workflows}
+    assert {"ValueEngine", "AppGenerator", "HostedOnly"} <= workflow_ids
+    entrypoint_ids = {entrypoint.id for entrypoint in graph.entrypoints}
+    assert "create_app" not in entrypoint_ids
+    assert "hosted_only" in entrypoint_ids
+    sequence_ids = {sequence.id for sequence in graph.journeys}
+    assert {"app_revision", "theme_patch", "hosted_sequence"} <= sequence_ids
+    assert graph.artifact_dependency_graph["hosted_artifact"] == []
+
+    roots = workflow_resolution_roots(workflows_root)
+    assert roots[0] == workflows_root.resolve()
+    assert roots[1] == _resources.resolve_factory_workflows_root()
+    workflow_paths = discover_workflow_paths(workflows_root)
+    assert workflow_paths["HostedOnly"] == hosted_workflow_dir.resolve()
+    assert workflow_paths["AppGenerator"] == (
+        _resources.resolve_factory_workflows_root() / "AppGenerator"
+    ).resolve()
+    assert resolve_workflow_path("HostedOnly", workflows_root) == hosted_workflow_dir.resolve()
+    assert resolve_workflow_path("AppGenerator", workflows_root) == (
+        _resources.resolve_factory_workflows_root() / "AppGenerator"
+    ).resolve()
+
+
+def test_explicit_app_registry_without_extends_does_not_discover_factory_workflows(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+
+    workflows_root = tmp_path / "workflows"
+    registry_dir = workflows_root / "extended_orchestration"
+    registry_dir.mkdir(parents=True)
+    hosted_workflow_dir = workflows_root / "HostedOnly"
+    hosted_workflow_dir.mkdir()
+    (hosted_workflow_dir / "orchestrator.yaml").write_text(
+        "workflow_name: HostedOnly\nworkflow_startup_mode: BackendOnly\n",
+        encoding="utf-8",
+    )
+    (registry_dir / "extension_registry.json").write_text(
+        json.dumps(
+            {
+                "pack_name": "AppOnly",
+                "version": 3,
+                "workflows": [
+                    {"id": "HostedOnly", "description": "Product workflow"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
+
+    workflow_paths = discover_workflow_paths(workflows_root)
+
+    assert workflow_paths == {"HostedOnly": hosted_workflow_dir.resolve()}
+    assert resolve_workflow_path("AppGenerator", workflows_root) is None
 
 
 def test_declared_global_workflows_match_physical_workflow_folders(monkeypatch) -> None:

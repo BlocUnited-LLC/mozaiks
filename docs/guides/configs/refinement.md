@@ -12,9 +12,10 @@ checkpoint decisions, or workflow re-entry based on request meaning.
 | File | Owns |
 |------|------|
 | `app/config/refinement_policy.yaml` | Enables refinement capabilities and selects model profiles. |
-| `refinement_harness/config/harness.yaml` | Maps artifact kinds and change classes to workflow sequences. |
-| `refinement_harness/config/tools.yaml` | Names the deterministic tools available to checkpoint handlers. |
-| `refinement_harness/prompts/*.yaml` | Prompt text referenced by checkpoint `prompt_id` values. |
+| `refinement_harness/config/harness.yaml` | Optional overlay that extends the packaged default harness. |
+| `refinement_harness/config/tools.yaml` | Optional app-local tool additions referenced by overlay checkpoints. |
+| `refinement_harness/config/policies.yaml` | Optional deterministic scope policy overrides. |
+| `refinement_harness/prompts/*.yaml` | Optional prompt overrides referenced from `overrides.prompts`. |
 | `workflows/extended_orchestration/extension_registry.json` | Workflow sequences that the harness can route into. |
 
 ## Minimal Policy
@@ -46,63 +47,43 @@ coding:
   llm_profile: codegen
 ```
 
-## Minimal Harness
+## Minimal Harness Overlay
+
+Most apps should use the packaged default harness. Add an app-local
+`refinement_harness/config/harness.yaml` only when the app needs to extend the
+default routing, checkpoint, or prompt behavior:
 
 ```yaml
 schema_version: mozaiks.refinement_harness.v1
-routing:
-  default_artifact_kind: app_bundle
-  artifacts:
-    - artifact_kind: app_bundle
-      label: app bundle
-      routes:
-        patch:
-          workflow_sequence: app_revision
-        design:
-          workflow_sequence: app_surface_revision
-        feature:
-          workflow_sequence: app_revision
-        core:
-          workflow_sequence: full_rebuild
-
-checkpoints:
-  - event: request_submitted
-    prompt_id: change_classifier_system
-    tool_ids:
-      - get_revision_context
-      - get_artifact_summary
-      - get_app_intelligence_context
-      - get_stale_artifact_families
-  - event: scope_requested
-    prompt_id: coding_scope_selection_system
-    tool_ids:
-      - get_revision_context
-      - get_artifact_summary
-      - get_app_intelligence_context
-      - get_artifact_workspace_catalog
-      - get_context_graph_catalog
-      - search_app_source_context
-  - event: contract_surface_requested
-    prompt_id: contract_surface_selection_system
-    tool_ids:
-      - get_contract_surface_context
-      - get_app_intelligence_context
-      - search_app_source_context
-  - event: coding_requested
-    prompt_id: coding_refinement_system
-    tool_ids:
-      - get_revision_context
-      - get_artifact_summary
-      - get_app_intelligence_context
-      - get_artifact_workspace_scope
-      - get_context_graph_scope
-      - search_app_source_context
-      - read_app_source_file
-      - get_related_app_source_files
+extends: mozaiks.default_refinement_harness
+overrides:
+  routing:
+    artifacts:
+      - artifact_kind: app_bundle
+        label: app bundle
+  checkpoints:
+    - event: coding_requested
+      append_tool_ids:
+        - app_local_context
 ```
 
-Every `workflow_sequence` referenced by the harness must exist in
+`extends: mozaiks.default_refinement_harness` loads the packaged
+`factory_app/refinement_harness` pack from the installed `mozaiks` package and
+then applies deterministic app-local deltas. Every new `workflow_sequence`
+referenced by an overlay must exist in
 `workflows/extended_orchestration/extension_registry.json`.
+
+Overlay merge rules:
+
+- scalar values override the default
+- object values merge recursively by key
+- `routing.artifacts` merge by `artifact_kind`
+- `checkpoints` merge by `event`
+- checkpoint `tool_ids` replace the default list
+- checkpoint `append_tool_ids` adds tools without replacing the default list
+- `config/tools.yaml` merges tools by `id`
+- `config/policies.yaml` merges policy objects by key
+- `overrides.prompts` maps prompt id to an app-local prompt file
 
 ## Code Context By Checkpoint
 
@@ -126,7 +107,8 @@ through tools only when their checkpoint needs it.
 |---------|------|
 | Ask/chat/workflow startup | `app/config/ai.json` |
 | Model profile selection | `app/config/refinement_policy.yaml` |
-| Artifact routing and checkpoints | `refinement_harness/config/harness.yaml` |
+| Default artifact routing and checkpoints | packaged `mozaiks.default_refinement_harness` |
+| App-specific routing and checkpoint deltas | `refinement_harness/config/harness.yaml` |
 | Sequence impact metadata | `workflows/extended_orchestration/extension_registry.json` |
 
 ## Read Next

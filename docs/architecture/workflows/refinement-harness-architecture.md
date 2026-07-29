@@ -311,8 +311,9 @@ refinement_harness/config/harness.yaml  artifact routes and LLM-backed checkpoin
 `app/config/refinement_policy.yaml` provides model config. `harness.yaml` does
 not point to Python implementation files.
 
-The declarative pack lives under `factory_app/refinement_harness/` or an app-local
-override at `<workspace>/refinement_harness/`.
+The packaged default pack lives under `factory_app/refinement_harness/`. An
+app-local `<workspace>/refinement_harness/` directory is an overlay when
+`config/harness.yaml` declares `extends: mozaiks.default_refinement_harness`.
 
 ## Generated App Authoring
 
@@ -320,13 +321,14 @@ Most generated apps do not need an app-local Refinement Engine. They should use
 ordinary workflow launches, module actions, and `extension_registry.json`
 workflow sequences first.
 
-AppGenerator may emit an app-local harness only when the product explicitly
-needs checkpointed lifecycle, refinement, session, or coding-control behavior
-that cannot be expressed as normal workflow transitions.
+AppGenerator may emit an app-local harness overlay only when the product
+explicitly needs checkpointed lifecycle, refinement, session, or coding-control
+behavior that cannot be expressed by the packaged default harness plus normal
+workflow transitions.
 
 See [app/refinement-harness.md](../../architecture/app/refinement-harness.md)
-for the full starter pack reference, annotated templates, and guidance on which
-checkpoints and tools a generated app should include.
+for the overlay contract and guidance on which deltas a generated app should
+include.
 
 ### Ownership Split
 
@@ -334,7 +336,7 @@ Keep startup separate from the harness pack:
 
 - `app/config/ai.json` owns `ask`, `chat`, and `workflows` startup
 - `app/config/refinement_policy.yaml` owns runtime policy (LLM profiles, feature flags)
-- `refinement_harness/config/harness.yaml` owns declarative checkpoints and routing
+- `refinement_harness/config/harness.yaml` owns app-local checkpoint and routing deltas
 
 ### AppGenerator Build Task
 
@@ -348,12 +350,12 @@ initial_agent: RefinementHarnessAgent
 owned_paths:
   - app/config/refinement_policy.yaml
   - refinement_harness/config/harness.yaml
-  - refinement_harness/config/tools.yaml
 ```
 
 Optional owned paths:
 
 ```yaml
+- refinement_harness/config/tools.yaml
 - refinement_harness/config/policies.yaml
 - refinement_harness/prompts/*.yaml
 ```
@@ -368,8 +370,8 @@ Generated refinement harnesss are declarative only:
 - no custom harness Python
 - no business-domain logic
 
-The generated pack uses shipped `mozaiksai.control_plane` implementations and
-declared tool entrypoints from `mozaiksai.control_plane.tools.*` and
+The generated overlay uses shipped `mozaiksai.control_plane` implementations
+and declared tool entrypoints from `mozaiksai.control_plane.tools.*` and
 `factory_app.refinement_harness.tools.*`. Custom harness Python is not a v1
 generator contract.
 
@@ -389,10 +391,8 @@ generator contract.
 
 Declares:
 
-- harness entrypoint
 - artifact routing
 - checkpoint events
-- handler entrypoints
 - prompt ids
 - tool ids
 
@@ -400,12 +400,22 @@ Example:
 
 ```yaml
 schema_version: mozaiks.refinement_harness.v1
-profile:
-  id: factory_app
-  display_name: Factory App Harness
-  description: First-party declarative refinement harness for the Mozaiks build experience.
-harness:
-  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
+extends: mozaiks.default_refinement_harness
+overrides:
+  routing:
+    artifacts:
+      - artifact_kind: app_bundle
+        label: app bundle
+  checkpoints:
+    - event: coding_requested
+      append_tool_ids:
+        - app_local_context
+```
+
+The packaged default expands to an effective manifest with this shape:
+
+```yaml
+schema_version: mozaiks.refinement_harness.v1
 routing:
   default_artifact_kind: app_bundle
   artifacts:
@@ -420,47 +430,53 @@ routing:
           workflow_sequence: app_revision
         core:
           workflow_sequence: full_rebuild
+    - artifact_kind: theme_config
+      label: theme config
+      routes:
+        patch:
+          workflow_sequence: theme_patch
+        design:
+          workflow_sequence: theme_revision
+        feature:
+          workflow_sequence: theme_revision
+        core:
+          workflow_sequence: full_rebuild
 checkpoints:
-  - id: request_intake
-    event: request_submitted
-    entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
+  - event: request_submitted
     prompt_id: change_classifier_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
-
-  - id: refinement_route
-    event: route_requested
-    entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
-
-  - id: decision
-    event: decision_requested
-    entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
-
-  - id: scope_selection
-    event: scope_requested
-    entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
+      - get_app_intelligence_context
+      - get_stale_artifact_families
+  - event: route_requested
+  - event: decision_requested
+  - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
+      - get_app_intelligence_context
       - get_artifact_workspace_catalog
-
-  - id: contract_surface_planning
-    event: contract_surface_requested
-    entrypoint: mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner
+      - get_context_graph_catalog
+      - search_app_source_context
+  - event: contract_surface_requested
     prompt_id: contract_surface_selection_system
     tool_ids:
       - get_contract_surface_context
-
-  - id: coding_refinement
-    event: coding_requested
-    entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
+      - get_app_intelligence_context
+      - search_app_source_context
+  - event: coding_requested
     prompt_id: coding_refinement_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
+      - get_app_intelligence_context
       - get_artifact_workspace_scope
+      - get_context_graph_scope
+      - search_app_source_context
+      - read_app_source_file
+      - get_related_app_source_files
 ```
 
 Route rules:
@@ -478,21 +494,37 @@ Route rules:
 - Do not declare `requires_rebuild`; Refinement Engine rebuild decisions are
   runtime decision outputs, not route manifest inputs.
 
+Overlay merge rules:
+
+- overlays must declare `schema_version: mozaiks.refinement_harness.v1`
+- overlays must declare `extends: mozaiks.default_refinement_harness`
+- overlay manifest deltas live under `overrides`
+- scalar values override the packaged default
+- object values merge recursively by key
+- `routing.artifacts` merge by `artifact_kind`
+- `checkpoints` merge by `event`
+- checkpoint `tool_ids` replace the packaged list
+- checkpoint `append_tool_ids` adds tools while preserving packaged order
+- `config/tools.yaml` merges tools by `id`
+- `config/policies.yaml` merges policy objects by key
+- `overrides.prompts` maps prompt id to an app-local prompt file
+
 ### `config/tools.yaml`
 
-Declares harness-owned tools.
+Declares app-local tool additions. The packaged default declares the standard
+first-party tools.
 
 Example:
 
 ```yaml
+schema_version: mozaiks.refinement_harness.tools.v1
 tools:
-  - id: get_artifact_summary
+  - id: app_local_context
     kind: context_tool
-    description: Load artifact lineage and version metadata.
-    entrypoint: factory_app.refinement_harness.tools.get_artifact_summary:get_artifact_summary
+    description: Load app-local refinement context.
+    entrypoint: app.refinement_tools:app_local_context
     available_to:
-      - request_submitted
-      - route_requested
+      - coding_requested
 ```
 
 ### `prompts/*.yaml`
@@ -741,9 +773,9 @@ At runtime:
 
 1. `mozaiksai/core/runtime/app/ai_config.py` resolves startup from `app/config/ai.json`
 2. `mozaiksai/control_plane/config.py` resolves runtime policy from `app/config/refinement_policy.yaml`
-3. `mozaiksai/control_plane/loader.py` resolves the active pack from `refinement_harness/config/harness.yaml`
+3. `mozaiksai/control_plane/loader.py` resolves the packaged default harness and any app-local overlay
 4. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
-5. the harness entrypoint is instantiated from `harness.implementation`
+5. checkpoint handlers are resolved from first-party runtime bindings by event
 6. the harness binds and runs the checkpoints it needs
 
 Current Studio refinement flow:

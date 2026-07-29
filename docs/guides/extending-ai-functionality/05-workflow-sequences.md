@@ -6,6 +6,50 @@ sequences the Refinement Engine can re-enter.
 The Refinement Engine chooses a route. The workflow registry owns what that route
 means.
 
+Apps can use the packaged factory workflow registry directly or extend it with
+an app-local overlay:
+
+```json
+{
+  "pack_name": "MyAppOverlay",
+  "version": 3,
+  "extends": "mozaiks.default_workflow_registry",
+  "workflows": [
+    { "id": "ProductWorkflow", "description": "App-owned product workflow" }
+  ],
+  "entrypoints": [
+    { "id": "create_app", "remove": true },
+    {
+      "id": "product_workflow",
+      "workflow": "ProductWorkflow",
+      "path": "/product-workflow",
+      "label": "Product Workflow"
+    }
+  ],
+  "workflow_sequences": [
+    {
+      "id": "product_revision",
+      "affected_declarative_families": ["product_artifact"],
+      "steps": [{ "workflows": ["ProductWorkflow"] }]
+    }
+  ],
+  "artifact_dependency_graph": {
+    "product_artifact": []
+  }
+}
+```
+
+Use the overlay form when an app wants default Factory/Studio sequences and
+app-owned product workflows in the same effective registry. Lists merge by
+`id`; `{ "id": "...", "remove": true }` hides a packaged entry such as the
+default create route.
+
+When a registry extends `mozaiks.default_workflow_registry`, workflow folder
+resolution also searches the packaged factory workflow root. App-local workflow
+folders remain in the app `workflows/` directory and override packaged folders
+with the same id. Without `extends`, the app registry is explicit and only the
+selected app workflow root is searched.
+
 Example:
 
 ```json
