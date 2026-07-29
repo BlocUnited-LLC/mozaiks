@@ -67,7 +67,7 @@ The runtime exposes these stable entrypoints:
 - `mozaiksai.core.runtime.app.write_app_provenance`
 - `mozaiksai.core.runtime.app.AppLoader.load`
 
-`AppLoader.load()` accepts missing provenance for backwards compatibility, but
-rejects malformed `app/provenance.yaml` when it is present. CI should load the
-app through the pinned `mozaiks` package, validate provenance, and verify that
+`AppLoader.load()` accepts apps that do not declare provenance yet, but rejects
+malformed `app/provenance.yaml` when it is present. CI should load the app
+through the pinned `mozaiks` package, validate provenance, and verify that
 declared overlay paths remain inside the app bundle.
