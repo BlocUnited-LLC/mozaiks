@@ -28,7 +28,7 @@
     "dompurify": "^3.4.12",
     "keycloak-js": "^26.2.4",
     "lucide-react": "^1.27.0",
-    "marked": "^13.0.3",
+    "marked": "^18.0.7",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
