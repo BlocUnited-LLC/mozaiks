@@ -10,10 +10,7 @@ logger = logging.getLogger(__name__)
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from factory_app.workflows.AppGenerator.tools.app_validation import (
-    _is_safe_build_command,
-    validate_app_build,
-)
+from mozaiksai.control_plane.app_validation import run_current_app_source_validation
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
@@ -38,6 +35,7 @@ _ELIGIBLE_CHANGE_CLASSES = {"patch"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
 _VALIDATION_STRATEGIES = {"skip", "local", "e2b"}
 _CHECKPOINT_EVENT = "coding_requested"
+_MODEL_VALIDATION_COMMAND_MAX_LENGTH = 240
 
 # theme_config files live inside the app_bundle workspace. We alias the artifact
 # kind so the coding worker can locate and patch these files without requiring a
@@ -63,7 +61,7 @@ class ScopedRefinementCodingWorker:
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_refinement_harness,
         tool_executor: Any = None,
-        validation_runner: Any = validate_app_build,
+        source_validation_runner: Any = run_current_app_source_validation,
         artifact_store: Any = None,
         output_root: Any = None,
     ) -> None:
@@ -71,7 +69,7 @@ class ScopedRefinementCodingWorker:
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
-        self._validation_runner = validation_runner
+        self._source_validation_runner = source_validation_runner
         self._artifact_store = artifact_store
         self._output_root = Path(output_root) if output_root is not None else Path("generated_refinements")
 
@@ -139,15 +137,14 @@ class ScopedRefinementCodingWorker:
         validation_result = None
         status = "planned"
         if resolved_artifact_kind == "app_bundle" and merged_files:
-            validation_result = await self._validation_runner(
-                files=merged_files,
-                commands=list(resolved_plan.validation_commands or []),
-                start_dev_server=bool(resolved_plan.start_preview),
+            validation_result = await self._run_source_validation(
+                request=request,
+                plan=resolved_plan,
+                merged_files=merged_files,
                 validation_strategy=resolved_strategy,
-                context_variables=None,
             )
             validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
-            if validation_status in {"passed", "skipped"}:
+            if validation_status in {"passed", "skipped", "warning"}:
                 status = "validated"
             elif validation_status == "failed":
                 status = "failed"
@@ -162,13 +159,18 @@ class ScopedRefinementCodingWorker:
             "applied_file_count": len(applied_files),
             "selected_file_paths": list((request.metadata or {}).get("selected_file_paths") or []),
         }
+        if validation_result is not None:
+            validation_status = str((validation_result or {}).get("validation_status") or "").strip().lower()
+            metadata["validation_status"] = validation_status
+            metadata["source_validation_status"] = validation_status
+            metadata["source_validation_execution_mode"] = validation_result.get("execution_mode")
         if isinstance((request.metadata or {}).get("scope_proposal"), dict):
             metadata["scope_proposal"] = dict(request.metadata["scope_proposal"])
         persistence_error: str | None = None
-        if status == "validated":
+        if status in {"validated", "failed"} and validation_result is not None:
             try:
                 metadata.update(
-                    await self._persist_validated_artifact(
+                    await self._persist_refinement_artifact(
                         request=request,
                         resolved_artifact_kind=resolved_artifact_kind,
                         applied_files=applied_files,
@@ -196,7 +198,7 @@ class ScopedRefinementCodingWorker:
             validation_result=validation_result,
             metadata=metadata,
             error=persistence_error
-            or ((validation_result or {}).get("errors", [None])[0] if status == "failed" else None),
+            or (self._validation_error(validation_result) if status == "failed" else None),
         )
 
     def _load_config(self) -> ControlPlaneConfig:
@@ -274,11 +276,11 @@ class ScopedRefinementCodingWorker:
         commands = []
         for raw_command in plan.validation_commands or []:
             command = str(raw_command or "").strip()
-            if command and _is_safe_build_command(command):
+            if command and ScopedRefinementCodingWorker._safe_model_validation_command_hint(command):
                 commands.append(command)
             elif command:
                 logger.warning(
-                    "CODING_WORKER: rejected unsafe validation_command (shell metacharacters): %r",
+                    "CODING_WORKER: discarded unsafe model validation_command hint: %r",
                     command,
                 )
 
@@ -384,7 +386,79 @@ class ScopedRefinementCodingWorker:
         ]
         return "\n".join(lines)
 
-    async def _persist_validated_artifact(
+    async def _run_source_validation(
+        self,
+        *,
+        request: CodingWorkerRequest,
+        plan: CodingWorkerPlan,
+        merged_files: dict[str, str],
+        validation_strategy: str,
+    ) -> dict[str, Any]:
+        options = self._source_validation_options(
+            request=request,
+            plan=plan,
+            validation_strategy=validation_strategy,
+        )
+        result = await self._source_validation_runner(
+            app_id=request.app_id,
+            artifact_store=self._artifact_store,
+            overlay_files=merged_files,
+            allowed_kinds=options["allowed_kinds"],
+            include_install=options["include_install"],
+            max_commands=options["max_commands"],
+            timeout_seconds=options["timeout_seconds"],
+            confirm_execution=options["confirm_execution"],
+            copy_workspace=True,
+        )
+        if hasattr(result, "model_dump"):
+            payload = result.model_dump(mode="json")
+        elif isinstance(result, dict):
+            payload = dict(result)
+        else:
+            payload = {"validation_status": "failed", "error": str(result)}
+        payload["validation_strategy"] = validation_strategy
+        payload["requested_validation_commands"] = list(plan.validation_commands or [])
+        payload["confirm_execution"] = options["confirm_execution"]
+        return payload
+
+    @staticmethod
+    def _source_validation_options(
+        *,
+        request: CodingWorkerRequest,
+        plan: CodingWorkerPlan,
+        validation_strategy: str,
+    ) -> dict[str, Any]:
+        metadata = dict(request.metadata or {})
+        context_seed = dict(request.context_seed or {})
+        raw_kinds = metadata.get("validation_allowed_kinds") or metadata.get("allowed_validation_kinds")
+        if raw_kinds is None:
+            raw_kinds = context_seed.get("validation_allowed_kinds") or context_seed.get("allowed_validation_kinds")
+        allowed_kinds = ScopedRefinementCodingWorker._string_list(raw_kinds)
+        include_install = bool(metadata.get("validation_include_install") or context_seed.get("validation_include_install"))
+        max_commands = ScopedRefinementCodingWorker._bounded_int(
+            metadata.get("validation_max_commands") or context_seed.get("validation_max_commands"),
+            default=4,
+            minimum=1,
+            maximum=12,
+        )
+        timeout_seconds = ScopedRefinementCodingWorker._bounded_int(
+            metadata.get("validation_timeout_seconds") or context_seed.get("validation_timeout_seconds"),
+            default=120,
+            minimum=5,
+            maximum=900,
+        )
+        confirm_execution = validation_strategy != "skip"
+        if plan.start_preview:
+            confirm_execution = True
+        return {
+            "allowed_kinds": allowed_kinds or None,
+            "include_install": include_install,
+            "max_commands": max_commands,
+            "timeout_seconds": timeout_seconds,
+            "confirm_execution": confirm_execution,
+        }
+
+    async def _persist_refinement_artifact(
         self,
         *,
         request: CodingWorkerRequest,
@@ -439,6 +513,9 @@ class ScopedRefinementCodingWorker:
             "applied_paths": sorted(applied_files.keys()),
             "validation_strategy": plan.validation_strategy,
             "validation_status": "",  # filled after status is resolved below
+            "source_validation_status": str((validation_result or {}).get("validation_status") or "").strip().lower(),
+            "source_validation_result": validation_result,
+            "validation_result": validation_result,
             "source_surface": request.source_surface,
         }
         content_store = get_artifact_content_store()
@@ -489,6 +566,8 @@ class ScopedRefinementCodingWorker:
             "artifact_path": str(zip_path.resolve()),
             "workspace_dir": str(workspace_dir.resolve()),
             "bundle_mode": "staged_refinement_bundle",
+            "validation_status": validation_status.value,
+            "source_validation_status": commit_content_metadata["source_validation_status"],
         }
 
     @staticmethod
@@ -501,6 +580,53 @@ class ScopedRefinementCodingWorker:
         if status == "failed":
             return ArtifactValidationStatus.FAILED
         return ArtifactValidationStatus.PENDING
+
+    @staticmethod
+    def _validation_error(validation_result: dict[str, Any] | None) -> str | None:
+        if not isinstance(validation_result, dict):
+            return None
+        if validation_result.get("error"):
+            return str(validation_result["error"])
+        for key in ("command_results", "fallback_checks"):
+            values = validation_result.get(key)
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if isinstance(item, dict) and str(item.get("status") or "").strip().lower() == "failed":
+                    return str(item.get("reason") or f"{key} failed")
+        errors = validation_result.get("errors")
+        if isinstance(errors, list) and errors:
+            return str(errors[0])
+        return None
+
+    @staticmethod
+    def _safe_model_validation_command_hint(command: str) -> bool:
+        if not command or "\x00" in command:
+            return False
+        if len(command) > _MODEL_VALIDATION_COMMAND_MAX_LENGTH:
+            return False
+        return not any(char in command for char in "\r\n")
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        for item in value:
+            text = str(item or "").strip().lower()
+            if text and text not in result:
+                result.append(text)
+        return result
+
+    @staticmethod
+    def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            number = default
+        return max(minimum, min(number, maximum))
 
 
 _coding_worker: ScopedRefinementCodingWorker | None = None

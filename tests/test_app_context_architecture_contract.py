@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOC_PATH = "docs/architecture/foundations/app-context-and-brownfield-adoption.md"
 INTELLIGENCE_DOC_PATH = "docs/architecture/foundations/app-intelligence-plane.md"
+INTELLIGENCE_USER_JOURNEY_DOC_PATH = "docs/architecture/foundations/app-intelligence-user-journey.md"
 GRAPH_DOC_PATH = "docs/architecture/foundations/graph-authority-boundaries.md"
 
 
@@ -93,6 +94,18 @@ def test_app_intelligence_plane_doc_defines_artifact_stack_and_agent_policy() ->
     assert "FalkorDB is the recommended production graph backend" in normalized
 
 
+def test_app_intelligence_user_journey_doc_defines_production_lifecycle() -> None:
+    doc = _read(INTELLIGENCE_USER_JOURNEY_DOC_PATH)
+    normalized = _normalized(doc)
+
+    assert "create/import app -> index source -> build graph -> generate/refine -> validate -> review diff -> promote" in normalized
+    assert "`repo_clone`" in doc
+    assert "`workspace_scan`" in doc
+    assert "`symbol_parse`" in doc
+    assert "Tree-sitter is the local parser layer" in doc
+    assert "FalkorDB is the production relationship-query mirror" in doc
+
+
 def test_graph_authority_doc_mentions_app_context_graph_without_runtime_authority() -> None:
     doc = _read(GRAPH_DOC_PATH)
     normalized = _normalized(doc)
@@ -109,8 +122,11 @@ def test_app_context_doc_is_registered_in_docs_navigation() -> None:
     target = "architecture/foundations/app-context-and-brownfield-adoption.md"
 
     assert "foundations/app-intelligence-plane.md" in _read("docs/architecture/index.md")
+    assert "foundations/app-intelligence-user-journey.md" in _read("docs/architecture/index.md")
     assert "app-intelligence-plane.md" in _read("docs/architecture/foundations/overview.md")
+    assert "app-intelligence-user-journey.md" in _read("docs/architecture/foundations/overview.md")
     assert "architecture/foundations/app-intelligence-plane.md" in _read("mkdocs.yml")
+    assert "architecture/foundations/app-intelligence-user-journey.md" in _read("mkdocs.yml")
     assert "foundations/app-context-and-brownfield-adoption.md" in _read("docs/architecture/index.md")
     assert "app-context-and-brownfield-adoption.md" in _read("docs/architecture/foundations/overview.md")
     assert target in _read("mkdocs.yml")

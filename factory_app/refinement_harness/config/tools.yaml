@@ -44,6 +44,12 @@ tools:
       - scope_requested
       - contract_surface_requested
       - coding_requested
+  - id: run_app_source_validation
+    kind: validation_tool
+    description: Run framework-aware validation commands from the current App Intelligence source context after staged source changes are ready for review.
+    entrypoint: factory_app.refinement_harness.tools.app_validation:run_app_source_validation
+    available_to:
+      - coding_requested
   - id: get_context_graph_scope
     kind: context_tool
     description: Load graph-neighborhood context for explicitly scoped files, including related files, symbols, and edges from the current app/artifact Context Graph.

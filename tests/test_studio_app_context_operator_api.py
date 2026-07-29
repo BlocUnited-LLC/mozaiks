@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -19,6 +20,7 @@ from mozaiksai.control_plane.app_context_refresh_execution import (
     ContextRefreshLaunchStatus,
 )
 from mozaiksai.control_plane.dry_run import build_refinement_execution_plan_from_route
+from mozaiksai.control_plane.source_import import SourceImportResult
 from mozaiksai.core.app_context.models import AppContextGraph, AppContextStaleStatus
 from mozaiksai.core.app_context.refresh import (
     BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE,
@@ -144,12 +146,23 @@ def test_get_app_context_status_handles_missing_context(monkeypatch) -> None:
     assert APP_CONTEXT_MISSING_WARNING in body["warnings"]
 
 
-def test_app_intelligence_index_endpoint_registers_context(monkeypatch) -> None:
+def test_app_intelligence_index_endpoint_starts_and_completes_job(monkeypatch) -> None:
     studio_app, client = _client(monkeypatch)
+
+    def fake_resolve_source_import(**kwargs):
+        request = kwargs["request"]
+        assert kwargs["app_id"] == "app_1"
+        assert request.workspace_root == "C:/workspace/app"
+        return SourceImportResult(
+            source_kind="local_workspace",
+            workspace_root="C:/workspace/app",
+            selected_root="C:/workspace/app",
+        )
 
     async def fake_index(**kwargs):
         assert kwargs["app_id"] == "app_1"
         assert kwargs["workspace_root"] == "C:/workspace/app"
+        assert kwargs["scan_policy"] == {}
         return type(
             "Result",
             (),
@@ -164,10 +177,18 @@ def test_app_intelligence_index_endpoint_registers_context(monkeypatch) -> None:
                 "indexed_file_count": 42,
                 "scan_health": {"selected_file_count": 42},
                 "health_report": {"status": "healthy", "warnings": [], "blockers": [], "coverage": {}},
+                "framework_detection": {
+                    "schema_version": "mozaiks.framework_detection.v1",
+                    "primary_framework_id": "nextjs",
+                    "primary_framework_label": "Next.js",
+                    "frameworks": [{"framework_id": "nextjs", "label": "Next.js"}],
+                    "validation_commands": [{"kind": "build", "command": "npm run build"}],
+                },
                 "warnings": [],
             },
         )()
 
+    monkeypatch.setattr(studio_app, "resolve_source_import", fake_resolve_source_import)
     monkeypatch.setattr(studio_app, "index_workspace_app_intelligence", fake_index)
 
     response = client.post(
@@ -175,14 +196,70 @@ def test_app_intelligence_index_endpoint_registers_context(monkeypatch) -> None:
         json={"workspace_root": "C:/workspace/app"},
     )
 
-    assert response.status_code == 200
-    intelligence = response.json()["app_intelligence"]
+    assert response.status_code == 202
+    queued = response.json()["index_job"]
+    assert queued["status"] == "queued"
+    assert queued["source"]["workspace_root_present"] is True
+
+    latest_response = client.get("/api/studio/apps/app_1/context/app-intelligence/index/latest")
+    assert latest_response.status_code == 200
+    completed = latest_response.json()["index_job"]
+    assert completed["status"] == "succeeded"
+    intelligence = completed["app_intelligence"]
     assert intelligence["app_bundle_artifact_version_id"] == "av_bundle"
     assert intelligence["source_context_artifact_version_id"] == "av_source"
     assert intelligence["app_intelligence_artifact_version_id"] == "av_intelligence"
     assert intelligence["graph_artifact_version_id"] == "av_graph"
     assert intelligence["scan_health"]["selected_file_count"] == 42
     assert intelligence["health_report"]["status"] == "healthy"
+    assert intelligence["framework_detection"]["primary_framework_label"] == "Next.js"
+    assert completed["context_readiness"]["status"] == "ready"
+
+
+def test_app_source_validation_endpoint_requires_confirmation(monkeypatch) -> None:
+    _, client = _client(monkeypatch)
+
+    response = client.post(
+        "/api/studio/apps/app_1/context/validation/run",
+        json={},
+    )
+
+    assert response.status_code == 400
+    assert "confirm_execution=true" in response.json()["detail"]
+
+
+def test_app_source_validation_endpoint_runs_current_context_validation(monkeypatch) -> None:
+    studio_app, client = _client(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    class _ValidationResult:
+        def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
+            return {
+                "schema_version": "mozaiks.app_source_validation.v1",
+                "validation_status": "passed",
+                "mode": mode,
+                "workspace_root_present": True,
+            }
+
+    async def fake_validation(**kwargs):
+        captured.update(kwargs)
+        return _ValidationResult()
+
+    monkeypatch.setattr(studio_app, "run_current_app_source_validation", fake_validation)
+
+    response = client.post(
+        "/api/studio/apps/app_1/context/validation/run",
+        json={"confirm_execution": True, "allowed_kinds": ["test"], "max_commands": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validation"]["validation_status"] == "passed"
+    assert body["validation"]["workspace_root_present"] is True
+    assert captured["app_id"] == "app_1"
+    assert captured["allowed_kinds"] == ["test"]
+    assert captured["max_commands"] == 1
+    assert captured["confirm_execution"] is True
 
 
 def test_refresh_plan_is_non_mutating_and_does_not_launch(monkeypatch) -> None:

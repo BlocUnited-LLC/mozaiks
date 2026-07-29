@@ -20,6 +20,7 @@ import {
   StatusPill,
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import { API_BASE } from './studioApi.js'
 import buildWorkspacePortfolio from './workspaceStudioModel.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 
@@ -201,33 +202,63 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
   )
 }
 
-function ImportAppOverlay({ open, onClose, onImport }) {
+function ImportAppOverlay({ open, onClose, onImport, error, busy }) {
   return (
     <StudioSlideOver
       open={open}
       title="Import App"
-      description="Register an existing application so Mozaiks can route discovery and refinement from Studio."
+      description="Clone an existing repository and build App Intelligence before agents edit it."
       onClose={onClose}
     >
+      {error ? (
+        <div className="mb-4 rounded-lg border border-destructive/35 bg-destructive/8 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
       <Form
         id="import-app"
         fields={[
           {
-            name: 'url',
-            label: 'Existing app URL',
+            name: 'name',
+            label: 'App name',
+            type: 'text',
+            placeholder: 'Mozaiks App',
+          },
+          {
+            name: 'repo_url',
+            label: 'Repository URL',
             type: 'text',
             required: true,
-            placeholder: 'https://example.com',
+            placeholder: 'https://github.com/org/repo',
+          },
+          {
+            name: 'branch',
+            label: 'Branch',
+            type: 'text',
+            placeholder: 'main',
+          },
+          {
+            name: 'monorepo_path',
+            label: 'Monorepo path',
+            type: 'text',
+            placeholder: 'apps/web',
+          },
+          {
+            name: 'ignored_paths',
+            label: 'Ignored paths',
+            type: 'textarea',
+            placeholder: 'One path per line, such as docs/archive or examples/large-demo.',
           },
           {
             name: 'notes',
-            label: 'Notes for discovery',
+            label: 'Notes',
             type: 'textarea',
             placeholder: 'Current stack, product purpose, and constraints to preserve.',
           },
         ]}
-        submit_label="Continue Intake"
+        submit_label="Import Repository"
         cancel_label="Cancel"
+        disabled={busy}
         onCancel={onClose}
         onSubmit={onImport}
       />
@@ -241,6 +272,8 @@ export default function AppsPage() {
   const [searchValue, setSearchValue] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
   const [importOpen, setImportOpen] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importError, setImportError] = useState(null)
 
   const portfolio = useMemo(() => buildWorkspacePortfolio(apps), [apps])
 
@@ -288,7 +321,62 @@ export default function AppsPage() {
     if (actionId === 'create') {
       navigate(CREATE_APP_PATH)
     } else if (actionId === 'import') {
+      setImportError(null)
       setImportOpen(true)
+    }
+  }
+
+  async function handleImport(values) {
+    setImportBusy(true)
+    setImportError(null)
+    try {
+      const repoUrl = String(values.repo_url || '').trim()
+      const name = String(values.name || '').trim() || repoUrl.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') || 'Imported app'
+      const ignoredPaths = String(values.ignored_paths || '')
+        .split(/\r?\n|,/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+      const createRes = await fetch(`${API_BASE}/api/studio/apps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description: String(values.notes || '').trim() || `Imported from ${repoUrl}`,
+          status: 'building',
+          name_source: 'imported_app',
+          build_context_profile: {
+            source: 'repository_import',
+            repo_url: repoUrl,
+            branch: String(values.branch || '').trim() || null,
+            monorepo_path: String(values.monorepo_path || '').trim() || null,
+            ignored_paths: ignoredPaths,
+          },
+        }),
+      })
+      if (!createRes.ok) throw new Error('App record could not be created.')
+      const createPayload = await createRes.json()
+      const appId = createPayload?.app?.app_id
+      if (!appId) throw new Error('Created app record did not return an app id.')
+
+      const importRes = await fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(appId)}/context/source-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_kind: 'git_repository',
+          repo_url: repoUrl,
+          branch: String(values.branch || '').trim() || null,
+          monorepo_path: String(values.monorepo_path || '').trim() || null,
+          ignored_paths: ignoredPaths,
+          make_current: true,
+        }),
+      })
+      if (!importRes.ok) throw new Error('Source import job could not be started.')
+      setImportOpen(false)
+      navigate(`/apps/${encodeURIComponent(appId)}/overview`)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Repository import could not be started.')
+    } finally {
+      setImportBusy(false)
     }
   }
 
@@ -336,11 +424,14 @@ export default function AppsPage() {
 
         <ImportAppOverlay
           open={importOpen}
-          onClose={() => setImportOpen(false)}
-          onImport={() => {
+          onClose={() => {
+            if (importBusy) return
             setImportOpen(false)
-            navigate('/apps/new')
+            setImportError(null)
           }}
+          onImport={handleImport}
+          error={importError}
+          busy={importBusy}
         />
       </div>
     </WorkspaceLayout>

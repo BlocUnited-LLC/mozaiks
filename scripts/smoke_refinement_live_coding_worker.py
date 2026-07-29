@@ -546,9 +546,12 @@ def _build_manual_validation_runner():
     async def _manual_validation_runner(**kwargs):  # noqa: ANN003
         return {
             "success": True,
-            "validation_strategy": kwargs.get("validation_strategy", "skip"),
             "validation_status": "skipped",
+            "execution_mode": "not_executed",
+            "overlay_file_count": len(kwargs.get("overlay_files") or {}),
             "preview_url": None,
+            "command_results": [],
+            "fallback_checks": [],
             "errors": [],
             "warnings": [
                 "manual live smoke skips persistent validation output; replay fixture captures the staged result",
@@ -702,7 +705,7 @@ async def _run_scenario(
                 source_file_map=source_before,
                 plan=plan,
             ),
-            validation_runner=_manual_validation_runner,
+            source_validation_runner=_manual_validation_runner,
             artifact_store=artifact_store,
             output_root=tmp_path / "generated_refinements",
         )

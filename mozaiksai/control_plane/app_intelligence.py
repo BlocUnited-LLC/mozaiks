@@ -28,6 +28,7 @@ from mozaiksai.core.app_context import (
     ValidationSummary,
     collect_source_scan_file_map,
     default_context_graph_scan_policy,
+    detect_frameworks_from_file_map,
     index_source_scan,
     persist_app_context_index,
     redact_source_text,
@@ -74,6 +75,7 @@ class AppIntelligenceIndexResult:
     indexed_file_count: int
     scan_health: dict[str, Any]
     health_report: dict[str, Any]
+    framework_detection: dict[str, Any]
     warnings: list[str]
 
 
@@ -125,6 +127,7 @@ async def index_workspace_app_intelligence(
     )
     indexed_at = datetime.now(UTC)
     safe_file_map = _redacted_scan_file_map(scan_result.file_map)
+    framework_detection = detect_frameworks_from_file_map(safe_file_map).model_dump(mode="json")
     bundle_root = _generated_artifacts_root(generated_artifacts_root)
     index_token = indexed_at.strftime("%Y%m%d%H%M%S")
     index_dir = bundle_root / "app_intelligence" / _safe_segment(resolved_app_id) / index_token
@@ -154,6 +157,7 @@ async def index_workspace_app_intelligence(
                 "source_workspace_root": root.as_posix(),
                 "bundle_sha256": bundle_sha256,
                 "bundle_size_bytes": bundle_size_bytes,
+                "framework_detection": framework_detection,
             },
         },
     )
@@ -189,6 +193,9 @@ async def index_workspace_app_intelligence(
         source_ref=source_ref,
         indexed_at=indexed_at,
     )
+    snapshot_detection = dict(source_index.app_intelligence_snapshot.architecture.get("framework_detection") or {})
+    if snapshot_detection:
+        framework_detection = snapshot_detection
     app_bundle_ref = ArtifactRef(
         artifact_kind="app_bundle",
         artifact_key=artifact_key,
@@ -238,6 +245,7 @@ async def index_workspace_app_intelligence(
         indexed_file_count=registration.indexed_file_count,
         scan_health=registration.scan_health,
         health_report=registration.health_report,
+        framework_detection=framework_detection,
         warnings=registration.warnings,
     )
 

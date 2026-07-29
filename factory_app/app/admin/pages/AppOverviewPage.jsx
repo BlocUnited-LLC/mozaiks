@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { Alert } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
+  ActionButton,
   LinkButton,
   Panel,
   StatusPill,
@@ -25,6 +26,7 @@ import {
   getPlanStateLabel,
   normalizeAppStatus,
 } from './appStudioModel.js'
+import { API_BASE } from './studioApi.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
@@ -70,6 +72,24 @@ function runStatusLabel(status) {
   if (status === 2) return 'Completed'
   if (status === 1) return 'Running'
   return 'Unknown'
+}
+
+function contextReadinessTone(status) {
+  if (status === 'ready' || status === 'succeeded') return 'success'
+  if (status === 'failed') return 'destructive'
+  if (status === 'running' || status === 'queued') return 'primary'
+  if (status === 'stale' || status === 'degraded') return 'warning'
+  return 'default'
+}
+
+function contextReadinessLabel(status) {
+  if (status === 'ready') return 'Ready'
+  if (status === 'running') return 'Indexing'
+  if (status === 'queued') return 'Queued'
+  if (status === 'stale') return 'Stale'
+  if (status === 'degraded') return 'Degraded'
+  if (status === 'failed') return 'Failed'
+  return 'Missing'
 }
 
 function readNumber(...values) {
@@ -385,6 +405,177 @@ function ActivityPanel({ snapshot, latestRun, totalRuns, appId }) {
   )
 }
 
+function AppIntelligencePanel({ context, appId }) {
+  const [validationRunning, setValidationRunning] = useState(false)
+  const [validationResult, setValidationResult] = useState(null)
+  const [validationError, setValidationError] = useState(null)
+  const readiness = context?.context_readiness || {}
+  const job = context?.index_job || null
+  const graph = context?.context_graph_status || {}
+  const appIntelligence = job?.app_intelligence || {}
+  const frameworkDetection = appIntelligence.framework_detection || {}
+  const status = readiness.status || job?.status || (graph.available ? 'ready' : 'missing')
+  const phase = job?.phases?.find((item) => item.id === job.current_phase)
+  const commands = frameworkDetection.validation_commands || []
+  const frameworks = frameworkDetection.frameworks || []
+  const warnings = readiness.warnings || job?.warnings || context?.warnings || []
+  const canRunValidation = ['ready', 'degraded', 'succeeded'].includes(status) || graph.available
+  const validationCommands = validationResult?.command_results || []
+  const validationFallbacks = validationResult?.fallback_checks || []
+
+  async function handleRunValidation() {
+    setValidationRunning(true)
+    setValidationError(null)
+    try {
+      const response = await fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(appId)}/context/validation/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm_execution: true }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(body?.detail || 'Validation could not be started.')
+      }
+      setValidationResult(body.validation || null)
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : 'Validation could not be started.')
+    } finally {
+      setValidationRunning(false)
+    }
+  }
+
+  return (
+    <Panel
+      title="App intelligence"
+      subtitle="Source context available to build and refinement agents."
+      eyebrow={job?.updated_at ? `Updated ${formatRelativeTime(job.updated_at)}` : null}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusPill tone={contextReadinessTone(status)}>{contextReadinessLabel(status)}</StatusPill>
+        {readiness.primary_framework_label || frameworkDetection.primary_framework_label ? (
+          <StatusPill tone="default">{readiness.primary_framework_label || frameworkDetection.primary_framework_label}</StatusPill>
+        ) : null}
+        {frameworkDetection.monorepo ? <StatusPill tone="default">Monorepo</StatusPill> : null}
+      </div>
+
+      {job?.status === 'running' || job?.status === 'queued' ? (
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>{phase?.message || phase?.label || 'Preparing source context'}</span>
+            <span>{formatPercentLabel(job.progress_percent || 0, '0%')}</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary"
+              style={{ width: `${Math.max(3, Math.min(100, Number(job.progress_percent || 0)))}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Files</div>
+          <div className="mt-1 text-xl font-bold text-foreground">
+            {formatCompactNumber(readiness.indexed_file_count ?? appIntelligence.indexed_file_count ?? 0, '0')}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Graph</div>
+          <div className="mt-1 text-xl font-bold text-foreground">
+            {formatCompactNumber(graph.node_count || 0, '0')} / {formatCompactNumber(graph.edge_count || 0, '0')}
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground/60">nodes / edges</div>
+        </div>
+      </div>
+
+      {frameworks.length > 0 ? (
+        <>
+          <div className="my-4 border-t border-border/30" />
+          <div className="flex flex-wrap gap-2">
+            {frameworks.slice(0, 6).map((framework) => (
+              <StatusPill key={framework.framework_id} tone="default">{framework.label}</StatusPill>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {commands.length > 0 ? (
+        <>
+          <div className="my-4 border-t border-border/30" />
+          <div className="space-y-2">
+            {commands.slice(0, 3).map((command) => (
+              <div key={`${command.kind}:${command.command}:${command.working_directory}`} className="flex items-center justify-between gap-3 rounded-lg border border-border/45 px-3 py-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/65">{command.kind}</span>
+                <code className="truncate text-xs text-foreground">{command.command}</code>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <div className="my-4 border-t border-border/30" />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Validation</div>
+          <div className="mt-0.5 text-xs text-muted-foreground/70">
+            {validationResult
+              ? `${validationCommands.length} commands · ${validationFallbacks.length} fallback checks`
+              : commands.length > 0
+                ? `${commands.length} detected commands`
+                : 'Fallback checks available'}
+          </div>
+        </div>
+        <ActionButton
+          variant="outline"
+          size="sm"
+          disabled={!canRunValidation || validationRunning}
+          onClick={handleRunValidation}
+        >
+          {validationRunning ? 'Running...' : 'Run checks'}
+        </ActionButton>
+      </div>
+
+      {validationError ? (
+        <p className="mt-3 text-xs leading-5 text-destructive">{validationError}</p>
+      ) : null}
+
+      {validationResult ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone={validationTone(validationResult.validation_status)}>
+              {validationResult.validation_status || 'skipped'}
+            </StatusPill>
+            {validationResult.execution_mode ? <StatusPill tone="default">{validationResult.execution_mode}</StatusPill> : null}
+          </div>
+          {validationCommands.slice(0, 3).map((command) => (
+            <div key={`${command.kind}:${command.command}:${command.duration_ms}`} className="rounded-lg border border-border/45 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="truncate text-xs font-medium text-foreground">{command.command}</span>
+                <StatusPill tone={validationTone(command.status)}>{command.status}</StatusPill>
+              </div>
+              {command.reason ? <div className="mt-1 text-xs text-muted-foreground/65">{command.reason}</div> : null}
+            </div>
+          ))}
+          {validationCommands.length === 0 && validationFallbacks.slice(0, 2).map((check) => (
+            <div key={check.name} className="rounded-lg border border-border/45 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="truncate text-xs font-medium text-foreground">{check.name}</span>
+                <StatusPill tone={validationTone(check.status)}>{check.status}</StatusPill>
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground/65">{check.reason}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {warnings.length > 0 ? (
+        <p className="mt-4 text-xs leading-5 text-warning">{warnings.slice(0, 2).join(' · ')}</p>
+      ) : null}
+    </Panel>
+  )
+}
+
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -484,13 +675,14 @@ export default function AppOverviewPage() {
             description="Capture the first app brief to begin tracking this app through the build lifecycle. Artifact history, approval state, and runtime metrics will appear here once a build starts."
           />
         ) : (
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 xl:grid-cols-3">
             <BuildStatusPanel
               build={build}
               latestArtifact={latestArtifact}
               isApprovalPending={isApprovalPending}
               appId={appId}
             />
+            <AppIntelligencePanel context={data.context} appId={appId} />
             <ActivityPanel
               snapshot={snapshot}
               latestRun={latestRun}

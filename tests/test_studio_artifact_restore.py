@@ -221,6 +221,44 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
     assert body["review"]["review_status"] == "promoted"
 
 
+def test_promote_requires_override_for_skipped_validation(monkeypatch, tmp_path: Path) -> None:
+    bundle_zip = tmp_path / "bundle.zip"
+    _write_bundle_zip(
+        bundle_zip,
+        {
+            "GeneratedApp/src/App.jsx": "export default function App() { return <div>Promoted</div>; }\n",
+        },
+    )
+    version = _version(
+        artifact_version_id="av_skipped_validation_1",
+        zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.SKIPPED,
+        refinement_request_id="refine_skipped_validation",
+        files_manifest=[
+            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
+        ],
+    )
+    runtime_root = tmp_path / "runtime_app"
+    store = _PromoteStore(version)
+    _, client = _promote_client(monkeypatch, runtime_root, store)
+
+    blocked = client.post("/api/studio/build/artifacts/av_skipped_validation_1/promote")
+
+    assert blocked.status_code == 409
+    assert "validation_status='passed' is required" in blocked.json()["detail"]
+    assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+
+    allowed = client.post(
+        "/api/studio/build/artifacts/av_skipped_validation_1/promote",
+        json={"allow_validation_override": True},
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.json()["promoted"] is True
+    assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+
+
 def test_promote_restores_artifact_and_marks_app_registry_active(monkeypatch, tmp_path: Path) -> None:
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(

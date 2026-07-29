@@ -22,6 +22,7 @@ the peer architecture sections for details:
 | [Platform Information Architecture](platform-information-architecture.md) | Studio and app-level IA contracts |
 | [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md) | Ownership boundaries between runtime, product, and app bundle |
 | [App Intelligence Plane](app-intelligence-plane.md) | Shared code-context, graph, intelligence snapshot, and agent retrieval substrate |
+| [App Intelligence User Journey](app-intelligence-user-journey.md) | Source-backed create/import, indexing, refinement, validation, review, and promotion lifecycle |
 | [Graph Authority Boundaries](graph-authority-boundaries.md) | Source-of-truth boundaries for config, runtime, DB, and derived graph indexes |
 | [Context Graph and Code Intelligence](context-graph-and-code-intelligence.md) | Context Graph contract, deterministic code extraction, contract mapping, and advisory semantic annotations |
 | [App Context and Brownfield Adoption](app-context-and-brownfield-adoption.md) | Unified app context, brownfield onboarding, and Refinement Engine ownership boundaries |
@@ -38,7 +39,6 @@ from builder state.
 | [Event System](events-and-data/event-system.md) | Event namespaces and routing ownership |
 | [Event Contracts](events-and-data/event-contracts.md) | Event envelope schema and naming conventions |
 | [Persistence and Artifact Storage](events-and-data/persistence-and-artifact-storage.md) | Mongo/artifact namespaces and generated output staging |
-| [Learning Loop Architecture](events-and-data/learning-loop-architecture.md) | Feedback and learning-loop boundaries |
 
 ## Contract Summary
 

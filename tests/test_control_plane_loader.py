@@ -74,6 +74,7 @@ def test_load_default_factory_refinement_harness() -> None:
         "get_artifact_workspace_catalog",
         "get_context_graph_catalog",
         "get_app_intelligence_context",
+        "run_app_source_validation",
         "get_context_graph_scope",
         "search_app_source_context",
         "read_app_source_file",

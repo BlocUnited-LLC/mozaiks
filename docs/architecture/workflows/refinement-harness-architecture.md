@@ -592,6 +592,55 @@ Current first-party handler:
 
 - `mozaiksai/control_plane/implementations/coding_worker.py`
 
+## Staged Coding Worker
+
+The staged coding worker (`mozaiksai/control_plane/implementations/coding_worker.py`)
+is the checkpoint handler that applies LLM-generated file edits during a
+coding refinement turn. It bridges between an LLM checkpoint's structured
+output and the staging area.
+
+### Flow
+
+```
+LLM coding checkpoint
+    → structured output: list[{path, new_content, reason}]
+    → apply_scoped_refinement_changes()   # scoped_execution.py
+        → path safety checks (no traversal, no secrets, no absolute paths)
+        → write files into staging area (never live workspace)
+        → return ScopedRefinementResult
+    → run_app_source_validation()          # app_validation.py (optional)
+        → copy staging area into isolated temp dir
+        → apply staged files as overlay
+        → run framework-detected lint/test commands
+        → return AppSourceValidationResult
+    → persist staged artifact version
+    → emit tool event to Studio panel
+```
+
+### What the coding worker does NOT do
+
+- It does not modify the live workspace. All writes go to a staging area.
+- It does not interpret the LLM's reasoning. It receives already-typed
+  structured output and applies it deterministically.
+- It does not run validation unless `confirm_execution=True` is passed. The
+  default is to plan validation commands and return them without running.
+- It does not promote staged changes. Promotion requires a separate
+  acceptance step through the Studio promotion flow.
+
+### Security guarantees from scoped execution
+
+Every path written by the coding worker passes through
+`apply_scoped_refinement_changes()`, which enforces:
+
+- no `..` traversal components
+- no absolute paths (Windows drive qualifiers or POSIX `/` prefixes)
+- no secret-sensitive filenames (`.env`, `id_rsa`, `.pem`, `.key`, etc.)
+- new files only created inside directories already referenced in the change set
+
+Files that fail these checks get status `skipped_unsafe` or `skipped_secret`
+and are never written. The worker reports these in the tool event so Studio
+can surface them.
+
 ## Tool Model
 
 Refinement Engine tools are leaf capabilities used by checkpoints.
@@ -608,6 +657,7 @@ Examples:
 - `get_artifact_summary`
 - `get_artifact_workspace_catalog`
 - `get_artifact_workspace_scope`
+- `run_app_source_validation`
 
 The current first-party tools live under:
 

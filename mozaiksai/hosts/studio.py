@@ -9,13 +9,14 @@ workflow triggering on top of the headless platform host.
 
 import stat
 import zipfile
+from asyncio import to_thread
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, HTTPException
+from fastapi import BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
@@ -26,9 +27,13 @@ configure_repo_host_defaults("studio")
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleArtifactVersionError,
+    SourceImportRequest,
     accept_staged_refinement_artifact_version,
     get_orchestration_control_harness,
     index_workspace_app_intelligence,
+    resolve_source_import,
+    run_current_app_source_validation,
+    source_import_scan_policy,
 )
 from mozaiksai.control_plane.app_context import (
     get_current_app_context_graph,
@@ -51,6 +56,17 @@ from mozaiksai.control_plane.app_context_refresh_execution import (
     ContextRefreshLaunchResult,
     complete_context_refresh,
     launch_context_refresh_plan,
+)
+from mozaiksai.control_plane.app_intelligence_jobs import (
+    AppIntelligenceIndexJob,
+    advance_app_intelligence_index_job,
+    complete_app_intelligence_index_job,
+    create_app_intelligence_index_job,
+    fail_app_intelligence_index_job,
+    get_app_intelligence_index_job,
+    get_latest_app_intelligence_index_job,
+    public_app_intelligence_index_job,
+    save_app_intelligence_index_job,
 )
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.review import load_refinement_review_record
@@ -319,6 +335,34 @@ def _refinement_acceptance_ready(version) -> bool:  # noqa: ANN001
     )
 
 
+def _validation_override_required(version) -> bool:  # noqa: ANN001
+    return version.validation_status in {ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED}
+
+
+def _enforce_artifact_validation_gate(
+    version,  # noqa: ANN001
+    *,
+    action: str,
+    allow_validation_override: bool = False,
+) -> None:
+    if version.validation_status == ArtifactValidationStatus.FAILED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Artifact cannot be {action}; validation_status='failed'.",
+        )
+    if version.validation_status == ArtifactValidationStatus.PASSED:
+        return
+    if allow_validation_override and _validation_override_required(version):
+        return
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Artifact cannot be {action}; validation_status='passed' is required "
+            "unless an explicit validation override is supplied."
+        ),
+    )
+
+
 def _resolve_bundle_restore_target(version) -> Path:  # noqa: ANN001
     app_root = resolve_app_root()
     if version.artifact_kind != "app_bundle":
@@ -494,15 +538,21 @@ async def _build_artifact_review_payload(
 
     can_accept = (
         version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
-        and version.validation_status in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}
+        and version.validation_status == ArtifactValidationStatus.PASSED
         and _refinement_acceptance_ready(version)
     )
     can_reject = version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
     can_promote = (
         version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
-        and version.validation_status in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}
+        and version.validation_status == ArtifactValidationStatus.PASSED
         and current_zip is not None
     )
+    validation_override_required = _validation_override_required(version)
+    validation_blocker = None
+    if version.validation_status == ArtifactValidationStatus.FAILED:
+        validation_blocker = "Validation failed. Reject or revise this artifact before accepting it."
+    elif validation_override_required:
+        validation_blocker = "Validation has not passed. Run validation or use an explicit operator override."
 
     return {
         "artifact_version": version.model_dump(by_alias=False, mode="python"),
@@ -520,6 +570,8 @@ async def _build_artifact_review_payload(
             "selected_paths": selected_paths,
             "coding_summary": coding_summary,
             "validation_result": validation_result,
+            "validation_override_required": validation_override_required,
+            "validation_blocker": validation_blocker,
             "current_skipped_files": current_skipped,
             "parent_skipped_files": parent_skipped,
             "can_accept": can_accept,
@@ -785,10 +837,24 @@ class AppContextRefreshCompleteRequest(BaseModel):
 
 
 class AppIntelligenceIndexRequest(BaseModel):
-    workspace_root: str = Field(..., min_length=1)
+    source_kind: Literal["local_workspace", "git_repository"] = "local_workspace"
+    workspace_root: str | None = Field(default=None, min_length=1)
+    repo_url: str | None = Field(default=None, min_length=1)
+    branch: str | None = Field(default=None, max_length=240)
+    monorepo_path: str | None = Field(default=None, max_length=1000)
+    auth_connector_id: str | None = Field(default=None, max_length=160)
+    ignored_paths: list[str] = Field(default_factory=list)
     artifact_key: str = "app_intelligence_workspace"
     make_current: bool = True
     scan_policy: dict[str, Any] | None = None
+
+
+class AppSourceValidationRequest(BaseModel):
+    allowed_kinds: list[Literal["install", "lint", "test", "build", "typecheck"]] = Field(default_factory=list)
+    include_install: bool = False
+    max_commands: int = Field(default=4, ge=1, le=12)
+    timeout_seconds: int = Field(default=120, ge=5, le=900)
+    confirm_execution: bool = False
 
 
 class AppContextPolicyOverrideRequest(BaseModel):
@@ -901,11 +967,19 @@ async def get_studio_app_context_status(
         "source_ref_count": len(graph.source_refs) if graph is not None else 0,
         "warnings": list(graph_lookup.warnings),
     }
+    latest_job = await get_latest_app_intelligence_index_job(app_id=resolved_app_id)
+    context_readiness = _studio_context_readiness(
+        summary=summary,
+        graph_status=graph_status,
+        latest_job=latest_job,
+    )
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
             "app_context_summary": summary.model_dump(mode="json"),
             "context_graph_status": graph_status,
+            "context_readiness": context_readiness,
+            "index_job": public_app_intelligence_index_job(latest_job),
             "stale_status": summary.stale_status,
             "warnings": [*list(summary.warnings), *list(graph_lookup.warnings)],
             "artifact_refs": [ref.model_dump(mode="json") for ref in summary.artifact_refs],
@@ -914,46 +988,281 @@ async def get_studio_app_context_status(
     )
 
 
-@app.post("/api/studio/apps/{app_id}/context/app-intelligence/index")
+@app.post("/api/studio/apps/{app_id}/context/app-intelligence/index", status_code=202)
 async def index_studio_app_intelligence_context(
     app_id: str,
     body: AppIntelligenceIndexRequest,
+    background_tasks: BackgroundTasks,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    return await _start_studio_app_intelligence_index_job(
+        app_id=resolved_app_id,
+        user_id=user_id,
+        body=body,
+        background_tasks=background_tasks,
+    )
+
+
+@app.post("/api/studio/apps/{app_id}/context/source-import", status_code=202)
+async def import_studio_app_source_context(
+    app_id: str,
+    body: AppIntelligenceIndexRequest,
+    background_tasks: BackgroundTasks,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    validate_path_id(app_id, "app_id")
+    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    return await _start_studio_app_intelligence_index_job(
+        app_id=resolved_app_id,
+        user_id=user_id,
+        body=body,
+        background_tasks=background_tasks,
+    )
+
+
+@app.get("/api/studio/apps/{app_id}/context/app-intelligence/index/latest")
+async def get_latest_studio_app_intelligence_index_job(
+    app_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    validate_path_id(app_id, "app_id")
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    job = await get_latest_app_intelligence_index_job(app_id=resolved_app_id)
+    return _redact_secret_fields({"app_id": resolved_app_id, "index_job": public_app_intelligence_index_job(job)})
+
+
+@app.get("/api/studio/apps/{app_id}/context/app-intelligence/index/{job_id}")
+async def get_studio_app_intelligence_index_job(
+    app_id: str,
+    job_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    validate_path_id(app_id, "app_id")
+    validate_path_id(job_id, "job_id")
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    job = await get_app_intelligence_index_job(app_id=resolved_app_id, job_id=job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="App Intelligence index job not found.")
+    return _redact_secret_fields({"app_id": resolved_app_id, "index_job": public_app_intelligence_index_job(job)})
+
+
+@app.post("/api/studio/apps/{app_id}/context/validation/run")
+async def run_studio_app_source_validation(
+    app_id: str,
+    body: AppSourceValidationRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    validate_path_id(app_id, "app_id")
+    if not body.confirm_execution:
+        raise HTTPException(status_code=400, detail="confirm_execution=true is required to run app validation.")
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     try:
-        result = await index_workspace_app_intelligence(
+        result = await run_current_app_source_validation(
             app_id=resolved_app_id,
-            workspace_root=body.workspace_root,
             artifact_store=get_artifact_store(),
-            artifact_key=body.artifact_key,
-            source_workflow="studio_app_intelligence_index",
-            source_chat_id=user_id,
-            scan_policy=body.scan_policy,
-            make_current=body.make_current,
+            allowed_kinds=body.allowed_kinds,
+            include_install=body.include_install,
+            max_commands=body.max_commands,
+            timeout_seconds=body.timeout_seconds,
+            confirm_execution=body.confirm_execution,
         )
     except ValueError as exc:
-        logger.warning("index_workspace_app_intelligence validation error app=%s: %s", app_id, exc)
-        raise HTTPException(status_code=400, detail="Invalid App Intelligence indexing parameters.") from exc
+        logger.warning("run_app_source_validation validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
-            "app_intelligence": {
-                "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
-                "source_context_artifact_version_id": result.source_context_artifact_version_id,
-                "app_intelligence_artifact_version_id": result.app_intelligence_artifact_version_id,
-                "app_context_version_id": result.app_context_version_id,
-                "app_context_artifact_version_id": result.app_context_artifact_version_id,
-                "graph_artifact_version_id": result.graph_artifact_version_id,
-                "artifact_path": result.artifact_path,
-                "indexed_file_count": result.indexed_file_count,
-                "scan_health": result.scan_health,
-                "health_report": result.health_report,
-                "warnings": result.warnings,
-            },
+            "validation": result.model_dump(mode="json"),
         }
     )
+
+
+async def _start_studio_app_intelligence_index_job(
+    *,
+    app_id: str,
+    user_id: str | None,
+    body: AppIntelligenceIndexRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    try:
+        _validate_app_intelligence_index_request(body)
+        job = create_app_intelligence_index_job(
+            app_id=app_id,
+            requested_by=user_id,
+            source_kind=body.source_kind,
+            workspace_root=body.workspace_root,
+            repo_url=body.repo_url,
+            branch=body.branch,
+            monorepo_path=body.monorepo_path,
+            auth_connector_id=body.auth_connector_id,
+            ignored_paths=body.ignored_paths,
+            artifact_key=body.artifact_key,
+            make_current=body.make_current,
+            scan_policy=body.scan_policy,
+        )
+        job = await save_app_intelligence_index_job(job)
+    except ValueError as exc:
+        logger.warning("create_app_intelligence_index_job validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    background_tasks.add_task(_run_studio_app_intelligence_index_job, app_id, job.job_id)
+    return _redact_secret_fields(
+        {
+            "app_id": app_id,
+            "accepted": True,
+            "index_job": public_app_intelligence_index_job(job),
+        }
+    )
+
+
+def _validate_app_intelligence_index_request(body: AppIntelligenceIndexRequest) -> None:
+    if body.source_kind == "local_workspace" and not body.workspace_root:
+        raise ValueError("workspace_root is required for local workspace indexing")
+    if body.source_kind == "git_repository" and not body.repo_url:
+        raise ValueError("repo_url is required for repository import")
+
+
+async def _run_studio_app_intelligence_index_job(app_id: str, job_id: str) -> None:
+    job = await get_app_intelligence_index_job(app_id=app_id, job_id=job_id)
+    if job is None:
+        return
+    try:
+        if job.source_kind == "git_repository":
+            job = advance_app_intelligence_index_job(job, phase_id="repo_clone")
+            job = await save_app_intelligence_index_job(job)
+
+        import_result = await to_thread(
+            resolve_source_import,
+            app_id=job.app_id,
+            request=_source_import_request_from_job(job),
+        )
+        job = job.model_copy(
+            update={
+                "workspace_root": import_result.selected_root,
+                "import_result": import_result.model_dump(mode="python"),
+                "warnings": _dedupe_strings([*job.warnings, *import_result.warnings]),
+            }
+        )
+        job = await save_app_intelligence_index_job(job)
+
+        async def progress_callback(phase_id: str, details: dict[str, Any]) -> None:
+            nonlocal job
+            job = advance_app_intelligence_index_job(
+                job,
+                phase_id=phase_id,
+                message=str((details or {}).get("message") or ""),
+                details=details,
+            )
+            job = await save_app_intelligence_index_job(job)
+
+        result = await index_workspace_app_intelligence(
+            app_id=job.app_id,
+            workspace_root=import_result.selected_root,
+            artifact_store=get_artifact_store(),
+            artifact_key=job.artifact_key,
+            source_workflow="studio_app_intelligence_index",
+            source_chat_id=job.requested_by,
+            scan_policy=source_import_scan_policy(job.scan_policy, ignored_paths=import_result.ignored_paths),
+            make_current=job.make_current,
+            progress_callback=progress_callback,
+        )
+        job = complete_app_intelligence_index_job(
+            job,
+            app_intelligence=_app_intelligence_result_payload(result),
+            context_readiness=_index_result_readiness(result),
+            warnings=result.warnings,
+        )
+        await save_app_intelligence_index_job(job)
+    except Exception as exc:
+        logger.exception("Studio App Intelligence index job failed job_id=%s", job_id)
+        failed = fail_app_intelligence_index_job(job, error=str(exc), warnings=job.warnings)
+        await save_app_intelligence_index_job(failed)
+
+
+def _source_import_request_from_job(job: AppIntelligenceIndexJob) -> SourceImportRequest:
+    return SourceImportRequest(
+        source_kind=job.source_kind,
+        workspace_root=job.workspace_root,
+        repo_url=job.repo_url,
+        branch=job.branch,
+        monorepo_path=job.monorepo_path,
+        auth_connector_id=job.auth_connector_id,
+        ignored_paths=list(job.ignored_paths),
+    )
+
+
+def _app_intelligence_result_payload(result: Any) -> dict[str, Any]:
+    return {
+        "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
+        "source_context_artifact_version_id": result.source_context_artifact_version_id,
+        "app_intelligence_artifact_version_id": result.app_intelligence_artifact_version_id,
+        "app_context_version_id": result.app_context_version_id,
+        "app_context_artifact_version_id": result.app_context_artifact_version_id,
+        "graph_artifact_version_id": result.graph_artifact_version_id,
+        "artifact_path": result.artifact_path,
+        "indexed_file_count": result.indexed_file_count,
+        "scan_health": result.scan_health,
+        "health_report": result.health_report,
+        "framework_detection": result.framework_detection,
+        "warnings": result.warnings,
+    }
+
+
+def _index_result_readiness(result: Any) -> dict[str, Any]:
+    frameworks = dict(result.framework_detection or {})
+    graph_health = dict(result.health_report or {})
+    status = "ready" if result.indexed_file_count > 0 and not graph_health.get("blockers") else "degraded"
+    return {
+        "status": status,
+        "indexed_file_count": result.indexed_file_count,
+        "primary_framework_id": frameworks.get("primary_framework_id"),
+        "primary_framework_label": frameworks.get("primary_framework_label"),
+        "framework_count": len(frameworks.get("frameworks") or []),
+        "validation_command_count": len(frameworks.get("validation_commands") or []),
+        "warnings": _dedupe_strings([*list(result.warnings or []), *list(graph_health.get("warnings") or [])]),
+    }
+
+
+def _job_readiness(job: AppIntelligenceIndexJob | None) -> dict[str, Any] | None:
+    if job is None:
+        return None
+    if job.context_readiness:
+        return dict(job.context_readiness)
+    if job.status in {"queued", "running"}:
+        return {"status": job.status, "progress_percent": job.progress_percent, "current_phase": job.current_phase}
+    if job.status == "failed":
+        return {"status": "failed", "error": job.error, "warnings": list(job.warnings)}
+    return {"status": job.status, "progress_percent": job.progress_percent}
+
+
+def _studio_context_readiness(*, summary: Any, graph_status: dict[str, Any], latest_job: AppIntelligenceIndexJob | None) -> dict[str, Any]:
+    job_readiness = _job_readiness(latest_job)
+    if job_readiness and latest_job and latest_job.status in {"queued", "running", "failed"}:
+        return job_readiness
+    if graph_status.get("available"):
+        stale_status = getattr(summary.stale_status, "value", summary.stale_status)
+        return {
+            "status": "ready" if stale_status == "current" else "stale",
+            "graph_id": graph_status.get("graph_id"),
+            "indexed_at": graph_status.get("indexed_at"),
+            "node_count": graph_status.get("node_count"),
+            "edge_count": graph_status.get("edge_count"),
+            "warnings": _dedupe_strings([*list(summary.warnings), *list(graph_status.get("warnings") or [])]),
+        }
+    return job_readiness or {"status": "missing", "warnings": list(summary.warnings)}
+
+
+def _dedupe_strings(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
 
 
 @app.post("/api/studio/apps/{app_id}/context/refresh-plan")
@@ -1372,9 +1681,18 @@ async def get_build_artifact_review(
     return {"app_id": app_id, **payload}
 
 
+class BuildArtifactAcceptanceRequest(BaseModel):
+    allow_validation_override: bool = Field(
+        default=False,
+        description="Allow accepting skipped or pending validation with an explicit operator override.",
+    )
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
 async def accept_build_artifact_version(
     artifact_version_id: str,
+    body: BuildArtifactAcceptanceRequest | None = None,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
@@ -1388,8 +1706,12 @@ async def accept_build_artifact_version(
         raise HTTPException(status_code=409, detail="Rejected artifact versions cannot be accepted.")
     if version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise HTTPException(status_code=409, detail="Only draft artifact versions can be accepted.")
-    if version.validation_status not in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}:
-        raise HTTPException(status_code=409, detail="Only validated artifact versions can be accepted.")
+    allow_validation_override = bool(body.allow_validation_override) if body is not None else False
+    _enforce_artifact_validation_gate(
+        version,
+        action="accepted",
+        allow_validation_override=allow_validation_override,
+    )
 
     refinement_metadata = _refinement_metadata_from_version(version)
     refinement_review_record = _load_refinement_review_record_for_version(version)
@@ -1407,6 +1729,8 @@ async def accept_build_artifact_version(
                 request_id=refinement_review_record.request_id,
                 artifact_store=artifact_store,
                 accepted_by=principal.user_id,
+                notes=body.notes if body is not None else None,
+                allow_validation_override=allow_validation_override,
             )
         except (AcceptedStagedAppBundleArtifactVersionError, ValueError) as exc:
             logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
@@ -1486,6 +1810,10 @@ class BuildArtifactPromotionRequest(BaseModel):
         default=None,
         description="Optional app_registry record id to mark active after the artifact is restored.",
     )
+    allow_validation_override: bool = Field(
+        default=False,
+        description="Allow promoting skipped or pending validation with an explicit operator override.",
+    )
 
 
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
@@ -1505,8 +1833,12 @@ async def promote_build_artifact_version(
         raise HTTPException(status_code=409, detail="Only accepted current artifact versions can be promoted.")
     if version.artifact_kind != "app_bundle":
         raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.artifact_kind}")
-    if version.validation_status not in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}:
-        raise HTTPException(status_code=409, detail="Only validated artifact versions can be promoted.")
+    allow_validation_override = bool(body.allow_validation_override) if body is not None else False
+    _enforce_artifact_validation_gate(
+        version,
+        action="promoted",
+        allow_validation_override=allow_validation_override,
+    )
 
     zip_path = _artifact_bundle_path_from_version(version)
     if zip_path is None:

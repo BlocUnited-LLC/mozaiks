@@ -246,19 +246,244 @@ class GridFSMediaContentStore:
             return False
 
 
+class AzureBlobMediaContentStore:
+    """Stores generated media bytes in Azure Blob Storage.
+
+    Required environment variables
+    --------------------------------
+    AZURE_STORAGE_CONNECTION_STRING
+        Full connection string from the Azure portal
+        (Storage account → Access keys → Connection string).
+        Mutually exclusive with the account-name + SAS approach below.
+
+    OR, as an alternative to the connection string:
+
+    AZURE_STORAGE_ACCOUNT_NAME
+        Storage account name (e.g. ``mozaiksmedia``).
+    AZURE_STORAGE_SAS_TOKEN
+        SAS token scoped to the container (include the leading ``?``).
+        If absent the client falls back to ``DefaultAzureCredential``
+        (managed identity / service principal / CLI login — whichever
+        is active in the deployment environment).
+
+    AZURE_STORAGE_CONTAINER_NAME
+        Blob container that holds all media assets.
+        Defaults to ``mozaiks-media``.
+        The container must already exist; this store does not create it.
+
+    Content reference
+    -----------------
+    The opaque ``content_ref`` returned by ``put_media`` is the blob name:
+    ``{app_id}/{media_id}/{filename}``
+
+    This is stable and deduplicated — re-uploading the same
+    ``(app_id, media_id, filename)`` triple overwrites the existing blob.
+
+    CDN / direct URL
+    ----------------
+    Set ``AZURE_STORAGE_CDN_BASE_URL`` to a CDN endpoint or the container's
+    public base URL (e.g. ``https://cdn.example.com/media`` or
+    ``https://mozaiksmedia.blob.core.windows.net/mozaiks-media``).
+    When set, ``put_media`` returns the full public URL as the content ref
+    instead of the raw blob name, enabling the API serve route to issue
+    a redirect rather than proxying bytes.
+    """
+
+    backend_name = "azure_blob"
+
+    _ENV_CONNECTION_STRING = "AZURE_STORAGE_CONNECTION_STRING"
+    _ENV_ACCOUNT_NAME = "AZURE_STORAGE_ACCOUNT_NAME"
+    _ENV_SAS_TOKEN = "AZURE_STORAGE_SAS_TOKEN"
+    _ENV_CONTAINER = "AZURE_STORAGE_CONTAINER_NAME"
+    _ENV_CDN_BASE = "AZURE_STORAGE_CDN_BASE_URL"
+    _DEFAULT_CONTAINER = "mozaiks-media"
+
+    def __init__(
+        self,
+        *,
+        connection_string: str | None = None,
+        account_name: str | None = None,
+        sas_token: str | None = None,
+        container_name: str | None = None,
+        cdn_base_url: str | None = None,
+    ) -> None:
+        self._connection_string = connection_string or os.getenv(self._ENV_CONNECTION_STRING, "").strip() or None
+        self._account_name = account_name or os.getenv(self._ENV_ACCOUNT_NAME, "").strip() or None
+        self._sas_token = sas_token or os.getenv(self._ENV_SAS_TOKEN, "").strip() or None
+        self._container_name = (
+            container_name
+            or os.getenv(self._ENV_CONTAINER, "").strip()
+            or self._DEFAULT_CONTAINER
+        )
+        self._cdn_base_url = (cdn_base_url or os.getenv(self._ENV_CDN_BASE, "").strip() or "").rstrip("/")
+        self._client: Any | None = None
+
+    def _ensure_client(self) -> Any:
+        """Return a BlobServiceClient, constructing it on first call."""
+        if self._client is not None:
+            return self._client
+        try:
+            from azure.storage.blob.aio import BlobServiceClient  # type: ignore[import]
+        except ImportError as exc:
+            raise RuntimeError(
+                "azure-storage-blob is required for Azure Blob media storage. "
+                "Install it with: pip install azure-storage-blob>=12.19.0"
+            ) from exc
+
+        if self._connection_string:
+            self._client = BlobServiceClient.from_connection_string(self._connection_string)
+        elif self._account_name and self._sas_token:
+            account_url = f"https://{self._account_name}.blob.core.windows.net"
+            self._client = BlobServiceClient(account_url=account_url, credential=self._sas_token)
+        elif self._account_name:
+            # Fall back to DefaultAzureCredential (managed identity / CLI / env SP)
+            try:
+                from azure.identity.aio import DefaultAzureCredential  # type: ignore[import]
+            except ImportError as exc:
+                raise RuntimeError(
+                    "azure-identity is required when using DefaultAzureCredential. "
+                    "Install it with: pip install azure-identity>=1.15.0"
+                ) from exc
+            account_url = f"https://{self._account_name}.blob.core.windows.net"
+            self._client = BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential())
+        else:
+            raise RuntimeError(
+                "AzureBlobMediaContentStore requires either AZURE_STORAGE_CONNECTION_STRING "
+                "or AZURE_STORAGE_ACCOUNT_NAME (+ optional AZURE_STORAGE_SAS_TOKEN)."
+            )
+        return self._client
+
+    def _blob_name(self, app_id: str, media_id: str, filename: str) -> str:
+        return f"{app_id}/{media_id}/{filename}"
+
+    def _content_ref(self, blob_name: str) -> str:
+        """Return the public CDN URL if configured, otherwise the raw blob name."""
+        if self._cdn_base_url:
+            return f"{self._cdn_base_url}/{blob_name}"
+        return blob_name
+
+    async def put_media(
+        self,
+        data: bytes,
+        *,
+        app_id: str,
+        media_id: str,
+        filename: str,
+        media_type: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        client = self._ensure_client()
+        safe_name = _safe_filename(filename, media_type=media_type, fallback_stem=media_id)
+        blob_name = self._blob_name(app_id, media_id, safe_name)
+        blob_client = client.get_blob_client(container=self._container_name, blob=blob_name)
+        blob_metadata = {
+            "app_id": app_id,
+            "media_id": media_id,
+        }
+        if metadata:
+            # Azure blob metadata values must be strings
+            for k, v in metadata.items():
+                if v is not None:
+                    blob_metadata[str(k)] = str(v)
+        await blob_client.upload_blob(
+            data,
+            overwrite=True,
+            content_settings=_azure_content_settings(media_type),
+            metadata=blob_metadata,
+        )
+        return self._content_ref(blob_name)
+
+    async def get_media(self, content_ref: str) -> bytes:
+        client = self._ensure_client()
+        blob_name = self._blob_name_from_ref(content_ref)
+        blob_client = client.get_blob_client(container=self._container_name, blob=blob_name)
+        try:
+            stream = await blob_client.download_blob()
+            return await stream.readall()
+        except Exception as exc:
+            raise MediaContentNotFoundError(
+                f"Azure Blob media content not found: {content_ref!r}"
+            ) from exc
+
+    async def exists(self, content_ref: str) -> bool:
+        client = self._ensure_client()
+        blob_name = self._blob_name_from_ref(content_ref)
+        blob_client = client.get_blob_client(container=self._container_name, blob=blob_name)
+        try:
+            return await blob_client.exists()
+        except Exception:
+            return False
+
+    async def delete(self, content_ref: str) -> bool:
+        client = self._ensure_client()
+        blob_name = self._blob_name_from_ref(content_ref)
+        blob_client = client.get_blob_client(container=self._container_name, blob=blob_name)
+        try:
+            await blob_client.delete_blob()
+            return True
+        except Exception:
+            return False
+
+    def _blob_name_from_ref(self, content_ref: str) -> str:
+        """Strip CDN base URL prefix to recover the raw blob name."""
+        if self._cdn_base_url and content_ref.startswith(self._cdn_base_url):
+            return content_ref[len(self._cdn_base_url):].lstrip("/")
+        return content_ref
+
+
+def _azure_content_settings(media_type: str) -> Any:
+    """Return a ContentSettings object if azure-storage-blob is available, else None."""
+    try:
+        from azure.storage.blob import ContentSettings  # type: ignore[import]
+        return ContentSettings(content_type=media_type)
+    except ImportError:
+        return None
+
+
 _CONTENT_BACKEND_ENV_VAR = "MOZAIKS_MEDIA_CONTENT_BACKEND"
 _content_store: MediaContentStore | None = None
 
 
 def get_media_content_store() -> MediaContentStore:
-    """Return the process-wide generated media content store."""
+    """Return the process-wide generated media content store.
 
+    Selected by the ``MOZAIKS_MEDIA_CONTENT_BACKEND`` environment variable:
+
+    ``local`` (default)
+        Writes bytes to the local filesystem under ``MOZAIKS_MEDIA_STORAGE_DIR``.
+        Only safe for single-instance local development — bytes are not shared
+        across replicas and are lost on container restart.
+
+    ``gridfs``
+        Stores bytes in MongoDB GridFS via the ``MONGO_URI`` connection.
+        Suitable for small-to-medium deployments that already run MongoDB.
+        Requires ``motor>=3.3.0``.
+
+    ``azure_blob``
+        Stores bytes in Azure Blob Storage.  Suitable for production — durable,
+        cheap, CDN-ready, and scales to any volume without touching MongoDB.
+        Requires ``azure-storage-blob>=12.19.0``.
+        Configure via ``AZURE_STORAGE_CONNECTION_STRING`` (or account name +
+        credential) and ``AZURE_STORAGE_CONTAINER_NAME``.
+        Set ``AZURE_STORAGE_CDN_BASE_URL`` to serve assets via CDN redirect
+        instead of proxying bytes through the API.
+    """
     global _content_store
     if _content_store is None:
         backend = os.getenv(_CONTENT_BACKEND_ENV_VAR, "local").strip().lower()
         if backend == "gridfs":
             _content_store = GridFSMediaContentStore()
+        elif backend == "azure_blob":
+            _content_store = AzureBlobMediaContentStore()
         else:
+            mozaiks_env = os.getenv("MOZAIKS_ENV", "").strip().lower()
+            if mozaiks_env == "production":
+                logger.warning(
+                    "[MediaStore] MOZAIKS_MEDIA_CONTENT_BACKEND is 'local' in production. "
+                    "Local filesystem storage is not shared across replicas and will lose "
+                    "assets on container restart. "
+                    "Set MOZAIKS_MEDIA_CONTENT_BACKEND=azure_blob for production deployments."
+                )
             _content_store = LocalMediaContentStore()
     return _content_store
 
@@ -398,6 +623,8 @@ class MediaAssetStore:
             return self.content_store
         if normalized == "gridfs":
             return GridFSMediaContentStore()
+        if normalized == "azure_blob":
+            return AzureBlobMediaContentStore()
         if normalized == "local":
             return LocalMediaContentStore()
         raise ValueError(f"Unsupported media content backend: {backend_name!r}")
@@ -472,6 +699,7 @@ def get_media_asset_store() -> MediaAssetStore:
 
 
 __all__ = [
+    "AzureBlobMediaContentStore",
     "GridFSMediaContentStore",
     "LocalMediaContentStore",
     "MediaAssetStore",

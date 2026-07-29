@@ -61,6 +61,21 @@ DEFAULT_EXCLUDED_FILE_NAMES = frozenset(
         "uv.lock",
     }
 )
+DEFAULT_MANIFEST_PRIORITY_FILE_NAMES = frozenset(
+    {
+        "app.json",
+        "module.yaml",
+        "module.yml",
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "composer.json",
+        "vite.config.js",
+        "vite.config.ts",
+        "next.config.js",
+        "next.config.mjs",
+    }
+)
 SENSITIVE_EXACT_NAMES = frozenset(
     {
         ".env",
@@ -92,6 +107,7 @@ class SourceScanPolicy:
     included_extensions: frozenset[str] = DEFAULT_CONTEXT_GRAPH_EXTENSIONS
     excluded_dir_names: frozenset[str] = DEFAULT_EXCLUDED_DIR_NAMES
     excluded_file_names: frozenset[str] = DEFAULT_EXCLUDED_FILE_NAMES
+    excluded_path_prefixes: frozenset[str] = frozenset()
     priority_rules: tuple[ScanPriorityRule, ...] = field(default_factory=tuple)
 
 
@@ -135,6 +151,7 @@ def default_context_graph_scan_policy(overrides: dict[str, Any] | None = None) -
     extensions = _normalize_extensions(raw.get("included_extensions")) or DEFAULT_CONTEXT_GRAPH_EXTENSIONS
     excluded_dirs = DEFAULT_EXCLUDED_DIR_NAMES | frozenset(_string_list(raw.get("excluded_dir_names")))
     excluded_files = DEFAULT_EXCLUDED_FILE_NAMES | frozenset(_string_list(raw.get("excluded_file_names")))
+    excluded_path_prefixes = frozenset(_normalize_path_prefixes(raw.get("excluded_path_prefixes") or raw.get("ignored_paths")))
     return SourceScanPolicy(
         max_files=max_files,
         max_file_bytes=max_file_bytes,
@@ -142,6 +159,7 @@ def default_context_graph_scan_policy(overrides: dict[str, Any] | None = None) -
         included_extensions=extensions,
         excluded_dir_names=excluded_dirs,
         excluded_file_names=excluded_files,
+        excluded_path_prefixes=excluded_path_prefixes,
         priority_rules=DEFAULT_CONTEXT_GRAPH_PRIORITY_RULES,
     )
 
@@ -225,6 +243,8 @@ def collect_source_scan_file_map(
         warnings.append(f"context_graph_large_files_skipped:{skipped['large_file']}")
     if skipped.get("sensitive_path"):
         warnings.append(f"context_graph_sensitive_files_skipped:{skipped['sensitive_path']}")
+    if skipped.get("excluded_path"):
+        warnings.append(f"context_graph_excluded_paths_skipped:{skipped['excluded_path']}")
 
     health = {
         "policy_id": scan_policy.policy_id,
@@ -304,6 +324,8 @@ def select_source_file_map(
         warnings.append(f"context_graph_large_files_skipped:{skipped['large_file']}")
     if skipped.get("sensitive_path"):
         warnings.append(f"context_graph_sensitive_files_skipped:{skipped['sensitive_path']}")
+    if skipped.get("excluded_path"):
+        warnings.append(f"context_graph_excluded_paths_skipped:{skipped['excluded_path']}")
 
     health = {
         "policy_id": scan_policy.policy_id,
@@ -344,6 +366,8 @@ def skip_reason_for_path(path: str, *, policy: SourceScanPolicy | None = None) -
         return "unsafe_path"
     pure = PurePosixPath(safe)
     parts = tuple(part.lower() for part in pure.parts)
+    if _matches_excluded_prefix(safe, scan_policy.excluded_path_prefixes):
+        return "excluded_path"
     if any(part in scan_policy.excluded_dir_names for part in parts[:-1]):
         return "excluded_dir"
     name = pure.name.lower()
@@ -389,6 +413,8 @@ def _priority_for_path(path: str, policy: SourceScanPolicy) -> tuple[int, str]:
     normalized = safe_scan_relpath(path) or ""
     if normalized:
         normalized = f"{normalized}/" if "." not in PurePosixPath(normalized).name else normalized
+    if PurePosixPath(normalized).name.lower() in DEFAULT_MANIFEST_PRIORITY_FILE_NAMES:
+        return 0, "manifests"
     for rule in policy.priority_rules:
         if normalized == rule.prefix.rstrip("/") or normalized.startswith(rule.prefix):
             return rule.priority, rule.label
@@ -430,6 +456,26 @@ def _normalize_extensions(value: Any) -> frozenset[str]:
     return frozenset(extensions)
 
 
+def _normalize_path_prefixes(value: Any) -> list[str]:
+    prefixes: list[str] = []
+    for item in _string_list(value):
+        safe = safe_scan_relpath(item)
+        if safe is None:
+            continue
+        prefix = safe.rstrip("/")
+        if prefix and prefix not in prefixes:
+            prefixes.append(prefix)
+    return prefixes
+
+
+def _matches_excluded_prefix(path: str, prefixes: frozenset[str]) -> bool:
+    safe = safe_scan_relpath(path)
+    if not safe or not prefixes:
+        return False
+    normalized = safe.rstrip("/")
+    return any(normalized == prefix or normalized.startswith(f"{prefix}/") for prefix in prefixes)
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -443,6 +489,7 @@ def _string_list(value: Any) -> list[str]:
 
 __all__ = [
     "DEFAULT_CONTEXT_GRAPH_EXTENSIONS",
+    "DEFAULT_MANIFEST_PRIORITY_FILE_NAMES",
     "DEFAULT_CONTEXT_GRAPH_PRIORITY_RULES",
     "SourceScanPolicy",
     "SourceScanResult",

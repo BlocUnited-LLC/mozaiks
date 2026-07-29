@@ -234,8 +234,11 @@ class _CodingService:
 async def _validation_runner(**_kwargs: Any) -> dict[str, Any]:
     return {
         "success": True,
-        "validation_strategy": "skip",
         "validation_status": "skipped",
+        "execution_mode": "not_executed",
+        "overlay_file_count": len(_kwargs.get("overlay_files") or {}),
+        "command_results": [],
+        "fallback_checks": [],
         "preview_url": None,
         "errors": [],
         "warnings": ["dogfood smoke skipped runtime validation intentionally"],
@@ -340,7 +343,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         config_loader=_enabled_control_plane,
         pack_loader=load_selected_refinement_harness,
         tool_executor=tool_executor,
-        validation_runner=_validation_runner,
+        source_validation_runner=_validation_runner,
         artifact_store=store,
         output_root=output_root / "refinements",
     )

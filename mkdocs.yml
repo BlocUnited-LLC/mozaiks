@@ -95,9 +95,17 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Key Concepts: concepts.md
+
   - Guides:
       - guides/index.md
       - Use Studio: guides/studio/01-overview.md
+      - Extend Your App:
+          - Add a Module: guides/adding-modules/01-overview.md
+          - Add a Page: guides/adding-pages/01-overview.md
+          - Add a Workflow: guides/adding-workflows/01-overview.md
+          - Extending AI Functionality: guides/extending-ai-functionality/01-overview.md
+          - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
+          - Integrations: guides/integrations/01-overview.md
       - Config Files:
           - Overview: guides/configs/index.md
           - App Provenance: guides/configs/provenance.md
@@ -105,120 +113,133 @@ nav:
           - Subscriptions: guides/configs/subscriptions.md
           - Refinement: guides/configs/refinement.md
           - Module Contracts: guides/configs/module-contracts.md
-      - Integrations: guides/integrations/01-overview.md
-      - Add Workflows: guides/adding-workflows/01-overview.md
-      - Add a Module: guides/adding-modules/01-overview.md
-      - Add a Page: guides/adding-pages/01-overview.md
-      - Extending AI Functionality:
-          - guides/extending-ai-functionality/01-overview.md
-          - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
-      - App Shell & Branding: guides/custom-brand-integration/01-overview.md
-      - Self-Hosting: guides/self-hosting.md
       - Context & Refinement:
           - Context Graph: guides/platform-intelligence/01-context-graph.md
           - Harness: guides/platform-intelligence/02-harness.md
           - Refinement: guides/platform-intelligence/03-refinement.md
+      - App Shell & Branding: guides/custom-brand-integration/01-overview.md
+      - Self-Hosting: guides/self-hosting.md
+
   - Studio:
       - studio/index.md
       - Workspace Pages: studio/workspace-pages.md
       - App Dashboard: studio/app-dashboard.md
       - Interface Conventions: studio/ui-ux-primitives.md
+
   - CLI Reference: cli-reference.md
+
   - Architecture:
       - architecture/index.md
+
+      # ── 1. Foundations ───────────────────────────────────────────────────────
+      # Core mental models and cross-cutting contracts. Start here.
       - Foundations:
           - Overview: architecture/foundations/overview.md
-          - Distribution and Workspace Model: architecture/foundations/distribution-and-workspace-model.md
+          - Distribution & Workspace Model: architecture/foundations/distribution-and-workspace-model.md
           - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
           - App Intelligence Plane: architecture/foundations/app-intelligence-plane.md
+          - App Intelligence User Journey: architecture/foundations/app-intelligence-user-journey.md
+          - Framework Detection: architecture/foundations/framework-detection.md
+          - Context Graph & Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
-          - Context Graph and Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
-          - App Context and Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
-      - App Architecture:
-          - architecture/app/index.md
-          - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md
-          - Canonical App Structure: architecture/app/canonical-app-structure.md
-          - App Manifest and Platform Targets: architecture/app/app-manifest-and-platform-targets.md
-          - App Bundle Declaratives: architecture/app/app-bundle-declaratives.md
-          - Platform Authoring: architecture/app/platform-authoring.md
-          - Surface Model: architecture/app/surface-model.md
-          - UI Surface and Layout Architecture: architecture/app/ui-surface-and-layout-architecture.md
-          - App Dashboard Contract: architecture/app/app-dashboard-contract.md
-          - Platform Navigation Contract: architecture/app/platform-navigation-contract.md
-          - Admin System: architecture/app/admin-system.md
-          - Account, Admin, and Platform Services: architecture/app/account-admin-and-platform-services.md
-          - Tenant Auth and Scope: architecture/app/tenant-auth-and-scope.md
-          - App-Local Refinement Harness: architecture/app/refinement-harness.md
-      - Module Systems:
-          - architecture/modules-systems/index.md
-          - Module System: architecture/modules-systems/module-system.md
-          - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
-          - Internal Messaging: architecture/modules-systems/internal-messaging.md
-          - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
-          - Managed Capability Packs: architecture/modules-systems/managed-capability-packs.md
-          - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
-      - Workflows:
+          - App Context & Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
+          - Event System: architecture/foundations/events-and-data/event-system.md
+          - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
+          - Persistence & Artifact Storage: architecture/foundations/events-and-data/persistence-and-artifact-storage.md
+
+      # ── 2. Apps & Modules ────────────────────────────────────────────────────
+      # App bundle structure, module contracts, and capability packs.
+      - Apps & Modules:
+          - App Architecture:
+              - architecture/app/index.md
+              - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md
+              - Canonical App Structure: architecture/app/canonical-app-structure.md
+              - App Manifest & Platform Targets: architecture/app/app-manifest-and-platform-targets.md
+              - App Bundle Declaratives: architecture/app/app-bundle-declaratives.md
+              - Surface Model: architecture/app/surface-model.md
+              - UI Surface & Layout: architecture/app/ui-surface-and-layout-architecture.md
+              - Platform Authoring: architecture/app/platform-authoring.md
+              - Platform Navigation Contract: architecture/app/platform-navigation-contract.md
+              - App Dashboard Contract: architecture/app/app-dashboard-contract.md
+              - Admin System: architecture/app/admin-system.md
+              - Account, Admin & Platform Services: architecture/app/account-admin-and-platform-services.md
+              - Tenant Auth & Scope: architecture/app/tenant-auth-and-scope.md
+              - App-Local Refinement Harness: architecture/app/refinement-harness.md
+          - Module System:
+              - architecture/modules-systems/index.md
+              - Module System: architecture/modules-systems/module-system.md
+              - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
+              - Internal Messaging: architecture/modules-systems/internal-messaging.md
+              - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
+              - Managed Capability Packs: architecture/modules-systems/managed-capability-packs.md
+              - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
+
+      # ── 3. AI Workflows ──────────────────────────────────────────────────────
+      # Workflow authoring, routing, refinement, and AG2 integration.
+      - AI Workflows:
           - architecture/workflows/index.md
           - Workflow Architecture: architecture/workflows/workflow-architecture.md
           - Workflow Authoring Contracts: architecture/workflows/workflow-authoring-contracts.md
-          - Workflow Routing Transitions: architecture/workflows/workflow-routing-transitions.md
+          - Workflow Routing & Transitions: architecture/workflows/workflow-routing-transitions.md
           - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
-          - AG2 Ownership Boundary: architecture/workflows/ag2-ownership-boundary.md
-          - AG2 Update Watchpoints: architecture/workflows/ag2-update-watchpoints.md
-          - AG2 Execution Alignment Plan: architecture/workflows/ag2-execution-alignment-plan.md
-          - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
-          - AG2 Network Patternbook: architecture/workflows/ag2-network-patternbook.md
-          - Build Context Packs: architecture/workflows/build-context-packs.md
-          - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
           - Refinement Engine: architecture/workflows/refinement-engine.md
-          - Session Router: architecture/workflows/session-router.md
           - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
-      - MozaiksAI Runtime:
+          - Session Router: architecture/workflows/session-router.md
+          - Build Context Packs: architecture/workflows/build-context-packs.md
+          - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
+          - AG2 Integration:
+              - AG2 Ownership Boundary: architecture/workflows/ag2-ownership-boundary.md
+              - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
+              - AG2 Network Patternbook: architecture/workflows/ag2-network-patternbook.md
+              - AG2 Execution Alignment Plan: architecture/workflows/ag2-execution-alignment-plan.md
+              - AG2 Update Watchpoints: architecture/workflows/ag2-update-watchpoints.md
+
+      # ── 4. Runtime ───────────────────────────────────────────────────────────
+      # mozaiksai internals: orchestration, transport, hooks, tokens.
+      - Runtime:
           - architecture/mozaiksai/index.md
-          - Workflow and Orchestration:
-              - Workflow Task Batches: architecture/mozaiksai/task-batches.md
-              - Universal Orchestrator: architecture/mozaiksai/universal-orchestrator.md
-              - Pack Graph Semantics: architecture/mozaiksai/pack-graph-semantics.md
-              - Handoff Context Conditions: architecture/mozaiksai/handoff-context-conditions.md
-          - UI and Interaction:
-              - UI Interaction Patterns: architecture/mozaiksai/ui-interaction-patterns.md
-              - Lifecycle Tools: architecture/mozaiksai/lifecycle-tools.md
-          - Runtime and Transport:
-              - Transport and Streaming: architecture/mozaiksai/transport-and-streaming.md
-              - Hook System Deep Dive: architecture/mozaiksai/hook-system-deep-dive.md
-              - API Reference Notes: architecture/mozaiksai/api-reference.md
-          - Agent and Contracts:
-              - Context Variables Complete: architecture/mozaiksai/context-variables-complete.md
-              - Auto Tool Execution: architecture/mozaiksai/auto-tool-execution.md
-          - Tokens and Cost Control:
-              - Monetization Contract: architecture/mozaiksai/monetization-contract.md
-              - Core Monetization Scope: architecture/mozaiksai/core-monetization-scope.md
-              - Token Management: architecture/mozaiksai/token-management.md
-      - Events and Data:
-          - Event System: architecture/foundations/events-and-data/event-system.md
-          - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
-          - Persistence and Artifact Storage: architecture/foundations/events-and-data/persistence-and-artifact-storage.md
-          - Learning Loop Architecture: architecture/foundations/events-and-data/learning-loop-architecture.md
-      - Builder and Generation:
+          - Universal Orchestrator: architecture/mozaiksai/universal-orchestrator.md
+          - Pack Graph Semantics: architecture/mozaiksai/pack-graph-semantics.md
+          - Workflow Task Batches: architecture/mozaiksai/task-batches.md
+          - Handoff Context Conditions: architecture/mozaiksai/handoff-context-conditions.md
+          - Context Variables: architecture/mozaiksai/context-variables-complete.md
+          - Auto Tool Execution: architecture/mozaiksai/auto-tool-execution.md
+          - Transport & Streaming: architecture/mozaiksai/transport-and-streaming.md
+          - Hook System: architecture/mozaiksai/hook-system-deep-dive.md
+          - UI Interaction Patterns: architecture/mozaiksai/ui-interaction-patterns.md
+          - Lifecycle Tools: architecture/mozaiksai/lifecycle-tools.md
+          - Monetization Contract: architecture/mozaiksai/monetization-contract.md
+          - Core Monetization Scope: architecture/mozaiksai/core-monetization-scope.md
+          - Token Management: architecture/mozaiksai/token-management.md
+          - API Reference Notes: architecture/mozaiksai/api-reference.md
+
+      # ── 5. Builder & Studio ──────────────────────────────────────────────────
+      # Factory workflows, app generation, source intelligence, and deployment.
+      - Builder & Studio:
           - App Builder Architecture: architecture/builder/app-builder-architecture.md
-          - App Planning Contracts: architecture/builder/app-planning-contracts.md
-          - Shared Workflow Infrastructure: architecture/builder/shared-workflow-infrastructure.md
           - Builder Execution Model: architecture/builder/builder-execution-model.md
           - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
           - Studio Product Model: architecture/builder/studio-product-model.md
-          - Data Contract and Revision: architecture/builder/data-contract-and-revision-contract.md
+          - App Planning Contracts: architecture/builder/app-planning-contracts.md
+          - Shared Workflow Infrastructure: architecture/builder/shared-workflow-infrastructure.md
+          - Data Contract & Revision: architecture/builder/data-contract-and-revision-contract.md
           - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
           - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md
           - App-Backend Admin Contract: architecture/builder/app-backend-admin-contract.md
-      - Deployment:
-          - OSS Infra and Generated App Deployment: architecture/deployment/oss-infra-and-generated-app-deployment.md
+          - Artifact Staleness & Routing: architecture/builder/artifact-staleness-and-routing.md
+          - Source Import Contracts: architecture/builder/source-import-contracts.md
+          - Source Validation Framework: architecture/builder/source-validation-framework.md
+          - OSS Infra & Deployment: architecture/deployment/oss-infra-and-generated-app-deployment.md
           - Generated App Deployment Contract: architecture/deployment/generated-app-deployment-contract.md
-      - Frontend UI:
+
+      # ── 6. Frontend & UI ─────────────────────────────────────────────────────
+      # Chat UI runtime, generated UI system, auth, and mobile.
+      - Frontend & UI:
           - architecture/frontend/index.md
-          - Chat UI Runtime:
+          - Chat UI:
               - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
               - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
               - Layout Modes: architecture/frontend/chat-ui/layout-modes.md
@@ -233,7 +254,8 @@ nav:
               - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
           - Brokered OIDC Auth: architecture/keycloak-auth.md
           - Mobile Client Contract: architecture/mobile-client-contract.md
-          - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
+          - Orchestration & Decomposition: architecture/orchestration-and-decomposition.md
+
   - Contributing:
       - contributing/index.md
       - Contributor Guidance Readiness: contributing/contributor-guidance-readiness.md

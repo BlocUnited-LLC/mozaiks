@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .framework_detection import detect_frameworks_from_file_map
 from .models import AppContextGraph, GraphNodeType
 from .source_corpus import SourceCorpusBundle
 
@@ -72,6 +73,21 @@ def build_app_intelligence_snapshot(
     source_ref_ids = _dedupe([ref.source_ref_id for ref in graph.source_refs] + [ref.source_ref_id for ref in bundle.source_refs])
 
     architecture = _architecture_summary(bundle=bundle, graph=graph)
+    framework_detection = detect_frameworks_from_file_map(dict(bundle.file_contents or {}))
+    architecture["framework_detection"] = framework_detection.model_dump(mode="json")
+    architecture["frameworks"] = [
+        {
+            "framework_id": framework.framework_id,
+            "label": framework.label,
+            "category": framework.category,
+            "confidence": framework.confidence,
+        }
+        for framework in framework_detection.frameworks
+    ]
+    architecture["validation_commands"] = [
+        command.model_dump(mode="json")
+        for command in framework_detection.validation_commands
+    ]
     capabilities = _capability_summaries(bundle=bundle, graph=graph)
     ownership = _ownership_summary(bundle=bundle, graph=graph)
     integration_surfaces = _integration_surfaces(bundle=bundle, graph=graph)
@@ -114,6 +130,14 @@ def build_app_intelligence_snapshot(
             "edge_counts": dict(sorted(edge_counts.items())),
             "parser_status": dict(bundle.parser_status),
             "scan_health": dict(bundle.health),
+            "framework_detection": {
+                "primary_framework_id": framework_detection.primary_framework_id,
+                "primary_framework_label": framework_detection.primary_framework_label,
+                "languages": list(framework_detection.languages),
+                "framework_ids": [framework.framework_id for framework in framework_detection.frameworks],
+                "package_managers": list(framework_detection.package_managers),
+                "monorepo": framework_detection.monorepo,
+            },
         },
         architecture=architecture,
         capabilities=capabilities,
@@ -147,6 +171,8 @@ def build_app_intelligence_catalog(
         "deployment_surfaces",
         "test_surfaces",
         "top_source_roots",
+        "frameworks",
+        "validation_commands",
     ):
         value = architecture.get(key)
         if isinstance(value, list):

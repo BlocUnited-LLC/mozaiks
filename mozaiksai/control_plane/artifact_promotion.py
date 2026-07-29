@@ -407,6 +407,8 @@ def _build_acceptance_commit_metadata(
     request_id: str,
     review_status: str,
     notes: str | None = None,
+    validation_override: bool = False,
+    validation_status: ArtifactValidationStatus | None = None,
 ) -> dict[str, Any]:
     payload = _commit_metadata_document(commit_metadata)
     metadata = dict(payload.get("metadata") or {})
@@ -415,6 +417,8 @@ def _build_acceptance_commit_metadata(
         "accepted_at": accepted_at,
         "refinement_review_status": review_status,
         "request_id": request_id,
+        "validation_override": bool(validation_override),
+        "validation_status": validation_status.value if validation_status is not None else None,
     }
     redacted_notes = redact_review_notes(notes)
     if redacted_notes is not None:
@@ -685,6 +689,7 @@ async def accept_staged_refinement_artifact_version(
     artifact_store: ArtifactStore | None = None,
     accepted_by: str | None = None,
     notes: str | None = None,
+    allow_validation_override: bool = False,
 ) -> AcceptedStagedAppBundleArtifactVersionResult:
     resolved_app_id = str(app_id or "").strip()
     resolved_request_id = str(request_id or "").strip()
@@ -713,6 +718,14 @@ async def accept_staged_refinement_artifact_version(
     if artifact_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise AcceptedStagedAppBundleArtifactVersionError(
             f"Staged refinement acceptance requires a DRAFT artifact version; received {artifact_version.lifecycle_status.value!r}."
+        )
+    if artifact_version.validation_status == ArtifactValidationStatus.FAILED:
+        raise AcceptedStagedAppBundleArtifactVersionError(
+            "Staged refinement acceptance requires passing validation; validation_status='failed'."
+        )
+    if artifact_version.validation_status != ArtifactValidationStatus.PASSED and not allow_validation_override:
+        raise AcceptedStagedAppBundleArtifactVersionError(
+            "Staged refinement acceptance requires validation_status='passed' or an explicit validation override."
         )
 
     metadata_payload = _commit_metadata_payload(artifact_version.commit_metadata)
@@ -771,6 +784,9 @@ async def accept_staged_refinement_artifact_version(
         request_id=resolved_request_id,
         review_status=loaded_review.status,
         notes=notes,
+        validation_override=allow_validation_override
+        and artifact_version.validation_status != ArtifactValidationStatus.PASSED,
+        validation_status=artifact_version.validation_status,
     )
 
     accepted_version = await artifact_store.accept_artifact_version(

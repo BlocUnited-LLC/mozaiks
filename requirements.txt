@@ -27,4 +27,6 @@ python-multipart>=0.0.6
 # Azure (optional — used when AZURE_KEYVAULT_URL is set)
 azure-identity>=1.15.0
 azure-keyvault-secrets>=4.7.0
+# Azure Blob Storage (optional — used when MOZAIKS_MEDIA_CONTENT_BACKEND=azure_blob)
+azure-storage-blob>=12.19.0
 
