@@ -10,9 +10,11 @@ OSS `mozaiks` owns the generic primitives:
 - media type classification and allowlists
 - provider-neutral `MediaInputRef` values for image, audio, video, and document inputs
 - generated media metadata through `GeneratedMediaAsset`
-- local/GridFS generated-media byte storage
+- pluggable byte storage via `MediaContentStore` (local, GridFS, Azure Blob built-in)
+- harvest middleware that intercepts AG2 reply files and persists them in one call
 - AG2 adapter helpers for typed inputs and image-generation configuration
 - workflow declarative flags that enable media behavior per agent
+- `promote_brand_asset` and `attach_campaign_asset` tools for the promote pattern
 
 Apps own product use cases. A marketing app can use these primitives to generate
 campaign images. A branding workflow can use the same primitives to produce logo,
@@ -48,7 +50,7 @@ Auto-tool-call agents do not receive image generation tools.
 
 ## Workflow Contract
 
-Agents can opt into media behavior:
+Agents opt into media behavior via `agents.yaml`:
 
 ```yaml
 agents:
@@ -58,11 +60,135 @@ agents:
     image_generation:
       quality: high
       size: "1024x1024"
-      background: transparent
+      background: opaque   # transparent requires gpt-image-1
       output_format: png
+    promotion_targets:
+      - brand_asset
+      - app_asset
 ```
 
 `image_generation` implies `image_generation_enabled`.
+`promotion_targets` declares which promotion slots this agent's output may fill —
+the harvest middleware uses this to tag `GeneratedMediaAsset.promotion_targets`.
+
+## Generate → Harvest → Promote
+
+Generated media follows a three-step pattern:
+
+```
+AG2 reply.files (BinaryResult)
+    ↓ harvest_generated_media_response(...)
+MediaAssetStore.persist_generated_binary_result(...)
+    ↓ writes bytes to MediaContentStore
+    ↓ writes metadata to MediaAssets collection
+GeneratedMediaAsset (asset_id, content_ref, sha256, promotion_targets, ...)
+    ↓ user/workflow promote action
+asset_manifest.json  ←  promote_brand_asset(asset_id, role="logo")
+```
+
+**Generate** is stochastic — the model decides the image.
+**Promote** is deterministic — an explicit human or workflow gate commits the
+asset to `config/asset_manifest.json`. Nothing downstream reads the asset until
+it is promoted.
+
+`harvest_generated_media_response` is the OSS middleware that handles step two:
+
+```python
+from mozaiksai.core.media.middleware import harvest_generated_media_response
+
+assets = await harvest_generated_media_response(
+    model_response,
+    agent_name="BrandDesignerAgent",
+    workflow_name="BrandAssetGeneratorWorkflow",
+    context_variables=context_variables,
+    generation_params=image_generation_kwargs,
+    promotion_targets=[MediaPromotionTarget.BRAND_ASSET],
+    asset_store=asset_store,
+    transport=transport,           # emits ui.media.generated events
+)
+```
+
+## Byte Storage — MediaContentStore
+
+`MediaContentStore` is a `typing.Protocol`. The framework ships three built-in
+implementations selected by the `MOZAIKS_MEDIA_CONTENT_BACKEND` environment
+variable:
+
+### `local` (default)
+
+Writes bytes to the local filesystem under `MOZAIKS_MEDIA_STORAGE_DIR`
+(default: `./generated_media`).
+
+**Use for:** local development and single-instance demos only.
+Assets are not shared across replicas and are lost on container restart.
+
+### `gridfs`
+
+Stores bytes in MongoDB GridFS. Shares the existing `MONGO_URI` connection.
+
+**Use for:** small-to-medium deployments that already run MongoDB and do not
+need CDN delivery. GridFS chunks files at 255 KB — fine for logo PNGs,
+awkward for large video assets.
+
+```
+MOZAIKS_MEDIA_CONTENT_BACKEND=gridfs
+```
+
+### `azure_blob`
+
+Stores bytes in Azure Blob Storage using `azure-storage-blob>=12.19.0`.
+
+**Recommended for production:** durable, cheap, scales without touching MongoDB,
+CDN-ready.
+
+```
+MOZAIKS_MEDIA_CONTENT_BACKEND=azure_blob
+```
+
+Three authentication modes — use whichever matches your deployment:
+
+| Mode | Required env vars |
+|------|-------------------|
+| Connection string | `AZURE_STORAGE_CONNECTION_STRING` |
+| Account + SAS token | `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_STORAGE_SAS_TOKEN` |
+| Account + managed identity | `AZURE_STORAGE_ACCOUNT_NAME` (no token — uses `DefaultAzureCredential`) |
+
+Container configuration:
+
+```
+AZURE_STORAGE_CONTAINER_NAME=mozaiks-media   # must exist before deployment
+```
+
+**Optional CDN redirect:** Set `AZURE_STORAGE_CDN_BASE_URL` to a CDN endpoint
+or the container's public base URL. When set, the `azure_blob` backend returns
+the full public URL as the `content_ref`, enabling the API serve route to issue
+`302` redirects instead of proxying bytes. Without this, the route streams bytes
+from the blob client.
+
+```
+AZURE_STORAGE_CDN_BASE_URL=https://cdn.example.com/media
+```
+
+### Custom backends
+
+Any class that satisfies the `MediaContentStore` Protocol can be used:
+
+```python
+from mozaiksai.core.media.store import MediaContentStore, MediaAssetStore
+
+class MyS3ContentStore:
+    backend_name = "s3"
+
+    async def put_media(self, data, *, app_id, media_id, filename, media_type, metadata=None): ...
+    async def get_media(self, content_ref): ...
+    async def exists(self, content_ref): ...
+    async def delete(self, content_ref): ...
+
+asset_store = MediaAssetStore(content_store=MyS3ContentStore())
+```
+
+Pass the custom store explicitly to `MediaAssetStore`. The `get_media_content_store()`
+factory only knows about the three built-in backends.
 
 ## Persistence
 
@@ -75,36 +201,46 @@ events. `MediaAssetStore.persist_generated_binary_result(...)` writes:
 
 - bytes through `MediaContentStore`
 - metadata into the framework-owned `MediaAssets` collection
-- provenance such as `source_workflow`, `source_chat_id`, prompt, provider, model,
-  media type, checksum, and promotion targets
-
-Local development defaults to filesystem storage under `generated_media/`.
-Production can use GridFS via `MOZAIKS_MEDIA_CONTENT_BACKEND=gridfs`.
+- provenance: `source_workflow`, `source_chat_id`, prompt, provider, model,
+  media type, sha256 checksum, and promotion targets
 
 ## Promotion
 
 Generated media remains a proposal until a workflow or user action promotes it.
 Promotion targets are generic:
 
-- `brand_asset` for `app/brand/assets`
-- `app_asset` for app-bundle media inventory
-- `page_asset` for page-specific imagery
-- `campaign_asset` for product modules such as marketing campaigns
-- `artifact` for review-only workflow output
+- `brand_asset` — committed to `config/asset_manifest.json` via `promote_brand_asset`
+- `app_asset` — app-bundle media inventory
+- `page_asset` — page-specific imagery
+- `campaign_asset` — product modules such as marketing campaigns
+- `artifact` — review-only workflow output
 
-AppGenerator already owns `config/asset_manifest.json` for reusable media
-inventory. Generated media can become an asset-manifest entry through
-`GeneratedMediaAsset.to_asset_manifest_entry(...)`.
+`config/asset_manifest.json` is the deterministic source of truth for promoted
+assets. Downstream consumers (e.g. `create_listing` in a marketplace module)
+read from it rather than querying `MediaAssets` directly.
 
-## Current Gaps
+```json
+{
+  "assets": {
+    "logo": {
+      "asset_id": "media_abc123",
+      "content_url": "/api/media/assets/{app_id}/media_abc123/content",
+      "alt_text": "",
+      "promoted": true
+    }
+  }
+}
+```
 
-This first foundation does not yet add a frontend media artifact renderer or
-automatic AG2 reply-file harvesting inside every workflow turn. Workflows can
-persist generated `reply.files` explicitly through `MediaAssetStore`. A future
-runtime slice should add:
+## Reference Workflows
 
-- a core media artifact UI component
-- transport events for generated media proposals
-- explicit accept/promote actions into brand assets or campaign modules
-- replay of media refs alongside text messages
+The OSS factory ships two reference workflows that demonstrate the full pipeline:
 
+| Workflow | Purpose |
+|----------|---------|
+| `BrandAssetGeneratorWorkflow` | Logo and brand imagery. Promotes to `role=logo` in `asset_manifest.json`. |
+| `CampaignAssetGeneratorWorkflow` | Campaign hero images. Attaches to marketplace/campaign placement records via `attach_campaign_asset`. |
+
+Both workflows follow the same generate → harvest → promote pattern and can be
+customized via `build_context` overlays or used as archetypes for app-specific
+media workflows.
