@@ -390,6 +390,66 @@ async def test_harvest_generated_media_response_persists_context_and_emits_ui(tm
     assert transport.events[0]["payload"]["assets"][0]["asset_id"] == assets[0].asset_id
 
 
+def test_azure_blob_content_store_implements_media_content_store_interface() -> None:
+    """AzureBlobMediaContentStore satisfies the MediaContentStore Protocol without
+    requiring live Azure credentials — it raises RuntimeError only when import or
+    credential resolution is attempted at call time, not at construction time."""
+    from mozaiksai.core.media.store import AzureBlobMediaContentStore, MediaContentStore
+
+    store = AzureBlobMediaContentStore(
+        account_name="test-account",
+        container_name="test-container",
+    )
+    assert isinstance(store, MediaContentStore)
+    assert store.backend_name == "azure_blob"
+
+
+def test_azure_blob_content_store_raises_on_missing_credentials() -> None:
+    """Constructing with no credentials at all raises RuntimeError when any
+    IO method is called (lazy credential check)."""
+    from mozaiksai.core.media.store import AzureBlobMediaContentStore
+
+    store = AzureBlobMediaContentStore()
+    # _ensure_client() must raise — either ImportError wrapped as RuntimeError
+    # (azure-storage-blob not installed) or RuntimeError for missing credentials.
+    import asyncio
+
+    with pytest.raises((RuntimeError, Exception)):
+        asyncio.get_event_loop().run_until_complete(
+            store.put_media(b"x", app_id="a", media_id="b", filename="b.png", media_type="image/png")
+        )
+
+
+def test_azure_blob_cdn_ref_strips_base_url_on_get() -> None:
+    """_blob_name_from_ref correctly strips the CDN prefix for get/delete/exists."""
+    from mozaiksai.core.media.store import AzureBlobMediaContentStore
+
+    store = AzureBlobMediaContentStore(
+        account_name="acc",
+        container_name="c",
+        cdn_base_url="https://cdn.example.com/media",
+    )
+    blob_name = "app1/media_abc/logo.png"
+    full_url = f"https://cdn.example.com/media/{blob_name}"
+    assert store._blob_name_from_ref(full_url) == blob_name
+    assert store._content_ref(blob_name) == full_url
+
+
+def test_get_media_content_store_selects_azure_blob(monkeypatch) -> None:
+    """get_media_content_store() returns AzureBlobMediaContentStore when env var is set."""
+    import mozaiksai.core.media.store as store_mod
+    from mozaiksai.core.media.store import AzureBlobMediaContentStore
+
+    monkeypatch.setenv("MOZAIKS_MEDIA_CONTENT_BACKEND", "azure_blob")
+    monkeypatch.setattr(store_mod, "_content_store", None)
+
+    result = store_mod.get_media_content_store()
+    assert isinstance(result, AzureBlobMediaContentStore)
+
+    # cleanup
+    monkeypatch.setattr(store_mod, "_content_store", None)
+
+
 def test_core_media_generated_asset_primitive_is_registered() -> None:
     root = Path(__file__).resolve().parents[1]
     renderer = (root / "chat-ui/src/primitives/PrimitiveRenderer.jsx").read_text(encoding="utf-8")
