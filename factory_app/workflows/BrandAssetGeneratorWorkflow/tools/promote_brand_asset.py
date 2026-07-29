@@ -75,8 +75,8 @@ async def promote_brand_asset(
 
     # mark asset promoted in store (best-effort)
     try:
-        from mozaiksai.core.media.store import get_media_asset_store
         from mozaiksai.core.media import MediaPromotionTarget
+        from mozaiksai.core.media.store import get_media_asset_store
 
         store = get_media_asset_store()
         await store.mark_asset_promoted(asset_id, MediaPromotionTarget.BRAND_ASSET)

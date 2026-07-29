@@ -15,12 +15,21 @@ class _Context:
         self.data = {"order": []}
 
 
+def _write_orchestrator(workflow_dir: Path) -> None:
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (workflow_dir / "orchestrator.yaml").write_text(
+        f"workflow_name: {workflow_dir.name}\nworkflow_startup_mode: BackendOnly\n",
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.asyncio
 async def test_lifecycle_tools_execute_in_declared_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Redirect _workflows_root() to tmp_path via the env override.
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
 
     wf_dir = tmp_path / "FlowA"
+    _write_orchestrator(wf_dir)
     tools_dir = wf_dir / "tools"
     tools_dir.mkdir(parents=True)
 
@@ -66,6 +75,7 @@ async def test_lifecycle_tool_receives_empty_context_container(monkeypatch: pyte
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
 
     workflow_dir = tmp_path / "EmptyContext"
+    _write_orchestrator(workflow_dir)
     tools_dir = workflow_dir / "tools"
     tools_dir.mkdir(parents=True)
     (tools_dir / "preload.py").write_text(
@@ -96,7 +106,7 @@ def test_lifecycle_manager_skips_missing_tool_files(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
 
     wf_dir = tmp_path / "FlowB"
-    wf_dir.mkdir(parents=True)
+    _write_orchestrator(wf_dir)
     (wf_dir / "tools.yaml").write_text(
         "lifecycle_tools:\n"
         "  - trigger: before_chat\n"
@@ -117,6 +127,7 @@ async def test_lifecycle_manager_executes_run_level_hooks(monkeypatch: pytest.Mo
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
 
     wf_dir = tmp_path / "FlowRun"
+    _write_orchestrator(wf_dir)
     tools_dir = wf_dir / "tools"
     tools_dir.mkdir(parents=True)
 
