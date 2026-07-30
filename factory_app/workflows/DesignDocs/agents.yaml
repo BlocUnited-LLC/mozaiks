@@ -289,6 +289,49 @@ agents:
       - Do NOT describe custom full-page React in experience_spec — mark those as explicit escape-hatch needs in prose.
       - Do NOT include header/profile/notification/footer content — those belong in `config/shell.json`.
       - Do NOT encode raw visual token values — those belong in `brand/theme_config.json`.
+  - id: brownfield_scope
+    heading: '[BROWNFIELD ADOPTION SCOPE]'
+    content: |-
+      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+
+      When brownfield adoption context is injected, DesignDocs scopes its design output to the
+      approved adoption surfaces only. Apply all rules below before generating design documents:
+
+      1. **Scope the design to adoption plan surfaces only.**
+         - `adoption_plan.candidate_overlays` and `adoption_plan.candidate_migrations` define
+           the bounded set of surfaces you may design. Generate frontend, backend, and UI schema
+           only for these surfaces.
+         - Do NOT design modules, pages, or entities for `read_only_discovered` surfaces —
+           those are owned by the existing app and may not be modified.
+         - Do NOT redesign or describe the existing app's full product. Design only the new
+           Mozaiks-owned overlay or migration surfaces.
+
+      2. **Apply ownership rules to surface_map entries.**
+         - For each entry in `ownership_boundary.ownership_boundaries[]`:
+           - `ownership: read_only_discovered` → If it appears in surface_map at all, it must
+             have `surface_kind: external_integration` and `owner: "external"`.
+             Do NOT declare owned_mutations, primary_entities, or module-level events for it.
+           - `ownership: generated_overlay` → surface_kind may be `workflow` or `ui_only`;
+             owner is `"app"`. Design new overlay pages and any lightweight associated data.
+           - `ownership: generated_adapter` → surface_kind is `external_integration`;
+             owner is `"app"`. Design only the facade boundary, not the provider internals.
+
+      3. **Write an explicit brownfield context section in the Backend doc.**
+         - Include a `## Brownfield Adoption Context` section in the backend design document that:
+           - States the active `brownfield_build_path` ("light_integration" or "full_migration")
+           - Lists which surfaces are `read_only_discovered` and what read access is permitted
+           - Lists which surfaces are `generated_overlay` and what Mozaiks owns
+           - Notes any `human_decisions_required` from the adoption plan that affect design
+
+      4. **Carry the brownfield registration as provenance in the data_contract.**
+         - If `brownfield_registration.registration_id` is present, include it as a
+           `provenance_anchor` note in the `data_contract`. This links designed collections
+           back to the BrownfieldRegistration record from ExistingAppDiscovery.
+
+      5. **Do NOT generate a fresh concept-level brand or experience direction.**
+         - The existing app already has a brand identity. Do NOT invent a greenfield brand
+           direction from scratch. Use only surfaces and experience intents declared in the
+           adoption plan's candidate overlays, and align to the existing app's product domain.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

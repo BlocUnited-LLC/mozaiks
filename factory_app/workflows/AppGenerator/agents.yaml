@@ -91,6 +91,38 @@ agents:
       If the user mentions these as framework infrastructure, acknowledge they are built-in and move on.
       If the user wants their generated app to sell plans, expose a billing portal, or gate end-user features, treat those as app-owned SaaS modules/config that can be generated on top of the built-in entitlement, runtime usage, and token wallet primitives. Do not generate a second AI-token usage or balance ledger.
       If the product needs domain-specific profile records (for example investor profiles, seller profiles, creator profiles, or member profiles), treat those as module-owned domain entities rather than replacements for the host-owned account/profile primitive.
+  - id: brownfield_scope
+    heading: '[BROWNFIELD ADOPTION SCOPE]'
+    content: |-
+      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+
+      When brownfield adoption context is injected, the app scope is NOT open-ended.
+      The adoption plan already determines what gets built. Adjust your interview accordingly:
+
+      1. **Do NOT restart as a blank-slate product interview.**
+         The `adoption_plan` declares `candidate_overlays`, `candidate_adapters`, and
+         `candidate_migrations`. These are the bounded scope of what AppGenerator will build.
+         Do not ask about unrelated product features, pricing models, or page count.
+
+      2. **For `light_integration` path (overlay):**
+         - The existing app is not being replaced. Overlays add NEW surfaces only.
+         - Confirm only: which of the `candidate_overlays` the user wants to proceed with,
+           and whether any integration constraints apply to the listed `candidate_adapters`.
+         - Do NOT ask about the existing app's architecture, database, or current tech stack —
+           that is already captured in `ownership_boundary`.
+         - Emit NEXT as soon as the overlay selection is confirmed (usually 0–1 questions).
+
+      3. **For `full_migration` path:**
+         - `candidate_migrations` lists the modules to migrate. Confirm module priorities
+           and any data-migration constraints if the user has not already provided them.
+         - Do NOT redesign the existing app from scratch — migration scope is bounded by
+           the adoption plan.
+         - Emit NEXT once module priorities are clear (usually 1–2 questions maximum).
+
+      4. **Ownership boundaries are fixed.**
+         - `read_only_discovered` surfaces are NOT available for new module generation.
+           Do not ask the user to describe or scope those surfaces further.
+         - Only `generated_overlay` and migration-scoped surfaces are in scope for this build.
   max_consecutive_auto_reply: 8
   structured_outputs_required: false
 - name: AppPlanAgent
@@ -581,6 +613,47 @@ agents:
           trigger token-metered work must detect `INSUFFICIENT_TOKENS`, route to
           the configured top-up/billing recovery path, and return without
           retrying the failed action or workflow.
+  - id: brownfield_scope
+    heading: '[BROWNFIELD ADOPTION SCOPE]'
+    content: |-
+      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+
+      When brownfield adoption context is injected, the app bundle scope is constrained by the
+      adoption plan. Apply all of the following rules before planning capability packs or pages:
+
+      1. **Scope capability packs to adoption plan only.**
+         - `adoption_plan.candidate_overlays` lists the workflow overlays approved for generation
+           (e.g. `workflow:ChatSupport`). Do NOT plan capability packs or modules that fall outside
+           this list.
+         - `adoption_plan.candidate_adapters` lists integration adapters in scope
+           (e.g. `adapter:stripe`). Include these as `external_integration` surface entries only.
+         - `adoption_plan.candidate_migrations` lists modules approved for migration to Mozaiks
+           ownership. These and only these may become `module` surfaces.
+         - Do NOT invent capability packs or modules beyond what the adoption plan declares.
+
+      2. **Map ownership boundaries to surface_map ownership.**
+         - For every entry in `ownership_boundary.ownership_boundaries[]`:
+           - `ownership: read_only_discovered` → surface_kind must be `external_integration` or
+             `ui_only`; owner must be `"external"`. NEVER plan a `module_contract` task for these.
+           - `ownership: generated_overlay` → surface_kind may be `workflow` or `ui_only`;
+             owner is `"app"`. Plan overlay-style surfaces only.
+           - `ownership: generated_adapter` → surface_kind is `external_integration`; owner
+             is `"app"`. Plan a thin facade module or integration task.
+         - Set `requires_review: true` surfaces as advisory context notes in the build plan
+           rationale — do NOT block on them, but document the human decision required.
+
+      3. **Do NOT plan module_contract tasks for read_only_discovered surfaces.**
+         - These surfaces are discovered read-only from the existing app. Generating module
+           contracts for them would violate the ownership boundary. Reference them in
+           `service_scope` as existing external capabilities instead.
+
+      4. **Set app_kind to reflect the brownfield path.**
+         - For `brownfield_build_path: "light_integration"`: set `app_kind: "brownfield_overlay"`.
+         - For `brownfield_build_path: "full_migration"`: set `app_kind: "brownfield_migration"`.
+
+      5. **Carry brownfield registration as provenance.**
+         - Include `brownfield_registration.registration_id` and `brownfield_registration.app_id`
+           in the build plan `rationale` field so downstream agents have the provenance anchor.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
