@@ -206,6 +206,11 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             )
         ),
     )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness(),
+        "contract_surface_enabled",
+        lambda: False,
+    )
 
     client = TestClient(studio_app.app)
     response = client.post(
@@ -1688,3 +1693,145 @@ def _async_coding_worker(result: dict):
 
     return _run
 
+
+
+def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_changes(monkeypatch):
+    from mozaiksai.control_plane.contracts import (
+        ContractSurfacePlan,
+        ContractSurfaceUpdate,
+        HarnessDecision,
+        HarnessDecisionAction,
+        SurfaceExecutionRecord,
+        SurfacePlanExecutionResult,
+    )
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    _plan = ContractSurfacePlan(
+        summary="Add export action to product module",
+        change_class="feature",
+        artifact_kind="app_bundle",
+        confidence=0.92,
+        surfaces=[
+            ContractSurfaceUpdate(
+                kind="module_action",
+                target_id="product",
+                target_kind="module",
+                affected_paths=["app/modules/product/backend/handler.py"],
+                dependency_order=0,
+                rationale="Add export action handler",
+                confidence=0.92,
+            )
+        ],
+    )
+    _harness_decision = HarnessDecision(
+        decision_type="targeted_regeneration",
+        message="Executing targeted surface regeneration.",
+        rationale="Adding an export action extends the existing app bundle.",
+        confidence=0.92,
+        recommended_workflow_id=None,
+        actions=[
+            HarnessDecisionAction(
+                action_id="review_surface",
+                label="Review surface changes",
+                action_type="review_surface",
+            )
+        ],
+        metadata={"contract_surface_plan": _plan.model_dump(mode="python")},
+    )
+    _surface_result = SurfacePlanExecutionResult(
+        status="success",
+        surfaces_executed=[
+            SurfaceExecutionRecord(
+                kind="module_action",
+                target_id="product",
+                status="success",
+                applied_files={"app/modules/product/backend/handler.py": "# updated handler"},
+            )
+        ],
+        all_files={"app/modules/product/backend/handler.py": "# updated handler"},
+        requires_schema_migration=False,
+    )
+
+    persisted_sessions: list[dict] = []
+    persisted_changes: list[dict] = []
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            persisted_changes.append(kwargs)
+            return SimpleNamespace(id="cr_surface_1")
+
+        async def create_refinement_session(self, **kwargs):
+            persisted_sessions.append(kwargs)
+            return SimpleNamespace(id="rs_surface_1")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return []
+
+        async def update_change_request_router_decision(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="feature",
+                rationale="Adding an export action extends the existing app bundle.",
+                confidence=0.92,
+                signals=["new_capability", "app_extension"],
+            )
+        ),
+    )
+
+    async def _fake_prepare_contract_surface(**kwargs):
+        return _plan, _harness_decision
+
+    async def _fake_execute_surface_plan(**kwargs):
+        return _surface_result
+
+    harness = studio_app.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", _fake_prepare_contract_surface)
+    monkeypatch.setattr(harness, "execute_surface_plan", _fake_execute_surface_plan)
+
+    client = TestClient(studio_app.app)
+    response = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_456",
+                    "raw_user_request": "Add an export action to the product module",
+                    "source_surface": "app_build",
+                },
+            },
+            "context_variables": {"screen": "studio-create"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["execution_mode"] == "surface_regeneration"
+    assert body["chat_id"] is None
+    assert body["websocket_url"] is None
+    assert body["trigger_source"] == "refinement"
+    assert body["rerouted_by_dependency"] is False
+    assert body["harness_decision"]["decision_type"] == "targeted_regeneration"
+    assert body["surface_result"]["status"] == "success"
+    assert "app/modules/product/backend/handler.py" in body["surface_result"]["all_files"]
+    assert body["refinement_session_id"] == "rs_surface_1"
+    assert len(persisted_sessions) == 1
+    assert persisted_sessions[0]["provider"] == "contract_surface_regeneration"
+    assert persisted_sessions[0]["artifact_version_id"] == "av_456"
+    assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"

@@ -2146,6 +2146,8 @@ async def trigger_workflow(
     coding_request = None
     coding_result = None
     coding_session = None
+    contract_surface_plan = None
+    surface_result = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
 
@@ -2208,6 +2210,29 @@ async def trigger_workflow(
             logger.error("refinement_classification_failed: %s", exc, exc_info=True)
             raise HTTPException(status_code=503, detail="Refinement classification unavailable") from exc
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
+        if (
+            orchestration_control.contract_surface_enabled()
+            and refinement_decision.change_intent.change_class.value in {"feature", "design"}
+            and refinement_request.artifact_kind in {"app_bundle", "workflow_bundle"}
+        ):
+            try:
+                contract_surface_plan, harness_decision = (
+                    await orchestration_control.prepare_contract_surface_request(
+                        refinement_request=refinement_request,
+                        routing_decision=refinement_decision,
+                    )
+                )
+                if contract_surface_plan is not None:
+                    surface_result = await orchestration_control.execute_surface_plan(
+                        plan=contract_surface_plan,
+                        refinement_request=refinement_request,
+                        routing_decision=refinement_decision,
+                    )
+            except Exception as exc:
+                logger.warning("contract_surface_planner_failed, falling back to workflow: %s", exc)
+                contract_surface_plan = None
+                surface_result = None
+                harness_decision = orchestration_control.build_harness_decision(refinement_decision)
         resolved_change_class = refinement_decision.change_intent.change_class.value
         resolved_artifact_kind = refinement_request.artifact_kind
         resolved_artifact_version_id = refinement_request.artifact_version_id
@@ -2451,6 +2476,46 @@ async def trigger_workflow(
             "refinement_session_id": coding_session.id if coding_session is not None else None,
             "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
             "coding_worker": coding_result.model_dump(mode="python"),
+        }
+
+    if surface_result is not None:
+        surface_session = None
+        if (
+            artifact_store is not None
+            and persisted_change_request_id is not None
+            and refinement_request.artifact_version_id
+        ):
+            try:
+                surface_session_status = {
+                    "success": RefinementSessionStatus.VALIDATED,
+                    "partial": RefinementSessionStatus.PENDING,
+                    "failed": RefinementSessionStatus.FAILED,
+                }.get(surface_result.status, RefinementSessionStatus.PENDING)
+                surface_session = await artifact_store.create_refinement_session(
+                    app_id=app_id,
+                    artifact_version_id=refinement_request.artifact_version_id,
+                    change_request_id=persisted_change_request_id,
+                    provider="contract_surface_regeneration",
+                    status=surface_session_status,
+                    metadata={
+                        "surface_result": surface_result.model_dump(mode="python"),
+                        "workflow_id": refinement_decision.workflow_id,
+                    },
+                )
+            except Exception as persist_err:
+                logger.warning("Failed to persist surface RefinementSession: %s", persist_err)
+        return {
+            "execution_mode": "surface_regeneration",
+            "chat_id": None,
+            "workflow_id": refinement_decision.workflow_id,
+            "requested_workflow_id": body.workflow_id or refinement_decision.workflow_id,
+            "websocket_url": None,
+            "trigger_source": body.trigger_source,
+            "routing_explanation": refinement_decision.explanation,
+            "rerouted_by_dependency": False,
+            "refinement_session_id": surface_session.id if surface_session is not None else None,
+            "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
+            "surface_result": surface_result.model_dump(mode="python"),
         }
 
     try:
