@@ -210,6 +210,43 @@ agents:
     heading: '[AG2 NETWORK PATTERNBOOK]'
     content: '{{PATTERN_GUIDANCE_AND_EXAMPLES}}'
 
+  - id: brownfield_scope
+    heading: '[BROWNFIELD ADOPTION SCOPE]'
+    content: |-
+      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+
+      When brownfield adoption context is injected:
+
+      1. **Scope to approved overlays and adapters only.**
+         - `adoption_plan.candidate_overlays` is the authoritative list of workflows you may generate.
+           For each overlay candidate (e.g. `workflow:ChatSupport`), generate exactly one workflow.
+           Do NOT invent workflows outside this list — the adoption plan is the scope contract.
+         - `adoption_plan.candidate_adapters` are integration workflows (e.g. `adapter:stripe`).
+           These become adapter-pattern supporting workflows where explicitly in scope.
+         - If `candidate_overlays` is empty, emit `is_multi_workflow: false` with one lightweight
+           integration workflow and note the adoption plan scope in `pack_partition_reason`.
+
+      2. **Select overlay-appropriate AG2 patterns.**
+         - Overlay workflows typically augment existing product flows. Prefer patterns that
+           compose well with external systems: Pipeline (6), Star (8), or Coordinator (5).
+         - Avoid patterns that assume standalone ownership of a full user journey (Triage with Tasks 9)
+           unless the adoption plan explicitly calls for a migration surface.
+
+      3. **Carry adoption constraints into `initial_message`.**
+         - For every workflow entry in `workflows[]`, the `initial_message` to WorkflowBundleBuilderAgent
+           MUST include:
+           - `brownfield_build_path`: the active path ("light_integration" or "full_migration")
+           - `ownership_boundary`: the list of known surfaces with their ownership class
+           - A clear directive: "Do not write tools or agents that mutate read_only_discovered surfaces."
+         - Name which ownership classes each generated agent/tool is allowed to operate on.
+
+      4. **Respect ownership boundaries in pack partitioning.**
+         - Surfaces with `ownership: read_only_discovered` must NEVER be assigned as module owners
+           or workflow primary concerns. They are context inputs only.
+         - Surfaces with `ownership: generated_overlay` are the only surfaces you may generate
+           new workflows for.
+         - `pack_partition_reason` must reference the adoption plan when explaining scope.
+
   - id: instructions_continued
     heading: '[INSTRUCTIONS CONTINUED]'
     content: |-
@@ -823,6 +860,40 @@ agents:
   - id: pattern_guidance_and_examples
     heading: '[PATTERN GUIDANCE]'
     content: '{{PATTERN_GUIDANCE_AND_EXAMPLES}}'
+
+  - id: brownfield_scope
+    heading: '[BROWNFIELD ADOPTION SCOPE]'
+    content: |-
+      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt
+      (injected from the `initial_message` provided by PatternAgent).**
+
+      When brownfield adoption context is present:
+
+      1. **Generate overlay-style bundles, not greenfield replacements.**
+         - Your workflow MUST operate as an augmentation layer on top of the existing app.
+           Do NOT generate tools that overwrite, delete, or replace data owned by
+           `read_only_discovered` surfaces.
+         - Every tool that writes data MUST target only surfaces with `ownership: generated_overlay`
+           or `ownership: generated_adapter`.
+
+      2. **Honor ownership in tool design.**
+         - `read_only_discovered` surfaces: tools may READ from them (e.g. list users, fetch products)
+           but MUST NOT write, mutate, or delete their records.
+         - `generated_overlay` surfaces: full CRUD is allowed — these are new overlay surfaces.
+         - If a tool would mutate a `read_only_discovered` surface, comment in the stub docstring
+           that the operation is forbidden and raise `NotImplementedError` with a message referencing
+           the ownership boundary.
+
+      3. **Scope agents to overlay responsibilities.**
+         - Agent roles must reference the overlay target (e.g. "You augment the existing CRM's
+           contact flow by adding a follow-up recommendation layer — you do NOT own CRM contacts").
+         - The `context` section of each agent's prompt_sections must explain which surfaces
+           it reads (read_only) and which it owns (generated_overlay).
+
+      4. **context_variables must reflect the brownfield state.**
+         - Declare `brownfield_build_path` and `adoption_plan` as context variables accessible
+           to planning agents in the generated `context_variables.yaml`.
+         - This allows the overlay workflow to be aware of the adoption scope at runtime.
 
   - id: contract_check
     heading: '[CONTRACT CHECK]'
