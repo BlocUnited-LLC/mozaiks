@@ -1989,6 +1989,8 @@ models:
         - billing
         - membership
         - entitlement_dispatch
+        - file_storage
+        - notification_preferences
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
           standard = request/response CRUD (default).
@@ -1999,6 +2001,8 @@ models:
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
           membership = resource-scoped user classes, collaborators, invitations, access summaries, and deterministic policy inputs for app-owned participation flows; consuming modules own any decision records or freeze semantics.
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
+          file_storage = metadata-only file record module; blobs are stored externally via services/adapters/storage/{provider}.py; emits file_uploaded and file_deleted events; always user_data_scope=true.
+          notification_preferences = user notification opt-in preferences module; external delivery via services/adapters/notifications/; triggered by reactions.yaml observing domain events; always user_data_scope=true.
       description:
         type: str
         description: Short module summary.
