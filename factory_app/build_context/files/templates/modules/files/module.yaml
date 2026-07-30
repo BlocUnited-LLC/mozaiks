@@ -1,0 +1,132 @@
+schema_version: mozaiks.module.v1
+module:
+  id: files
+  display_name: Files
+  version: 1.0.0
+  description: User-generated file upload, storage metadata, retrieval, and deletion. Stores file metadata only; blobs are managed by the app's storage adapter.
+  owner: app
+  visibility: private
+  handler: backend.handler:FilesHandler
+  user_data_scope: true
+
+permissions:
+  - id: files.read
+    description: Read file records and metadata.
+  - id: files.write
+    description: Upload and delete files.
+
+actions:
+  - id: upload_file
+    description: Register a file record after the blob has been stored externally.
+    handler_method: upload_file
+    input_schema:
+      type: object
+      required: [filename, mime_type, size_bytes, storage_url]
+      properties:
+        filename:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+        storage_url:
+          type: string
+          description: Opaque provider URL returned by the storage adapter after blob upload.
+        is_public:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+    output_schema:
+      type: object
+      required: [success, file]
+      properties:
+        success:
+          type: boolean
+        file:
+          type: object
+    permissions:
+      - files.write
+    emits:
+      - domain.files.file_uploaded
+
+  - id: get_file
+    description: Fetch a single file record by file_id.
+    handler_method: get_file
+    input_schema:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+    output_schema:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: object
+    permissions:
+      - files.read
+
+  - id: list_files
+    description: List file records for the current user.
+    handler_method: list_files
+    input_schema:
+      type: object
+      properties:
+        is_public:
+          type: boolean
+        mime_type:
+          type: string
+        limit:
+          type: integer
+    output_schema:
+      type: object
+      required: [files, total]
+      properties:
+        files:
+          type: array
+        total:
+          type: integer
+    permissions:
+      - files.read
+
+  - id: delete_file
+    description: Soft-delete a file record by file_id.
+    handler_method: delete_file
+    input_schema:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+    permissions:
+      - files.write
+    emits:
+      - domain.files.file_deleted
+
+capabilities:
+  - capability_id: files.upload
+    kind: action
+    target: upload_file
+    title: Upload file
+    permissions:
+      - files.write
+  - capability_id: files.read
+    kind: action
+    target: list_files
+    title: List files
+    permissions:
+      - files.read
+  - capability_id: files.delete
+    kind: action
+    target: delete_file
+    title: Delete file
+    permissions:
+      - files.write

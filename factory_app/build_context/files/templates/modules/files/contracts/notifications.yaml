@@ -1,0 +1,20 @@
+schema_version: mozaiks.notifications.v1
+
+notifications:
+  - id: public_file_uploaded
+    description: Notify relevant users when a public file is uploaded and available for viewing.
+    event_type: domain.files.file_uploaded
+    condition:
+      field: is_public
+      value: true
+    channels:
+      - in_app
+    audience:
+      strategy: app_admins
+    template:
+      title: "New file available"
+      body: "{{filename}} has been uploaded."
+    context_fields:
+      - file_id
+      - filename
+      - mime_type

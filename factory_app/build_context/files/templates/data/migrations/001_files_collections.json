@@ -1,0 +1,33 @@
+{
+  "migration_id": "files_001_collections",
+  "description": "Declare the files.records collection for the files module.",
+  "surfaces": [
+    {
+      "surface_id": "files",
+      "collections": [
+        {
+          "mongo_collection": "files_records",
+          "data_alias": "files.records",
+          "description": "File metadata records. Blobs are stored externally; this collection tracks metadata and the opaque storage_url.",
+          "indexes": [
+            {
+              "name": "files_by_app_user",
+              "keys": [
+                {"field": "app_id", "order": 1},
+                {"field": "created_by", "order": 1}
+              ]
+            },
+            {
+              "name": "files_by_app_file_id",
+              "keys": [
+                {"field": "app_id", "order": 1},
+                {"field": "file_id", "order": 1}
+              ],
+              "unique": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

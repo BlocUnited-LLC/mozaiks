@@ -243,3 +243,36 @@ capabilities:
       - onboarding.tour.show
       - onboarding.tour.dismiss
       - onboarding.tour.progress.read
+
+  - id: files_pack
+    label: Files & Media Storage
+    capability_kind: operator_pack
+    recommendation_rank: 3
+    domains:
+      - files
+      - media
+      - storage
+      - documents
+    intent_signals:
+      - App needs file upload, media storage, or document management.
+      - Users upload images, documents, or attachments.
+      - App stores user-generated files, photos, or media assets.
+      - Product spec mentions file upload, document management, attachments, media library, or photo upload.
+    selection_aliases:
+      - files
+      - file upload
+      - media
+      - storage
+      - document management
+      - attachments
+      - photo upload
+      - image upload
+    generator_notes:
+      - Generate the files module with metadata-only storage. Actual blobs are stored by the app's storage adapter.
+      - Do not generate cloud storage SDK calls in the module backend.
+      - Generate services/adapters/storage/{provider}.py when the app declares a specific cloud storage provider.
+      - The storage_url field is an opaque provider URL returned by the storage adapter; the module does not validate or proxy it.
+    capabilities_provided:
+      - files.upload
+      - files.read
+      - files.delete

@@ -1,0 +1,87 @@
+contract_id: files
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_file_storage_apps
+    when:
+      intent_any:
+        - file upload
+        - file storage
+        - media management
+        - document management
+        - user files
+        - attachments
+        - photo upload
+        - image upload
+        - file sharing
+        - document storage
+        - media upload
+        - upload files
+    action: select_pack
+
+recommended_domains:
+  - files
+  - media
+  - storage
+  - documents
+  - attachments
+
+required_outputs:
+  - path: data/migrations/001_files_collections.json
+    owner: templates
+  - path: modules/files/module.yaml
+    owner: templates
+  - path: modules/files/backend/__init__.py
+    owner: templates
+  - path: modules/files/backend/base_handler.py
+    owner: templates
+  - path: modules/files/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
+  - path: modules/files/backend/service.py
+    owner: templates
+  - path: modules/files/backend/repo.py
+    owner: templates
+  - path: modules/files/backend/policy.py
+    owner: templates
+  - path: modules/files/backend/schemas.py
+    owner: templates
+  - path: modules/files/backend/account_data_handler.py
+    owner: templates
+  - path: modules/files/contracts/events.yaml
+    owner: templates
+  - path: modules/files/contracts/notifications.yaml
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/storage/
+  - path_prefix: modules/media/
+  - path_prefix: modules/uploads/
+  - path_prefix: services/cloud_storage/
+
+runtime_boundaries:
+  - id: metadata_only
+    rule: >
+      Generated module stores file metadata only (file_id, filename, mime_type,
+      size_bytes, storage_url, is_public, created_by). The actual blob belongs in
+      a provider storage service. Do not generate AWS/GCP/Azure SDK calls in the
+      module backend.
+  - id: storage_url_is_opaque
+    rule: >
+      The storage_url field is an opaque provider URL. The module does not validate,
+      sign, or proxy it. The app's storage adapter manages blob lifecycle.
+  - id: user_data_scope
+    rule: >
+      File records are user-owned PII. The module declares user_data_scope: true
+      and ships account_data_handler.py implementing delete_user_data and
+      export_user_data.
+  - id: no_direct_sdk_calls
+    rule: >
+      Generated repo.py must use ctx.persistence.collection("files", entity_name).
+      No direct cloud storage SDK calls in module backend. Storage mechanics belong
+      in services/adapters/storage/{provider}.py.
+  - id: event_emission
+    rule: >
+      Events must be emitted via ctx.emit() from service.py, not from handler.py
+      or repo.py.
+
+facades: []
