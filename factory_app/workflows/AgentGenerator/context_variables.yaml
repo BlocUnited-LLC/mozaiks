@@ -254,6 +254,47 @@ definitions:
     source:
       type: state
       default: null
+  brownfield_build_path:
+    type: string
+    description: >
+      Selected brownfield build path from brownfield_path_selector. One of
+      "light_integration" (overlay-only generation via AgentGenerator +
+      AppGenerator) or "full_migration" (DesignDocs + full pipeline grounded
+      in AdoptionPlan scope). Null for greenfield builds.
+    source:
+      type: state
+      default: null
+  adoption_plan:
+    type: object
+    description: >
+      Canonical AdoptionPlan from ExistingAppDiscovery — recommended_path,
+      phases, candidate_overlays, candidate_adapters, candidate_migrations, and
+      human_decisions_required. Present only for brownfield builds. Planning
+      agents scope generation work to approved surfaces declared here.
+    source:
+      type: state
+      default: null
+  ownership_boundary:
+    type: object
+    description: >
+      Canonical ownership_boundary artifact from ExistingAppDiscovery —
+      app_id and ownership_boundaries[] listing each discovered surface with
+      its ownership class (read_only_discovered, generated_overlay, etc.),
+      allowed_operations, and requires_review flag. Present only for brownfield
+      builds. Agents must not propose changes to read_only_discovered surfaces.
+    source:
+      type: state
+      default: null
+  brownfield_registration:
+    type: object
+    description: >
+      BrownfieldRegistration record from ExistingAppDiscovery — registration_id,
+      app_id, source_refs, context_version_id, scan_policy_ref, and status.
+      Present only for brownfield builds. Used as the provenance anchor for
+      generated overlays and adapters.
+    source:
+      type: state
+      default: null
   context_aware:
     type: boolean
     description: Flag indicating if the application is opensource (in which the llm
@@ -749,6 +790,10 @@ agents:
     - pack_name
     - pack_partition_reason
     - workflows_spec
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration
   ProjectOverviewAgent:
     variables:
     - concept_overview
@@ -776,6 +821,10 @@ agents:
     - experience_spec_document
     - pack_name
     - is_multi_workflow
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration
   PackMetadataAgent:
     variables:
     - build_mode

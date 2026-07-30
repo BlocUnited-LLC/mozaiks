@@ -30,6 +30,12 @@ prompt_middleware:
 - agent: WorkflowBundleBuilderAgent
   filename: tools/hook_workflow_archetypes_context.py
   function: inject_workflow_archetypes_context
+- agent: PatternAgent
+  filename: ../_shared/brownfield_adoption_context.py
+  function: inject_brownfield_adoption_context
+- agent: WorkflowBundleBuilderAgent
+  filename: ../_shared/brownfield_adoption_context.py
+  function: inject_brownfield_adoption_context
 
 
 

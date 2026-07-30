@@ -17,9 +17,15 @@ prompt_middleware:
 - agent: InterviewAgent
   filename: hook_agent_backend_context.py
   function: inject_agent_backend_context
+- agent: InterviewAgent
+  filename: ../_shared/brownfield_adoption_context.py
+  function: inject_brownfield_adoption_context
 - agent: AppPlanAgent
   filename: hook_agent_backend_context.py
   function: inject_agent_backend_context
+- agent: AppPlanAgent
+  filename: ../_shared/brownfield_adoption_context.py
+  function: inject_brownfield_adoption_context
 - agent: AppPlanAgent
   filename: hook_workflow_integration_contract.py
   function: inject_workflow_integration_contract
