@@ -7,7 +7,6 @@ import { useNavigate } from 'react-router-dom'
 
 import {
   CollectionToolbar,
-  Form,
   InlineEmptyState,
   ResourceList,
 } from '@mozaiks/chat-ui/ui'
@@ -16,16 +15,12 @@ import {
   ActionButton,
   StudioErrorState,
   StudioLoadingState,
-  StudioSlideOver,
   StatusPill,
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
-import { API_BASE } from './studioApi.js'
 import {
-  buildAppDashboardHref,
   fetchDashboardConfig,
   getDefaultPortalRoute,
-  getSurfaceRoutePattern,
 } from './dashboardRoutes.js'
 import buildWorkspacePortfolio from './workspaceStudioModel.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
@@ -36,8 +31,6 @@ const FILTER_OPTIONS = [
   { label: 'Building', value: 'building' },
   { label: 'Live', value: 'live' },
 ]
-
-const CREATE_APP_PATH = '/create'
 
 function matchesFilter(row, activeFilter) {
   if (activeFilter === 'all') return true
@@ -65,12 +58,6 @@ const TrashIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
     <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-  </svg>
-)
-
-const DashboardIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
   </svg>
 )
 
@@ -208,79 +195,12 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
   )
 }
 
-function ImportAppOverlay({ open, onClose, onImport, error, busy }) {
-  return (
-    <StudioSlideOver
-      open={open}
-      title="Import App"
-      description="Clone an existing repository and build App Intelligence before agents edit it."
-      onClose={onClose}
-    >
-      {error ? (
-        <div className="mb-4 rounded-lg border border-destructive/35 bg-destructive/8 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      ) : null}
-      <Form
-        id="import-app"
-        fields={[
-          {
-            name: 'name',
-            label: 'App name',
-            type: 'text',
-            placeholder: 'Mozaiks App',
-          },
-          {
-            name: 'repo_url',
-            label: 'Repository URL',
-            type: 'text',
-            required: true,
-            placeholder: 'https://github.com/org/repo',
-          },
-          {
-            name: 'branch',
-            label: 'Branch',
-            type: 'text',
-            placeholder: 'main',
-          },
-          {
-            name: 'monorepo_path',
-            label: 'Monorepo path',
-            type: 'text',
-            placeholder: 'apps/web',
-          },
-          {
-            name: 'ignored_paths',
-            label: 'Ignored paths',
-            type: 'textarea',
-            placeholder: 'One path per line, such as docs/archive or examples/large-demo.',
-          },
-          {
-            name: 'notes',
-            label: 'Notes',
-            type: 'textarea',
-            placeholder: 'Current stack, product purpose, and constraints to preserve.',
-          },
-        ]}
-        submit_label="Import Repository"
-        cancel_label="Cancel"
-        disabled={busy}
-        onCancel={onClose}
-        onSubmit={onImport}
-      />
-    </StudioSlideOver>
-  )
-}
-
 export default function AppsPage() {
   const navigate = useNavigate()
   const { apps, loading, error, deleteApp } = useWorkspaceApps('Could not load your apps.')
   const [dashboardConfig, setDashboardConfig] = useState(null)
   const [searchValue, setSearchValue] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
-  const [importOpen, setImportOpen] = useState(false)
-  const [importBusy, setImportBusy] = useState(false)
-  const [importError, setImportError] = useState(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -296,10 +216,6 @@ export default function AppsPage() {
 
   const appDashboardRoute = useMemo(
     () => getDefaultPortalRoute(dashboardConfig, 'app'),
-    [dashboardConfig],
-  )
-  const appRootRoute = useMemo(
-    () => getSurfaceRoutePattern(dashboardConfig, 'app'),
     [dashboardConfig],
   )
 
@@ -348,73 +264,6 @@ export default function AppsPage() {
     await deleteApp(buildRegistryId)
   }
 
-  function handleHeaderAction(actionId) {
-    if (actionId === 'create') {
-      navigate(CREATE_APP_PATH)
-    } else if (actionId === 'import') {
-      setImportError(null)
-      setImportOpen(true)
-    }
-  }
-
-  async function handleImport(values) {
-    setImportBusy(true)
-    setImportError(null)
-    try {
-      const repoUrl = String(values.repo_url || '').trim()
-      const name = String(values.name || '').trim() || repoUrl.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') || 'Imported app'
-      const ignoredPaths = String(values.ignored_paths || '')
-        .split(/\r?\n|,/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-      const createRes = await fetch(`${API_BASE}/api/studio/apps`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: String(values.notes || '').trim() || `Imported from ${repoUrl}`,
-          status: 'building',
-          name_source: 'imported_app',
-          build_context_profile: {
-            source: 'repository_import',
-            repo_url: repoUrl,
-            branch: String(values.branch || '').trim() || null,
-            monorepo_path: String(values.monorepo_path || '').trim() || null,
-            ignored_paths: ignoredPaths,
-          },
-        }),
-      })
-      if (!createRes.ok) throw new Error('App record could not be created.')
-      const createPayload = await createRes.json()
-      const appId = createPayload?.app?.app_id
-      if (!appId) throw new Error('Created app record did not return an app id.')
-
-      const importRes = await fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(appId)}/context/source-import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_kind: 'git_repository',
-          repo_url: repoUrl,
-          branch: String(values.branch || '').trim() || null,
-          monorepo_path: String(values.monorepo_path || '').trim() || null,
-          ignored_paths: ignoredPaths,
-          make_current: true,
-        }),
-      })
-      if (!importRes.ok) throw new Error('Source import job could not be started.')
-      setImportOpen(false)
-      navigate(
-        buildAppDashboardHref(appDashboardRoute, appId) ||
-        buildAppDashboardHref(appRootRoute, appId) ||
-        '/apps',
-      )
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Repository import could not be started.')
-    } finally {
-      setImportBusy(false)
-    }
-  }
-
   if (loading) return <StudioLoadingState label="Loading your apps…" />
   if (error) return <StudioErrorState title="Could not load apps" message={error} />
 
@@ -424,11 +273,6 @@ export default function AppsPage() {
         <WorkspaceStudioHero
           title="Apps"
           subtitle="Manage your apps, continue builds, and open app Studio."
-          actions={[
-            { id: 'create', label: 'Create App' },
-            { id: 'import', label: 'Import App', variant: 'outline' },
-          ]}
-          onAction={handleHeaderAction}
           summaryItems={summaryItems}
         />
 
@@ -447,7 +291,7 @@ export default function AppsPage() {
           ) : portfolio.rows.length === 0 ? (
             <InlineEmptyState
               title="No apps yet"
-              description="Hit Create App above to get started. Describe what you want to build and Mozaiks handles the scaffold."
+              description="Apps you create or manage will appear here."
             />
           ) : (
             <InlineEmptyState
@@ -457,17 +301,6 @@ export default function AppsPage() {
           )}
         </section>
 
-        <ImportAppOverlay
-          open={importOpen}
-          onClose={() => {
-            if (importBusy) return
-            setImportOpen(false)
-            setImportError(null)
-          }}
-          onImport={handleImport}
-          error={importError}
-          busy={importBusy}
-        />
       </div>
     </WorkspaceLayout>
   )

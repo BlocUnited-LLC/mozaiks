@@ -54,6 +54,24 @@
       }
     },
     {
+      "path": "/users",
+      "component": "WorkspaceUsersPage",
+      "label": "Users",
+      "order": 6,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Users",
+        "appShell": true,
+        "ai_context": "The user is on the Workspace Users page. It shows total, active, and new user counts across all apps with a per-app breakdown. Clicking an app row navigates to the app access page for the full user list.",
+        "navigation": {
+          "group": "workspace-studio",
+          "scope": "local",
+          "icon": "users"
+        }
+      }
+    },
+    {
       "path": "/integrations",
       "component": "WorkspaceIntegrationsPage",
       "label": "Integrations",

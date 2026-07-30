@@ -17,6 +17,7 @@ const AdminPage          = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.j
 const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
+const WorkspaceUsersPage         = lazy(() => import('./pages/WorkspaceUsersPage.jsx'))
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const CreateAppRedirectPage = lazy(() => import('./pages/CreateAppRedirectPage.jsx'))
 const DashboardPortalPage = lazy(() => import('./pages/DashboardPortalPage.jsx'))
@@ -48,6 +49,10 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('WorkspaceUsagePage', WorkspaceUsagePage, {
     description: 'Workspace usage surface — portfolio-level usage, capacity, and value trends across all apps.',
+  })
+
+  registerComponent('WorkspaceUsersPage', WorkspaceUsersPage, {
+    description: 'Workspace users surface — total, active, and new user counts across all apps with per-app breakdown.',
   })
 
   registerComponent('WorkspaceIntegrationsPage', WorkspaceIntegrationsPage, {
