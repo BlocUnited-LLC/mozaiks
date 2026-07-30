@@ -124,6 +124,28 @@ def test_build_outbound_event_envelope_marks_hidden_initial_seed_messages() -> N
     assert envelope["data"]["_mozaiks_seed_kind"] == "initial_message"
 
 
+def test_build_outbound_event_envelope_maps_tool_progress_to_chat_namespace() -> None:
+    dispatcher = UnifiedEventDispatcher()
+
+    envelope = dispatcher.build_outbound_event_envelope(
+        raw_event={
+            "kind": "tool_progress",
+            "tool_name": "App Intelligence",
+            "progress_percent": 58,
+            "status_message": "Extracting symbols.",
+            "ui_visibility": "user",
+        },
+        chat_id="chat-progress",
+        workflow_name="ExistingAppDiscovery",
+    )
+
+    assert envelope is not None
+    assert envelope["type"] == "chat.tool_progress"
+    assert envelope["data"]["tool_name"] == "App Intelligence"
+    assert envelope["data"]["progress_percent"] == 58
+    assert envelope["data"]["ui_visibility"] == "user"
+
+
 def test_serialize_event_content_normalizes_enum_to_value() -> None:
     class WorkflowName(Enum):
         SMOKE_CHILD = "SmokeChild"

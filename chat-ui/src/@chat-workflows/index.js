@@ -80,10 +80,12 @@ export const initializeWorkflows = async (registerComponent) => {
       const namespacedComponentName = `${workflowName}:${componentName}`;
       registerComponent(namespacedComponentName, component, {
         description: `${workflowName} workflow component (namespaced)`,
+        override: true,
       });
       // Plain registration is retained for route/transition components and developer ergonomics.
       registerComponent(componentName, component, {
         description: `${workflowName} workflow component`,
+        override: true,
       });
     }
   }

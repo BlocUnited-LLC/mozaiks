@@ -1516,7 +1516,7 @@ const ChatPage = () => {
       if (debugFlag('mozaiks.debug_pipeline')) console.warn('[PIPELINE] failed to unwrap nested envelope', e);
     }
     
-    if (!data.type.startsWith('chat.') && data.type !== 'unknown') return;
+    if (!data.type.startsWith('chat.') && !data.type.startsWith('ui.') && data.type !== 'unknown') return;
 
     // Some events may arrive already as { type:'chat.text', data:{ ...actualFields... } } (no double-serialization)
     // or after the above unwrap we can still retain an inner data object we need to promote.
@@ -1544,7 +1544,7 @@ const ChatPage = () => {
         if (inner.structured_output !== undefined && data.structured_output === undefined) data.structured_output = inner.structured_output;
         if (inner.structured_schema !== undefined && data.structured_schema === undefined) data.structured_schema = inner.structured_schema;
         // UI tool / component hints (input_request etc.) + error messages
-        ['component_type','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata','role','replay','index','timestamp'].forEach(f => {
+        ['component_type','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','activity_type','status','status_message','workflow_name','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata','role','replay','index','timestamp'].forEach(f => {
           if (inner[f] !== undefined && data[f] === undefined) data[f] = inner[f];
         });
       }
@@ -2503,6 +2503,14 @@ const ChatPage = () => {
         const activityMessage = data.message
           || `${activityAgent} is working in the background.`;
         const activityKey = `${activityType}:${activityAgent}`;
+        const normalizedActivityStatus = String(activityStatus || '').trim().toLowerCase();
+        const activityCompleteStatuses = ['complete', 'completed', 'ready', 'success', 'succeeded', 'done'];
+        const activityFailedStatuses = ['failed', 'error', 'unavailable'];
+        const activityIcon = activityCompleteStatuses.includes(normalizedActivityStatus)
+          ? '✓'
+          : activityFailedStatuses.includes(normalizedActivityStatus)
+            ? '⚠'
+            : '⏳';
         if (showInitSpinner) {
           setShowInitSpinner(false);
           initSpinnerHiddenOnceRef.current = true;
@@ -2516,7 +2524,7 @@ const ChatPage = () => {
               : `activity-${Date.now()}`,
             sender: 'system',
             agentName: 'System',
-            content: `⏳ ${activityMessage}`,
+            content: `${activityIcon} ${activityMessage}`,
             isStreaming: false,
             metadata: {
               event_type: 'activity',
@@ -2524,6 +2532,7 @@ const ChatPage = () => {
               activity_status: activityStatus,
               activity_agent: activityAgent,
               activity_key: activityKey,
+              progress_percent: data.progress_percent,
               workflow_name: data.workflow_name || currentWorkflowName || null,
             },
           };
@@ -2541,22 +2550,32 @@ const ChatPage = () => {
       }
       case 'tool_progress': {
         // Update or append progress for a long-running tool
-        const progress = data.progress_percent;
+        const progress = Number(data.progress_percent || 0);
         const tool = data.tool_name || 'tool';
-        if (!showSystemMessages) {
+        const userVisibleToolProgress = (
+          tool === 'App Intelligence'
+          || tool === 'app_intelligence'
+          || data.ui_visibility === 'user'
+          || data.metadata?.ui_visibility === 'user'
+        );
+        if (!showSystemMessages && !userVisibleToolProgress) {
           return;
         }
+        const statusText = data.status_message || data.message || `${tool} progress`;
+        const progressComplete = progress >= 100 || ['complete', 'completed', 'ready', 'success', 'succeeded'].includes(String(data.status || '').toLowerCase());
+        const progressIcon = progressComplete ? '✓' : '⏳';
+        const progressContent = `${progressIcon} ${statusText}${Number.isFinite(progress) ? ` (${Math.round(progress)}%)` : ''}`;
         setMessagesWithLogging(prev => {
           const updated = [...prev];
           for (let i = updated.length - 1; i >=0; i--) {
             const m = updated[i];
-            if (m.metadata && m.metadata.event_type === 'tool_call' && m.metadata.tool_name === tool) {
-              m.content = `🔧 ${tool} progress: ${progress}%`;
+            if (m.metadata && m.metadata.event_type === 'tool_progress' && m.metadata.tool_name === tool) {
+              m.content = progressContent;
               m.metadata.progress_percent = progress;
               return updated;
             }
           }
-          updated.push({ id:`tool-progress-${Date.now()}`, sender:'system', agentName:'System', content:`🔧 ${tool} progress: ${progress}%`, isStreaming:false, metadata:{ event_type:'tool_progress', tool_name: tool, progress_percent: progress }});
+          updated.push({ id:`tool-progress-${Date.now()}`, sender:'system', agentName:'System', content: progressContent, isStreaming:false, metadata:{ event_type:'tool_progress', tool_name: tool, progress_percent: progress }});
           return updated;
         });
         return;
