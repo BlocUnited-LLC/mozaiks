@@ -718,7 +718,7 @@ export default function ProfilePage() {
         const res = await fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth);
         if (res.ok) {
           const body = await res.json();
-          if (body?.sections && typeof body.sections === 'object') {
+          if (body?.sections && !Array.isArray(body.sections) && typeof body.sections === 'object') {
             sections = body.sections;
             profileTrace('pages:v2:sections', { sectionIds: Object.keys(sections) });
           } else if (Array.isArray(body?.pages)) {

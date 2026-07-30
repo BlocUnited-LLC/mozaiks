@@ -736,4 +736,5 @@ def test_profile_page_fetches_profile_pages() -> None:
     assert "/api/users/" in source
     assert "subjectParams.set('username', username)" in source
     assert "componentRegistry" in source
+    assert "!Array.isArray(body.sections)" in source
 
