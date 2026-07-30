@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "playwright:install": "npx playwright install --with-deps chromium",
-    "test:ui-primitives": "node ../scripts/validate-ui-primitive-usage.js",
+    "test:ui-primitives": "node ./scripts/validate-ui-primitive-usage.cjs",
     "test:responsive-smoke": "playwright test -c playwright.responsive.config.js",
     "test:generated-ui": "playwright test -c playwright.generated-ui.config.js",
     "test:generated-ui:app": "playwright test -c playwright.generated-ui.config.js playwright/generated-ui/generated-app.generic.acceptance.spec.js",
