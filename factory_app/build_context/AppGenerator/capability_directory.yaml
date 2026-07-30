@@ -276,3 +276,44 @@ capabilities:
       - files.upload
       - files.read
       - files.delete
+
+  - id: notifications_pack
+    label: External Notification Delivery
+    capability_kind: operator_pack
+    recommendation_rank: 4
+    domains:
+      - notifications
+      - email
+      - push
+      - sms
+      - alerts
+    capabilities_provided:
+      - notifications.email.send
+      - notifications.push.send
+      - notifications.preferences.read
+      - notifications.preferences.write
+    intent_signals:
+      - App delivers email alerts, push notifications, or SMS messages to users.
+      - Users need to opt in or out of notification channels.
+      - Domain events should trigger transactional email or mobile push delivery.
+    selection_aliases:
+      - notifications
+      - email notifications
+      - push notifications
+      - sms notifications
+      - transactional email
+      - mobile push
+      - email delivery
+      - external notifications
+    generator_notes:
+      - Generate the notification_settings facade module for user preferences and a provider-neutral adapter stub under services/adapters/notifications/.
+      - Do not re-implement in-app notification storage or websocket delivery — the runtime handles those via contracts/notifications.yaml on event-producing modules.
+      - Do not embed provider SDK calls in module service.py — delivery mechanics belong in services/adapters/notifications/{channel}.py.
+      - Generated adapter stubs must not include credential values — load from env vars (EMAIL_API_KEY, FCM_SERVER_KEY, etc.).
+    alternatives:
+      - id: managed_notification_platform
+        capability_kind: managed_capability
+        use_when: User brings a managed notification platform (Courier, Knock, Novu) with its own delivery API.
+        generator_notes:
+          - Generate a thin services/integrations/{platform}_client.py and a notification_settings facade module only.
+          - Do not generate provider adapter stubs — the managed platform owns delivery.

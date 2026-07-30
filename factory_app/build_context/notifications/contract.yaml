@@ -1,0 +1,183 @@
+contract_id: notifications
+contract_type: build_pack_instructions
+
+# The notifications operator_pack is for EXTERNAL notification delivery
+# (email, push, SMS) beyond the runtime in-app notification record.
+#
+# The runtime already provides in-app notification storage and websocket
+# delivery — modules declare these in contracts/notifications.yaml on the
+# event-producing module. Select this pack only when the app must deliver
+# domain-event alerts through a provider-backed external channel.
+#
+# Generated outputs are all owner: generator because external delivery
+# adapters are highly provider-specific and must be customized per-app.
+# AppGenerator generates provider-neutral stubs; operators fill in their
+# chosen provider (SendGrid, AWS SES, Firebase, Twilio, etc.).
+
+selection_rules:
+  - id: select_for_external_delivery
+    when:
+      intent_any:
+        - email notifications
+        - push notifications
+        - sms notifications
+        - email alerts
+        - email delivery
+        - transactional email
+        - push alerts
+        - mobile push
+        - text message alerts
+        - external notification delivery
+    action: select_pack
+  - id: confirm_for_generic_notifications
+    when:
+      intent_any:
+        - notifications
+        - alerts
+        - in-app notifications
+        - notification center
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - saas
+  - community
+  - marketplace
+  - social
+  - ecommerce
+
+avoid_when:
+  - App only needs in-app alerts and notification center — declare contracts/notifications.yaml on the event-producing module instead.
+  - App uses a managed notification platform that handles external delivery — use that platform's client as a managed_capability or service integration.
+
+# All required outputs are owner: generator because external delivery adapters
+# are provider-specific and must be customized per deployment target.
+# AppGenerator produces provider-neutral stubs. Operators select their
+# provider and fill in credentials + API calls in the adapter.
+required_outputs:
+  - path: modules/notification_settings/module.yaml
+    owner: generator
+    notes: >
+      User-facing notification preference module. Actions:
+      get_notification_preferences (reads user opt-ins for email, push, sms),
+      update_notification_preferences (sets per-channel opt-in).
+      user_data_scope: true. No entitlement_gate — all users may manage
+      their own preferences.
+
+  - path: modules/notification_settings/backend/handler.py
+    owner: workspace
+    notes: Preserved across regeneration. Thin dispatch only.
+
+  - path: modules/notification_settings/backend/service.py
+    owner: generator
+
+  - path: modules/notification_settings/backend/repo.py
+    owner: generator
+    notes: Persists preference records to notifications.preferences data alias.
+
+  - path: modules/notification_settings/backend/schemas.py
+    owner: generator
+    notes: NotificationPreferences typed shape with per-channel opt-in booleans.
+
+  - path: modules/notification_settings/contracts/reactions.yaml
+    owner: generator
+    notes: >
+      Observes domain events declared as external-delivery targets and
+      routes them to the channel-appropriate adapter. One reaction per
+      event type that should trigger external delivery.
+
+  - path: services/adapters/notifications/email.py
+    owner: generator
+    notes: >
+      Provider-neutral email adapter stub. Declares send_email(to, subject, body, template_id).
+      Operators replace the stub body with their chosen provider SDK (SendGrid,
+      AWS SES, Postmark, Mailgun). No provider credentials committed.
+
+  - path: services/adapters/notifications/push.py
+    owner: generator
+    notes: >
+      Provider-neutral push adapter stub. Declares send_push(token, title, body, data).
+      Operators fill in their chosen push provider (Firebase FCM, APNs, OneSignal).
+
+  - path: data/migrations/001_notification_preferences_collection.json
+    owner: generator
+    notes: >
+      Declares notifications.preferences data alias for the notification_settings
+      module. Does NOT create notification delivery log collections — those belong
+      in the external provider.
+
+forbidden_outputs:
+  - path_prefix: modules/notifications/
+    reason: >
+      The module must be named notification_settings (user preferences), not notifications.
+      The runtime already owns in-app notification delivery under the notifications namespace.
+  - path_prefix: services/notification_delivery/
+    reason: External delivery mechanics belong in services/adapters/notifications/ only.
+  - path_prefix: modules/notification_delivery/
+    reason: Delivery logic belongs in service adapters, not a separate module.
+  - path_prefix: services/email/
+    reason: Email mechanics belong in services/adapters/notifications/email.py.
+  - path_prefix: services/push/
+    reason: Push mechanics belong in services/adapters/notifications/push.py.
+
+runtime_boundaries:
+  - id: no_duplicate_in_app_channel
+    rule: >
+      Do not re-implement in-app notification storage or websocket delivery.
+      The runtime provides these. Generated code must not create a custom
+      notification repo, custom websocket worker, or custom notification center.
+      In-app alerts are declared in contracts/notifications.yaml on the
+      event-producing module and handled by the runtime.
+
+  - id: adapter_pattern_only
+    rule: >
+      External delivery mechanics live in services/adapters/notifications/{channel}.py.
+      The notification_settings module calls these adapters from reactions; it does not
+      embed provider SDK calls directly in service.py.
+
+  - id: preferences_are_user_data
+    rule: >
+      Notification preferences (email opt-in, push opt-in, sms opt-in) are
+      user-owned PII. notification_settings module must declare user_data_scope: true
+      and generate backend/account_data_handler.py.
+
+  - id: no_credentials_in_adapters
+    rule: >
+      Generated adapter stubs must not include provider API keys, secrets,
+      or credential values. Credentials are loaded from env vars
+      (EMAIL_API_KEY, FCM_SERVER_KEY, etc.) at adapter initialization.
+      env.example must list required credential names.
+
+  - id: reactions_not_service_calls
+    rule: >
+      External delivery is triggered by reactions in contracts/reactions.yaml
+      that observe well-known domain events. Service.py must not poll for
+      events or call delivery adapters on every action — reactions decouple
+      delivery from module business logic.
+
+  - id: provider_neutral_interface
+    rule: >
+      Adapter methods (send_email, send_push) must accept only provider-neutral
+      arguments (to, subject, body, data). Provider SDK details are encapsulated
+      in the adapter. Generated service code depends only on the adapter interface,
+      not on a specific SDK.
+
+facades: []
+
+cross_pack_integrations:
+  - pack_id: messaging
+    description: >
+      When the messaging pack is selected alongside notifications, message_sent
+      events may trigger email or push delivery for offline participants.
+      The messaging module's contracts/notifications.yaml covers in-app delivery;
+      the notification_settings reactions.yaml covers external delivery for
+      the same events.
+  - pack_id: social
+    description: >
+      Friend request accepted, post liked, and comment received events may trigger
+      push notifications. Social pack reactions are the source; notification_settings
+      reactions route to the external adapter.
+  - pack_id: commerce
+    description: >
+      Order placed, shipped, and delivered events are common transactional email
+      triggers. Commerce reactions are the source; notification_settings routes
+      domain.commerce.* events to the email adapter.

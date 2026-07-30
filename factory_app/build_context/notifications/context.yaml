@@ -1,0 +1,19 @@
+context_id: notifications
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+pack:
+  id: notifications
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: notifications.email.send
+    facade_recommended: notification_settings
+  - capability_id: notifications.push.send
+    facade_recommended: notification_settings
+  - capability_id: notifications.preferences.read
+    facade_recommended: notification_settings
+  - capability_id: notifications.preferences.write
+    facade_recommended: notification_settings
