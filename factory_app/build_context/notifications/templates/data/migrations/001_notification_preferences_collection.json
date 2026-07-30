@@ -1,0 +1,20 @@
+{
+  "migration_id": "001_notification_preferences_collection",
+  "module": "notification_settings",
+  "description": "Declare the notifications.preferences data alias for notification_settings module preference records.",
+  "aliases": [
+    {
+      "alias": "notifications.preferences",
+      "collection": "notification_settings__preferences",
+      "module_id": "notification_settings",
+      "entity": "preferences"
+    }
+  ],
+  "indexes": [
+    {
+      "alias": "notifications.preferences",
+      "keys": [{"app_id": 1}, {"user_id": 1}],
+      "options": {"unique": true, "name": "notification_settings_preferences_user_unique"}
+    }
+  ]
+}

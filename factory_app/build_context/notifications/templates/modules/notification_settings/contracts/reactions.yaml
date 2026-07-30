@@ -1,0 +1,25 @@
+schema_version: mozaiks.reactions.v1
+module_id: notification_settings
+
+# These reactions fire external delivery adapters when domain events arrive.
+# In-app notification storage is handled separately by contracts/notifications.yaml
+# on the event-producing module — do not duplicate those entries here.
+#
+# Each reaction routes to the appropriate adapter (email.py or push.py).
+# Operators customize the adapter body for their chosen provider.
+#
+# Add reactions here for any domain events in your app that should
+# trigger external notification delivery.
+
+reactions: []
+
+# Example — uncomment and adapt when the messaging pack is also selected:
+#
+# reactions:
+#   - id: notify_message_sent_push
+#     event: domain.messages.message_sent
+#     description: >
+#       Send a push notification to the recipient when a new message arrives
+#       and the recipient has push_enabled.
+#     condition: "event.payload.get('recipient_id') is not None"
+#     handler: backend.service:handle_message_sent_push
