@@ -50,6 +50,8 @@ required_outputs:
     owner: templates
   - path: modules/messages/backend/schemas.py
     owner: templates
+  - path: modules/messages/backend/account_data_handler.py
+    owner: templates
   - path: modules/messages/contracts/events.yaml
     owner: templates
   - path: modules/messages/contracts/notifications.yaml
