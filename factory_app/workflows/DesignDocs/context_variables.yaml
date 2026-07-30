@@ -249,6 +249,47 @@ definitions:
     source:
       type: state
       default: local
+  brownfield_build_path:
+    type: string
+    description: >
+      Selected brownfield build path from brownfield_path_selector. Present
+      only in brownfield_module_generation sequences ("full_migration").
+      Null for greenfield builds.
+    source:
+      type: state
+      default: null
+  adoption_plan:
+    type: object
+    description: >
+      Canonical AdoptionPlan from ExistingAppDiscovery — recommended_path,
+      phases, candidate_overlays, candidate_adapters, candidate_migrations, and
+      human_decisions_required. Present only for brownfield builds.
+      DesignDocsAgent uses this to scope module and page design to approved
+      surfaces and ownership classes.
+    source:
+      type: state
+      default: null
+  ownership_boundary:
+    type: object
+    description: >
+      Canonical ownership_boundary artifact from ExistingAppDiscovery —
+      app_id and ownership_boundaries[] listing each discovered surface with
+      its ownership class, allowed_operations, and requires_review flag.
+      Present only for brownfield builds. DesignDocsAgent must not design
+      modules that conflict with read_only_discovered surfaces.
+    source:
+      type: state
+      default: null
+  brownfield_registration:
+    type: object
+    description: >
+      BrownfieldRegistration record from ExistingAppDiscovery — registration_id,
+      app_id, source_refs, context_version_id, and status. Present only for
+      brownfield builds. Used as the provenance anchor for designed modules
+      and pages.
+    source:
+      type: state
+      default: null
 agents:
   DesignDocsAgent:
     variables:
@@ -279,3 +320,7 @@ agents:
     - design_docs_hitl
     - database_provider
     - database_setup_mode
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration

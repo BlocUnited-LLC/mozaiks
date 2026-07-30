@@ -1,14 +1,12 @@
 """Contract tests for brownfield adoption context wiring in generation workflows.
 
 Verifies that:
-- AgentGenerator and AppGenerator declare the canonical brownfield context
-  variables (brownfield_build_path, adoption_plan, ownership_boundary,
+- AgentGenerator, AppGenerator, and DesignDocs declare the canonical brownfield
+  context variables (brownfield_build_path, adoption_plan, ownership_boundary,
   brownfield_registration) in their context_variables.yaml definitions.
-- The planning agents in each workflow (PatternAgent + WorkflowBundleBuilderAgent
-  in AgentGenerator; InterviewAgent + AppPlanAgent in AppGenerator) expose the
-  brownfield context variables.
-- Both workflows wire inject_brownfield_adoption_context middleware for their
-  planning agents.
+- The planning agents in each workflow expose the brownfield context variables.
+- All three workflows wire inject_brownfield_adoption_context middleware for
+  their planning agents.
 - The inject_brownfield_adoption_context hook returns empty for greenfield builds
   and a labelled context block for brownfield builds.
 - The brownfield overlay and module generation sequences are correctly declared
@@ -26,8 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 AGENT_GENERATOR_CV = ROOT / "factory_app/workflows/AgentGenerator/context_variables.yaml"
 APP_GENERATOR_CV = ROOT / "factory_app/workflows/AppGenerator/context_variables.yaml"
+DESIGN_DOCS_CV = ROOT / "factory_app/workflows/DesignDocs/context_variables.yaml"
 AGENT_GENERATOR_MW = ROOT / "factory_app/workflows/AgentGenerator/middleware.yaml"
 APP_GENERATOR_MW = ROOT / "factory_app/workflows/AppGenerator/middleware.yaml"
+DESIGN_DOCS_MW = ROOT / "factory_app/workflows/DesignDocs/middleware.yaml"
 REGISTRY_PATH = ROOT / "factory_app/workflows/extended_orchestration/extension_registry.json"
 HOOK_PATH = ROOT / "factory_app/workflows/_shared/brownfield_adoption_context.py"
 
@@ -389,4 +389,62 @@ def test_brownfield_context_vars_not_declared_in_greenfield_only_artifacts() -> 
         # Must be state-backed (session-carried), not config or data_reference
         assert source.get("type") == "state", (
             f"{var} must be type: state so it only appears in brownfield sessions"
+        )
+
+
+# ---------------------------------------------------------------------------
+# DesignDocs — brownfield_module_generation path
+# ---------------------------------------------------------------------------
+
+def test_design_docs_declares_brownfield_context_vars() -> None:
+    defs = _definitions(_load_cv(DESIGN_DOCS_CV))
+    for var in BROWNFIELD_CONTEXT_VARS:
+        assert var in defs, f"DesignDocs context_variables.yaml missing definition: {var}"
+
+
+def test_design_docs_brownfield_vars_have_null_default() -> None:
+    defs = _definitions(_load_cv(DESIGN_DOCS_CV))
+    for var in BROWNFIELD_CONTEXT_VARS:
+        source = (defs.get(var) or {}).get("source") or {}
+        assert source.get("default") is None, (
+            f"DesignDocs {var} must default to null — only present for brownfield builds"
+        )
+
+
+def test_design_docs_agent_exposes_brownfield_vars() -> None:
+    cv = _load_cv(DESIGN_DOCS_CV)
+    agent_vars = _agent_vars(cv, "DesignDocsAgent")
+    for var in BROWNFIELD_CONTEXT_VARS:
+        assert var in agent_vars, (
+            f"DesignDocsAgent missing brownfield context var: {var}"
+        )
+
+
+def test_design_docs_wires_brownfield_hook_for_design_docs_agent() -> None:
+    mw = _load_mw(DESIGN_DOCS_MW)
+    wired = _wired_agents_for_function(mw, BROWNFIELD_HOOK_FUNCTION)
+    assert "DesignDocsAgent" in wired, (
+        "DesignDocs middleware.yaml does not wire inject_brownfield_adoption_context for DesignDocsAgent"
+    )
+
+
+def test_design_docs_brownfield_hook_references_shared_file() -> None:
+    mw = _load_mw(DESIGN_DOCS_MW)
+    entries = [
+        e for e in _mw_entries(mw)
+        if e.get("function") == BROWNFIELD_HOOK_FUNCTION
+    ]
+    assert entries, "No brownfield hook entries found in DesignDocs middleware.yaml"
+    for entry in entries:
+        assert entry.get("filename") == BROWNFIELD_HOOK_FILE, (
+            f"Expected filename '{BROWNFIELD_HOOK_FILE}', got '{entry.get('filename')}'"
+        )
+
+
+def test_design_docs_brownfield_context_vars_are_state_type() -> None:
+    defs = _definitions(_load_cv(DESIGN_DOCS_CV))
+    for var in BROWNFIELD_CONTEXT_VARS:
+        source = (defs.get(var) or {}).get("source") or {}
+        assert source.get("type") == "state", (
+            f"DesignDocs {var} must be type: state"
         )
