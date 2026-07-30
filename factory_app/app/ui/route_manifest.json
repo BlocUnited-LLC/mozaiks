@@ -152,7 +152,7 @@
         "requiresRole": "admin",
         "title": "Building",
         "appShell": true,
-        "ai_context": "The user is on the App Building portal. It renders dashboard.yaml build panels for build threads, artifact versions, approval state, and workflow launch actions.",
+        "ai_context": "The user is on the App Building portal. It renders dashboard.yaml build panels for build requests, artifact versions, approval state, and workflow launch actions.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",

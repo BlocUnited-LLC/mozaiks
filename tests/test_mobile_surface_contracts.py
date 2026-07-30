@@ -157,6 +157,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert (_workspace() / "web_shell" / "playwright.responsive.config.js").exists()
     assert (_workspace() / "web_shell" / "playwright" / "apps.responsive.smoke.spec.js").exists()
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
+    assert "workspace users route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace support route stays responsive across desktop and mobile widths" in smoke_source
     assert "create app transition overlay can return to Apps" in smoke_source
@@ -191,6 +192,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
     smoke_titles_by_component = {
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
+        "WorkspaceUsersPage": "workspace users route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to manifest default portal",

@@ -92,11 +92,11 @@ app:
       route: /apps/:appId/building
       icon: hammer
       order: 10
-      capabilities: [build_threads, artifact_versions, approval_votes]
+      capabilities: [build_requests, artifact_versions, approval_queue]
       panels:
-        - id: threads
-          type: build_threads
-          title: Threads
+        - id: requests
+          type: build_requests
+          title: Build requests
         - id: artifacts
           type: artifact_timeline
           title: Artifacts
@@ -122,7 +122,7 @@ The default App Dashboard lanes are:
 | Portal | Purpose |
 | --- | --- |
 | `overview` | App identity, lifecycle, KPIs, next step, and top-level alerts. |
-| `building` | Build threads, artifact versions, approvals, votes, and build workflow launch actions. |
+| `building` | Build requests, artifact versions, approval queue, and build workflow launch actions. |
 | `branding` | Brand kit, logos, themes, generated media, and promoted brand assets. |
 | `launch` | Landing page status, hosting, domains, deployment readiness, and launch workflows. |
 | `growth` | Landing-page improvement, marketing campaigns, campaign assets, and growth workflow launch actions. |
@@ -168,11 +168,18 @@ remain valid while the Dashboard Portal renderer is adopted.
 `DashboardPortalPage` reads the active `mozaiks.dashboard.v1` manifest through
 `/api/studio/dashboard`, matches the current route to an enabled portal, then
 renders known panel types against Studio data. The generic renderer currently
-covers summary, next step, portal links, build threads, artifact timelines,
-approval queues/votes, and workflow launch panels. Apps should mount it by
+covers summary, next step, portal links, build requests, artifact timelines,
+approval queues, and workflow launch panels. Apps should mount it by
 declaring a normal route-manifest entry with `component: DashboardPortalPage`;
 they should not copy the factory page into their workspace to activate a
 default portal.
+
+The OSS dashboard contract intentionally stops at build/review management.
+Collaborative development product behavior such as proposal discussion, voting,
+community moderation, and proprietary approval policy belongs in app-owned
+modules and app-specific routes. Apps can surface a compact admin summary
+through `module_panel_ref` or `custom_component` panels, but those product
+semantics are not generic Factory/Studio defaults.
 
 `validate_dashboard_manifest_routes()` is the CI contract for apps that mount
 concrete Studio pages. It validates that every enabled dashboard portal points

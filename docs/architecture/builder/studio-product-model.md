@@ -66,7 +66,7 @@ App-level routes:
 
 - `/apps/:appId` -> redirects to `/apps/:appId/overview`
 - `/apps/:appId/overview` -> App Studio overview with operational health summary
-- `/apps/:appId/building` -> manifest-backed Building portal for build threads, artifacts, approvals, and workflow launch
+- `/apps/:appId/building` -> manifest-backed Building portal for build requests, artifacts, approvals, and workflow launch
 - `/apps/:appId/health` -> deep app health diagnostics, hidden from primary navigation
 - `/apps/:appId/access` -> app access
 - `/apps/:appId/usage` -> app usage
@@ -101,7 +101,7 @@ product billing routes.
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |
 | `/apps/:appId` | App Studio | Redirects to app overview |
 | `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, operational health, connected services, build state, and activity |
-| `/apps/:appId/building` | Building | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build threads, artifacts, approvals, and workflow launch |
+| `/apps/:appId/building` | Building | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build requests, artifacts, approvals, and workflow launch |
 | `/apps/:appId/health` | App Health Diagnostics | Deep diagnostics across runtime, workflows, hosting, and integrations; routable but hidden from primary navigation |
 | `/apps/:appId/access` | App Access | App-scoped account access, plan assignment, and access blockers |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
