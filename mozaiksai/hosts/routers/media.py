@@ -8,8 +8,25 @@ from fastapi.responses import RedirectResponse
 from mozaiksai.core.auth import UserPrincipal, optional_user, require_any_auth
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.media.store import MediaContentNotFoundError, get_media_asset_store
+from mozaiksai.core.media.types import AssetVisibility
 
 router = APIRouter(tags=["media"])
+
+
+def _has_backer_access(principal: UserPrincipal, app_id: str, asset_id: str) -> bool:
+    """Return True when the principal holds a verified-backer claim for this asset.
+
+    The claim ``verified_campaign_backer_assets`` is a list of ``asset_id`` strings
+    injected into the session by the hosted product after a campaign backing payment
+    confirms (see growth_campaigns.backing.paid reaction). Operators and admin-role
+    principals bypass the check entirely.
+    """
+    roles: list[str] = list(getattr(principal, "roles", None) or [])
+    if "admin" in roles or "operator" in roles:
+        return True
+    raw_claims: dict = dict(getattr(principal, "raw_claims", None) or {})
+    backer_assets: list[str] = list(raw_claims.get("verified_campaign_backer_assets") or [])
+    return asset_id in backer_assets
 
 
 def _safe_download_filename(value: str | None) -> str:
@@ -31,20 +48,36 @@ async def get_media_asset_content(
 ) -> Response:
     """Serve generated media bytes for authenticated users.
 
+    Access is gated on ``asset_visibility``:
+
+    - ``private`` — operator/admin only
+    - ``investor_preview`` — verified campaign backers + operators/admins
+    - ``public`` — any authenticated user (unauthenticated use the public endpoint)
+
     When the asset was stored in Azure Blob with a CDN base URL configured
     (AZURE_STORAGE_CDN_BASE_URL), the content_ref is a full HTTPS URL and
     this endpoint issues a 302 redirect to it instead of proxying bytes.
-    This allows the CDN to serve the asset directly with zero API overhead.
-
-    For local and GridFS backends the bytes are proxied through this endpoint.
     """
-    _ = principal
     clean_app_id = validate_path_id(app_id, "app_id")
     clean_asset_id = validate_path_id(asset_id, "asset_id")
     store = get_media_asset_store()
     asset = await store.get_asset(app_id=clean_app_id, asset_id=clean_asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
+
+    visibility = asset.asset_visibility
+    roles: list[str] = list(getattr(principal, "roles", None) or [])
+    is_privileged = "admin" in roles or "operator" in roles
+
+    if visibility == AssetVisibility.PRIVATE and not is_privileged:
+        raise HTTPException(status_code=403, detail="Asset is private")
+
+    if visibility == AssetVisibility.INVESTOR_PREVIEW:
+        if not _has_backer_access(principal, clean_app_id, clean_asset_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Asset requires verified campaign backer access",
+            )
 
     # CDN fast-path: redirect instead of proxying bytes
     if _is_cdn_url(asset.content_ref):
@@ -57,11 +90,12 @@ async def get_media_asset_content(
 
     disposition = "attachment" if download else "inline"
     filename = _safe_download_filename(asset.filename)
+    cache_control = "public, max-age=3600" if visibility == AssetVisibility.PUBLIC else "private, max-age=300"
     return Response(
         content=content,
         media_type=asset.media_type,
         headers={
-            "Cache-Control": "private, max-age=300",
+            "Cache-Control": cache_control,
             "Content-Disposition": f'{disposition}; filename="{filename}"',
         },
     )
@@ -94,9 +128,10 @@ async def get_public_media_asset_content(
     if asset is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
 
-    # Gate on promotion status — only explicitly promoted assets are public
+    # Gate: asset must be promoted OR have public visibility
     promotion_status = (asset.metadata or {}).get("promotion_status", "")
-    if promotion_status != "promoted":
+    is_public_visibility = asset.asset_visibility == AssetVisibility.PUBLIC
+    if promotion_status != "promoted" and not is_public_visibility:
         raise HTTPException(
             status_code=403,
             detail="Asset is not promoted and cannot be served publicly",

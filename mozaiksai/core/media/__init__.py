@@ -27,6 +27,7 @@ from .types import (
     CHAT_ATTACHMENT_MIME_TYPES,
     DOCUMENT_MIME_TYPES,
     IMAGE_MIME_TYPES,
+    AssetVisibility,
     GeneratedMediaAsset,
     MediaArtifactPayload,
     MediaInputRef,
@@ -43,6 +44,7 @@ from .types import (
 __all__ = [
     "AG2_IMAGE_INPUT_MIME_TYPES",
     "AG2_INPUT_MIME_TYPES",
+    "AssetVisibility",
     "CHAT_ATTACHMENT_MIME_TYPES",
     "DOCUMENT_MIME_TYPES",
     "GeneratedMediaAsset",

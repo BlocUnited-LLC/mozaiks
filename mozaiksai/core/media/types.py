@@ -113,6 +113,28 @@ MediaPromotionTargetValue = Literal[
 ]
 
 
+class AssetVisibility(StrEnum):
+    """Access control state for a generated media asset.
+
+    private
+        Default. Only app operators and admin-role principals may retrieve the
+        asset. Suitable for draft and review states.
+
+    investor_preview
+        Verified campaign backers (plus operators/admins) may retrieve the asset.
+        Set automatically when the parent campaign transitions to ``funding`` state.
+        Allows backers to see forthcoming campaign visuals before public launch.
+
+    public
+        Served without authentication via the public media endpoint. Set
+        automatically when the associated content slot publishes to a channel.
+    """
+
+    PRIVATE = "private"
+    INVESTOR_PREVIEW = "investor_preview"
+    PUBLIC = "public"
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -232,6 +254,7 @@ class GeneratedMediaAsset(BaseModel):
     model: str | None = None
     generation_params: dict[str, Any] = Field(default_factory=dict)
     promotion_targets: list[MediaPromotionTarget] = Field(default_factory=list)
+    asset_visibility: AssetVisibility = AssetVisibility.PRIVATE
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
 
