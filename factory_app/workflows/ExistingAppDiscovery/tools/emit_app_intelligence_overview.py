@@ -37,7 +37,7 @@ async def emit_app_intelligence_overview_card(
     context_variables: Any | None = None,
     **_: Any,
 ) -> dict[str, Any]:
-    """Show the user the compact context available to discovery agents."""
+    """Show the full App Intelligence artifact available to discovery agents."""
     ctx = context_variables if context_variables is not None else {}
     preload_status = str(_ctx_get(ctx, "preload_status") or "none")
     catalog = _dict_value(_ctx_get(ctx, "app_intelligence_catalog"))
@@ -49,7 +49,7 @@ async def emit_app_intelligence_overview_card(
     chat_id = _ctx_get(ctx, "chat_id")
 
     try:
-        await emit_ui_surface(
+        event_id = await emit_ui_surface(
             "AppIntelligenceOverviewCard",
             payload,
             chat_id=str(chat_id) if chat_id else None,
@@ -70,6 +70,49 @@ async def emit_app_intelligence_overview_card(
         "success": True,
         "preload_status": preload_status,
         "app_intelligence_snapshot_id": payload.get("app_intelligence_snapshot_id"),
+        "ui_event_id": event_id if "event_id" in locals() else None,
+    }
+
+
+async def emit_app_intelligence_inline_brief(
+    context_variables: Any | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """Show a durable compact App Intelligence brief in the chat transcript."""
+    ctx = context_variables if context_variables is not None else {}
+    preload_status = str(_ctx_get(ctx, "preload_status") or "none")
+    catalog = _dict_value(_ctx_get(ctx, "app_intelligence_catalog"))
+
+    if preload_status == "none" and not catalog:
+        return {"skipped": True, "reason": "no_app_intelligence_data"}
+
+    overview_payload = _overview_payload(ctx=ctx, preload_status=preload_status, catalog=catalog)
+    payload = _inline_brief_payload(overview_payload)
+    chat_id = _ctx_get(ctx, "chat_id")
+
+    try:
+        event_id = await emit_ui_surface(
+            "AppIntelligenceInlineBrief",
+            payload,
+            chat_id=str(chat_id) if chat_id else None,
+            workflow_name="ExistingAppDiscovery",
+            agent_name="App Intelligence",
+            display="inline",
+        )
+        logger.info(
+            "[ExistingAppDiscovery] App Intelligence inline brief emitted: status=%s app=%s files=%s",
+            preload_status,
+            payload.get("app_name") or payload.get("repo_name") or payload.get("github_repo") or "unknown",
+            ((payload.get("coverage") or {}).get("file_count") or 0),
+        )
+    except Exception as exc:
+        logger.warning("[ExistingAppDiscovery] App Intelligence inline brief emission failed: %s", exc)
+
+    return {
+        "success": True,
+        "preload_status": preload_status,
+        "app_intelligence_snapshot_id": payload.get("app_intelligence_snapshot_id"),
+        "ui_event_id": event_id if "event_id" in locals() else None,
     }
 
 
@@ -134,6 +177,134 @@ def _overview_payload(*, ctx: Any, preload_status: str, catalog: dict[str, Any])
             ]
         )[:12],
     }
+
+
+def _inline_brief_payload(overview_payload: dict[str, Any]) -> dict[str, Any]:
+    catalog = _dict_value(overview_payload.get("app_intelligence_catalog"))
+    coverage = _dict_value(catalog.get("coverage"))
+    architecture = _dict_value(catalog.get("architecture"))
+    warnings = _dedupe(
+        [
+            *_list_value(overview_payload.get("warnings")),
+            *_list_value(catalog.get("warnings")),
+        ]
+    )
+    source_refs = [
+        *_surface_samples(_list_value(architecture.get("module_roots")), limit=3),
+        *_surface_samples(_list_value(architecture.get("service_roots")), limit=2),
+        *_surface_samples(_list_value(architecture.get("ui_surfaces")), limit=3),
+        *_surface_samples(_list_value(architecture.get("workflow_roots")), limit=2),
+    ]
+    risk_hints = _list_value(catalog.get("risk_hints"))[:4]
+    capability_samples = _surface_samples(_list_value(catalog.get("capabilities")), limit=5)
+    app_name = (
+        str(
+            overview_payload.get("app_name")
+            or overview_payload.get("repo_name")
+            or overview_payload.get("github_repo")
+            or ""
+        ).strip()
+        or "Indexed app"
+    )
+
+    return {
+        "status": str(overview_payload.get("status") or "partial"),
+        "app_name": app_name,
+        "github_repo": str(overview_payload.get("github_repo") or "").strip(),
+        "repo_name": str(overview_payload.get("repo_name") or "").strip(),
+        "source": str(overview_payload.get("source") or "none").strip(),
+        "tech_stack": str(overview_payload.get("tech_stack") or "").strip(),
+        "summary": _inline_summary(
+            overview_payload=overview_payload,
+            coverage=coverage,
+            warning_count=len(warnings),
+        ),
+        "app_intelligence_snapshot_id": overview_payload.get("app_intelligence_snapshot_id"),
+        "current_app_context_version_id": overview_payload.get("current_app_context_version_id"),
+        "coverage": {
+            "file_count": int(coverage.get("file_count") or overview_payload.get("total_files_scanned") or 0),
+            "chunk_count": int(coverage.get("chunk_count") or 0),
+            "symbol_count": int(coverage.get("symbol_count") or 0),
+            "node_count": int(coverage.get("node_count") or 0),
+            "edge_count": int(coverage.get("edge_count") or 0),
+            "language_counts": _dict_value(coverage.get("language_counts")),
+            "role_counts": _dict_value(coverage.get("role_counts")),
+        },
+        "architecture": {
+            "module_count": len(_list_value(architecture.get("module_roots"))),
+            "service_count": len(_list_value(architecture.get("service_roots"))),
+            "ui_surface_count": len(_list_value(architecture.get("ui_surfaces"))),
+            "workflow_count": len(_list_value(architecture.get("workflow_roots"))),
+            "source_refs": _dedupe_surface_samples(source_refs)[:8],
+        },
+        "capabilities": capability_samples,
+        "integration_count": len(_list_value(catalog.get("integration_surfaces"))),
+        "data_surface_count": len(_list_value(catalog.get("data_surfaces"))),
+        "risk_hints": risk_hints,
+        "warnings": warnings[:4],
+    }
+
+
+def _inline_summary(
+    *,
+    overview_payload: dict[str, Any],
+    coverage: dict[str, Any],
+    warning_count: int,
+) -> str:
+    existing_summary = str(overview_payload.get("app_intelligence_summary") or "").strip()
+    if existing_summary:
+        return existing_summary
+
+    file_count = int(coverage.get("file_count") or overview_payload.get("total_files_scanned") or 0)
+    symbol_count = int(coverage.get("symbol_count") or 0)
+    edge_count = int(coverage.get("edge_count") or 0)
+    status = str(overview_payload.get("status") or "partial")
+    warning_clause = f" with {warning_count} warning(s)" if warning_count else ""
+    return (
+        f"App Intelligence is {status}: indexed {file_count} file(s), "
+        f"{symbol_count} symbol(s), and {edge_count} relationship(s){warning_clause}."
+    )
+
+
+def _surface_samples(items: list[Any], *, limit: int) -> list[dict[str, str]]:
+    samples: list[dict[str, str]] = []
+    for item in items:
+        if isinstance(item, str):
+            label = item.strip()
+            detail = ""
+        elif isinstance(item, dict):
+            label = str(
+                item.get("label")
+                or item.get("capability_id")
+                or item.get("module_id")
+                or item.get("service_id")
+                or item.get("workflow_id")
+                or item.get("path")
+                or item.get("root")
+                or ""
+            ).strip()
+            paths = _list_value(item.get("paths"))
+            detail = str(item.get("path") or (paths[0] if paths else "") or "").strip()
+        else:
+            continue
+        if not label:
+            continue
+        samples.append({"label": label, "detail": detail})
+        if len(samples) >= limit:
+            break
+    return samples
+
+
+def _dedupe_surface_samples(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, str]] = []
+    for item in items:
+        label = str(item.get("label") or "").strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        deduped.append(item)
+    return deduped
 
 
 def _overview_status(*, ctx: Any, preload_status: str, catalog: dict[str, Any]) -> str:
@@ -270,4 +441,4 @@ def _dedupe(values: list[Any]) -> list[str]:
     return out
 
 
-__all__ = ["emit_app_intelligence_overview_card"]
+__all__ = ["emit_app_intelligence_inline_brief", "emit_app_intelligence_overview_card"]

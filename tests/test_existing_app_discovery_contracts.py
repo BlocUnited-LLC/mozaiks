@@ -210,12 +210,19 @@ def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_
 
     assert [(item["file"], item["function"]) for item in before_chat] == [
         ("preload_discovery_context.py", "collect_prechat_discovery_context"),
+        ("emit_app_intelligence_overview.py", "emit_app_intelligence_inline_brief"),
         ("emit_app_intelligence_overview.py", "emit_app_intelligence_overview_card"),
     ]
-    overview_tool = before_chat[1]
+    inline_tool = before_chat[1]
+    overview_tool = before_chat[2]
+    assert inline_tool["tool_type"] == "UI_Surface"
+    assert inline_tool["ui"]["component"] == "AppIntelligenceInlineBrief"
+    assert inline_tool["ui"]["mode"] == "inline"
     assert overview_tool["tool_type"] == "UI_Surface"
     assert overview_tool["ui"]["component"] == "AppIntelligenceOverviewCard"
-    assert "AppIntelligenceOverviewCard" in _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
+    ui_index = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
+    assert "AppIntelligenceInlineBrief" in ui_index
+    assert "AppIntelligenceOverviewCard" in ui_index
     assert "get_preloaded_app_intelligence" in manifest_text
     assert "search_preloaded_source_context" in manifest_text
     assert "read_preloaded_source_file" in manifest_text
@@ -293,6 +300,68 @@ def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> N
     assert "file_contents" not in str(emitted["payload"])
     assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
     assert emitted["kwargs"]["display"] == "artifact"
+
+
+def test_app_intelligence_inline_brief_emitter_surfaces_compact_chat_payload() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_app_intelligence_inline_direct",
+    )
+
+    emitted = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["component"] = component
+        emitted["payload"] = payload
+        emitted["kwargs"] = kwargs
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_inline",
+        preload_status="ready",
+        app_id="app_1",
+        github_repo="acme/app",
+        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
+        app_intelligence_catalog={
+            "present": True,
+            "snapshot_id": "app_intelligence_1",
+            "coverage": {
+                "file_count": 3,
+                "chunk_count": 4,
+                "symbol_count": 5,
+                "node_count": 6,
+                "edge_count": 7,
+            },
+            "architecture": {
+                "module_roots": [{"module_id": "billing", "paths": ["app/modules/billing/module.yaml"]}],
+                "service_roots": [{"service_id": "github", "path": "app/services/integrations/github_client.py"}],
+                "ui_surfaces": [{"label": "Dashboard", "path": "app/ui/pages/dashboard.yaml"}],
+                "workflow_roots": [],
+            },
+            "capabilities": [{"capability_id": "module:billing", "label": "billing"}],
+            "integration_surfaces": [{"label": "GitHub"}],
+            "data_surfaces": [{"label": "billing_events"}],
+            "risk_hints": [{"risk_id": "missing_tests", "severity": "low"}],
+            "agent_context_policy": {"policy": "retrieve_not_dump", "authority": {}, "surfaces": []},
+            "warnings": ["scan warning"],
+        },
+        source_context_bundle={"file_contents": {"app.py": "secret source must not be emitted"}},
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_inline_brief(context_variables=context))
+
+    assert result["success"] is True
+    assert emitted["component"] == "AppIntelligenceInlineBrief"
+    assert emitted["payload"]["coverage"]["file_count"] == 3
+    assert emitted["payload"]["coverage"]["symbol_count"] == 5
+    assert emitted["payload"]["architecture"]["source_refs"][0]["label"] == "billing"
+    assert emitted["payload"]["integration_count"] == 1
+    assert emitted["payload"]["data_surface_count"] == 1
+    assert "app_intelligence_catalog" not in emitted["payload"]
+    assert "file_contents" not in str(emitted["payload"])
+    assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
+    assert emitted["kwargs"]["agent_name"] == "App Intelligence"
+    assert emitted["kwargs"]["display"] == "inline"
 
 
 def test_app_intelligence_overview_uses_real_workflow_ui_surface(monkeypatch) -> None:
@@ -375,6 +444,149 @@ def test_app_intelligence_overview_uses_real_workflow_ui_surface(monkeypatch) ->
     assert event["payload"]["component_type"] == "AppIntelligenceOverviewCard"
     assert event["payload"]["workflow_primitive"] == "document_preview"
     assert event["payload"]["ui_realization"] == "generated_component"
+
+
+def test_app_intelligence_inline_brief_uses_real_workflow_ui_surface(monkeypatch) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_app_intelligence_inline_transport",
+    )
+
+    from mozaiksai.core.transport import simple_transport as transport_mod
+
+    class _FakeTransport:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def send_tool_call_event(
+            self,
+            *,
+            event_id,
+            chat_id,
+            tool_name,
+            component_name,
+            display_type,
+            payload,
+            awaiting_response=True,
+            agent_name=None,
+        ):
+            self.events.append(
+                {
+                    "event_id": event_id,
+                    "chat_id": chat_id,
+                    "tool_name": tool_name,
+                    "component_name": component_name,
+                    "display_type": display_type,
+                    "payload": payload,
+                    "awaiting_response": awaiting_response,
+                    "agent_name": agent_name,
+                }
+            )
+
+    fake_transport = _FakeTransport()
+
+    async def _get_instance():
+        return fake_transport
+
+    monkeypatch.setattr(transport_mod.SimpleTransport, "get_instance", staticmethod(_get_instance))
+
+    context = _Context(
+        chat_id="chat_inline_ui_surface",
+        app_id="app_1",
+        preload_status="ready",
+        github_repo="acme/app",
+        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
+        app_intelligence_catalog={
+            "present": True,
+            "snapshot_id": "app_intelligence_1",
+            "coverage": {"file_count": 8, "symbol_count": 21, "node_count": 13, "edge_count": 34},
+            "architecture": {"module_roots": [], "service_roots": [], "ui_surfaces": [], "workflow_roots": []},
+            "capabilities": [],
+            "integration_surfaces": [],
+            "data_surfaces": [],
+            "risk_hints": [],
+            "agent_context_policy": {"policy": "retrieve_not_dump", "authority": {}, "surfaces": []},
+            "warnings": [],
+        },
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_inline_brief(context_variables=context))
+
+    assert result["success"] is True
+    assert len(fake_transport.events) == 1
+    event = fake_transport.events[0]
+    assert event["chat_id"] == "chat_inline_ui_surface"
+    assert event["tool_name"] == "AppIntelligenceInlineBrief"
+    assert event["component_name"] == "AppIntelligenceInlineBrief"
+    assert event["display_type"] == "inline"
+    assert event["awaiting_response"] is False
+    assert event["agent_name"] == "App Intelligence"
+    assert event["payload"]["workflow_name"] == "ExistingAppDiscovery"
+    assert event["payload"]["interaction_type"] == "ui_surface"
+    assert event["payload"]["component_type"] == "AppIntelligenceInlineBrief"
+    assert event["payload"]["workflow_primitive"] == "document_preview"
+    assert event["payload"]["ui_realization"] == "generated_component"
+
+
+def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_activity_emit",
+    )
+    transport_mod = __import__("mozaiksai.core.transport.simple_transport", fromlist=["SimpleTransport"])
+
+    class _FakeTransport:
+        def __init__(self) -> None:
+            self.events: list[tuple[dict[str, Any], str | None]] = []
+
+        async def send_event_to_ui(self, event: dict[str, Any], chat_id: str | None = None) -> None:
+            self.events.append((event, chat_id))
+
+    fake_transport = _FakeTransport()
+
+    async def _get_instance():
+        return fake_transport
+
+    monkeypatch.setattr(transport_mod.SimpleTransport, "get_instance", staticmethod(_get_instance))
+
+    context = _Context(chat_id="chat_app_intelligence_progress", app_id="app_1")
+    module._set_app_intelligence_progress(context, "collecting_evidence")
+    result = asyncio.run(module._emit_app_intelligence_activity(context))
+
+    assert result["success"] is True
+    assert fake_transport.events
+    event, chat_id = fake_transport.events[-1]
+    assert chat_id == "chat_app_intelligence_progress"
+    assert event["kind"] == "activity"
+    assert event["activity_type"] == "app_intelligence_indexing"
+    assert event["agent"] == "App Intelligence"
+    assert event["status"] == "working"
+    assert event["progress_percent"] == 25
+    assert "Obtaining app context" in event["message"]
+
+    module._set_app_intelligence_progress(context, "ready")
+    result = asyncio.run(module._emit_app_intelligence_activity(context))
+
+    assert result["status"] == "complete"
+    ready_event, _ = fake_transport.events[-1]
+    assert ready_event["status"] == "complete"
+    assert ready_event["message"] == "App context ready. Starting the discovery agent."
+
+
+def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
+    source = _read_text("chat-ui/src/pages/ChatPage.js")
+
+    assert "!data.type.startsWith('ui.')" in source
+    assert "activityCompleteStatuses" in source
+    assert "progress_percent: data.progress_percent" in source
+    assert "const userVisibleToolProgress = (" in source
+    assert "tool === 'App Intelligence'" in source
+
+
+def test_workflow_component_registration_is_hmr_safe() -> None:
+    source = _read_text("chat-ui/src/@chat-workflows/index.js")
+
+    assert "override: true" in source
 
 
 def test_existing_app_preload_mutates_an_empty_context_container() -> None:

@@ -332,6 +332,67 @@ def _default_app_intelligence_progress_message(stage: str) -> str:
     }.get(stage, "Updating App Intelligence status.")
 
 
+def _app_intelligence_activity_status(progress: dict[str, Any]) -> str:
+    status = str(progress.get("status") or "").strip().lower()
+    stage = str(progress.get("stage") or "").strip().lower()
+    if status in {"ready"} or stage in {"ready"}:
+        return "complete"
+    if status in {"failed", "unavailable"} or stage in {"failed", "unavailable"}:
+        return "failed"
+    if status in {"partial"} or stage in {"partial"}:
+        return "complete"
+    return "working"
+
+
+def _app_intelligence_activity_message(progress: dict[str, Any]) -> str:
+    status = str(progress.get("status") or "").strip().lower()
+    stage = str(progress.get("stage") or "").strip().lower()
+    percent = int(progress.get("percent") or 0)
+    message = str(progress.get("message") or "").strip()
+    if status == "ready" or stage == "ready":
+        return "App context ready. Starting the discovery agent."
+    if status == "partial" or stage == "partial":
+        return "App context is partially ready. The discovery agent may ask follow-up questions."
+    if status in {"failed", "unavailable"} or stage in {"failed", "unavailable"}:
+        return message or "App context could not be fully indexed."
+    return f"Obtaining app context... {message or 'Indexing repository evidence.'} ({percent}%)"
+
+
+async def _emit_app_intelligence_activity(context_variables: Any) -> dict[str, Any]:
+    progress = _coerce_mapping(_ctx_get(context_variables, "app_intelligence_progress"))
+    chat_id = str(_ctx_get(context_variables, "chat_id") or "").strip()
+    if not chat_id:
+        return {"skipped": True, "reason": "missing_chat_id"}
+    if not progress:
+        return {"skipped": True, "reason": "missing_app_intelligence_progress"}
+
+    activity_status = _app_intelligence_activity_status(progress)
+    event = {
+        "kind": "activity",
+        "activity_type": "app_intelligence_indexing",
+        "agent": "App Intelligence",
+        "agent_name": "App Intelligence",
+        "status": activity_status,
+        "message": _app_intelligence_activity_message(progress),
+        "workflow_name": "ExistingAppDiscovery",
+        "progress_percent": progress.get("percent"),
+        "metadata": {
+            "source": "existing_app_discovery_preload",
+            "progress_stage": progress.get("stage"),
+            "progress_status": progress.get("status"),
+        },
+    }
+    try:
+        from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+        transport = await SimpleTransport.get_instance()
+        await transport.send_event_to_ui(event, chat_id)
+        return {"success": True, "status": activity_status, "stage": progress.get("stage")}
+    except Exception as exc:
+        logger.debug("[ExistingAppDiscovery] App Intelligence activity emission failed: %s", exc)
+        return {"skipped": True, "reason": "activity_emit_failed", "error": str(exc)}
+
+
 def _coerce_mapping(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
@@ -1325,12 +1386,15 @@ async def _preload_context_graph_pack(
             "github_source_count": len(github_sources or []),
         },
     )
+    await _emit_app_intelligence_activity(context_variables)
     if not roots and not github_sources:
-        return await _preload_prior_context_graph_pack(
+        result = await _preload_prior_context_graph_pack(
             context_variables=context_variables,
             discovery_inputs=discovery_inputs,
             unavailable_reason="no_local_source_roots",
         )
+        await _emit_app_intelligence_activity(context_variables)
+        return result
 
     try:
         from factory_app.workflows._shared.context_graph.prompt_pack import (
@@ -1378,6 +1442,7 @@ async def _preload_context_graph_pack(
             details=health,
             warnings=[warning],
         )
+        await _emit_app_intelligence_activity(context_variables)
         return {"present": False, "reason": "context_graph_import_failed", "warnings": [warning]}
 
     scan_policy_inputs = _context_graph_scan_policy_inputs(context_variables, discovery_inputs)
@@ -1418,6 +1483,7 @@ async def _preload_context_graph_pack(
             details=dict(scan_result.health),
             warnings=warnings,
         )
+        await _emit_app_intelligence_activity(context_variables)
         return {"present": False, "reason": "no_supported_source_files", "warnings": warnings}
 
     app_id = str(
@@ -1444,6 +1510,7 @@ async def _preload_context_graph_pack(
         },
         warnings=warnings,
     )
+    await _emit_app_intelligence_activity(context_variables)
     indexed_at = datetime.now(UTC)
     source_ref = _build_preload_source_ref(
         app_id=app_id,
@@ -1474,6 +1541,7 @@ async def _preload_context_graph_pack(
         },
         warnings=warnings,
     )
+    await _emit_app_intelligence_activity(context_variables)
     source_corpus = source_index.source_corpus
     app_intelligence_snapshot = source_index.app_intelligence_snapshot
     source_file_map = source_index.safe_file_map
@@ -1541,6 +1609,7 @@ async def _preload_context_graph_pack(
         },
         warnings=warnings,
     )
+    await _emit_app_intelligence_activity(context_variables)
     return {
         "present": True,
         "source": "existing_app_discovery_preload",
@@ -1725,6 +1794,7 @@ async def _preload_prior_context_graph_pack(
         },
         warnings=combined_warnings,
     )
+    await _emit_app_intelligence_activity(context_variables)
     return {
         "present": True,
         "source": "previous_app_context_graph",
@@ -2301,6 +2371,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         "resolving_sources",
         details={"host_app_source": host_app_source, "discovery_mode": discovery_mode},
     )
+    await _emit_app_intelligence_activity(ctx)
 
     repo_path = _first_nonempty(_ctx_get(ctx, "repo_path"), discovery_inputs.get("repo_path"))
     frontend_repo_path = _first_nonempty(_ctx_get(ctx, "frontend_repo_path"), discovery_inputs.get("frontend_repo_path"))
@@ -2358,6 +2429,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             "has_api_input": bool(backend_base_url or openapi_url or uploaded_openapi_path),
         },
     )
+    await _emit_app_intelligence_activity(ctx)
 
     if frontend_repo_path or frontend_github_repo:
         frontend_repo_summary = await _scan_repo_source(frontend_repo_path, frontend_github_repo, github_ref, github_token=github_token)

@@ -145,7 +145,11 @@ operator validation override that is recorded in artifact metadata.
 
 ## Studio Surface
 
-Studio must show a visible App Intelligence panel before source-editing work:
+Studio must show visible App Intelligence state before source-editing work.
+Workflow startup emits a chat-feed activity row such as "Obtaining app
+context..." and updates it through ready or failed. When indexing completes,
+the workflow emits a compact inline App Intelligence brief into the chat feed
+and keeps the detailed App Intelligence overview in the artifact panel.
 
 - readiness: missing, queued, indexing, ready, stale, degraded, or failed
 - current indexing phase and progress
@@ -156,7 +160,9 @@ Studio must show a visible App Intelligence panel before source-editing work:
 - validation commands available to the refinement harness
 - warnings from scan, parser, graph, health, and stale-context checks
 
-This makes indexing a visible transition state instead of a silent chat delay.
+This makes indexing a visible transition state instead of a silent chat delay
+or a side-panel-only flash, and it leaves a durable transcript record of what
+agents could see before they edited or advised on the app.
 
 ## Workflow Journey
 

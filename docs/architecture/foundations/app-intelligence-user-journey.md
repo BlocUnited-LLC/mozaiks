@@ -86,6 +86,14 @@ Studio shows a source-context panel before edit-heavy workflows proceed:
 This panel is not documentation text inside the build workflow. It is the
 operational status of the app context that agents can use.
 
+During Existing App Discovery startup, Studio must also show a chat-feed status
+row while App Intelligence is indexing. The status row updates from obtaining
+context to ready or failed so the user is not left on a blank chat while source
+selection, parsing, graph build, and snapshot synthesis run. After the ready
+state, Studio emits an inline App Intelligence brief in the chat transcript and
+the full overview in the artifact panel so the user can see the context agents
+received.
+
 ## Generate Or Refine
 
 Once the current context is ready, AppGenerator, AgentGenerator, existing-app

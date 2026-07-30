@@ -520,6 +520,7 @@ def test_core_ui_index_exports_shipped_workflow_components() -> None:
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
     files = [
+        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceInlineBrief.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
