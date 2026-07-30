@@ -37,7 +37,7 @@ async def send_email(
     """
     api_key = os.environ.get("EMAIL_API_KEY", "")
     if not api_key:
-        raise EnvironmentError(
+        raise OSError(
             "EMAIL_API_KEY is not set. Configure it in your .env file "
             "with your email provider API key."
         )

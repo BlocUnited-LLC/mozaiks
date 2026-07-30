@@ -34,7 +34,7 @@ async def send_push(
     """
     fcm_key = os.environ.get("FCM_SERVER_KEY", "")
     if not fcm_key:
-        raise EnvironmentError(
+        raise OSError(
             "FCM_SERVER_KEY is not set. Configure it in your .env file "
             "with your push provider credentials."
         )

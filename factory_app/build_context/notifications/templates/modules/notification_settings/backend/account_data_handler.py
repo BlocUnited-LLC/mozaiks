@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import repo
-
 
 class AccountDataHandler:
     """GDPR data handler for notification preference records.
