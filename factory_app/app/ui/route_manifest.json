@@ -38,14 +38,14 @@
     {
       "path": "/usage",
       "component": "WorkspaceUsagePage",
-      "label": "Usage",
+      "label": "Token Usage",
       "order": 5,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Usage",
+        "title": "Token Usage",
         "appShell": true,
-        "ai_context": "The user is on the Workspace Usage page. It shows LLM token consumption, cost estimates, and chat activity across all apps in this workspace.",
+        "ai_context": "The user is on the Workspace Token Usage page. It shows LLM token consumption, cost estimates, and chat activity across all apps in this workspace.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
@@ -75,7 +75,7 @@
       "path": "/integrations",
       "component": "WorkspaceIntegrationsPage",
       "label": "Integrations",
-      "order": 6,
+      "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -161,35 +161,16 @@
       }
     },
     {
-      "path": "/apps/:appId/health",
-      "component": "AppHealthPage",
-      "label": "Health",
-      "order": 21,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "App Health",
-        "appShell": true,
-        "ai_context": "The user is on the App Health page. It shows runtime signals, connector status, and any warnings or errors for this app.",
-        "navigation": {
-          "group": "app-studio",
-          "include": false,
-          "scope": "local",
-          "icon": "pulse"
-        }
-      }
-    },
-    {
       "path": "/apps/:appId/access",
       "component": "AppAccessPage",
-      "label": "Access",
+      "label": "Users",
       "order": 22,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "App Access",
+        "title": "App Users",
         "appShell": true,
-        "ai_context": "The user is on the App Access page. It shows users, roles, permission posture, plan assignment context, and support-access handoff for this app.",
+        "ai_context": "The user is on the App Users page. It shows accounts, access status, subscription plan assignment, and last-activity for this app's users.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -198,10 +179,46 @@
       }
     },
     {
+      "path": "/apps/:appId/usage",
+      "component": "AppUsagePage",
+      "label": "Token Usage",
+      "order": 23,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Token Usage",
+        "appShell": true,
+        "ai_context": "The user is on the App Token Usage page. It shows LLM token consumption, cost estimates, and per-workflow chat breakdowns for this specific app.",
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "chart"
+        }
+      }
+    },
+    {
+      "path": "/apps/:appId/health",
+      "component": "AppHealthPage",
+      "label": "Health",
+      "order": 24,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App Health",
+        "appShell": true,
+        "ai_context": "The user is on the App Health page. It shows runtime signals, connector status, and any warnings or errors for this app.",
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "pulse"
+        }
+      }
+    },
+    {
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
       "label": "App Integrations",
-      "order": 23,
+      "order": 26,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -213,24 +230,6 @@
           "include": false,
           "scope": "local",
           "icon": "plug"
-        }
-      }
-    },
-    {
-      "path": "/apps/:appId/usage",
-      "component": "AppUsagePage",
-      "label": "Usage",
-      "order": 24,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Usage",
-        "appShell": true,
-        "ai_context": "The user is on the App Usage page. It shows LLM token consumption, cost estimates, and per-workflow chat breakdowns for this specific app.",
-        "navigation": {
-          "group": "app-studio",
-          "scope": "local",
-          "icon": "chart"
         }
       }
     },

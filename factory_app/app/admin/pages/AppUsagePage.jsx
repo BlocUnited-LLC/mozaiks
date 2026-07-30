@@ -159,7 +159,7 @@ export default function AppUsagePage() {
   }
 
   if (loading) return <StudioLoadingState label="Loading app usage..." />
-  if (error || !data) return <StudioErrorState title="Usage Unavailable" message={error || 'No usage data returned.'} />
+  if (error || !data) return <StudioErrorState title="Token Usage Unavailable" message={error || 'No usage data returned.'} />
 
   const snapshot = getAppStudioSnapshot(appId, data, dataMode)
   const usageTotals = snapshot.usage?.totals || {}
@@ -235,9 +235,9 @@ export default function AppUsagePage() {
           appId={appId}
           summary={snapshot.summary}
           dataMode={dataMode}
-          title="Usage"
-          currentSection="Usage"
-          subtitle="Review measured runtime token usage and cost estimates."
+          title="Token Usage"
+          currentSection="Token Usage"
+          subtitle="Measured runtime token usage and cost estimates for this app."
           actions={null}
           onAction={null}
         />
