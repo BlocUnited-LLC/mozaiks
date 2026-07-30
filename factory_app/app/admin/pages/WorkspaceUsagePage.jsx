@@ -370,14 +370,14 @@ export default function WorkspaceUsagePage() {
   ]
 
   if (loading) return <StudioLoadingState label="Loading workspace usage…" />
-  if (error) return <StudioErrorState title="Workspace Usage Unavailable" message={error} />
+  if (error) return <StudioErrorState title="Workspace Token Usage Unavailable" message={error} />
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
         <WorkspaceStudioHero
-          title="Usage"
-          subtitle="Track workspace metering, model spend, and workflow activity."
+          title="Token Usage"
+          subtitle="Track workspace LLM metering, model spend, and workflow activity."
           actions={null}
           onAction={null}
         />

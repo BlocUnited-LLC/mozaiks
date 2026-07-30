@@ -97,7 +97,7 @@ export default function AppAccessPage() {
 
   if (loading) return <StudioLoadingState label="Loading app access..." />
   if (error || !data || !snapshot) {
-    return <StudioErrorState title="App Access Unavailable" message={error || 'No access data returned.'} />
+    return <StudioErrorState title="App Users Unavailable" message={error || 'No access data returned.'} />
   }
 
   const activeUsers = users.filter((user) => String(user.status || '').toLowerCase() === 'active').length
@@ -144,9 +144,9 @@ export default function AppAccessPage() {
           appId={appId}
           summary={snapshot.summary}
           dataMode={dataMode}
-          title="Access"
-          currentSection="Access"
-          subtitle="Manage app accounts, access state, and plan assignment context."
+          title="Users"
+          currentSection="Users"
+          subtitle="Manage app accounts, user access state, and plan assignment."
           summaryItems={summaryItems}
           actions={[
             {
