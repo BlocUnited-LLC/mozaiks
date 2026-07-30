@@ -1,0 +1,29 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.files.file_uploaded
+    version: 1
+    description: Emitted after a file metadata record is registered following external blob upload.
+    producer: files
+    payload_schema:
+      type: object
+      required: [file_id, filename, mime_type, size_bytes, created_by, app_id]
+      properties:
+        file_id: { type: string }
+        filename: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        is_public: { type: boolean }
+        created_by: { type: string }
+        app_id: { type: string }
+
+  - type: domain.files.file_deleted
+    version: 1
+    description: Emitted after a file metadata record is soft-deleted. Storage adapters may use this to schedule blob cleanup.
+    producer: files
+    payload_schema:
+      type: object
+      required: [file_id, deleted_by, app_id]
+      properties:
+        file_id: { type: string }
+        deleted_by: { type: string }
+        app_id: { type: string }
