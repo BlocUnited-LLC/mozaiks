@@ -19,6 +19,7 @@ const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const CreateAppRedirectPage = lazy(() => import('./pages/CreateAppRedirectPage.jsx'))
+const DashboardPortalPage = lazy(() => import('./pages/DashboardPortalPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppAccessPage      = lazy(() => import('./pages/AppAccessPage.jsx'))
@@ -55,6 +56,10 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('CreateAppRedirectPage', CreateAppRedirectPage, {
     description: 'Create app redirect helper — opens the deferred ValueEngine create flow without creating a draft app record first.',
+  })
+
+  registerComponent('DashboardPortalPage', DashboardPortalPage, {
+    description: 'Dashboard portal surface — renders enabled mozaiks.dashboard.v1 portal panels using generic Studio data.',
   })
 
   registerComponent('AppOverviewPage', AppOverviewPage, {

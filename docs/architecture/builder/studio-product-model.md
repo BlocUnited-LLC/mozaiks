@@ -12,6 +12,7 @@ Use these terms in visible product copy:
 - `Apps`
 - `App Studio`
 - `Overview`
+- `Building`
 - `Access`
 - `Usage`
 - `Integrations`
@@ -19,8 +20,9 @@ Use these terms in visible product copy:
 Hosted deployments may add provider-owned sections such as billing or hosting,
 but those routes are not owned by the OSS first-party Studio.
 
-Workflow-owned concepts like `Build` may still appear in lifecycle copy, but
-they are not standalone Studio pages in the current production surface.
+Workflow-owned concepts like `Build` may still appear in lifecycle copy. The
+canonical persistent surface is the `Building` portal, not a standalone
+`/build` page.
 
 ## Internal Terminology
 
@@ -64,6 +66,7 @@ App-level routes:
 
 - `/apps/:appId` -> redirects to `/apps/:appId/overview`
 - `/apps/:appId/overview` -> App Studio overview with operational health summary
+- `/apps/:appId/building` -> manifest-backed Building portal for build threads, artifacts, approvals, and workflow launch
 - `/apps/:appId/health` -> deep app health diagnostics, hidden from primary navigation
 - `/apps/:appId/access` -> app access
 - `/apps/:appId/usage` -> app usage
@@ -74,6 +77,7 @@ App-level routes:
 Primary app navigation is:
 
 - Overview
+- Building
 - Access
 - Usage
 - Support
@@ -97,6 +101,7 @@ product billing routes.
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |
 | `/apps/:appId` | App Studio | Redirects to app overview |
 | `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, operational health, connected services, build state, and activity |
+| `/apps/:appId/building` | Building | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build threads, artifacts, approvals, and workflow launch |
 | `/apps/:appId/health` | App Health Diagnostics | Deep diagnostics across runtime, workflows, hosting, and integrations; routable but hidden from primary navigation |
 | `/apps/:appId/access` | App Access | App-scoped account access, plan assignment, and access blockers |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
@@ -137,6 +142,7 @@ Behavior expectations:
 `App Studio` is single-app scope:
 
 - overview
+- building
 - access
 - usage
 - support

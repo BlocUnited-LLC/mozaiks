@@ -60,6 +60,39 @@ const dashboardPayload = {
         label: 'Overview',
         route: '/apps/:appId/overview',
         enabled: true,
+        panels: [
+          { id: 'summary', type: 'summary_strip', title: 'Summary' },
+          { id: 'next_step', type: 'next_step', title: 'Next step' },
+        ],
+      },
+      {
+        id: 'building',
+        label: 'Building',
+        route: '/apps/:appId/building',
+        description: 'Build threads, artifact versions, approvals, and workflow launch actions.',
+        enabled: true,
+        capabilities: ['build_threads', 'artifact_versions', 'approval_votes'],
+        panels: [
+          { id: 'threads', type: 'build_threads', title: 'Threads' },
+          { id: 'artifacts', type: 'artifact_timeline', title: 'Artifacts' },
+          { id: 'approvals', type: 'approval_queue', title: 'Approvals' },
+          {
+            id: 'continue_build',
+            type: 'workflow_launcher',
+            title: 'Continue build',
+            source: 'workflow',
+            workflow_id: 'extended_orchestration',
+            actions: [
+              {
+                id: 'continue_build',
+                label: 'Continue Build',
+                type: 'workflow_sequence',
+                target: 'build',
+                variant: 'primary',
+              },
+            ],
+          },
+        ],
       },
     ],
   },
@@ -170,7 +203,38 @@ function buildAppStudioPayload(appId = APP_ID) {
     },
     buildState: {
       build: {
+        current_request: {
+          text: 'Revise the campaign approval workspace and preserve marketplace reporting.',
+          request_kind: 'refinement',
+          change_class: 'feature',
+          updated_at: '2025-02-05T08:45:00Z',
+        },
+        current_plan: {
+          summary: 'Build the next app bundle while preserving existing hosted capability boundaries.',
+          build_tasks: [],
+          owned_paths: ['app/modules', 'app/ui/pages'],
+          acceptance_criteria: ['Artifact validates', 'Owner review is complete'],
+          approvals_required: ['Owner approval before promotion'],
+          cost_implications: [],
+          runtime_implications: [],
+        },
+        recent_requests: [
+          {
+            text: 'Add stakeholder review notes to the campaign workbench.',
+            request_kind: 'refinement',
+            change_class: 'patch',
+            saved_at: '2025-02-04T16:10:00Z',
+          },
+        ],
+        plan_state: 'plan_ready',
         approval_state: 'pending',
+        initial_compile_workflow: 'ValueEngine',
+        refinement_support: {
+          patch: { available: true, workflow_id: 'AppGenerator' },
+          design: { available: true, workflow_id: 'DesignDocs' },
+          feature: { available: true, workflow_id: 'AppGenerator' },
+          core: { available: true, workflow_id: 'ValueEngine' },
+        },
       },
     },
     buildHistory: {
@@ -687,7 +751,7 @@ async function mockStudioApis(page) {
     });
   });
 
-  await page.route('**/api/studio/dashboard', async (route) => {
+  await page.route('**/api/studio/dashboard**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -1086,8 +1150,33 @@ test('app overview route stays responsive across desktop and mobile widths', asy
   await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
   await expect(main.getByText('Runtime cost').first()).toBeVisible();
   await expect(main.getByText('Active users').first()).toBeVisible();
-  await expect(main.getByText('Build v17').first()).toBeVisible();
+  await expect(main.getByText('Revise the campaign approval workspace')).toBeVisible();
   await expect(main.getByText('Approval required')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
+test('app building route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto(`/apps/${APP_ID}/building`);
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Threads' })).toBeVisible();
+  await expect(main.getByText('Revise the campaign approval workspace')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+  await expect(main.getByText('Build v17').first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Approvals' })).toBeVisible();
+  await expect(main.getByText('Owner approval before promotion')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Continue build' })).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue Build' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -1308,6 +1397,11 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
   const routeChecks = [
+    {
+      href: `/apps/${APP_ID}/building`,
+      heading: 'Building',
+      detail: async () => expect(main.getByRole('heading', { name: 'Threads' })).toBeVisible(),
+    },
     {
       href: `/apps/${APP_ID}/usage`,
       heading: 'Usage',

@@ -164,6 +164,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app Studio root redirects to manifest default portal" in smoke_source
     assert "app overview route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app building route stays responsive across desktop and mobile widths" in smoke_source
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
     assert "app integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
@@ -194,6 +195,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to manifest default portal",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
+        "DashboardPortalPage": "app building route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppAccessPage": "app access route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",

@@ -30,6 +30,8 @@ Dashboard structure comes from `app/dashboard/dashboard.yaml`. When that file is
 missing, Studio uses the OSS default dashboard manifest. CI can validate that
 enabled dashboard portals resolve to mounted routes and that visible Studio
 navigation routes are represented in the dashboard manifest.
+Manifest-backed portals can use the factory `DashboardPortalPage` route
+component, starting with the canonical `/apps/:appId/building` Building lane.
 
 ## Coming Back to a Build
 

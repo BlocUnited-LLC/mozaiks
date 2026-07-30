@@ -44,6 +44,11 @@ The default App Dashboard has these portal lanes:
 Apps may hide or extend portals through the dashboard manifest. Capability packs
 can contribute panels without taking over the whole dashboard.
 
+The generic factory `DashboardPortalPage` renders manifest-backed lanes such as
+Building. Mount it from `ui/route_manifest.json` with
+`component: DashboardPortalPage` and keep portal content in
+`dashboard/dashboard.yaml`; do not copy the factory page into an app workspace.
+
 Apps that mount concrete Studio routes should run the dashboard route validator
 in CI. Enabled portals must point to registered routes, and visible Studio
 navigation routes must be declared as enabled dashboard portals.
@@ -81,4 +86,4 @@ investigation. They are not listed in primary navigation.
 | --- | --- | --- |
 | Health diagnostics | `/apps/:appId/health` | Overview when a runtime or integration issue needs investigation |
 | Integration setup | `/apps/:appId/integrations` | Overview when a required service is not connected, or workspace Integrations |
-| Build history | `/apps/:appId/activity` | Overview or Support when you need artifact versions or build audit detail |
+| Build history | `/apps/:appId/activity` | Building when you need the full artifact preservation audit detail |

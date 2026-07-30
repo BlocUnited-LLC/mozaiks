@@ -60,7 +60,13 @@ def test_platform_shell_registers_admin_section_routes() -> None:
 
     # First-party Studio product routes live in route_manifest.json.
     assert "pages: []" in registry_source
-    for path in ["/apps/:appId/overview", "/apps/:appId/access", "/apps/:appId/usage", "/apps/:appId/activity"]:
+    for path in [
+        "/apps/:appId/overview",
+        "/apps/:appId/building",
+        "/apps/:appId/access",
+        "/apps/:appId/usage",
+        "/apps/:appId/activity",
+    ]:
         assert path in route_manifest
         assert path not in registry_source
 

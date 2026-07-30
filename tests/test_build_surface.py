@@ -47,6 +47,8 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"component": "AppsPage"' in manifest_source
     assert '"path": "/apps/:appId/access"' in manifest_source
     assert '"component": "AppAccessPage"' in manifest_source
+    assert '"path": "/apps/:appId/building"' in manifest_source
+    assert '"component": "DashboardPortalPage"' in manifest_source
     assert '"path": "/apps/:appId/users"' not in manifest_source
     assert '"path": "/apps/:appId/usage"' in manifest_source
     assert '"path": "/apps/:appId/health"' in manifest_source
@@ -78,6 +80,7 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('WorkspaceHostingPage'" not in source
     assert "registerComponent('AppsPage'" in admin_source
     assert "registerComponent('WorkspaceIntegrationsPage'" in admin_source
+    assert "registerComponent('DashboardPortalPage'" in admin_source
     assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
     assert "registerComponent('AppAccessPage'" in admin_source
@@ -87,6 +90,7 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('AppHostingPage'" not in admin_source
     assert "./pages/AppHealthPage.jsx" in admin_source
     assert "./pages/AppAccessPage.jsx" in admin_source
+    assert "./pages/DashboardPortalPage.jsx" in admin_source
     assert "./pages/AppHostingPage.jsx" not in admin_source
     assert "AppBuildPage" not in source
     assert "AppDeployPage" not in source
@@ -156,6 +160,21 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
     assert 'to={`/apps/${appId}/deploy`}' not in source
     assert 'to={`/apps/${appId}/operations`}' not in source
     assert 'to={`/apps/${appId}/settings`}' not in source
+
+
+def test_dashboard_portal_page_renders_manifest_build_panels() -> None:
+    source = _read("factory_app/app/admin/pages/DashboardPortalPage.jsx")
+    manifest_source = _read("factory_app/app/ui/route_manifest.json")
+
+    assert "fetchDashboardConfig({ scope, appId" in source
+    assert "routePatternMatches(item.route, pathname)" in source
+    assert "case 'build_threads':" in source
+    assert "case 'artifact_timeline':" in source
+    assert "case 'approval_queue':" in source
+    assert "case 'workflow_launcher':" in source
+    assert "GenericPanelFallback" in source
+    assert '"/apps/:appId/building"' in manifest_source
+    assert '"component": "DashboardPortalPage"' in manifest_source
 
 
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
