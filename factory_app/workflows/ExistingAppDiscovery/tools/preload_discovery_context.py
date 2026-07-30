@@ -27,7 +27,7 @@ import os
 import tomllib
 import xml.etree.ElementTree as ET
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -279,6 +279,7 @@ _APP_INTELLIGENCE_STAGE_PROGRESS = {
     "resolving_sources": ("indexing", 10),
     "collecting_evidence": ("indexing", 25),
     "selecting_source_files": ("indexing", 40),
+    "fetching_source_files": ("indexing", 45),
     "extracting_symbols": ("indexing", 58),
     "building_graph": ("indexing", 72),
     "building_snapshot": ("indexing", 86),
@@ -294,15 +295,20 @@ def _set_app_intelligence_progress(
     stage: str,
     *,
     message: str | None = None,
+    percent: int | None = None,
     details: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
-    status, percent = _APP_INTELLIGENCE_STAGE_PROGRESS.get(stage, ("indexing", 0))
+    status, default_percent = _APP_INTELLIGENCE_STAGE_PROGRESS.get(stage, ("indexing", 0))
+    if percent is None:
+        resolved_percent = default_percent
+    else:
+        resolved_percent = max(0, min(100, int(percent)))
     payload = {
         "schema_version": _APP_INTELLIGENCE_PROGRESS_SCHEMA,
         "stage": stage,
         "status": status,
-        "percent": percent,
+        "percent": resolved_percent,
         "message": message or _default_app_intelligence_progress_message(stage),
         "details": dict(details or {}),
         "warnings": list(warnings or []),
@@ -322,6 +328,7 @@ def _default_app_intelligence_progress_message(stage: str) -> str:
         "resolving_sources": "Resolving repository and AppContext inputs.",
         "collecting_evidence": "Collecting deterministic intake evidence.",
         "selecting_source_files": "Selecting safe source files for indexing.",
+        "fetching_source_files": "Downloading selected source files from GitHub.",
         "extracting_symbols": "Extracting symbols, imports, and source chunks.",
         "building_graph": "Building the AppContext graph.",
         "building_snapshot": "Building the App Intelligence snapshot.",
@@ -858,17 +865,37 @@ def _scan_local_repo(repo_path: str) -> dict[str, Any]:
     return summary
 
 
-async def _github_request(url: str, token: str | None) -> httpx.Response:
+def _github_headers(token: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+async def _github_request(
+    url: str,
+    token: str | None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> httpx.Response:
+    headers = _github_headers(token)
+    if client is not None:
+        return await client.get(url, headers=headers)
     async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0)) as client:
         return await client.get(url, headers=headers)
 
 
-async def _fetch_github_file(owner: str, repo: str, path: str, ref: str, token: str | None) -> bytes | None:
+async def _fetch_github_file(
+    owner: str,
+    repo: str,
+    path: str,
+    ref: str,
+    token: str | None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> bytes | None:
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}"
-    resp = await _github_request(url, token)
+    resp = await _github_request(url, token, client=client)
     if resp.status_code != 200:
         return None
     try:
@@ -914,47 +941,52 @@ async def _scan_github_repo(github_repo: str, github_ref: str | None, github_tok
 
     owner, repo = normalized_repo.split("/", 1)
     token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
-    repo_resp = await _github_request(f"https://api.github.com/repos/{owner}/{repo}", token)
-    if repo_resp.status_code != 200:
-        return {
-            "success": False,
-            "error": f"GitHub repo lookup failed with HTTP {repo_resp.status_code}",
-        }
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, connect=10.0),
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
+    ) as client:
+        repo_resp = await _github_request(f"https://api.github.com/repos/{owner}/{repo}", token, client=client)
+        if repo_resp.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub repo lookup failed with HTTP {repo_resp.status_code}",
+            }
 
-    repo_info = repo_resp.json()
-    ref = github_ref or repo_info.get("default_branch") or "main"
-    tree_resp = await _github_request(
-        f"https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1",
-        token,
-    )
-    if tree_resp.status_code != 200:
-        return {
-            "success": False,
-            "error": f"GitHub tree lookup failed with HTTP {tree_resp.status_code}",
-        }
+        repo_info = repo_resp.json()
+        ref = github_ref or repo_info.get("default_branch") or "main"
+        tree_resp = await _github_request(
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1",
+            token,
+            client=client,
+        )
+        if tree_resp.status_code != 200:
+            return {
+                "success": False,
+                "error": f"GitHub tree lookup failed with HTTP {tree_resp.status_code}",
+            }
 
-    tree = tree_resp.json().get("tree", []) or []
-    file_paths = [item.get("path", "") for item in tree if item.get("type") == "blob"]
-    summary = _summarise_file_tree(file_paths)
-    languages = list(summary["languages"])
-    frameworks = list(summary["frameworks"])
-    target_frameworks: list[str] = []
+        tree = tree_resp.json().get("tree", []) or []
+        file_paths = [item.get("path", "") for item in tree if item.get("type") == "blob"]
+        summary = _summarise_file_tree(file_paths)
+        languages = list(summary["languages"])
+        frameworks = list(summary["frameworks"])
+        target_frameworks: list[str] = []
 
-    for rel_path in summary["manifest_paths"][:10]:
-        raw_bytes = await _fetch_github_file(owner, repo, rel_path, ref, token)
-        if not raw_bytes:
-            continue
-        try:
-            if rel_path.endswith("package.json"):
-                _parse_package_json(raw_bytes.decode("utf-8"), frameworks, languages)
-            elif rel_path.endswith("pyproject.toml"):
-                _parse_pyproject(raw_bytes, frameworks, languages)
-            elif rel_path.endswith("requirements.txt"):
-                _append_unique(languages, "Python")
-            elif rel_path.lower().endswith(".csproj"):
-                target_frameworks.extend(_parse_csproj(raw_bytes.decode("utf-8"), frameworks, languages))
-        except Exception as exc:
-            logger.debug("[ExistingAppDiscovery] Failed to parse GitHub manifest %s: %s", rel_path, exc)
+        for rel_path in summary["manifest_paths"][:10]:
+            raw_bytes = await _fetch_github_file(owner, repo, rel_path, ref, token, client=client)
+            if not raw_bytes:
+                continue
+            try:
+                if rel_path.endswith("package.json"):
+                    _parse_package_json(raw_bytes.decode("utf-8"), frameworks, languages)
+                elif rel_path.endswith("pyproject.toml"):
+                    _parse_pyproject(raw_bytes, frameworks, languages)
+                elif rel_path.endswith("requirements.txt"):
+                    _append_unique(languages, "Python")
+                elif rel_path.lower().endswith(".csproj"):
+                    target_frameworks.extend(_parse_csproj(raw_bytes.decode("utf-8"), frameworks, languages))
+            except Exception as exc:
+                logger.debug("[ExistingAppDiscovery] Failed to parse GitHub manifest %s: %s", rel_path, exc)
 
     summary.update(
         {
@@ -1060,6 +1092,7 @@ async def _collect_github_context_graph_file_map(
     github_ref: str | None,
     github_token: str | None,
     scan_policy_inputs: dict[str, Any] | None = None,
+    progress_callback: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> Any:
     from mozaiksai.core.app_context.scan_policy import (
         SourceScanResult,
@@ -1149,21 +1182,49 @@ async def _collect_github_context_graph_file_map(
 
     semaphore = asyncio.Semaphore(12)
 
-    async def _fetch_candidate(candidate: tuple[int, int, str, str, str, str, str, str]):
+    if progress_callback and fetch_candidates:
+        await progress_callback(0, len(fetch_candidates))
+
+    async def _fetch_candidate(
+        index: int,
+        candidate: tuple[int, int, str, str, str, str, str, str],
+        client: httpx.AsyncClient,
+    ):
         _priority, _depth, graph_path, priority_label, owner, repo, github_path, ref = candidate
         try:
             async with semaphore:
-                raw_bytes = await _fetch_github_file(owner, repo, github_path, ref, token)
-            return graph_path, priority_label, raw_bytes, None
+                raw_bytes = await _fetch_github_file(owner, repo, github_path, ref, token, client=client)
+            return index, graph_path, priority_label, raw_bytes, None
         except Exception as exc:
-            return graph_path, priority_label, None, f"{type(exc).__name__}:{graph_path}"
+            return index, graph_path, priority_label, None, f"{type(exc).__name__}:{graph_path}"
 
-    fetched_candidates = await asyncio.gather(
-        *(_fetch_candidate(candidate) for candidate in fetch_candidates)
-    )
+    fetched_candidates: list[tuple[int, str, str, bytes | None, str | None] | None] = [None] * len(fetch_candidates)
+    if fetch_candidates:
+        progress_interval = max(1, len(fetch_candidates) // 12)
+        completed_count = 0
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0, connect=10.0),
+            limits=httpx.Limits(max_connections=24, max_keepalive_connections=24),
+        ) as client:
+            tasks = [
+                asyncio.create_task(_fetch_candidate(index, candidate, client))
+                for index, candidate in enumerate(fetch_candidates)
+            ]
+            for task in asyncio.as_completed(tasks):
+                result = await task
+                fetched_candidates[result[0]] = result
+                completed_count += 1
+                if progress_callback and (
+                    completed_count == len(fetch_candidates)
+                    or completed_count % progress_interval == 0
+                ):
+                    await progress_callback(completed_count, len(fetch_candidates))
 
     fetch_error_warnings = 0
-    for graph_path, priority_label, raw_bytes, fetch_error in fetched_candidates:
+    for fetched_candidate in fetched_candidates:
+        if fetched_candidate is None:
+            continue
+        _index, graph_path, priority_label, raw_bytes, fetch_error = fetched_candidate
         if len(file_map) >= policy.max_files:
             limit_reached = True
             break
@@ -1452,11 +1513,29 @@ async def _preload_context_graph_pack(
             scan_policy_inputs=scan_policy_inputs,
         )
     else:
+        async def _github_fetch_progress(completed: int, total: int) -> None:
+            if total <= 0:
+                return
+            percent = 42 + int((min(completed, total) / total) * 13)
+            _set_app_intelligence_progress(
+                context_variables,
+                "fetching_source_files",
+                message=f"Downloading selected source files from GitHub ({completed}/{total}).",
+                percent=percent,
+                details={
+                    "source": "github_source_scan",
+                    "downloaded_file_count": completed,
+                    "fetch_candidate_count": total,
+                },
+            )
+            await _emit_app_intelligence_activity(context_variables)
+
         scan_result = await _collect_github_context_graph_file_map(
             list(github_sources or []),
             github_ref=github_ref,
             github_token=github_token,
             scan_policy_inputs=scan_policy_inputs,
+            progress_callback=_github_fetch_progress,
         )
     file_map = scan_result.file_map
     warnings = list(scan_result.warnings)
