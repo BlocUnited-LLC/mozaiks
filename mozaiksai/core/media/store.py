@@ -17,6 +17,7 @@ from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeC
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 
 from .types import (
+    AssetVisibility,
     GeneratedMediaAsset,
     MediaKind,
     MediaPromotionTarget,
@@ -667,6 +668,42 @@ class MediaAssetStore:
         )
         return await self.get_asset(app_id=resolved_app_id, asset_id=resolved_asset_id)
 
+    async def update_asset_visibility(
+        self,
+        *,
+        app_id: str,
+        asset_id: str,
+        visibility: AssetVisibility | str,
+    ) -> GeneratedMediaAsset | None:
+        """Update the access-control visibility state of a generated asset.
+
+        Callers use ``AssetVisibility`` values:
+
+        - ``private`` — default; operator/admin only
+        - ``investor_preview`` — verified campaign backers + operators/admins
+        - ``public`` — anyone with the URL (served via public media endpoint)
+
+        Returns the updated asset record, or ``None`` if not found.
+        """
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        resolved_asset_id = str(asset_id or "").strip()
+        if not resolved_asset_id:
+            raise ValueError("asset_id is required")
+        vis = visibility if isinstance(visibility, AssetVisibility) else AssetVisibility(str(visibility))
+        coll = await self._coll()
+        result = await coll.update_one(
+            {
+                "asset_id": resolved_asset_id,
+                **build_app_scope_filter(resolved_app_id),
+            },
+            {"$set": {"asset_visibility": vis.value}},
+        )
+        if result.matched_count == 0:
+            return None
+        return await self.get_asset(app_id=resolved_app_id, asset_id=resolved_asset_id)
+
     async def list_generated_assets_for_chat(
         self,
         *,
@@ -699,6 +736,7 @@ def get_media_asset_store() -> MediaAssetStore:
 
 
 __all__ = [
+    "AssetVisibility",
     "AzureBlobMediaContentStore",
     "GridFSMediaContentStore",
     "LocalMediaContentStore",
