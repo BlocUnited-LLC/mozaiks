@@ -265,7 +265,8 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/ui/components/OnboardingTour.jsx",
         "factory_app/app/ui/installOnboardingTour.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
-        # ExistingAppDiscovery App Intelligence overview — emitted before agent speaks
+        # ExistingAppDiscovery App Intelligence surfaces — emitted before and after agent speaks
+        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceInlineBrief.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
