@@ -2,7 +2,7 @@
 title: App Dashboard Contract
 status: Authoritative - Pre-Production
 created: 2026-07-28
-updated: 2026-07-29
+updated: 2026-07-30
 depends_on: surface-model.md, platform-navigation-contract.md, ../workflows/workflow-routing-transitions.md
 ---
 
@@ -158,10 +158,21 @@ The OSS runtime provides:
 - `build_dashboard_shell_routes(manifest)`
 - `validate_dashboard_manifest_routes(manifest, route_pages)`
 - `GET /api/studio/dashboard`
+- `DashboardPortalPage`, the generic factory UI renderer for
+  manifest-declared portal panels
 
 `build_dashboard_shell_routes()` is a migration bridge for clients that still
 consume route-manifest-shaped entries. Existing `ui/route_manifest.json` pages
 remain valid while the Dashboard Portal renderer is adopted.
+
+`DashboardPortalPage` reads the active `mozaiks.dashboard.v1` manifest through
+`/api/studio/dashboard`, matches the current route to an enabled portal, then
+renders known panel types against Studio data. The generic renderer currently
+covers summary, next step, portal links, build threads, artifact timelines,
+approval queues/votes, and workflow launch panels. Apps should mount it by
+declaring a normal route-manifest entry with `component: DashboardPortalPage`;
+they should not copy the factory page into their workspace to activate a
+default portal.
 
 `validate_dashboard_manifest_routes()` is the CI contract for apps that mount
 concrete Studio pages. It validates that every enabled dashboard portal points

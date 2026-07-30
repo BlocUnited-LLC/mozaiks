@@ -30,8 +30,12 @@ export function buildAppDashboardHref(routePattern, appId) {
   return String(routePattern).replace(':appId', encodeURIComponent(appId))
 }
 
-export async function fetchDashboardConfig({ signal } = {}) {
-  const response = await fetch(`${API_BASE}/api/studio/dashboard`, {
+export async function fetchDashboardConfig({ scope = null, appId = null, signal } = {}) {
+  const params = new URLSearchParams()
+  if (scope) params.set('scope', scope)
+  if (appId) params.set('app_id', appId)
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  const response = await fetch(`${API_BASE}/api/studio/dashboard${suffix}`, {
     headers: {
       Accept: 'application/json',
     },

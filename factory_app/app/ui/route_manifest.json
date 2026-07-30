@@ -125,6 +125,24 @@
       }
     },
     {
+      "path": "/apps/:appId/building",
+      "component": "DashboardPortalPage",
+      "label": "Building",
+      "order": 21,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Building",
+        "appShell": true,
+        "ai_context": "The user is on the App Building portal. It renders dashboard.yaml build panels for build threads, artifact versions, approval state, and workflow launch actions.",
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "hammer"
+        }
+      }
+    },
+    {
       "path": "/apps/:appId/health",
       "component": "AppHealthPage",
       "label": "Health",
