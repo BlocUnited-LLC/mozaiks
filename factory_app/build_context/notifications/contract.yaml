@@ -55,7 +55,7 @@ avoid_when:
 # provider and fill in credentials + API calls in the adapter.
 required_outputs:
   - path: modules/notification_settings/module.yaml
-    owner: generator
+    owner: templates
     notes: >
       User-facing notification preference module. Actions:
       get_notification_preferences (reads user opt-ins for email, push, sms),
@@ -63,43 +63,56 @@ required_outputs:
       user_data_scope: true. No entitlement_gate — all users may manage
       their own preferences.
 
+  - path: modules/notification_settings/backend/base_handler.py
+    owner: templates
+    notes: DO NOT EDIT — regenerated from contract. NotificationSettingsBaseHandler base class.
+
   - path: modules/notification_settings/backend/handler.py
     owner: workspace
-    notes: Preserved across regeneration. Thin dispatch only.
+    notes: Preserved across regeneration. Subclasses base_handler.py. Thin dispatch only.
 
   - path: modules/notification_settings/backend/service.py
-    owner: generator
+    owner: templates
+    notes: >
+      get_notification_preferences and update_notification_preferences.
+      Merges defaults with stored preferences; never calls provider adapters directly.
 
   - path: modules/notification_settings/backend/repo.py
-    owner: generator
-    notes: Persists preference records to notifications.preferences data alias.
+    owner: templates
+    notes: Persists preference records to notifications.preferences data alias via ctx.persistence.
 
   - path: modules/notification_settings/backend/schemas.py
-    owner: generator
-    notes: NotificationPreferences typed shape with per-channel opt-in booleans.
+    owner: templates
+    notes: notification_preferences_doc, preferences_response typed helpers with per-channel opt-in booleans.
+
+  - path: modules/notification_settings/backend/account_data_handler.py
+    owner: templates
+    notes: >
+      GDPR handler — delete_user_data deletes preference records;
+      export_user_data returns opt-in state. Required because user_data_scope: true.
 
   - path: modules/notification_settings/contracts/reactions.yaml
-    owner: generator
+    owner: templates
     notes: >
-      Observes domain events declared as external-delivery targets and
-      routes them to the channel-appropriate adapter. One reaction per
-      event type that should trigger external delivery.
+      Stub reactions file. Operators add one reaction per domain event that should
+      trigger external delivery. Reactions call service handler methods that
+      delegate to services/adapters/notifications/.
 
   - path: services/adapters/notifications/email.py
-    owner: generator
+    owner: templates
     notes: >
       Provider-neutral email adapter stub. Declares send_email(to, subject, body, template_id).
       Operators replace the stub body with their chosen provider SDK (SendGrid,
       AWS SES, Postmark, Mailgun). No provider credentials committed.
 
   - path: services/adapters/notifications/push.py
-    owner: generator
+    owner: templates
     notes: >
       Provider-neutral push adapter stub. Declares send_push(token, title, body, data).
       Operators fill in their chosen push provider (Firebase FCM, APNs, OneSignal).
 
   - path: data/migrations/001_notification_preferences_collection.json
-    owner: generator
+    owner: templates
     notes: >
       Declares notifications.preferences data alias for the notification_settings
       module. Does NOT create notification delivery log collections — those belong

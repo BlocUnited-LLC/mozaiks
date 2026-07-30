@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from .policy import files_scope
 from .repo import get_file, list_files, register_file, soft_delete_file
 from .schemas import build_file_record, safe_file_record
 

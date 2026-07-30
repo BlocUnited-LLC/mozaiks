@@ -1,0 +1,58 @@
+schema_version: mozaiks.module.v1
+module:
+  id: notification_settings
+  display_name: Notification Settings
+  version: 1.0.0
+  description: >
+    User notification preference management. Stores per-channel opt-in preferences
+    (email, push, SMS). Does not own external delivery — delivery adapters live in
+    services/adapters/notifications/ and are invoked from reactions.yaml.
+  owner: app
+  visibility: private
+  handler: backend.handler:NotificationSettingsHandler
+  user_data_scope: true
+
+actions:
+  - id: get_notification_preferences
+    description: Fetch the current user's notification opt-in preferences.
+    handler_method: get_notification_preferences
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [preferences]
+      properties:
+        preferences:
+          type: object
+
+  - id: update_notification_preferences
+    description: Update the current user's notification opt-in preferences.
+    handler_method: update_notification_preferences
+    input_schema:
+      type: object
+      properties:
+        email_enabled:
+          type: boolean
+        push_enabled:
+          type: boolean
+        sms_enabled:
+          type: boolean
+    output_schema:
+      type: object
+      required: [success, preferences]
+      properties:
+        success:
+          type: boolean
+        preferences:
+          type: object
+
+capabilities:
+  - capability_id: notifications.preferences.read
+    kind: action
+    target: get_notification_preferences
+    title: Get notification preferences
+  - capability_id: notifications.preferences.write
+    kind: action
+    target: update_notification_preferences
+    title: Update notification preferences
