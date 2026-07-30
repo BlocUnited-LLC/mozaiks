@@ -253,3 +253,69 @@ def test_send_event_to_ui_does_not_filter_activity_for_non_visual_agent(monkeypa
         )
     ]
 
+
+def test_send_event_to_ui_does_not_filter_one_way_ui_surface_for_non_visual_agent(monkeypatch):
+    transport = SimpleTransport()
+    transport.connections = {"chat-1": {"workflow_name": "ExistingAppDiscovery", "user_id": "user-1"}}
+    sent = []
+
+    class _FakeDispatcher:
+        def build_outbound_event_envelope(self, *, raw_event, chat_id, get_sequence_cb, workflow_name):  # noqa: ANN001
+            return {
+                "type": "chat.tool_call",
+                "data": {
+                    "kind": "tool_call",
+                    "agent": "App Intelligence",
+                    "tool_name": "AppIntelligenceInlineBrief",
+                    "component_type": "AppIntelligenceInlineBrief",
+                    "tool_call_id": "ui_surface_1",
+                    "display": "inline",
+                    "awaiting_response": False,
+                    "interaction_type": "ui_surface",
+                    "payload": {"status": "ready"},
+                },
+            }
+
+    monkeypatch.setattr(_dispatcher_mod, "get_event_dispatcher", lambda: _FakeDispatcher())
+    monkeypatch.setattr(transport, "should_show_to_user", lambda agent_name, chat_id: False)
+    monkeypatch.setattr(
+        transport,
+        "_broadcast_to_websockets",
+        lambda event, chat_id=None: _record_broadcast(sent, event, chat_id),
+    )
+
+    import asyncio
+
+    asyncio.run(
+        transport.send_event_to_ui(
+            {
+                "kind": "tool_call",
+                "agent": "App Intelligence",
+                "tool_name": "AppIntelligenceInlineBrief",
+                "component_type": "AppIntelligenceInlineBrief",
+                "awaiting_response": False,
+            },
+            "chat-1",
+        )
+    )
+
+    assert sent == [
+        (
+            {
+                "type": "chat.tool_call",
+                "data": {
+                    "kind": "tool_call",
+                    "agent": "App Intelligence",
+                    "tool_name": "AppIntelligenceInlineBrief",
+                    "component_type": "AppIntelligenceInlineBrief",
+                    "tool_call_id": "ui_surface_1",
+                    "display": "inline",
+                    "awaiting_response": False,
+                    "interaction_type": "ui_surface",
+                    "payload": {"status": "ready"},
+                },
+            },
+            "chat-1",
+        )
+    ]
+

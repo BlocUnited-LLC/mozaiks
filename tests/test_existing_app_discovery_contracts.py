@@ -572,6 +572,20 @@ def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch
     assert ready_event["status"] == "complete"
     assert ready_event["message"] == "App context ready. Starting the discovery agent."
 
+    module._set_app_intelligence_progress(
+        context,
+        "fetching_source_files",
+        message="Downloading selected source files from GitHub (60/120).",
+        percent=48,
+    )
+    result = asyncio.run(module._emit_app_intelligence_activity(context))
+
+    assert result["status"] == "working"
+    download_event, _ = fake_transport.events[-1]
+    assert download_event["status"] == "working"
+    assert download_event["progress_percent"] == 48
+    assert "Downloading selected source files from GitHub (60/120)." in download_event["message"]
+
 
 def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     source = _read_text("chat-ui/src/pages/ChatPage.js")
@@ -1063,7 +1077,7 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
         "README.md": b"# Demo\nExisting app repository.\n",
     }
 
-    async def _fake_github_request(url: str, token: str | None):
+    async def _fake_github_request(url: str, token: str | None, **kwargs):
         assert token is None
         if "/git/trees/" in url:
             return _FakeResponse(200, tree)
@@ -1077,11 +1091,12 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
             )
         return _FakeResponse(404, {})
 
-    async def _fake_fetch_github_file(owner: str, repo: str, path: str, ref: str, token: str | None):
+    async def _fake_fetch_github_file(owner: str, repo: str, path: str, ref: str, token: str | None, **kwargs):
         assert owner == "Example"
         assert repo == "demo"
         assert ref == "main"
         assert token is None
+        assert "client" in kwargs
         return contents.get(path)
 
     monkeypatch.setattr(module, "_github_request", _fake_github_request)

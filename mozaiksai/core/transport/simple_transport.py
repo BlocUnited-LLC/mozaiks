@@ -652,14 +652,16 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 data_payload["trace_agent"] = agent
                 return True
             
-            # Determine if this is a UI tool event (requires user interaction)
+            # Determine if this is a workflow UI render event. Both
+            # response-required UI_Tool events and one-way UI_Surface events
+            # must bypass visual_agents filtering; the workflow UI contract
+            # already declared them as user-visible surfaces.
             is_ui_tool_event = False
             if envelope_type == 'chat.tool_call' and isinstance(envelope.get('data'), dict):
                 data_payload = envelope.get('data')
-                # UI tool events have awaiting_response=True and component_type
-                is_ui_tool_event = data_payload.get('awaiting_response') and data_payload.get('component_type')
+                is_ui_tool_event = bool(data_payload.get('component_type'))
             
-            # Skip visibility filtering for select_speaker and response-required UI tool events
+            # Skip visibility filtering for select_speaker and declared UI surfaces.
             skip_visibility_filter = (
                 envelope_type == 'chat.select_speaker'
                 or envelope_type == 'chat.run_complete'
