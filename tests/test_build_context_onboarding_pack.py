@@ -108,6 +108,10 @@ def test_onboarding_contract_required_outputs_include_config_and_module() -> Non
     assert "modules/user_onboarding/module.yaml" in output_paths, (
         "contract.yaml must declare modules/user_onboarding/module.yaml as a required output"
     )
+    assert "modules/user_onboarding/backend/account_data_handler.py" in output_paths, (
+        "contract.yaml must declare modules/user_onboarding/backend/account_data_handler.py "
+        "because user_onboarding stores user-owned tour state"
+    )
 
 
 def test_onboarding_contract_user_onboarding_module_requires_user_data_scope() -> None:

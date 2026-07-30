@@ -257,7 +257,7 @@ function PortalLinkGridPanel({ panel, surface, currentPortal, appId }) {
   )
 }
 
-function BuildThreadsPanel({ panel, build, snapshot, appId }) {
+function BuildRequestsPanel({ panel, build, snapshot, appId }) {
   const currentRequest = build.current_request || {}
   const recentRequests = toArray(build.recent_requests)
   const recentRuns = snapshot.runs.slice(0, 4)
@@ -269,7 +269,7 @@ function BuildThreadsPanel({ panel, build, snapshot, appId }) {
   }).toString()}`
 
   return (
-    <Panel title={titleForPanel(panel, 'Build threads')} subtitle={panel.description || 'Current request, saved build prompts, and recent workflow activity.'}>
+    <Panel title={titleForPanel(panel, 'Build requests')} subtitle={panel.description || 'Current request, saved build prompts, and recent workflow activity.'}>
       {currentRequest.text ? (
         <div className="rounded-lg border border-primary/25 bg-primary/6 px-4 py-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-primary/65">Current request</div>
@@ -516,12 +516,11 @@ function DashboardPanelRenderer({ panel, portal, surface, snapshot, data, appId 
       return <NextStepPanel panel={panel} snapshot={snapshot} />
     case 'portal_link_grid':
       return <PortalLinkGridPanel panel={panel} surface={surface} currentPortal={portal} appId={appId} />
-    case 'build_threads':
-      return <BuildThreadsPanel panel={panel} build={build} snapshot={snapshot} appId={appId} />
+    case 'build_requests':
+      return <BuildRequestsPanel panel={panel} build={build} snapshot={snapshot} appId={appId} />
     case 'artifact_timeline':
       return <ArtifactTimelinePanel panel={panel} snapshot={snapshot} />
     case 'approval_queue':
-    case 'approval_votes':
       return <ApprovalPanel panel={panel} build={build} latestArtifact={latestArtifact} />
     case 'workflow_launcher':
       return <WorkflowLauncherPanel panel={panel} build={build} appId={appId} />

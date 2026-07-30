@@ -168,7 +168,7 @@ def test_dashboard_portal_page_renders_manifest_build_panels() -> None:
 
     assert "fetchDashboardConfig({ scope, appId" in source
     assert "routePatternMatches(item.route, pathname)" in source
-    assert "case 'build_threads':" in source
+    assert "case 'build_requests':" in source
     assert "case 'artifact_timeline':" in source
     assert "case 'approval_queue':" in source
     assert "case 'workflow_launcher':" in source
@@ -202,7 +202,8 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "/api/studio/apps/{record_id}/status" in update_hook_source
     assert "/api/modules/app_registry" not in update_hook_source
     assert "Mozaiks Studio" in layout_source
-    assert "Import App" in source
+    assert "Create App" in source
+    assert "Import App" not in source
     assert "const CREATE_APP_PATH = '/create'" in source
     assert "/chat?workflow=ValueEngine&mode=workflow&defer_start=1" not in source
     assert "/chat?workflow=ValueEngine&mode=workflow&new=1" not in source
@@ -239,11 +240,11 @@ def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     assert "Browse sections" not in source
     assert "Mozaiks Studio" in source
     assert "App Studio" in source
-    assert '"label": "Access"' in manifest_source
+    assert '"label": "Users"' in manifest_source
     assert '"label": "Billing"' not in manifest_source
     assert '"label": "Health"' in manifest_source
     assert '"label": "Hosting"' not in manifest_source
-    assert '"label": "Usage"' in manifest_source
+    assert '"label": "Token Usage"' in manifest_source
     assert '"label": "Integrations"' in manifest_source
     # Nav is route-manifest-owned and derived from registered shell pages.
     assert "useNavigation" in source

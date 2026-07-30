@@ -86,6 +86,12 @@ required_outputs:
     owner: workspace
     notes: Preserved across regeneration. Subclasses base_handler if present, otherwise thin dispatch only.
 
+  - path: modules/user_onboarding/backend/account_data_handler.py
+    owner: generator
+    notes: >
+      Implements delete_user_data and export_user_data for per-user onboarding
+      state. Required because module.yaml declares user_data_scope: true.
+
   - path: modules/user_onboarding/backend/service.py
     owner: generator
 

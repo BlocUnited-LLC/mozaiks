@@ -69,11 +69,11 @@ const dashboardPayload = {
         id: 'building',
         label: 'Building',
         route: '/apps/:appId/building',
-        description: 'Build threads, artifact versions, approvals, and workflow launch actions.',
+        description: 'Build requests, artifact versions, approval queue, and workflow launch actions.',
         enabled: true,
-        capabilities: ['build_threads', 'artifact_versions', 'approval_votes'],
+        capabilities: ['build_requests', 'artifact_versions', 'approval_queue'],
         panels: [
-          { id: 'threads', type: 'build_threads', title: 'Threads' },
+          { id: 'requests', type: 'build_requests', title: 'Build requests' },
           { id: 'artifacts', type: 'artifact_timeline', title: 'Artifacts' },
           { id: 'approvals', type: 'approval_queue', title: 'Approvals' },
           {
@@ -665,6 +665,26 @@ function buildWorkspaceSupportPayload() {
   };
 }
 
+function buildWorkspaceUsersPayload() {
+  return {
+    total_users: 184,
+    active_users: 136,
+    new_users: 12,
+    by_app: {
+      [APP_ID]: {
+        total_users: 118,
+        active_users: 91,
+        new_users: 8,
+      },
+      'partner-delivery-studio': {
+        total_users: 66,
+        active_users: 45,
+        new_users: 4,
+      },
+    },
+  };
+}
+
 function buildOnboardingStatusPayload({ dismissed = false, progress = 0, steps = {} } = {}) {
   const defaultSteps = {
     create_app: { completed: false, completed_at: null },
@@ -748,6 +768,14 @@ async function mockStudioApis(page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(appsPayload),
+    });
+  });
+
+  await page.route('**/api/admin/users', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildWorkspaceUsersPayload()),
     });
   });
 
@@ -955,7 +983,7 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
 
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Create App' })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Import App' })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Import App' })).toHaveCount(0);
   await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
@@ -1011,40 +1039,11 @@ test('create app transition overlay can return to Apps', async ({ page, isMobile
   await expect(page.locator('main').getByRole('heading', { name: 'Apps', exact: true })).toBeVisible();
 });
 
-test('import app overlay stays within the viewport and suppresses the floating widget', async ({ page, isMobile }) => {
-  // Mobile CI: the SlideOver dialog never becomes visible after clicking Import App
-  // on touch-emulated devices (click does not open the overlay). The viewport-fitting
-  // assertion is meaningful for mobile but can only run once the dialog opens reliably.
-  // Track as a separate mobile-specific fix.
-  test.skip(isMobile, 'SlideOver does not open reliably on touch-emulated CI; desktop-only');
-
-  await page.goto('/apps');
-  const main = page.locator('main');
-
-  const widgetRoot = page.locator('.widget-safe-bottom').first();
-  await expect(widgetRoot).toBeVisible();
-
-  await main.getByRole('button', { name: 'Import App' }).click();
-
-  const dialog = page.getByRole('dialog', { name: 'Import App' });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Close overlay' })).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-  await expect(widgetRoot).toHaveAttribute('aria-hidden', 'true');
-
-  const dialogBox = await dialog.boundingBox();
-  const viewport = page.viewportSize();
-  expect(dialogBox).not.toBeNull();
-  expect(viewport).not.toBeNull();
-  expect(dialogBox.width).toBeLessThanOrEqual(viewport.width);
-  expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height + 1);
-});
-
 test('workspace usage route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/usage');
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Token Usage', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workspace usage' })).toBeVisible();
   await expect(main.getByPlaceholder('Search apps or workflows...')).toBeVisible();
   await expect(main.getByText('Total spend')).toBeVisible();
@@ -1060,6 +1059,32 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
     await expect(main.getByRole('columnheader', { name: 'App' })).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'Input tok.' })).toBeVisible();
     await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
+test('workspace users route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto('/users');
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
+  await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
+  const summaryMetrics = main.getByLabel('Summary metrics');
+  await expect(summaryMetrics.getByText('Total users')).toBeVisible();
+  await expect(summaryMetrics.getByText('Active users')).toBeVisible();
+  await expect(summaryMetrics.getByText('Apps with users')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'Total users' })).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'Active' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
@@ -1169,7 +1194,7 @@ test('app building route stays responsive across desktop and mobile widths', asy
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Threads' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build requests' })).toBeVisible();
   await expect(main.getByText('Revise the campaign approval workspace')).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
   await expect(main.getByText('Build v17').first()).toBeVisible();
@@ -1279,7 +1304,7 @@ test('app usage route stays responsive across desktop and mobile widths', async 
   await page.goto(`/apps/${APP_ID}/usage`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Token Usage', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible();
   await expect(main.getByRole('columnheader', { name: 'Input' })).toBeVisible();
   await expect(main.getByText('RevisionOrchestrator').first()).toBeVisible();
@@ -1353,7 +1378,7 @@ test('app access route stays responsive across desktop and mobile widths', async
   await page.goto(`/apps/${APP_ID}/access`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Access', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible();
   await expect(main.getByPlaceholder('Search by name, email, status, or plan')).toBeVisible();
   await expect(main.getByRole('button', { name: 'Export' }).first()).toBeVisible();
@@ -1400,16 +1425,16 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
     {
       href: `/apps/${APP_ID}/building`,
       heading: 'Building',
-      detail: async () => expect(main.getByRole('heading', { name: 'Threads' })).toBeVisible(),
+      detail: async () => expect(main.getByRole('heading', { name: 'Build requests' })).toBeVisible(),
     },
     {
       href: `/apps/${APP_ID}/usage`,
-      heading: 'Usage',
+      heading: 'Token Usage',
       detail: async () => expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible(),
     },
     {
       href: `/apps/${APP_ID}/access`,
-      heading: 'Access',
+      heading: 'Users',
       detail: async () => expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible(),
     },
   ];
@@ -1436,7 +1461,7 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
   const routeChecks = [
     {
       href: '/usage',
-      heading: 'Usage',
+      heading: 'Token Usage',
       detail: async () => expect(main.getByRole('heading', { name: 'Workspace usage' })).toBeVisible(),
     },
     {

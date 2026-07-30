@@ -32,7 +32,7 @@ The default App Dashboard has these portal lanes:
 | Portal | Route | Purpose |
 | --- | --- | --- |
 | Overview | `/apps/:appId/overview` | App identity, lifecycle state, KPIs, and next step. |
-| Building | `/apps/:appId/building` | Build threads, artifact versions, approvals, votes, and build workflow launches. |
+| Building | `/apps/:appId/building` | Build requests, artifact versions, approval queue, and build workflow launches. |
 | Branding | `/apps/:appId/branding` | Brand kit, themes, logos, generated media, and promoted assets. |
 | Launch | `/apps/:appId/launch` | Landing page, hosting, domains, and deployment readiness. |
 | Growth | `/apps/:appId/growth` | Marketing campaigns, landing page improvement, and campaign assets. |
@@ -52,6 +52,12 @@ Building. Mount it from `ui/route_manifest.json` with
 Apps that mount concrete Studio routes should run the dashboard route validator
 in CI. Enabled portals must point to registered routes, and visible Studio
 navigation routes must be declared as enabled dashboard portals.
+
+The OSS dashboard default is not a collaborative development product surface.
+Discussion, voting, proposal workflows, and community moderation belong to
+app-owned modules and routes. A host product can expose admin review or
+moderation summaries through module or custom dashboard panels without copying
+those product semantics into the generic Factory/Studio defaults.
 
 ## Support
 
