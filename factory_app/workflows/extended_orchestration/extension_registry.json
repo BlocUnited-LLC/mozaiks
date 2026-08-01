@@ -139,7 +139,7 @@
     {
       "id": "ExistingAppDiscovery",
       "description": "Discovery workflow for existing-app adopters",
-      "startup_mode": "UserDriven"
+      "startup_mode": "AgentDriven"
     },
     {
       "id": "AppReview",

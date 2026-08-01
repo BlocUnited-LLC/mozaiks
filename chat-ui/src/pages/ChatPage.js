@@ -2511,10 +2511,6 @@ const ChatPage = () => {
           : activityFailedStatuses.includes(normalizedActivityStatus)
             ? '⚠'
             : '⏳';
-        if (showInitSpinner) {
-          setShowInitSpinner(false);
-          initSpinnerHiddenOnceRef.current = true;
-        }
         setMessagesWithLogging(prev => {
           const updated = [...prev];
           const last = updated.length ? updated[updated.length - 1] : null;
