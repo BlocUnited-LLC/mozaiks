@@ -196,13 +196,18 @@ agents:
          - capabilities that would require deeper migration before agents should touch them
 
       5. Summarize the capability map and emit NEXT only once the user confirms the important pieces.
+
+      CRITICAL FIRST-TURN RULE: Your FIRST response after entering this stage MUST
+      be a conversational capability summary. Do NOT include NEXT in your first
+      response. NEXT may only appear as a standalone response AFTER the user has
+      read and explicitly responded to your capability summary.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
       Your output at each turn MUST be exactly ONE of:
       - A conversational response (string)
       - EXACTLY `NEXT` (uppercase, no extra text) when the capability map is confirmed
-  max_consecutive_auto_reply: 10
+  max_consecutive_auto_reply: 1
   structured_outputs_required: false
 
 - name: IntegrationPlannerAgent
@@ -312,13 +317,18 @@ agents:
          Mozaiks shell deliberately.
 
       8. Emit NEXT only when the recommended adoption path is confirmed.
+
+      CRITICAL FIRST-TURN RULE: Your FIRST response after entering this stage MUST
+      be a conversational adoption recommendation. Do NOT include NEXT in your first
+      response. NEXT may only appear as a standalone response AFTER the user has
+      read and explicitly responded to your recommendation.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
       Your output at each turn MUST be exactly ONE of:
       - A conversational response (string)
       - EXACTLY `NEXT` (uppercase, no extra text) when the adoption plan is confirmed
-  max_consecutive_auto_reply: 12
+  max_consecutive_auto_reply: 1
   structured_outputs_required: false
 
 # ---------------------------------------------------------------------------
@@ -442,13 +452,18 @@ agents:
          Do not reference proprietary app logic. This is a design brief, not code.
 
       10. Confirm your decomposition with the user, invite corrections, then emit NEXT.
+
+      CRITICAL FIRST-TURN RULE: Your FIRST response after entering this stage MUST
+      be a conversational decomposition plan. Do NOT include NEXT in your first
+      response. NEXT may only appear as a standalone response AFTER the user has
+      read and explicitly responded to your decomposition plan.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |
       Your output at each turn MUST be exactly ONE of:
       - A conversational response presenting the decomposition plan
       - EXACTLY `NEXT` (uppercase, no extra text) when the decomposition is confirmed
-  max_consecutive_auto_reply: 12
+  max_consecutive_auto_reply: 1
   structured_outputs_required: false
 
 - name: DiscoveryArtifactAssemblerAgent
