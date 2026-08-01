@@ -223,6 +223,8 @@ def _build_review_snapshot(review_record: RefinementReviewRecord) -> dict[str, A
         "source_bundle_path": review_record.source_bundle_path,
         "staging_area": review_record.staging_area,
         "affected_bundle_paths": list(review_record.affected_bundle_paths or []),
+        "write_back_mode": review_record.write_back_mode,
+        "write_back_target": review_record.write_back_target,
     }
 
 
@@ -773,6 +775,10 @@ async def accept_staged_refinement_artifact_version(
     if review_snapshot.get("promotion_allowed") is not True:
         raise AcceptedStagedAppBundleArtifactVersionError(
             "Draft artifact metadata does not reflect promotion_allowed=true."
+        )
+    if str(review_snapshot.get("write_back_mode") or "").strip() != loaded_review.write_back_mode:
+        raise AcceptedStagedAppBundleArtifactVersionError(
+            "Draft artifact metadata write_back_mode does not match the staged refinement review record."
         )
 
     accepted_by_resolved = str(accepted_by or loaded_review.reviewer or review_record.reviewer or "").strip() or None

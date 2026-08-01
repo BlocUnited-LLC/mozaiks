@@ -74,3 +74,14 @@ def test_value_engine_interview_complete_trigger_still_uses_exact_next() -> None
     assert trigger["type"] == "agent_text"
     assert trigger["agent"] == "ValueInterviewAgent"
     assert trigger["match"]["equals"] == "NEXT"
+
+
+def test_value_engine_existing_app_mode_overrides_greenfield_openers() -> None:
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "This section overrides [OPENING THE CONVERSATION] for existing-app runs." in agents_text
+    assert "This section applies only to greenfield app starts." in agents_text
+    assert 'Never ask "What do you want to build?", "What problem are you trying to solve?", or "Who are you building this for?" for an existing-app run.' in agents_text
+    assert "Do not ask the user to pick from detected opportunities before research." in agents_text
+    assert "ValueEngine's downstream agents own that value analysis." in agents_text
+    assert 'what would you suggest' in agents_text

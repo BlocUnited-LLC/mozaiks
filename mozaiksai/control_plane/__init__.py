@@ -112,6 +112,15 @@ from .ports import (
     RoutingPolicyPort,
     ScopeProposalPort,
 )
+from .review_package import (
+    REVIEW_PACKAGE_SCHEMA_VERSION,
+    RefinementReviewAction,
+    RefinementReviewChangedFile,
+    RefinementReviewPackage,
+    RefinementReviewRouteDecision,
+    RefinementReviewWriteBack,
+    build_refinement_review_package,
+)
 from .revision_context import assemble_revision_context
 from .runtime import (
     ControlPlaneCheckpointRuntime,
@@ -220,13 +229,20 @@ __all__ = [
     "LoadedControlPlanePack",
     "OrchestrationControlHarness",
     "RefinementRequest",
+    "RefinementReviewAction",
+    "RefinementReviewChangedFile",
+    "RefinementReviewPackage",
+    "RefinementReviewRouteDecision",
+    "RefinementReviewWriteBack",
     "RefinementRoutingDecision",
     "RefinementTriggerRouteResolver",
     "RoutingPolicyPort",
+    "REVIEW_PACKAGE_SCHEMA_VERSION",
     "ScopeProposal",
     "ScopeProposalPort",
     "ScopedRefinementCodingWorker",
     "build_selected_control_plane_harness",
+    "build_refinement_review_package",
     "assemble_revision_context",
     "accept_staged_refinement_artifact_version",
     "apply_app_context_policy_override",

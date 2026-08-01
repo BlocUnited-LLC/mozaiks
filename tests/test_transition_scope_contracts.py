@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from mozaiksai.core.auth.dependencies import UserPrincipal
 from mozaiksai.hosts import platform as platform_app
+from mozaiksai.hosts.routers import transitions as transitions_router
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 
@@ -92,10 +94,99 @@ def test_route_renderer_posts_app_and_user_scope_for_transition_resolution() -> 
     assert "const { user, config } = useChatUI();" in source
 
 
+@pytest.mark.asyncio
+async def test_transition_resolve_workflow_response_includes_context_variables(monkeypatch) -> None:
+    principal = UserPrincipal(
+        user_id="anonymous",
+        email=None,
+        name="Anonymous User",
+        roles=[],
+        scopes=["access_as_user"],
+        raw_claims={},
+        provider="none",
+        app_id=None,
+    )
+    selected_context = {
+        "app_type": "brownfield_app",
+        "brownfield_build_path": "light_integration",
+    }
+
+    async def fake_launch_transition(**kwargs):  # noqa: ANN003
+        assert kwargs["context_variables"] == {"app_type": "brownfield_app"}
+        return SimpleNamespace(
+            resolution_type="workflow",
+            option_id="light_integration",
+            context_variables=selected_context,
+            workflow_launch=SimpleNamespace(
+                chat_id="chat_1",
+                workflow_id="ValueEngine",
+                requested_workflow_id="ValueEngine",
+                journey_id="brownfield_overlay_generation",
+                websocket_url="/ws/ValueEngine/app_1/chat_1/user_1",
+                routing_explanation="route selected",
+                rerouted_by_dependency=False,
+            ),
+        )
+
+    monkeypatch.setattr(transitions_router, "launch_transition", fake_launch_transition)
+
+    response = await transitions_router.resolve_transition_route(
+        transitions_router.TransitionResolveRequest(
+            transition_id="brownfield_path_selector",
+            option_id="light_integration",
+            app_id="app_1",
+            user_id="user_1",
+            context_variables={"app_type": "brownfield_app"},
+        ),
+        principal=principal,
+    )
+
+    assert response["resolution_type"] == "workflow"
+    assert response["workflow_id"] == "ValueEngine"
+    assert response["context_variables"] == selected_context
+
+
+def test_session_state_route_accepts_explicit_local_scope() -> None:
+    source = _read_text("mozaiksai/hosts/routers/transitions.py")
+
+    assert '@router.get("/api/session/state")' in source
+    assert "app_id: str | None = Query(default=None)" in source
+    assert "user_id: str | None = Query(default=None)" in source
+    assert "resolve_scope_from_principal(" in source
+    assert "app_id=scoped_app_id" in source
+    assert "user_id=scoped_user_id" in source
+
+
 def test_workflow_start_posts_app_and_user_scope_for_triggered_workflows() -> None:
     source = _read_text("chat-ui/src/hooks/useWorkflowStart.js")
 
     assert "app_id: resolvedAppId" in source
     assert "user_id: resolvedUserId" in source
     assert "const { user, config } = useChatUI();" in source
+
+
+def test_chat_page_transition_handoff_persists_workflow_before_reconnect() -> None:
+    source = _read_text("chat-ui/src/pages/ChatPage.js")
+    startup_source = _read_text("chat-ui/src/hooks/useChatStartupEffects.js")
+
+    assert "setStoredActiveWorkflowName(resolvedWorkflowName)" in source
+    assert "currentChatId\n        ? activeResolvedWorkflow || urlResolvedWorkflow" in source
+    assert "workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())" in source
+    assert "buildWorkflowResolutionCandidates({" in source
+    assert "includeAvailable: Boolean(queryChatId)" in source
+    assert "includeAvailable: candidateChatId === queryChatId" in source
+    assert "resolvedCandidateWorkflow" in source
+    assert "const expectedConnectionWorkflow = routeWorkflowName || preferredConnectionWorkflow" in source
+    assert "const existingConnectionWorkflow = workflowConfig.resolveKnownWorkflowName(wsRef.current?.workflowName)" in source
+    assert "existingConnectionWorkflow === expectedConnectionWorkflow" in source
+    assert (
+        "const workflowForUrl =\n"
+        "      workflowConfig.resolveKnownWorkflowName(currentWorkflowName)\n"
+        "      || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)\n"
+        "      || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())"
+    ) in source
+    assert "includeAvailable: true" in startup_source
+    assert "resolveWorkflowForChat({" in startup_source
+    assert "resolvedWorkflowForChat || preferredWorkflow || workflowFromQuery" in startup_source
+    assert source.count("navigate(`/chat?${chatParams.toString()}`)") >= 2
 

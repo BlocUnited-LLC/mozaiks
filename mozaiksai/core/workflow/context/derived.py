@@ -463,13 +463,39 @@ class DerivedContextManager:
         next routing decision is made.
         """
 
+        updates = self.preview_agent_text_updates(agent_name, text)
+        if not updates:
+            return {}
+
+        updated_vars: dict[str, Any] = {}
+        for name, value in updates.items():
+            for provider in self.providers:
+                if hasattr(provider, "set"):
+                    try:
+                        provider.set(name, value)  # type: ignore[attr-defined]
+                        updated_vars[name] = value
+                    except Exception as err:  # pragma: no cover
+                        logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
+            if name in updated_vars:
+                logger.debug(
+                    "[DERIVED_CONTEXT] %s: %s -> %r (agent_text, agent=%s)",
+                    self.workflow_name, name, updated_vars[name], agent_name,
+                )
+                for cb in list(self._listeners):
+                    try:
+                        cb({"variable": name, "value": updated_vars[name], "source": "agent_text"})
+                    except Exception:  # pragma: no cover
+                        pass
+        return updated_vars
+
+    def preview_agent_text_updates(self, agent_name: str, text: str) -> dict[str, Any]:
+        """Return agent_text-derived updates without mutating providers."""
+
         candidate = str(text or "").strip()
         if not candidate or not self.variables:
             return {}
 
-        # Build a per-agent lookup once and check only variables that care about
-        # this specific agent to keep the hot path O(matching triggers).
-        updated_vars: dict[str, Any] = {}
+        updates: dict[str, Any] = {}
         for var in self.variables:
             for trigger in var.triggers:
                 if trigger.agent != agent_name:
@@ -481,24 +507,8 @@ class DerivedContextManager:
                     m = trigger._compiled.search(candidate)
                     if m and m.groups():
                         value_to_set = m.group(1)
-                for provider in self.providers:
-                    if hasattr(provider, "set"):
-                        try:
-                            provider.set(var.name, value_to_set)  # type: ignore[attr-defined]
-                            updated_vars[var.name] = value_to_set
-                        except Exception as err:  # pragma: no cover
-                            logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
-                if var.name in updated_vars:
-                    logger.debug(
-                        "[DERIVED_CONTEXT] %s: %s -> %r (agent_text, agent=%s)",
-                        self.workflow_name, var.name, updated_vars[var.name], agent_name,
-                    )
-                    for cb in list(self._listeners):
-                        try:
-                            cb({"variable": var.name, "value": updated_vars[var.name], "source": "agent_text"})
-                        except Exception:  # pragma: no cover
-                            pass
-        return updated_vars
+                updates[var.name] = value_to_set
+        return updates
 
     def apply_user_text(self, text: str) -> dict[str, Any]:
         """Apply declarative user_text triggers based on a free-form composer reply."""

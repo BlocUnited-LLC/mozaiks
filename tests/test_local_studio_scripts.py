@@ -16,12 +16,16 @@ def test_run_studio_waits_for_backend_before_frontend() -> None:
     assert "SkipBackendWait" in script
     assert "Wait-ForHttpOk" in script
     assert "http://localhost:$BackendPort/api/shell-config" in script
+    assert "Stop-ListeningPorts -Ports @($BackendPort, $FrontendPort)" in script
+    assert "clean-runtime-artifacts.ps1" in script
+    assert "-IncludeMainLogs" in script
 
+    clean_start = script.rindex("Clear-PreviousRunFiles")
     backend_start = script.index("Start-Process -FilePath $shellExe")
     readiness_wait = script.index('Wait-ForHttpOk -Name "backend shell config"')
     frontend_start = script.index('& "$ScriptDir/run-frontend.ps1" @frontendParams')
 
-    assert backend_start < readiness_wait < frontend_start
+    assert clean_start < backend_start < readiness_wait < frontend_start
 
 
 def test_run_infra_fails_early_when_docker_is_unavailable() -> None:

@@ -18,6 +18,7 @@
 
 .PARAMETER ForceStop
     Kill any existing process already listening on either port before starting.
+    Also clears prior run logs and runtime artifacts so the next run starts clean.
 
 .PARAMETER SkipInfra
     Skip the Docker Compose infra check (MongoDB) on backend startup.
@@ -102,6 +103,57 @@ function Wait-ForHttpOk {
     throw "$Name readiness timed out."
 }
 
+function Get-ListeningProcessIds {
+    param([int]$LocalPort)
+
+    $procIds = @()
+    try {
+        $procIds = Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    } catch {
+        $lines = netstat -ano | Select-String ":$LocalPort\s+.*LISTENING"
+        $procIds = $lines | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique
+    }
+
+    return $procIds | Where-Object { $_ -and $_ -ne 0 } | ForEach-Object { [int]$_ }
+}
+
+function Stop-ListeningPorts {
+    param([int[]]$Ports)
+
+    $stopped = @{}
+    foreach ($port in $Ports) {
+        foreach ($procId in (Get-ListeningProcessIds -LocalPort $port)) {
+            $key = [string]$procId
+            if ($stopped.ContainsKey($key)) {
+                continue
+            }
+            try {
+                Write-Host ("[studio] ForceStop: stopping PID {0} on port {1}" -f $procId, $port) -ForegroundColor Yellow
+                Stop-Process -Id $procId -Force -ErrorAction Stop
+                $stopped[$key] = $true
+            } catch {
+                Write-Host ("[studio] ForceStop: could not stop PID {0}: {1}" -f $procId, $_.Exception.Message) -ForegroundColor DarkYellow
+            }
+        }
+    }
+
+    if ($stopped.Count -gt 0) {
+        Start-Sleep -Milliseconds 350
+    }
+}
+
+function Clear-PreviousRunFiles {
+    $cleanupScript = Join-Path $ScriptDir "clean-runtime-artifacts.ps1"
+    if (-not (Test-Path -LiteralPath $cleanupScript)) {
+        Write-Host "[studio] Clean start skipped: scripts\clean-runtime-artifacts.ps1 was not found." -ForegroundColor DarkYellow
+        return
+    }
+
+    Write-Host "[studio] ForceStop clean start: clearing logs and runtime artifacts..." -ForegroundColor Cyan
+    & $cleanupScript -IncludeMainLogs -Quiet
+}
+
 # Build backend command string for the new terminal window
 $backendScript = Join-Path $ScriptDir "run-backend.ps1"
 $backendCmd = "& $(Quote-PowerShellArgument $backendScript) -Port $BackendPort"
@@ -109,6 +161,11 @@ if ($ForceStop) { $backendCmd += " -ForceStop" }
 if ($SkipInfra) { $backendCmd += " -SkipInfra" }
 if ($PlatformPath) { $backendCmd += " -PlatformPath $(Quote-PowerShellArgument $PlatformPath)" }
 if ($AppWorkspacePath) { $backendCmd += " -AppWorkspacePath $(Quote-PowerShellArgument $AppWorkspacePath)" }
+
+if ($ForceStop) {
+    Stop-ListeningPorts -Ports @($BackendPort, $FrontendPort)
+    Clear-PreviousRunFiles
+}
 
 Write-Host "[studio] Opening backend terminal (port $BackendPort)..." -ForegroundColor Cyan
 Start-Process -FilePath $shellExe -ArgumentList "-NoExit", "-Command", $backendCmd

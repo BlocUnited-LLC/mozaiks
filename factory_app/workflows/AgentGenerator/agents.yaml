@@ -210,10 +210,23 @@ agents:
     heading: '[AG2 NETWORK PATTERNBOOK]'
     content: '{{PATTERN_GUIDANCE_AND_EXAMPLES}}'
 
+  - id: app_intelligence_context
+    heading: '[APP INTELLIGENCE CONTEXT]'
+    content: |-
+      If `app_intelligence_ready` is true, treat `app_intelligence_summary`,
+      `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`
+      as prompt-safe context authority for workflow scoping.
+
+      Use this compact context to:
+      - Align workflow candidates with discovered product capabilities and integrations.
+      - Avoid inventing workflows that duplicate protected existing-app behavior.
+      - Name source-context refs in rationale when a generated workflow depends on discovered app facts.
+      - Keep generated AG2 tools bounded to approved Mozaiks-owned overlays, adapters, or app modules.
+
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt.**
 
       When brownfield adoption context is injected:
 
@@ -236,6 +249,14 @@ agents:
          - For every workflow entry in `workflows[]`, the `initial_message` to WorkflowBundleBuilderAgent
            MUST include:
            - `brownfield_build_path`: the active path ("light_integration" or "full_migration")
+           - the user-facing path label:
+             - "Add AI Workflows" for `light_integration`: preserve the
+               existing app as source of truth and generate app-aware AI
+               workflows, chat surfaces, and only the safe adapters required by
+               those workflows.
+             - "Build App Features" for `full_migration`: generate
+               Mozaiks-owned workflows only for explicitly approved module and
+               product expansion scope, not an automatic whole-repo rewrite.
            - `ownership_boundary`: the list of known surfaces with their ownership class
            - A clear directive: "Do not write tools or agents that mutate read_only_discovered surfaces."
          - Name which ownership classes each generated agent/tool is allowed to operate on.
@@ -715,7 +736,7 @@ agents:
       - Use `condition_type: context_equals` with `condition_key` and `condition_value` for context-variable-gated routing.
       - Use `condition_type: context_expression` with `context_expression` for composite deterministic context routing over declared `${context_variable}` references; prefer `context_equals` for simple equality.
       - Use `condition_type: tool_called` with `tool_name` only when the runtime host supports AG2 routing tools for that workflow.
-      - Put same-source condition rules before fallback `after_turn` rules because AG2 evaluates lower priority first.
+      - Conditional rules are evaluated before fallback `after_turn` rules by the Mozaiks AG2 compiler; keep YAML order meaningful within each rule type.
       - These rules compile to AG2 1.0 beta `TransitionGraph` and are resolved through `WorkflowAdapter`.
       - Terminal agents route to `terminate` (background) or `user` (chat-facing).
       - Follow the pattern's `terminal_rule` exactly.
@@ -846,6 +867,10 @@ agents:
       - `composer_reply` is the primitive for agent-to-user text interactions; do not build a custom text surface for it.
       - When the workflow needs a custom transition surface, prefer a file-backed transition component exported from `extended_orchestration/ui/index.js`. Use `ui.props` only for lightweight built-in fallback tuning.
       - For any generated React UI file: Typography must come from semantic theme tokens; never hardcode `font-family` names in component code.
+      - Artifact-mode UI must lead with user-facing meaning, not backend telemetry. Map raw tool payloads into a presentation view model before rendering.
+      - Default artifact views should answer what the user should understand first: concise summary, primary entities or features, and 3-5 recommendations. Keep workflow selection in the agent conversation or in a dedicated response-required artifact.
+      - Hide ids, file paths, language counts, raw metrics, scanner warnings, and diagnostic counts from the default artifact. Do not make repository internals, execution metadata, or raw payload structure the dominant artifact experience.
+      - Avoid status/readiness pills, priority badges, and repeated per-card CTAs unless the artifact explicitly collects a decision. If the artifact has two different mental models, use at most 2-3 plain tabs with user-facing labels rather than stacking long sections. Keep custom artifacts consumable in about 30 seconds: 6-10 primary items, 3-5 recommendations, and no long tables, diagnostics footers, or exhaustive lists.
 
       ## SHIPPED PRIMITIVE REFERENCE
       Canonical shipped primitive shapes — no stale fields:
@@ -864,7 +889,7 @@ agents:
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt
       (injected from the `initial_message` provided by PatternAgent).**
 
       When brownfield adoption context is present:
@@ -1029,6 +1054,18 @@ agents:
              - `"UserDriven"` for workflows the user starts directly (entered via an entrypoint or user-choice transition)
              - `"AgentDriven"` for workflows advanced through a sequence or upstream workflow route
              - Omit (null) only when startup mode is genuinely ambiguous
+           - `interaction_mode` = first-party Mozaiks conversation taxonomy:
+             - `"user_guided"` for workflows where the user participates in the chat conversation
+             - `"agent_directed"` for workflows mainly started by an upstream sequence or transition
+             - `"backend_only"` for workflows triggered only by domain events
+           - `launch_behavior` = how an empty chat session should start:
+             - `"auto_start"` for user-reachable workflow sessions and sequence handoffs, including `UserDriven` workflows reached after a transition
+             - `"wait_for_user"` only when the product intentionally wants an empty chat until the user types
+             - `"none"` only for `BackendOnly` workflows
+           - `handoff_style` = how the transition should feel to the user:
+             - `"continuous_chat"` for workflow-sequence handoffs that should feel like one build conversation
+             - `"separate_chat"` only for deliberate standalone workflow starts
+             - `"background"` only for `BackendOnly` workflows
            - `dependencies` = exactly the explicit `depends_on[]` values from the
              matching `workflows_spec` item. Do not infer dependencies from journey
              order, workflow role, or domain assumptions.
@@ -1036,6 +1073,10 @@ agents:
            exactly match a workflow_name present in `workflow_bundle_results`.
          - Never infer `startup_mode`. Parse it from each generated bundle's
            `orchestrator.yaml` file content.
+         - Do not make a user-reachable workflow wait in a blank chat after a
+           transition unless the user explicitly requested that experience. A
+           transition is a continuity checkpoint, and the target workflow should
+           treat seeded `context_variables` as upstream conversation state.
 
       2. **Workflow sequences (optional)**:
          - Only create a sequence when the pack must auto-advance through a linear chain of phases.
@@ -1085,6 +1126,10 @@ agents:
               {
                 "id": "<workflow_name>",
                 "description": "<string|null>",
+                "startup_mode": "UserDriven|AgentDriven|BackendOnly|null",
+                "interaction_mode": "user_guided|agent_directed|backend_only|null",
+                "launch_behavior": "auto_start|wait_for_user|none|null",
+                "handoff_style": "continuous_chat|separate_chat|background|null",
                 "dependencies": [
                   {"id": "<workflow_name>", "scope": "app|user", "gating": "required|optional", "reason": "<string|null>"}
                 ]

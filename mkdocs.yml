@@ -186,6 +186,7 @@ nav:
           - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
           - Refinement Engine: architecture/workflows/refinement-engine.md
+          - End-to-End App Editing Loop: architecture/workflows/e2e-app-editing-loop.md
           - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
           - Session Router: architecture/workflows/session-router.md
           - Build Context Packs: architecture/workflows/build-context-packs.md

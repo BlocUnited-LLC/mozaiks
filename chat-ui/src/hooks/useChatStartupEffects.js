@@ -5,8 +5,14 @@ import {
   clearStoredChatCacheSeed,
   getStoredActiveChatId,
   getStoredActiveGeneralChatId,
+  clearStoredWorkflowChatId,
   setStoredActiveChatId,
+  getStoredActiveWorkflowName,
 } from '../session/chatSessionStorage';
+import {
+  buildWorkflowResolutionCandidates,
+  resolveWorkflowForChat,
+} from '../session/workflowChatResolution';
 
 export function useChatStartupEffects({
   api,
@@ -32,6 +38,8 @@ export function useChatStartupEffects({
   currentChatId,
   activeChatId,
   restoreStoredArtifactForChat,
+  restoreStoredActivityForChat = null,
+  upsertRestoredActivityFromArtifactMessages = null,
   urlWorkflowName,
   conversationMode,
   connectionStatus,
@@ -61,6 +69,7 @@ export function useChatStartupEffects({
   resolveKnownWorkflowName,
   setIsInWidgetMode,
   setActiveChatId,
+  rememberWorkflowChatSession = null,
   workflowConfig,
 }) {
   useEffect(() => {
@@ -116,19 +125,36 @@ export function useChatStartupEffects({
       consumeNavigationQueryParams(['mode', 'resume']);
 
       const snapshot = workflowArtifactSnapshotRef.current;
-      if (snapshot?.isOpen && snapshot?.messages?.length > 0) {
+      const restoreChatId = queryChatId || currentChatId || activeChatId || getStoredActiveChatId();
+      const snapshotMatchesChat = !snapshot?.chatId || !restoreChatId || snapshot.chatId === restoreChatId;
+      const snapshotMatchesWorkflow = !snapshot?.workflowName || !currentWorkflowName || snapshot.workflowName === currentWorkflowName;
+      if (snapshot?.isOpen && snapshot?.messages?.length > 0 && snapshotMatchesChat && snapshotMatchesWorkflow) {
         setTimeout(() => {
           setIsSidePanelOpen(true);
           setCurrentArtifactMessages(snapshot.messages);
+          if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
+            upsertRestoredActivityFromArtifactMessages(
+              snapshot.messages,
+              snapshot.workflowName || currentWorkflowName || urlWorkflowName,
+            );
+          }
           if (snapshot.layoutMode && setLayoutMode) {
             setLayoutMode(snapshot.layoutMode);
           }
         }, 100);
       } else {
-        const restoreChatId = queryChatId || currentChatId || activeChatId || getStoredActiveChatId();
+        if (snapshot?.messages?.length > 0 && (!snapshotMatchesChat || !snapshotMatchesWorkflow)) {
+          workflowArtifactSnapshotRef.current = { isOpen: false, messages: [], layoutMode: 'split' };
+        }
         if (restoreChatId) {
           const restored = restoreStoredArtifactForChat(restoreChatId, urlWorkflowName);
           if (restored) {
+            if (typeof restoreStoredActivityForChat === 'function') {
+              restoreStoredActivityForChat(restoreChatId, urlWorkflowName);
+            }
+          } else if (typeof restoreStoredActivityForChat === 'function') {
+            // Restore inline activity (e.g. AppIntelligenceProgressCard) even when no artifact exists yet
+            restoreStoredActivityForChat(restoreChatId, urlWorkflowName);
           }
         }
       }
@@ -154,10 +180,12 @@ export function useChatStartupEffects({
     conversationBootstrapRef,
     conversationMode,
     currentChatId,
+    currentWorkflowName,
     generalMessagesCacheRef,
     navigationLoading,
     queryChatId,
     queryMode,
+    restoreStoredActivityForChat,
     restoreStoredArtifactForChat,
     setConversationMode,
     setCurrentArtifactMessages,
@@ -165,6 +193,7 @@ export function useChatStartupEffects({
     setLayoutMode,
     setMessagesWithLogging,
     urlWorkflowName,
+    upsertRestoredActivityFromArtifactMessages,
     workflowArtifactSnapshotRef,
   ]);
 
@@ -258,40 +287,69 @@ export function useChatStartupEffects({
     let cancelled = false;
 
     const attemptRouteResume = async () => {
-      const workflowForCheck =
-        resolveKnownWorkflowName(workflowFromQuery)
-        || resolveKnownWorkflowName(currentWorkflowName)
+      const storedWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+      const currentResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
+      const queryResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(workflowFromQuery);
+      const preferredWorkflow =
+        storedWorkflow
+        || currentResolvedWorkflow
+        || queryResolvedWorkflow
         || workflowConfig.getDefaultWorkflow()
         || workflowFromQuery;
+      const workflowCandidates = buildWorkflowResolutionCandidates({
+        workflowConfig,
+        candidates: [
+          preferredWorkflow,
+          storedWorkflow,
+          currentResolvedWorkflow,
+          queryResolvedWorkflow,
+          workflowConfig.getDefaultWorkflow(),
+          workflowFromQuery,
+        ],
+        includeAvailable: true,
+      });
 
-      if (api && typeof api.getHttpBaseUrl === 'function' && currentAppId && workflowForCheck) {
+      let resolvedWorkflowForChat = null;
+      let sawMissingWorkflow = false;
+      if (api && typeof api.getHttpBaseUrl === 'function' && currentAppId && workflowCandidates.length > 0) {
         try {
-          const response = await fetch(
-            `${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${workflowForCheck}/${queryChatId}`
-          );
+          const resolution = await resolveWorkflowForChat({
+            api,
+            appId: currentAppId,
+            chatId: queryChatId,
+            workflowCandidates,
+          });
           if (cancelled) {
             return;
           }
+          resolvedWorkflowForChat = resolution.workflowName;
+          sawMissingWorkflow = resolution.sawMissingWorkflow;
 
-          if (response.ok) {
-            const result = await response.json();
-            if (cancelled) {
-              return;
+          if (resolution.validationIncomplete) {
+            resolvedWorkflowForChat = preferredWorkflow;
+            sawMissingWorkflow = false;
+          }
+
+          if (!resolvedWorkflowForChat && sawMissingWorkflow) {
+            console.warn('🧹 [ROUTE_RESUME] Ignoring stale query chat_id after no matching workflow session was found:', queryChatId);
+            clearStoredArtifactState(queryChatId);
+            clearStoredChatCacheSeed(queryChatId);
+            for (const workflowForCheck of workflowCandidates) {
+              clearStoredWorkflowChatId({
+                appId: currentAppId,
+                userId: currentUserId,
+                workflowName: workflowForCheck,
+              });
             }
-            if (result?.exists === false) {
-              console.warn('🧹 [ROUTE_RESUME] Ignoring stale query chat_id after backend reset:', queryChatId);
-              clearStoredArtifactState(queryChatId);
-              clearStoredChatCacheSeed(queryChatId);
-              if (getStoredActiveChatId() === queryChatId) {
-                setStoredActiveChatId(null);
-              }
-              if (activeChatId === queryChatId) {
-                setActiveChatId(null);
-              }
-              queryResumeHandledRef.current = cacheKey;
-              consumeNavigationQueryParams(['chat_id']);
-              return;
+            if (getStoredActiveChatId() === queryChatId) {
+              setStoredActiveChatId(null);
             }
+            if (activeChatId === queryChatId) {
+              setActiveChatId(null);
+            }
+            queryResumeHandledRef.current = cacheKey;
+            consumeNavigationQueryParams(['chat_id']);
+            return;
           }
         } catch (err) {
           console.warn('⚠️ [ROUTE_RESUME] Could not validate query chat_id, attempting resume anyway:', err);
@@ -302,10 +360,13 @@ export function useChatStartupEffects({
         setIsInWidgetMode(false);
       }
 
-      const success = resumeWorkflowSession(queryChatId, workflowFromQuery);
+      const resolvedWorkflowName = resolvedWorkflowForChat || preferredWorkflow || workflowFromQuery;
+      const success = resumeWorkflowSession(queryChatId, resolvedWorkflowName);
       if (success) {
+        if (typeof rememberWorkflowChatSession === 'function') {
+          rememberWorkflowChatSession(queryChatId, resolvedWorkflowName);
+        }
         queryResumeHandledRef.current = cacheKey;
-        consumeNavigationQueryParams(['chat_id']);
       }
     };
 
@@ -321,11 +382,13 @@ export function useChatStartupEffects({
     consumeNavigationQueryParams,
     currentAppId,
     currentWorkflowName,
+    currentUserId,
     isInWidgetMode,
     isPrimaryChatRoute,
     queryChatId,
     queryMode,
     queryResumeHandledRef,
+    rememberWorkflowChatSession,
     resolveKnownWorkflowName,
     resumeWorkflowSession,
     setActiveChatId,

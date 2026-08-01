@@ -19,6 +19,7 @@ async def get_workflows(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     _ = principal
+    from mozaiksai.core.workflow.startup_messages import resolve_workflow_launch_taxonomy
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
     ordered_names = get_platform_hooks().call_workflow_ordering(sorted(workflow_manager.get_all_workflow_names()))
@@ -26,6 +27,10 @@ async def get_workflows(
     for workflow_name in ordered_names:
         config = workflow_manager.get_config(workflow_name)
         startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
+        launch_taxonomy = resolve_workflow_launch_taxonomy(
+            workflow_name,
+            workflow_startup_mode=startup_mode,
+        )
         structured_outputs = workflow_manager.get_structured_output_registry(workflow_name)
         structured_output_components = {
             agent_name: model_name
@@ -39,6 +44,9 @@ async def get_workflows(
             "visual_agents": config.get("visual_agents") or [],
             "startup_mode": startup_mode,
             "workflow_startup_mode": startup_mode,
+            "interaction_mode": launch_taxonomy.get("interaction_mode"),
+            "launch_behavior": launch_taxonomy.get("launch_behavior"),
+            "handoff_style": launch_taxonomy.get("handoff_style"),
             "structured_outputs": structured_outputs,
             "structured_output_components": structured_output_components,
             "status": "ready",

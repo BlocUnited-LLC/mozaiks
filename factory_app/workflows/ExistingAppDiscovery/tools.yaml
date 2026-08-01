@@ -1,9 +1,9 @@
 # ExistingAppDiscovery Tools
 #
 # before_chat collector builds deterministic App Intelligence context.
-# ExistingAppDiscovery emits a durable inline AppIntelligenceInlineBrief in the
-# chat feed and the full AppIntelligenceOverviewCard in the artifact panel so
-# users can see the compact context agents receive before the agent speaks.
+# Indexing progress is streamed as chat activity, then ExistingAppDiscovery emits
+# its workflow-owned AppIntelligenceOverviewCard in the artifact panel so users
+# can review the source-backed context agents receive before the agent speaks.
 # DiscoveryArtifactAssemblerAgent later persists canonical artifacts and emits
 # the final DiscoveryBriefCard.
 
@@ -141,27 +141,14 @@ lifecycle_tools:
 - trigger: before_chat
   agent: null
   file: emit_app_intelligence_overview.py
-  function: emit_app_intelligence_inline_brief
+  function: emit_repo_access_recovery_card
   description: >
-    Show the compact App Intelligence brief inline in chat after indexing and
-    before the agent speaks.
+    Show an inline recovery card when the supplied GitHub repository requires
+    account or token access before App Intelligence can index it.
   tool_type: UI_Surface
   ui:
-    component: AppIntelligenceInlineBrief
+    component: RepoAccessRecoveryCard
     mode: inline
-    workflow_primitive: document_preview
-    realization: generated_component
-- trigger: before_chat
-  agent: null
-  file: emit_app_intelligence_overview.py
-  function: emit_app_intelligence_overview_card
-  description: >
-    Show the deterministic App Intelligence overview in the artifact panel
-    after indexing and before the agent speaks.
-  tool_type: UI_Surface
-  ui:
-    component: AppIntelligenceOverviewCard
-    mode: artifact
     workflow_primitive: document_preview
     realization: generated_component
 - trigger: on_start

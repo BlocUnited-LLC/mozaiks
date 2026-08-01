@@ -83,6 +83,8 @@ def test_create_review_record_from_staging_result(tmp_path: Path) -> None:
     assert record.request_id == staging_result.request_id
     assert record.staging_area == staging_result.staging_area
     assert record.affected_bundle_paths == ["ui/pages/dashboard.yaml"]
+    assert record.write_back_mode == "generated_artifact"
+    assert record.write_back_target is None
     assert Path(staging_result.staging_area, REVIEW_FILENAME).exists()
 
 
@@ -94,6 +96,22 @@ def test_initial_review_status_is_review_pending(tmp_path: Path) -> None:
     assert record.status == "review_pending"
     assert record.decision is None
     assert record.promotion_allowed is False
+
+
+def test_review_record_can_declare_external_write_back_target(tmp_path: Path) -> None:
+    _, staging_result = _stage(tmp_path)
+
+    record = create_refinement_review_record(
+        staging_result,
+        write_back_mode="external_patch",
+        write_back_target="repo:customer/main",
+    )
+    payload = json.loads(Path(staging_result.staging_area, REVIEW_FILENAME).read_text(encoding="utf-8"))
+
+    assert record.write_back_mode == "external_patch"
+    assert record.write_back_target == "repo:customer/main"
+    assert payload["write_back_mode"] == "external_patch"
+    assert payload["write_back_target"] == "repo:customer/main"
 
 
 def test_approve_moves_review_pending_to_approved(tmp_path: Path) -> None:

@@ -545,7 +545,13 @@ async def test_launch_transition_starts_workflow_chat(monkeypatch):
                     "id": "entry",
                     "transition_type": "user_choice",
                     "ui": {"component": "LauncherScreen", "mode": "screen"},
-                    "options": [{"id": "docs", "route_to": "DesignDocs"}],
+                    "options": [
+                        {
+                            "id": "docs",
+                            "route_to": "DesignDocs",
+                            "context_variables": {"brownfield_build_path": "light_integration"},
+                        }
+                    ],
                 }
             ],
             "workflow_sequences": [
@@ -568,6 +574,8 @@ async def test_launch_transition_starts_workflow_chat(monkeypatch):
     assert launch.workflow_launch is not None
     assert launch.workflow_launch.workflow_id == "DesignDocs"
     assert launch.workflow_launch.chat_id in sessions._docs
+    assert launch.context_variables["brownfield_build_path"] == "light_integration"
+    assert sessions._docs[launch.workflow_launch.chat_id]["brownfield_build_path"] == "light_integration"
 
     state = await store.load(app_id="app_1", user_id="user_1")
     assert state is not None

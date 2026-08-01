@@ -1,6 +1,8 @@
 
 import asyncio
+import hashlib
 import os
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -44,6 +46,14 @@ def _build_events_client():
     )
 
     return BuildEventsClient()
+
+
+def _app_registry_service():
+    from factory_app.app.modules.app_registry.backend.service import (
+        AppRegistryService,
+    )
+
+    return AppRegistryService()
 
 
 def get_mongo_client():
@@ -98,6 +108,21 @@ def _normalize_text(value: Any) -> str | None:
         return None
     text = str(value or "").strip()
     return text or None
+
+
+def _slugify(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return slug or "imported-app"
+
+
+def _repo_display_name(value: Any) -> str | None:
+    repo = _normalize_text(value)
+    if not repo:
+        return None
+    repo = repo.removesuffix(".git").rstrip("/")
+    tail = repo.split("/")[-1].strip()
+    return tail or repo
 
 
 def _env_csv_set(name: str, default_csv: str) -> set[str]:
@@ -157,9 +182,49 @@ async def _get_chat_session_context(*, app_id: str, chat_id: str) -> dict[str, A
             "journey_position": 1,
             "journey_total_steps": 1,
             "last_artifact": 1,
+            "app_name": 1,
+            "app_description": 1,
+            "existing_experience_summary": 1,
+            "github_repo": 1,
+            "frontend_github_repo": 1,
+            "backend_github_repo": 1,
+            "repo_summary": 1,
+            "frontend_repo_summary": 1,
+            "backend_repo_summary": 1,
+            "app_intelligence_summary": 1,
+            "app_intelligence_status": 1,
+            "current_app_context_version_id": 1,
+            "app_context_version_artifact_version_id": 1,
+            "source_context_artifact_version_id": 1,
+            "app_intelligence_artifact_version_id": 1,
+            "graph_artifact_version_id": 1,
+            "app_intelligence_registration": 1,
         },
     )
     return dict(doc) if isinstance(doc, dict) else {}
+
+
+async def _record_chat_session_build_registry_id(
+    *,
+    app_id: str,
+    chat_id: str | None,
+    build_registry_id: str | None,
+) -> None:
+    resolved_app_id = coalesce_app_id(app_id=app_id)
+    resolved_chat_id = _normalize_text(chat_id)
+    resolved_record_id = _normalize_text(build_registry_id)
+    if not resolved_app_id or not resolved_chat_id or not resolved_record_id:
+        return
+    try:
+        client = get_mongo_client()
+        system_database, chat_sessions_collection = _runtime_chat_sessions_collection()
+        coll = client[system_database][chat_sessions_collection]
+        await coll.update_one(
+            {"_id": resolved_chat_id, **build_app_scope_filter(str(resolved_app_id))},
+            {"$set": {"build_registry_id": resolved_record_id, "last_updated_at": datetime.now(UTC)}},
+        )
+    except Exception as exc:
+        logger.debug("Failed to persist local build registry pointer: %s", exc)
 
 
 async def _get_last_artifact_payload(*, app_id: str, chat_id: str) -> dict[str, Any] | None:
@@ -305,6 +370,13 @@ async def _resolve_build_event_context(
         or _normalize_text(session_ctx.get("build_registry_id"))
         or resolved_build_id
     )
+    build_registry_id_source = (
+        "explicit"
+        if _normalize_text(build_registry_id)
+        else "session"
+        if _normalize_text(session_ctx.get("build_registry_id"))
+        else "build_id_fallback"
+    )
 
     resolved_journey_instance_id = (
         _normalize_text(journey_instance_id)
@@ -336,12 +408,14 @@ async def _resolve_build_event_context(
         "app_id": str(resolved_app_id),
         "build_id": str(resolved_build_id),
         "build_registry_id": str(resolved_build_registry_id),
+        "build_registry_id_source": build_registry_id_source,
         "journey_instance_id": str(resolved_journey_instance_id),
         "journey_key": resolved_journey_key,
         "journey_position": resolved_journey_position,
         "journey_total_steps": resolved_total_steps,
         "chat_id": resolved_chat_id,
         "execution_id": _normalize_text(execution_id) or str(uuid.uuid4()),
+        "session_context": session_ctx,
     }
 
 
@@ -366,6 +440,208 @@ def _base_payload(
         "timestamp": _utc_iso(),
     }
     return payload
+
+
+def _first_context_text(session_ctx: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        text = _normalize_text(session_ctx.get(key))
+        if text:
+            return text
+    return None
+
+
+def _first_repo_summary(session_ctx: dict[str, Any]) -> dict[str, Any]:
+    for key in ("repo_summary", "frontend_repo_summary", "backend_repo_summary"):
+        value = session_ctx.get(key)
+        if isinstance(value, dict) and value:
+            return value
+    return {}
+
+
+def _registry_app_id_for_imported_app(
+    *,
+    owner_user_id: str,
+    repo_identifier: str | None,
+    display_name: str | None,
+    chat_id: str | None,
+    build_id: str,
+) -> str:
+    seed = f"{owner_user_id}:{repo_identifier or display_name or chat_id or build_id}".encode()
+    digest = hashlib.sha1(seed).hexdigest()[:10]
+    return f"{_slugify(display_name or repo_identifier or 'imported-app')}-{digest}"
+
+
+def _build_context_profile_for_event(*, context: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    session_ctx = context.get("session_context") if isinstance(context.get("session_context"), dict) else {}
+    repo_identifier = _first_context_text(session_ctx, "github_repo", "frontend_github_repo", "backend_github_repo")
+    profile: dict[str, Any] = {
+        "source": "factory_app",
+        "workflow_sequence": _normalize_text(payload.get("journeyId")) or "build",
+        "workflow_name": _normalize_text(payload.get("workflowName")),
+    }
+    if repo_identifier:
+        profile["github_repo"] = repo_identifier
+    for key in (
+        "current_app_context_version_id",
+        "app_context_version_artifact_version_id",
+        "source_context_artifact_version_id",
+        "app_intelligence_artifact_version_id",
+        "graph_artifact_version_id",
+    ):
+        text = _normalize_text(session_ctx.get(key))
+        if text:
+            profile[key] = text
+    registration = session_ctx.get("app_intelligence_registration")
+    if isinstance(registration, dict):
+        refs = {
+            key: value
+            for key, value in registration.items()
+            if key.endswith("_id") and _normalize_text(value)
+        }
+        if refs:
+            profile["app_intelligence_refs"] = refs
+    return {key: value for key, value in profile.items() if value is not None}
+
+
+def _local_registry_payload(
+    *,
+    context: dict[str, Any],
+    payload: dict[str, Any],
+    lifecycle_state: str,
+) -> dict[str, Any] | None:
+    session_ctx = context.get("session_context") if isinstance(context.get("session_context"), dict) else {}
+    workflow_name = _normalize_text(payload.get("workflowName")) or "Workflow"
+    owner_user_id = _normalize_text(payload.get("userId")) or "anonymous"
+    chat_id = _normalize_text(payload.get("chatId"))
+    build_id = _normalize_text(payload.get("buildId")) or _normalize_text(context.get("build_id")) or str(uuid.uuid4())
+    repo_summary = _first_repo_summary(session_ctx)
+    repo_identifier = (
+        _first_context_text(session_ctx, "github_repo", "frontend_github_repo", "backend_github_repo")
+        or _normalize_text(repo_summary.get("source"))
+    )
+    display_name = (
+        _first_context_text(session_ctx, "app_name")
+        or _repo_display_name(repo_identifier)
+        or _repo_display_name(repo_summary.get("repo_name"))
+    )
+
+    is_imported_app = workflow_name == "ExistingAppDiscovery" or (
+        _normalize_text(payload.get("journeyId")) or ""
+    ).startswith("brownfield_")
+    record_id_is_real = bool(_normalize_text(context.get("build_registry_id"))) and (
+        str(context.get("build_registry_id_source") or "") in {"explicit", "session"}
+    )
+    if not is_imported_app and not record_id_is_real:
+        return None
+
+    current_build_run = {
+        "build_id": build_id,
+        "workflow_sequence": _normalize_text(payload.get("journeyId")) or "build",
+        "status": lifecycle_state,
+        "active_chat_id": chat_id,
+        "active_workflow_id": workflow_name,
+    }
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, dict):
+        artifact_version_id = _normalize_text(artifacts.get("artifactVersionId") or artifacts.get("artifact_version_id"))
+        bundle_path = _normalize_text(artifacts.get("bundlePath") or artifacts.get("bundle_path"))
+        if artifact_version_id:
+            current_build_run["artifact_version_id"] = artifact_version_id
+        if bundle_path:
+            current_build_run["bundle_path"] = bundle_path
+
+    description = (
+        _first_context_text(session_ctx, "app_description", "existing_experience_summary")
+        or (
+            f"Mozaiks imported source context from {repo_identifier} so agents can build with this existing app."
+            if repo_identifier
+            else "Mozaiks imported source context so agents can build with this existing app."
+        )
+    )
+
+    registry_app_id = (
+        _normalize_text(session_ctx.get("registry_app_id"))
+        or (
+            _registry_app_id_for_imported_app(
+                owner_user_id=owner_user_id,
+                repo_identifier=repo_identifier,
+                display_name=display_name,
+                chat_id=chat_id,
+                build_id=build_id,
+            )
+            if is_imported_app
+            else _normalize_text(payload.get("appId"))
+        )
+    )
+    if not registry_app_id:
+        return None
+
+    return {
+        "owner_user_id": owner_user_id,
+        "name": display_name,
+        "description": description,
+        "status": lifecycle_state,
+        "app_id": registry_app_id,
+        "chat_app_id": _normalize_text(payload.get("appId")),
+        "active_chat_id": chat_id,
+        "active_workflow_id": workflow_name,
+        "name_source": "imported_app" if is_imported_app and display_name else "provisional",
+        "build_context_profile": _build_context_profile_for_event(context=context, payload=payload),
+        "current_build_run": current_build_run,
+    }
+
+
+async def _materialize_local_app_registry_event(
+    *,
+    context: dict[str, Any],
+    payload: dict[str, Any],
+    lifecycle_state: str,
+) -> None:
+    registry_payload = _local_registry_payload(
+        context=context,
+        payload=payload,
+        lifecycle_state=lifecycle_state,
+    )
+    if not registry_payload:
+        return
+
+    try:
+        service = _app_registry_service()
+        build_registry_id = _normalize_text(context.get("build_registry_id"))
+        existing = None
+        if build_registry_id and context.get("build_registry_id_source") != "build_id_fallback":
+            existing_response = await service.get_app_record(build_registry_id=build_registry_id)
+            existing = existing_response.get("app") if isinstance(existing_response, dict) else None
+
+        if isinstance(existing, dict) and existing.get("build_registry_id"):
+            await service.update_build_status(
+                build_registry_id=str(existing["build_registry_id"]),
+                status=lifecycle_state,
+                workflow_sequence=registry_payload["current_build_run"].get("workflow_sequence"),
+                active_chat_id=registry_payload.get("active_chat_id"),
+                active_workflow_id=registry_payload.get("active_workflow_id"),
+                current_build_run=registry_payload["current_build_run"],
+            )
+            return
+
+        result = await service.create_app_record(**registry_payload)
+        app = result.get("app") if isinstance(result, dict) else None
+        record_id = _normalize_text(app.get("build_registry_id")) if isinstance(app, dict) else None
+        if record_id:
+            await _record_chat_session_build_registry_id(
+                app_id=str(payload.get("appId") or context.get("app_id") or ""),
+                chat_id=payload.get("chatId"),
+                build_registry_id=record_id,
+            )
+            logger.info(
+                "LOCAL_APP_REGISTRY_MATERIALIZED workflow=%s status=%s app_id=%s build_registry_id=%s",
+                payload.get("workflowName"),
+                lifecycle_state,
+                registry_payload.get("app_id"),
+                record_id,
+            )
+    except Exception as exc:
+        logger.warning("Local app registry materialization failed: %s", exc)
 
 
 async def _deliver_outbox_event_once(*, outbox_event_id: str) -> None:
@@ -451,6 +727,11 @@ async def emit_build_started(
         ),
         payload=payload,
     )
+    await _materialize_local_app_registry_event(
+        context=context,
+        payload=payload,
+        lifecycle_state="building",
+    )
     _spawn_delivery(outbox_event_id=outbox_event_id)
     return outbox_event_id
 
@@ -508,6 +789,11 @@ async def emit_build_completed(
             event_type="build.completed",
         ),
         payload=payload,
+    )
+    await _materialize_local_app_registry_event(
+        context=context,
+        payload=payload,
+        lifecycle_state="review",
     )
     _spawn_delivery(outbox_event_id=outbox_event_id)
 
@@ -574,6 +860,11 @@ async def emit_build_failed(
             event_type="build.failed",
         ),
         payload=payload,
+    )
+    await _materialize_local_app_registry_event(
+        context=context,
+        payload=payload,
+        lifecycle_state="needs_revision",
     )
     _spawn_delivery(outbox_event_id=outbox_event_id)
 

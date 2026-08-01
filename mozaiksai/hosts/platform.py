@@ -3279,9 +3279,21 @@ async def websocket_endpoint(
             except Exception as reload_err:
                 logger.debug("Workflow hot-reload skipped for %s: %s", workflow_name, reload_err)
 
+            from mozaiksai.core.workflow.startup_messages import (
+                resolve_workflow_launch_taxonomy,
+                should_autostart_empty_workflow,
+            )
+
             cfg = workflow_manager.get_config(workflow_name) or {}
             startup_mode = str(cfg.get("workflow_startup_mode") or "").strip() or "AgentDriven"
-            if startup_mode != "AgentDriven":
+            launch_taxonomy = resolve_workflow_launch_taxonomy(
+                workflow_name,
+                workflow_startup_mode=startup_mode,
+            )
+            if not should_autostart_empty_workflow(
+                startup_mode,
+                launch_behavior=launch_taxonomy.get("launch_behavior"),
+            ):
                 return
 
             coll = await runtime_app._chat_coll()
@@ -3324,16 +3336,28 @@ async def websocket_endpoint(
             logger.error("Auto-start failed for %s/%s: %s", workflow_name, active_chat_id, exc)
 
     _task = asyncio.create_task(_auto_start_if_needed())
-    _task.add_done_callback(
-        lambda t: logger.error(
-            "Auto-start task raised unexpected error for %s/%s: %s",
-            workflow_name,
-            active_chat_id,
-            t.exception(),
-        )
-        if not t.cancelled() and t.exception() is not None
-        else None
-    )
+    if runtime_app.simple_transport:
+        existing_task = runtime_app.simple_transport._background_tasks.get(active_chat_id)
+        if existing_task and not existing_task.done():
+            _task.cancel()
+        else:
+            runtime_app.simple_transport._background_tasks[active_chat_id] = _task
+
+    def _clear_auto_start_task(t: asyncio.Task[Any]) -> None:
+        try:
+            if runtime_app.simple_transport and runtime_app.simple_transport._background_tasks.get(active_chat_id) is t:
+                runtime_app.simple_transport._background_tasks.pop(active_chat_id, None)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Auto-start task raised unexpected error for %s/%s: %s",
+                    workflow_name,
+                    active_chat_id,
+                    t.exception(),
+                )
+        except Exception as cb_err:
+            logger.debug("Auto-start task cleanup failed for %s/%s: %s", workflow_name, active_chat_id, cb_err)
+
+    _task.add_done_callback(_clear_auto_start_task)
 
     try:
         has_children = False

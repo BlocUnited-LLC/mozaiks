@@ -17,6 +17,14 @@ import {
   supportTrace,
   supportWarn,
 } from '../../utils/supportLinks';
+import {
+  getStoredActiveChatId,
+  getStoredActiveWorkflowName,
+  getStoredWorkflowChatId,
+  setStoredActiveChatId,
+  setStoredActiveWorkflowName,
+  setStoredWorkflowChatId,
+} from '../../session/chatSessionStorage';
 
 /**
  * PersistentChatWidget - Floating chat widget in bottom-right corner.
@@ -139,7 +147,15 @@ const PersistentChatWidget = ({
   }, [generalModeReady, wsSend, wsStatus]);
 
   // Workflow session exists → show the "Back to workspace" button
-  const hasActiveWorkflow = !!(activeChatId || chatId);
+  const storedWorkflowNameForWidget = workflowName || activeWorkflowName || getStoredActiveWorkflowName();
+  const storedWorkflowChatIdForWidget = storedWorkflowNameForWidget
+    ? getStoredWorkflowChatId({
+        appId: effectiveAppId || resolvedAppId,
+        userId: effectiveUserId || resolvedUserId,
+        workflowName: storedWorkflowNameForWidget,
+      })
+    : null;
+  const hasActiveWorkflow = !!(activeChatId || chatId || storedWorkflowChatIdForWidget);
 
   // Unread badge: count new messages that arrive while the widget is collapsed
   const prevAskLenRef = useRef(null);
@@ -265,17 +281,31 @@ const PersistentChatWidget = ({
 
   // Navigate back to the active workflow session
   const handleBackToWorkspace = () => {
-    const safeGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
-    const resolvedChatId = chatId || activeChatId || safeGet('mozaiks.current_chat_id');
-    const resolvedWorkflowName = workflowName || activeWorkflowName || safeGet('mozaiks.current_workflow_name');
+    const resolvedWorkflowName = workflowName || activeWorkflowName || getStoredActiveWorkflowName();
+    const scopedWorkflowChatId = resolvedWorkflowName
+      ? getStoredWorkflowChatId({
+          appId: effectiveAppId || resolvedAppId,
+          userId: effectiveUserId || resolvedUserId,
+          workflowName: resolvedWorkflowName,
+        })
+      : null;
+    const resolvedChatId = scopedWorkflowChatId || chatId || activeChatId || getStoredActiveChatId();
 
     if (resolvedChatId) {
       setActiveChatId(resolvedChatId);
-      try { localStorage.setItem('mozaiks.current_chat_id', resolvedChatId); } catch {}
+      setStoredActiveChatId(resolvedChatId);
     }
     if (resolvedWorkflowName) {
       setActiveWorkflowName(resolvedWorkflowName);
-      try { localStorage.setItem('mozaiks.current_workflow_name', resolvedWorkflowName); } catch {}
+      setStoredActiveWorkflowName(resolvedWorkflowName);
+      if (resolvedChatId) {
+        setStoredWorkflowChatId({
+          appId: effectiveAppId || resolvedAppId,
+          userId: effectiveUserId || resolvedUserId,
+          workflowName: resolvedWorkflowName,
+          chatId: resolvedChatId,
+        });
+      }
     }
 
     setConversationMode('workflow');

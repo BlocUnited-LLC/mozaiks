@@ -274,9 +274,15 @@ const ModernChatInterface = ({
   // Chat flow UI tool event handling
   // This keeps the main chat interface clean and avoids hook violations.
 
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    const resolvedBehavior = typeof behavior === 'string' ? behavior : 'smooth';
+    chatEndRef.current?.scrollIntoView({
+      behavior: resolvedBehavior,
+      block: 'end',
+      inline: 'nearest',
+    });
+    setIsScrolledUp(false);
+  }, []);
 
   const handleScroll = () => {
     if (chatContainerRef.current) {
@@ -399,8 +405,14 @@ const ModernChatInterface = ({
   }, [messages, loading]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    scrollToBottom('smooth');
+    const frame = window.requestAnimationFrame(() => scrollToBottom('auto'));
+    const timer = window.setTimeout(() => scrollToBottom('auto'), 160);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     const chatContainer = chatContainerRef.current;
@@ -445,6 +457,30 @@ const ModernChatInterface = ({
       handleModeToggle();
     }
   };
+
+  const hasVisibleMessages = Array.isArray(messages) && messages.some((chat) => {
+    if (!chat || chat.metadata?.hideInTranscript) {
+      return false;
+    }
+    const isEmptyContent = !(chat.content && String(chat.content).trim().length);
+    const hasStructured = !!(chat.structuredOutput && typeof chat.structuredOutput === 'object');
+    const hasToolCall = !!chat.toolCall;
+    const hasAttachment = !!chat.attachment;
+    const hasTrace = Array.isArray(chat.trace) && chat.trace.length > 0;
+    const isSystem = chat.isTokenMessage || chat.isWarningMessage;
+    return !isEmptyContent || chat.isThinking || hasStructured || hasToolCall || hasAttachment || hasTrace || isSystem;
+  });
+  const normalizedWorkflowName = String(workflowName || '').trim().toLowerCase();
+  const showValueEngineHandoffPlaceholder = Boolean(
+    conversationMode === 'workflow'
+    && normalizedWorkflowName === 'valueengine'
+    && !hasVisibleMessages
+    && !showComposerBanner
+    && connectionStatus !== 'error'
+  );
+  const valueEngineHandoffStatus = connectionStatus === 'connected'
+    ? 'Starting the planning agent'
+    : 'Connecting to ValueEngine';
 
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
@@ -496,6 +532,7 @@ const ModernChatInterface = ({
             isThinking={chat.isThinking}
             attachment={chat.attachment}
             trace={chat.trace}
+            metadata={chat.metadata}
           />
 
           {chat.toolCall && (
@@ -529,6 +566,27 @@ const ModernChatInterface = ({
   const messageStack = (
     <div className={messageStackClass} style={{ rowGap: 'var(--chat-bubble-stack-gap, 1rem)' }}>
       {/* Messages render below */}
+      {showValueEngineHandoffPlaceholder && (
+        <div className="flex justify-start px-0 message-container">
+          <div className="max-w-xl rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(10,16,32,0.72)] shadow-[0_16px_48px_rgba(3,8,24,0.35)] px-5 py-4 backdrop-blur-md">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-[rgba(var(--color-primary-light-rgb),0.9)] font-semibold mb-2">
+              Value Planning
+            </div>
+            <div className="text-white font-semibold text-base mb-1">
+              Preparing your enhancement plan
+            </div>
+            <p className="text-sm leading-relaxed text-slate-300 m-0">
+              Mozaiks is carrying the app readout and selected enhancement path into the next planning step.
+            </p>
+            <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.22)] bg-[rgba(var(--color-primary-rgb),0.08)] px-3 py-2 text-xs text-[rgba(var(--color-primary-light-rgb),0.95)]">
+              <span className="typing-dot" />
+              <span className="typing-dot delay-150" />
+              <span className="typing-dot delay-300" />
+              <span>{valueEngineHandoffStatus}</span>
+            </div>
+          </div>
+        </div>
+      )}
       {renderedMessages}
       {/* Typing indicator slot (rendered when loading without messages updating) */}
       {loading && (

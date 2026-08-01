@@ -5,8 +5,15 @@ import {
   getStoredActiveChatId,
   getStoredActiveGeneralChatId,
   getStoredActiveWorkflowName,
+  getStoredWorkflowChatId,
   setStoredActiveChatId,
+  setStoredActiveWorkflowName,
+  setStoredWorkflowChatId,
 } from '../session/chatSessionStorage';
+import {
+  buildWorkflowResolutionCandidates,
+  resolveWorkflowForChat,
+} from '../session/workflowChatResolution';
 
 export function useConversationModeController({
   activeGeneralChatId,
@@ -38,6 +45,7 @@ export function useConversationModeController({
   setActiveWorkflowName,
   currentWorkflowNameRef,
   setCurrentWorkflowName,
+  rememberWorkflowChatSession = null,
   workflowMessagesSharedRef,
   activeWorkflowName,
   configuredEntryWorkflow,
@@ -67,10 +75,45 @@ export function useConversationModeController({
   urlWorkflowName,
   restoreViewSnapshot,
   clearViewArtifacts,
+  restoreStoredArtifactForChat,
+  restoreStoredActivityForChat = null,
+  upsertRestoredActivityFromArtifactMessages = null,
   queryGeneralChatId = null,
   setConnectionInitialized,
   connectionInProgressRef,
+  applySessionRouterState = null,
 }) {
+  const rememberWorkflowChat = useCallback((chatId, workflowName = null) => {
+    const resolvedWorkflow =
+      workflowName
+      || currentWorkflowName
+      || activeWorkflowName
+      || getStoredActiveWorkflowName();
+    if (!chatId || !resolvedWorkflow) {
+      return false;
+    }
+    setStoredActiveChatId(chatId);
+    setStoredActiveWorkflowName(resolvedWorkflow);
+    if (typeof rememberWorkflowChatSession === 'function') {
+      return rememberWorkflowChatSession(chatId, resolvedWorkflow);
+    }
+    if (!currentAppId || !currentUserId) {
+      return false;
+    }
+    return setStoredWorkflowChatId({
+      appId: currentAppId,
+      userId: currentUserId,
+      workflowName: resolvedWorkflow,
+      chatId,
+    });
+  }, [
+    activeWorkflowName,
+    currentAppId,
+    currentUserId,
+    currentWorkflowName,
+    rememberWorkflowChatSession,
+  ]);
+
   const ensureGeneralMode = useCallback((requestedGeneralChatId = null) => {
     const preferredGeneralChatId = requestedGeneralChatId || activeGeneralChatId || getStoredActiveGeneralChatId();
     if (conversationMode === 'ask') {
@@ -91,6 +134,8 @@ export function useConversationModeController({
     setConversationMode('ask');
     workflowMessagesCacheRef.current = messagesRef.current;
     workflowArtifactSnapshotRef.current = {
+      chatId: currentChatId || null,
+      workflowName: currentWorkflowName || activeWorkflowName || null,
       isOpen: isSidePanelOpen,
       layoutMode: layoutMode || 'split',
       messages: isSidePanelOpen ? [...currentArtifactMessages] : [],
@@ -109,9 +154,12 @@ export function useConversationModeController({
     return sent;
   }, [
     activeGeneralChatId,
+    activeWorkflowName,
     askMessages,
     conversationMode,
     currentArtifactMessages,
+    currentChatId,
+    currentWorkflowName,
     generalMessagesCacheRef,
     isSidePanelOpen,
     layoutMode,
@@ -207,20 +255,49 @@ export function useConversationModeController({
       const snapshot = workflowArtifactSnapshotRef.current;
 
       if (snapshot && typeof snapshot.isOpen === 'boolean') {
-        if (snapshot.isOpen) {
-          setIsSidePanelOpen(true);
-          if (snapshot.layoutMode && setLayoutMode) {
-            setLayoutMode(snapshot.layoutMode);
-          }
-          if (snapshot.messages?.length) {
-            setCurrentArtifactMessages(snapshot.messages);
-          }
+        const snapshotChatId = snapshot.chatId || null;
+        const snapshotWorkflowName = snapshot.workflowName || null;
+        const snapshotMatchesChat = !snapshotChatId || !currentChatId || snapshotChatId === currentChatId;
+        const snapshotMatchesWorkflow = !snapshotWorkflowName || !currentWorkflowName || snapshotWorkflowName === currentWorkflowName;
+        if (!snapshotMatchesChat || !snapshotMatchesWorkflow) {
+          workflowArtifactSnapshotRef.current = { isOpen: false, messages: [], layoutMode: 'split' };
         } else {
-          setIsSidePanelOpen(false);
-          if (setLayoutMode) setLayoutMode('full');
+          if (snapshot.isOpen) {
+            setIsSidePanelOpen(true);
+            if (snapshot.layoutMode && setLayoutMode) {
+              setLayoutMode(snapshot.layoutMode);
+            }
+            if (snapshot.messages?.length) {
+              setCurrentArtifactMessages(snapshot.messages);
+              if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
+                upsertRestoredActivityFromArtifactMessages(
+                  snapshot.messages,
+                  snapshotWorkflowName || currentWorkflowName,
+                );
+              }
+            } else if (typeof restoreStoredArtifactForChat === 'function') {
+              const restored = restoreStoredArtifactForChat(
+                snapshotChatId || currentChatId,
+                snapshotWorkflowName || currentWorkflowName,
+              );
+              if (restored && typeof restoreStoredActivityForChat === 'function') {
+                restoreStoredActivityForChat(
+                  snapshotChatId || currentChatId,
+                  snapshotWorkflowName || currentWorkflowName,
+                );
+              }
+              if (!restored) {
+                setIsSidePanelOpen(false);
+                if (setLayoutMode) setLayoutMode('full');
+              }
+            }
+          } else {
+            setIsSidePanelOpen(false);
+            if (setLayoutMode) setLayoutMode('full');
+          }
+          workflowArtifactSnapshotRef.current = { isOpen: false, messages: [], layoutMode: 'split' };
+          return;
         }
-        workflowArtifactSnapshotRef.current = { isOpen: false, messages: [], layoutMode: 'split' };
-        return;
       }
 
       const cachedMessages = workflowMessagesCacheRef.current || [];
@@ -241,8 +318,26 @@ export function useConversationModeController({
         ));
         if (artifactMessages.length > 0) {
           setCurrentArtifactMessages(artifactMessages);
+          if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
+            upsertRestoredActivityFromArtifactMessages(
+              artifactMessages,
+              currentWorkflowName,
+            );
+          }
         }
+      } else if (typeof restoreStoredArtifactForChat === 'function'
+        && restoreStoredArtifactForChat(currentChatId, currentWorkflowName)) {
+        if (typeof restoreStoredActivityForChat === 'function') {
+          restoreStoredActivityForChat(currentChatId, currentWorkflowName);
+        }
+        setIsSidePanelOpen(true);
+        if (setLayoutMode) setLayoutMode('split');
       } else {
+        // Still restore inline activity (e.g. AppIntelligenceProgressCard) even when no artifact exists yet
+        if (typeof restoreStoredActivityForChat === 'function') {
+          restoreStoredActivityForChat(currentChatId, currentWorkflowName);
+        }
+        setCurrentArtifactMessages([]);
         setIsSidePanelOpen(false);
         if (setLayoutMode) setLayoutMode('full');
       }
@@ -252,6 +347,7 @@ export function useConversationModeController({
   }, [
     conversationMode,
     currentChatId,
+    currentWorkflowName,
     generalMessagesCacheRef,
     messagesRef,
     sanitizeVisibleWorkflowMessages,
@@ -261,7 +357,10 @@ export function useConversationModeController({
     setIsSidePanelOpen,
     setLayoutMode,
     setMessagesWithLogging,
+    restoreStoredArtifactForChat,
+    restoreStoredActivityForChat,
     surfaceStateRef,
+    upsertRestoredActivityFromArtifactMessages,
     workflowArtifactSnapshotRef,
     workflowMessages,
     workflowMessagesCacheRef,
@@ -280,6 +379,7 @@ export function useConversationModeController({
     setActiveWorkflowName(resolvedWorkflow);
     currentWorkflowNameRef.current = resolvedWorkflow;
     setCurrentWorkflowName(resolvedWorkflow);
+    rememberWorkflowChat(targetChatId, resolvedWorkflow);
 
     workflowReplayPendingRef.current = true;
     setMessagesWithLogging([]);
@@ -296,6 +396,14 @@ export function useConversationModeController({
     if (sent) {
       setConversationMode('workflow');
       generalMessagesCacheRef.current = messagesRef.current;
+      if (typeof restoreStoredArtifactForChat === 'function') {
+        setTimeout(() => {
+          const restored = restoreStoredArtifactForChat(targetChatId, resolvedWorkflow);
+          if (restored && typeof restoreStoredActivityForChat === 'function') {
+            restoreStoredActivityForChat(targetChatId, resolvedWorkflow);
+          }
+        }, 100);
+      }
       return true;
     }
 
@@ -314,6 +422,9 @@ export function useConversationModeController({
     setCurrentChatId,
     setCurrentWorkflowName,
     setMessagesWithLogging,
+    rememberWorkflowChat,
+    restoreStoredActivityForChat,
+    restoreStoredArtifactForChat,
     workflowMessagesCacheRef,
     workflowMessagesSharedRef,
     workflowReplayPendingRef,
@@ -373,11 +484,16 @@ export function useConversationModeController({
         }
 
         const canonicalWorkflowName =
-          resolveKnownWorkflowName(urlWorkflowName)
-          || resolveKnownWorkflowName(configuredEntryWorkflow)
+          workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+          || workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(configuredEntryWorkflow)
           || resolveKnownWorkflowName(currentWorkflowName)
           || resolveKnownWorkflowName(activeWorkflowName)
           || resolveKnownWorkflowName(getStoredActiveWorkflowName())
+          || resolveKnownWorkflowName(urlWorkflowName)
+          || resolveKnownWorkflowName(configuredEntryWorkflow)
           || resolveWorkflow(currentWorkflowName)
           || resolveWorkflow(urlWorkflowName)
           || workflowConfig.getDefaultWorkflow();
@@ -418,22 +534,46 @@ export function useConversationModeController({
           setIsInWidgetMode(false);
         }
 
-        const validateExistingWorkflowSession = async (candidateChatId, workflowName) => {
-          if (!candidateChatId || !workflowName || typeof api.getHttpBaseUrl !== 'function') {
-            return null;
-          }
-          try {
-            const response = await fetch(
-              `${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${workflowName}/${candidateChatId}`
-            );
-            if (!response.ok) {
-              console.warn('⚠️ [MODE_CHANGE] Workflow chat validation returned non-OK; attempting resume:', response.status);
-              return null;
+        const resolveExistingWorkflowSession = async (candidateChatId, workflowNames, includeAvailable = false) => {
+          const workflowCandidates = buildWorkflowResolutionCandidates({
+            workflowConfig,
+            candidates: workflowNames,
+            includeAvailable,
+          });
+          const resolution = await resolveWorkflowForChat({
+            api,
+            appId: currentAppId,
+            chatId: candidateChatId,
+            workflowCandidates,
+          });
+          if (resolution.validationIncomplete) {
+            if (resolution.error) {
+              console.warn('⚠️ [MODE_CHANGE] Workflow chat validation failed; attempting resume:', resolution.error);
+            } else {
+              console.warn('⚠️ [MODE_CHANGE] Workflow chat validation incomplete; attempting resume.');
             }
-            const result = await response.json();
-            return result?.exists === true;
+            return {
+              exists: null,
+              workflowName: workflowCandidates[0] || null,
+            };
+          }
+          return {
+            exists: Boolean(resolution.workflowName),
+            workflowName: resolution.workflowName,
+          };
+        };
+
+        const readSessionRouterState = async () => {
+          try {
+            const params = new URLSearchParams();
+            params.set('app_id', String(currentAppId));
+            params.set('user_id', String(currentUserId));
+            const response = await api.get(`/api/session/state?${params.toString()}`);
+            return response?.session_state && typeof response.session_state === 'object'
+              ? response.session_state
+              : null;
           } catch (err) {
-            console.warn('⚠️ [MODE_CHANGE] Workflow chat validation failed; attempting resume:', err);
+            console.warn('⚠️ [MODE_CHANGE] Session router state unavailable; falling back to stored chat:', err);
             return null;
           }
         };
@@ -445,15 +585,71 @@ export function useConversationModeController({
           || resolveWorkflow(urlWorkflowName)
           || workflowConfig.getDefaultWorkflow();
 
+        const sessionState = await readSessionRouterState();
+        if (sessionState && typeof applySessionRouterState === 'function') {
+          const pendingTransitionId = String(sessionState.pending_transition_id || '').trim();
+          const routerChatId = String(sessionState.current_chat_id || '').trim();
+          const rawRouterWorkflow = String(
+            sessionState.current_workflow_id
+            || sessionState.last_requested_workflow_id
+            || ''
+          ).trim();
+          const routerWorkflowName = rawRouterWorkflow
+            ? (resolveKnownWorkflowName(rawRouterWorkflow) || rawRouterWorkflow)
+            : null;
+
+          if (pendingTransitionId) {
+            ensureWorkflowMode({ sendSwitch: false, forceRestore: true });
+            applySessionRouterState(sessionState);
+            setConversationMode('workflow');
+            return;
+          }
+
+          if (routerChatId && routerWorkflowName) {
+            const { exists, workflowName: resolvedRouterWorkflow } = await resolveExistingWorkflowSession(
+              routerChatId,
+              [routerWorkflowName, canonicalWorkflowName],
+              true,
+            );
+            if (exists !== false) {
+              const workflowToResume = resolvedRouterWorkflow || routerWorkflowName;
+              applySessionRouterState({
+                ...sessionState,
+                current_workflow_id: workflowToResume,
+              });
+              const resumed = resumeWorkflowSession(routerChatId, workflowToResume);
+              if (resumed) {
+                refreshWorkflowSessions();
+                return;
+              }
+            }
+          }
+        }
+
         if (entryWorkflow) {
           const candidateWorkflowChatIds = [
+            getStoredWorkflowChatId({
+              appId: currentAppId,
+              userId: currentUserId,
+              workflowName: entryWorkflow,
+            }),
             activeChatId,
             getStoredActiveChatId(),
             currentChatId,
           ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
 
           for (const candidateChatId of candidateWorkflowChatIds) {
-            const exists = await validateExistingWorkflowSession(candidateChatId, entryWorkflow);
+            const { exists, workflowName: resolvedCandidateWorkflow } = await resolveExistingWorkflowSession(
+              candidateChatId,
+              [
+                entryWorkflow,
+                currentWorkflowName,
+                activeWorkflowName,
+                getStoredActiveWorkflowName(),
+                urlWorkflowName,
+              ],
+              true,
+            );
             if (exists === false) {
               if (getStoredActiveChatId() === candidateChatId) {
                 setStoredActiveChatId(null);
@@ -464,8 +660,10 @@ export function useConversationModeController({
               continue;
             }
 
-            const resumed = resumeWorkflowSession(candidateChatId, entryWorkflow);
+            const workflowToResume = resolvedCandidateWorkflow || entryWorkflow;
+            const resumed = resumeWorkflowSession(candidateChatId, workflowToResume);
             if (resumed) {
+              rememberWorkflowChat(candidateChatId, workflowToResume);
               refreshWorkflowSessions();
               return;
             }
@@ -495,7 +693,7 @@ export function useConversationModeController({
               setActiveChatId(newChatId);
               setActiveWorkflowName(entryWorkflow);
               setCurrentWorkflowName(entryWorkflow);
-              setStoredActiveChatId(newChatId);
+              rememberWorkflowChat(newChatId, entryWorkflow);
 
               setConnectionInitialized(false);
               connectionInProgressRef.current = false;
@@ -528,6 +726,7 @@ export function useConversationModeController({
   }, [
     activeChatId,
     activeWorkflowName,
+    applySessionRouterState,
     api,
     clearViewArtifacts,
     configuredEntryWorkflow,
@@ -549,6 +748,7 @@ export function useConversationModeController({
     modeChangeInProgressRef,
     navigate,
     queryResumeHandledRef,
+    rememberWorkflowChat,
     refreshWorkflowSessions,
     resolveKnownWorkflowName,
     restoreViewSnapshot,

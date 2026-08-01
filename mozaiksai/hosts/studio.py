@@ -29,6 +29,7 @@ from mozaiksai.control_plane import (
     AcceptedStagedAppBundleArtifactVersionError,
     SourceImportRequest,
     accept_staged_refinement_artifact_version,
+    build_refinement_review_package,
     get_orchestration_control_harness,
     index_workspace_app_intelligence,
     resolve_source_import,
@@ -515,6 +516,7 @@ async def _build_artifact_review_payload(
         )
         change_request = requests[0] if requests else None
 
+    refinement_metadata = _refinement_metadata_from_version(version)
     changed_files = _build_bundle_diff_summary(current_files=current_files, parent_files=parent_files)
     selected_paths = []
     validation_result = None
@@ -554,30 +556,37 @@ async def _build_artifact_review_payload(
     elif validation_override_required:
         validation_blocker = "Validation has not passed. Run validation or use an explicit operator override."
 
+    review_package = build_refinement_review_package(
+        app_id=app_id,
+        artifact_version_id=version.id,
+        artifact_kind=version.artifact_kind,
+        artifact_key=version.artifact_key,
+        parent_version_id=version.parent_version_id,
+        lifecycle_status=version.lifecycle_status.value,
+        validation_status=version.validation_status.value,
+        review_status=review_status,
+        changed_files=changed_files,
+        selected_paths=selected_paths,
+        current_skipped_files=current_skipped,
+        parent_skipped_files=parent_skipped,
+        refinement_metadata=refinement_metadata,
+        change_request=change_request,
+        latest_session=latest_session,
+        coding_summary=coding_summary,
+        validation_result=validation_result,
+        validation_override_required=validation_override_required,
+        validation_blocker=validation_blocker,
+        can_accept=can_accept,
+        can_reject=can_reject,
+        can_promote=can_promote,
+    )
+
     return {
         "artifact_version": version.model_dump(by_alias=False, mode="python"),
         "parent_artifact_version": parent_version.model_dump(by_alias=False, mode="python") if parent_version else None,
         "change_request": change_request.model_dump(by_alias=False, mode="python") if change_request else None,
         "refinement_session": latest_session.model_dump(by_alias=False, mode="python") if latest_session else None,
-        "review": {
-            "artifact_version_id": version.id,
-            "parent_version_id": version.parent_version_id,
-            "review_status": review_status,
-            "lifecycle_status": version.lifecycle_status.value,
-            "validation_status": version.validation_status.value,
-            "changed_file_count": len(changed_files),
-            "changed_files": changed_files,
-            "selected_paths": selected_paths,
-            "coding_summary": coding_summary,
-            "validation_result": validation_result,
-            "validation_override_required": validation_override_required,
-            "validation_blocker": validation_blocker,
-            "current_skipped_files": current_skipped,
-            "parent_skipped_files": parent_skipped,
-            "can_accept": can_accept,
-            "can_reject": can_reject,
-            "can_promote": can_promote,
-        },
+        "review": review_package.model_dump(mode="python"),
     }
 
 configure_session_router(

@@ -266,6 +266,11 @@ class WorkflowDependency(BaseModel):
         return val
 
 
+WorkflowInteractionMode = Literal["agent_directed", "user_guided", "backend_only"]
+WorkflowLaunchBehavior = Literal["auto_start", "wait_for_user", "none"]
+WorkflowHandoffStyle = Literal["continuous_chat", "separate_chat", "background"]
+
+
 class WorkflowEntry(BaseModel):
     """Workflow registry entry in the global pack graph."""
 
@@ -274,6 +279,9 @@ class WorkflowEntry(BaseModel):
     id: str
     description: str | None = None
     startup_mode: Literal["UserDriven", "AgentDriven", "BackendOnly"] | None = None
+    interaction_mode: WorkflowInteractionMode | None = None
+    launch_behavior: WorkflowLaunchBehavior | None = None
+    handoff_style: WorkflowHandoffStyle | None = None
     dependencies: list[str | WorkflowDependency] = Field(
         default_factory=list,
         description=(
@@ -291,6 +299,32 @@ class WorkflowEntry(BaseModel):
         if not val:
             raise ValueError("workflow id must be a non-empty string")
         return val
+
+    @model_validator(mode="after")
+    def _validate_launch_taxonomy(self) -> WorkflowEntry:
+        if self.startup_mode == "BackendOnly":
+            if self.interaction_mode not in {None, "backend_only"}:
+                raise ValueError("BackendOnly workflows must use interaction_mode backend_only")
+            if self.launch_behavior not in {None, "none"}:
+                raise ValueError("BackendOnly workflows must use launch_behavior none")
+            if self.handoff_style not in {None, "background"}:
+                raise ValueError("BackendOnly workflows must use handoff_style background")
+            return self
+
+        if self.startup_mode in {"UserDriven", "AgentDriven"}:
+            if self.interaction_mode == "backend_only":
+                raise ValueError(
+                    "User-reachable workflows must not use interaction_mode backend_only"
+                )
+            if self.launch_behavior == "none":
+                raise ValueError(
+                    "User-reachable workflows must not use launch_behavior none"
+                )
+            if self.handoff_style == "background":
+                raise ValueError(
+                    "User-reachable workflows must not use handoff_style background"
+                )
+        return self
 
 
 class WorkflowEntrypoint(BaseModel):
@@ -688,6 +722,9 @@ __all__ = [
     "ConditionRoute",
     "WorkflowTransition",
     # Global pack graph
+    "WorkflowInteractionMode",
+    "WorkflowLaunchBehavior",
+    "WorkflowHandoffStyle",
     "WorkflowDependency",
     "WorkflowEntry",
     "WorkflowEntrypoint",

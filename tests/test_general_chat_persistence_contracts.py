@@ -158,17 +158,65 @@ def test_ask_bootstrap_sessions_do_not_count_as_workflow_runs() -> None:
 
 
 def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None:
+    storage_source = _read("chat-ui/src/session/chatSessionStorage.js")
     controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
 
-    assert "const validateExistingWorkflowSession = async" in controller_source
-    assert "/api/chats/exists/" in controller_source
+    assert "mozaiks.workflow_chat_id" in storage_source
+    assert "getStoredWorkflowChatId" in storage_source
+    assert "setStoredWorkflowChatId" in storage_source
+    assert "restoreStoredArtifactForChat," in controller_source
+    assert "snapshotChatId || currentChatId" in controller_source
+    assert "restoreStoredArtifactForChat(targetChatId, resolvedWorkflow)" in controller_source
+    assert "restoreStoredArtifactForChat," in chat_page_source
+    assert "const resolveExistingWorkflowSession = async" in controller_source
+    assert "buildWorkflowResolutionCandidates({" in controller_source
+    assert "resolveWorkflowForChat({" in controller_source
+    assert "/api/session/state?" in controller_source
+    assert "pending_transition_id" in controller_source
+    assert "applySessionRouterState(sessionState)" in controller_source
     assert "const candidateWorkflowChatIds = [" in controller_source
+    assert "getStoredWorkflowChatId({" in controller_source
     assert "activeChatId," in controller_source
     assert "getStoredActiveChatId()," in controller_source
     assert "currentChatId," in controller_source
-    assert "resumeWorkflowSession(candidateChatId, entryWorkflow)" in controller_source
+    assert "const workflowToResume = resolvedCandidateWorkflow || entryWorkflow" in controller_source
+    assert "resumeWorkflowSession(candidateChatId, workflowToResume)" in controller_source
+    assert "rememberWorkflowChat(candidateChatId, workflowToResume)" in controller_source
+    assert "rememberWorkflowChat(newChatId, entryWorkflow)" in controller_source
+    assert "rememberWorkflowChatSession(data.chat_id, resolvedWorkflowId)" in chat_page_source
+    assert "setStoredActiveWorkflowName(resolvedWorkflowName)" in chat_page_source
+    assert "setStoredActiveWorkflowName(resolvedWorkflow)" in controller_source
+    assert "applySessionStatePendingTransition(data.session_state)" in chat_page_source
 
-    resume_index = controller_source.index("resumeWorkflowSession(candidateChatId, entryWorkflow)")
+    router_state_index = controller_source.index("/api/session/state?")
+    resume_index = controller_source.index("resumeWorkflowSession(candidateChatId, workflowToResume)")
     start_index = controller_source.index("api.startChat(")
+    assert router_state_index < start_index
     assert resume_index < start_index
 
+
+def test_activity_inline_progress_restores_with_artifact_panel() -> None:
+    controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")
+    startup_source = _read("chat-ui/src/hooks/useChatStartupEffects.js")
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+    activity_helper_source = _read("chat-ui/src/components/chat/activityArtifacts.js")
+
+    assert "export function upsertActivityMessage" in activity_helper_source
+    assert "export function activityArtifactFromMessage" in activity_helper_source
+    assert "const upsertRestoredActivityFromArtifactMessages" in chat_page_source
+    assert "const restoreStoredActivityForChat" in chat_page_source
+    assert "workflowMessagesCacheRef.current = applyRestoredProgress(workflowMessagesCacheRef.current)" in chat_page_source
+    assert "workflowMessagesSharedRef.current = applyRestoredProgress(workflowMessagesSharedRef.current)" in chat_page_source
+    assert "setWorkflowMessages((prev) => applyRestoredProgress(prev))" in chat_page_source
+
+    assert "restoreStoredActivityForChat = null" in controller_source
+    assert "upsertRestoredActivityFromArtifactMessages = null" in controller_source
+    assert "upsertRestoredActivityFromArtifactMessages(" in controller_source
+    assert "restoreStoredActivityForChat(currentChatId, currentWorkflowName)" in controller_source
+    assert "restoreStoredActivityForChat(targetChatId, resolvedWorkflow)" in controller_source
+
+    assert "restoreStoredActivityForChat = null" in startup_source
+    assert "upsertRestoredActivityFromArtifactMessages = null" in startup_source
+    assert "upsertRestoredActivityFromArtifactMessages(" in startup_source
+    assert "restoreStoredActivityForChat(restoreChatId, urlWorkflowName)" in startup_source

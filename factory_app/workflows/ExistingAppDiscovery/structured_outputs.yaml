@@ -292,10 +292,19 @@ models:
     fields:
       adoption_level:
         type: str
-        description: Recommended starting level - "embed", "bridge", "ecosystem", or "gradual_modernization".
+        description: >
+          Recommended starting level - "embed", "bridge", "ecosystem", or
+          "gradual_modernization". Embed/bridge normally feed the user-facing
+          Add AI Workflows path. Ecosystem/gradual_modernization may feed Build
+          App Features only when the user explicitly approves Mozaiks-owned
+          expansion scope.
       adoption_rationale:
         type: str
-        description: Why this level is the right first move for the app.
+        description: >
+          Why this level is the right first move for the app. Explain whether
+          the safest first move is Add AI Workflows, where the existing app
+          remains source of truth, or Build App Features, where selected
+          surfaces become Mozaiks-owned after explicit approval.
       ui_surface_preference:
         type: str
         description: Where the Mozaiks surface should live in the current app.

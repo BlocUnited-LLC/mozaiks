@@ -419,6 +419,26 @@ export class WebSocketApiAdapter extends ApiAdapter {
     }
     
     const wsBase = this.getWsBaseUrl();
+    const existingConnection = this._chatConnections.get(chatId);
+    const existingSocket = existingConnection?.socket;
+    if (
+      existingConnection
+      && existingConnection.workflowName === actualworkflowname
+      && existingSocket
+      && (existingSocket.readyState === WebSocket.CONNECTING || existingSocket.readyState === WebSocket.OPEN)
+    ) {
+      return existingConnection;
+    }
+    if (
+      existingConnection
+      && existingSocket
+      && existingSocket.readyState !== WebSocket.CLOSING
+      && existingSocket.readyState !== WebSocket.CLOSED
+    ) {
+      try {
+        existingConnection.close?.();
+      } catch (_) {}
+    }
     
     // Build WebSocket URL with access_token query param for authentication
     let wsUrl = `${wsBase}/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`;
@@ -429,6 +449,8 @@ export class WebSocketApiAdapter extends ApiAdapter {
     }
     
     const socket = new WebSocket(wsUrl);
+    let closedByClient = false;
+    let hasOpened = false;
     
     // F7/F8: Sequence tracking and resume capability (strict canonical key)
     let lastSequence = parseInt(platform.storage.getItem(`ws_idx_${chatId}`) || '0');
@@ -447,6 +469,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     socket.onopen = () => {
+      hasOpened = true;
       
       // If we have a previous sequence, request resume first
       if (lastSequence > 0) {
@@ -487,6 +510,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     socket.onerror = (error) => {
+      if (closedByClient && !hasOpened) {
+        return;
+      }
       console.error("WebSocket error:", error);
       if (callbacks.onError) callbacks.onError(error);
     };
@@ -498,6 +524,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
 
     const connection = {
       chatId,
+      workflowName: actualworkflowname,
       socket,
       send: (message) => {
         if (socket.readyState === WebSocket.OPEN) {
@@ -517,8 +544,11 @@ export class WebSocketApiAdapter extends ApiAdapter {
         return false;
       },
       close: () => {
+        closedByClient = true;
         try {
-          socket.close();
+          if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
         } finally {
           this._chatConnections.delete(chatId);
         }

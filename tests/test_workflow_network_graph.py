@@ -101,6 +101,58 @@ def test_transition_rules_compile_to_serializable_ag2_transition_graph():
     )
 
 
+def test_later_conditional_rule_wins_over_same_source_fallback():
+    graph = compile_transition_rules_to_graph(
+        [
+            {
+                "source_agent": "ValueInterviewAgent",
+                "target_agent": "user",
+                "transition_type": "after_turn",
+            },
+            {
+                "source_agent": "ValueInterviewAgent",
+                "target_agent": "ResearchAgent",
+                "transition_type": "condition",
+                "condition_type": "context_equals",
+                "condition_key": "interview_complete",
+                "condition_value": True,
+            },
+        ],
+        initial_agent_name="ValueInterviewAgent",
+        agent_id_by_name={
+            "ValueInterviewAgent": "ValueInterviewAgent",
+            "ResearchAgent": "ResearchAgent",
+        },
+    )
+
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="ValueInterviewAgent",
+            context_variables={"interview_complete": True},
+            agent_name_by_id={
+                "ValueInterviewAgent": "ValueInterviewAgent",
+                "ResearchAgent": "ResearchAgent",
+            },
+            participant_order=["ValueInterviewAgent", "ResearchAgent", "user"],
+        )
+        == "ResearchAgent"
+    )
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="ValueInterviewAgent",
+            context_variables={"interview_complete": False},
+            agent_name_by_id={
+                "ValueInterviewAgent": "ValueInterviewAgent",
+                "ResearchAgent": "ResearchAgent",
+            },
+            participant_order=["ValueInterviewAgent", "ResearchAgent", "user"],
+        )
+        == "user"
+    )
+
+
 def test_resolve_next_agent_supports_distinct_ag2_agent_ids():
     graph = compile_transition_rules_to_graph(
         [

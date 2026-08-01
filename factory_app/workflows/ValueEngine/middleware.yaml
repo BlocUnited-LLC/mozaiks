@@ -1,1 +1,4 @@
-prompt_middleware: []
+prompt_middleware:
+- agent: all
+  filename: ../_shared/brownfield_adoption_context.py
+  function: inject_brownfield_adoption_context

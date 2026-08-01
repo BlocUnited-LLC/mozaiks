@@ -860,6 +860,11 @@ async def websocket_endpoint(
             requested_chat_id=chat_id,
         )
         resolved_chat_id = str(resume_resolution.get("chat_id") or chat_id)
+        resume_workflow_name = str(resume_resolution.get("workflow_id") or "").strip()
+        if resume_workflow_name:
+            resolved_resume_workflow = hooks.call_workflow_name_resolver(resume_workflow_name, workflow_names)
+            if resolved_resume_workflow:
+                resolved_workflow_name = resolved_resume_workflow
         resolved_doc = await coll.find_one(
             {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
             {
@@ -965,9 +970,24 @@ async def websocket_endpoint(
         }
         await simple_transport.send_event_to_ui(chat_meta, resolved_chat_id)
 
+        from mozaiksai.core.workflow.startup_messages import (
+            resolve_workflow_launch_taxonomy,
+            should_autostart_empty_workflow,
+        )
+
         config = workflow_manager.get_config(resolved_workflow_name) or {}
-        startup_mode = str(config.get("workflow_startup_mode") or "").strip().lower()
-        if startup_mode in ("agentdriven", "userdriven") and run_history_count == 0:
+        startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
+        launch_taxonomy = resolve_workflow_launch_taxonomy(
+            resolved_workflow_name,
+            workflow_startup_mode=startup_mode,
+        )
+        if (
+            should_autostart_empty_workflow(
+                startup_mode,
+                launch_behavior=launch_taxonomy.get("launch_behavior"),
+            )
+            and run_history_count == 0
+        ):
             existing_task = simple_transport._background_tasks.get(resolved_chat_id)
             if not (existing_task and not existing_task.done()):
                 conn = simple_transport.connections.setdefault(resolved_chat_id, {})
@@ -1186,12 +1206,17 @@ async def get_workflows(
 ):
     """Return loaded workflows in SDK-friendly format."""
     _ = principal
+    from mozaiksai.core.workflow.startup_messages import resolve_workflow_launch_taxonomy
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
     workflows = []
     for workflow_name in sorted(workflow_manager.get_all_workflow_names()):
         config = workflow_manager.get_config(workflow_name)
         startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
+        launch_taxonomy = resolve_workflow_launch_taxonomy(
+            workflow_name,
+            workflow_startup_mode=startup_mode,
+        )
         workflows.append(
             {
                 "name": workflow_name,
@@ -1200,6 +1225,9 @@ async def get_workflows(
                 "visual_agents": config.get("visual_agents") or [],
                 "startup_mode": startup_mode,
                 "workflow_startup_mode": startup_mode,
+                "interaction_mode": launch_taxonomy.get("interaction_mode"),
+                "launch_behavior": launch_taxonomy.get("launch_behavior"),
+                "handoff_style": launch_taxonomy.get("handoff_style"),
                 "status": "ready",
             }
         )

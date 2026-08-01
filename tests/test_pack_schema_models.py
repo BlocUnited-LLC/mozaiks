@@ -647,8 +647,66 @@ def test_parse_global_pack_graph_startup_mode_round_trips() -> None:
     assert mode_map["AppGenerator"] == "AgentDriven"
 
 
-def test_pack_metadata_structured_output_workflow_has_startup_mode() -> None:
-    """PackGraphWorkflow in AgentGenerator structured_outputs.yaml must declare startup_mode."""
+def test_parse_global_pack_graph_launch_taxonomy_round_trips() -> None:
+    """Workflow registry entries preserve first-party launch taxonomy fields."""
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [
+                {
+                    "id": "ValueEngine",
+                    "startup_mode": "UserDriven",
+                    "interaction_mode": "user_guided",
+                    "launch_behavior": "auto_start",
+                    "handoff_style": "continuous_chat",
+                },
+                {
+                    "id": "AuditWorkflow",
+                    "startup_mode": "BackendOnly",
+                    "interaction_mode": "backend_only",
+                    "launch_behavior": "none",
+                    "handoff_style": "background",
+                },
+            ],
+            "transitions": [],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [{"workflows": ["ValueEngine"]}],
+                }
+            ],
+        }
+    )
+
+    by_id = {workflow.id: workflow for workflow in graph.workflows}
+    assert by_id["ValueEngine"].interaction_mode == "user_guided"
+    assert by_id["ValueEngine"].launch_behavior == "auto_start"
+    assert by_id["ValueEngine"].handoff_style == "continuous_chat"
+    assert by_id["AuditWorkflow"].interaction_mode == "backend_only"
+    assert by_id["AuditWorkflow"].launch_behavior == "none"
+    assert by_id["AuditWorkflow"].handoff_style == "background"
+
+
+def test_parse_global_pack_graph_rejects_backend_only_chat_taxonomy() -> None:
+    with pytest.raises(ValueError, match="BackendOnly workflows must use"):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [
+                    {
+                        "id": "AuditWorkflow",
+                        "startup_mode": "BackendOnly",
+                        "interaction_mode": "user_guided",
+                    },
+                ],
+                "transitions": [],
+                "workflow_sequences": [],
+            }
+        )
+
+
+def test_pack_metadata_structured_output_workflow_has_launch_taxonomy() -> None:
+    """AgentGenerator PackGraphWorkflow must declare launch taxonomy fields."""
     path = (
         Path(__file__).resolve().parents[1]
         / "factory_app"
@@ -672,5 +730,18 @@ def test_pack_metadata_structured_output_workflow_has_startup_mode() -> None:
     assert "UserDriven" in values
     assert "AgentDriven" in values
 
+    expected_literals = {
+        "interaction_mode": ("PackGraphInteractionMode", {"agent_directed", "user_guided", "backend_only"}),
+        "launch_behavior": ("PackGraphLaunchBehavior", {"auto_start", "wait_for_user", "none"}),
+        "handoff_style": ("PackGraphHandoffStyle", {"continuous_chat", "separate_chat", "background"}),
+    }
+    for field_name, (literal_name, literal_values) in expected_literals.items():
+        assert field_name in wf_fields, f"PackGraphWorkflow must declare {field_name}"
+        field = wf_fields[field_name]
+        assert field["type"] == "union"
+        assert "null" in field["variants"]
+        assert literal_name in field["variants"]
+        assert literal_name in spec["models"]
+        assert set(spec["models"][literal_name]["values"]) == literal_values
 
 

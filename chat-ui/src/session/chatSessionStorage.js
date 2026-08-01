@@ -4,6 +4,7 @@ const CURRENT_CHAT_ID_KEY = 'mozaiks.current_chat_id';
 const CURRENT_WORKFLOW_NAME_KEY = 'mozaiks.current_workflow_name';
 const CONVERSATION_MODE_KEY = 'mozaiks.conversation_mode';
 const ACTIVE_GENERAL_CHAT_ID_KEY = 'mozaiks.active_general_chat_id';
+const WORKFLOW_CHAT_ID_PREFIX = 'mozaiks.workflow_chat_id';
 
 const readValue = (key) => {
   try {
@@ -73,6 +74,36 @@ export const getStoredConversationMode = () => readValue(CONVERSATION_MODE_KEY);
 export const setStoredConversationMode = (mode) => {
   if (!mode) return removeValue(CONVERSATION_MODE_KEY);
   return writeValue(CONVERSATION_MODE_KEY, String(mode));
+};
+
+const scopePart = (value) => {
+  const normalized = String(value || '').trim();
+  return normalized ? encodeURIComponent(normalized) : null;
+};
+
+export const getStoredWorkflowChatIdKey = ({ appId, userId, workflowName } = {}) => {
+  const app = scopePart(appId);
+  const user = scopePart(userId);
+  const workflow = scopePart(workflowName);
+  if (!app || !user || !workflow) return null;
+  return `${WORKFLOW_CHAT_ID_PREFIX}.${app}.${user}.${workflow}`;
+};
+
+export const getStoredWorkflowChatId = (scope) => {
+  const key = getStoredWorkflowChatIdKey(scope);
+  return key ? readValue(key) : null;
+};
+
+export const setStoredWorkflowChatId = ({ appId, userId, workflowName, chatId } = {}) => {
+  const key = getStoredWorkflowChatIdKey({ appId, userId, workflowName });
+  if (!key) return false;
+  if (!chatId) return removeValue(key);
+  return writeValue(key, String(chatId));
+};
+
+export const clearStoredWorkflowChatId = (scope) => {
+  const key = getStoredWorkflowChatIdKey(scope);
+  return key ? removeValue(key) : false;
 };
 
 export const getChatCacheSeedKey = (chatId) => `${CURRENT_CHAT_ID_KEY}.cache_seed.${chatId}`;

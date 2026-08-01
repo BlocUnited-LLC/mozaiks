@@ -91,6 +91,21 @@ Discovery snapshots are evidence, not authority. The existing repo remains the
 source of truth until explicit transfer through staged patch, generated overlay,
 migration approval, or PR approval.
 
+## Brownfield Build Paths
+
+After discovery, the user chooses how Mozaiks should build with the existing
+app. The UI must explain the choice in terms of code ownership, not just depth.
+
+| User label | Internal value | Meaning |
+| --- | --- | --- |
+| Add AI Workflows | `light_integration` | The normal first move for most existing apps. The existing repository, data, auth, and business logic remain source of truth. Mozaiks adds app-aware AI workflows, chat surfaces, and only the safe adapters those workflows require. |
+| Build App Features | `full_migration` | A deliberate product expansion path. Mozaiks generates native modules, workflows, pages, data contracts, and extended functionality only for surfaces the user explicitly approves. It is not an automatic whole-repo rewrite. |
+
+Users should be able to add AI workflows first and build app features later.
+No brownfield path may imply that Mozaiks owns or rewrites existing source
+unless the ownership boundary marks the surface as approved for module
+expansion or staged patch review.
+
 ## Greenfield Journey
 
 Canonical greenfield registration:

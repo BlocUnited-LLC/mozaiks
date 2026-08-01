@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -130,6 +131,8 @@ def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -
     plan_fields = models["AgentAugmentationPlan"]["fields"]
     assert "adoption_level" in plan_fields
     assert plan_fields["adoption_level"]["type"] == "str"
+    assert "Add AI Workflows" in plan_fields["adoption_level"]["description"]
+    assert "Build App Features" in plan_fields["adoption_rationale"]["description"]
     assert plan_fields["ecosystem_bindings"]["items"] == "str"
     assert plan_fields["theme_adaptation_strategy"]["type"] == "str"
     assert plan_fields["embed_theme_ready"]["type"] == "bool"
@@ -177,6 +180,8 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "app_intelligence_summary" in definitions
     assert "app_intelligence_progress" in definitions
     assert "app_intelligence_health" in definitions
+    assert "repo_access_status" in definitions
+    assert "repo_access_recovery" in definitions
     assert "app_context_graph" in definitions
     assert "adoption_level" in definitions
     assert "ecosystem_bindings" in definitions
@@ -195,6 +200,22 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "AgentAugmentationPlan" in agents
     assert "app_intelligence_ready" in agents
     assert "app_intelligence_summary" in agents
+    assert "repo_access_status" in agents
+    assert "repo_access_recovery" in agents
+    assert "feature readout" in agents
+    assert "Use 4-7 named feature areas" in agents
+    assert "Do not say \"and more\", \"many more\", \"various modules\"" in agents
+    assert "`activity_feed` -> activity feed or timeline" in agents
+    assert "`hosting`, `dns_management`, `domain_registry` -> hosting, DNS, and domain management" in agents
+    assert "`hosted_billing`, `wallet`, `mozaikspay`, checkout routes -> billing, wallet, payments, or checkout" in agents
+    assert "I see code surfaces for" in agents
+    assert "do not ask for `app_url`" in agents
+    assert "unless live runtime/browser behavior is actually needed" in agents
+    assert "Under the hood" in agents
+    assert "product readout to the App" in agents
+    assert "Do not list future build ideas in the chat" in agents
+    assert "the next ValueEngine step owns the enhancement plan" in agents
+    assert "Which of these feature areas should Mozaiks work on first?" in agents
     assert "discovery_mode" in agents
     assert "host_app_source" in agents
     assert "workspace_app" in agents
@@ -203,39 +224,38 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "brand_theme_summary" in agents
 
 
-def test_existing_app_discovery_runs_app_intelligence_overview_after_repository_scan() -> None:
+def test_existing_app_discovery_before_chat_repo_access_recovery_shown_inline() -> None:
     tools = _read_yaml("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
     before_chat = [item for item in tools["lifecycle_tools"] if item["trigger"] == "before_chat"]
     manifest_text = _read_text("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
 
     assert [(item["file"], item["function"]) for item in before_chat] == [
         ("preload_discovery_context.py", "collect_prechat_discovery_context"),
-        ("emit_app_intelligence_overview.py", "emit_app_intelligence_inline_brief"),
-        ("emit_app_intelligence_overview.py", "emit_app_intelligence_overview_card"),
+        ("emit_app_intelligence_overview.py", "emit_repo_access_recovery_card"),
     ]
-    inline_tool = before_chat[1]
-    overview_tool = before_chat[2]
-    assert inline_tool["tool_type"] == "UI_Surface"
-    assert inline_tool["ui"]["component"] == "AppIntelligenceInlineBrief"
-    assert inline_tool["ui"]["mode"] == "inline"
-    assert overview_tool["tool_type"] == "UI_Surface"
-    assert overview_tool["ui"]["component"] == "AppIntelligenceOverviewCard"
+    recovery_tool = before_chat[1]
+    assert recovery_tool["tool_type"] == "UI_Surface"
+    assert recovery_tool["ui"]["component"] == "RepoAccessRecoveryCard"
+    assert recovery_tool["ui"]["mode"] == "inline"
     ui_index = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
-    assert "AppIntelligenceInlineBrief" in ui_index
-    assert "AppIntelligenceOverviewCard" in ui_index
+    assert "RepoAccessRecoveryCard" in ui_index
+    assert "AppIntelligenceInlineBrief" not in ui_index
+    assert "AppIntelligenceOverviewCard" not in ui_index
     assert "get_preloaded_app_intelligence" in manifest_text
     assert "search_preloaded_source_context" in manifest_text
     assert "read_preloaded_source_file" in manifest_text
     assert "get_related_preloaded_source_files" in manifest_text
+    assert "emit_app_intelligence_inline_brief" not in manifest_text
+    assert "emit_app_intelligence_overview_card" not in manifest_text
     assert "get_repo_app_intelligence" not in manifest_text
     assert "search_repo_source_context" not in manifest_text
     assert "read_repo_source_file" not in manifest_text
 
 
-def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> None:
+def test_repo_access_recovery_emitter_surfaces_private_github_blocker() -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
-        "tests.emit_app_intelligence_overview_direct",
+        "tests.emit_repo_access_recovery_direct",
     )
 
     emitted = {}
@@ -244,288 +264,48 @@ def test_app_intelligence_overview_emitter_surfaces_agent_visible_catalog() -> N
         emitted["component"] = component
         emitted["payload"] = payload
         emitted["kwargs"] = kwargs
+        return "ui_repo_access_1"
 
     module.emit_ui_surface = _fake_emit
     context = _Context(
-        chat_id="chat_123",
-        preload_status="ready",
-        app_id="app_1",
-        github_repo="acme/app",
-        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
-        app_intelligence_catalog={
-            "present": True,
-            "snapshot_id": "app_intelligence_1",
-            "source_context_bundle_id": "source_context_1",
-            "graph_id": "graph_1",
-            "coverage": {
-                "file_count": 3,
-                "chunk_count": 4,
-                "symbol_count": 5,
-                "node_count": 6,
-                "edge_count": 7,
-                "language_counts": {"python": 2, "javascript": 1},
-                "role_counts": {"source": 2, "route": 1},
-            },
-            "architecture": {
-                "module_roots": [{"module_id": "billing", "paths": ["app/modules/billing/module.yaml"]}],
-                "service_roots": [],
-                "ui_surfaces": [],
-                "workflow_roots": [],
-            },
-            "capabilities": [{"capability_id": "module:billing", "label": "billing"}],
-            "integration_surfaces": [],
-            "data_surfaces": [],
-            "risk_hints": [],
-            "agent_context_policy": {
-                "policy": "retrieve_not_dump",
-                "authority": {
-                    "facts": "SourceContextBundle and AppContextGraph",
-                    "summary": "AppIntelligenceSnapshot",
-                    "exact_code": "source retrieval tools",
-                },
-                "surfaces": [],
-            },
-            "warnings": [],
+        chat_id="chat_repo_access",
+        repo_access_status="required",
+        github_repo="BlocUnited-LLC/mozaiks-app",
+        repo_access_recovery={
+            "provider": "github",
+            "code": "github_repo_access_required",
+            "github_repo": "BlocUnited-LLC/mozaiks-app",
+            "github_url": "https://github.com/BlocUnited-LLC/mozaiks-app",
+            "http_status": 404,
+            "phase": "repo_lookup",
+            "auth_present": False,
+            "message": "Mozaiks could not access this GitHub repository.",
+            "recovery_actions": [{"id": "connect_github", "label": "Connect GitHub", "kind": "oauth_retry"}],
         },
-        source_context_bundle={"file_contents": {"app.py": "secret source must not be emitted"}},
+        app_intelligence_status="unavailable",
+        app_intelligence_progress={
+            "stage": "repo_access_required",
+            "status": "unavailable",
+            "message": "GitHub access is required before App Intelligence can index this repository.",
+            "warnings": ["github_repo_lookup_failed:BlocUnited-LLC/mozaiks-app:404"],
+        },
     )
 
-    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    result = asyncio.run(module.emit_repo_access_recovery_card(context_variables=context))
 
     assert result["success"] is True
-    assert result["app_intelligence_snapshot_id"] == "app_intelligence_1"
-    assert emitted["component"] == "AppIntelligenceOverviewCard"
-    assert emitted["payload"]["github_repo"] == "acme/app"
-    assert emitted["payload"]["app_intelligence_catalog"]["coverage"]["file_count"] == 3
-    assert "file_contents" not in str(emitted["payload"])
-    assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
-    assert emitted["kwargs"]["display"] == "artifact"
-
-
-def test_app_intelligence_inline_brief_emitter_surfaces_compact_chat_payload() -> None:
-    module = _load_module(
-        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
-        "tests.emit_app_intelligence_inline_direct",
-    )
-
-    emitted = {}
-
-    async def _fake_emit(component, payload, **kwargs):
-        emitted["component"] = component
-        emitted["payload"] = payload
-        emitted["kwargs"] = kwargs
-
-    module.emit_ui_surface = _fake_emit
-    context = _Context(
-        chat_id="chat_inline",
-        preload_status="ready",
-        app_id="app_1",
-        github_repo="acme/app",
-        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
-        app_intelligence_catalog={
-            "present": True,
-            "snapshot_id": "app_intelligence_1",
-            "coverage": {
-                "file_count": 3,
-                "chunk_count": 4,
-                "symbol_count": 5,
-                "node_count": 6,
-                "edge_count": 7,
-            },
-            "architecture": {
-                "module_roots": [{"module_id": "billing", "paths": ["app/modules/billing/module.yaml"]}],
-                "service_roots": [{"service_id": "github", "path": "app/services/integrations/github_client.py"}],
-                "ui_surfaces": [{"label": "Dashboard", "path": "app/ui/pages/dashboard.yaml"}],
-                "workflow_roots": [],
-            },
-            "capabilities": [{"capability_id": "module:billing", "label": "billing"}],
-            "integration_surfaces": [{"label": "GitHub"}],
-            "data_surfaces": [{"label": "billing_events"}],
-            "risk_hints": [{"risk_id": "missing_tests", "severity": "low"}],
-            "agent_context_policy": {"policy": "retrieve_not_dump", "authority": {}, "surfaces": []},
-            "warnings": ["scan warning"],
-        },
-        source_context_bundle={"file_contents": {"app.py": "secret source must not be emitted"}},
-    )
-
-    result = asyncio.run(module.emit_app_intelligence_inline_brief(context_variables=context))
-
-    assert result["success"] is True
-    assert emitted["component"] == "AppIntelligenceInlineBrief"
-    assert emitted["payload"]["coverage"]["file_count"] == 3
-    assert emitted["payload"]["coverage"]["symbol_count"] == 5
-    assert emitted["payload"]["architecture"]["source_refs"][0]["label"] == "billing"
-    assert emitted["payload"]["integration_count"] == 1
-    assert emitted["payload"]["data_surface_count"] == 1
-    assert "app_intelligence_catalog" not in emitted["payload"]
-    assert "file_contents" not in str(emitted["payload"])
+    assert result["ui_event_id"] == "ui_repo_access_1"
+    assert emitted["component"] == "RepoAccessRecoveryCard"
+    assert emitted["payload"]["repo_access_status"] == "required"
+    assert emitted["payload"]["github_repo"] == "BlocUnited-LLC/mozaiks-app"
+    assert emitted["payload"]["http_status"] == 404
+    assert emitted["payload"]["recovery_actions"][0]["id"] == "connect_github"
+    assert emitted["payload"]["activity_display_variant"] == "app_intelligence_progress"
+    assert emitted["payload"]["activity_component_type"] == "AppIntelligenceProgressCard"
+    assert "component_type" not in emitted["payload"]
     assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
     assert emitted["kwargs"]["agent_name"] == "App Intelligence"
     assert emitted["kwargs"]["display"] == "inline"
-
-
-def test_app_intelligence_overview_uses_real_workflow_ui_surface(monkeypatch) -> None:
-    module = _load_module(
-        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
-        "tests.emit_app_intelligence_overview_transport",
-    )
-
-    from mozaiksai.core.transport import simple_transport as transport_mod
-
-    class _FakeTransport:
-        def __init__(self) -> None:
-            self.events = []
-
-        async def send_tool_call_event(
-            self,
-            *,
-            event_id,
-            chat_id,
-            tool_name,
-            component_name,
-            display_type,
-            payload,
-            awaiting_response=True,
-            agent_name=None,
-        ):
-            self.events.append(
-                {
-                    "event_id": event_id,
-                    "chat_id": chat_id,
-                    "tool_name": tool_name,
-                    "component_name": component_name,
-                    "display_type": display_type,
-                    "payload": payload,
-                    "awaiting_response": awaiting_response,
-                    "agent_name": agent_name,
-                }
-            )
-
-    fake_transport = _FakeTransport()
-
-    async def _get_instance():
-        return fake_transport
-
-    monkeypatch.setattr(transport_mod.SimpleTransport, "get_instance", staticmethod(_get_instance))
-
-    context = _Context(
-        chat_id="chat_real_ui_surface",
-        app_id="app_1",
-        preload_status="ready",
-        github_repo="acme/app",
-        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
-        app_intelligence_catalog={
-            "present": True,
-            "snapshot_id": "app_intelligence_1",
-            "coverage": {"file_count": 8, "symbol_count": 21, "node_count": 13, "edge_count": 34},
-            "architecture": {"module_roots": [], "service_roots": [], "ui_surfaces": [], "workflow_roots": []},
-            "capabilities": [],
-            "integration_surfaces": [],
-            "data_surfaces": [],
-            "risk_hints": [],
-            "agent_context_policy": {"policy": "retrieve_not_dump", "authority": {}, "surfaces": []},
-            "warnings": [],
-        },
-    )
-
-    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
-
-    assert result["success"] is True
-    assert len(fake_transport.events) == 1
-    event = fake_transport.events[0]
-    assert event["chat_id"] == "chat_real_ui_surface"
-    assert event["tool_name"] == "AppIntelligenceOverviewCard"
-    assert event["component_name"] == "AppIntelligenceOverviewCard"
-    assert event["display_type"] == "artifact"
-    assert event["awaiting_response"] is False
-    assert event["agent_name"] == "ExistingAppDiscovery"
-    assert event["payload"]["workflow_name"] == "ExistingAppDiscovery"
-    assert event["payload"]["interaction_type"] == "ui_surface"
-    assert event["payload"]["component_type"] == "AppIntelligenceOverviewCard"
-    assert event["payload"]["workflow_primitive"] == "document_preview"
-    assert event["payload"]["ui_realization"] == "generated_component"
-
-
-def test_app_intelligence_inline_brief_uses_real_workflow_ui_surface(monkeypatch) -> None:
-    module = _load_module(
-        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
-        "tests.emit_app_intelligence_inline_transport",
-    )
-
-    from mozaiksai.core.transport import simple_transport as transport_mod
-
-    class _FakeTransport:
-        def __init__(self) -> None:
-            self.events = []
-
-        async def send_tool_call_event(
-            self,
-            *,
-            event_id,
-            chat_id,
-            tool_name,
-            component_name,
-            display_type,
-            payload,
-            awaiting_response=True,
-            agent_name=None,
-        ):
-            self.events.append(
-                {
-                    "event_id": event_id,
-                    "chat_id": chat_id,
-                    "tool_name": tool_name,
-                    "component_name": component_name,
-                    "display_type": display_type,
-                    "payload": payload,
-                    "awaiting_response": awaiting_response,
-                    "agent_name": agent_name,
-                }
-            )
-
-    fake_transport = _FakeTransport()
-
-    async def _get_instance():
-        return fake_transport
-
-    monkeypatch.setattr(transport_mod.SimpleTransport, "get_instance", staticmethod(_get_instance))
-
-    context = _Context(
-        chat_id="chat_inline_ui_surface",
-        app_id="app_1",
-        preload_status="ready",
-        github_repo="acme/app",
-        repo_summary={"repo_name": "acme/app", "source": "github_repo_scan"},
-        app_intelligence_catalog={
-            "present": True,
-            "snapshot_id": "app_intelligence_1",
-            "coverage": {"file_count": 8, "symbol_count": 21, "node_count": 13, "edge_count": 34},
-            "architecture": {"module_roots": [], "service_roots": [], "ui_surfaces": [], "workflow_roots": []},
-            "capabilities": [],
-            "integration_surfaces": [],
-            "data_surfaces": [],
-            "risk_hints": [],
-            "agent_context_policy": {"policy": "retrieve_not_dump", "authority": {}, "surfaces": []},
-            "warnings": [],
-        },
-    )
-
-    result = asyncio.run(module.emit_app_intelligence_inline_brief(context_variables=context))
-
-    assert result["success"] is True
-    assert len(fake_transport.events) == 1
-    event = fake_transport.events[0]
-    assert event["chat_id"] == "chat_inline_ui_surface"
-    assert event["tool_name"] == "AppIntelligenceInlineBrief"
-    assert event["component_name"] == "AppIntelligenceInlineBrief"
-    assert event["display_type"] == "inline"
-    assert event["awaiting_response"] is False
-    assert event["agent_name"] == "App Intelligence"
-    assert event["payload"]["workflow_name"] == "ExistingAppDiscovery"
-    assert event["payload"]["interaction_type"] == "ui_surface"
-    assert event["payload"]["component_type"] == "AppIntelligenceInlineBrief"
-    assert event["payload"]["workflow_primitive"] == "document_preview"
-    assert event["payload"]["ui_realization"] == "generated_component"
 
 
 def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch) -> None:
@@ -562,7 +342,21 @@ def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch
     assert event["agent"] == "App Intelligence"
     assert event["status"] == "working"
     assert event["progress_percent"] == 25
+    assert event["display_variant"] == "app_intelligence_progress"
+    assert event["component_type"] == "AppIntelligenceProgressCard"
+    assert event["activity_display_variant"] == "app_intelligence_progress"
+    assert event["activity_component_type"] == "AppIntelligenceProgressCard"
     assert "Obtaining app context" in event["message"]
+    assert event["metadata"]["display_variant"] == "app_intelligence_progress"
+    assert event["metadata"]["component_type"] == "AppIntelligenceProgressCard"
+    assert event["metadata"]["activity_display_variant"] == "app_intelligence_progress"
+    assert event["metadata"]["activity_component_type"] == "AppIntelligenceProgressCard"
+    assert event["metadata"]["progress_stage"] == "collecting_evidence"
+    assert event["metadata"]["progress_status"] == "indexing"
+    assert event["metadata"]["progress"]["stage"] == "collecting_evidence"
+    assert event["metadata"]["app_intelligence_progress"]["stage"] == "collecting_evidence"
+    assert event["metadata"]["progress_details"] == {}
+    assert event["metadata"]["progress_warnings"] == []
 
     module._set_app_intelligence_progress(context, "ready")
     result = asyncio.run(module._emit_app_intelligence_activity(context))
@@ -589,18 +383,115 @@ def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch
 
 def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     source = _read_text("chat-ui/src/pages/ChatPage.js")
+    chat_message = _read_text("chat-ui/src/components/chat/ChatMessage.jsx")
+    chat_interface = _read_text("chat-ui/src/components/chat/ChatInterface.jsx")
+    activity_renderer = _read_text("chat-ui/src/components/chat/ActivityRenderer.jsx")
+    activity_helper = _read_text("chat-ui/src/components/chat/activityArtifacts.js")
+    existing_app_ui_index = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
 
     assert "!data.type.startsWith('ui.')" in source
-    assert "activityCompleteStatuses" in source
-    assert "progress_percent: data.progress_percent" in source
-    assert "const userVisibleToolProgress = (" in source
-    assert "tool === 'App Intelligence'" in source
+    assert "buildActivityMessageFromEvent(data, currentWorkflowName)" in source
+    assert "shouldShowToolProgress(data)" in source
+    assert "buildRestoredActivityMessage" in source
+    assert "buildComposerArtifactContext" in source
+    assert "const artifactContextPayload = buildComposerArtifactContext" in source
+    assert "artifactContextPayload ? { artifact_context: artifactContextPayload } : null" in source
+    assert "const scopedStoredChatId = !queryFreshStart && !askCarrierMode" in source
+    assert "(!queryMode && conversationMode === 'ask')" in source
+    assert "rememberWorkflowChatSession(candidateChatId, resolvedCandidateWorkflow)" in source
+    assert "rememberWorkflowChatSession(metaChatId, metaWorkflowName)" in source
+    assert "rememberWorkflowChatSession(currentChatId, workflowName)" in source
+    assert "snapshotMatchesChat" in _read_text("chat-ui/src/hooks/useChatStartupEffects.js")
+    assert "ExistingAppDiscovery" not in source
+    assert "ValueEngine" not in source
+    assert "DesignDocs" not in source
+    assert "AppGenerator" not in source
+    assert "AppIntelligence" not in source
+    assert "App Intelligence" not in source
+    assert "app_intelligence" not in source
+
+    composer_context_helper = activity_helper[
+        activity_helper.index("export function buildComposerArtifactContext"):
+        activity_helper.index("// Extracted hooks for gradual migration")
+        if "// Extracted hooks for gradual migration" in activity_helper
+        else len(activity_helper)
+    ]
+    assert "app_intelligence_catalog:" not in composer_context_helper
+    assert "app_intelligence_catalog," not in composer_context_helper
+    assert "suggested_adjustments:" not in composer_context_helper
+    assert "context_graph_pack:" not in composer_context_helper
+    assert "source_context_catalog:" not in composer_context_helper
+    assert "file_contents" not in composer_context_helper
+    assert "source_chunks" not in composer_context_helper
+    assert "graph_relationships" not in composer_context_helper
+    assert "suggested_adjustments_count" in composer_context_helper
+    assert "artifact_version_ids" in composer_context_helper
+    assert "/api/chats/meta/${encodedAppId}/${encodedWorkflow}/${encodedChatId}" in source
+    assert "cachedCurrent?.tool_name || cachedCurrent?.toolCall?.tool_name" in source
+    assert "cached?.payload || cachedToolCall.payload" in source
+    assert "cached.component_type || cachedToolCall.component_type || cachedPayload.component_type" in source
+    assert "setCurrentArtifactMessages((prev) =>" in source
+    assert "getStoredArtifactPanelOpen(targetChatId) !== false" in source
+    assert "setLayoutMode('split')" in source
+    assert "cacheServerLastArtifact(data.last_artifact, {" in source
+    assert "chatId: metaChatId" in source
+    assert "cacheServerLastArtifact(metaData.last_artifact, {" in source
+    assert "cacheServerLastArtifact(meta.last_artifact, {" in source
+    assert "handleMissingBackendArtifact(metaChatId, metaWorkflowName)" in source
+    assert "restoredActivityArtifactRef.current" in source
+    assert "restored_from_last_artifact" in activity_helper
+    assert "const userVisibleToolProgress = shouldShowToolProgress(data)" in source
+    assert "agentName: activityAgent" in activity_helper
+    assert "agentName: tool" in source
+    assert "shouldShowToolProgress(data)" in source
+    assert "ActivityRenderer" in chat_message
+    assert "resolveActivityComponent" in chat_message
+    assert "AppIntelligenceProgressCard" not in chat_message
+    assert "app_intelligence_indexing" not in chat_message
+    assert "ExistingAppDiscovery" not in chat_message
+    assert "AppIntelligenceProgressCard" in existing_app_ui_index
+    assert "app_intelligence_progress" in existing_app_ui_index
+    assert "getComponent(candidate)" in activity_renderer
+    assert "workflowName && componentType ? `${workflowName}:${componentType}`" in activity_renderer
+    assert "metadata={chat.metadata}" in chat_interface
+
+    controller_source = _read_text("chat-ui/src/hooks/useConversationModeController.js")
+    assert "restoreStoredArtifactForChat," in controller_source
+    assert "restoreStoredArtifactForChat(" in controller_source
+    assert "snapshotChatId || currentChatId" in controller_source
+    assert "snapshotWorkflowName || currentWorkflowName" in controller_source
+
+
+def test_app_intelligence_progress_card_is_stage_based_and_persistent() -> None:
+    source = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceProgressCard.jsx")
+
+    assert "Understanding your codebase" in source
+    assert "if (isReady)" in source
+    assert "Codebase context is ready" in source
+    assert "Completed" in source
+    assert "Mozaiks finished reading the app. The discovery agent can use this context now." in source
+    assert "Safe indexing notes are available in the overview." in source
+    assert "dedupeWarnings" in source
+    assert "Indexing notes" in source
+    assert 'aria-live="polite"' in source
+    assert "Connect to codebase" in source
+    assert "Read app signals" in source
+    assert "Choose safe files" in source
+    assert "Load source files" in source
+    assert "Parse code structure" in source
+    assert "Build relationship graph" in source
+    assert "Prepare agent brief" in source
+    assert "The agent has not started editing files." in source
+    assert "repo_access_required" in source
+    assert "Needs attention" in source
 
 
 def test_workflow_component_registration_is_hmr_safe() -> None:
     source = _read_text("chat-ui/src/@chat-workflows/index.js")
+    app_source = _read_text("chat-ui/src/app/MozaiksApp.jsx")
 
     assert "override: true" in source
+    assert "return initializeWorkflows(registerComponent)" in app_source
 
 
 def test_existing_app_preload_mutates_an_empty_context_container() -> None:
@@ -724,13 +615,12 @@ def test_brownfield_path_selector_routes_to_downstream_sequences() -> None:
 
     options = {opt["id"]: opt for opt in selector["options"]}
 
-    # Light path option keeps its user-choice id but routes to overlay generation.
-    assert options["light_integration"]["route_to"] == "AgentGenerator"
+    # Both options enter ValueEngine first; the selected path scopes downstream generation.
+    assert options["light_integration"]["route_to"] == "ValueEngine"
     assert options["light_integration"]["sequence"] == "brownfield_overlay_generation"
     assert options["light_integration"]["context_variables"]["brownfield_build_path"] == "light_integration"
 
-    # Full path option keeps its user-choice id but routes to module generation.
-    assert options["full_migration"]["route_to"] == "DesignDocs"
+    assert options["full_migration"]["route_to"] == "ValueEngine"
     assert options["full_migration"]["sequence"] == "brownfield_module_generation"
     assert options["full_migration"]["context_variables"]["brownfield_build_path"] == "full_migration"
 
@@ -739,26 +629,26 @@ def test_brownfield_path_selector_routes_to_downstream_sequences() -> None:
     assert legacy_light_sequence not in sequence_map
     assert legacy_full_sequence not in sequence_map
 
+    expected_downstream = [
+        "ValueEngine",
+        "ThemeCapture",
+        "DesignDocs",
+        "SubscriptionContractDesigner",
+        "AgentGenerator",
+        "AppGenerator",
+    ]
+
     # brownfield_overlay_generation sequence
     light = sequence_map["brownfield_overlay_generation"]
-    light_workflows = [s.get("workflows", [s.get("transition")]) for s in light["steps"]]
-    assert ["AgentGenerator"] in light_workflows
-    assert ["AppGenerator"] in light_workflows
+    light_workflow_names = [s["workflows"][0] for s in light["steps"] if "workflows" in s]
+    assert light_workflow_names == expected_downstream
     assert any(s.get("transition") == "app_review" for s in light["steps"])
-    # DesignDocs should NOT be in the light path
-    assert not any("DesignDocs" in s.get("workflows", []) for s in light["steps"])
 
     # brownfield_module_generation sequence
     full = sequence_map["brownfield_module_generation"]
-    full_workflow_steps = [s.get("workflows", []) for s in full["steps"] if "workflows" in s]
-    assert ["DesignDocs"] in full_workflow_steps
-    assert ["AgentGenerator"] in full_workflow_steps
-    assert ["AppGenerator"] in full_workflow_steps
-    assert any(s.get("transition") == "app_review" for s in full["steps"])
-    # DesignDocs must come before AgentGenerator
     full_workflow_names = [s["workflows"][0] for s in full["steps"] if "workflows" in s]
-    assert full_workflow_names.index("DesignDocs") < full_workflow_names.index("AgentGenerator")
-    assert full_workflow_names.index("AgentGenerator") < full_workflow_names.index("AppGenerator")
+    assert full_workflow_names == expected_downstream
+    assert any(s.get("transition") == "app_review" for s in full["steps"])
 
     # BrownfieldPathSelector must be registered in ui/index.js
     index_text = _read_text("factory_app/workflows/extended_orchestration/ui/index.js")
@@ -1033,6 +923,79 @@ def test_existing_app_github_repo_identifier_accepts_urls_and_owner_repo() -> No
         == "BlocUnited-LLC/mozaiks-app"
     )
     assert module._normalize_github_repo_identifier("not-a-repo") is None
+
+
+def test_existing_app_github_repo_scan_returns_access_recovery_for_private_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_github_access_recovery",
+    )
+
+    class _FakeResponse:
+        status_code = 404
+
+        def json(self) -> dict:
+            return {"message": "Not Found"}
+
+    async def _fake_github_request(url: str, token: str | None, **kwargs):
+        assert url.endswith("/repos/BlocUnited-LLC/mozaiks-app")
+        assert token is None
+        return _FakeResponse()
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(module, "_github_request", _fake_github_request)
+
+    result = asyncio.run(module._scan_github_repo("https://github.com/BlocUnited-LLC/mozaiks-app", None))
+
+    assert result["success"] is False
+    assert result["source"] == "github_repo_scan"
+    assert result["github_repo"] == "BlocUnited-LLC/mozaiks-app"
+    assert result["repo_access_recovery"]["schema_version"] == "mozaiks.repo_access_recovery.v1"
+    assert result["repo_access_recovery"]["code"] == "github_repo_access_required"
+    assert result["repo_access_recovery"]["http_status"] == 404
+    assert result["repo_access_recovery"]["auth_present"] is False
+    assert result["repo_access_recovery"]["recovery_actions"][0]["id"] == "connect_github"
+
+
+def test_existing_app_github_context_graph_sets_access_recovery_on_lookup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_github_context_graph_access_recovery",
+    )
+
+    class _FakeResponse:
+        status_code = 404
+
+        def json(self) -> dict:
+            return {"message": "Not Found"}
+
+    async def _fake_github_request(url: str, token: str | None, **kwargs):
+        assert url.endswith("/repos/BlocUnited-LLC/mozaiks-app")
+        assert token is None
+        return _FakeResponse()
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(module, "_github_request", _fake_github_request)
+
+    result = asyncio.run(
+        module._collect_github_context_graph_file_map(
+            [("", "https://github.com/BlocUnited-LLC/mozaiks-app")],
+            github_ref=None,
+            github_token=None,
+        )
+    )
+
+    assert result.file_map == {}
+    assert result.health["access_issues"][0]["code"] == "github_repo_access_required"
+    assert result.health["access_issues"][0]["github_repo"] == "BlocUnited-LLC/mozaiks-app"
+    assert result.health["skipped"]["github_repo_lookup_failed"] == 1
+    assert result.warnings == ["github_repo_lookup_failed:BlocUnited-LLC/mozaiks-app:404"]
 
 
 def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
@@ -1316,5 +1279,29 @@ def test_existing_app_docs_describe_workspace_app_preset() -> None:
     assert "MOZAIKS_APP_WORKSPACE_PATH" in preload_tool
     assert "mozaiks-app" not in preload_tool
     assert "ThemeCapture" in preload_tool
+
+
+def test_brownfield_path_selector_explains_light_vs_migration_choice() -> None:
+    selector_ui = _read_text(
+        "factory_app/workflows/extended_orchestration/ui/transitions/BrownfieldPathSelector.js"
+    )
+    agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
+    app_context_doc = _read_text("docs/architecture/foundations/app-context-and-brownfield-adoption.md")
+
+    assert "Add AI Workflows" in selector_ui
+    assert "Best first move for most existing apps" in selector_ui
+    assert "Your app stays the source of truth" in selector_ui
+    assert "Build App Features" in selector_ui
+    assert "Advanced build" in selector_ui
+    assert "Existing code" in selector_ui
+    assert "AI workflows first" in selector_ui
+
+    assert '"Add AI Workflows" maps to `light_integration`' in agents
+    assert '"Build App Features" maps to `full_migration`' in agents
+    assert "the user can add AI workflows first and build app features later" in agents
+
+    assert "| Add AI Workflows | `light_integration` |" in app_context_doc
+    assert "| Build App Features | `full_migration` |" in app_context_doc
+    assert "not an automatic whole-repo rewrite" in app_context_doc
 
 

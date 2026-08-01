@@ -3,8 +3,9 @@ max_turns: 25
 human_in_the_loop: true
 workflow_startup_mode: UserDriven
 orchestration_pattern: ag2_network
-initial_message: 'ValueInterviewAgent: guide the user to a concrete app direction. Start the interview by asking the user one open question about what they want to build.
+initial_message: 'ValueInterviewAgent: guide the user to a concrete app direction. For greenfield apps, start the interview by asking the user one open question about what they want to build.
   Do not suggest an idea unprompted. If the user gives a recognizable shorthand such as "Polymarket for AI startups",
-  infer the likely niche and present a working direction with 1-2 angles instead of asking generic discovery questions.'
+  infer the likely niche and present a working direction with 1-2 angles instead of asking generic discovery questions.
+  For existing-app enhancement runs, use the provided App Intelligence and selected enhancement path; do not ask for the repo again, and emit NEXT once the enhancement scope is clear.'
 initial_agent: ValueInterviewAgent
 

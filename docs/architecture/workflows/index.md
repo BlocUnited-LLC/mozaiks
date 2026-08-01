@@ -21,6 +21,7 @@ handoffs, workflow routing, or session/refinement behavior.
 | [Domain-Agnostic Build Factory](domain-agnostic-build-factory.md) | Dev-pack architecture for shared harnesses and domain-specific workflow contracts |
 | [Structured Output Extraction](structured-output-extraction-contract.md) | Strict structured-output extraction contract |
 | [Refinement Engine](refinement-engine.md) | Refinement routing, classification, and scoped repair |
+| [End-to-End App Editing Loop](e2e-app-editing-loop.md) | Post-generation app editing flow across refinement, staging, review, promotion, and App Intelligence |
 | [Session Router](session-router.md) | Session routing and resume contract |
 | [Refinement Harness Architecture](refinement-harness-architecture.md) | Builder harness ownership and contracts |
 | [Proposal-Only Workflow Pattern](proposal-only-workflow-pattern.md) | HITL planning/review workflow archetype, blocked/deferred phases, output invariants |

@@ -43,6 +43,10 @@ agents:
       **Preloaded Frontend Evidence** may exist from ExistingAppDiscovery:
       - `frontend_repo_summary` — analysis of the frontend codebase
       - `app_name`, `app_description`, `tech_stack`
+      - `app_intelligence_summary`, `app_intelligence_catalog`, and `source_context_catalog`
+        — prompt-safe source-backed context, not raw source content
+      - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and
+        `brownfield_registration` — existing-app enhancement scope and protected boundaries
 
       If any of these are populated, use them as your starting point. Do not re-ask
       questions the user has already answered upstream.
@@ -84,16 +88,19 @@ agents:
          - `border_style`: subtle, prominent, accent-colored
          - `shadow_style`: glow, drop-shadow, flat
          - `corner_radius`: sharp, small, medium, large
-        - `nav_layout`: sidebar, top-bar, both, none
-        - `density`: compact, comfortable, spacious
-        - `page_width`: tight, standard, or wide
+         - `nav_layout`: sidebar, top-bar, both, none
+         - `density`: compact, comfortable, spacious
+         - `page_width`: tight, standard, or wide
          - `brand_name`: the app's display name
 
       5. Important boundary:
          - You are capturing brand direction for Mozaiks-owned surfaces.
-        - Treat `parent_shell_config` and discovered host chrome as layout evidence only; do NOT promise those content objects will be copied into shell.json or theme_config.json.
-        - Do NOT promise pixel-perfect recreation of a host app's bespoke header, footer, or layout.
-        - Treat host chrome as inspiration for semantic shell/page/chat tokens, not something you automatically clone into shell.json.
+         - If `app_type` is `brownfield_app` or `brownfield_build_path` is present,
+           match the connected app's visual language for Mozaiks-owned additions.
+           Do not propose redesigning, replacing, or rewriting protected existing-app surfaces.
+         - Treat `parent_shell_config` and discovered host chrome as layout evidence only; do NOT promise those content objects will be copied into shell.json or theme_config.json.
+         - Do NOT promise pixel-perfect recreation of a host app's bespoke header, footer, or layout.
+         - Treat host chrome as inspiration for semantic shell/page/chat tokens, not something you automatically clone into shell.json.
 
       6. Emit NEXT when you have enough to produce a complete theme config.
   - id: output_format

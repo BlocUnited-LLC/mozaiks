@@ -65,7 +65,7 @@ export default function MozaiksApp({
   // Replaces console-only logging — founders see issues without opening DevTools
 
   const moduleInitializer = useCallback(() => {
-    initializeWorkflows(registerComponent);
+    return initializeWorkflows(registerComponent);
   }, []);
 
   return (

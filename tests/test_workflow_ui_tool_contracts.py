@@ -520,7 +520,7 @@ def test_core_ui_index_exports_shipped_workflow_components() -> None:
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
     files = [
-        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceInlineBrief.jsx",
+        "factory_app/workflows/ExistingAppDiscovery/ui/RepoAccessRecoveryCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
@@ -649,6 +649,20 @@ def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:
     assert "`onRowClick`" not in content
     assert "`submitLabel`" not in content
     assert "`renderItem`" not in content
+
+
+def test_agent_generator_artifact_prompts_prioritize_user_facing_view_models() -> None:
+    content = _read("factory_app/workflows/AgentGenerator/agents.yaml")
+
+    assert "Artifact-mode UI must lead with user-facing meaning" in content
+    assert "Map raw tool payloads into a presentation view model" in content
+    assert "Default artifact views should answer what the user should understand" in content
+    assert "Hide ids, file paths, language counts, raw metrics, scanner warnings" in content
+    assert "Avoid status/readiness pills, priority badges, and repeated per-card CTAs" in content
+    assert "use at most 2-3 plain tabs with user-facing labels" in content
+    assert "dedicated response-required artifact" in content
+    assert "diagnostics footers" in content
+    assert "consumable in about 30 seconds" in content
 
 
 def test_form_primitive_uses_static_tailwind_grid_column_classes() -> None:

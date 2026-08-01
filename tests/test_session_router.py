@@ -1051,7 +1051,7 @@ async def test_resolve_resume_prefers_session_state_chat(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_resolve_resume_does_not_substitute_when_requested_chat_missing(monkeypatch):
+async def test_resolve_resume_substitutes_latest_workflow_when_requested_chat_missing(monkeypatch):
     persistence = _FakePersistence()
     sessions = await persistence._coll()
     sessions._docs["chat_agent_1"] = {
@@ -1079,6 +1079,35 @@ async def test_resolve_resume_does_not_substitute_when_requested_chat_missing(mo
         workflow_id="AgentGenerator",
         chat_id="chat_agent_1",
     )
+
+    resolution = await router.resolve_resume(
+        app_id="app_1",
+        user_id="user_1",
+        requested_workflow_id="AgentGenerator",
+        requested_chat_id="fresh_chat_id",
+    )
+
+    assert resolution["found"] is True
+    assert resolution["resolved_from"] == "latest_chat_after_requested_chat_missing"
+    assert resolution["chat_id"] == "chat_agent_1"
+    assert resolution["requested_chat_id"] == "fresh_chat_id"
+    assert resolution["session_state"]["current_chat_id"] == "chat_agent_1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_resume_keeps_requested_missing_chat_when_no_prior_run(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "AgentGenerator"}],
+            "transitions": [],
+            "workflow_sequences": [],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
 
     resolution = await router.resolve_resume(
         app_id="app_1",
