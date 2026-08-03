@@ -162,8 +162,13 @@ def _warn_undeclared_entitlement_gates(
     almost always a misconfiguration rather than intentional behaviour.
     """
     declared_capabilities: set[str] = set()
+    # v1: flat top-level plans
     for plan in subscriptions_config.plans:
         declared_capabilities.update(plan.capabilities or [])
+    # v2: plans nested under products
+    for product in (subscriptions_config.products or []):
+        for plan in product.plans:
+            declared_capabilities.update(plan.capabilities or [])
 
     for loaded_module in modules:
         for action_id, capability_id in loaded_module.action_entitlement_map.items():
