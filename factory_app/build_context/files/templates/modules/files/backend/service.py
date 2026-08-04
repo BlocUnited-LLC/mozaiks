@@ -47,7 +47,7 @@ class FilesService:
             return {"success": False, "error": "storage_url is required"}
 
         created_by = str(getattr(ctx, "user_id", None) or "anonymous").strip() or "anonymous"
-        app_id = getattr(ctx, "app_id", None)
+        app_id = str(getattr(ctx, "app_id", None) or "")
 
         record = build_file_record(
             app_id=app_id,
