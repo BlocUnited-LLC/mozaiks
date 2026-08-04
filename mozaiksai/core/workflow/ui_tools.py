@@ -485,6 +485,62 @@ async def emit_ui_surface(
 
     return event_id
 
+async def emit_workflow_activity(
+    *,
+    workflow_name: str,
+    chat_id: str | None,
+    activity_type: str,
+    agent_name: str | None = None,
+    status: str = "in_progress",
+    message: str = "",
+    progress_percent: float | int | None = None,
+    component_type: str = "WorkflowActivity",
+    display_variant: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Emit a one-way workflow activity surface event to the UI.
+
+    Convenience wrapper over emit_ui_surface for structured activity/progress
+    events. Returns {"success": True} on success or {"success": False, ...}
+    on failure so callers can branch without catching exceptions.
+    """
+    if not chat_id:
+        return {"success": False, "reason": "missing_chat_id"}
+
+    payload: dict[str, Any] = {
+        "activity_type": activity_type,
+        "status": status,
+        "message": message,
+        "component_type": component_type,
+    }
+    if progress_percent is not None:
+        payload["progress_percent"] = float(progress_percent)
+    if display_variant:
+        payload["display_variant"] = display_variant
+    if metadata:
+        payload["metadata"] = metadata
+    if agent_name:
+        payload["agent_name"] = agent_name
+
+    try:
+        await emit_ui_surface(
+            tool_id=activity_type,
+            payload=payload,
+            chat_id=chat_id,
+            workflow_name=workflow_name,
+            display="inline",
+            agent_name=agent_name,
+        )
+        return {"success": True}
+    except Exception as exc:
+        logger.warning(
+            "[emit_workflow_activity] Failed to emit %s activity: %s",
+            activity_type,
+            exc,
+        )
+        return {"success": False, "error": str(exc)}
+
+
 async def emit_tool_progress_event(
     tool_name: str,
     progress_percent: float,
@@ -620,6 +676,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     
 __all__ = [
     "emit_ui_surface",
+    "emit_workflow_activity",
     "use_ui_tool",
     "handle_tool_call_for_ui_interaction",
     "emit_tool_progress_event",
