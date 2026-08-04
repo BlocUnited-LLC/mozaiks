@@ -19,7 +19,6 @@ from mozaiksai.core.app_context.store import (
 )
 from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus, ArtifactValidationStatus
 from mozaiksai.core.artifacts.store import get_artifact_store
-from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 logger = logging.getLogger(__name__)
 
@@ -154,59 +153,6 @@ async def save_existing_app_artifacts(
 
     adoption_level = augmentation_plan.get("adoption_level", "embed")
     migration_complexity = augmentation_plan.get("migration_complexity")
-
-    # ------------------------------------------------------------------
-    # UI payload — includes new detection signals for UI surface display
-    # ------------------------------------------------------------------
-    ui_payload = {
-        "app_name": product_spec.get("app_name", "Unknown App"),
-        "app_description": product_spec.get("app_description", ""),
-        "tech_stack": product_spec.get("tech_stack", ""),
-        "brand_theme_summary": product_spec.get("brand_theme_summary", ""),
-        "brand_theme_evidence": product_spec.get("brand_theme_evidence") or {},
-        "storage_pattern": product_spec.get("storage_pattern", "unknown"),
-        "storage_migration_required": product_spec.get("storage_migration_required", False),
-        "detected_connectors": product_spec.get("detected_connectors") or [],
-        "mozaiks_vocabulary_detected": product_spec.get("mozaiks_vocabulary_detected", False),
-        "mozaiks_authored_app": product_spec.get("mozaiks_authored_app", False),
-        "adoption_level": adoption_level,
-        "migration_complexity": migration_complexity,
-        "adoption_rationale": augmentation_plan.get("adoption_rationale", ""),
-        "new_adapters_required": augmentation_plan.get("new_adapters_required") or [],
-        "theme_adaptation_strategy": augmentation_plan.get("theme_adaptation_strategy", ""),
-        "embed_theme_ready": augmentation_plan.get("embed_theme_ready", False),
-        "analysis_summary": analysis_summary,
-        "discovery_brief": analysis_summary or data.get("discovery_brief", ""),
-        "capability_count": len(capability_specs),
-        "ai_accessible_count": len(ai_caps),
-        "service_surface_count": len(product_spec.get("service_surfaces") or []),
-        "route_surface_count": len(product_spec.get("route_surfaces") or []),
-        "adoption_plan_available": bool(augmentation_plan),
-        "capabilities": [
-            {
-                "name": cap.get("label", cap.get("capability_id", "")),
-                "agent_ready": cap.get("agent_ready", False),
-                "confidence": cap.get("confidence", "unverified"),
-                "delivery_surface": cap.get("delivery_surface", ""),
-                "migration_priority": cap.get("migration_priority"),
-                "connector_requirements": cap.get("connector_requirements") or [],
-            }
-            for cap in capability_specs
-        ],
-        "unresolved_questions": [
-            {
-                "question": item.get("question", ""),
-                "priority": item.get("priority", "medium"),
-            }
-            for item in data.get("unresolved_questions") or []
-        ],
-        "auth_model": product_spec.get("auth_model", ""),
-        "auth_delegation_model": augmentation_plan.get("auth_delegation_model", ""),
-        "ui_surface_preference": augmentation_plan.get("ui_surface_preference", ""),
-        "initial_workflows": augmentation_plan.get("initial_workflows") or [],
-        "ecosystem_bindings": augmentation_plan.get("ecosystem_bindings") or [],
-        "artifact_version": data.get("artifact_version", "1.0"),
-    }
 
     # ------------------------------------------------------------------
     # Persist context variables

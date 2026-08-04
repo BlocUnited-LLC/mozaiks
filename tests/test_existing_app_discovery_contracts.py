@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -258,6 +257,15 @@ def test_existing_app_discovery_before_chat_tools_registered() -> None:
     assert "AppIntelligenceInlineBrief" not in ui_index
     assert "AppIntelligenceOverviewCard" in ui_index
 
+
+def test_existing_app_discovery_activity_uses_canonical_runtime_helper() -> None:
+    source = _read_text("factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py")
+
+    assert "from mozaiksai.core.workflow.ui_tools import emit_workflow_activity" in source
+    assert "emit_workflow_activity(" in source
+    assert '"kind": "activity"' not in source
+    assert "send_event_to_ui(event, chat_id)" not in source
+
     assert "get_preloaded_app_intelligence" in manifest_text
     assert "search_preloaded_source_context" in manifest_text
     assert "read_preloaded_source_file" in manifest_text
@@ -386,6 +394,11 @@ def test_app_intelligence_overview_card_emitter_surfaces_full_artifact_payload()
     assert payload["current_app_context_version_id"] == "acv_abc123"
     assert payload["artifact_version_ids"]["app_context_version"] == "av_ctx_1"
     assert payload["artifact_version_ids"]["app_intelligence_snapshot"] == "av_intel_1"
+    assert "activity_type" not in payload
+    assert "activity_display_variant" not in payload
+    assert "activity_component_type" not in payload
+    assert "display_variant" not in payload
+    assert "component_type" not in payload
     # Overview card includes full catalog
     assert "app_intelligence_catalog" in payload
     assert payload["app_intelligence_catalog"]["coverage"]["file_count"] == 200
@@ -481,9 +494,9 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     source = _read_text("chat-ui/src/pages/ChatPage.js")
     chat_message = _read_text("chat-ui/src/components/chat/ChatMessage.jsx")
     chat_interface = _read_text("chat-ui/src/components/chat/ChatInterface.jsx")
-    activity_renderer = _read_text("chat-ui/src/components/chat/ActivityRenderer.jsx")
     activity_helper = _read_text("chat-ui/src/components/chat/activityArtifacts.js")
     existing_app_ui_index = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
+    core_ui_index = _read_text("chat-ui/src/core/ui/index.js")
 
     assert "!data.type.startsWith('ui.')" in source
     assert "buildActivityMessageFromEvent(data, currentWorkflowName)" in source
@@ -536,19 +549,22 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "handleMissingBackendArtifact(metaChatId, metaWorkflowName)" in source
     assert "restoredActivityArtifactRef.current" in source
     assert "restored_from_last_artifact" in activity_helper
+    assert "toolCall: inlineToolCall" in activity_helper
+    assert "display: INLINE_DISPLAY" in activity_helper
+    assert "interaction_type: 'ui_surface'" in activity_helper
+    assert "awaiting_response: false" in activity_helper
+    assert "SystemActivityCard" in core_ui_index
     assert "const userVisibleToolProgress = shouldShowToolProgress(data)" in source
     assert "agentName: activityAgent" in activity_helper
     assert "agentName: tool" in source
     assert "shouldShowToolProgress(data)" in source
-    assert "ActivityRenderer" in chat_message
-    assert "resolveActivityComponent" in chat_message
+    assert "ActivityRenderer" not in chat_message
+    assert "resolveActivityComponent" not in chat_message
     assert "AppIntelligenceProgressCard" not in chat_message
     assert "app_intelligence_indexing" not in chat_message
     assert "ExistingAppDiscovery" not in chat_message
     assert "AppIntelligenceProgressCard" in existing_app_ui_index
     assert "app_intelligence_progress" in existing_app_ui_index
-    assert "getComponent(candidate)" in activity_renderer
-    assert "workflowName && componentType ? `${workflowName}:${componentType}`" in activity_renderer
     assert "metadata={chat.metadata}" in chat_interface
     assert "artifactWorkspaceSnapshotRef" in source
     assert "workflowArtifactSnapshotRef" not in source
@@ -562,7 +578,7 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "snapshotChatId || currentChatId" in controller_source
     assert "snapshotWorkflowName || currentWorkflowName" in controller_source
     assert "artifactWorkspaceSnapshotRef" in controller_source
-    assert "messages: [...currentArtifactMessages]" in controller_source
+    assert "filterArtifactPanelMessages(currentArtifactMessages)" in controller_source
     assert "artifactWorkspaceSnapshotRef" in startup_source
     assert "readStoredArtifactWorkspaceSnapshot(restoreChatId)" in startup_source
     assert "workflowArtifactSnapshotRef" not in controller_source

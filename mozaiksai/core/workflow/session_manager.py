@@ -10,7 +10,6 @@ from typing import Any
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
-
 WORKFLOW_SESSIONS_COLLECTION = "WorkflowSessions"
 ARTIFACT_INSTANCES_COLLECTION = "ArtifactInstances"
 

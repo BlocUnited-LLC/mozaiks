@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mozaiksai.hosts import platform as platform_app
 from mozaiksai.core.workflow.startup_messages import (
     resolve_workflow_launch_behavior,
     should_autostart_empty_workflow,
 )
-
+from mozaiksai.hosts import platform as platform_app
 
 ROOT = Path(__file__).resolve().parents[1]
 
