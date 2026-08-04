@@ -257,15 +257,6 @@ def test_existing_app_discovery_before_chat_tools_registered() -> None:
     assert "AppIntelligenceInlineBrief" not in ui_index
     assert "AppIntelligenceOverviewCard" in ui_index
 
-
-def test_existing_app_discovery_activity_uses_canonical_runtime_helper() -> None:
-    source = _read_text("factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py")
-
-    assert "from mozaiksai.core.workflow.ui_tools import emit_workflow_activity" in source
-    assert "emit_workflow_activity(" in source
-    assert '"kind": "activity"' not in source
-    assert "send_event_to_ui(event, chat_id)" not in source
-
     assert "get_preloaded_app_intelligence" in manifest_text
     assert "search_preloaded_source_context" in manifest_text
     assert "read_preloaded_source_file" in manifest_text
@@ -275,6 +266,15 @@ def test_existing_app_discovery_activity_uses_canonical_runtime_helper() -> None
     assert "get_repo_app_intelligence" not in manifest_text
     assert "search_repo_source_context" not in manifest_text
     assert "read_repo_source_file" not in manifest_text
+
+
+def test_existing_app_discovery_activity_uses_canonical_runtime_helper() -> None:
+    source = _read_text("factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py")
+
+    assert "from mozaiksai.core.workflow.ui_tools import emit_workflow_activity" in source
+    assert "emit_workflow_activity(" in source
+    assert '"kind": "activity"' not in source
+    assert "send_event_to_ui(event, chat_id)" not in source
 
 
 def test_repo_access_recovery_emitter_surfaces_private_github_blocker() -> None:
