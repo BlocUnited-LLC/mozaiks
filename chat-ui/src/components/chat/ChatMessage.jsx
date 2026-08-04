@@ -3,8 +3,9 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import "./ChatMessage.css";
 
-function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null }) {
+function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null, metadata = null }) {
   const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : (agentNameRaw ? String(agentNameRaw) : null);
+  const messageMetadata = metadata && typeof metadata === 'object' ? metadata : {};
   // No local state needed: always show pretty structured output
   const traceItems = Array.isArray(trace) ? trace : [];
   const [traceOpen, setTraceOpen] = React.useState(false);

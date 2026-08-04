@@ -34,7 +34,7 @@ export function useChatSessionHistory({
       setGeneralChatSessions(sessions);
       return sessions;
     } catch (err) {
-      console.error('Failed to list general chats:', err);
+      console.error('❌ Failed to list general chats:', err);
       return [];
     } finally {
       setGeneralSessionsLoading(false);
@@ -52,7 +52,7 @@ export function useChatSessionHistory({
       setWorkflowSessions(sessions);
       return sessions;
     } catch (err) {
-      console.error('Failed to list workflow sessions:', err);
+      console.error('❌ Failed to list workflow sessions:', err);
       setWorkflowSessions([]);
       return [];
     } finally {
@@ -87,7 +87,7 @@ export function useChatSessionHistory({
         setMessagesWithLogging([]);
       }
     } catch (err) {
-      console.error('Failed to clear general chat sessions:', err);
+      console.error('❌ Failed to clear general chat sessions:', err);
     } finally {
       setGeneralSessionsLoading(false);
     }
@@ -111,7 +111,7 @@ export function useChatSessionHistory({
       await api.deleteGeneralChat(currentAppId, currentUserId, chatId);
       setGeneralChatSessions((prev) => (Array.isArray(prev) ? prev.filter((s) => s?.chat_id !== chatId) : []));
     } catch (err) {
-      console.error('Failed to delete general chat session:', err);
+      console.error('❌ Failed to delete general chat session:', err);
     }
   }, [api, currentAppId, currentUserId, setGeneralChatSessions]);
 
@@ -148,7 +148,7 @@ export function useChatSessionHistory({
         setCurrentArtifactMessages([]);
       }
     } catch (err) {
-      console.error('Failed to clear workflow sessions:', err);
+      console.error('❌ Failed to clear workflow sessions:', err);
     } finally {
       setWorkflowSessionsLoading(false);
     }

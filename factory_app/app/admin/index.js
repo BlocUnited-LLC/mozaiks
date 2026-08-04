@@ -25,7 +25,7 @@ const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppAccessPage      = lazy(() => import('./pages/AppAccessPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
-const AppBuildHistoryPage = lazy(() => import('./pages/AppBuildHistoryPage.jsx'))
+const AppBuildReviewPage = lazy(() => import('./pages/AppBuildReviewPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
 const AppSupportPage      = lazy(() => import('./pages/AppSupportPage.jsx'))
 const UserSupportPage     = lazy(() => import('./pages/UserSupportPage.jsx'))
@@ -101,8 +101,8 @@ export function registerAdminComponents(registerComponent) {
     description: 'Profile panel for workspace_support — shows the user\'s support ticket list and thread view. Declared by workspace_support/contracts/profile.yaml.',
   })
 
-  registerComponent('AppBuildHistoryPage', AppBuildHistoryPage, {
-    description: 'Build history surface — artifact versions with carry-forward preservation audit per revision.',
+  registerComponent('AppBuildReviewPage', AppBuildReviewPage, {
+    description: 'Build review surface — artifact versions, validation state, staged output, and review actions per revision.',
   })
 
   registerComponent('ProfilePage', ProfilePage, {

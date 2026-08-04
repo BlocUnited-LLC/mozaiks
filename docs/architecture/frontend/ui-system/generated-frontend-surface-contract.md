@@ -316,7 +316,8 @@ Rules:
   (`interaction_type=input_request`, `display=composer`)
 - inline React components are for structured workflow interaction, not default
   free-text reply
-- shared workflow components live in `chat-ui/src/core/ui/` and are mounted by `WorkflowUIRouter`
+- framework-owned shared workflow primitives live in `chat-ui/src/core/ui/` and are mounted by `WorkflowUIRouter`
+- factory-owned reusable workflow components live under `factory_app/workflows/_shared/ui/` and must be imported/re-exported by each consuming workflow's `ui/index.js`; they are not auto-registered
 - runtime-enriched workflow payloads should carry manifest-owned `workflow_primitive`, `ui_realization`, and `ui_contract`
 - shipped shared workflow components should derive their actions from `ui_contract.actions_schema`
 - workflow-local React is only for genuine customization or primitive gaps

@@ -90,12 +90,18 @@
     {
       "id": "ValueEngine",
       "description": "Concept & value decomposition",
-      "startup_mode": "UserDriven"
+      "startup_mode": "UserDriven",
+      "interaction_mode": "user_guided",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat"
     },
     {
       "id": "ThemeCapture",
       "description": "Captures visual identity and produces theme_config.json",
       "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
       "dependencies": [
         "ValueEngine"
       ]
@@ -104,6 +110,9 @@
       "id": "DesignDocs",
       "description": "Frontend, backend, database design docs",
       "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
       "dependencies": [
         "ValueEngine"
       ]
@@ -112,6 +121,9 @@
       "id": "SubscriptionContractDesigner",
       "description": "Generates provider-neutral subscription, access, and token contract artifacts",
       "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
       "dependencies": [
         "DesignDocs"
       ]
@@ -120,6 +132,9 @@
       "id": "AgentGenerator",
       "description": "Generates workflow artifacts and agent specs",
       "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
       "dependencies": [
         "DesignDocs",
         "SubscriptionContractDesigner"
@@ -129,6 +144,9 @@
       "id": "AppGenerator",
       "description": "Generates app schema and module files",
       "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
       "dependencies": [
         "DesignDocs",
         "SubscriptionContractDesigner",
@@ -139,12 +157,18 @@
     {
       "id": "ExistingAppDiscovery",
       "description": "Discovery workflow for existing-app adopters",
-      "startup_mode": "AgentDriven"
+      "startup_mode": "AgentDriven",
+      "interaction_mode": "user_guided",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat"
     },
     {
       "id": "AppReview",
       "description": "In-chat build review and promote-or-revise HITL step",
       "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
       "dependencies": [
         "AppGenerator"
       ]
@@ -233,7 +257,7 @@
     },
     {
       "id": "brownfield_app_adoption",
-      "description": "Brownfield app adoption pipeline: app path context -> repo link -> App Intelligence indexing -> discovery chat -> generation path selection.",
+      "description": "Existing app intake pipeline: app path context -> enhancement-path selection -> repo selection -> App Intelligence indexing -> discovery chat.",
       "affected_declarative_families": [
         "application_inventory",
         "ownership_boundary",
@@ -251,15 +275,15 @@
           "transition": "app_type_selector"
         },
         {
+          "transition": "brownfield_path_selector"
+        },
+        {
           "transition": "brownfield_repo_input"
         },
         {
           "workflows": [
             "ExistingAppDiscovery"
           ]
-        },
-        {
-          "transition": "brownfield_path_selector"
         }
       ]
     },
@@ -288,12 +312,38 @@
     },
     {
       "id": "brownfield_overlay_generation",
-      "description": "Brownfield overlay-generation build: generates AI workflow bundles and overlay surfaces alongside the existing app without architectural rebuild. Grounded in AdoptionPlan and AppContextVersion context.",
+      "description": "Existing app Add AI Workflows path: ValueEngine plans app-aware AI improvements, then the scoped build stack generates approved workflow and app surfaces without replacing the existing app.",
       "affected_declarative_families": [
+        "concept",
+        "build_plan",
+        "brand",
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
         "workflow_bundle",
         "app_bundle"
       ],
       "steps": [
+        {
+          "workflows": [
+            "ValueEngine"
+          ]
+        },
+        {
+          "workflows": [
+            "ThemeCapture"
+          ]
+        },
+        {
+          "workflows": [
+            "DesignDocs"
+          ]
+        },
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
         {
           "workflows": [
             "AgentGenerator"
@@ -311,8 +361,11 @@
     },
     {
       "id": "brownfield_module_generation",
-      "description": "Brownfield module-generation build: runs the full DesignDocs -> AgentGenerator -> AppGenerator pipeline grounded in AdoptionPlan ownership and impact scope.",
+      "description": "Existing app Build App Features path: ValueEngine plans approved feature expansion, then the scoped build stack generates Mozaiks-owned features and extensions without rewriting the source repository.",
       "affected_declarative_families": [
+        "concept",
+        "build_plan",
+        "brand",
         "design_docs",
         "experience_spec",
         "subscription_contract",
@@ -320,6 +373,16 @@
         "app_bundle"
       ],
       "steps": [
+        {
+          "workflows": [
+            "ValueEngine"
+          ]
+        },
+        {
+          "workflows": [
+            "ThemeCapture"
+          ]
+        },
         {
           "workflows": [
             "DesignDocs"
@@ -634,7 +697,7 @@
         },
         {
           "id": "brownfield_app",
-          "route_to": "brownfield_repo_input",
+          "route_to": "brownfield_path_selector",
           "sequence": "brownfield_app_adoption",
           "context_variables": {
             "app_type": "brownfield_app"
@@ -675,19 +738,29 @@
       "route_to": "AppReview"
     },
     {
-      "id": "brownfield_discovery_intro",
+      "id": "brownfield_path_selector",
       "transition_type": "user_choice_context",
       "ui": {
-        "component": "BrownfieldDiscoveryIntro",
+        "component": "BrownfieldPathSelector",
         "mode": "screen",
         "shell_mode": "focused"
       },
       "options": [
         {
-          "id": "start_discovery",
+          "id": "light_integration",
           "route_to": "brownfield_repo_input",
           "sequence": "brownfield_app_adoption",
-          "context_variables": {}
+          "context_variables": {
+            "brownfield_build_path": "light_integration"
+          }
+        },
+        {
+          "id": "full_migration",
+          "route_to": "brownfield_repo_input",
+          "sequence": "brownfield_app_adoption",
+          "context_variables": {
+            "brownfield_build_path": "full_migration"
+          }
         }
       ]
     },
@@ -705,33 +778,6 @@
           "route_to": "ExistingAppDiscovery",
           "sequence": "brownfield_app_adoption",
           "context_variables": {}
-        }
-      ]
-    },
-    {
-      "id": "brownfield_path_selector",
-      "transition_type": "user_choice_context",
-      "ui": {
-        "component": "BrownfieldPathSelector",
-        "mode": "screen",
-        "shell_mode": "focused"
-      },
-      "options": [
-        {
-          "id": "light_integration",
-          "route_to": "AgentGenerator",
-          "sequence": "brownfield_overlay_generation",
-          "context_variables": {
-            "brownfield_build_path": "light_integration"
-          }
-        },
-        {
-          "id": "full_migration",
-          "route_to": "DesignDocs",
-          "sequence": "brownfield_module_generation",
-          "context_variables": {
-            "brownfield_build_path": "full_migration"
-          }
         }
       ]
     },

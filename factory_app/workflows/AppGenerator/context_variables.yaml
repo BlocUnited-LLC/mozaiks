@@ -310,9 +310,12 @@ definitions:
     type: string
     description: >
       Selected brownfield build path from brownfield_path_selector. One of
-      "light_integration" (overlay-only generation via AgentGenerator +
-      AppGenerator) or "full_migration" (DesignDocs + full pipeline grounded
-      in AdoptionPlan scope). Null for greenfield builds.
+      "light_integration" (Add AI Workflows: preserve the existing app as
+      source of truth and generate app-aware AI workflows, chat surfaces, and
+      only required safe adapters around approved capabilities) or
+      "full_migration" (Build App Features: generate Mozaiks-owned modules,
+      workflows, pages, data contracts, and extended functionality for
+      explicitly approved expansion scope). Null for greenfield builds.
     source:
       type: state
       default: null
@@ -1391,7 +1394,16 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
     - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint
@@ -1435,7 +1447,16 @@ agents:
     - previous_app_bundle_ref
     - carry_forward_modules
     - llm_profile
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
     - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint

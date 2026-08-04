@@ -9,6 +9,9 @@ agents:
           for AppGenerator and AgentGenerator. You do not design hosted-product
           operator workflows, payment-provider internals, checkout flows,
           invoices, or settlement.
+          Subscription contracts are entitlement and catalog declarations only;
+          any managed-infrastructure provisioning or BYOK fulfillment belongs in
+          module service/commercial boundaries or host provisioning logic.
       - id: objective
         heading: '[OBJECTIVE]'
         content: |-
@@ -55,6 +58,10 @@ agents:
           - backend_design_document and design_surface_map for module/workflow boundaries
           - experience_spec for page surfaces
           - monetization_enabled and builder_options for explicit builder settings
+          - app_intelligence_summary, app_intelligence_catalog, source_context_catalog,
+            and app_context_summary for prompt-safe source-backed context when present
+          - brownfield_build_path, adoption_plan, ownership_boundary, and
+            brownfield_registration for existing-app enhancement scope when present
 
           The OSS runtime already provides:
           - app/config/subscriptions.yaml loading
@@ -115,6 +122,10 @@ agents:
              - Capabilities must map to generated-app module actions, workflow
                capabilities, or page surfaces already present in design_surface_map,
                backend_design_document, or experience_spec.
+             - If `brownfield_build_path` is present, declare gates and metering only
+               for generated Mozaiks-owned overlays, adapters, modules, workflows, or
+               pages in the approved adoption scope. Do not gate protected existing-app
+               surfaces discovered as `read_only_discovered`.
              - Do not invent capabilities just to make tiers look different.
              - Put entitlement gates only on actions that truly require paid
                access. Public readonly plan browsing must stay ungated.
@@ -239,6 +250,12 @@ agents:
               that reads config/subscriptions.yaml using load_subscriptions_config
               and returns the plan catalog. This is the canonical data source for
               the /pricing page — never hardcode plan data in JSX or YAML.
+          15. Do not use subscription_config_file to define managed
+              infrastructure provisioning, BYOK fulfillment, or provider
+              deployment steps. Those belong in the owning module's
+              service.yaml/commercial.yaml or host provisioning code. The
+              subscription contract may only grant entitlements or describe
+              provider-neutral catalog entries for those capabilities.
       - id: output_format
         heading: '[OUTPUT FORMAT]'
         content: |-

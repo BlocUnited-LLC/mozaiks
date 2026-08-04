@@ -429,6 +429,13 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
         )
     )
 
+    draft_review_response = TestClient(studio_app.app).get(
+        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review"
+    )
+    assert draft_review_response.status_code == 200
+    assert draft_review_response.json()["review"]["write_back_mode"] == "generated_artifact"
+    assert draft_review_response.json()["review"]["write_back_target"] is None
+
     draft_promote_response = TestClient(studio_app.app).post(
         f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote"
     )

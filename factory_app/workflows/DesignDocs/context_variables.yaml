@@ -111,6 +111,72 @@ definitions:
     source:
       type: state
       default: null
+  app_context_required:
+    type: boolean
+    description: >
+      True when this run is a refinement or existing-app route that must retain
+      a current AppContextVersion before downstream build work continues.
+    source:
+      type: state
+      default: false
+  current_app_context_version_id:
+    type: string
+    description: Durable AppContextVersion id for source-backed App Intelligence.
+    source:
+      type: state
+      default: null
+  app_context_summary:
+    type: object
+    description: >
+      Prompt-safe summary of the current AppContextVersion, including artifact
+      refs, source refs, ownership boundaries, stale status, and warnings.
+    source:
+      type: state
+      default: null
+  app_type:
+    type: string
+    description: Entry path selected at the app_type_selector gate.
+    source:
+      type: state
+      default: "greenfield_app"
+  app_intelligence_ready:
+    type: boolean
+    description: True when startup loaded an App Intelligence catalog.
+    source:
+      type: state
+      default: false
+  app_intelligence_status:
+    type: string
+    description: Startup load status for App Intelligence context.
+    source:
+      type: state
+      default: null
+  app_intelligence_summary:
+    type: string
+    description: Compact human-readable summary of indexed source coverage.
+    source:
+      type: state
+      default: null
+  app_intelligence_health:
+    type: object
+    description: App Intelligence coverage, scan health, and startup warnings.
+    source:
+      type: state
+      default: null
+  app_intelligence_catalog:
+    type: object
+    description: >
+      Prompt-safe App Intelligence catalog containing architecture, capability,
+      ownership, integration, data, and risk summaries.
+    source:
+      type: state
+      default: null
+  source_context_catalog:
+    type: object
+    description: Prompt-safe source corpus catalog for indexed files, chunks, symbols, and imports.
+    source:
+      type: state
+      default: null
   pivot_description:
     type: string
     description: >
@@ -253,8 +319,10 @@ definitions:
     type: string
     description: >
       Selected brownfield build path from brownfield_path_selector. Present
-      only in brownfield_module_generation sequences ("full_migration").
-      Null for greenfield builds.
+      only in brownfield_module_generation sequences ("full_migration" /
+      Build App Features), where DesignDocs scopes Mozaiks-owned modules,
+      workflows, pages, data contracts, and extended product functionality only
+      to explicitly approved expansion surfaces. Null for greenfield builds.
     source:
       type: state
       default: null
@@ -307,6 +375,16 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
+    - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - pivot_description
     - existing_concept_ref
     - preserve_families

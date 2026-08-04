@@ -49,6 +49,26 @@ That means optimization goals are different from a typical enterprise codebase:
 - Remove stale logic when a better contract or architecture is introduced.
 - Do not keep shims, aliases, wrappers, fallback branches, or duplicate schemas unless explicitly requested.
 
+## No Paid Infrastructure Until Launch
+
+**Do not provision, recommend, or assume any paid cloud service is running.**
+
+This project is pre-launch. All paid Azure infrastructure (Container Apps,
+Redis Cache, Container Registry, Log Analytics, Front Door) has been stopped
+or is not yet provisioned to avoid billing before the product is live.
+
+Rules for agents:
+- Do not add `REDIS_URL` to `.env.example` or any config as a required value.
+  Redis is **optional** — the app runs fine without it using in-memory fallbacks.
+  Wire it only when the product is actually live and multi-instance scaling is needed.
+- Do not suggest provisioning Azure Container Apps, Redis, or any other
+  paid Azure service as part of a task. Those decisions belong to the operator.
+- Do not reference staging or production Azure URLs as live endpoints.
+  The Front Door URL (`fd-mozaiks-endpoint-*.azurefd.net`) is a config
+  placeholder — it is not currently provisioned.
+- If a task requires a cloud service that costs money, note it as a
+  pre-launch prerequisite and stop — do not provision it.
+
 ## Release Hold
 
 Do **not** publish this repo yet.
@@ -148,7 +168,7 @@ Canonical ownership:
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
 | `factory_app/workflows/` | Factory layer — shared builder/generator workflows (AppGenerator, AgentGenerator, DesignDocs, ValueEngine) |
 | `factory_app/workflows/{WorkflowName}/*.yaml` | Factory layer — workflow-owned runtime YAML, prompts, agents, transitions, structured outputs, tool bindings, and middleware |
-| `factory_app/workflows/_shared/` | Factory layer — shared prompt/catalog helpers consumed by multiple factory workflows |
+| `factory_app/workflows/_shared/` | Factory layer — shared builder implementation consumed by multiple factory workflows, including deterministic Python helpers and reusable workflow UI components |
 | `factory_app/build_context/{context_name}/context.yaml` | Factory layer — named build-context registries for static catalogs, contracts, reusable packs, and templates |
 | `factory_app/refinement_harness/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
@@ -197,6 +217,14 @@ products, and customer workspaces use the same shape:
 - Do not recreate `factory_app/workflows/_shared/catalogs/`. Catalog contents
   belong in `factory_app/build_context/{context_name}/`; workflow
   tools may contain workflow-specific renderers over those catalogs.
+- Shared workflow React components that are reused by multiple factory workflows
+  belong under `factory_app/workflows/_shared/ui/`. They are not auto-registered:
+  each consuming workflow must re-export/register them from its own
+  `factory_app/workflows/{WorkflowName}/ui/index.js` so UI ownership remains
+  workflow-scoped and deterministic.
+- Do not import UI from a sibling workflow folder. Move genuinely shared
+  workflow UI to `_shared/ui/`, or keep a workflow-specific wrapper in the
+  owning workflow's `ui/` folder.
 - `context_variables.yaml` declares runtime/session state. Large static prompt
   catalogs are injected by deterministic hooks; do not stuff them into context
   variables.

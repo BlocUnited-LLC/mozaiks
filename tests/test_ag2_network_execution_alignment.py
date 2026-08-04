@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
@@ -401,6 +402,41 @@ async def test_ag2_network_runner_executes_mozaiks_transition_rules() -> None:
 
 
 @pytest.mark.anyio
+async def test_ag2_network_runner_serializes_context_variables_for_replay() -> None:
+    planner_agent = _DeterministicAgent("PlannerAgent", '{"plan_ready": true}')
+    created_at = datetime(2026, 7, 30, 21, 15, tzinfo=UTC)
+
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="SerializableContextSmoke",
+            chat_id="chat-serializable-context",
+            app_id="app-serializable-context",
+            agents={"PlannerAgent": planner_agent},
+            transition_rules=[
+                {
+                    "source_agent": "PlannerAgent",
+                    "target_agent": "terminate",
+                    "transition_type": "after_turn",
+                },
+            ],
+            initial_agent_name="PlannerAgent",
+            initial_message="Use context safely.",
+            context_variables={
+                "created_at": created_at,
+                "nested": {"updated_at": created_at},
+            },
+            structured_registry={"PlannerAgent": _PlannerOutput},
+            max_turns=2,
+            close_timeout_seconds=10.0,
+        )
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.context_variables["created_at"] == created_at.isoformat()
+    assert result.context_variables["nested"]["updated_at"] == created_at.isoformat()
+
+
+@pytest.mark.anyio
 async def test_ag2_network_runner_commits_tool_context_updates_before_routing() -> None:
     context: dict[str, Any] = {}
     planner_agent = _ContextMutatingAgent(
@@ -457,6 +493,68 @@ async def test_ag2_network_runner_commits_tool_context_updates_before_routing() 
         and result.agent_name_by_id[entry["sender_id"]] == "PlannerAgent"
     )
     assert planner_packet["event_data"]["context_updates"]["set"]["route"] == "review"
+
+
+@pytest.mark.anyio
+async def test_ag2_network_runner_commits_agent_text_context_updates_before_routing() -> None:
+    interviewer = _DeterministicAgent("ValueInterviewAgent", "NEXT")
+    research_agent = _DeterministicAgent("ResearchAgent", "Existing app research is ready.")
+
+    def _derive_agent_text_context(agent_name: str, text: str) -> dict[str, Any]:
+        if agent_name == "ValueInterviewAgent" and text.strip() == "NEXT":
+            return {"interview_complete": True}
+        return {}
+
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="AgentTextContextSmoke",
+            chat_id="chat-agent-text-context",
+            app_id="app-agent-text-context",
+            agents={
+                "ValueInterviewAgent": interviewer,
+                "ResearchAgent": research_agent,
+            },
+            transition_rules=[
+                {
+                    "source_agent": "ValueInterviewAgent",
+                    "target_agent": "user",
+                    "transition_type": "after_turn",
+                },
+                {
+                    "source_agent": "ValueInterviewAgent",
+                    "target_agent": "ResearchAgent",
+                    "transition_type": "condition",
+                    "condition_type": "context_equals",
+                    "condition_key": "interview_complete",
+                    "condition_value": True,
+                },
+                {
+                    "source_agent": "ResearchAgent",
+                    "target_agent": "terminate",
+                    "transition_type": "after_turn",
+                },
+            ],
+            initial_agent_name="ValueInterviewAgent",
+            initial_message="Use the existing-app context.",
+            context_variables={"interview_complete": False},
+            agent_text_context_deriver=_derive_agent_text_context,
+            close_timeout_seconds=10.0,
+        )
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.context_variables["interview_complete"] is True
+    assert interviewer.ask_calls
+    assert research_agent.ask_calls
+    interviewer_packet = next(
+        entry
+        for entry in result.wal
+        if entry["event_type"] == EV_PACKET
+        and result.agent_name_by_id.get(entry["sender_id"]) == "ValueInterviewAgent"
+    )
+    assert interviewer_packet["event_data"]["context_updates"]["set"][
+        "interview_complete"
+    ] is True
 
 
 @pytest.mark.anyio

@@ -192,6 +192,25 @@ models:
         description: >
           provider_ids this capability depends on (from ConnectorSpec.provider_id).
           Null or empty for capabilities with no external connector dependency.
+      category:
+        type: optional_str
+        description: >
+          Short snake_case category label for UI display grouping.
+          Choose a label that accurately describes this capability's domain for
+          this specific app — e.g. identity_access, payments_commerce,
+          messaging, content_media, data_analytics, infrastructure_ops,
+          ai_automation, marketplace, logistics, or any other domain-appropriate
+          label. Use "other" only when no domain label fits.
+      icon:
+        type: optional_str
+        description: >
+          A single emoji that best represents this capability's category, chosen
+          to match the app's domain. Examples: 🛡 for identity/auth, 💳 for
+          payments, ✉ for messaging, 📊 for analytics, 🤖 for AI features,
+          🏪 for marketplace, 🚚 for logistics, 🖼 for media. Pick the most
+          specific and recognizable emoji for the capability — not a generic
+          symbol. Different capabilities in the same category should share the
+          same icon.
 
   # ---------------------------------------------------------------------------
   # ExistingProductSpec — canonical host product artifact
@@ -258,7 +277,10 @@ models:
         description: >
           Detected data storage mechanism. One of: mongodb, sql, file_store,
           redis, unknown. Populated by preload scan. Use "unknown" when no
-          clear signal was detected.
+          clear signal was detected. Redis signals usually mean cache/session,
+          pub/sub, queue, or rate-limit infrastructure; treat Redis as the
+          durable store only when source evidence proves it owns canonical app
+          data.
       storage_migration_required:
         type: bool
         description: >
@@ -292,10 +314,19 @@ models:
     fields:
       adoption_level:
         type: str
-        description: Recommended starting level - "embed", "bridge", "ecosystem", or "gradual_modernization".
+        description: >
+          Recommended starting level - "embed", "bridge", "ecosystem", or
+          "gradual_modernization". Embed/bridge normally feed the user-facing
+          Add AI Workflows path. Ecosystem/gradual_modernization may feed Build
+          App Features only when the user explicitly approves Mozaiks-owned
+          expansion scope.
       adoption_rationale:
         type: str
-        description: Why this level is the right first move for the app.
+        description: >
+          Why this level is the right first move for the app. Explain whether
+          the safest first move is Add AI Workflows, where the existing app
+          remains source of truth, or Build App Features, where selected
+          surfaces become Mozaiks-owned after explicit approval.
       ui_surface_preference:
         type: str
         description: Where the Mozaiks surface should live in the current app.
@@ -614,4 +645,25 @@ models:
       artifact_version:
         type: str
         description: Schema version of this artifact.
+      analysis_summary:
+        type: optional_str
+        description: >
+          Preferred source-backed synthesis of the AST, tree-sitter, route,
+          service, and graph evidence discovered in the app. This is the
+          summary the AppIntelligenceOverviewCard should show once discovery
+          synthesis is available. It should say what the app is, what the
+          strongest surfaces are, and what the analysis actually confirmed.
+      app_type:
+        type: optional_str
+        description: >
+          Short noun phrase describing the application type, e.g. "community
+          platform", "e-commerce API", "SaaS dashboard", "CLI tool".
+          Produced once and frozen into the artifact.
+      app_summary:
+        type: optional_str
+        description: >
+          2–3 sentence plain-language narrative of what the application does.
+          Keep it descriptive and evidence-grounded. If `analysis_summary` is
+          present, this may mirror it for compatibility with older consumers.
+          Do not add recommendations or future-state build ideas here.
 

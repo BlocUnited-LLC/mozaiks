@@ -10,12 +10,14 @@
     "playwright:install": "npx playwright install --with-deps chromium",
     "test:ui-primitives": "node ./scripts/validate-ui-primitive-usage.cjs",
     "test:responsive-smoke": "playwright test -c playwright.responsive.config.js",
+    "test:onboarding-demo": "playwright test -c playwright.onboarding-demo.config.js",
     "test:generated-ui": "playwright test -c playwright.generated-ui.config.js",
     "test:generated-ui:app": "playwright test -c playwright.generated-ui.config.js playwright/generated-ui/generated-app.generic.acceptance.spec.js",
     "test:visual": "playwright test -c playwright.visual.config.js",
     "test:visual:update": "playwright test -c playwright.visual.config.js --update-snapshots"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-progress": "^1.1.16",
@@ -23,6 +25,7 @@
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
+    "@xyflow/react": "^12.11.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.12",

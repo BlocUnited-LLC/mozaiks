@@ -62,6 +62,15 @@ Do not describe one of these as another.
 - Hooks resolve factory build-context paths through
   `factory_app.workflows._shared.hook_utils.workflow_context_path()`.
 - Do not recreate `factory_app/workflows/_shared/catalogs/`.
+- Reusable workflow React components belong under
+  `factory_app/workflows/_shared/ui/` when multiple factory workflows consume
+  them.
+- Shared workflow UI is not auto-registered; each consuming workflow must
+  import and re-export/register it from its own
+  `factory_app/workflows/{WorkflowName}/ui/index.js`.
+- Do not import UI from a sibling workflow folder. Move shared UI into
+  `_shared/ui/`, or keep a workflow-specific wrapper in the owning workflow's
+  `ui/` folder.
 - Do not create a one-off catalog family folder unless there is a real
   organization need and the file is still declared in `assets[]`.
 - `context_variables.yaml` is runtime/session state. Do not store large static

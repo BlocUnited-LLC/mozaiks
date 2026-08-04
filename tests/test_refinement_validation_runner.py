@@ -475,7 +475,7 @@ def test_validation_evidence_from_runner_can_enable_ui_patch_promotion(tmp_path:
         affected_bundle_paths=list(_route_bundle_files().keys()),
         files=_route_bundle_files(),
     )
-    create_refinement_review_record(staging_result)
+    create_refinement_review_record(staging_result, write_back_mode="local_workspace")
     approve_refinement_staging(staging_result.staging_area, reviewer="reviewer-1")
     review_record = mark_refinement_promotion_ready(staging_result.staging_area, reviewer="reviewer-1")
     execution_result = apply_scoped_refinement_changes(

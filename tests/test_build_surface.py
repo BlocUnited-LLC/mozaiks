@@ -53,7 +53,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/:appId/usage"' in manifest_source
     assert '"path": "/apps/:appId/health"' in manifest_source
     assert '"path": "/apps/:appId/activity"' in manifest_source
-    assert '"component": "AppBuildHistoryPage"' in manifest_source
+    assert '"component": "AppBuildReviewPage"' in manifest_source
     assert '"path": "/apps/:appId/billing"' not in manifest_source
     assert '"path": "/apps/:appId/hosting"' not in manifest_source
     assert '"path": "/apps/:appId/build"' not in manifest_source

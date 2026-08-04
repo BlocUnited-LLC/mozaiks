@@ -116,6 +116,19 @@ def test_mozaikspay_catalog_is_default_removable_monetization_integration() -> N
     assert spec["managed_default"] == {"provider": "mozaikspay", "mode": "hosted"}
 
 
+def test_redis_catalog_is_byok_optional_infrastructure() -> None:
+    spec = CATALOG_BY_ID["redis"]
+    text = " ".join([spec["description"], *spec["setup_steps"]]).lower()
+
+    assert spec["category"] == "cache"
+    assert spec["required_secrets"] == ["REDIS_URL"]
+    assert spec["preferred_setup_lane"] == "bring_your_own_key"
+    assert spec["allowed_setup_lanes"] == ["bring_your_own_key"]
+    assert "optional" in text
+    assert "do not provision a paid managed redis service by default" in text
+    assert "single-instance" in text
+
+
 # ── module.yaml contract ──────────────────────────────────────────────────────
 
 def test_workspace_integrations_module_yaml_contract() -> None:

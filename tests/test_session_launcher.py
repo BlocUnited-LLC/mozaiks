@@ -439,11 +439,40 @@ async def test_launch_routed_workflow_binds_brownfield_app_adoption_journey(monk
                         {"id": "greenfield_app", "route_to": "ValueEngine", "context_variables": {"app_type": "greenfield_app"}},
                         {
                             "id": "brownfield_app",
-                            "route_to": "ExistingAppDiscovery",
+                            "route_to": "brownfield_path_selector",
                             "context_variables": {"app_type": "brownfield_app"},
                         },
                     ],
-                }
+                },
+                {
+                    "id": "brownfield_path_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldPathSelector", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "light_integration",
+                            "route_to": "brownfield_repo_input",
+                            "context_variables": {"brownfield_build_path": "light_integration"},
+                        },
+                        {
+                            "id": "full_migration",
+                            "route_to": "brownfield_repo_input",
+                            "context_variables": {"brownfield_build_path": "full_migration"},
+                        },
+                    ],
+                },
+                {
+                    "id": "brownfield_repo_input",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "start_discovery",
+                            "route_to": "ExistingAppDiscovery",
+                            "context_variables": {"github_repo": "BlocUnited-LLC/mozaiks-app"},
+                        },
+                    ],
+                },
             ],
             "workflow_sequences": [
                 {"id": "build", "steps": [{"transition": "app_type_selector"}, {"workflows": ["ValueEngine"]}]},
@@ -451,6 +480,8 @@ async def test_launch_routed_workflow_binds_brownfield_app_adoption_journey(monk
                     "id": "brownfield_app_adoption",
                     "steps": [
                         {"transition": "app_type_selector"},
+                        {"transition": "brownfield_path_selector"},
+                        {"transition": "brownfield_repo_input"},
                         {"workflows": ["ExistingAppDiscovery"]},
                     ],
                 },
@@ -464,7 +495,12 @@ async def test_launch_routed_workflow_binds_brownfield_app_adoption_journey(monk
         workflow_id="ExistingAppDiscovery",
         app_id="app_1",
         user_id="user_1",
-        context_variables={"app_type": "brownfield_app"},
+        context_variables={
+            "app_type": "brownfield_app",
+            "brownfield_build_path": "light_integration",
+            "github_repo": "BlocUnited-LLC/mozaiks-app",
+        },
+        journey_id="brownfield_app_adoption",
         session_router=router,
     )
 
@@ -473,6 +509,8 @@ async def test_launch_routed_workflow_binds_brownfield_app_adoption_journey(monk
     assert state.current_chat_id == launch.chat_id
     assert state.current_workflow_id == "ExistingAppDiscovery"
     assert state.journey_key == "brownfield_app_adoption"
+    assert state.journey_position == 3
+    assert state.journey_total_steps == 4
 
 
 @pytest.mark.asyncio
@@ -545,7 +583,13 @@ async def test_launch_transition_starts_workflow_chat(monkeypatch):
                     "id": "entry",
                     "transition_type": "user_choice",
                     "ui": {"component": "LauncherScreen", "mode": "screen"},
-                    "options": [{"id": "docs", "route_to": "DesignDocs"}],
+                    "options": [
+                        {
+                            "id": "docs",
+                            "route_to": "DesignDocs",
+                            "context_variables": {"brownfield_build_path": "light_integration"},
+                        }
+                    ],
                 }
             ],
             "workflow_sequences": [
@@ -568,6 +612,8 @@ async def test_launch_transition_starts_workflow_chat(monkeypatch):
     assert launch.workflow_launch is not None
     assert launch.workflow_launch.workflow_id == "DesignDocs"
     assert launch.workflow_launch.chat_id in sessions._docs
+    assert launch.context_variables["brownfield_build_path"] == "light_integration"
+    assert sessions._docs[launch.workflow_launch.chat_id]["brownfield_build_path"] == "light_integration"
 
     state = await store.load(app_id="app_1", user_id="user_1")
     assert state is not None

@@ -35,6 +35,8 @@ from typing import Any
 import httpx
 import yaml
 
+from mozaiksai.core.workflow.ui_tools import emit_workflow_activity
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -285,6 +287,7 @@ _APP_INTELLIGENCE_STAGE_PROGRESS = {
     "building_snapshot": ("indexing", 86),
     "ready": ("ready", 100),
     "partial": ("partial", 100),
+    "repo_access_required": ("unavailable", 100),
     "unavailable": ("unavailable", 100),
     "failed": ("failed", 100),
 }
@@ -334,6 +337,7 @@ def _default_app_intelligence_progress_message(stage: str) -> str:
         "building_snapshot": "Building the App Intelligence snapshot.",
         "ready": "App Intelligence is ready for discovery agents.",
         "partial": "App Intelligence is partial; agents may need user confirmation.",
+        "repo_access_required": "GitHub access is required before App Intelligence can index this repository.",
         "unavailable": "App Intelligence is unavailable for this run.",
         "failed": "App Intelligence indexing failed.",
     }.get(stage, "Updating App Intelligence status.")
@@ -360,6 +364,8 @@ def _app_intelligence_activity_message(progress: dict[str, Any]) -> str:
         return "App context ready. Starting the discovery agent."
     if status == "partial" or stage == "partial":
         return "App context is partially ready. The discovery agent may ask follow-up questions."
+    if stage == "repo_access_required":
+        return message or "GitHub access is required before App Intelligence can index this repository."
     if status in {"failed", "unavailable"} or stage in {"failed", "unavailable"}:
         return message or "App context could not be fully indexed."
     return f"Obtaining app context... {message or 'Indexing repository evidence.'} ({percent}%)"
@@ -374,30 +380,30 @@ async def _emit_app_intelligence_activity(context_variables: Any) -> dict[str, A
         return {"skipped": True, "reason": "missing_app_intelligence_progress"}
 
     activity_status = _app_intelligence_activity_status(progress)
-    event = {
-        "kind": "activity",
-        "activity_type": "app_intelligence_indexing",
-        "agent": "App Intelligence",
-        "agent_name": "App Intelligence",
-        "status": activity_status,
-        "message": _app_intelligence_activity_message(progress),
-        "workflow_name": "ExistingAppDiscovery",
-        "progress_percent": progress.get("percent"),
-        "metadata": {
+    result = await emit_workflow_activity(
+        workflow_name="ExistingAppDiscovery",
+        chat_id=chat_id,
+        activity_type="app_intelligence_indexing",
+        agent_name="App Intelligence",
+        status=activity_status,
+        message=_app_intelligence_activity_message(progress),
+        progress_percent=progress.get("percent"),
+        component_type="AppIntelligenceProgressCard",
+        display_variant="app_intelligence_progress",
+        metadata={
             "source": "existing_app_discovery_preload",
             "progress_stage": progress.get("stage"),
             "progress_status": progress.get("status"),
+            "progress_details": progress.get("details") if isinstance(progress.get("details"), dict) else {},
+            "progress_warnings": progress.get("warnings") if isinstance(progress.get("warnings"), list) else [],
+            "progress": progress,
+            "app_intelligence_progress": progress,
         },
-    }
-    try:
-        from mozaiksai.core.transport.simple_transport import SimpleTransport
-
-        transport = await SimpleTransport.get_instance()
-        await transport.send_event_to_ui(event, chat_id)
+    )
+    if result.get("success"):
         return {"success": True, "status": activity_status, "stage": progress.get("stage")}
-    except Exception as exc:
-        logger.debug("[ExistingAppDiscovery] App Intelligence activity emission failed: %s", exc)
-        return {"skipped": True, "reason": "activity_emit_failed", "error": str(exc)}
+    logger.debug("[ExistingAppDiscovery] App Intelligence activity emission skipped: %s", result)
+    return result
 
 
 def _coerce_mapping(value: Any) -> dict[str, Any]:
@@ -934,6 +940,76 @@ def _normalize_github_repo_identifier(github_repo: str | None) -> str | None:
     return f"{owner}/{repo}"
 
 
+def _github_repo_access_recovery(
+    *,
+    normalized_repo: str,
+    status_code: int,
+    phase: str,
+    auth_present: bool,
+) -> dict[str, Any]:
+    """Build a safe user/action payload for GitHub repo access failures."""
+    if status_code == 401:
+        code = "github_token_invalid"
+        message = (
+            "Mozaiks could not authenticate to GitHub for this repository. "
+            "Connect GitHub again or provide a token with read access."
+        )
+    elif status_code == 403:
+        code = "github_repo_permission_required"
+        message = (
+            "Mozaiks authenticated to GitHub but does not have permission to read this repository. "
+            "Grant repo read access and retry discovery."
+        )
+    elif status_code == 404:
+        code = "github_repo_access_required"
+        message = (
+            "Mozaiks could not access this GitHub repository. GitHub returns 404 for private repos "
+            "when the connected account or token does not have read access."
+        )
+    else:
+        code = "github_repo_unavailable"
+        message = f"Mozaiks could not read this GitHub repository because GitHub returned HTTP {status_code}."
+
+    return {
+        "schema_version": "mozaiks.repo_access_recovery.v1",
+        "provider": "github",
+        "code": code,
+        "github_repo": normalized_repo,
+        "github_url": f"https://github.com/{normalized_repo}",
+        "http_status": int(status_code),
+        "phase": phase,
+        "auth_present": bool(auth_present),
+        "message": message,
+        "recovery_actions": [
+            {
+                "id": "connect_github",
+                "label": "Connect GitHub",
+                "kind": "oauth_retry",
+                "description": "Return to Create App, connect GitHub with repo read access, then start discovery again.",
+            },
+            {
+                "id": "retry_import",
+                "label": "Retry discovery",
+                "kind": "retry",
+                "description": "Retry after GitHub access is connected or a valid token is configured.",
+            },
+            {
+                "id": "use_local_checkout",
+                "label": "Use local checkout",
+                "kind": "local_path",
+                "description": "For local development, provide a readable checkout path so Mozaiks can index source directly.",
+            },
+        ],
+    }
+
+
+def _set_repo_access_recovery(context_variables: Any, recovery: dict[str, Any]) -> None:
+    if not recovery:
+        return
+    _ctx_set(context_variables, "repo_access_status", "required")
+    _ctx_set(context_variables, "repo_access_recovery", recovery)
+
+
 async def _scan_github_repo(github_repo: str, github_ref: str | None, github_token: str | None = None) -> dict[str, Any]:
     normalized_repo = _normalize_github_repo_identifier(github_repo)
     if not normalized_repo:
@@ -947,9 +1023,19 @@ async def _scan_github_repo(github_repo: str, github_ref: str | None, github_tok
     ) as client:
         repo_resp = await _github_request(f"https://api.github.com/repos/{owner}/{repo}", token, client=client)
         if repo_resp.status_code != 200:
+            recovery = _github_repo_access_recovery(
+                normalized_repo=normalized_repo,
+                status_code=repo_resp.status_code,
+                phase="repo_lookup",
+                auth_present=bool(token),
+            )
             return {
                 "success": False,
-                "error": f"GitHub repo lookup failed with HTTP {repo_resp.status_code}",
+                "source": "github_repo_scan",
+                "github_repo": normalized_repo,
+                "github_url": f"https://github.com/{normalized_repo}",
+                "error": recovery["message"],
+                "repo_access_recovery": recovery,
             }
 
         repo_info = repo_resp.json()
@@ -960,9 +1046,19 @@ async def _scan_github_repo(github_repo: str, github_ref: str | None, github_tok
             client=client,
         )
         if tree_resp.status_code != 200:
+            recovery = _github_repo_access_recovery(
+                normalized_repo=normalized_repo,
+                status_code=tree_resp.status_code,
+                phase="tree_lookup",
+                auth_present=bool(token),
+            )
             return {
                 "success": False,
-                "error": f"GitHub tree lookup failed with HTTP {tree_resp.status_code}",
+                "source": "github_repo_scan",
+                "github_repo": normalized_repo,
+                "github_url": f"https://github.com/{normalized_repo}",
+                "error": recovery["message"],
+                "repo_access_recovery": recovery,
             }
 
         tree = tree_resp.json().get("tree", []) or []
@@ -1106,6 +1202,7 @@ async def _collect_github_context_graph_file_map(
     token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
     candidates: list[tuple[int, int, str, str, str, str, str, str]] = []
     warnings: list[str] = []
+    access_issues: list[dict[str, Any]] = []
     skipped: Counter[str] = Counter()
     roots_summary: list[dict[str, Any]] = []
 
@@ -1119,6 +1216,14 @@ async def _collect_github_context_graph_file_map(
         repo_resp = await _github_request(f"https://api.github.com/repos/{owner}/{repo}", token)
         if repo_resp.status_code != 200:
             warnings.append(f"github_repo_lookup_failed:{normalized_repo}:{repo_resp.status_code}")
+            access_issues.append(
+                _github_repo_access_recovery(
+                    normalized_repo=normalized_repo,
+                    status_code=repo_resp.status_code,
+                    phase="repo_lookup",
+                    auth_present=bool(token),
+                )
+            )
             skipped["github_repo_lookup_failed"] += 1
             continue
         repo_info = repo_resp.json()
@@ -1129,6 +1234,14 @@ async def _collect_github_context_graph_file_map(
         )
         if tree_resp.status_code != 200:
             warnings.append(f"github_tree_lookup_failed:{normalized_repo}:{tree_resp.status_code}")
+            access_issues.append(
+                _github_repo_access_recovery(
+                    normalized_repo=normalized_repo,
+                    status_code=tree_resp.status_code,
+                    phase="tree_lookup",
+                    auth_present=bool(token),
+                )
+            )
             skipped["github_tree_lookup_failed"] += 1
             continue
         roots_summary.append(
@@ -1275,6 +1388,7 @@ async def _collect_github_context_graph_file_map(
         "selected_by_priority": dict(sorted(selected_by_priority.items())),
         "selected_by_extension": dict(sorted(selected_by_extension.items())),
         "skipped": dict(sorted(skipped.items())),
+        "access_issues": access_issues,
         "warnings": list(warnings),
     }
     return SourceScanResult(file_map=file_map, health=health, warnings=warnings)
@@ -1540,10 +1654,22 @@ async def _preload_context_graph_pack(
     file_map = scan_result.file_map
     warnings = list(scan_result.warnings)
     if not file_map:
+        access_issues = [
+            item for item in scan_result.health.get("access_issues", [])
+            if isinstance(item, dict)
+        ]
+        recovery = access_issues[0] if access_issues else {}
+        if recovery:
+            _set_repo_access_recovery(context_variables, recovery)
+        unavailable_reason = str(recovery.get("code") or "no_supported_source_files")
+        unavailable_message = (
+            str(recovery.get("message") or "").strip()
+            or "No supported source files were available for App Intelligence indexing."
+        )
         _ctx_set(
             context_variables,
             "context_graph_pack",
-            build_context_graph_unavailable_pack(reason="no_supported_source_files", warnings=warnings),
+            build_context_graph_unavailable_pack(reason=unavailable_reason, warnings=warnings),
         )
         _ctx_set(context_variables, "context_graph_catalog", None)
         _ctx_set(context_variables, "source_context_bundle", None)
@@ -1551,19 +1677,19 @@ async def _preload_context_graph_pack(
         _ctx_set(context_variables, "app_intelligence_snapshot", None)
         _ctx_set(context_variables, "app_intelligence_catalog", None)
         _ctx_set(context_variables, "context_graph_status", "unavailable")
-        _ctx_set(context_variables, "context_graph_reason", "no_supported_source_files")
+        _ctx_set(context_variables, "context_graph_reason", unavailable_reason)
         _ctx_set(context_variables, "context_graph_warnings", warnings)
         _ctx_set(context_variables, "context_graph_health", dict(scan_result.health))
         _ctx_set(context_variables, "app_intelligence_health", dict(scan_result.health))
         _set_app_intelligence_progress(
             context_variables,
-            "unavailable",
-            message="No supported source files were available for App Intelligence indexing.",
+            "repo_access_required" if recovery else "unavailable",
+            message=unavailable_message,
             details=dict(scan_result.health),
             warnings=warnings,
         )
         await _emit_app_intelligence_activity(context_variables)
-        return {"present": False, "reason": "no_supported_source_files", "warnings": warnings}
+        return {"present": False, "reason": unavailable_reason, "warnings": warnings}
 
     app_id = str(
         _first_nonempty(
@@ -2430,6 +2556,10 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     """Populate discovery context from deterministic pre-chat sources."""
     ctx = context_variables if context_variables is not None else {}
     discovery_inputs = _coerce_mapping(_ctx_get(ctx, "discovery_inputs", {}))
+    brownfield_build_path = _first_nonempty(
+        _ctx_get(ctx, "brownfield_build_path"),
+        discovery_inputs.get("brownfield_build_path"),
+    )
     host_app_source = _first_nonempty(
         discovery_inputs.get("host_app_source"),
         _ctx_get(ctx, "host_app_source"),
@@ -2444,6 +2574,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     discovery_mode = _first_nonempty(_ctx_get(ctx, "discovery_mode"), discovery_inputs.get("discovery_mode"), "guided")
 
     _ctx_set(ctx, "host_app_source", host_app_source)
+    _ctx_set(ctx, "brownfield_build_path", brownfield_build_path)
     _ctx_set(ctx, "app_intelligence_ready", False)
     _set_app_intelligence_progress(
         ctx,
@@ -2518,6 +2649,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             "success": bool(frontend_repo_summary.get("success")),
         })
         if not frontend_repo_summary.get("success"):
+            _set_repo_access_recovery(ctx, _coerce_mapping(frontend_repo_summary.get("repo_access_recovery")))
             _merge_unresolved(
                 unresolved_questions,
                 "Frontend repo could not be scanned.",
@@ -2533,6 +2665,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             "success": bool(backend_repo_summary.get("success")),
         })
         if not backend_repo_summary.get("success"):
+            _set_repo_access_recovery(ctx, _coerce_mapping(backend_repo_summary.get("repo_access_recovery")))
             _merge_unresolved(
                 unresolved_questions,
                 "Backend repo could not be scanned.",
@@ -2562,6 +2695,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
             "success": bool(repo_summary.get("success")),
         })
         if not repo_summary.get("success"):
+            _set_repo_access_recovery(ctx, _coerce_mapping(repo_summary.get("repo_access_recovery")))
             _merge_unresolved(
                 unresolved_questions,
                 "GitHub repo could not be scanned.",
@@ -2804,6 +2938,13 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     if app_intelligence_ready:
         _ctx_set(ctx, "app_intelligence_ready", True)
         _ctx_set(ctx, "app_intelligence_status", "ready")
+    if not _ctx_get(ctx, "repo_access_status"):
+        if app_intelligence_ready or repo_summary.get("success") or frontend_repo_summary.get("success") or backend_repo_summary.get("success"):
+            _ctx_set(ctx, "repo_access_status", "available")
+        elif github_repo or frontend_github_repo or backend_github_repo:
+            _ctx_set(ctx, "repo_access_status", "required")
+        else:
+            _ctx_set(ctx, "repo_access_status", "not_provided")
 
     summary_lines = []
     app_intelligence_summary = _build_app_intelligence_summary(
@@ -2834,6 +2975,8 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         )
     if theme_capture_status != "none" and theme_capture_summary:
         summary_lines.append(f"Theme evidence: {theme_capture_summary}")
+    if brownfield_build_path:
+        summary_lines.append(f"Selected brownfield path: {brownfield_build_path}")
     if context_graph_preload.get("present"):
         if context_graph_preload.get("source") == "previous_app_context_graph":
             summary_lines.append("App Intelligence loaded the previous AppContext graph for refresh.")

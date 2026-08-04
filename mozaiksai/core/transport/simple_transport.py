@@ -907,15 +907,40 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     async def _broadcast_to_websockets(self, event_data: dict[str, Any], target_chat_id: str | None = None) -> None:
         """Broadcast event data to relevant WebSocket connections."""
         active_connections = list(self.connections.items())
-        
+
         # If a chat_id is specified, only send to that connection
         if target_chat_id:
             connection_info = self.connections.get(target_chat_id)
+
+            # Detect artifact tool_call events for elevated logging.
+            _event_type = event_data.get("type") if isinstance(event_data, dict) else None
+            _event_data_inner = event_data.get("data") if isinstance(event_data, dict) else None
+            _is_artifact_tc = (
+                _event_type == "chat.tool_call"
+                and isinstance(_event_data_inner, dict)
+                and _event_data_inner.get("display") == "artifact"
+            )
+            _artifact_component = (
+                (_event_data_inner or {}).get("component_type")
+                or (_event_data_inner or {}).get("tool_name")
+            ) if _is_artifact_tc else None
+
             if connection_info and connection_info.get("websocket"):
+                if _is_artifact_tc:
+                    logger.info(
+                        "ARTIFACT_TOOL_CALL_DISPATCH component=%s chat=%s ws_id=%s — queuing for live WS",
+                        _artifact_component, target_chat_id, connection_info.get("ws_id"),
+                    )
                 # H1: Use message queuing with backpressure control
                 await self._queue_message_with_backpressure(target_chat_id, event_data)
                 await self._flush_message_queue(target_chat_id)
             else:
+                if _is_artifact_tc:
+                    logger.warning(
+                        "ARTIFACT_TOOL_CALL_BUFFERED component=%s chat=%s — no live WS at emit time; "
+                        "queuing in pre-connection buffer (will flush on next reconnect)",
+                        _artifact_component, target_chat_id,
+                    )
                 # H4: Buffer message until the websocket connects
                 buf = self._pre_connection_buffers.setdefault(target_chat_id, [])
                 buf.append(event_data)
@@ -1484,6 +1509,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         app_id: str | None = None,
         ws_id: int | None = None,
         token_exp: int = 0,
+        suppress_history_replay: bool = False,
     ) -> None:
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
         if self._owner_loop is None:
@@ -1588,7 +1614,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._pre_connection_buffer_overflow_counts.pop(chat_id, None)
 
         # H5: Auto-resume for IN_PROGRESS chats (check status and restore chat history)
-        await self._replay_run_on_connect_if_needed(chat_id, websocket, app_id)
+        await self._replay_run_on_connect_if_needed(
+            chat_id,
+            websocket,
+            app_id,
+            suppress_history_replay=suppress_history_replay,
+        )
         
         try:
             # Inbound loop: receive JSON control messages from client

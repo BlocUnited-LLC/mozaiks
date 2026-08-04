@@ -515,6 +515,7 @@ class AG2PersistenceManager:
             "created_at",
             "last_updated_at",
             "last_sequence",
+            "session_version",
             "messages",
             "workflow_ui_state",
             "last_artifact",

@@ -235,7 +235,9 @@ Quality gates:
 - `factory_app/workflows/{WorkflowName}/*.yaml` — workflow-owned runtime YAML,
   prompts, agent rosters, transitions, structured outputs, tool bindings, and
   middleware
-- `factory_app/workflows/_shared/` — shared factory prompt/catalog helpers
+- `factory_app/workflows/_shared/` — shared factory builder implementation
+  consumed by multiple factory workflows, including deterministic Python
+  helpers and reusable workflow UI components
 - `factory_app/build_context/{context_name}/context.yaml` — named build-context
   registries for static catalogs, contracts, reusable packs, and templates
 - `factory_app/refinement_harness/` — declarative builder harness pack

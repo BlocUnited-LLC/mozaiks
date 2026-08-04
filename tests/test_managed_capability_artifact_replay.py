@@ -703,6 +703,13 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         "mozaiksai.core.runtime.composition.module_executor.get_audit_logger",
         lambda: _NoopAuditLogger(),
     )
+    # Freeze wallet "now" to July 2026 so ensure_plan_allowances uses the same
+    # monthly period key (2026-07) as the fulfillment command's occurred_at,
+    # preventing a spurious second allocation when the test runs in a later month.
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet._now",
+        lambda: datetime(2026, 7, 15, tzinfo=UTC),
+    )
     for module in loaded.modules:
         executor.register(
             module.name,

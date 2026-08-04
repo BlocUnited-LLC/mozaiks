@@ -16,6 +16,16 @@ definitions:
       type: state
       default: "brownfield_app"
 
+  brownfield_build_path:
+    type: string
+    description: >
+      Selected existing-app path from the intake screen: light_integration or
+      full_migration. Discovery should treat this as downstream scope context
+      and not ask the user to choose again.
+    source:
+      type: state
+      default: null
+
   host_app_source:
     type: string
     description: >
@@ -191,6 +201,26 @@ definitions:
       Short-lived session key from the GitHub OAuth popup flow. Consumed once
       by the before_chat hook to retrieve the OAuth access token from the
       server-side token store. Never persisted beyond the initial preload phase.
+    source:
+      type: state
+      default: null
+
+  repo_access_status:
+    type: string
+    description: >
+      Source repository access status for discovery: unknown, available,
+      required, or not_provided. `required` means a repository was supplied but
+      Mozaiks could not read it with the available GitHub credentials.
+    source:
+      type: state
+      default: "unknown"
+
+  repo_access_recovery:
+    type: object
+    description: >
+      Safe user-facing recovery payload for repository access failures. It may
+      include provider, github_repo, github_url, http_status, phase, message,
+      and recovery_actions. It never contains tokens or credential values.
     source:
       type: state
       default: null
@@ -674,7 +704,12 @@ definitions:
 
   adoption_level:
     type: string
-    description: Recommended adoption level - embed, bridge, ecosystem, or gradual_modernization.
+    description: >
+      Recommended adoption level - embed, bridge, ecosystem, or
+      gradual_modernization. Embed/bridge usually map to the user-facing
+      Add AI Workflows path where the existing app remains source of truth.
+      Ecosystem/gradual_modernization may map to Build App Features only
+      after explicit user approval for Mozaiks-owned expansion scope.
     source:
       type: state
       default: null
@@ -821,6 +856,23 @@ definitions:
       type: state
       default: null
 
+  analysis_summary:
+    type: string
+    description: >
+      Preferred source-backed synthesis of the discovery results. This is the
+      narrative that should drive the AppIntelligenceOverviewCard and any
+      later handoff surfaces.
+    source:
+      type: state
+      default: ""
+
+  discovery_brief:
+    type: string
+    description: Concise handoff note derived from the discovery synthesis.
+    source:
+      type: state
+      default: ""
+
   existing_app_discovery_artifact:
     type: object
     description: Full structured discovery artifact produced by DiscoveryArtifactAssemblerAgent.
@@ -838,10 +890,81 @@ definitions:
       type: state
       default: null
 
+  application_inventory:
+    type: object
+    description: Canonical ApplicationInventory payload derived from the existing-app readout.
+    source:
+      type: state
+      default: null
+
+  integration_inventory:
+    type: object
+    description: Canonical IntegrationInventory payload derived from detected connectors and service surfaces.
+    source:
+      type: state
+      default: null
+
+  risk_report:
+    type: object
+    description: Canonical RiskReport payload derived from discovery gaps, protected boundaries, and migration risks.
+    source:
+      type: state
+      default: null
+
+  adoption_plan:
+    type: object
+    description: Canonical AdoptionPlan payload used by ValueEngine and downstream brownfield generation workflows.
+    source:
+      type: state
+      default: null
+
+  ownership_boundary:
+    type: object
+    description: Canonical ownership boundary payload for discovered and Mozaiks-owned enhancement surfaces.
+    source:
+      type: state
+      default: null
+
+  brownfield_registration:
+    type: object
+    description: BrownfieldRegistration provenance record for the connected existing app.
+    source:
+      type: state
+      default: null
+
+  brownfield_app_context_artifacts:
+    type: object
+    description: Persisted brownfield AppContext artifact handles grouped by artifact kind.
+    source:
+      type: state
+      default: null
+
+  brownfield_app_context_artifact_version_refs:
+    type: object
+    description: Persisted ArtifactVersion refs for brownfield AppContext artifacts.
+    source:
+      type: state
+      default: null
+
+  brownfield_app_context_artifact_persistence_error:
+    type: string
+    description: Non-fatal persistence error from saving brownfield AppContext artifacts, if any.
+    source:
+      type: state
+      default: null
+
+  app_context_version:
+    type: object
+    description: Registered AppContextVersion payload created from the existing-app discovery readout.
+    source:
+      type: state
+      default: null
+
 agents:
   DiscoveryHostAgent:
     variables:
       - app_type
+      - brownfield_build_path
       - discovery_inputs
       - context_refresh_request
       - current_context_version_id
@@ -864,6 +987,8 @@ agents:
       - frontend_github_repo
       - backend_github_repo
       - github_ref
+      - repo_access_status
+      - repo_access_recovery
       - backend_base_url
       - openapi_url
       - uploaded_openapi_path
@@ -889,6 +1014,8 @@ agents:
       - api_inventory
       - runtime_observations
       - auth_hypothesis
+      - repo_access_status
+      - repo_access_recovery
       - unresolved_questions
       - storage_pattern
       - storage_migration_required
@@ -910,6 +1037,7 @@ agents:
       - app_description
       - tech_stack
       - discovery_mode
+      - brownfield_build_path
       - existing_experience_summary
       - preload_status
       - preload_summary
@@ -951,6 +1079,7 @@ agents:
       - tech_stack
       - host_app_source
       - discovery_mode
+      - brownfield_build_path
       - app_intelligence_ready
       - app_intelligence_status
       - app_intelligence_summary
@@ -973,6 +1102,8 @@ agents:
       - agent_ready_capabilities
       - api_surface
       - auth_model
+      - repo_access_status
+      - repo_access_recovery
       - unresolved_questions
       - adoption_level
       - migration_complexity
@@ -993,6 +1124,7 @@ agents:
       - app_description
       - tech_stack
       - hosting_environment
+      - brownfield_build_path
       - app_intelligence_ready
       - app_intelligence_status
       - app_intelligence_summary
@@ -1006,6 +1138,8 @@ agents:
       - key_entities
       - auth_model
       - api_surface
+      - repo_access_status
+      - repo_access_recovery
       - adoption_level
       - migration_complexity
       - storage_pattern
@@ -1033,6 +1167,7 @@ agents:
       - expected_artifacts
       - host_app_source
       - discovery_mode
+      - brownfield_build_path
       - evidence_sources
       - preload_status
       - preload_summary
@@ -1054,6 +1189,8 @@ agents:
       - api_inventory
       - runtime_observations
       - auth_hypothesis
+      - repo_access_status
+      - repo_access_recovery
       - unresolved_questions
       - storage_pattern
       - storage_migration_required

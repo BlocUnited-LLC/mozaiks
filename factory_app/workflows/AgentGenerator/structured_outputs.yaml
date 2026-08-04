@@ -1777,6 +1777,24 @@ models:
     - UserDriven
     - AgentDriven
     - BackendOnly
+  PackGraphInteractionMode:
+    type: literal
+    values:
+    - agent_directed
+    - user_guided
+    - backend_only
+  PackGraphLaunchBehavior:
+    type: literal
+    values:
+    - auto_start
+    - wait_for_user
+    - none
+  PackGraphHandoffStyle:
+    type: literal
+    values:
+    - continuous_chat
+    - separate_chat
+    - background
 
   PackGraphWorkflow:
     type: model
@@ -1802,6 +1820,41 @@ models:
           triggered exclusively by domain events; MUST NOT appear in workflow_sequences
           or entrypoints. Read from the workflow bundle's orchestrator.yaml workflow_startup_mode
           field. Leave null only when startup mode is genuinely ambiguous.
+      interaction_mode:
+        type: union
+        variants:
+        - PackGraphInteractionMode
+        - 'null'
+        default: null
+        description: >
+          First-party Mozaiks conversation taxonomy. user_guided means the user
+          participates directly in the workflow conversation. agent_directed means
+          the workflow usually starts from an upstream sequence or transition.
+          backend_only means the workflow runs from domain events without a chat
+          entrypoint. Leave null only when the default mapping from startup_mode is
+          sufficient.
+      launch_behavior:
+        type: union
+        variants:
+        - PackGraphLaunchBehavior
+        - 'null'
+        default: null
+        description: >
+          Controls whether an empty workflow chat starts immediately. Use auto_start
+          for user-reachable workflow sessions and sequence handoffs, including
+          UserDriven workflows reached after a transition. Use wait_for_user only
+          for an intentionally blank chat. Use none only for BackendOnly workflows.
+      handoff_style:
+        type: union
+        variants:
+        - PackGraphHandoffStyle
+        - 'null'
+        default: null
+        description: >
+          Defines how the workflow should feel when reached from a transition or
+          sequence. continuous_chat keeps the build journey feeling like one
+          conversation. separate_chat is for deliberate standalone workflow starts.
+          background is only for BackendOnly workflows.
       dependencies:
         type: list
         items: PackGraphDependency

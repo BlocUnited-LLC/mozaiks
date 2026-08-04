@@ -208,10 +208,10 @@ inactive_surfaces:
 # ---------------------------------------------------------------------------
 platform_hooks:
   # When a hosted app is deployed the platform reads the app bundle's
-  # app/config/subscriptions.yaml, provisions Stripe products and prices
-  # for each paid plan (amount > 0), and persists the resulting price_ids in
-  # hosted_billing.app_billing_plans keyed by app_id.
-  # The checkout flow looks up these price_ids at runtime.
+  # app/config/subscriptions.yaml catalog, and the hosted billing module
+  # provisions Stripe products and prices for each paid plan (amount > 0).
+  # The resulting price_ids are persisted in hosted_billing.app_billing_plans
+  # keyed by app_id and the checkout flow looks them up at runtime.
   # Plans without a price.amount field are treated as contact-sales and
   # skipped — no Stripe price is created.
   - id: billing_plan_provisioning
@@ -219,8 +219,8 @@ platform_hooks:
     responsible_module: hosted_billing
     responsible_action: provision_app_billing_plans
     description: >
-      On deployment the platform provisions Stripe billing products and prices
-      for paid plans declared in the app bundle's app/config/subscriptions.yaml.
+      On deployment the platform reads the app bundle's app/config/subscriptions.yaml
+      catalog and provisions Stripe billing products and prices for paid plans.
       This is idempotent — existing Stripe prices are reused via lookup_key.
       Emits hosted.billing.app_billing_plans.provisioned on success.
       Skips silently when MozaiksPay billing is not configured or when the

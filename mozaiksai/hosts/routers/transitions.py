@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
@@ -163,6 +163,7 @@ async def resolve_transition_route(
         "requested_workflow_id": workflow_launch.requested_workflow_id,
         "journey_id": workflow_launch.journey_id,
         "websocket_url": workflow_launch.websocket_url,
+        "context_variables": launch_result.context_variables,
         "routing_explanation": workflow_launch.routing_explanation,
         "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,
     }
@@ -170,11 +171,21 @@ async def resolve_transition_route(
 
 @router.get("/api/session/state")
 async def get_session_state(
+    app_id: str | None = Query(default=None),
+    user_id: str | None = Query(default=None),
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     from mozaiksai.core.session import get_session_router
 
-    snapshot = await get_session_router().get_session_snapshot(app_id=principal.app_id, user_id=principal.user_id)
+    scoped_app_id, scoped_user_id = resolve_scope_from_principal(
+        principal,
+        app_id=app_id,
+        user_id=user_id,
+    )
+    snapshot = await get_session_router().get_session_snapshot(
+        app_id=scoped_app_id,
+        user_id=scoped_user_id,
+    )
     return {"session_state": snapshot}
 
 

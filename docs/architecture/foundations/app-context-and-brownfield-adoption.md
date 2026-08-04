@@ -91,6 +91,22 @@ Discovery snapshots are evidence, not authority. The existing repo remains the
 source of truth until explicit transfer through staged patch, generated overlay,
 migration approval, or PR approval.
 
+## Brownfield Build Paths
+
+After discovery, the user chooses how Mozaiks should build with the existing
+app. The UI must explain the choice in terms of code ownership, not just depth.
+
+| User label | Internal value | Meaning |
+| --- | --- | --- |
+| Add AI Workflows | `light_integration` | The normal first move for most existing apps. The existing repository, data, auth, and business logic remain source of truth. Mozaiks adds app-aware AI workflows, chat surfaces, and only the safe adapters those workflows require. |
+| Build App Features | `full_migration` | A deliberate product expansion path. Mozaiks generates native modules, workflows, pages, data contracts, and extended functionality only for surfaces the user explicitly approves. It is not an automatic whole-repo rewrite. |
+
+Users should be able to choose Add AI Workflows or Build App Features before
+discovery runs, and the chosen path should stay in context for the rest of the
+brownfield journey. No brownfield path may imply that Mozaiks owns or rewrites
+existing source unless the ownership boundary marks the surface as approved for
+module expansion or staged patch review.
+
 ## Greenfield Journey
 
 Canonical greenfield registration:
@@ -191,11 +207,11 @@ App Intelligence is not an `AppPage`. It is workflow and control-plane context:
 - AppPages remain persistent generated app surfaces under `app/ui/`; they do
   not own builder indexing or refinement context
 
-The create journey enters `app_type_selector`, then the brownfield branch enters
-`brownfield_repo_input`, launches `ExistingAppDiscovery`, runs pre-chat indexing,
-registers a current source-backed `AppContextVersion`, emits
-`AppIntelligenceOverviewCard`, and then lets agents use retrieval tools for
-exact files.
+The create journey enters `app_type_selector`, then the brownfield branch
+enters `brownfield_path_selector`, then `brownfield_repo_input`, launches
+`ExistingAppDiscovery`, runs pre-chat indexing, registers a current
+source-backed `AppContextVersion`, emits `AppIntelligenceOverviewCard`, and
+then lets agents use retrieval tools for exact files.
 
 ## Implementation Map
 

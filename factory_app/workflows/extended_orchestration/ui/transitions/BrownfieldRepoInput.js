@@ -102,58 +102,6 @@ function useGithubRepos(sessionKey) {
   return { repos, loading, error };
 }
 
-function ExtractionProgress({ mode, repo }) {
-  const stages = mode === 'manual'
-    ? [
-        'Opening discovery chat',
-        'Preparing context questions',
-        'Handing off to discovery agents',
-      ]
-    : [
-        'Connecting to repository',
-        'Selecting safe source files',
-        'Extracting symbols and source chunks',
-        'Building AppContext graph',
-        'Creating App Intelligence snapshot',
-        'Preparing agent overview',
-      ];
-
-  return (
-    <div className="mx-auto w-full max-w-3xl rounded-xl border border-border/60 bg-card/60 px-5 py-5">
-      <div className="flex items-start gap-3">
-        <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary animate-pulse" />
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">
-            {mode === 'manual' ? 'Starting discovery' : 'Indexing App Intelligence'}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground break-words">
-            {repo || mode === 'manual'
-              ? repo || 'Manual discovery'
-              : 'Repository selected'}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-2">
-        {stages.map((stage, index) => (
-          <div
-            key={stage}
-            className="flex items-center gap-3 rounded-lg border border-border/50 bg-background/70 px-3 py-2"
-          >
-            <span
-              className={[
-                'h-2 w-2 shrink-0 rounded-full',
-                index === 0 ? 'bg-primary animate-pulse' : 'bg-muted-foreground/35',
-              ].join(' ')}
-            />
-            <span className="min-w-0 text-xs text-foreground">{stage}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function BrownfieldRepoInput({
   transition,
   onResolve,
@@ -234,31 +182,11 @@ export default function BrownfieldRepoInput({
     setShowManual(false);
   };
 
-  if (isStarting) {
-    return (
-      <TransitionChoicePanel
-        eyebrow="Existing App"
-        title={startMode === 'manual' ? 'Starting discovery' : 'Indexing App Intelligence'}
-        subtitle={
-          startMode === 'manual'
-            ? 'The discovery chat is being prepared.'
-            : 'Mozaiks is indexing source files before the agents begin.'
-        }
-        overlayTitleId={overlayTitleId}
-        overlayDescriptionId={overlayDescriptionId}
-        entered={motion.entered}
-        prefersReducedMotion={motion.prefersReducedMotion}
-      >
-        <ExtractionProgress mode={startMode} repo={activeRepo} />
-      </TransitionChoicePanel>
-    );
-  }
-
   return (
     <TransitionChoicePanel
       eyebrow="Existing App"
-      title="Link your codebase"
-      subtitle="Connect GitHub to pick your repo, or paste the URL below. You can skip this and describe your app manually instead."
+      title="Choose the app to analyze"
+      subtitle="Connect GitHub to pick the repo, or paste the URL below. Mozaiks reads this codebase before discovery starts."
       overlayTitleId={overlayTitleId}
       overlayDescriptionId={overlayDescriptionId}
       entered={motion.entered}
@@ -270,7 +198,7 @@ export default function BrownfieldRepoInput({
         {isPickerMode && (
           <>
             <div className="flex items-center justify-between gap-4">
-              <p className="text-sm font-semibold text-foreground">Choose a repository</p>
+              <p className="text-sm font-semibold text-foreground">Choose a repository to analyze</p>
               <button
                 type="button"
                 onClick={handleDisconnect}
@@ -337,7 +265,7 @@ export default function BrownfieldRepoInput({
             {oauthAvailable && !showManual && (
               <div className="flex flex-col items-center gap-3 py-2">
                 <p className="text-sm text-muted-foreground text-center">
-                  Connect your GitHub account to pick a repo from your list.
+                  Connect your GitHub account to pick the repo you want Mozaiks to analyze.
                 </p>
                 <button
                   type="button"
@@ -372,7 +300,7 @@ export default function BrownfieldRepoInput({
                   </div>
                 )}
                 {!showManual && (
-                  <p className="text-sm font-semibold text-foreground">GitHub repository</p>
+                  <p className="text-sm font-semibold text-foreground">GitHub repository to analyze</p>
                 )}
                 <input
                   type="text"

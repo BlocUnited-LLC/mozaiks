@@ -29,7 +29,7 @@ whole workflows through `workflow_sequences[]`.
 Use it for coarse build phases:
 
 - `ValueEngine -> ThemeCapture -> DesignDocs -> AgentGenerator -> AppGenerator -> AppReview`
-- `ExistingAppDiscovery -> brownfield path selection`
+- `app_type_selector -> brownfield_path_selector -> brownfield_repo_input -> ExistingAppDiscovery -> enhancement path selection -> ValueEngine -> scoped existing-app build sequence`
 - downstream design/revision paths that must restart at a workflow boundary
 
 It does not decide how a workflow decomposes its internal task work.

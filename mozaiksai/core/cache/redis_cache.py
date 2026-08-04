@@ -5,8 +5,8 @@
 #              Falls back to in-memory dict when Redis is unavailable.
 #
 # Configuration (env vars):
-#   REDIS_URL            — Redis connection URL (default: redis://localhost:6379)
-#   REDIS_CACHE_ENABLED  — set to "false" to disable (default: true)
+#   REDIS_URL            — Redis connection URL (required to enable; unset = in-memory only)
+#   REDIS_CACHE_ENABLED  — set to "false" to disable even when REDIS_URL is set
 #   REDIS_CACHE_TTL      — default TTL in seconds (default: 300)
 #   REDIS_CACHE_PREFIX   — key prefix (default: "mozaiks:")
 #
@@ -23,8 +23,8 @@ from logs.logging_config import get_core_logger
 
 logger = get_core_logger("redis_cache")
 
-_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-_ENABLED = os.getenv("REDIS_CACHE_ENABLED", "true").lower() not in ("false", "0", "no")
+_REDIS_URL = os.getenv("REDIS_URL", "").strip()
+_ENABLED = bool(_REDIS_URL) and os.getenv("REDIS_CACHE_ENABLED", "true").lower() not in ("false", "0", "no")
 _DEFAULT_TTL = int(os.getenv("REDIS_CACHE_TTL", "300").strip() or "300")
 _PREFIX = os.getenv("REDIS_CACHE_PREFIX", "mozaiks:").rstrip(":") + ":"
 

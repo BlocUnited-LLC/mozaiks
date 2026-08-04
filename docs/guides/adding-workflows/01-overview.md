@@ -304,10 +304,22 @@ Use workflow UI components only for artifacts that belong in the chat stream.
 Persistent app pages belong under the generated app workspace, not inside a
 workflow UI folder.
 
+Workflow UI registration stays workflow-local. If a first-party factory
+workflow component is reused by multiple factory workflows, put the reusable
+implementation under `factory_app/workflows/_shared/ui/` and import it from
+each consuming workflow's `ui/index.js`. Do not import UI from a sibling
+workflow folder.
+
+Generated workflow bundles should not depend on `workflows/_shared` or
+`factory_app/workflows/_shared/ui/`; generated workflow UI stays inside that
+workflow's own `ui/` folder unless the capability is promoted into a framework
+primitive.
+
 ## Read Next
 
 - [Workflow Architecture](../../architecture/workflows/workflow-architecture.md)
 - [Workflow Authoring Contracts](../../architecture/workflows/workflow-authoring-contracts.md)
+- [Shared Workflow Infrastructure](../../architecture/builder/shared-workflow-infrastructure.md)
 - [Workflow Task Batches](../../architecture/mozaiksai/task-batches.md)
 
 

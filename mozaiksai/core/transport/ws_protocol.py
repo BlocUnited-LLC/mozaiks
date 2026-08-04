@@ -120,9 +120,17 @@ class WebSocketProtocolMixin:
                                     safe_message["agent"] = "Agent"
 
                             if safe_message.get("type") == "chat.tool_call":
-                                payload_obj = safe_message.get("data", {}).get("payload", {})
+                                _tc_data = safe_message.get("data", {})
+                                payload_obj = _tc_data.get("payload", {})
                                 payload_keys = list(payload_obj.keys()) if isinstance(payload_obj, dict) else []
+                                _tc_display = _tc_data.get("display") or (payload_obj.get("display") if isinstance(payload_obj, dict) else None)
+                                _tc_component = _tc_data.get("component_type") or _tc_data.get("tool_name")
                                 logger.debug("PROTOCOL_TOOL_CALL_KEYS payload=%s", payload_keys[:12])
+                                if _tc_display == "artifact":
+                                    logger.info(
+                                        "ARTIFACT_TOOL_CALL_WS_SEND component=%s display=%s chat=%s — sending over wire",
+                                        _tc_component, _tc_display, chat_id,
+                                    )
                             await websocket.send_json(safe_message)
                             logger.debug("[PROTOCOL] WebSocket send_json completed for envelope type=%s, chat_id=%s", safe_message.get('type'), chat_id)
                         except Exception:
@@ -136,11 +144,27 @@ class WebSocketProtocolMixin:
                         await websocket.send_json(serialized_message)
                 except Exception as e:
                     if chat_id not in self.connections:
-                        logger.debug(
-                            "Dropping queued messages for disconnected chat %s after send failure: %s",
-                            chat_id,
-                            e,
+                        _dropped_type = message.get("type") if isinstance(message, dict) else None
+                        _dropped_data = message.get("data") if isinstance(message, dict) else None
+                        _is_artifact_drop = (
+                            _dropped_type == "chat.tool_call"
+                            and isinstance(_dropped_data, dict)
+                            and _dropped_data.get("display") == "artifact"
                         )
+                        if _is_artifact_drop:
+                            logger.warning(
+                                "ARTIFACT_TOOL_CALL_DROPPED_WS_GONE component=%s chat=%s — "
+                                "send failed and chat disconnected; artifact will NOT reach frontend: %s",
+                                _dropped_data.get("component_type") or _dropped_data.get("tool_name"),
+                                chat_id,
+                                e,
+                            )
+                        else:
+                            logger.debug(
+                                "Dropping queued messages for disconnected chat %s after send failure: %s",
+                                chat_id,
+                                e,
+                            )
                         self._message_queues.pop(chat_id, None)
                         break
                     logger.error("Failed to send queued message to %s: %s. Will retry shortly.", chat_id, e, exc_info=True)
@@ -239,12 +263,22 @@ class WebSocketProtocolMixin:
     # RUN REPLAY ON RECONNECT
     # ==================================================================================
 
-    async def _replay_run_on_connect_if_needed(self, chat_id: str, websocket: WebSocket, app_id: str | None) -> None:
+    async def _replay_run_on_connect_if_needed(
+        self,
+        chat_id: str,
+        websocket: WebSocket,
+        app_id: str | None,
+        *,
+        suppress_history_replay: bool = False,
+    ) -> None:
         """Replay chat history for IN_PROGRESS chats on WebSocket connection."""
         _ = websocket
         try:
             if not app_id:
                 logger.debug("[RUN_REPLAY] No app_id for %s, skipping replay", chat_id)
+                return
+            if suppress_history_replay:
+                logger.debug("[RUN_REPLAY] Suppressed on-connect replay for %s", chat_id)
                 return
 
             # Get workflow name and workflow_startup_mode from connection

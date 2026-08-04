@@ -260,7 +260,7 @@ function TransitionRoute({ route }) {
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
-        console.error('[TransitionRoute] transition resolution failed:', err);
+        console.error('❌ [TransitionRoute] transition resolution failed:', err);
         return false;
       }
     },
@@ -531,7 +531,7 @@ const RouteRenderer = ({
     return CORE_ROUTES.map((route, index) => {
       const { path, component: componentName } = route;
       if (!hasComponent(componentName)) {
-        console.warn(`[RouteRenderer] Core component "${componentName}" not found in registry for route "${path}"`);
+        console.warn(`⚠️ [RouteRenderer] Core component "${componentName}" not found in registry for route "${path}"`);
         return null;
       }
       const Component = getComponent(componentName);
@@ -623,7 +623,7 @@ const RouteRenderer = ({
       }
 
       if (!hasComponent(componentName)) {
-        console.warn(`[RouteRenderer] Component "${componentName}" not found in registry for route "${path}"`);
+        console.warn(`⚠️ [RouteRenderer] Component "${componentName}" not found in registry for route "${path}"`);
         return (
           <Route
             key={`extra-${index}-${path}`}

@@ -47,6 +47,12 @@ definitions:
     source:
       type: state
       default: in_progress
+  revision_origin_workflow:
+    type: string
+    description: Workflow where the revision request originated before reroute.
+    source:
+      type: state
+      default: null
   refinement_request:
     type: string
     description: Raw refinement request text when rerun during a revision.
@@ -59,6 +65,12 @@ definitions:
     source:
       type: state
       default: null
+  screen:
+    type: string
+    description: Builder surface or screen identifier that launched the current refinement request.
+    source:
+      type: state
+      default: null
   change_intent:
     type: object
     description: Control-plane refinement classification.
@@ -68,6 +80,96 @@ definitions:
   impact_set:
     type: object
     description: Control-plane downstream impact summary.
+    source:
+      type: state
+      default: null
+  app_context_required:
+    type: boolean
+    description: >
+      True when this run is a refinement or existing-app route that must retain
+      a current AppContextVersion before downstream build work continues.
+    source:
+      type: state
+      default: false
+  current_app_context_version_id:
+    type: string
+    description: Durable AppContextVersion id for source-backed App Intelligence.
+    source:
+      type: state
+      default: null
+  app_context_summary:
+    type: object
+    description: Prompt-safe summary of the current AppContextVersion.
+    source:
+      type: state
+      default: null
+  app_type:
+    type: string
+    description: Entry path selected at the app_type_selector gate.
+    source:
+      type: state
+      default: "greenfield_app"
+  app_intelligence_ready:
+    type: boolean
+    description: True when startup loaded an App Intelligence catalog.
+    source:
+      type: state
+      default: false
+  app_intelligence_status:
+    type: string
+    description: Startup load status for App Intelligence context.
+    source:
+      type: state
+      default: null
+  app_intelligence_summary:
+    type: string
+    description: Compact human-readable summary of indexed source coverage.
+    source:
+      type: state
+      default: null
+  app_intelligence_health:
+    type: object
+    description: App Intelligence coverage, scan health, and startup warnings.
+    source:
+      type: state
+      default: null
+  app_intelligence_catalog:
+    type: object
+    description: >
+      Prompt-safe App Intelligence catalog containing architecture, capability,
+      ownership, integration, data, and risk summaries.
+    source:
+      type: state
+      default: null
+  source_context_catalog:
+    type: object
+    description: Prompt-safe source corpus catalog for indexed files, chunks, symbols, and imports.
+    source:
+      type: state
+      default: null
+  brownfield_build_path:
+    type: string
+    description: >
+      Selected existing-app enhancement path. `light_integration` means Add AI
+      Workflows; `full_migration` means Build App Features. Null for greenfield.
+    source:
+      type: state
+      default: null
+  adoption_plan:
+    type: object
+    description: Canonical AdoptionPlan from ExistingAppDiscovery, when present.
+    source:
+      type: state
+      default: null
+  ownership_boundary:
+    type: object
+    description: Canonical ownership boundary from ExistingAppDiscovery, when present.
+    source:
+      type: state
+      default: null
+  brownfield_registration:
+    type: object
+    description: BrownfieldRegistration provenance record from ExistingAppDiscovery, when present.
     source:
       type: state
       default: null
@@ -185,10 +287,26 @@ agents:
       - artifact_kind
       - artifact_version_id
       - sequence_status
+      - revision_origin_workflow
       - refinement_request
       - refinement_request_meta
+      - screen
       - change_intent
       - impact_set
+      - app_context_required
+      - current_app_context_version_id
+      - app_context_summary
+      - app_type
+      - app_intelligence_ready
+      - app_intelligence_status
+      - app_intelligence_summary
+      - app_intelligence_health
+      - app_intelligence_catalog
+      - source_context_catalog
+      - brownfield_build_path
+      - adoption_plan
+      - ownership_boundary
+      - brownfield_registration
       - monetization_enabled
       - builder_options
       - concept_overview

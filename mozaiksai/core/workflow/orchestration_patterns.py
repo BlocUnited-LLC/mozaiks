@@ -312,6 +312,19 @@ _SENSITIVE_CONTEXT_KEY_PARTS = (
     "token",
 )
 
+_HANDOFF_CONTEXT_LOG_KEYS = (
+    "app_type",
+    "app_name",
+    "github_repo",
+    "brownfield_build_path",
+    "workflow_sequence",
+    "build_mode",
+    "revision_scope",
+    "current_app_context_version_id",
+    "app_intelligence_ready",
+    "app_intelligence_status",
+)
+
 
 def _safe_context_keys(context_variables: dict[str, Any]) -> list[str]:
     keys: list[str] = []
@@ -321,6 +334,44 @@ def _safe_context_keys(context_variables: dict[str, Any]) -> list[str]:
             continue
         keys.append(key)
     return keys
+
+
+def _safe_handoff_context_preview(
+    context_variables: dict[str, Any],
+    extra_context: dict[str, Any],
+) -> dict[str, Any]:
+    preview: dict[str, Any] = {}
+    for key in _HANDOFF_CONTEXT_LOG_KEYS:
+        if key not in context_variables:
+            continue
+        value = context_variables.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        if isinstance(value, str):
+            preview[key] = value[:160]
+        elif isinstance(value, (bool, int, float)):
+            preview[key] = value
+        elif isinstance(value, dict):
+            preview[key] = f"dict:{len(value)}"
+        elif isinstance(value, list):
+            preview[key] = f"list:{len(value)}"
+        else:
+            preview[key] = type(value).__name__
+
+    trigger_meta = extra_context.get("trigger_meta") if isinstance(extra_context, dict) else None
+    if isinstance(trigger_meta, dict):
+        for source_key, preview_key in (
+            ("trigger_source", "trigger_source"),
+            ("transition_id", "transition_id"),
+            ("option_id", "transition_option"),
+            ("journey_id", "journey_id"),
+            ("resolved_workflow_id", "resolved_workflow"),
+        ):
+            value = trigger_meta.get(source_key)
+            if isinstance(value, str) and value.strip():
+                preview[preview_key] = value.strip()[:160]
+
+    return preview
 
 
 def _set_context_value(context_ref: Any, key: str, value: Any) -> None:
@@ -564,6 +615,7 @@ async def _run_ag2_network_phase(
     context_variables: dict[str, Any],
     structured_registry: dict[str, Any],
     max_turns: int,
+    agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -577,6 +629,7 @@ async def _run_ag2_network_phase(
             context_variables=context_variables,
             structured_registry=structured_registry,
             max_turns=max_turns,
+            agent_text_context_deriver=agent_text_context_deriver,
         )
     )
 
@@ -689,6 +742,7 @@ async def run_workflow_orchestration(
             wf_logger.debug("[%s] frontend_context lookup failed: %s", workflow_name_upper, _fe_err)
 
         context: Any = None
+        persisted_extra_ctx: dict[str, Any] = {}
         if context_factory:
             result_ctx = context_factory()
             if inspect.isawaitable(result_ctx):
@@ -714,6 +768,7 @@ async def run_workflow_orchestration(
             if context is not None:
                 extra_ctx = await persistence_manager.fetch_chat_session_extra_context(chat_id=chat_id, app_id=app_id)
                 if isinstance(extra_ctx, dict) and extra_ctx:
+                    persisted_extra_ctx = dict(extra_ctx)
                     merge_persisted_extra_context(context, extra_ctx)
         except Exception as seed_err:
             wf_logger.debug("[%s] Persisted extra context merge failed: %s", workflow_name_upper, seed_err)
@@ -752,6 +807,14 @@ async def run_workflow_orchestration(
                         context[key] = ctx_dict[key]
                 except Exception as _ctx_exc:
                     wf_logger.debug("[%s] CONTEXT_SEED_FAILED key=%s: %s", workflow_name_upper, key, _ctx_exc)
+
+        if persisted_extra_ctx:
+            wf_logger.info(
+                "[%s] SESSION_CONTEXT_MERGED extra_keys=%s handoff=%s",
+                workflow_name_upper,
+                _safe_context_keys(persisted_extra_ctx),
+                _safe_handoff_context_preview(ctx_dict, persisted_extra_ctx),
+            )
 
         # 6) Preload deterministic context before agent prompts are composed.
         try:
@@ -935,6 +998,13 @@ async def run_workflow_orchestration(
 
         # 10) Execute AG2 Network workflow channel
         network_prompt = _messages_to_network_prompt(initial_messages)
+        agent_text_context_deriver = (
+            getattr(derived_context_manager, "preview_agent_text_updates", None)
+            if derived_context_manager is not None
+            else None
+        )
+        if not callable(agent_text_context_deriver):
+            agent_text_context_deriver = None
         projected_sequence = 0
         project_final_runner_result = True
         if task_batches_config is not None:
@@ -956,6 +1026,7 @@ async def run_workflow_orchestration(
                 context_variables=dict(ctx_dict),
                 structured_registry=structured_registry,
                 max_turns=max_turns,
+                agent_text_context_deriver=agent_text_context_deriver,
             )
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
@@ -1020,10 +1091,11 @@ async def run_workflow_orchestration(
                         transition_rules=transition_rules,
                         initial_agent_name=continuation_agent,
                         initial_message="Continue with the completed deterministic task batch outputs.",
-                        context_variables=ctx_dict,
-                        structured_registry=structured_registry,
-                        max_turns=max_turns,
-                    )
+                    context_variables=ctx_dict,
+                    structured_registry=structured_registry,
+                    max_turns=max_turns,
+                    agent_text_context_deriver=agent_text_context_deriver,
+                )
                 else:
                     runner_result = first_phase_result
                     project_final_runner_result = False
@@ -1039,6 +1111,7 @@ async def run_workflow_orchestration(
                 context_variables=ctx_dict,
                 structured_registry=structured_registry,
                 max_turns=max_turns,
+                agent_text_context_deriver=agent_text_context_deriver,
             )
 
         await _emit_structured_once(runner_result, projected_sequence)

@@ -6,6 +6,7 @@ import {
   applyBrandImageFallback,
   getBrandLogoSrc,
 } from "../../styles/brandAssets";
+import { logChatPersistence } from '../../session/chatSessionStorage';
 
 const PENDING_HARNESS_DECISION_TITLES = {
   workflow_reentry: 'Workflow Re-Entry',
@@ -274,9 +275,15 @@ const ModernChatInterface = ({
   // Chat flow UI tool event handling
   // This keeps the main chat interface clean and avoids hook violations.
 
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    const resolvedBehavior = typeof behavior === 'string' ? behavior : 'smooth';
+    chatEndRef.current?.scrollIntoView({
+      behavior: resolvedBehavior,
+      block: 'end',
+      inline: 'nearest',
+    });
+    setIsScrolledUp(false);
+  }, []);
 
   const handleScroll = () => {
     if (chatContainerRef.current) {
@@ -399,8 +406,14 @@ const ModernChatInterface = ({
   }, [messages, loading]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    scrollToBottom('smooth');
+    const frame = window.requestAnimationFrame(() => scrollToBottom('auto'));
+    const timer = window.setTimeout(() => scrollToBottom('auto'), 160);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     const chatContainer = chatContainerRef.current;
@@ -421,6 +434,18 @@ const ModernChatInterface = ({
     if (modeTogglePending) {
       return;
     }
+
+    logChatPersistence('ui_mode_toggle_clicked', {
+      conversationMode,
+      isOnChatPage,
+      modeTogglePending,
+      hasPendingHarnessDecision,
+      showModeToggle,
+      workflowName: workflowName || null,
+      shellTitle,
+      conversationSubtitle,
+      source: isOnChatPage ? 'chat_page_shell' : 'embedded_shell',
+    });
 
     // When NOT on chat page and switching from Ask → Workflow:
     // Immediately switch mode (which triggers most recent workflow fetch), navigation will follow
@@ -446,6 +471,52 @@ const ModernChatInterface = ({
     }
   };
 
+  const hasVisibleMessages = Array.isArray(messages) && messages.some((chat) => {
+    if (!chat || chat.metadata?.hideInTranscript) {
+      return false;
+    }
+    const isEmptyContent = !(chat.content && String(chat.content).trim().length);
+    const hasStructured = !!(chat.structuredOutput && typeof chat.structuredOutput === 'object');
+    const hasToolCall = !!chat.toolCall;
+    const hasAttachment = !!chat.attachment;
+    const hasTrace = Array.isArray(chat.trace) && chat.trace.length > 0;
+    const isSystem = chat.isTokenMessage || chat.isWarningMessage;
+    return !isEmptyContent || chat.isThinking || hasStructured || hasToolCall || hasAttachment || hasTrace || isSystem;
+  });
+
+  // Show a typing indicator when workflow has produced any output (activity card,
+  // inline tool call, or tool progress) but no agent text has arrived yet.
+  // This covers the before-chat → first-agent gap where before_chat hooks emit
+  // activity/artifact cards, run_complete clears loading=false, and then
+  // DiscoveryHostAgent (or any first agent) starts its run with no stream chunks yet.
+  const showTypingIndicator = loading || (() => {
+    if (!Array.isArray(messages) || connectionStatus === 'error') return false;
+    let hasWorkflowOutput = false;
+    let hasAgentText = false;
+    for (const msg of messages) {
+      if (!msg || msg.metadata?.hideInTranscript) continue;
+      // activity cards (event_type: 'activity'), tool progress, or inline tool calls
+      if (
+        msg.toolCall
+        || msg.metadata?.event_type === 'activity'
+        || msg.metadata?.event_type === 'tool_progress'
+      ) {
+        hasWorkflowOutput = true;
+      }
+      if (
+        msg.sender === 'agent'
+        && !msg.isThinking
+        // tool_call_agent_message = planning text before a tool call — not the final response
+        && msg.metadata?.type !== 'tool_call_agent_message'
+        && msg.content
+        && String(msg.content).trim().length > 0
+      ) {
+        hasAgentText = true;
+      }
+    }
+    // Only fire in workflow mode — ask mode doesn't have this gap
+    return conversationMode === 'workflow' && hasWorkflowOutput && !hasAgentText;
+  })();
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
     let lastContentIndex = -1;
@@ -496,6 +567,7 @@ const ModernChatInterface = ({
             isThinking={chat.isThinking}
             attachment={chat.attachment}
             trace={chat.trace}
+            metadata={chat.metadata}
           />
 
           {chat.toolCall && (
@@ -530,8 +602,8 @@ const ModernChatInterface = ({
     <div className={messageStackClass} style={{ rowGap: 'var(--chat-bubble-stack-gap, 1rem)' }}>
       {/* Messages render below */}
       {renderedMessages}
-      {/* Typing indicator slot (rendered when loading without messages updating) */}
-      {loading && (
+      {/* Typing indicator slot: shown while loading, or when a UI surface arrived before any agent text */}
+      {showTypingIndicator && (
         <div className="flex justify-start px-0 message-container">
           <div className="mt-1 px-2 py-1 rounded-md bg-transparent text-[rgba(var(--color-primary-light-rgb),0.7)] flex items-center gap-1 text-xs font-mono tracking-wide typing-indicator" aria-label="Assistant is typing" role="status">
             <span className="typing-dot" />

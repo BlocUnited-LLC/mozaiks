@@ -8,9 +8,11 @@ validated declarations and already constructed AG2 agents.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,42 @@ from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_st
 _INITIATOR_NAME = "mozaiks_user"
 
 
+def _json_safe_key(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, Mapping):
+        return {
+            _json_safe_key(key): _json_safe(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list | tuple | set):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return _json_safe(value.model_dump(mode="json"))
+        except TypeError:
+            return _json_safe(value.model_dump())
+    return str(value)
+
+
+def _json_safe_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    serialized = _json_safe(dict(value or {}))
+    return serialized if isinstance(serialized, dict) else {}
+
+
 @dataclass(slots=True)
 class AG2NetworkRunnerRequest:
     """Already-loaded workflow execution inputs for the AG2 Network runner."""
@@ -58,6 +96,7 @@ class AG2NetworkRunnerRequest:
     max_turns: int | None = None
     close_timeout_seconds: float = 120.0
     attach_network_plugin: bool = True
+    agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
 
 
 @dataclass(slots=True)
@@ -140,7 +179,12 @@ class AG2NetworkRunner:
                     Resume(claimed_capabilities=[name]),
                     attach_plugin=request.attach_network_plugin,
                 )
-                _install_context_update_handler(agent=agent, client=client)
+                _install_context_update_handler(
+                    agent=agent,
+                    client=client,
+                    agent_name=name,
+                    agent_text_context_deriver=request.agent_text_context_deriver,
+                )
                 agent_clients[name] = client
                 agent_id_by_name[name] = client.agent_id
 
@@ -154,12 +198,14 @@ class AG2NetworkRunner:
                 max_turns=request.max_turns,
             )
 
+            safe_context_vars = _json_safe_dict(request.context_variables)
+
             channel = await initiator.open(
                 type="workflow",
                 target=[client.agent_id for client in agent_clients.values()],
                 knobs={
                     "graph": graph.to_dict(),
-                    "context_vars": dict(request.context_variables or {}),
+                    "context_vars": safe_context_vars,
                 },
             )
             channel_id = channel.channel_id
@@ -199,7 +245,7 @@ class AG2NetworkRunner:
                         app_id=request.app_id,
                         channel_id=channel.channel_id,
                         close_reason=close_reason,
-                        context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                        context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                         structured_outputs=structured_outputs,
                         agent_name_by_id=agent_name_by_id,
                         wal=[_envelope_to_dict(envelope) for envelope in wal],
@@ -212,7 +258,7 @@ class AG2NetworkRunner:
                     app_id=request.app_id,
                     channel_id=channel.channel_id,
                     close_reason=close_reason,
-                    context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                    context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                     structured_outputs=structured_outputs,
                     agent_name_by_id=agent_name_by_id,
                     wal=[_envelope_to_dict(envelope) for envelope in wal],
@@ -256,7 +302,7 @@ class AG2NetworkRunner:
                         chat_id=request.chat_id,
                         app_id=request.app_id,
                         channel_id=channel.channel_id,
-                        context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                        context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                         agent_name_by_id=agent_name_by_id,
                         wal=[_envelope_to_dict(envelope) for envelope in wal],
                         error=f"AG2 turn failed for {failed_agent}: {failure['error']}",
@@ -458,7 +504,7 @@ class _AG2LiveWorkflowRun:
                 await self._channel.send(
                     "",
                     event_type=EV_CONTEXT_SET,
-                    event_data={"set": dict(context_updates or {}), "delete": []},
+                    event_data={"set": _json_safe_dict(context_updates), "delete": []},
                 )
             audience = self._next_agent_audience_for_user_text(str(message or "."))
             await self._channel.send(str(message or "."), audience=audience)
@@ -598,25 +644,43 @@ class _AG2LiveWorkflowRun:
             )
 
 
-def _install_context_update_handler(*, agent: Any, client: Any) -> None:
+def _packet_body_text(event_data: Mapping[str, Any]) -> str:
+    body = event_data.get("body")
+    if isinstance(body, str):
+        return body
+    if isinstance(body, (dict, list)):
+        return json.dumps(body, ensure_ascii=False, default=str)
+    return str(body or "")
+
+
+def _install_context_update_handler(
+    *,
+    agent: Any,
+    client: Any,
+    agent_name: str,
+    agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None,
+) -> None:
     """Commit Mozaiks tool context mutations through AG2 workflow packets.
 
     AG2 Workflow routing reads ``WorkflowState.context_vars``. Mozaiks tools
     receive ``ContextVariablesBridge`` for ergonomics, so this adapter consumes
-    bridge mutations at round end and merges them into the outgoing AG2
-    ``EV_PACKET.context_updates`` payload before AG2 selects the next speaker.
+    bridge mutations and declarative agent-text state triggers at round end and
+    merges them into the outgoing AG2 ``EV_PACKET.context_updates`` payload
+    before AG2 selects the next speaker.
     """
 
     bridge = getattr(agent, "_mozaiks_context_bridge", None)
-    if bridge is None:
-        return
-    if not callable(getattr(bridge, "clear_context_updates", None)):
-        return
-    if not callable(getattr(bridge, "consume_context_updates", None)):
+    has_bridge = (
+        bridge is not None
+        and callable(getattr(bridge, "clear_context_updates", None))
+        and callable(getattr(bridge, "consume_context_updates", None))
+    )
+    if not has_bridge and agent_text_context_deriver is None:
         return
 
     async def _handler(envelope: Any) -> None:
-        bridge.clear_context_updates()
+        if bridge is not None:
+            bridge.clear_context_updates()
         original_send_envelope = client.send_envelope
 
         async def _send_with_context_updates(out_envelope: Any) -> str:
@@ -625,17 +689,41 @@ def _install_context_update_handler(*, agent: Any, client: Any) -> None:
                 and str(getattr(out_envelope, "channel_id", "") or "")
                 == str(getattr(envelope, "channel_id", "") or "")
             ):
-                updates = bridge.consume_context_updates()
-                if updates.get("set") or updates.get("delete"):
-                    event_data = dict(getattr(out_envelope, "event_data", {}) or {})
+                bridge_updates = (
+                    bridge.consume_context_updates()
+                    if bridge is not None
+                    else {"set": {}, "delete": []}
+                )
+                event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
+                derived_updates: Mapping[str, Any] = {}
+                if agent_text_context_deriver is not None:
+                    text = _packet_body_text(event_data)
+                    if text.strip():
+                        try:
+                            candidate_updates = agent_text_context_deriver(agent_name, text)
+                        except Exception as err:  # pragma: no cover
+                            logger.debug(
+                                "AG2_AGENT_TEXT_CONTEXT_DERIVE_FAILED agent=%s: %s",
+                                agent_name,
+                                err,
+                            )
+                            candidate_updates = {}
+                        if isinstance(candidate_updates, Mapping):
+                            derived_updates = candidate_updates
+                if (
+                    bridge_updates.get("set")
+                    or bridge_updates.get("delete")
+                    or derived_updates
+                ):
                     existing = dict(event_data.get("context_updates") or {})
                     merged_set = {
-                        **dict(existing.get("set") or {}),
-                        **dict(updates.get("set") or {}),
+                        **_json_safe_dict(existing.get("set") or {}),
+                        **_json_safe_dict(derived_updates),
+                        **_json_safe_dict(bridge_updates.get("set") or {}),
                     }
                     merged_delete = [
                         *list(existing.get("delete") or []),
-                        *list(updates.get("delete") or []),
+                        *list(bridge_updates.get("delete") or []),
                     ]
                     event_data["context_updates"] = {
                         "set": merged_set,
@@ -649,7 +737,8 @@ def _install_context_update_handler(*, agent: Any, client: Any) -> None:
             await default_handler(envelope, client)
         finally:
             client.send_envelope = original_send_envelope
-            bridge.clear_context_updates()
+            if bridge is not None:
+                bridge.clear_context_updates()
 
     client.on_envelope(_handler)
 
@@ -693,10 +782,10 @@ def _envelope_to_dict(envelope: Any) -> dict[str, Any]:
         "envelope_id": str(getattr(envelope, "envelope_id", "") or ""),
         "channel_id": str(getattr(envelope, "channel_id", "") or ""),
         "sender_id": str(getattr(envelope, "sender_id", "") or ""),
-        "audience": list(getattr(envelope, "audience", None) or []),
+        "audience": _json_safe(list(getattr(envelope, "audience", None) or [])),
         "event_type": str(getattr(envelope, "event_type", "") or ""),
-        "event_data": dict(getattr(envelope, "event_data", {}) or {}),
-        "causation_id": getattr(envelope, "causation_id", None),
+        "event_data": _json_safe_dict(getattr(envelope, "event_data", {}) or {}),
+        "causation_id": _json_safe(getattr(envelope, "causation_id", None)),
     }
 
 

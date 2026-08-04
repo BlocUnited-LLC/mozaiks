@@ -28,6 +28,7 @@ TYPE_MAP = {
     'str': str,
     'string': str,
     'int': int,
+    'integer': int,
     'bool': bool,
     'optional_str': Optional[str],  # noqa: UP045
     'Optional[str]': Optional[str],  # noqa: UP045

@@ -26,7 +26,7 @@ These were local, high-confidence dead-code items with no current contract value
   Studio app bundle. The reusable generated-app messaging build context remains
   available under `factory_app/build_context/messaging`.
 - Made `factory_app/app/ui/route_manifest.json` the first-party Studio route
-  source for app pages, including `/apps/:appId/activity` -> `AppBuildHistoryPage`.
+  source for app pages, including `/apps/:appId/activity` -> `AppBuildReviewPage`.
 - Reduced `factory_app/app/admin/admin_registry.yaml` to an AdminPortal
   extension-page registry and removed duplicate Studio route declarations.
 - Removed hosted/social page registrations and unrouted page files from the OSS

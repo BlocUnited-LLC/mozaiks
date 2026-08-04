@@ -216,6 +216,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 |---------------------|--------------|
 | Shared/factory AI workflow logic | `factory_app/workflows/{name}/` |
 | Factory workflow-owned prompt catalogs | `factory_app/build_context/{context_name}/context.yaml` `assets[]` with `kind: catalog` |
+| Shared factory workflow helpers | `factory_app/workflows/_shared/` for cross-workflow Python helpers and reusable workflow UI components |
 | Factory build-context path helper | `factory_app/workflows/_shared/hook_utils.py` |
 | OSS reusable build pack | `factory_app/build_context/{context_name}/context.yaml` with `pack:` and explicit `assets[]` |
 | App/workspace build context | `build_context/{context_name}/` beside the active `app/` root |

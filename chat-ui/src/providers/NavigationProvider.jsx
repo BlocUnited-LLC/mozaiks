@@ -291,7 +291,7 @@ export const NavigationProvider = ({
         } else {
         }
       } catch (err) {
-        console.error('[NavigationProvider] Error loading shell config:', err);
+        console.error('❌ [NavigationProvider] Error loading shell config:', err);
         onErrorRef.current(err);
       }
 

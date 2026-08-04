@@ -67,10 +67,10 @@ if (Test-Path "ChatUI") {
 # Logs (optional)
 if (-not $KeepLogs) {
     Write-Host "`n Cleaning logs..." -ForegroundColor Yellow
-    if (Test-Path "logs/logs") {
-        $logFiles = Get-ChildItem -Path "logs/logs" -Filter "*.log" -ErrorAction SilentlyContinue
+    if (Test-Path "logs") {
+        $logFiles = Get-ChildItem -Path "logs" -Filter "*.log" -Recurse -File -ErrorAction SilentlyContinue
         if (-not $logFiles) {
-            Write-Host "    No log files found in logs/logs/" -ForegroundColor Gray
+            Write-Host "    No log files found under logs/" -ForegroundColor Gray
         } else {
             $lockedFiles = @()
             $deletedCount = 0
@@ -112,8 +112,24 @@ if (-not $KeepLogs) {
                 Write-Host "    ⚠️  Could not delete locked logs: $names" -ForegroundColor Yellow
                 Write-Host "       Close remaining log writers and rerun cleanse to remove them." -ForegroundColor Gray
             } else {
-                Write-Host "    Removed logs/logs/*.log ($deletedCount file(s))" -ForegroundColor Green
+                Write-Host "    Removed logs/**/*.log ($deletedCount file(s))" -ForegroundColor Green
             }
+        }
+
+        $screenshotFiles = Get-ChildItem -Path "logs" -Filter "*.png" -Recurse -File -ErrorAction SilentlyContinue
+        if (-not $screenshotFiles) {
+            Write-Host "    No screenshot artifacts found under logs/" -ForegroundColor Gray
+        } else {
+            $deletedScreenshots = 0
+            foreach ($screenshot in $screenshotFiles) {
+                try {
+                    Remove-Item -Path $screenshot.FullName -Force -ErrorAction Stop
+                    $deletedScreenshots++
+                } catch {
+                    # best effort
+                }
+            }
+            Write-Host "    Removed logs/**/*.png ($deletedScreenshots file(s))" -ForegroundColor Green
         }
     }
 

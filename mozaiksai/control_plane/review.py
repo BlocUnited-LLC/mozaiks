@@ -20,6 +20,13 @@ RefinementReviewStatus = Literal[
     "promotion_ready",
     "promoted",
 ]
+RefinementWriteBackMode = Literal[
+    "generated_artifact",
+    "external_patch",
+    "mozaiks_overlay",
+    "full_migration_artifact",
+    "local_workspace",
+]
 
 _INITIAL_REVIEW_STATUSES = {"staged", "review_pending"}
 _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -52,6 +59,8 @@ class RefinementReviewRecord(BaseModel):
     source_bundle_path: str | None = None
     staging_area: str
     affected_bundle_paths: list[str] = Field(default_factory=list)
+    write_back_mode: RefinementWriteBackMode = "generated_artifact"
+    write_back_target: str | None = None
     mutation_allowed: Literal[False] = False
 
 
@@ -117,6 +126,8 @@ def create_refinement_review_record(
     status: RefinementReviewStatus = "review_pending",
     reviewer: str | None = None,
     notes: str | None = None,
+    write_back_mode: RefinementWriteBackMode = "generated_artifact",
+    write_back_target: str | None = None,
 ) -> RefinementReviewRecord:
     if status not in _INITIAL_REVIEW_STATUSES:
         allowed = ", ".join(sorted(_INITIAL_REVIEW_STATUSES))
@@ -133,6 +144,8 @@ def create_refinement_review_record(
         source_bundle_path=staging_result.source_bundle_path,
         staging_area=staging_result.staging_area,
         affected_bundle_paths=_affected_paths_from_result(staging_result),
+        write_back_mode=write_back_mode,
+        write_back_target=str(write_back_target).strip() or None if write_back_target is not None else None,
         mutation_allowed=False,
     )
     _write_review_record(record)
@@ -264,6 +277,7 @@ __all__ = [
     "RefinementReviewRecord",
     "RefinementReviewStatus",
     "RefinementReviewTransitionError",
+    "RefinementWriteBackMode",
     "approve_refinement_staging",
     "create_refinement_review_record",
     "load_refinement_review_record",

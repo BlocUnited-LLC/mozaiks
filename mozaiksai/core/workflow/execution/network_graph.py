@@ -157,7 +157,11 @@ def compile_transition_rules_to_graph(
                 f"transition_type={transition_type!r}"
             )
 
-        transitions.append(Transition(when=when, then=target, priority=index))
+        # AG2 evaluates lower numeric priorities first. Conditional rules are
+        # narrower than unconditional after_turn fallbacks, so keep conditions
+        # ahead of fallbacks while preserving YAML order within each group.
+        priority = index if transition_type == "condition" else len(transition_rules) + index
+        transitions.append(Transition(when=when, then=target, priority=priority))
 
     initial_speaker = _agent_id(initial_agent_name, agent_ids)
     return TransitionGraph(

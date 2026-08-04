@@ -23,6 +23,158 @@ definitions:
       type: state
       default: "greenfield_app"
 
+  app_name:
+    type: string
+    description: Existing app or generated app display name carried from discovery or launch context.
+    source:
+      type: state
+      default: null
+
+  github_repo:
+    type: string
+    description: Optional GitHub repo in owner/repo format for an existing app.
+    source:
+      type: state
+      default: null
+
+  repo_summary:
+    type: object
+    description: Prompt-safe repository summary carried from ExistingAppDiscovery.
+    source:
+      type: state
+      default: null
+
+  tech_stack:
+    type: string
+    description: Prompt-safe technology stack summary carried from ExistingAppDiscovery.
+    source:
+      type: state
+      default: null
+
+  existing_experience_summary:
+    type: string
+    description: User-facing summary of the current existing-app experience discovered during indexing.
+    source:
+      type: state
+      default: null
+
+  current_app_context_version_id:
+    type: string
+    description: >
+      Current AppContextVersion id created or loaded by App Intelligence
+      preload. This is the durable source-backed context handle for downstream
+      value planning, build, and refinement.
+    source:
+      type: state
+      default: null
+
+  app_context_summary:
+    type: object
+    description: >
+      Prompt-safe summary of the current AppContextVersion, including artifact
+      refs, source refs, ownership boundaries, stale status, and warnings.
+      This is context authority for existing-app planning, not raw source content.
+    source:
+      type: state
+      default: null
+
+  app_context_required:
+    type: boolean
+    description: >
+      True when this run is a refinement or existing-app route that must retain
+      a current AppContextVersion before downstream build work continues.
+    source:
+      type: state
+      default: false
+
+  app_intelligence_ready:
+    type: boolean
+    description: True when startup loaded an App Intelligence catalog.
+    source:
+      type: state
+      default: false
+
+  app_intelligence_status:
+    type: string
+    description: Startup load status for App Intelligence context.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_summary:
+    type: string
+    description: Compact human-readable summary of indexed source coverage.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_health:
+    type: object
+    description: App Intelligence coverage, scan health, and startup warnings.
+    source:
+      type: state
+      default: null
+
+  app_intelligence_catalog:
+    type: object
+    description: >
+      Prompt-safe App Intelligence catalog containing architecture, capability,
+      ownership, integration, data, and risk summaries. Exact code is not
+      embedded here; agents use source retrieval tools later when a selected
+      enhancement needs code evidence.
+    source:
+      type: state
+      default: null
+
+  source_context_catalog:
+    type: object
+    description: >
+      Prompt-safe source corpus catalog for indexed files, chunks, symbols, and
+      imports. It is an index for retrieval, not full source content.
+    source:
+      type: state
+      default: null
+
+  brownfield_build_path:
+    type: string
+    description: >
+      Selected existing-app enhancement path from brownfield_path_selector.
+      Internal values stay stable: "light_integration" means Add AI Workflows;
+      "full_migration" means Build App Features. Null for greenfield builds.
+    source:
+      type: state
+      default: null
+
+  adoption_plan:
+    type: object
+    description: >
+      Canonical AdoptionPlan from ExistingAppDiscovery. Present only for
+      existing-app builds. ValueEngine uses it to recommend the highest-value
+      enhancement while respecting approved scope.
+    source:
+      type: state
+      default: null
+
+  ownership_boundary:
+    type: object
+    description: >
+      Canonical ownership_boundary artifact from ExistingAppDiscovery. Present
+      only for existing-app builds. ValueEngine must preserve protected existing
+      app surfaces unless the user explicitly approves staged changes.
+    source:
+      type: state
+      default: null
+
+  brownfield_registration:
+    type: object
+    description: >
+      BrownfieldRegistration record from ExistingAppDiscovery. Present only for
+      existing-app builds. Used as the provenance anchor for generated
+      extensions and app connections.
+    source:
+      type: state
+      default: null
+
   context_aware:
     type: boolean
     description: Flag indicating if the application is opensource (LLM asks for context) or part of an existing product with seeded context.
@@ -304,6 +456,24 @@ agents:
     variables:
     - platform_user_email
     - app_type
+    - app_name
+    - github_repo
+    - repo_summary
+    - tech_stack
+    - existing_experience_summary
+    - current_app_context_version_id
+    - app_context_summary
+    - app_context_required
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration
     - context_aware
     - monetization_enabled
     - build_mode
@@ -328,6 +498,25 @@ agents:
     - interview_complete
   ResearchAgent:
     variables:
+    - app_type
+    - app_name
+    - github_repo
+    - repo_summary
+    - tech_stack
+    - existing_experience_summary
+    - current_app_context_version_id
+    - app_context_summary
+    - app_context_required
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration
     - build_mode
     - workflow_sequence
     - revision_scope
@@ -348,9 +537,27 @@ agents:
     - llm_profile
     - interview_complete
     - concept_presented
-    - app_type
   GapAnalysisAgent:
     variables:
+    - app_type
+    - app_name
+    - github_repo
+    - repo_summary
+    - tech_stack
+    - existing_experience_summary
+    - current_app_context_version_id
+    - app_context_summary
+    - app_context_required
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration
     - build_mode
     - workflow_sequence
     - revision_scope
@@ -375,4 +582,3 @@ agents:
     - api_endpoints
     - feature_decomposition
     - generation_status
-    - app_type

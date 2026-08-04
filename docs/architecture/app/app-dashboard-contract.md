@@ -96,23 +96,13 @@ app:
       panels:
         - id: requests
           type: build_requests
-          title: Build requests
+          title: Build state
         - id: artifacts
           type: artifact_timeline
-          title: Artifacts
+          title: Build versions
         - id: approvals
           type: approval_queue
           title: Approvals
-        - id: continue_build
-          type: workflow_launcher
-          source: workflow
-          workflow_id: extended_orchestration
-          actions:
-            - id: continue_build
-              label: Continue Build
-              type: workflow_sequence
-              target: build
-              variant: primary
 ```
 
 ## Canonical App Portals
@@ -122,7 +112,7 @@ The default App Dashboard lanes are:
 | Portal | Purpose |
 | --- | --- |
 | `overview` | App identity, lifecycle, KPIs, next step, and top-level alerts. |
-| `building` | Build requests, artifact versions, approval queue, and build workflow launch actions. |
+| `building` | Build state, build versions, and approval queue. |
 | `branding` | Brand kit, logos, themes, generated media, and promoted brand assets. |
 | `launch` | Landing page status, hosting, domains, deployment readiness, and launch workflows. |
 | `growth` | Landing-page improvement, marketing campaigns, campaign assets, and growth workflow launch actions. |
@@ -169,7 +159,7 @@ remain valid while the Dashboard Portal renderer is adopted.
 `/api/studio/dashboard`, matches the current route to an enabled portal, then
 renders known panel types against Studio data. The generic renderer currently
 covers summary, next step, portal links, build requests, artifact timelines,
-approval queues, and workflow launch panels. Apps should mount it by
+approval queues, and explicitly declared workflow launch panels. Apps should mount it by
 declaring a normal route-manifest entry with `component: DashboardPortalPage`;
 they should not copy the factory page into their workspace to activate a
 default portal.

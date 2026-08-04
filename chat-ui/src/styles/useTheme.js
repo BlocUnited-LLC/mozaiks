@@ -23,7 +23,7 @@ export function useTheme(appId = null) {
           setLoading(false);
         }
       } catch (error) {
-        console.error('[useTheme] Failed to load theme:', error);
+        console.error('❌ [useTheme] Failed to load theme:', error);
         if (!cancelled) {
           setTheme(DEFAULT_THEME);
           applyTheme(DEFAULT_THEME);

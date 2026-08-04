@@ -25,6 +25,8 @@ agents:
       - `frontend_design_document`, `backend_design_document`, `database_design_document`: Draft design documents when they already exist.
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools`: Upstream agent-backend integration context when an agent backend is part of the build.
       - `platform_user_email`: Email of the authenticated platform user running this session. When non-null, use this as the admin email — do NOT ask the user for it.
+      - `app_intelligence_summary`, `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`: Prompt-safe source-backed context for an existing/current app when available.
+      - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and `brownfield_registration`: Existing-app enhancement scope and protected boundaries when available.
 
       This workflow is for normal product application generation, not for inventing new AI workflows.
   - id: instructions
@@ -94,7 +96,7 @@ agents:
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt.**
 
       When brownfield adoption context is injected, the app scope is NOT open-ended.
       The adoption plan already determines what gets built. Adjust your interview accordingly:
@@ -105,7 +107,13 @@ agents:
          Do not ask about unrelated product features, pricing models, or page count.
 
       2. **For `light_integration` path (overlay):**
-         - The existing app is not being replaced. Overlays add NEW surfaces only.
+         - User-facing label: Add AI Workflows.
+         - The existing app is not being replaced. This path adds app-aware AI
+           workflows, chat surfaces, and only required safe adapters around
+           approved capabilities.
+         - Treat this as the normal first move for most existing apps: preserve
+           current code, data, auth, and business logic while adding Mozaiks AI
+           capability around the product.
          - Confirm only: which of the `candidate_overlays` the user wants to proceed with,
            and whether any integration constraints apply to the listed `candidate_adapters`.
          - Do NOT ask about the existing app's architecture, database, or current tech stack —
@@ -113,9 +121,13 @@ agents:
          - Emit NEXT as soon as the overlay selection is confirmed (usually 0–1 questions).
 
       3. **For `full_migration` path:**
-         - `candidate_migrations` lists the modules to migrate. Confirm module priorities
-           and any data-migration constraints if the user has not already provided them.
-         - Do NOT redesign the existing app from scratch — migration scope is bounded by
+         - User-facing label: Build App Features.
+         - `candidate_migrations` lists the modules or product areas to expand.
+           Confirm module priorities and any data-migration constraints if the
+           user has not already provided them.
+         - This is approved module and product expansion scope only. Do NOT imply Mozaiks will
+           automatically take over the whole repository.
+         - Do NOT redesign the existing app from scratch — expansion scope is bounded by
            the adoption plan.
          - Emit NEXT once module priorities are clear (usually 1–2 questions maximum).
 
@@ -149,6 +161,8 @@ agents:
       - `experience_spec`: typed ExperienceSpec from DesignDocs — the authoritative page structure. When present with a non-empty `pages[]`, use these designed pages as the canonical page list. Map each `experience_spec.pages[i]` directly to your `pages[]` output, preserving name, route, layout, intent, and mapping `sections[j]` to `sections_hint[]`. Do not invent page structure from capability packs when `experience_spec.pages[]` is present.
       - `experience_spec_document`: human-readable YAML version of the ExperienceSpec. Use as a readable fallback or secondary reference only when `experience_spec` is null.
       - `concept_api_endpoints`, `concept_blueprint`: optional structured hints from upstream planning, including `capability_pack_hints`, `monetization_intent`, and `agentic_capabilities`.
+      - `app_intelligence_summary`, `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`: prompt-safe source-backed context for the current app. Use these to avoid duplicating protected existing behavior and to keep build tasks tied to discovered app facts.
+      - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and `brownfield_registration`: existing-app enhancement scope and provenance. When present, they constrain which modules, pages, workflows, services, and adapters may be generated.
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
@@ -319,6 +333,7 @@ agents:
              Choose the layout that best fits the app's primary user context and domain. Default to `top_nav` only when truly uncertain. Do NOT leave this null for apps with user profiles.
       9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
          - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `mongodb`, `postgres`, `redis`, `openai`, `anthropic`, `gemini`, `google_oauth`, `microsoft_oauth`, `segment`.
+         - Do not add `redis` for generic production readiness, caching best practice, rate limiting, or future scale. Include Redis only when the approved product scope explicitly requires shared cache, shared sessions, pub/sub, queues, or when scanned source/package evidence already depends on Redis. Redis is BYOK/operator-owned and must not be planned as paid managed infrastructure by default.
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
            - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
@@ -326,6 +341,11 @@ agents:
            - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
          - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
          - This check is read-only and non-blocking. If the tool fails, continue planning with all integrations treated as unchecked.
+      9c. When the app brief explicitly asks for deterministic browser/demo/preview records, populate `demo_fixture_sets` with the route/module/entity groups that need seeded data:
+         - Treat this as planning metadata for local smoke, browser demo, or replay fixtures only.
+         - Name the routes that depend on the fixtures, the module/entity families involved, the required record states, and any stable key hints the seed tool should fill.
+         - Keep the fixture plan deterministic and no-spend: do not turn it into runtime module behavior, production data, or provider-side provisioning.
+         - If the brief does not need preview data, leave `demo_fixture_sets` empty.
       10. If agent-backend context exists (`agent_api_url` or `agent_websocket_url` is non-null), set `agent_backend_required` to true and include the required integration surfaces in `frontend_scope`, `service_scope`, `external_integrations`, and `capability_packs`.
          - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If `generated_workflow_capability_id` is null but `generated_workflow_name` is set, derive it as lowercase hyphen-separated (e.g. `CustomerSupport` → `customer-support`).
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
@@ -616,7 +636,7 @@ agents:
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt.**
 
       When brownfield adoption context is injected, the app bundle scope is constrained by the
       adoption plan. Apply all of the following rules before planning capability packs or pages:

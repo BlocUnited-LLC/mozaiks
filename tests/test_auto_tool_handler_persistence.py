@@ -233,6 +233,7 @@ async def test_persist_context_variables_filters_canonical_fields():
         variables={
             "chat_id": "override-me",
             "workflow_name": "override-me",
+            "session_version": 44,
             "app_task_batch_status": "consumed",
             "smoke_presented_summary": "Smoke path summarized.",
         },
@@ -244,6 +245,8 @@ async def test_persist_context_variables_filters_canonical_fields():
     assert filter_doc["app_id"] == "app-1"
     assert "chat_id" not in update_doc["$set"]
     assert "workflow_name" not in update_doc["$set"]
+    assert "session_version" not in update_doc["$set"]
+    assert update_doc["$inc"] == {"session_version": 1}
     assert update_doc["$set"]["app_task_batch_status"] == "consumed"
     assert update_doc["$set"]["smoke_presented_summary"] == "Smoke path summarized."
     assert isinstance(update_doc["$set"]["last_updated_at"], datetime)

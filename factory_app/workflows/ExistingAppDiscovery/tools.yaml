@@ -1,11 +1,11 @@
 # ExistingAppDiscovery Tools
 #
 # before_chat collector builds deterministic App Intelligence context.
-# ExistingAppDiscovery emits a durable inline AppIntelligenceInlineBrief in the
-# chat feed and the full AppIntelligenceOverviewCard in the artifact panel so
-# users can see the compact context agents receive before the agent speaks.
-# DiscoveryArtifactAssemblerAgent later persists canonical artifacts and emits
-# the final DiscoveryBriefCard.
+# Indexing progress is streamed as chat activity, then ExistingAppDiscovery emits
+# its workflow-owned AppIntelligenceOverviewCard in the artifact panel from the
+# discovery assembler's structured synthesis of the indexed source context.
+# DiscoveryArtifactAssemblerAgent later persists canonical artifacts and
+# re-emits the overview card with the synthesized summary.
 
 tools:
 - agent: DiscoveryHostAgent
@@ -120,12 +120,12 @@ tools:
   function: save_existing_app_artifacts
   description: >
     Auto-invoked after DiscoveryArtifactAssemblerAgent outputs the structured
-    existing-app augmentation artifact. Persists the artifact set and emits a
-    UI summary for the user to review.
+    existing-app augmentation artifact. Persists the artifact set and updates
+    the App Intelligence overview with the synthesized summary.
   tool_type: UI_Surface
   auto_tool_call: true
   ui:
-    component: DiscoveryBriefCard
+    component: AppIntelligenceOverviewCard
     mode: artifact
     workflow_primitive: document_preview
     realization: generated_component
@@ -141,27 +141,27 @@ lifecycle_tools:
 - trigger: before_chat
   agent: null
   file: emit_app_intelligence_overview.py
-  function: emit_app_intelligence_inline_brief
+  function: emit_app_intelligence_overview_card
   description: >
-    Show the compact App Intelligence brief inline in chat after indexing and
-    before the agent speaks.
+    Emit the full App Intelligence overview into the artifact panel when the
+    prompt-safe catalog is available. Skipped when catalog is absent.
   tool_type: UI_Surface
   ui:
-    component: AppIntelligenceInlineBrief
-    mode: inline
+    component: AppIntelligenceOverviewCard
+    mode: artifact
     workflow_primitive: document_preview
     realization: generated_component
 - trigger: before_chat
   agent: null
   file: emit_app_intelligence_overview.py
-  function: emit_app_intelligence_overview_card
+  function: emit_repo_access_recovery_card
   description: >
-    Show the deterministic App Intelligence overview in the artifact panel
-    after indexing and before the agent speaks.
+    Show an inline recovery card when the supplied GitHub repository requires
+    account or token access before App Intelligence can index it.
   tool_type: UI_Surface
   ui:
-    component: AppIntelligenceOverviewCard
-    mode: artifact
+    component: RepoAccessRecoveryCard
+    mode: inline
     workflow_primitive: document_preview
     realization: generated_component
 - trigger: on_start

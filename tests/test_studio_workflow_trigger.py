@@ -1567,8 +1567,18 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
     assert response.status_code == 200
     body = response.json()
     assert body["review"]["review_status"] == "validated"
+    assert body["review"]["schema_version"] == "mozaiks.refinement.review_package.v1"
+    assert body["review"]["change_class"] == "patch"
+    assert body["review"]["affected_paths"] == ["src/App.jsx"]
+    assert body["review"]["write_back_mode"] == "generated_artifact"
+    assert body["review"]["write_back_label"] == "Update app version"
+    assert body["review"]["route_decision"]["execution_mode"] == "coding_worker"
+    assert body["review"]["route_decision"]["scope_summary"] == "Update the dashboard bundle output."
     assert body["review"]["can_accept"] is True
     assert body["review"]["can_promote"] is False
+    assert body["review"]["actions"][0]["id"] == "accept"
+    assert body["review"]["actions"][0]["enabled"] is True
+    assert any(action["id"] == "reroute" and action["enabled"] is False for action in body["review"]["actions"])
     assert body["review"]["changed_files"][0]["path"] == "src/App.jsx"
     assert "Builder Workspace" in body["review"]["changed_files"][0]["diff_preview"]
     assert body["refinement_session"]["status"] == "validated"
@@ -1599,6 +1609,9 @@ def test_studio_artifact_review_marks_skipped_validation_as_override_required(mo
     assert body["review"]["can_accept"] is False
     assert body["review"]["validation_override_required"] is True
     assert "Validation has not passed" in body["review"]["validation_blocker"]
+    assert body["review"]["actions"][0]["id"] == "accept"
+    assert body["review"]["actions"][0]["enabled"] is False
+    assert "Validation has not passed" in body["review"]["actions"][0]["reason"]
 
 
 def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monkeypatch, tmp_path: Path):

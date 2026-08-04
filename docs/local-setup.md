@@ -232,6 +232,16 @@ the current terminal:
 .\scripts\run-studio.ps1
 ```
 
+For a clean testing restart, use:
+
+```powershell
+.\scripts\run-studio.ps1 -ForceStop
+```
+
+That stops existing backend/frontend listeners and clears prior files under
+`logs/logs/`, `logs/agent_outputs/`, and `logs/workflow_converter/` before the
+new Studio run starts.
+
 If MongoDB is already running outside Docker, use:
 
 ```powershell

@@ -125,7 +125,7 @@ export function useArtifacts({
       );
       artifactCacheValidRef.current = true;
     } catch (e) {
-      console.warn('[Artifacts] Failed to persist artifact cache', e);
+      console.warn('💾 [Artifacts] Failed to persist artifact cache', e);
     }
   }, [currentArtifactMessages, chatId, workflowName]);
 
@@ -319,7 +319,7 @@ export function useArtifacts({
         artifactCacheValidRef.current = true;
         return true;
       } catch (e) {
-        console.warn('[Artifacts] Failed to restore from cache:', e);
+        console.warn('💾 [Artifacts] Failed to restore from cache:', e);
         return false;
       }
     },

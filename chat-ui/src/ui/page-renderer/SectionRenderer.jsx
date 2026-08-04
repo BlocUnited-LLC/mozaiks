@@ -332,7 +332,7 @@ export function SectionRenderer({
       }
       if (violations.length) {
         console.warn(
-          `[SectionRenderer] Config violations for section "${section.id}" (${section.primitive}):`,
+          `⚠️ [SectionRenderer] Config violations for section "${section.id}" (${section.primitive}):`,
           violations
         );
       }
@@ -416,7 +416,7 @@ export function SectionRenderer({
 
       return null;
     } catch (error) {
-      console.error(`Failed to execute page action for section '${section.id}'`, error);
+      console.error(`❌ Failed to execute page action for section '${section.id}'`, error);
       return null;
     }
   }, [effectiveData, onNavigate, onRefetch, section.id, startWorkflow]);

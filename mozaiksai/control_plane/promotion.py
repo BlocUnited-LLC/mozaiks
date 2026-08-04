@@ -290,6 +290,10 @@ def promote_refinement_staging(
         raise RefinementPromotionError("Refinement promotion requires mutation_allowed=false on plan and staging result.")
     if review_record.mutation_allowed is not False:
         raise RefinementPromotionError("Refinement promotion requires mutation_allowed=false on the review record.")
+    if not dry_run and review_record.write_back_mode != "local_workspace":
+        raise RefinementPromotionError(
+            "Direct source-bundle promotion requires review.write_back_mode='local_workspace'."
+        )
     if execution_result.mutation_allowed is not False or execution_result.source_mutated is not False:
         raise RefinementPromotionError("Refinement promotion requires a non-mutating scoped execution result.")
     if execution_result.execution_mode != "scoped_staging" or execution_result.mutation_scope != "staging_only":

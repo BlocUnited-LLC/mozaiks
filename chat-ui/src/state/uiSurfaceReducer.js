@@ -89,9 +89,11 @@ export const uiSurfaceReducer = (state, action) => {
       }
 
       // Restore non-full layout only if the user had previously opened the
-      // artifact pane in this session; otherwise keep 'full' so the pane
-      // stays closed until a real artifact arrives.
-      const restoredLayout = state.previousLayoutMode && state.previousLayoutMode !== 'full'
+      // artifact pane AND there is still an artifact in state to show.
+      // If no artifact is present (status === INACTIVE), keep 'full' so the
+      // pane stays closed until a real artifact event arrives.
+      const hasArtifact = state.artifact.status !== ARTIFACT_STATUS.INACTIVE;
+      const restoredLayout = (state.previousLayoutMode && state.previousLayoutMode !== 'full' && hasArtifact)
         ? state.previousLayoutMode
         : 'full';
       const normalizedLayout = normalizeLayoutMode(restoredLayout);
@@ -273,7 +275,7 @@ export const mapSurfaceEventToAction = (event) => {
 
   const eventType = String(event.type);
 
-  if (eventType === 'tool_call' || eventType === 'chat.tool_call') {
+  if (eventType === 'tool_call' || eventType === 'chat.tool_call' || eventType === 'ui.render') {
     const detail = event.data || {};
     const display = event.display || event.display_type || event.mode || detail.display || detail.display_type || detail.mode || detail?.payload?.display;
     const normalized = normalizeDisplayMode(display);

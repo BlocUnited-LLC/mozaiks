@@ -42,7 +42,7 @@ export function useChatArtifactLayoutEffects({
 
       restoreStoredArtifactForChat(currentChatId, currentWorkflowName);
     } catch (error) {
-      console.warn('[RESTORE] Failed to restore artifact:', error);
+      console.warn('💾 [RESTORE] Failed to restore artifact:', error);
     }
   }, [
     artifactRestoredOnceRef,

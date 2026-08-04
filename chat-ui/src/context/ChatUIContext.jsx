@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createInitialSurfaceState, mapSurfaceEventToAction, uiSurfaceReducer } from '../state/uiSurfaceReducer';
 import platform from '../platform/index.js';
+import { logChatPersistence } from '../session/chatSessionStorage';
 import {
   getStoredActiveChatId,
   getStoredActiveGeneralChatId,
@@ -129,6 +130,16 @@ export const ChatUIProvider = ({
   const setConversationMode = useCallback((mode) => {
     const current = surfaceStateRef.current?.conversationMode;
     const nextMode = typeof mode === 'function' ? mode(current) : mode;
+    logChatPersistence('surface_conversation_mode_requested', {
+      currentConversationMode: current || null,
+      nextConversationMode: nextMode || null,
+      layoutMode: surfaceStateRef.current?.layoutMode || null,
+      surfaceMode: surfaceStateRef.current?.surfaceMode || null,
+      artifactPanelOpen: Boolean(surfaceStateRef.current?.artifact?.panelOpen),
+      widgetOverlayOpen: Boolean(surfaceStateRef.current?.widget?.widgetOverlayOpen),
+      workflowStatus: surfaceStateRef.current?.workflowStatus || null,
+      storedConversationMode: getStoredConversationMode(),
+    });
     surfaceDispatch({ type: 'SET_CONVERSATION_MODE', mode: nextMode });
   }, [surfaceDispatch]);
 
@@ -237,7 +248,7 @@ export const ChatUIProvider = ({
         onReadyRef.current();
 
       } catch (error) {
-        console.error('Failed to initialize ChatUI:', error);
+        console.error('❌ Failed to initialize ChatUI:', error);
         setLoading(false);
       }
     };
@@ -248,7 +259,7 @@ export const ChatUIProvider = ({
   useEffect(() => {
     // Agents are auto-discovered through the workflow system
     if (agents.length > 0) {
-      console.warn('Custom agent registration via props is not supported. Agents are defined in the agents.json file.');
+      console.warn('⚠️ Custom agent registration via props is not supported. Agents are defined in the agents.json file.');
     }
   }, [agents]);
 

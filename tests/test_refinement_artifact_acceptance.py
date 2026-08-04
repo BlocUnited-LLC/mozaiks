@@ -272,6 +272,7 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert result.refinement_review_status == "promotion_ready"
     assert result.metadata["refinement"]["request_id"] == context["plan"].request_id
     assert result.metadata["refinement"]["review"]["status"] == "promotion_ready"
+    assert result.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
     assert result.metadata["acceptance"]["accepted_by"] == "operator-1"
     assert result.metadata["acceptance"]["request_id"] == context["plan"].request_id
     assert result.artifact_version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
@@ -381,6 +382,25 @@ async def test_rejects_request_id_mismatch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejects_write_back_mode_mismatch(tmp_path: Path) -> None:
+    context = await _build_acceptance_context(tmp_path)
+    version = context["artifact_store"].created_version
+    metadata = version.commit_metadata.model_dump(mode="python")
+    metadata["metadata"]["refinement"]["review"]["write_back_mode"] = "external_patch"
+    context["artifact_store"].created_version = version.model_copy(update={"commit_metadata": metadata})
+
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="write_back_mode"):
+        await accept_staged_refinement_artifact_version(
+            app_id=context["app_id"],
+            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            review_record=context["review_record"],
+            request_id=context["plan"].request_id,
+            artifact_store=context["artifact_store"],
+            accepted_by="operator-1",
+        )
+
+
+@pytest.mark.asyncio
 async def test_rejects_non_app_bundle_artifact_kind(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
@@ -451,6 +471,7 @@ async def test_acceptance_preserves_refinement_metadata_and_records_accepted_by(
     acceptance_metadata = result.artifact_version.commit_metadata.metadata["acceptance"]
     assert refinement_metadata["request_id"] == context["plan"].request_id
     assert refinement_metadata["review"]["status"] == "promotion_ready"
+    assert refinement_metadata["review"]["write_back_mode"] == "generated_artifact"
     assert acceptance_metadata["accepted_by"] == "operator-1"
     assert acceptance_metadata["refinement_review_status"] == "promotion_ready"
     assert acceptance_metadata["request_id"] == context["plan"].request_id

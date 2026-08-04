@@ -298,6 +298,8 @@ async def test_creates_draft_app_bundle_artifact_version_from_staged_workspace(t
         "ui_theme_primitive_validation",
     ]
     assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["status"] == "promotion_ready"
+    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
+    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["write_back_target"] is None
     assert result.artifact_version.commit_metadata.metadata["refinement"]["scoped_execution"]["execution_mode"] == "scoped_staging"
     assert result.artifact_version.commit_metadata.metadata["refinement"]["promotion_policy"]["policy_decisions"] == policy_decisions
     assert result.artifact_version.commit_metadata.metadata["artifact_path"] == result.artifact_path
@@ -543,6 +545,8 @@ async def test_draft_artifact_version_metadata_contains_lineage_validation_and_r
     assert metadata["validation_evidence"]["warnings"] == ["validator warning"]
     assert metadata["review"]["status"] == "promotion_ready"
     assert metadata["review"]["reviewer"] == "reviewer_1"
+    assert metadata["review"]["write_back_mode"] == "generated_artifact"
+    assert metadata["review"]["write_back_target"] is None
     assert metadata["scoped_execution"]["execution_mode"] == "scoped_staging"
     assert metadata["promotion_policy"]["policy_decisions"][0]["path"] == "ui/pages/dashboard.yaml"
     assert result.files_manifest[0].path == "config/shell.json"

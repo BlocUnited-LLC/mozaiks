@@ -348,6 +348,13 @@ class TestStaticContractChecks:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
         assert "task_type: module_contract" in source
 
+    def test_agents_yaml_keeps_redis_operator_owned_and_opt_in(self) -> None:
+        source = _read("factory_app/workflows/AppGenerator/agents.yaml")
+
+        assert "Do not add `redis` for generic production readiness" in source
+        assert "Redis is BYOK/operator-owned" in source
+        assert "must not be planned as paid managed infrastructure by default" in source
+
     def test_agents_yaml_has_no_flat_states_yaml_references(self) -> None:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
         assert "states.yaml" not in source
@@ -406,6 +413,17 @@ class TestStaticContractChecks:
         assert not missing, (
             f"AppSchemaAgent guidance in agents.yaml is missing page_type values: {missing}"
         )
+
+    def test_app_build_plan_includes_demo_fixture_sets(self) -> None:
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        assert "demo_fixture_sets" in so["models"]["AppBuildPlan"]["fields"]
+        assert "AppDemoFixtureSet" in so["models"]
+        assert "AppDemoFixtureRecordGroup" in so["models"]
+
+    def test_app_plan_agent_mentions_demo_fixture_sets(self) -> None:
+        agents_text = _read("factory_app/workflows/AppGenerator/agents.yaml")
+        assert "demo_fixture_sets" in agents_text
+        assert "browser/demo/preview records" in agents_text
 
 
 # ---------------------------------------------------------------------------

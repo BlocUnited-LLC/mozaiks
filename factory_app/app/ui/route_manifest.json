@@ -253,15 +253,15 @@
     },
     {
       "path": "/apps/:appId/activity",
-      "component": "AppBuildHistoryPage",
-      "label": "Build History",
+      "component": "AppBuildReviewPage",
+      "label": "Build Review",
       "order": 26,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Build History",
+        "title": "Build Review",
         "appShell": true,
-        "ai_context": "The user is on the App Build History page. It shows artifact versions, validation state, carry-forward preservation, and recent build activity for this app.",
+        "ai_context": "The user is on the App Build Review page. It shows artifact versions, validation state, review actions, and staged output for this app.",
         "navigation": {
           "group": "app-studio",
           "include": false,

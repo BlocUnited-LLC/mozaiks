@@ -7,7 +7,7 @@ Covers:
     - single identifier → [identifier]
     - comma-separated identifiers → all returned
     - whitespace around identifiers → stripped
-    - aliased identifier ("Foo as F") → ["Foo"] (alias stripped)
+    - aliased identifier ("Foo as F") → ["F"] (alias is the public export name)
     - invalid identifier (starts with digit) → excluded
     - invalid identifier (has dash) → excluded
     - empty token after split → skipped
@@ -60,13 +60,14 @@ class TestSplitIdentifiers:
         result = _split_identifiers("  Button  ,  Card  ")
         assert result == ["Button", "Card"]
 
-    def test_aliased_identifier_alias_stripped(self):
+    def test_aliased_identifier_returns_alias(self):
+        # For JS exports `X as Y`, Y is the public name — return Y, not X.
         result = _split_identifiers("Button as Btn")
-        assert result == ["Button"]
+        assert result == ["Btn"]
 
     def test_aliased_with_multiple(self):
         result = _split_identifiers("Button as Btn, Card")
-        assert result == ["Button", "Card"]
+        assert result == ["Btn", "Card"]
 
     def test_invalid_starts_with_digit_excluded(self):
         result = _split_identifiers("3Button")

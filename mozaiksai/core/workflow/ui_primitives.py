@@ -38,7 +38,9 @@ def _split_identifiers(raw_specifiers: str) -> list[str]:
         if not token:
             continue
         if " as " in token:
-            token = token.split(" as ", 1)[0].strip()
+            # `X as Y` — take Y (the exported or locally-aliased name).
+            # For exports this is the public name; for imports without aliases the branch is unreachable.
+            token = token.split(" as ", 1)[1].strip()
         if _IDENTIFIER_RE.fullmatch(token):
             identifiers.append(token)
     return identifiers

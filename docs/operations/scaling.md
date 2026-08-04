@@ -1,5 +1,11 @@
 # Scaling Guide
 
+> **Pre-launch note:** Do not provision Redis, additional Container App replicas,
+> or any other paid infrastructure until the product is live. Redis is optional —
+> the app runs fully on in-memory fallbacks for single-instance deployments.
+> Provision Redis only when you are running multiple instances and need shared
+> JWKS cache or global rate limiting.
+
 How to scale Mozaiks horizontally to handle higher workflow concurrency and user load.
 
 ---

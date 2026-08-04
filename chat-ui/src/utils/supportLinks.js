@@ -5,7 +5,7 @@ export const HUMAN_SUPPORT_CUE = /\b(human|person|operator|support|help\s+desk|r
 export function shouldOfferHumanSupport(text) {
   return HUMAN_SUPPORT_CUE.test(String(text || ''));
 }
-export const SUPPORT_LOG_PREFIX = '[mozaiks-support]';
+export const SUPPORT_LOG_PREFIX = '⚠️ [mozaiks-support]';
 
 function cleanString(value) {
   const text = String(value || '').trim();

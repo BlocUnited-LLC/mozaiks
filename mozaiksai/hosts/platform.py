@@ -163,10 +163,10 @@ def _warn_undeclared_entitlement_gates(
     """
     declared_capabilities: set[str] = set()
     # v1: flat top-level plans
-    for plan in subscriptions_config.plans:
+    for plan in (getattr(subscriptions_config, "plans", None) or []):
         declared_capabilities.update(plan.capabilities or [])
     # v2: plans nested under products
-    for product in (subscriptions_config.products or []):
+    for product in (getattr(subscriptions_config, "products", None) or []):
         for plan in product.plans:
             declared_capabilities.update(plan.capabilities or [])
 
@@ -1320,6 +1320,16 @@ async def get_current_user_profile(
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
     return await _ensure_account_profile(principal, app_id=resolved_app_id, user_id=user_id)
+
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120, description="Preferred user-facing display name")
+    bio: str | None = Field(default=None, max_length=500, description="Short user bio")
+    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL — must be a URL, not a data URI")
+
+
+class ProfilePreferencesUpdateRequest(BaseModel):
+    settings: dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
 
 
 @app.get("/api/users/{username}")
@@ -2648,18 +2658,6 @@ async def _load_account_preferences(*, app_id: str, user_id: str) -> dict[str, A
     }
 
 
-class ProfileUpdateRequest(BaseModel):
-    display_name: str | None = Field(default=None, max_length=120, description="Preferred user-facing display name")
-    bio: str | None = Field(default=None, max_length=500, description="Short user bio")
-    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL — must be a URL, not a data URI")
-
-
-class ProfilePreferencesUpdateRequest(BaseModel):
-    settings: dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
-
-
-
-
 def _load_workflow_capability_routes(app_root: Path) -> dict[str, list[dict[str, Any]]]:
     """Index workflow trigger declarations by public capability id."""
     workflows_dir = next(
@@ -3279,9 +3277,21 @@ async def websocket_endpoint(
             except Exception as reload_err:
                 logger.debug("Workflow hot-reload skipped for %s: %s", workflow_name, reload_err)
 
+            from mozaiksai.core.workflow.startup_messages import (
+                resolve_workflow_launch_taxonomy,
+                should_autostart_empty_workflow,
+            )
+
             cfg = workflow_manager.get_config(workflow_name) or {}
             startup_mode = str(cfg.get("workflow_startup_mode") or "").strip() or "AgentDriven"
-            if startup_mode != "AgentDriven":
+            launch_taxonomy = resolve_workflow_launch_taxonomy(
+                workflow_name,
+                workflow_startup_mode=startup_mode,
+            )
+            if not should_autostart_empty_workflow(
+                startup_mode,
+                launch_behavior=launch_taxonomy.get("launch_behavior"),
+            ):
                 return
 
             coll = await runtime_app._chat_coll()
@@ -3324,16 +3334,28 @@ async def websocket_endpoint(
             logger.error("Auto-start failed for %s/%s: %s", workflow_name, active_chat_id, exc)
 
     _task = asyncio.create_task(_auto_start_if_needed())
-    _task.add_done_callback(
-        lambda t: logger.error(
-            "Auto-start task raised unexpected error for %s/%s: %s",
-            workflow_name,
-            active_chat_id,
-            t.exception(),
-        )
-        if not t.cancelled() and t.exception() is not None
-        else None
-    )
+    if runtime_app.simple_transport:
+        existing_task = runtime_app.simple_transport._background_tasks.get(active_chat_id)
+        if existing_task and not existing_task.done():
+            _task.cancel()
+        else:
+            runtime_app.simple_transport._background_tasks[active_chat_id] = _task
+
+    def _clear_auto_start_task(t: asyncio.Task[Any]) -> None:
+        try:
+            if runtime_app.simple_transport and runtime_app.simple_transport._background_tasks.get(active_chat_id) is t:
+                runtime_app.simple_transport._background_tasks.pop(active_chat_id, None)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Auto-start task raised unexpected error for %s/%s: %s",
+                    workflow_name,
+                    active_chat_id,
+                    t.exception(),
+                )
+        except Exception as cb_err:
+            logger.debug("Auto-start task cleanup failed for %s/%s: %s", workflow_name, active_chat_id, cb_err)
+
+    _task.add_done_callback(_clear_auto_start_task)
 
     try:
         has_children = False
@@ -3439,9 +3461,15 @@ async def websocket_endpoint(
         app_id=app_id,
         user_id=user_id,
         auto_activate=True,
-    )
+        )
 
     try:
+        suppress_history_replay = str(websocket.query_params.get("suppress_history_replay", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         await runtime_app.simple_transport.handle_websocket(
             websocket=websocket,
             chat_id=active_chat_id,
@@ -3449,6 +3477,7 @@ async def websocket_endpoint(
             workflow_name=workflow_name,
             app_id=app_id,
             ws_id=ws_id,
+            suppress_history_replay=suppress_history_replay,
         )
     finally:
         session_registry.remove_session(ws_id)

@@ -50,7 +50,7 @@ export const readNavigationCache = (workflow, input) => {
     }
     return { key, ...payload };
   } catch (err) {
-    console.warn('[navigationCache] Failed to read cache', err);
+    console.warn('🧭 [navigationCache] Failed to read cache', err);
     return null;
   }
 };
@@ -73,7 +73,7 @@ export const writeNavigationCache = (workflow, input, artifact, ttlSeconds) => {
     platform.storage.setItem(key, JSON.stringify(payload));
     return { key, ...payload };
   } catch (err) {
-    console.warn('[navigationCache] Failed to write cache', err);
+    console.warn('🧭 [navigationCache] Failed to write cache', err);
     return null;
   }
 };

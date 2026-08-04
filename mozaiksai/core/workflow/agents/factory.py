@@ -60,6 +60,28 @@ def _safe_context_keys(context_dict: dict[str, Any]) -> list[str]:
     return keys
 
 
+def _supports_ag2_native_web_tools(
+    llm_config: Mapping[str, Any] | None,
+    model_config: Any | None = None,
+) -> bool:
+    """Return whether AG2 native hosted web tools fit the active provider.
+
+    AG2's WebSearchTool/WebFetchTool are provider-native tool schemas, not
+    normal Python function tools. OpenAI Chat Completions rejects those schemas;
+    OpenAI Responses accepts them.
+    """
+
+    config = dict(llm_config or {})
+    entry = ((config.get("config_list") or [{}])[0] or {})
+    api_type = str(entry.get("api_type") or "openai").strip().lower()
+    if api_type != "openai":
+        return bool(config.get("ag2_native_web_tools"))
+    if bool(config.get("use_responses_api") or config.get("responses_api")):
+        return True
+    model_config_name = type(model_config).__name__ if model_config is not None else ""
+    return model_config_name == "OpenAIResponsesConfig"
+
+
 def _log_existing_app_discovery_projection(
     *,
     agent_name: str,
@@ -467,10 +489,16 @@ async def create_agents(
                     shell_err,
                 )
 
+        native_web_tools_supported = _supports_ag2_native_web_tools(
+            llm_config_dict,
+            model_config,
+        )
+
         # Inject AG2 built-in WebSearchTool when agent declares web_search: true.
-        # Allows market research agents to do real-time search without custom tool code.
+        # These are provider-native hosted tools; skip them for providers such as
+        # OpenAI Chat Completions that only accept function tools.
         web_tools: list[Any] = []
-        if not auto_tool_call_enabled and agent_config.get("web_search"):
+        if not auto_tool_call_enabled and agent_config.get("web_search") and native_web_tools_supported:
             try:
                 from ag2.tools import WebSearchTool
                 web_tools.append(WebSearchTool())
@@ -481,10 +509,16 @@ async def create_agents(
                     agent_name,
                     ws_err,
                 )
+        elif not auto_tool_call_enabled and agent_config.get("web_search"):
+            logger.warning(
+                "[AGENTS] web_search requested for '%s' but skipped: provider-native "
+                "AG2 web tools require a supported Responses-style provider",
+                agent_name,
+            )
 
         # Inject AG2 built-in WebFetchTool when agent declares web_fetch: true.
         # Allows agents to retrieve full page content from URLs discovered via search.
-        if not auto_tool_call_enabled and agent_config.get("web_fetch"):
+        if not auto_tool_call_enabled and agent_config.get("web_fetch") and native_web_tools_supported:
             try:
                 from ag2.tools import WebFetchTool
                 web_tools.append(WebFetchTool())
@@ -495,6 +529,12 @@ async def create_agents(
                     agent_name,
                     wf_err,
                 )
+        elif not auto_tool_call_enabled and agent_config.get("web_fetch"):
+            logger.warning(
+                "[AGENTS] web_fetch requested for '%s' but skipped: provider-native "
+                "AG2 web tools require a supported Responses-style provider",
+                agent_name,
+            )
 
         # Inject DuckDuckSearchTool when agent declares duck_search: true.
         # No API key required — works with any model. Good fit for interview and
