@@ -2,14 +2,10 @@ import React from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import "./ChatMessage.css";
-import ActivityRenderer, { resolveActivityComponent } from "./ActivityRenderer.jsx";
 
 function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null, metadata = null }) {
   const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : (agentNameRaw ? String(agentNameRaw) : null);
   const messageMetadata = metadata && typeof metadata === 'object' ? metadata : {};
-  const ActivityComponent = message_from === 'system' && messageMetadata.event_type === 'activity'
-    ? resolveActivityComponent(messageMetadata)
-    : null;
   // No local state needed: always show pretty structured output
   const traceItems = Array.isArray(trace) ? trace : [];
   const [traceOpen, setTraceOpen] = React.useState(false);
@@ -153,14 +149,6 @@ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMe
   // If there's truly no textual content and no structured output and it's not a token/warning system message, avoid rendering any bubble at all
   const hasRenderableContent = !!(message && (typeof message === 'object' || String(message).trim().length)) || (structuredOutput && typeof structuredOutput === 'object');
   
-  if (ActivityComponent) {
-    return (
-      <div className="flex justify-start px-0 message-container">
-        <ActivityRenderer metadata={messageMetadata} message={message} />
-      </div>
-    );
-  }
-
   // Special case: thinking message
   if (isThinking) {
     return (
