@@ -88,6 +88,8 @@ def _registry_workflow_entry(workflow_name: str | None) -> Any | None:
         )
 
         pack = load_global_pack_graph()
+        if pack is None:
+            return None
         return get_workflow_entry(pack, str(workflow_name))
     except Exception:
         return None

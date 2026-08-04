@@ -378,7 +378,7 @@ async def _emit_app_intelligence_activity(context_variables: Any) -> dict[str, A
         return {"skipped": True, "reason": "missing_app_intelligence_progress"}
 
     activity_status = _app_intelligence_activity_status(progress)
-    event = {
+    event: dict[str, Any] = {
         "kind": "activity",
         "activity_type": "app_intelligence_indexing",
         "agent": "App Intelligence",

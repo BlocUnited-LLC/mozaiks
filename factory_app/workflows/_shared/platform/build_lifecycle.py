@@ -5,7 +5,7 @@ import os
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from logs.logging_config import get_core_logger
 
@@ -473,7 +473,7 @@ def _registry_app_id_for_imported_app(
 
 
 def _build_context_profile_for_event(*, context: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    session_ctx = context.get("session_context") if isinstance(context.get("session_context"), dict) else {}
+    session_ctx: dict[str, Any] = cast(dict[str, Any], context.get("session_context")) if isinstance(context.get("session_context"), dict) else {}
     repo_identifier = _first_context_text(session_ctx, "github_repo", "frontend_github_repo", "backend_github_repo")
     profile: dict[str, Any] = {
         "source": "factory_app",
@@ -511,7 +511,7 @@ def _local_registry_payload(
     payload: dict[str, Any],
     lifecycle_state: str,
 ) -> dict[str, Any] | None:
-    session_ctx = context.get("session_context") if isinstance(context.get("session_context"), dict) else {}
+    session_ctx: dict[str, Any] = cast(dict[str, Any], context.get("session_context")) if isinstance(context.get("session_context"), dict) else {}
     workflow_name = _normalize_text(payload.get("workflowName")) or "Workflow"
     owner_user_id = _normalize_text(payload.get("userId")) or "anonymous"
     chat_id = _normalize_text(payload.get("chatId"))

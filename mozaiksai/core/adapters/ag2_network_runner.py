@@ -679,7 +679,7 @@ def _install_context_update_handler(
         return
 
     async def _handler(envelope: Any) -> None:
-        if has_bridge:
+        if bridge is not None:
             bridge.clear_context_updates()
         original_send_envelope = client.send_envelope
 
@@ -691,7 +691,7 @@ def _install_context_update_handler(
             ):
                 bridge_updates = (
                     bridge.consume_context_updates()
-                    if has_bridge
+                    if bridge is not None
                     else {"set": {}, "delete": []}
                 )
                 event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
@@ -737,7 +737,7 @@ def _install_context_update_handler(
             await default_handler(envelope, client)
         finally:
             client.send_envelope = original_send_envelope
-            if has_bridge:
+            if bridge is not None:
                 bridge.clear_context_updates()
 
     client.on_envelope(_handler)
