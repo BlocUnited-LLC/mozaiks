@@ -30,23 +30,23 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.4.12",
     "keycloak-js": "^26.2.4",
-    "lucide-react": "^1.27.0",
+    "lucide-react": "^1.28.0",
     "marked": "^18.0.7",
     "monaco-editor": "^0.56.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-icons": "^5.7.0",
-    "react-router-dom": "^7.18.1",
+    "react-router-dom": "^7.18.2",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
-    "@vitejs/plugin-react": "^6.0.4",
+    "@vitejs/plugin-react": "^6.0.5",
     "esbuild": "^0.28.1",
-    "postcss": "^8.5.23",
+    "postcss": "^8.5.25",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.1.5",
+    "vite": "^8.2.0",
     "yaml": "^2.4.2"
   }
 }
