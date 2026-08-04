@@ -172,7 +172,7 @@ def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None
     assert "getStoredWorkflowChatId" in storage_source
     assert "setStoredWorkflowChatId" in storage_source
     assert "writeStoredArtifactWorkspaceSnapshot(currentChatId, artifactWorkspaceSnapshotRef.current)" in controller_source
-    assert "messages: [...currentArtifactMessages]" in controller_source
+    assert "messages: filterArtifactPanelMessages(currentArtifactMessages)" in controller_source
     assert "restoreStoredArtifactForChat," in controller_source
     assert "snapshotChatId || currentChatId" in controller_source
     assert "restoreStoredArtifactForChat(targetChatId, resolvedWorkflow)" in controller_source
