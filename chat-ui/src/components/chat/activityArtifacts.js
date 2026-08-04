@@ -1,6 +1,7 @@
 import { deriveArtifactId } from '../../core/actions/actionUtils';
 
 const ACTIVITY_COMPLETE_STATUSES = ['complete', 'completed', 'ready', 'success', 'succeeded', 'done'];
+const INLINE_DISPLAY = 'inline';
 const ACTIVITY_FAILED_STATUSES = ['failed', 'error', 'unavailable'];
 
 function asPlainObject(value) {
@@ -82,12 +83,29 @@ export function buildRestoredActivityMessage({ artifact, chatId, workflowName })
   const activityKey = `${normalized.activityType}:${normalized.activityAgent}`;
   const idSeed = artifact.tool_call_id || normalized.snapshotId || chatId || Date.now();
 
+  const inlineToolCall = {
+    tool_name: normalized.activityType,
+    component_type: normalized.componentType,
+    display: INLINE_DISPLAY,
+    interaction_type: 'ui_surface',
+    awaiting_response: false,
+    payload: {
+      activity_type: normalized.activityType,
+      agent: normalized.activityAgent,
+      status: normalized.activityStatus,
+      progress_percent: normalized.percent,
+      display_variant: normalized.displayVariant,
+      component_type: normalized.componentType,
+    },
+  };
+
   return {
     id: `activity-restored-${idSeed}`,
     sender: 'system',
     agentName: normalized.activityAgent,
     content: normalized.content,
     isStreaming: false,
+    toolCall: inlineToolCall,
     metadata: {
       event_type: 'activity',
       activity_type: normalized.activityType,

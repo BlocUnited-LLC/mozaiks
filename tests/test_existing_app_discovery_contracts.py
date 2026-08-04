@@ -394,11 +394,12 @@ def test_app_intelligence_overview_card_emitter_surfaces_full_artifact_payload()
     assert payload["current_app_context_version_id"] == "acv_abc123"
     assert payload["artifact_version_ids"]["app_context_version"] == "av_ctx_1"
     assert payload["artifact_version_ids"]["app_intelligence_snapshot"] == "av_intel_1"
-    assert "activity_type" not in payload
-    assert "activity_display_variant" not in payload
-    assert "activity_component_type" not in payload
-    assert "display_variant" not in payload
-    assert "component_type" not in payload
+    # Activity context fields are included for frontend mode-toggle restore
+    assert payload.get("activity_type") == "app_intelligence_indexing"
+    assert payload.get("activity_display_variant") == "app_intelligence_progress"
+    assert payload.get("activity_component_type") == "AppIntelligenceProgressCard"
+    assert payload.get("display_variant") == "app_intelligence_progress"
+    assert payload.get("component_type") == "AppIntelligenceProgressCard"
     # Overview card includes full catalog
     assert "app_intelligence_catalog" in payload
     assert payload["app_intelligence_catalog"]["coverage"]["file_count"] == 200

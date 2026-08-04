@@ -358,7 +358,6 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
         "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
         "factory_app/workflows/ValueEngine/tools/manifest.py",
-        "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 

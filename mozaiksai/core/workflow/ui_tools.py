@@ -498,39 +498,47 @@ async def emit_workflow_activity(
     display_variant: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Emit a one-way workflow activity surface event to the UI.
+    """Emit a workflow activity event directly via the UI transport.
 
-    Convenience wrapper over emit_ui_surface for structured activity/progress
-    events. Returns {"success": True} on success or {"success": False, ...}
+    Sends a structured ``kind="activity"`` event via ``send_event_to_ui``
+    (not a tool-call event). The metadata dict is enriched with
+    ``component_type`` / ``display_variant`` fields so the frontend can
+    restore the correct activity card after a mode toggle.
+
+    Returns ``{"success": True}`` on success or ``{"success": False, ...}``
     on failure so callers can branch without catching exceptions.
     """
     if not chat_id:
         return {"success": False, "reason": "missing_chat_id"}
 
-    payload: dict[str, Any] = {
+    enriched_metadata: dict[str, Any] = dict(metadata or {})
+    enriched_metadata["component_type"] = component_type
+    enriched_metadata["activity_component_type"] = component_type
+    if display_variant:
+        enriched_metadata["display_variant"] = display_variant
+        enriched_metadata["activity_display_variant"] = display_variant
+
+    event: dict[str, Any] = {
+        "kind": "activity",
         "activity_type": activity_type,
+        "agent": agent_name or "",
         "status": status,
         "message": message,
         "component_type": component_type,
+        "activity_component_type": component_type,
+        "metadata": enriched_metadata,
     }
     if progress_percent is not None:
-        payload["progress_percent"] = float(progress_percent)
+        event["progress_percent"] = float(progress_percent)
     if display_variant:
-        payload["display_variant"] = display_variant
-    if metadata:
-        payload["metadata"] = metadata
-    if agent_name:
-        payload["agent_name"] = agent_name
+        event["display_variant"] = display_variant
+        event["activity_display_variant"] = display_variant
 
     try:
-        await emit_ui_surface(
-            tool_id=activity_type,
-            payload=payload,
-            chat_id=chat_id,
-            workflow_name=workflow_name,
-            display="inline",
-            agent_name=agent_name,
-        )
+        from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+        transport = await SimpleTransport.get_instance()
+        await transport.send_event_to_ui(event, chat_id)
         return {"success": True}
     except Exception as exc:
         logger.warning(
