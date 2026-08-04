@@ -35,6 +35,8 @@ from typing import Any
 import httpx
 import yaml
 
+from mozaiksai.core.workflow.ui_tools import emit_workflow_activity
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -378,25 +380,18 @@ async def _emit_app_intelligence_activity(context_variables: Any) -> dict[str, A
         return {"skipped": True, "reason": "missing_app_intelligence_progress"}
 
     activity_status = _app_intelligence_activity_status(progress)
-    event: dict[str, Any] = {
-        "kind": "activity",
-        "activity_type": "app_intelligence_indexing",
-        "agent": "App Intelligence",
-        "agent_name": "App Intelligence",
-        "status": activity_status,
-        "message": _app_intelligence_activity_message(progress),
-        "workflow_name": "ExistingAppDiscovery",
-        "progress_percent": progress.get("percent"),
-        "display_variant": "app_intelligence_progress",
-        "component_type": "AppIntelligenceProgressCard",
-        "activity_display_variant": "app_intelligence_progress",
-        "activity_component_type": "AppIntelligenceProgressCard",
-        "metadata": {
+    result = await emit_workflow_activity(
+        workflow_name="ExistingAppDiscovery",
+        chat_id=chat_id,
+        activity_type="app_intelligence_indexing",
+        agent_name="App Intelligence",
+        status=activity_status,
+        message=_app_intelligence_activity_message(progress),
+        progress_percent=progress.get("percent"),
+        component_type="AppIntelligenceProgressCard",
+        display_variant="app_intelligence_progress",
+        metadata={
             "source": "existing_app_discovery_preload",
-            "display_variant": "app_intelligence_progress",
-            "component_type": "AppIntelligenceProgressCard",
-            "activity_display_variant": "app_intelligence_progress",
-            "activity_component_type": "AppIntelligenceProgressCard",
             "progress_stage": progress.get("stage"),
             "progress_status": progress.get("status"),
             "progress_details": progress.get("details") if isinstance(progress.get("details"), dict) else {},
@@ -404,16 +399,11 @@ async def _emit_app_intelligence_activity(context_variables: Any) -> dict[str, A
             "progress": progress,
             "app_intelligence_progress": progress,
         },
-    }
-    try:
-        from mozaiksai.core.transport.simple_transport import SimpleTransport
-
-        transport = await SimpleTransport.get_instance()
-        await transport.send_event_to_ui(event, chat_id)
+    )
+    if result.get("success"):
         return {"success": True, "status": activity_status, "stage": progress.get("stage")}
-    except Exception as exc:
-        logger.debug("[ExistingAppDiscovery] App Intelligence activity emission failed: %s", exc)
-        return {"skipped": True, "reason": "activity_emit_failed", "error": str(exc)}
+    logger.debug("[ExistingAppDiscovery] App Intelligence activity emission skipped: %s", result)
+    return result
 
 
 def _coerce_mapping(value: Any) -> dict[str, Any]:
