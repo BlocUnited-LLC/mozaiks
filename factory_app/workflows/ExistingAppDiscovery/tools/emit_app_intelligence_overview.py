@@ -546,6 +546,80 @@ def _derive_app_type(ctx: Any, catalog: dict[str, Any], features: list[dict]) ->
 
 
 # ---------------------------------------------------------------------------
+# App Intelligence ready card — inline status card emitted at before_chat
+# ---------------------------------------------------------------------------
+
+async def emit_app_intelligence_ready_card(
+    context_variables: Any | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """Emit the AppIntelligenceProgressCard inline (ready state) once indexing is complete.
+
+    Runs as a before_chat lifecycle hook immediately after the overview card.
+    Only emits when app_intelligence_status is ready/complete so that partial
+    or missing contexts do not inject a misleading "ready" card.
+    """
+    ctx = context_variables if context_variables is not None else {}
+    status = str(_ctx_get(ctx, "app_intelligence_status") or "").strip().lower()
+    catalog = _dict_value(_ctx_get(ctx, "app_intelligence_catalog"))
+    chat_id = _ctx_get(ctx, "chat_id")
+
+    _READY_STATUSES = {"ready", "complete", "completed", "success", "succeeded", "done"}
+    if status not in _READY_STATUSES and not catalog.get("present"):
+        logger.info(
+            "[ExistingAppDiscovery] Ready card skipped: chat_id=%s status=%s catalog_present=%s",
+            chat_id or "NONE",
+            status or "none",
+            bool(catalog.get("present")),
+        )
+        return {"skipped": True, "reason": "not_ready"}
+
+    progress = _dict_value(_ctx_get(ctx, "app_intelligence_progress"))
+    warnings = _dedupe([
+        *_list_value(_ctx_get(ctx, "context_graph_warnings")),
+        *_list_value((catalog or {}).get("warnings")),
+    ])[:4]
+    warnings = [w for w in warnings if "context_graph" not in w and "file_limit" not in w.lower()]
+
+    payload = {
+        "schema_version": "mozaiks.app_intelligence_progress.ui.v1",
+        "component_type": "AppIntelligenceProgressCard",
+        "workflow_name": "ExistingAppDiscovery",
+        # Fields read by AppIntelligenceProgressCard via metadata/payload
+        "app_intelligence_progress": progress,
+        "progress": progress,
+        "progress_stage": "ready",
+        "progress_status": "ready",
+        "progress_percent": 100,
+        "activity_status": "complete",
+        "progress_warnings": warnings,
+        "github_repo": str(_ctx_get(ctx, "github_repo") or "").strip() or None,
+        "app_name": str(_ctx_get(ctx, "app_name") or "").strip() or None,
+    }
+
+    try:
+        event_id = await emit_ui_surface(
+            "AppIntelligenceProgressCard",
+            payload,
+            chat_id=str(chat_id) if chat_id else None,
+            workflow_name="ExistingAppDiscovery",
+            agent_name="App Intelligence",
+            display="inline",
+        )
+        logger.info(
+            "[ExistingAppDiscovery] App Intelligence ready card emitted inline: chat_id=%s status=%s ui_event_id=%s",
+            chat_id or "NONE",
+            status,
+            event_id,
+        )
+    except Exception as exc:
+        logger.warning("[ExistingAppDiscovery] Ready card emission failed: %s", exc)
+        return {"skipped": True, "reason": "emission_failed", "error": str(exc)}
+
+    return {"success": True, "ui_event_id": event_id if "event_id" in locals() else None}
+
+
+# ---------------------------------------------------------------------------
 # App Intelligence overview card — full catalog in the artifact panel
 # ---------------------------------------------------------------------------
 
@@ -795,6 +869,9 @@ def _build_overview_payload(
         "service_surface_count": len(_list_value(product_spec.get("service_surfaces"))),
         "route_surface_count": len(_list_value(product_spec.get("route_surfaces"))),
         "adoption_plan_available": bool(augmentation_plan),
+        "storage_pattern": product_spec.get("storage_pattern") or None,
+        "storage_migration_required": bool(product_spec.get("storage_migration_required")),
+        "detected_connectors": _list_value(product_spec.get("detected_connectors")),
         "capabilities": _list_value(capability_specs or _ctx_get(ctx, "capability_specs")),
         "features": features,
         "services": services,
@@ -804,6 +881,13 @@ def _build_overview_payload(
         # Forward-compat: keep catalog for any older code paths still reading it
         "app_intelligence_catalog": safe_catalog,
         "app_intelligence_progress": _dict_value(_ctx_get(ctx, "app_intelligence_progress")),
+        # Activity context fields — required for inline progress card restore after mode toggle
+        "activity_type": "app_intelligence_indexing",
+        "activity_display_variant": "app_intelligence_progress",
+        "activity_component_type": "AppIntelligenceProgressCard",
+        "display_variant": "app_intelligence_progress",
+        "component_type": "AppIntelligenceProgressCard",
+        "progress": _dict_value(_ctx_get(ctx, "app_intelligence_progress")),
         "current_app_context_version_id": str(_ctx_get(ctx, "current_app_context_version_id") or "").strip() or None,
         "artifact_version_ids": {
             "app_context_version": _ctx_get(ctx, "app_context_version_artifact_version_id"),

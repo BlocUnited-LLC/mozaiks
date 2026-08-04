@@ -261,15 +261,10 @@ function BuildRequestsPanel({ panel, build, snapshot, appId }) {
   const currentRequest = build.current_request || {}
   const recentRequests = toArray(build.recent_requests)
   const recentRuns = snapshot.runs.slice(0, 4)
-  const workflowId = build.initial_compile_workflow || snapshot.workflowNames[0] || 'ValueEngine'
-  const chatHref = `/chat?${new URLSearchParams({
-    workflow: workflowId,
-    mode: 'workflow',
-    app_id: appId || '',
-  }).toString()}`
+  const reviewHref = `/apps/${encodeURIComponent(appId || 'workspace-app')}/activity`
 
   return (
-    <Panel title={titleForPanel(panel, 'Build requests')} subtitle={panel.description || 'Current request, saved build prompts, and recent workflow activity.'}>
+    <Panel title={titleForPanel(panel, 'Build state')} subtitle={panel.description || 'Current request, latest run, and review path.'}>
       {currentRequest.text ? (
         <div className="rounded-lg border border-primary/25 bg-primary/6 px-4 py-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-primary/65">Current request</div>
@@ -316,7 +311,7 @@ function BuildRequestsPanel({ panel, build, snapshot, appId }) {
       ) : null}
 
       <div className="mt-4">
-        <LinkButton to={chatHref} size="sm">Open build workflow</LinkButton>
+        <LinkButton to={reviewHref} size="sm" variant="outline">Review build output</LinkButton>
       </div>
     </Panel>
   )
@@ -330,7 +325,7 @@ function ArtifactTimelinePanel({ panel, snapshot }) {
       {artifacts.length === 0 ? (
         <StudioInlineEmptyState
           title="No artifacts yet"
-          description="Artifact versions appear after generation or refinement saves an app bundle."
+          description="Build versions appear after generation or refinement saves an app bundle."
         />
       ) : (
         <div className="space-y-3">

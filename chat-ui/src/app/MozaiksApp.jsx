@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { BrowserRouter as Router } from 'react-router-dom';
 import { ChatUIProvider, useChatUI } from '../context/ChatUIContext';
 import GlobalChatWidgetWrapper from '../widget/GlobalChatWidgetWrapper';
@@ -9,6 +9,7 @@ import { initializeWorkflows } from '../@chat-workflows/index.js';
 import { registerComponent } from '../registry/componentRegistry.js';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
 import { SkipLink } from '../ui/primitives/SkipLink.jsx';
+import BrowserConsoleBridge from '../components/debug/BrowserConsoleBridge.jsx';
 
 /**
  * Inner shell — must render inside ChatUIProvider to consume its context.
@@ -68,6 +69,22 @@ export default function MozaiksApp({
     return initializeWorkflows(registerComponent);
   }, []);
 
+  const consoleBridgeEndpointUrl = useMemo(() => {
+    const baseUrl = typeof apiAdapter?.getHttpBaseUrl === 'function'
+      ? apiAdapter.getHttpBaseUrl()
+      : apiAdapter?.baseUrl || apiAdapter?.api?.baseUrl || null;
+    if (typeof baseUrl !== 'string' || !baseUrl.trim()) {
+      return null;
+    }
+    return baseUrl.trim();
+  }, [apiAdapter]);
+
+  const consoleBridgeMetadata = useMemo(() => ({
+    app_name: appName,
+    default_app_id: defaultAppId,
+    surface: 'mozaiks_app_shell',
+  }), [appName, defaultAppId]);
+
   return (
     <NavigationProvider>
       <ChatUIProvider
@@ -80,6 +97,10 @@ export default function MozaiksApp({
         <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <SkipLink targetId="main-content" />
           <ConfigValidationOverlay />
+          <BrowserConsoleBridge
+            endpointUrl={consoleBridgeEndpointUrl}
+            metadata={consoleBridgeMetadata}
+          />
           <GlobalChatWidgetWrapper />
           {children || <AppShell />}
         </Router>

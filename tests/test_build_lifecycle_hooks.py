@@ -45,19 +45,37 @@ def _make_brownfield_pack():
                     "id": "app_type_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "AppTypeSelector", "mode": "screen"},
-                    "options": [{"id": "brownfield_app", "route_to": "brownfield_repo_input"}],
-                },
-                {
-                    "id": "brownfield_repo_input",
-                    "transition_type": "user_choice_context",
-                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
-                    "options": [{"id": "start_discovery", "route_to": "ExistingAppDiscovery"}],
+                    "options": [
+                        {
+                            "id": "brownfield_app",
+                            "route_to": "brownfield_path_selector",
+                            "sequence": "brownfield_app_adoption",
+                        }
+                    ],
                 },
                 {
                     "id": "brownfield_path_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "BrownfieldPathSelector", "mode": "screen"},
-                    "options": [{"id": "light_integration", "route_to": "ExistingAppDiscovery"}],
+                    "options": [
+                        {
+                            "id": "light_integration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                        }
+                    ],
+                },
+                {
+                    "id": "brownfield_repo_input",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "start_discovery",
+                            "route_to": "ExistingAppDiscovery",
+                            "sequence": "brownfield_app_adoption",
+                        }
+                    ],
                 },
             ],
             "workflow_sequences": [
@@ -65,9 +83,9 @@ def _make_brownfield_pack():
                     "id": "brownfield_app_adoption",
                     "steps": [
                         {"transition": "app_type_selector"},
+                        {"transition": "brownfield_path_selector"},
                         {"transition": "brownfield_repo_input"},
                         {"workflows": ["ExistingAppDiscovery"]},
-                        {"transition": "brownfield_path_selector"},
                     ],
                 }
             ],
@@ -165,13 +183,14 @@ async def test_emit_build_started_materializes_existing_app_import_in_local_regi
             "build_registry_id_source": "build_id_fallback",
             "journey_instance_id": "journey_1",
             "journey_key": "brownfield_app_adoption",
-            "journey_position": 2,
+            "journey_position": 3,
             "journey_total_steps": 4,
             "chat_id": kwargs["chat_id"],
             "execution_id": kwargs["execution_id"],
             "session_context": {
                 "github_repo": "BlocUnited-LLC/mozaiks-app",
                 "app_name": "mozaiks-app",
+                "brownfield_build_path": "light_integration",
                 "current_app_context_version_id": "ctx_1",
                 "app_intelligence_artifact_version_id": "av_ai_1",
             },
@@ -208,6 +227,7 @@ async def test_emit_build_started_materializes_existing_app_import_in_local_regi
     assert created["active_workflow_id"] == "ExistingAppDiscovery"
     assert created["build_context_profile"]["workflow_sequence"] == "brownfield_app_adoption"
     assert created["build_context_profile"]["github_repo"] == "BlocUnited-LLC/mozaiks-app"
+    assert created["build_context_profile"]["brownfield_build_path"] == "light_integration"
     assert created["build_context_profile"]["current_app_context_version_id"] == "ctx_1"
     assert created["current_build_run"]["build_id"] == "journey_1"
     assert registry_pointers == [

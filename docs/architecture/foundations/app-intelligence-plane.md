@@ -162,8 +162,9 @@ The progress card may show:
 - user-safe scanner notes when source access is partial or intentionally bounded
 
 `AppIntelligenceOverviewCard` is a workflow-owned artifact-panel UI surface, not
-a framework-wide artifact kind. In ExistingAppDiscovery it maps raw intelligence
-into a product-facing presentation view model with:
+a framework-wide artifact kind. In ExistingAppDiscovery it renders the
+`DiscoveryArtifactAssemblerAgent`'s structured synthesis of App Intelligence
+facts into a product-facing presentation view model with:
 
 - a concise application summary
 - major existing features

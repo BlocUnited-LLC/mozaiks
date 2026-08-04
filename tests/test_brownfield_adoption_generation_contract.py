@@ -482,14 +482,27 @@ def test_registry_brownfield_path_selector_routes_correctly() -> None:
     options = {o["id"]: o for o in selector.get("options", [])}
 
     assert "light_integration" in options
-    assert options["light_integration"]["route_to"] == "ValueEngine"
-    assert options["light_integration"]["sequence"] == "brownfield_overlay_generation"
+    assert options["light_integration"]["route_to"] == "brownfield_repo_input"
+    assert options["light_integration"]["sequence"] == "brownfield_app_adoption"
     assert options["light_integration"]["context_variables"]["brownfield_build_path"] == "light_integration"
 
     assert "full_migration" in options
-    assert options["full_migration"]["route_to"] == "ValueEngine"
-    assert options["full_migration"]["sequence"] == "brownfield_module_generation"
+    assert options["full_migration"]["route_to"] == "brownfield_repo_input"
+    assert options["full_migration"]["sequence"] == "brownfield_app_adoption"
     assert options["full_migration"]["context_variables"]["brownfield_build_path"] == "full_migration"
+
+
+def test_registry_brownfield_repo_input_routes_to_discovery() -> None:
+    registry = _load_registry()
+    transitions = {t["id"]: t for t in registry.get("transitions", [])}
+
+    assert "brownfield_repo_input" in transitions
+    repo_input = transitions["brownfield_repo_input"]
+    options = {o["id"]: o for o in repo_input.get("options", [])}
+
+    assert "start_discovery" in options
+    assert options["start_discovery"]["route_to"] == "ExistingAppDiscovery"
+    assert options["start_discovery"]["sequence"] == "brownfield_app_adoption"
 
 
 def test_brownfield_generation_prompts_explain_user_facing_build_paths() -> None:

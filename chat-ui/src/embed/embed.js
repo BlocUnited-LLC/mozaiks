@@ -29,7 +29,7 @@ function init() {
     document.querySelector('script[data-app-id][src*="embed"]');
 
   if (!script) {
-    console.warn('[MozaiksEmbed] Could not find embed script tag. Use MozaiksEmbed.init() instead.');
+    console.warn('⚠️ [MozaiksEmbed] Could not find embed script tag. Use MozaiksEmbed.init() instead.');
     return;
   }
 
@@ -44,7 +44,7 @@ function init() {
   const defaultOpen = script.dataset.defaultOpen === 'true';
 
   if (!appId || !runtimeUrl) {
-    console.error('[MozaiksEmbed] data-app-id and data-runtime-url are required.');
+    console.error('❌ [MozaiksEmbed] data-app-id and data-runtime-url are required.');
     return;
   }
 

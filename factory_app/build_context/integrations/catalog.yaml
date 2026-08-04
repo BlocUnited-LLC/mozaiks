@@ -227,12 +227,14 @@ integrations:
   - id: redis
     name: Redis
     category: cache
-    description: In-memory cache, session store, and pub/sub broker.
+    description: Optional in-memory cache, session store, and pub/sub broker. Do not add for default development or single-instance deployments.
     required_secrets:
       - REDIS_URL
     optional_secrets: []
     setup_steps:
-      - Provision a Redis instance (Upstash, Redis Cloud, or self-hosted)
+      - Leave Redis unconfigured unless the app explicitly requires shared cache, shared sessions, pub/sub, queues, or multi-instance rate limiting
+      - For development, prefer no Redis or a local/self-hosted Redis container; do not provision a paid managed Redis service by default
+      - For production scale, provide an operator-owned Redis instance (Upstash, Redis Cloud, Azure Cache, or self-hosted)
       - Copy the connection URL in the format redis://user:pass@host:port
     preferred_setup_lane: bring_your_own_key
     allowed_setup_lanes:

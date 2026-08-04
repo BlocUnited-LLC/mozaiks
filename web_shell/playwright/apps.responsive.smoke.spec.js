@@ -69,29 +69,13 @@ const dashboardPayload = {
         id: 'building',
         label: 'Building',
         route: '/apps/:appId/building',
-        description: 'Build requests, artifact versions, approval queue, and workflow launch actions.',
+        description: 'Build requests, build versions, and approval queue.',
         enabled: true,
         capabilities: ['build_requests', 'artifact_versions', 'approval_queue'],
         panels: [
-          { id: 'requests', type: 'build_requests', title: 'Build requests' },
-          { id: 'artifacts', type: 'artifact_timeline', title: 'Artifacts' },
+          { id: 'requests', type: 'build_requests', title: 'Build state' },
+          { id: 'artifacts', type: 'artifact_timeline', title: 'Build versions' },
           { id: 'approvals', type: 'approval_queue', title: 'Approvals' },
-          {
-            id: 'continue_build',
-            type: 'workflow_launcher',
-            title: 'Continue build',
-            source: 'workflow',
-            workflow_id: 'extended_orchestration',
-            actions: [
-              {
-                id: 'continue_build',
-                label: 'Continue Build',
-                type: 'workflow_sequence',
-                target: 'build',
-                variant: 'primary',
-              },
-            ],
-          },
         ],
       },
     ],
@@ -1194,14 +1178,12 @@ test('app building route stays responsive across desktop and mobile widths', asy
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Build requests' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build state' })).toBeVisible();
   await expect(main.getByText('Revise the campaign approval workspace')).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Artifacts' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build versions' })).toBeVisible();
   await expect(main.getByText('Build v17').first()).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Approvals' })).toBeVisible();
   await expect(main.getByText('Owner approval before promotion')).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Continue build' })).toBeVisible();
-  await expect(main.getByRole('link', { name: 'Continue Build' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -1395,14 +1377,14 @@ test('app access route stays responsive across desktop and mobile widths', async
   }
 });
 
-test('app build history route stays responsive across desktop and mobile widths', async ({ page }) => {
+test('app build review route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/activity`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Build History', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Artifact versions' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build Review', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build versions' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Selected artifact review' })).toBeVisible();
   await expect(main.getByText('Build artifact').first()).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Recent workflow runs' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();

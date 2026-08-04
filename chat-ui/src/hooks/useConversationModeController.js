@@ -659,12 +659,14 @@ export function useConversationModeController({
     if (!chatId) {
       return;
     }
-    const targetWorkflow =
-      resolveKnownWorkflowName(workflowName)
-      || resolveKnownWorkflowName(activeWorkflowName)
-      || resolveKnownWorkflowName(currentWorkflowName)
-      || resolveKnownWorkflowName(configuredEntryWorkflow)
-      || resolveWorkflow();
+    const targetWorkflow = workflowName
+      ? (resolveKnownWorkflowName(workflowName) || workflowName)
+      : (
+          resolveKnownWorkflowName(activeWorkflowName)
+          || resolveKnownWorkflowName(currentWorkflowName)
+          || resolveKnownWorkflowName(configuredEntryWorkflow)
+          || resolveWorkflow()
+        );
 
     const resumed = resumeWorkflowSession(chatId, targetWorkflow, { replayOnSwitch: true });
     if (resumed) {

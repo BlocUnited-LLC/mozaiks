@@ -3,8 +3,6 @@ import { useParams } from 'react-router-dom'
 import {
   CheckCircle2,
   GitBranch,
-  RefreshCw,
-  Route,
   Upload,
   XCircle,
 } from 'lucide-react'
@@ -54,8 +52,7 @@ function actionIcon(actionId, className = 'h-3.5 w-3.5') {
   if (actionId === 'accept') return <CheckCircle2 className={className} />
   if (actionId === 'reject') return <XCircle className={className} />
   if (actionId === 'promote') return <Upload className={className} />
-  if (actionId === 'reroute') return <Route className={className} />
-  return <RefreshCw className={className} />
+  return <GitBranch className={className} />
 }
 
 function actionVariant(actionId) {
@@ -111,14 +108,14 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
         )
         if (!response.ok) {
           const body = await response.json().catch(() => null)
-          throw new Error(body?.detail || `Review package unavailable: ${response.status}`)
+          throw new Error(body?.detail || `Review unavailable: ${response.status}`)
         }
         const body = await response.json()
         if (!cancelled) setPayload(body)
       } catch (err) {
         if (!cancelled) {
           setPayload(null)
-          setError(err instanceof Error ? err.message : 'Review package unavailable.')
+          setError(err instanceof Error ? err.message : 'Review unavailable.')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -150,33 +147,34 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
   const review = payload?.review || null
   const routeDecision = review?.route_decision || {}
   const actions = Array.isArray(review?.actions) ? review.actions : []
+  const visibleActions = actions.filter((action) => ['accept', 'reject', 'promote'].includes(action.id))
   const changedFiles = Array.isArray(review?.changed_files) ? review.changed_files : []
   const affectedPaths = Array.isArray(review?.affected_paths) ? review.affected_paths : []
   const riskNotes = Array.isArray(review?.risk_notes) ? review.risk_notes : []
 
   return (
     <Panel
-      title="Review package"
-      subtitle="Route decision, validation, write-back target, and staged file changes for the selected artifact."
+      title="Selected artifact review"
+      subtitle="Review the staged output, validation result, and where acceptance writes back."
     >
       {!artifactVersionId ? (
         <StudioInlineEmptyState
           title="No artifact selected"
-          description="Select an artifact version to inspect its review package."
+          description="Select a build version to review its staged output."
         />
       ) : dataMode === 'demo' ? (
         <StudioInlineEmptyState
-          title="Review package unavailable in demo data"
-          description="Live artifacts expose route decisions, diffs, validation state, and available actions."
+          title="Review unavailable in demo data"
+          description="Live builds show staged output, validation state, and available actions."
         />
       ) : loading ? (
-        <StudioLoadingState label="Loading review package..." />
+        <StudioLoadingState label="Loading review..." />
       ) : error ? (
-        <StudioErrorState title="Review Package Unavailable" message={error} />
+        <StudioErrorState title="Review Unavailable" message={error} />
       ) : !review ? (
         <StudioInlineEmptyState
-          title="No review package"
-          description="This artifact does not expose a review package yet."
+          title="No review available"
+          description="This build version does not have review data yet."
         />
       ) : (
         <div className="space-y-5">
@@ -229,7 +227,7 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
           <div>
             <div className="mb-2 text-[11px] font-semibold uppercase text-muted-foreground/65">Actions</div>
             <div className="flex flex-wrap gap-2">
-              {actions.map((action) => (
+              {visibleActions.map((action) => (
                 <ActionButton
                   key={action.id}
                   size="sm"
@@ -244,6 +242,11 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
                 </ActionButton>
               ))}
             </div>
+            {visibleActions.length === 0 ? (
+              <div className="rounded-lg border border-border/42 bg-background/24 px-3 py-3 text-sm text-muted-foreground">
+                No actions are available for this build version.
+              </div>
+            ) : null}
             {actionState.error ? (
               <div className="mt-2 rounded-lg border border-destructive/35 bg-destructive/8 px-3 py-2 text-xs text-destructive">
                 {actionState.error}
@@ -312,7 +315,7 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
   )
 }
 
-export default function AppBuildHistoryPage() {
+export default function AppBuildReviewPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode, refresh } = useAppStudioData(appId)
   const [selectedArtifactId, setSelectedArtifactId] = useState(null)
@@ -326,8 +329,8 @@ export default function AppBuildHistoryPage() {
     setSelectedArtifactId(artifactId(latestArtifact))
   }, [buildHistory, latestArtifact, selectedArtifactId])
 
-  if (loading) return <StudioLoadingState label="Loading build history…" />
-  if (error || !data?.summary) return <StudioErrorState title="Build History Unavailable" message={error || 'No summary returned.'} />
+  if (loading) return <StudioLoadingState label="Loading build review..." />
+  if (error || !data?.summary) return <StudioErrorState title="Build Review Unavailable" message={error || 'No summary returned.'} />
 
   const summaryItems = [
     {
@@ -363,20 +366,20 @@ export default function AppBuildHistoryPage() {
           appId={appId}
           summary={data.summary}
           dataMode={dataMode}
-          title="Build History"
-          subtitle="Artifact versions produced by build and refinement workflows, with carry-forward preservation audit."
+          title="Build Review"
+          subtitle="Review build versions, validation state, staged output, and promotion decisions."
           currentSection="activity"
           summaryItems={summaryItems}
         />
 
         <Panel
-          title="Artifact versions"
-          subtitle="Each entry is a saved build artifact. Expand carry-forward to see module preservation decisions."
+          title="Build versions"
+          subtitle="Select one version to inspect validation, diffs, and review actions."
         >
           {buildHistory.length === 0 ? (
             <StudioInlineEmptyState
               title="No build versions yet"
-              description="Build history will appear here after the first successful AppGenerator run."
+              description="Build versions appear after generation or refinement saves an app bundle."
             />
           ) : (
             <div className="space-y-3">
@@ -427,7 +430,7 @@ export default function AppBuildHistoryPage() {
                             className="inline-flex items-center gap-1.5"
                           >
                             <GitBranch className="h-3.5 w-3.5" />
-                            Review
+                            Select
                           </ActionButton>
                         ) : null}
                       </div>
@@ -455,29 +458,6 @@ export default function AppBuildHistoryPage() {
             dataMode={dataMode}
             onRefresh={refresh}
           />
-        )}
-
-        {snapshot.runs.length > 0 && (
-          <Panel
-            title="Recent workflow runs"
-            subtitle="Latest workflow activity across all runs for this app."
-          >
-            <div className="space-y-2">
-              {snapshot.runs.slice(0, 6).map((run, i) => (
-                <div
-                  key={run.run_id || run.id || i}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/36 bg-background/24 px-3 py-2.5 text-sm"
-                >
-                  <span className="font-medium text-foreground">
-                    {run.workflow_name || 'Unnamed workflow'}
-                  </span>
-                  <span className="text-[12px] text-muted-foreground">
-                    {formatDateTimeLabel(run.started_at)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Panel>
         )}
       </div>
     </WorkspaceLayout>

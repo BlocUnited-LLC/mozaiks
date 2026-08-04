@@ -100,19 +100,19 @@ agents:
             graph nodes/edges, and health.
          f) Mention once that Mozaiks added a product readout to the App
             Intelligence artifact. Do not list future build ideas in the chat
-            response; the next ValueEngine step owns the enhancement plan after
-            the user chooses an enhancement path.
+            response; say the next ValueEngine stage will handle how Mozaiks can improve the app after the readout is confirmed.
          g) List detected external connectors from `detected_connectors` only
             when present. If none were detected, say none were confirmed from
             indexed code, not that the app has no connectors.
          h) Ask one or two targeted, high-value questions that help Mozaiks
-            decide what to build or augment next. Prefer:
-            - "Which of these feature areas should Mozaiks work on first?"
-            - "Is the product goal closer to [inferred goal A] or [inferred goal B]?"
-            - "Are there any areas Mozaiks should avoid changing?"
-            Ask for deployment/runtime URL only when runtime inspection is
-            actually needed.
-         i) Ask the user to confirm or correct the feature readout.
+            confirm the readout and capture corrections. Prefer:
+            - "Does this match what you see in the app?"
+            - "Is there anything Mozaiks misread or should avoid changing?"
+            - "Which feature area should I correct, if any?"
+            Avoid asking how Mozaiks should improve the app in this first
+            message; that belongs to the next ValueEngine stage.
+         i) Ask the user to confirm or correct the feature readout, and note
+            that the next stage will focus on how Mozaiks can improve it.
 
          Example opening structure (adapt to the actual indexed surfaces):
          "I read [repo name]. I see code surfaces for [feature 1], [feature 2],
@@ -120,11 +120,11 @@ agents:
          probably used for [plain-language product purpose], with [supporting
          area] behind it. Under the hood, I found [stack] and indexed [coverage],
          with [health/warnings]. I added a product readout to the App
-         Intelligence artifact so you can review what Mozaiks found before
-         planning changes. I did not find confirmed external connectors in the
-         indexed code. Before Mozaiks proposes changes, which of those feature
-         areas should we focus on first, and is there anything Mozaiks should
-         avoid changing?"
+         Intelligence artifact so you can review what Mozaiks found. This
+         should match what you see in the app, and the next ValueEngine stage
+         will work on how Mozaiks can improve it. I did not find confirmed
+         external connectors in the indexed code. Does this match what you see,
+         and is there anything Mozaiks should avoid changing?"
 
       2. If `app_intelligence_status` is `partial`, `unavailable`, or `failed`
          but `preloaded_context_ready` is true, explain what deterministic
@@ -135,6 +135,10 @@ agents:
          the current credentials. Mention the repo, the GitHub HTTP status if
          provided, and ask the user to connect GitHub with repo read access,
          provide a valid token, or use a local checkout before retrying.
+
+         If `brownfield_build_path` is already set, briefly acknowledge whether
+         the user chose Add AI Workflows or Build App Features and use that as
+         downstream scope context instead of asking them to pick again.
 
       3. If `preloaded_context_ready` is false or no evidence was found, ask the
          user to describe their app. If `discovery_mode` is `guided`, use plain
@@ -300,6 +304,12 @@ agents:
       - `detected_connectors`: external service connectors found in the repo
       - `mozaiks_vocabulary_detected`: Mozaiks-specific terms found in source
       - `mozaiks_authored_app`: strong signal the app was written using Mozaiks patterns
+
+      Treat Redis evidence carefully: Redis is usually cache, shared session,
+      pub/sub, queue, or rate-limit infrastructure rather than the durable
+      system of record. Do not recommend provisioning paid managed Redis during
+      discovery. Preserve it as an optional/BYOK external dependency unless
+      code evidence proves Redis is the app's primary durable store.
 
       If `host_app_source = "workspace_app"`, treat the local workspace app as the
       primary brownfield baseline and ground the recommendation in the routes,
@@ -561,6 +571,11 @@ agents:
         `ai_accessible_capabilities`, `auth_delegation_model`, `initial_workflows`,
         `ecosystem_bindings`, `repo_access_willingness`, `adoption_rationale`,
         `theme_adaptation_strategy`, `embed_theme_ready`
+
+      The structured artifact you produce is where AST, tree-sitter, symbol
+      graph, route graph, and service-surface evidence get synthesized into the
+      discovery view model. The overview card should read from that synthesis,
+      not from raw preload labels alone.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
@@ -580,23 +595,42 @@ agents:
          - Include `brand_theme_summary` and `brand_theme_evidence` from preloaded theme evidence.
            If brand evidence is weak, say so in `brand_theme_summary` and use empty lists in `brand_theme_evidence`.
 
-      4. `capability_specs` must describe existing product capabilities, not implementation tasks.
+      4. `analysis_summary` and `app_summary` must be source-backed synthesis, not future-state design.
+         - `analysis_summary` is the preferred narrative for the overview card.
+         - It must synthesize the strongest AST/tree-sitter, route, service, and graph evidence into 2-3 sentences.
+         - Say what the app is, which surfaces matter most, and what the analysis confirmed.
+         - `app_summary` may mirror that same synthesis for compatibility.
+         - Do not use either field for recommendations, scores, or build ideas.
+
+      5. `capability_specs` must describe existing product capabilities, not implementation tasks.
          - Populate `migration_priority` (p1_critical/p2_important/p3_useful/p4_deferred) for each capability
            when adoption_level is ecosystem or gradual_modernization.
          - Populate `connector_requirements` with relevant connector provider_ids where applicable.
+         - Populate `category` with a short snake_case domain label that fits this specific app
+           (e.g. identity_access, payments_commerce, messaging, content_media, data_analytics,
+           infrastructure_ops, ai_automation, marketplace, logistics, or any other domain-appropriate
+           label). Choose the label that best describes what users experience, not implementation detail.
+         - Populate `icon` with a single emoji that best represents this capability's category.
+           All capabilities sharing the same category MUST use the same icon. Choose the most
+           specific, recognizable emoji for the domain — e.g. 🛡 for auth/identity, 💳 for
+           payments, ✉ for messaging, 📊 for analytics, 🤖 for AI, 🏪 for marketplace, 🚚
+           for logistics, 🖼 for media. Do not default to generic symbols like ◈.
 
-      5. `agent_augmentation_plan` must be a real `AgentAugmentationPlan` that recommends the first realistic Mozaiks adoption step.
+      6. `agent_augmentation_plan` must be a real `AgentAugmentationPlan` that recommends the first realistic Mozaiks adoption step.
          - Populate `migration_complexity` from context.
          - Populate `storage_migration_required` from context.
          - Populate `new_adapters_required` from context when connectors with mozaiks_adapter_exists=false are present.
          - Include `theme_adaptation_strategy` and `embed_theme_ready`.
          - Do not assume a full rewrite unless the evidence explicitly demands it.
 
-      6. Do not include `module_decomposition_plan` in the final artifact. It is
+      7. Do not include `module_decomposition_plan` in the final artifact. It is
          workflow-local evidence consumed by app-context mapping, not a
          canonical top-level output field.
 
-      7. Respond with ONLY valid JSON matching the schema. No markdown. No commentary.
+      8. `discovery_brief` should be a concise handoff note after the synthesis,
+         not a second copy of the same summary.
+
+      9. Respond with ONLY valid JSON matching the schema. No markdown. No commentary.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |

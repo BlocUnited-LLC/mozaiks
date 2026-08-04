@@ -326,6 +326,8 @@ export default defineConfig(({ mode }) => {
       'marked': path.resolve(__dirname, 'node_modules/marked'),
       'dompurify': path.resolve(__dirname, 'node_modules/dompurify'),
       'react-icons': path.resolve(__dirname, 'node_modules/react-icons'),
+      '@xyflow/react': path.resolve(__dirname, 'node_modules/@xyflow/react'),
+      '@dagrejs/dagre': path.resolve(__dirname, 'node_modules/@dagrejs/dagre'),
 
       // ── Platform extension alias (PLATFORM_PATH-driven) ─────────────────
       // App.jsx imports: import { register } from '@platform/extensions'

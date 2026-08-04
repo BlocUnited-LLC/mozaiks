@@ -397,7 +397,7 @@ function ActivityPanel({ snapshot, latestRun, totalRuns, appId }) {
             variant="outline"
             size="sm"
           >
-            View build history →
+            Review builds →
           </LinkButton>
         </>
       )}

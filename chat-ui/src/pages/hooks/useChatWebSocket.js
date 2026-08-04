@@ -56,7 +56,7 @@ export function useChatWebSocket({
   // Create WebSocket connection
   const connectWebSocket = useCallback(() => {
     if (!chatId) {
-      console.error('[WS] WebSocket requires existing chat ID');
+      console.error('❌ [WS] WebSocket requires existing chat ID');
       return () => {};
     }
 
@@ -65,7 +65,7 @@ export function useChatWebSocket({
 
     const workflowName = resolveWorkflow(urlWorkflowName) || currentWorkflowName;
     if (!workflowName) {
-      console.warn('[WS] No workflow available to connect');
+      console.warn('⚠️ [WS] No workflow available to connect');
       return () => {};
     }
 
@@ -82,7 +82,7 @@ export function useChatWebSocket({
           }
         },
         onError: (error) => {
-          console.error('[WS] WebSocket error:', error);
+          console.error('❌ [WS] WebSocket error:', error);
           setConnectionStatus('error');
         },
         onClose: () => {
@@ -134,10 +134,10 @@ export function useChatWebSocket({
         setCurrentWorkflowName(workflowName);
         return connectWebSocket();
       } catch (error) {
-        console.error('[WS] Error querying workflow transport:', error);
+        console.error('❌ [WS] Error querying workflow transport:', error);
         const fallbackWf = resolveWorkflow();
         if (!fallbackWf) {
-          console.warn('[WS] No workflow available for fallback');
+          console.warn('⚠️ [WS] No workflow available for fallback');
           return () => {};
         }
         setTransportType('websocket');
@@ -152,7 +152,7 @@ export function useChatWebSocket({
         cleanup = cleanupFn;
       })
       .catch((error) => {
-        console.error('[WS] Failed to connect:', error);
+        console.error('❌ [WS] Failed to connect:', error);
         setConnectionInitialized(false);
         connectionInProgressRef.current = false;
       });
@@ -191,7 +191,7 @@ export function useChatWebSocket({
       if (activeWs && activeWs.send) {
         return activeWs.send(data);
       }
-      console.warn('[WS] No WebSocket connection available');
+      console.warn('⚠️ [WS] No WebSocket connection available');
       return false;
     },
     []

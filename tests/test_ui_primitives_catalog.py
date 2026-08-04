@@ -41,6 +41,7 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
         sorted(
             set(expected_page)
                 | {
+                    "ArtifactLoadingState",
                     "CollectionToolbar",
                     "AnalyticsSummaryStrip",
                     "ChatInput",

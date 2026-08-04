@@ -2566,6 +2566,10 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     """Populate discovery context from deterministic pre-chat sources."""
     ctx = context_variables if context_variables is not None else {}
     discovery_inputs = _coerce_mapping(_ctx_get(ctx, "discovery_inputs", {}))
+    brownfield_build_path = _first_nonempty(
+        _ctx_get(ctx, "brownfield_build_path"),
+        discovery_inputs.get("brownfield_build_path"),
+    )
     host_app_source = _first_nonempty(
         discovery_inputs.get("host_app_source"),
         _ctx_get(ctx, "host_app_source"),
@@ -2580,6 +2584,7 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
     discovery_mode = _first_nonempty(_ctx_get(ctx, "discovery_mode"), discovery_inputs.get("discovery_mode"), "guided")
 
     _ctx_set(ctx, "host_app_source", host_app_source)
+    _ctx_set(ctx, "brownfield_build_path", brownfield_build_path)
     _ctx_set(ctx, "app_intelligence_ready", False)
     _set_app_intelligence_progress(
         ctx,
@@ -2980,6 +2985,8 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         )
     if theme_capture_status != "none" and theme_capture_summary:
         summary_lines.append(f"Theme evidence: {theme_capture_summary}")
+    if brownfield_build_path:
+        summary_lines.append(f"Selected brownfield path: {brownfield_build_path}")
     if context_graph_preload.get("present"):
         if context_graph_preload.get("source") == "previous_app_context_graph":
             summary_lines.append("App Intelligence loaded the previous AppContext graph for refresh.")

@@ -24,7 +24,7 @@ import ProfilePage from '../pages/ProfilePage.jsx';
 // Transition renderers — referenced by transition.ui.component
 import { LauncherScreen } from '../ui/screens/LauncherScreen.jsx';
 import { ConfirmScreen } from '../ui/screens/ConfirmScreen.jsx';
-import WorkflowCompletion from '../components/chat/WorkflowCompletion.jsx';
+import WorkflowCompletion from '../ui/screens/WorkflowCompletion.jsx';
 
 // Token usage surfaces — profile tab + admin panels
 import TokenStatusTab from '../components/profile/TokenStatusTab.jsx';

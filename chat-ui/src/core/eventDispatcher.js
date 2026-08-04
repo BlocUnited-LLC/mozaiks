@@ -19,7 +19,7 @@ class EventDispatcher {
       const toolCallId = tool_call_id || payload.tool_call_id || event?.corr || null;
 
       if (!toolName) {
-        console.error('EventDispatcher: Missing tool_name in event', event);
+        console.error('❌ EventDispatcher: Missing tool_name in event', event);
         return null;
       }
 
@@ -72,7 +72,7 @@ class EventDispatcher {
       });
 
     } catch (error) {
-      console.error('EventDispatcher: Error handling event', error);
+      console.error('❌ EventDispatcher: Error handling event', error);
       return this._renderErrorComponent(event?.tool_name || event?.component_type, error.message);
     }
   }

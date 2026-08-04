@@ -67,7 +67,7 @@ export const BrandingProvider = ({
         }
       } catch (err) {
         if (cancelled) return;
-        console.error('[BrandingProvider] Error loading theme:', err);
+        console.error('❌ [BrandingProvider] Error loading theme:', err);
         setError(err);
         setBranding(DEFAULT_BRANDING);
         setLoading(false);

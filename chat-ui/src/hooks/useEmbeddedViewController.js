@@ -64,7 +64,7 @@ export function useEmbeddedViewController({
         agent_name: 'System',
       });
     } catch (error) {
-      console.warn('Failed to open embedded view', error);
+      console.warn('⚠️ Failed to open embedded view', error);
     }
   }, [
     conversationMode,
@@ -85,7 +85,7 @@ export function useEmbeddedViewController({
       const viewId = resolveEmbeddedViewId(viewOverride);
       await openEmbeddedView('header_action', viewId);
     } catch (error) {
-      console.warn('Failed to open embedded view', error);
+      console.warn('⚠️ Failed to open embedded view', error);
     }
   }, [isInWidgetMode, openEmbeddedView, resolveEmbeddedViewId, setIsInWidgetMode]);
 

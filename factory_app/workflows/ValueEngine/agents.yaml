@@ -278,7 +278,7 @@ agents:
       For light_integration, prefer workflow and external_integration surface hints. Avoid module-heavy plans unless an app connection is required.
       For full_migration, modules/pages/workflows are allowed only inside the approved enhancement scope.
 
-      Do not include raw file paths, graph metrics, Tree-sitter details, FalkorDB details, or internal context ids in the user-facing fields.
+      Do not include raw file paths, graph metrics, Tree-sitter details, graph-database details, or internal context ids in the user-facing fields.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-

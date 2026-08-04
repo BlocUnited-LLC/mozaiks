@@ -31,6 +31,10 @@ contracts when the module needs that surface.
   app-wide SaaS plan catalogs.
 - App-wide products, plans, usage limits, and capability grants live in
   `app/config/subscriptions.yaml`.
+- If a module owns managed infrastructure or BYOK fulfillment, model the
+  entitlement in `app/config/subscriptions.yaml` and the provisioning rules in
+  the module's `service.yaml` or `commercial.yaml`. Do not use subscriptions
+  as a hidden infrastructure provisioning layer.
 - Runtime extensions live at `app/modules/{module_id}/runtime_extensions.yaml`.
 
 ## Service Boundary Example

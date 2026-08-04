@@ -210,6 +210,13 @@ jobs:
           MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
 
+      - name: Onboarding demo smoke
+        run: npm run test:onboarding-demo -- --project desktop-chromium
+        env:
+          VITE_MOCK_MODE: "true"
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
       - name: Build
         run: npm run build
         env:

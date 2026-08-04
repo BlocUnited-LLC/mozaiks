@@ -2266,8 +2266,8 @@ that have no `conceptual_replan` carry-forward context are unaffected.
 | `factory_app/workflows/AppGenerator/tools/generate_and_download.py` | Merges `carry_forward_additions`; saves `carry_forward_report` to artifact metadata |
 | `factory_app/app/admin/pages/CarryForwardReportPanel.jsx` | Studio app overview — full audit panel from `commit_metadata.metadata.carry_forward_report` |
 | `factory_app/app/admin/pages/AppOverviewPage.jsx` | Mounts `CarryForwardReportPanel` when the latest artifact contains a `carry_forward_report` |
-| `factory_app/app/admin/pages/CarryForwardReportSummary.jsx` | Compact collapsible carry-forward summary for build history entries |
-| `factory_app/app/admin/pages/AppBuildHistoryPage.jsx` | Build History (Activity) page — artifact version list with inline `CarryForwardReportSummary` per entry |
+| `factory_app/app/admin/pages/CarryForwardReportSummary.jsx` | Compact collapsible carry-forward summary for build review entries |
+| `factory_app/app/admin/pages/AppBuildReviewPage.jsx` | Build Review page — artifact versions, validation state, staged output, and inline `CarryForwardReportSummary` per entry |
 
 **Tests:**
 
@@ -2288,7 +2288,7 @@ python -m pytest tests/test_carry_forward_preservation.py tests/test_carry_forwa
 **App Overview (`AppOverviewPage`):** Full audit panel (`CarryForwardReportPanel`) below the
 build and runtime panels. Hidden when no report is present.
 
-**Build History (`AppBuildHistoryPage`, `/apps/:appId/activity`):** Compact collapsible
+**Build Review (`AppBuildReviewPage`, `/apps/:appId/activity`):** Compact collapsible
 `CarryForwardReportSummary` inline in each artifact version entry. All entries in the
 history list that carry a report show it; entries without a report show a
 "No carry-forward preservation" notice. Both components read

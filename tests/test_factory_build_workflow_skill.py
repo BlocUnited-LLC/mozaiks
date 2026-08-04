@@ -38,6 +38,20 @@ def test_factory_build_workflow_skill_covers_boundaries_reports_and_tests() -> N
     assert "tests/test_build_lifecycle_hooks.py" in skill
 
 
+def test_factory_build_workflow_skill_documents_shared_workflow_ui_lane() -> None:
+    skill = _read(".claude/skills/factory-build-workflow-change/SKILL.md")
+    codex_skill = _read(".agents/skills/factory-build-workflow-change/SKILL.md")
+    rule = _read(".claude/rules/factory-build-workflows.md")
+
+    for content in (skill, codex_skill, rule):
+        assert "factory_app/workflows/_shared/ui/" in content
+        assert "Shared workflow UI is not auto-registered" in content
+        assert "Do not import UI from a sibling workflow folder" in content
+
+    assert "Changing shared workflow UI" in skill
+    assert "tests/test_workflow_ui_tool_contracts.py" in skill
+
+
 def test_factory_build_workflow_skill_is_routed_from_index_and_quickstart() -> None:
     skills = _read(".claude/skills/README.md")
     quickstart = _read("CONTRIBUTING.md")

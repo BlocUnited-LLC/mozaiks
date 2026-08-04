@@ -57,9 +57,13 @@ reusable behavior into a framework-owned `mozaiksai.core.*` API with a
 documented contract.
 
 Factory-owned builder infrastructure is different: shared builder-only Python
-modules may live under `factory_app/workflows/_shared/` when multiple factory
-workflows consume them. That path is for the factory repo itself, not for
-generated workflow bundle output.
+modules and reusable workflow React components may live under
+`factory_app/workflows/_shared/` when multiple factory workflows consume them.
+Reusable workflow React components use the concrete
+`factory_app/workflows/_shared/ui/` lane.
+Shared workflow UI remains explicit: each consuming factory workflow imports
+and re-exports/registers the shared component from its own `ui/index.js`. That
+path is for the factory repo itself, not for generated workflow bundle output.
 
 ## Generation vs Refinement
 

@@ -199,12 +199,19 @@ def create_mozaiks_app(
         user_id: str,
     ):
         """WebSocket endpoint for real-time chat communication."""
+        suppress_history_replay = str(websocket.query_params.get("suppress_history_replay", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         await transport.handle_websocket(
             websocket=websocket,
             workflow_name=workflow_name,
             app_id=app_id,
             chat_id=chat_id,
             user_id=user_id,
+            suppress_history_replay=suppress_history_replay,
         )
 
     logger.info("mozaiksai runtime substrate created with workflow_dir=%s", workflow_path)

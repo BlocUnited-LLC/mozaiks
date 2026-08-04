@@ -3,9 +3,15 @@ import { useEffect } from 'react';
 import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
+  logChatPersistence,
+  readStoredArtifactWorkspaceSnapshot,
+  readStoredWorkflowTranscriptSnapshot,
   getStoredActiveChatId,
   getStoredActiveGeneralChatId,
   clearStoredWorkflowChatId,
+  summarizeArtifactWorkspaceSnapshot,
+  summarizeWorkflowTranscriptSnapshot,
+  summarizeWorkflowMessages,
   setStoredActiveChatId,
   getStoredActiveWorkflowName,
 } from '../session/chatSessionStorage';
@@ -34,11 +40,12 @@ export function useChatStartupEffects({
   setCurrentArtifactMessages,
   setLayoutMode,
   queryChatId,
-  workflowArtifactSnapshotRef,
+  artifactWorkspaceSnapshotRef,
   currentChatId,
   activeChatId,
   restoreStoredArtifactForChat,
   restoreStoredActivityForChat = null,
+  hydrateServerArtifactForChat = null,
   upsertRestoredActivityFromArtifactMessages = null,
   urlWorkflowName,
   conversationMode,
@@ -52,10 +59,14 @@ export function useChatStartupEffects({
   generalHydrationPendingRef,
   hydrateGeneralTranscript,
   workflowMessagesCacheRef,
+  workflowMessagesSharedRef = null,
   sanitizeVisibleWorkflowMessages,
   workflowMessages,
+  setWorkflowMessages = null,
   messagesRef,
   workflowReplayPendingRef,
+  artifactCacheValidRef = null,
+  artifactRestoredOnceRef = null,
   isPrimaryChatRoute,
   isInWidgetMode,
   currentArtifactMessages,
@@ -114,7 +125,6 @@ export function useChatStartupEffects({
       }
       setTimeout(() => {
         setIsSidePanelOpen(false);
-        setCurrentArtifactMessages([]);
         if (setLayoutMode) setLayoutMode('full');
       }, 50);
       return;
@@ -124,37 +134,124 @@ export function useChatStartupEffects({
       setConversationMode('workflow');
       consumeNavigationQueryParams(['mode', 'resume']);
 
-      const snapshot = workflowArtifactSnapshotRef.current;
       const restoreChatId = queryChatId || currentChatId || activeChatId || getStoredActiveChatId();
-      const snapshotMatchesChat = !snapshot?.chatId || !restoreChatId || snapshot.chatId === restoreChatId;
-      const snapshotMatchesWorkflow = !snapshot?.workflowName || !currentWorkflowName || snapshot.workflowName === currentWorkflowName;
-      if (snapshot?.isOpen && snapshot?.messages?.length > 0 && snapshotMatchesChat && snapshotMatchesWorkflow) {
+      const localSnapshot = artifactWorkspaceSnapshotRef.current;
+      const storedSnapshot = restoreChatId ? readStoredArtifactWorkspaceSnapshot(restoreChatId) : null;
+      const storedWorkflowTranscript = restoreChatId ? readStoredWorkflowTranscriptSnapshot(restoreChatId) : null;
+      const storedWorkflowTranscriptMatches = Boolean(
+        storedWorkflowTranscript
+        && (
+          !storedWorkflowTranscript.workflowName
+          || !currentWorkflowName
+          || storedWorkflowTranscript.workflowName === currentWorkflowName
+          || storedWorkflowTranscript.workflowName === urlWorkflowName
+        )
+      );
+      const storedWorkflowMessages = storedWorkflowTranscriptMatches
+        ? sanitizeVisibleWorkflowMessages(storedWorkflowTranscript.messages)
+        : [];
+      const hasLocalSnapshot = Boolean(
+        localSnapshot
+        && (
+          localSnapshot.chatId
+          || localSnapshot.workflowName
+          || localSnapshot.isOpen
+          || (Array.isArray(localSnapshot.messages) && localSnapshot.messages.length > 0)
+        ),
+      );
+      const snapshotCandidates = [hasLocalSnapshot ? localSnapshot : null, storedSnapshot].filter(Boolean);
+      const snapshot = snapshotCandidates.find((candidate) => {
+        const snapshotChatId = candidate.chatId || null;
+        const snapshotWorkflowName = candidate.workflowName || null;
+        const snapshotMatchesChat = !snapshotChatId || !restoreChatId || snapshotChatId === restoreChatId;
+        const snapshotMatchesWorkflow = !snapshotWorkflowName || !currentWorkflowName || snapshotWorkflowName === currentWorkflowName;
+        return snapshotMatchesChat && snapshotMatchesWorkflow;
+      }) || null;
+
+      logChatPersistence('startup_workflow_restore_decision', {
+        restoreChatId: restoreChatId || null,
+        queryChatId: queryChatId || null,
+        currentChatId: currentChatId || null,
+        activeChatId: activeChatId || null,
+        currentWorkflowName: currentWorkflowName || null,
+        queryWorkflowName: urlWorkflowName || null,
+        localSnapshot: summarizeArtifactWorkspaceSnapshot(localSnapshot),
+        storedSnapshot: summarizeArtifactWorkspaceSnapshot(storedSnapshot),
+        selectedSnapshot: summarizeArtifactWorkspaceSnapshot(snapshot),
+        storedWorkflowTranscript: summarizeWorkflowTranscriptSnapshot(storedWorkflowTranscript),
+        storedWorkflowTranscriptMatches,
+        storedWorkflowMessages: summarizeWorkflowMessages(storedWorkflowMessages),
+        currentMessages: summarizeWorkflowMessages(messagesRef.current),
+      });
+
+      if (storedWorkflowMessages.length > 0 && messagesRef.current.length === 0) {
+        workflowMessagesCacheRef.current = storedWorkflowMessages;
+        if (workflowMessagesSharedRef?.current !== undefined) {
+          workflowMessagesSharedRef.current = storedWorkflowMessages;
+        }
+        if (typeof setWorkflowMessages === 'function') {
+          setWorkflowMessages(storedWorkflowMessages);
+        }
+        setMessagesWithLogging(storedWorkflowMessages);
+      }
+
+      if (snapshot?.messages?.length > 0 || snapshot?.isOpen) {
         setTimeout(() => {
-          setIsSidePanelOpen(true);
-          setCurrentArtifactMessages(snapshot.messages);
-          if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
-            upsertRestoredActivityFromArtifactMessages(
-              snapshot.messages,
-              snapshot.workflowName || currentWorkflowName || urlWorkflowName,
-            );
+          if (snapshot?.messages?.length > 0) {
+            setCurrentArtifactMessages(snapshot.messages);
+            if (artifactCacheValidRef) {
+              artifactCacheValidRef.current = true;
+            }
+            if (artifactRestoredOnceRef) {
+              artifactRestoredOnceRef.current = true;
+            }
+            if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
+              upsertRestoredActivityFromArtifactMessages(
+                snapshot.messages,
+                snapshot.workflowName || currentWorkflowName || urlWorkflowName,
+              );
+            }
           }
-          if (snapshot.layoutMode && setLayoutMode) {
-            setLayoutMode(snapshot.layoutMode);
+          if (snapshot?.isOpen) {
+            setIsSidePanelOpen(true);
+            if (snapshot.layoutMode && setLayoutMode) {
+              setLayoutMode(snapshot.layoutMode);
+            }
+          } else {
+            setIsSidePanelOpen(false);
+            if (setLayoutMode) setLayoutMode('full');
           }
         }, 100);
       } else {
-        if (snapshot?.messages?.length > 0 && (!snapshotMatchesChat || !snapshotMatchesWorkflow)) {
-          workflowArtifactSnapshotRef.current = { isOpen: false, messages: [], layoutMode: 'split' };
+        if (snapshot?.messages?.length > 0) {
+          artifactWorkspaceSnapshotRef.current = { isOpen: false, messages: [], layoutMode: 'split' };
         }
         if (restoreChatId) {
           const restored = restoreStoredArtifactForChat(restoreChatId, urlWorkflowName);
+          logChatPersistence('startup_workflow_artifact_restore', {
+            restoreChatId,
+            restored,
+            workflowName: urlWorkflowName || currentWorkflowName || null,
+          });
           if (restored) {
             if (typeof restoreStoredActivityForChat === 'function') {
               restoreStoredActivityForChat(restoreChatId, urlWorkflowName);
             }
           } else if (typeof restoreStoredActivityForChat === 'function') {
-            // Restore inline activity (e.g. AppIntelligenceProgressCard) even when no artifact exists yet
+            // Restore workflow-owned inline activity even when no artifact exists yet.
             restoreStoredActivityForChat(restoreChatId, urlWorkflowName);
+          }
+          if (!restored && typeof hydrateServerArtifactForChat === 'function') {
+            Promise.resolve(hydrateServerArtifactForChat({
+              chatId: restoreChatId,
+              workflowName: urlWorkflowName || currentWorkflowName,
+              reason: 'startup_workflow_artifact_restore_miss',
+              force: true,
+            })).then((hydrated) => {
+              if (hydrated && typeof restoreStoredActivityForChat === 'function') {
+                restoreStoredActivityForChat(restoreChatId, urlWorkflowName || currentWorkflowName);
+              }
+            });
           }
         }
       }
@@ -163,13 +260,24 @@ export function useChatStartupEffects({
 
     const startupDefault = configuredStartupMode;
     if (startupDefault === 'ask') {
+      logChatPersistence('startup_default_mode', {
+        requestedMode: 'ask',
+        conversationMode,
+        currentChatId: currentChatId || null,
+        currentWorkflowName: currentWorkflowName || null,
+      });
       setConversationMode('ask');
       setTimeout(() => {
         setIsSidePanelOpen(false);
-        setCurrentArtifactMessages([]);
         if (setLayoutMode) setLayoutMode('full');
       }, 50);
     } else if (conversationMode !== 'workflow') {
+      logChatPersistence('startup_default_mode', {
+        requestedMode: 'workflow',
+        conversationMode,
+        currentChatId: currentChatId || null,
+        currentWorkflowName: currentWorkflowName || null,
+      });
       setConversationMode('workflow');
     }
   }, [
@@ -187,14 +295,20 @@ export function useChatStartupEffects({
     queryMode,
     restoreStoredActivityForChat,
     restoreStoredArtifactForChat,
+    hydrateServerArtifactForChat,
     setConversationMode,
     setCurrentArtifactMessages,
     setIsSidePanelOpen,
     setLayoutMode,
     setMessagesWithLogging,
+    setWorkflowMessages,
+    sanitizeVisibleWorkflowMessages,
     urlWorkflowName,
     upsertRestoredActivityFromArtifactMessages,
-    workflowArtifactSnapshotRef,
+    artifactWorkspaceSnapshotRef,
+    messagesRef,
+    workflowMessagesCacheRef,
+    workflowMessagesSharedRef,
   ]);
 
   useEffect(() => {
@@ -220,7 +334,6 @@ export function useChatStartupEffects({
   useEffect(() => {
     if (conversationMode === 'ask' && (isSidePanelOpen || layoutMode !== 'full')) {
       setIsSidePanelOpen(false);
-      setCurrentArtifactMessages([]);
       if (setLayoutMode) setLayoutMode('full');
     }
   }, [conversationMode, isSidePanelOpen, layoutMode, setLayoutMode, setCurrentArtifactMessages, setIsSidePanelOpen]);
@@ -260,9 +373,45 @@ export function useChatStartupEffects({
 
   useEffect(() => {
     if (conversationMode !== 'workflow') return;
-    // Workflow transcript restoration is server-owned via websocket replay.
-    // Do not reseed workflow messages from client caches on startup/reconnect.
-  }, [conversationMode]);
+    if (!currentChatId || !currentWorkflowName) return;
+    const hasArtifact = Array.isArray(currentArtifactMessages) && currentArtifactMessages.length > 0;
+    const artifactActive = surfaceState?.artifact?.status === 'active';
+    if (hasArtifact || artifactActive) return;
+
+    const restored = typeof restoreStoredArtifactForChat === 'function'
+      ? restoreStoredArtifactForChat(currentChatId, currentWorkflowName)
+      : false;
+    if (restored) {
+      if (typeof restoreStoredActivityForChat === 'function') {
+        restoreStoredActivityForChat(currentChatId, currentWorkflowName);
+      }
+      return;
+    }
+
+    if (typeof restoreStoredActivityForChat === 'function') {
+      restoreStoredActivityForChat(currentChatId, currentWorkflowName);
+    }
+    if (typeof hydrateServerArtifactForChat === 'function') {
+      Promise.resolve(hydrateServerArtifactForChat({
+        chatId: currentChatId,
+        workflowName: currentWorkflowName,
+        reason: 'workflow_mode_empty_artifact',
+      })).then((hydrated) => {
+        if (hydrated && typeof restoreStoredActivityForChat === 'function') {
+          restoreStoredActivityForChat(currentChatId, currentWorkflowName);
+        }
+      });
+    }
+  }, [
+    conversationMode,
+    currentArtifactMessages,
+    currentChatId,
+    currentWorkflowName,
+    hydrateServerArtifactForChat,
+    restoreStoredActivityForChat,
+    restoreStoredArtifactForChat,
+    surfaceState,
+  ]);
 
   useEffect(() => {
     if (!queryChatId) {

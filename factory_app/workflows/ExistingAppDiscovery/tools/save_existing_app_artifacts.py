@@ -10,6 +10,9 @@ from factory_app.workflows.ExistingAppDiscovery.tools.app_context_mapping import
     APP_CONTEXT_ARTIFACT_KINDS,
     build_existing_app_context_artifacts,
 )
+from factory_app.workflows.ExistingAppDiscovery.tools.emit_app_intelligence_overview import (
+    emit_app_intelligence_enriched_overview_card,
+)
 from mozaiksai.core.app_context.store import (
     build_brownfield_app_context_version,
     register_app_context_version,
@@ -135,8 +138,19 @@ async def save_existing_app_artifacts(
     product_spec = data.get("existing_product_spec") or {}
     capability_specs = data.get("capability_specs") or []
     augmentation_plan = data.get("agent_augmentation_plan") or {}
+    analysis_summary = str(data.get("analysis_summary") or data.get("app_summary") or data.get("discovery_brief") or "").strip()
     ai_caps = augmentation_plan.get("ai_accessible_capabilities") or []
     chat_id = context_variables.get("chat_id")
+
+    logger.info(
+        "[ExistingAppDiscovery] Final discovery artifact save requested: chat_id=%s app=%s capability_specs=%d ai_caps=%d analysis_summary_present=%s structured_output_present=%s",
+        chat_id or "NONE",
+        product_spec.get("app_name") or "unknown",
+        len(capability_specs),
+        len(ai_caps),
+        bool(analysis_summary),
+        True,
+    )
 
     adoption_level = augmentation_plan.get("adoption_level", "embed")
     migration_complexity = augmentation_plan.get("migration_complexity")
@@ -161,7 +175,8 @@ async def save_existing_app_artifacts(
         "new_adapters_required": augmentation_plan.get("new_adapters_required") or [],
         "theme_adaptation_strategy": augmentation_plan.get("theme_adaptation_strategy", ""),
         "embed_theme_ready": augmentation_plan.get("embed_theme_ready", False),
-        "discovery_brief": data.get("discovery_brief", ""),
+        "analysis_summary": analysis_summary,
+        "discovery_brief": analysis_summary or data.get("discovery_brief", ""),
         "capability_count": len(capability_specs),
         "ai_accessible_count": len(ai_caps),
         "service_surface_count": len(product_spec.get("service_surfaces") or []),
@@ -193,20 +208,13 @@ async def save_existing_app_artifacts(
         "artifact_version": data.get("artifact_version", "1.0"),
     }
 
-    await emit_ui_surface(
-        "DiscoveryBriefCard",
-        ui_payload,
-        chat_id=str(chat_id) if chat_id else None,
-        workflow_name="ExistingAppDiscovery",
-        agent_name="DiscoveryArtifactAssemblerAgent",
-    )
-
     # ------------------------------------------------------------------
     # Persist context variables
     # ------------------------------------------------------------------
     context_variables["existing_product_spec"] = product_spec
     context_variables["capability_specs"] = capability_specs
     context_variables["agent_augmentation_plan"] = augmentation_plan
+    _set_context_value(context_variables, "analysis_summary", analysis_summary)
     context_variables["existing_app_discovery_artifact"] = data
 
     # ------------------------------------------------------------------
@@ -332,6 +340,25 @@ async def save_existing_app_artifacts(
         adoption_level,
         migration_complexity or "n/a",
     )
+
+    # Re-emit the overview card with agent-enriched capability data (descriptions, categories)
+    # and the synthesized analysis summary. This updates the artifact panel with the full v2
+    # payload now that the assembler has produced the canonical discovery result.
+    try:
+        logger.info(
+            "[ExistingAppDiscovery] Re-emitting overview with agent output: chat_id=%s capability_specs=%d",
+            chat_id or "NONE",
+            len(capability_specs),
+        )
+        _set_context_value(context_variables, "discovery_brief", analysis_summary or data.get("discovery_brief") or "")
+        _set_context_value(context_variables, "analysis_summary", analysis_summary)
+        _set_context_value(context_variables, "existing_app_discovery_artifact", data)
+        await emit_app_intelligence_enriched_overview_card(
+            context_variables=context_variables,
+            capability_specs=capability_specs,
+        )
+    except Exception as exc:
+        logger.warning("[ExistingAppDiscovery] Enriched overview card re-emission failed: %s", exc)
 
     summary_parts = [
         f"Existing app augmentation artifacts created for "

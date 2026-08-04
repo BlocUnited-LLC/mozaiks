@@ -9,6 +9,9 @@ agents:
           for AppGenerator and AgentGenerator. You do not design hosted-product
           operator workflows, payment-provider internals, checkout flows,
           invoices, or settlement.
+          Subscription contracts are entitlement and catalog declarations only;
+          any managed-infrastructure provisioning or BYOK fulfillment belongs in
+          module service/commercial boundaries or host provisioning logic.
       - id: objective
         heading: '[OBJECTIVE]'
         content: |-
@@ -247,6 +250,12 @@ agents:
               that reads config/subscriptions.yaml using load_subscriptions_config
               and returns the plan catalog. This is the canonical data source for
               the /pricing page — never hardcode plan data in JSX or YAML.
+          15. Do not use subscription_config_file to define managed
+              infrastructure provisioning, BYOK fulfillment, or provider
+              deployment steps. Those belong in the owning module's
+              service.yaml/commercial.yaml or host provisioning code. The
+              subscription contract may only grant entitlements or describe
+              provider-neutral catalog entries for those capabilities.
       - id: output_format
         heading: '[OUTPUT FORMAT]'
         content: |-

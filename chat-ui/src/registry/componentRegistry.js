@@ -33,7 +33,7 @@ export function registerComponent(name, component, options = {}) {
       return;
     }
 
-    console.warn(`[ComponentRegistry] Component "${name}" already registered. Use override: true to replace.`);
+    console.warn(`⚠️ [ComponentRegistry] Component "${name}" already registered. Use override: true to replace.`);
     return;
   }
 

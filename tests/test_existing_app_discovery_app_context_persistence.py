@@ -306,8 +306,12 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
         emitted["payload"] = payload
         emitted["kwargs"] = kwargs
 
-    monkeypatch.setattr(save_module, "emit_ui_surface", _fake_emit)
     monkeypatch.setattr(save_module, "get_artifact_store", lambda: fake_store)
+    monkeypatch.setitem(
+        save_module.emit_app_intelligence_enriched_overview_card.__globals__,
+        "emit_ui_surface",
+        _fake_emit,
+    )
 
     result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
 
@@ -318,7 +322,7 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     assert context["existing_app_discovery_artifact"]["request_intent"] == "brownfield_app"
     assert context["module_decomposition_plan"] == json.dumps(_decomposition_evidence())
     assert "module_decomposition_plan" not in context["existing_app_discovery_artifact"]
-    assert emitted["component"] == "DiscoveryBriefCard"
+    assert emitted["component"] == "AppIntelligenceOverviewCard"
 
     persisted_kinds = {call["artifact_kind"] for call in fake_store.calls}
     assert persisted_kinds == {

@@ -16,6 +16,16 @@ definitions:
       type: state
       default: "brownfield_app"
 
+  brownfield_build_path:
+    type: string
+    description: >
+      Selected existing-app path from the intake screen: light_integration or
+      full_migration. Discovery should treat this as downstream scope context
+      and not ask the user to choose again.
+    source:
+      type: state
+      default: null
+
   host_app_source:
     type: string
     description: >
@@ -846,6 +856,23 @@ definitions:
       type: state
       default: null
 
+  analysis_summary:
+    type: string
+    description: >
+      Preferred source-backed synthesis of the discovery results. This is the
+      narrative that should drive the AppIntelligenceOverviewCard and any
+      later handoff surfaces.
+    source:
+      type: state
+      default: ""
+
+  discovery_brief:
+    type: string
+    description: Concise handoff note derived from the discovery synthesis.
+    source:
+      type: state
+      default: ""
+
   existing_app_discovery_artifact:
     type: object
     description: Full structured discovery artifact produced by DiscoveryArtifactAssemblerAgent.
@@ -937,6 +964,7 @@ agents:
   DiscoveryHostAgent:
     variables:
       - app_type
+      - brownfield_build_path
       - discovery_inputs
       - context_refresh_request
       - current_context_version_id
@@ -1009,6 +1037,7 @@ agents:
       - app_description
       - tech_stack
       - discovery_mode
+      - brownfield_build_path
       - existing_experience_summary
       - preload_status
       - preload_summary
@@ -1050,6 +1079,7 @@ agents:
       - tech_stack
       - host_app_source
       - discovery_mode
+      - brownfield_build_path
       - app_intelligence_ready
       - app_intelligence_status
       - app_intelligence_summary
@@ -1094,6 +1124,7 @@ agents:
       - app_description
       - tech_stack
       - hosting_environment
+      - brownfield_build_path
       - app_intelligence_ready
       - app_intelligence_status
       - app_intelligence_summary
@@ -1136,6 +1167,7 @@ agents:
       - expected_artifacts
       - host_app_source
       - discovery_mode
+      - brownfield_build_path
       - evidence_sources
       - preload_status
       - preload_summary

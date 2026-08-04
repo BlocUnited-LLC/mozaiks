@@ -146,6 +146,7 @@ def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -
     assert artifact_fields["existing_product_spec"]["type"] == "ExistingProductSpec"
     assert artifact_fields["capability_specs"]["items"] == "CapabilitySpec"
     assert artifact_fields["agent_augmentation_plan"]["type"] == "AgentAugmentationPlan"
+    assert artifact_fields["analysis_summary"]["type"] == "optional_str"
 
 
 def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> None:
@@ -168,6 +169,8 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "existing_product_spec" in definitions
     assert "capability_specs" in definitions
     assert "agent_augmentation_plan" in definitions
+    assert "analysis_summary" in definitions
+    assert "discovery_brief" in definitions
     assert "existing_app_discovery_artifact" in definitions
     assert "context_graph_pack" in definitions
     assert "context_graph_catalog" in definitions
@@ -214,39 +217,53 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "Under the hood" in agents
     assert "product readout to the App" in agents
     assert "Do not list future build ideas in the chat" in agents
-    assert "the next ValueEngine step owns the enhancement plan" in agents
-    assert "Which of these feature areas should Mozaiks work on first?" in agents
+    assert "the next ValueEngine stage will handle how Mozaiks can improve the app" in agents
+    assert "Does this match what you see in the app?" in agents
     assert "discovery_mode" in agents
     assert "host_app_source" in agents
     assert "workspace_app" in agents
     assert "theme_adaptation_strategy" in agents
     assert "embed_theme_ready" in agents
     assert "brand_theme_summary" in agents
+    assert "analysis_summary" in agents
+    assert "AST, tree-sitter" in agents or "tree-sitter" in agents
 
 
-def test_existing_app_discovery_before_chat_repo_access_recovery_shown_inline() -> None:
+def test_existing_app_discovery_before_chat_tools_registered() -> None:
     tools = _read_yaml("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
     before_chat = [item for item in tools["lifecycle_tools"] if item["trigger"] == "before_chat"]
     manifest_text = _read_text("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
 
+    # Canonical before_chat order: collector → overview card (artifact) → repo recovery (inline)
     assert [(item["file"], item["function"]) for item in before_chat] == [
         ("preload_discovery_context.py", "collect_prechat_discovery_context"),
+        ("emit_app_intelligence_overview.py", "emit_app_intelligence_overview_card"),
         ("emit_app_intelligence_overview.py", "emit_repo_access_recovery_card"),
     ]
-    recovery_tool = before_chat[1]
+
+    # Overview card — emitted to artifact panel when catalog is ready
+    overview_tool = before_chat[1]
+    assert overview_tool["tool_type"] == "UI_Surface"
+    assert overview_tool["ui"]["component"] == "AppIntelligenceOverviewCard"
+    assert overview_tool["ui"]["mode"] == "artifact"
+
+    # Repo access recovery — shown inline when GitHub repo cannot be read
+    recovery_tool = before_chat[2]
     assert recovery_tool["tool_type"] == "UI_Surface"
     assert recovery_tool["ui"]["component"] == "RepoAccessRecoveryCard"
     assert recovery_tool["ui"]["mode"] == "inline"
+
     ui_index = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
     assert "RepoAccessRecoveryCard" in ui_index
     assert "AppIntelligenceInlineBrief" not in ui_index
-    assert "AppIntelligenceOverviewCard" not in ui_index
+    assert "AppIntelligenceOverviewCard" in ui_index
+
     assert "get_preloaded_app_intelligence" in manifest_text
     assert "search_preloaded_source_context" in manifest_text
     assert "read_preloaded_source_file" in manifest_text
     assert "get_related_preloaded_source_files" in manifest_text
     assert "emit_app_intelligence_inline_brief" not in manifest_text
-    assert "emit_app_intelligence_overview_card" not in manifest_text
+    assert "emit_app_intelligence_overview_card" in manifest_text
     assert "get_repo_app_intelligence" not in manifest_text
     assert "search_repo_source_context" not in manifest_text
     assert "read_repo_source_file" not in manifest_text
@@ -306,6 +323,85 @@ def test_repo_access_recovery_emitter_surfaces_private_github_blocker() -> None:
     assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
     assert emitted["kwargs"]["agent_name"] == "App Intelligence"
     assert emitted["kwargs"]["display"] == "inline"
+
+
+def test_app_intelligence_overview_card_emitter_surfaces_full_artifact_payload() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_overview_card_direct",
+    )
+
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["component"] = component
+        emitted["payload"] = payload
+        emitted["kwargs"] = kwargs
+        return "ui_overview_card_1"
+
+    module.emit_ui_surface = _fake_emit
+    catalog = {
+        "coverage": {"file_count": 200, "symbol_count": 1500, "edge_count": 600, "node_count": 180},
+        "architecture": {
+            "module_roots": [{"root": "app/modules", "label": "Modules"}],
+            "service_roots": [],
+            "ui_surfaces": [],
+            "workflow_roots": [],
+        },
+        "capabilities": [],
+        "integration_surfaces": [],
+        "data_surfaces": [],
+        "risk_hints": [],
+        "warnings": [],
+        "agent_context_policy": {"policy": "retrieve_not_dump", "surfaces": [], "authority": {}},
+    }
+    context = _Context(
+        chat_id="chat_overview_card",
+        app_name="My App",
+        github_repo="owner/my-app",
+        app_intelligence_status="ready",
+        app_intelligence_summary="Full-stack Python app.",
+        app_intelligence_catalog=catalog,
+        app_intelligence_progress={"stage": "complete", "status": "ready", "percent": 100},
+        app_intelligence_health={"status": "healthy"},
+        current_app_context_version_id="acv_abc123",
+        app_context_version_artifact_version_id="av_ctx_1",
+        source_context_artifact_version_id="av_src_1",
+        graph_artifact_version_id="av_graph_1",
+        app_intelligence_artifact_version_id="av_intel_1",
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+
+    assert result["success"] is True
+    assert result["ui_event_id"] == "ui_overview_card_1"
+    assert emitted["component"] == "AppIntelligenceOverviewCard"
+    assert emitted["kwargs"]["display"] == "artifact"
+    assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
+    assert emitted["kwargs"]["agent_name"] == "App Intelligence"
+    payload = emitted["payload"]
+    assert payload["status"] == "ready"
+    assert payload["app_name"] == "My App"
+    assert payload["current_app_context_version_id"] == "acv_abc123"
+    assert payload["artifact_version_ids"]["app_context_version"] == "av_ctx_1"
+    assert payload["artifact_version_ids"]["app_intelligence_snapshot"] == "av_intel_1"
+    # Overview card includes full catalog
+    assert "app_intelligence_catalog" in payload
+    assert payload["app_intelligence_catalog"]["coverage"]["file_count"] == 200
+    # Raw file contents must be excluded
+    assert "source_context_bundle_file_contents" not in payload["app_intelligence_catalog"]
+
+
+def test_app_intelligence_overview_card_skipped_when_no_catalog() -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        "tests.emit_overview_skip",
+    )
+    context = _Context(chat_id="chat_no_catalog", app_intelligence_status="pending")
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    assert result["skipped"] is True
+    assert result["reason"] == "no_app_intelligence_catalog"
 
 
 def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch) -> None:
@@ -431,7 +527,7 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "cached?.payload || cachedToolCall.payload" in source
     assert "cached.component_type || cachedToolCall.component_type || cachedPayload.component_type" in source
     assert "setCurrentArtifactMessages((prev) =>" in source
-    assert "getStoredArtifactPanelOpen(targetChatId) !== false" in source
+    assert "storedPanelOpen === false && hadStoredArtifact" in source
     assert "setLayoutMode('split')" in source
     assert "cacheServerLastArtifact(data.last_artifact, {" in source
     assert "chatId: metaChatId" in source
@@ -454,12 +550,25 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "getComponent(candidate)" in activity_renderer
     assert "workflowName && componentType ? `${workflowName}:${componentType}`" in activity_renderer
     assert "metadata={chat.metadata}" in chat_interface
+    assert "artifactWorkspaceSnapshotRef" in source
+    assert "workflowArtifactSnapshotRef" not in source
 
     controller_source = _read_text("chat-ui/src/hooks/useConversationModeController.js")
+    startup_source = _read_text("chat-ui/src/hooks/useChatStartupEffects.js")
     assert "restoreStoredArtifactForChat," in controller_source
     assert "restoreStoredArtifactForChat(" in controller_source
+    assert "readStoredArtifactWorkspaceSnapshot" in controller_source
+    assert "writeStoredArtifactWorkspaceSnapshot(currentChatId, artifactWorkspaceSnapshotRef.current)" in controller_source
     assert "snapshotChatId || currentChatId" in controller_source
     assert "snapshotWorkflowName || currentWorkflowName" in controller_source
+    assert "artifactWorkspaceSnapshotRef" in controller_source
+    assert "messages: [...currentArtifactMessages]" in controller_source
+    assert "artifactWorkspaceSnapshotRef" in startup_source
+    assert "readStoredArtifactWorkspaceSnapshot(restoreChatId)" in startup_source
+    assert "workflowArtifactSnapshotRef" not in controller_source
+    assert "workflowArtifactSnapshotRef" not in startup_source
+    assert "AppIntelligenceProgressCard" not in controller_source
+    assert "AppIntelligenceProgressCard" not in startup_source
 
 
 def test_app_intelligence_progress_card_is_stage_based_and_persistent() -> None:
@@ -484,6 +593,26 @@ def test_app_intelligence_progress_card_is_stage_based_and_persistent() -> None:
     assert "The agent has not started editing files." in source
     assert "repo_access_required" in source
     assert "Needs attention" in source
+
+
+def test_app_intelligence_overview_graph_view_is_deterministic_and_app_agnostic() -> None:
+    source = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx")
+
+    # Component exists and exports a default component
+    assert "export default function AppIntelligenceOverviewCard" in source
+    # Prompt-safe: does not embed raw source, uses catalog summary only
+    assert "prompt-safe catalog" in source or "compact repo context" in source
+    # Uses app-agnostic data (no hardcoded app names or workflow names in component logic)
+    assert "ExistingAppDiscovery" not in source
+    assert "AppGenerator" not in source
+    # Architectural guardrails: no heavyweight graph rendering libraries
+    assert "Mermaid source" not in source
+    assert "Analysis Details" not in source
+    assert "ReactFlow" not in source
+    assert "@xyflow/react" not in source
+    assert "remove-attribution" not in source
+    assert "dagre" not in source.lower()
+    assert "falkor" not in source.lower()
 
 
 def test_workflow_component_registration_is_hmr_safe() -> None:
@@ -565,13 +694,13 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
 
     adoption_journey = next(item for item in workflow_sequences if item["id"] == "brownfield_app_adoption")
     assert adoption_journey["steps"][0]["transition"] == "app_type_selector"
-    assert adoption_journey["steps"][1]["transition"] == "brownfield_repo_input"
-    assert adoption_journey["steps"][2]["workflows"] == ["ExistingAppDiscovery"]
-    assert adoption_journey["steps"][3]["transition"] == "brownfield_path_selector"
+    assert adoption_journey["steps"][1]["transition"] == "brownfield_path_selector"
+    assert adoption_journey["steps"][2]["transition"] == "brownfield_repo_input"
+    assert adoption_journey["steps"][3]["workflows"] == ["ExistingAppDiscovery"]
 
     app_type_selector = transition_map["app_type_selector"]
     existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "brownfield_app")
-    assert existing_app_option["route_to"] == "brownfield_repo_input"
+    assert existing_app_option["route_to"] == "brownfield_path_selector"
     assert existing_app_option["sequence"] == "brownfield_app_adoption"
     assert existing_app_option["context_variables"] == {"app_type": "brownfield_app"}
 
@@ -602,7 +731,7 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
     }
 
 
-def test_brownfield_path_selector_routes_to_downstream_sequences() -> None:
+def test_brownfield_path_selector_routes_into_discovery_with_context() -> None:
     registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
     transition_map = {item["id"]: item for item in registry["transitions"]}
     sequence_map = {item["id"]: item for item in registry.get("workflow_sequences") or []}
@@ -615,13 +744,13 @@ def test_brownfield_path_selector_routes_to_downstream_sequences() -> None:
 
     options = {opt["id"]: opt for opt in selector["options"]}
 
-    # Both options enter ValueEngine first; the selected path scopes downstream generation.
-    assert options["light_integration"]["route_to"] == "ValueEngine"
-    assert options["light_integration"]["sequence"] == "brownfield_overlay_generation"
+    # Both options now seed the repo-selection screen first; the selected path scopes downstream generation.
+    assert options["light_integration"]["route_to"] == "brownfield_repo_input"
+    assert options["light_integration"]["sequence"] == "brownfield_app_adoption"
     assert options["light_integration"]["context_variables"]["brownfield_build_path"] == "light_integration"
 
-    assert options["full_migration"]["route_to"] == "ValueEngine"
-    assert options["full_migration"]["sequence"] == "brownfield_module_generation"
+    assert options["full_migration"]["route_to"] == "brownfield_repo_input"
+    assert options["full_migration"]["sequence"] == "brownfield_app_adoption"
     assert options["full_migration"]["context_variables"]["brownfield_build_path"] == "full_migration"
 
     legacy_light_sequence = "brownfield_" + "build_light"
@@ -650,9 +779,26 @@ def test_brownfield_path_selector_routes_to_downstream_sequences() -> None:
     assert full_workflow_names == expected_downstream
     assert any(s.get("transition") == "app_review" for s in full["steps"])
 
-    # BrownfieldPathSelector must be registered in ui/index.js
+    # BrownfieldPathSelector and BrownfieldRepoInput must be registered in ui/index.js
     index_text = _read_text("factory_app/workflows/extended_orchestration/ui/index.js")
     assert "BrownfieldPathSelector" in index_text
+    assert "BrownfieldRepoInput" in index_text
+
+
+def test_brownfield_repo_input_routes_into_discovery_with_repo_context() -> None:
+    registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
+    transition_map = {item["id"]: item for item in registry["transitions"]}
+
+    repo_input = transition_map["brownfield_repo_input"]
+    assert repo_input["transition_type"] == "user_choice_context"
+    assert repo_input["ui"]["component"] == "BrownfieldRepoInput"
+    assert repo_input["ui"]["shell_mode"] == "focused"
+
+    options = {opt["id"]: opt for opt in repo_input["options"]}
+    assert "start_discovery" in options
+    assert options["start_discovery"]["route_to"] == "ExistingAppDiscovery"
+    assert options["start_discovery"]["sequence"] == "brownfield_app_adoption"
+    assert options["start_discovery"]["context_variables"] == {}
 
 
 def test_existing_app_preload_supports_workspace_app_preset() -> None:
@@ -1234,8 +1380,16 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
             "artifact_version": "1.0",
         },
     )
+    save_module = module
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setitem(
+        save_module.emit_app_intelligence_enriched_overview_card.__globals__,
+        "emit_ui_surface",
+        _fake_emit,
+    )
 
     result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
+    monkeypatch.undo()
 
     assert result["success"] is True
     assert context["existing_product_spec"]["app_name"] == "existing-product-host"
@@ -1243,7 +1397,7 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     assert context["agent_augmentation_plan"]["adoption_level"] == "bridge"
     assert context["existing_app_discovery_artifact"]["request_intent"] == "brownfield_app"
 
-    assert emitted["component"] == "DiscoveryBriefCard"
+    assert emitted["component"] == "AppIntelligenceOverviewCard"
     assert emitted["payload"]["adoption_level"] == "bridge"
     assert emitted["payload"]["service_surface_count"] == 1
     assert emitted["payload"]["route_surface_count"] == 1
@@ -1267,6 +1421,17 @@ def test_existing_app_strategy_docs_are_indexed() -> None:
     assert "workspace_app" in discovery_context
     assert "ExistingProductSpec" in discovery_agents
     assert "AgentAugmentationPlan" in discovery_agents
+
+
+def test_existing_app_discovery_treats_redis_as_optional_infrastructure() -> None:
+    agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
+    structured_outputs = _read_text("factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
+
+    assert "Redis is usually cache, shared session" in agents
+    assert "Do not recommend provisioning paid managed Redis" in agents
+    assert "optional/BYOK external dependency" in agents
+    assert "cache/session" in structured_outputs
+    assert "durable store only when source evidence proves" in structured_outputs
 
 
 def test_existing_app_docs_describe_workspace_app_preset() -> None:
@@ -1303,5 +1468,760 @@ def test_brownfield_path_selector_explains_light_vs_migration_choice() -> None:
     assert "| Add AI Workflows | `light_integration` |" in app_context_doc
     assert "| Build App Features | `full_migration` |" in app_context_doc
     assert "not an automatic whole-repo rewrite" in app_context_doc
+
+
+# =============================================================================
+# v2 payload schema and emit helper tests
+# =============================================================================
+
+def _load_emit_module(suffix: str = ""):
+    """Load a fresh emit_app_intelligence_overview module instance."""
+    name = f"tests.emit_overview_v2{suffix}"
+    return _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/emit_app_intelligence_overview.py",
+        name,
+    )
+
+
+def _flat_script_repo_catalog() -> dict:
+    """Fixture: tiny flat single-directory repo (~5 files)."""
+    return {
+        "coverage": {
+            "file_count": 5,
+            "symbol_count": 18,
+            "node_count": 4,
+            "edge_count": 6,
+            "language_counts": {"Python": 5},
+            "framework_detection": {"primary_framework_label": "", "framework_ids": []},
+        },
+        "architecture": {"module_roots": [], "service_roots": [], "ui_surfaces": [], "workflow_roots": []},
+        "capabilities": [
+            {
+                "capability_id": "user_auth",
+                "label": "User Authentication",
+                "kind": "feature",
+                "evidence_paths": ["auth.py", "login.py"],
+                "connector_requirements": [],
+            },
+            {
+                "capability_id": "task_list",
+                "label": "Task List",
+                "kind": "feature",
+                "evidence_paths": ["tasks.py"],
+                "connector_requirements": [],
+            },
+        ],
+        "integration_surfaces": [],
+        "data_surfaces": [],
+        "risk_hints": [],
+        "warnings": [],
+    }
+
+
+def _monorepo_catalog() -> dict:
+    """Fixture: mixed-language monorepo with multiple capability categories."""
+    return {
+        "coverage": {
+            "file_count": 120,
+            "symbol_count": 980,
+            "node_count": 200,
+            "edge_count": 450,
+            "language_counts": {"TypeScript": 80, "Python": 30, "CSS": 10},
+            "framework_detection": {"primary_framework_label": "Next.js", "framework_ids": ["nextjs", "react"]},
+        },
+        "architecture": {
+            "module_roots": [{"root": "apps/api", "label": "API"}],
+            "service_roots": [],
+            "ui_surfaces": [{"label": "Dashboard", "path": "apps/web/dashboard"}],
+            "workflow_roots": [],
+        },
+        "capabilities": [
+            {
+                "capability_id": "user_auth",
+                "label": "User Authentication",
+                "kind": "feature",
+                "evidence_paths": ["apps/api/auth/handler.ts", "apps/api/auth/jwt.ts"],
+                "connector_requirements": ["clerk"],
+            },
+            {
+                "capability_id": "billing",
+                "label": "Billing",
+                "kind": "feature",
+                "evidence_paths": ["apps/api/billing/service.ts"],
+                "connector_requirements": ["stripe"],
+            },
+            {
+                "capability_id": "analytics",
+                "label": "Analytics Dashboard",
+                "kind": "feature",
+                "evidence_paths": ["apps/web/analytics/dashboard.tsx"],
+                "connector_requirements": ["segment"],
+            },
+            {
+                "capability_id": "notifications",
+                "label": "Email Notifications",
+                "kind": "feature",
+                "evidence_paths": ["apps/api/notifications/service.ts"],
+                "connector_requirements": ["sendgrid"],
+            },
+            {
+                "capability_id": "social_feed",
+                "label": "Social Feed",
+                "kind": "feature",
+                "evidence_paths": ["apps/web/feed/Feed.tsx"],
+                "connector_requirements": [],
+            },
+        ],
+        "integration_surfaces": [
+            {"label": "stripe", "path": "apps/api/billing/stripe_client.ts"},
+            {"label": "clerk", "path": "apps/api/auth/clerk.ts"},
+            {"label": "sendgrid", "path": "apps/api/notifications/email.ts"},
+            {"label": "segment", "path": "apps/web/analytics/tracker.ts"},
+            {"label": "unknown_custom_vendor_xyz", "path": "apps/api/custom.ts"},
+        ],
+        "data_surfaces": [
+            {"label": "postgres", "root": "db/", "path": "db/schema.sql"},
+        ],
+        "risk_hints": [],
+        "warnings": ["context_graph_file_limit_reached:600"],
+    }
+
+
+def test_v2_schema_version_present_in_overview_card_payload() -> None:
+    """emit_app_intelligence_overview_card emits a payload with schema_version v2."""
+    module = _load_emit_module("_schema_version")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_1"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_v2_test",
+        app_name="TestApp",
+        github_repo="owner/test-app",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    assert result["success"] is True
+    assert emitted["payload"]["schema_version"] == "mozaiks.app_intelligence_overview.ui.v2"
+
+
+def test_v2_payload_contains_all_required_fields() -> None:
+    """v2 payload has summary, app_type, stack, features, services, graph, meta."""
+    module = _load_emit_module("_all_fields")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_2"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_v2_fields",
+        app_name="FlatApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_monorepo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    payload = emitted["payload"]
+
+    required_v2_fields = {
+        "schema_version", "summary", "app_type", "stack",
+        "features", "services", "services_unmatched", "graph", "meta",
+    }
+    for field in required_v2_fields:
+        assert field in payload, f"Missing v2 field: {field!r}"
+
+    assert "nodes" in payload["graph"]
+    assert "edges" in payload["graph"]
+
+    meta = payload["meta"]
+    for meta_field in ("files", "symbols", "nodes", "edges", "truncated", "file_limit"):
+        assert meta_field in meta, f"Missing meta field: {meta_field!r}"
+
+
+def test_overview_summary_prefers_analysis_summary_over_app_summary() -> None:
+    """The overview narrative should prefer the assembler's analysis summary."""
+    module = _load_emit_module("_analysis_summary")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_analysis"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_analysis",
+        app_name="AnalysisApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        existing_app_discovery_artifact={
+            "analysis_summary": "Agent synthesis: the app exposes a job queue, a review route, and a graph-backed dashboard.",
+            "app_summary": "Stale summary that should not win over the agent synthesis.",
+        },
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    assert result["success"] is True
+    assert emitted["payload"]["summary"].startswith("Agent synthesis:")
+
+
+def test_v2_meta_reflects_catalog_coverage() -> None:
+    """meta.files / symbols / nodes / edges equal catalog coverage values."""
+    module = _load_emit_module("_meta")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_meta"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_meta",
+        app_name="MetaApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_monorepo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    meta = emitted["payload"]["meta"]
+
+    assert meta["files"] == 120
+    assert meta["symbols"] == 980
+    assert meta["nodes"] == 200
+    assert meta["edges"] == 450
+
+
+def test_v2_warnings_strip_debug_strings() -> None:
+    """context_graph_file_limit_reached strings are absent from warnings in the v2 payload."""
+    module = _load_emit_module("_warn_strip")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_warn"
+
+    module.emit_ui_surface = _fake_emit
+    catalog = _monorepo_catalog()  # contains "context_graph_file_limit_reached:600" in warnings
+    context = _Context(
+        chat_id="chat_warn_clean",
+        app_name="WarnApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=catalog,
+        context_graph_warnings=["context_graph_file_limit_reached:600"],
+    )
+
+    asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    warnings = emitted["payload"]["warnings"]
+
+    for w in warnings:
+        assert "context_graph" not in w, f"Debug string leaked: {w!r}"
+        assert "file_limit" not in w.lower(), f"Debug string leaked: {w!r}"
+
+
+def test_v2_features_derived_from_catalog_capabilities() -> None:
+    """features list is built from capabilities; each has name, category, description, files."""
+    module = _load_emit_module("_features")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_feat"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_features",
+        app_name="FeatApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    features = emitted["payload"]["features"]
+
+    assert len(features) == 2
+    names = {f["name"] for f in features}
+    assert "User Authentication" in names
+    assert "Task List" in names
+
+    for f in features:
+        for key in ("name", "category", "description", "files"):
+            assert key in f, f"Feature missing key: {key!r}"
+        assert f["category"] in module.FEATURE_CATEGORIES, f"Invalid category: {f['category']!r}"
+
+
+def test_v2_graph_nodes_match_capabilities_and_surfaces() -> None:
+    """graph.nodes contains capability nodes, external nodes, and data nodes."""
+    module = _load_emit_module("_graph_nodes")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_graph"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_graph",
+        app_name="GraphApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_monorepo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    nodes = emitted["payload"]["graph"]["nodes"]
+
+    cap_nodes = [n for n in nodes if n["kind"] == "capability"]
+    ext_nodes = [n for n in nodes if n["kind"] == "external"]
+    dat_nodes = [n for n in nodes if n["kind"] == "data"]
+
+    assert len(cap_nodes) == 5  # monorepo has 5 capabilities
+    assert len(ext_nodes) >= 1  # at least 1 integration surface matched
+    assert len(dat_nodes) == 1  # 1 data surface (postgres)
+
+
+def test_classify_category_returns_closed_enum_values() -> None:
+    """_classify_category always returns a value from FEATURE_CATEGORIES."""
+    module = _load_emit_module("_classify_enum")
+
+    test_cases = [
+        ("User Login", "identity_access"),
+        ("Payment Checkout", "payments_commerce"),
+        ("Email Notification", "communication"),
+        ("Social Feed", "social_community"),
+        ("Analytics Dashboard", "data_analytics"),
+        ("Upload Media", "content_media"),
+        ("Deploy Config", "infrastructure_ops"),
+        ("Marketing Campaign", "growth_marketing"),
+        ("OpenAI Agent", "ai_automation"),
+        ("API Connector", "integrations_platform"),
+        ("XyzUnknownWidget", "other"),
+    ]
+
+    for label, expected_cat in test_cases:
+        result = module._classify_category(label)
+        assert result in module.FEATURE_CATEGORIES, f"Category not in closed enum: {result!r}"
+        assert result == expected_cat, f"_classify_category({label!r}) = {result!r}, want {expected_cat!r}"
+
+
+def test_classify_category_is_deterministic() -> None:
+    """Same input always produces the same output across repeated calls."""
+    module = _load_emit_module("_classify_deterministic")
+
+    labels = [
+        "User Authentication",
+        "Stripe Billing",
+        "Push Notification",
+        "Analytics Report",
+        "Image Upload",
+        "Docker Deploy",
+        "Referral Campaign",
+        "ML Recommendation",
+    ]
+
+    for label in labels:
+        first = module._classify_category(label)
+        second = module._classify_category(label)
+        assert first == second, f"Non-deterministic for {label!r}: {first!r} vs {second!r}"
+
+
+def test_resolve_services_matches_known_service_labels() -> None:
+    """_resolve_services matches integration surface labels to known_services.json entries."""
+    module = _load_emit_module("_resolve_match")
+
+    catalog = {
+        "integration_surfaces": [
+            {"label": "stripe", "path": "src/billing/stripe_client.py"},
+            {"label": "sendgrid", "path": "src/email/sendgrid.py"},
+            {"label": "openai", "path": "src/ai/openai_client.py"},
+        ]
+    }
+
+    services, unmatched = module._resolve_services(catalog)
+
+    service_ids = {s["id"] for s in services}
+    service_labels = {s["label"] for s in services}
+    assert "stripe" in service_ids
+    assert "sendgrid" in service_ids
+    assert "openai" in service_ids
+    assert "Stripe" in service_labels
+    assert "SendGrid" in service_labels
+    assert "OpenAI" in service_labels
+    assert unmatched == 0
+
+
+def test_resolve_services_counts_unmatched() -> None:
+    """Unknown integration surface labels are counted in services_unmatched."""
+    module = _load_emit_module("_resolve_unmatched")
+
+    catalog = {
+        "integration_surfaces": [
+            {"label": "stripe", "path": "src/stripe.py"},
+            {"label": "unknown_custom_acme_vendor", "path": "src/acme.py"},
+            {"label": "another_proprietary_sdk", "path": "src/sdk.py"},
+        ]
+    }
+
+    services, unmatched = module._resolve_services(catalog)
+
+    service_ids = {s["id"] for s in services}
+    assert "stripe" in service_ids
+    assert unmatched == 2
+
+
+def test_resolve_services_deduplicates_by_id() -> None:
+    """Two surfaces mapping to the same service id produce one service entry."""
+    module = _load_emit_module("_resolve_dedup")
+
+    # "mongoose" and "mongodb" both map to id "mongodb" in known_services.json
+    catalog = {
+        "integration_surfaces": [
+            {"label": "mongodb", "path": "src/db/mongo.py"},
+            {"label": "mongoose", "path": "src/db/mongoose.js"},
+        ]
+    }
+
+    services, unmatched = module._resolve_services(catalog)
+
+    mongodb_entries = [s for s in services if s["id"] == "mongodb"]
+    assert len(mongodb_entries) == 1
+    assert unmatched == 0
+
+
+def test_enriched_overview_card_uses_agent_descriptions_and_categories() -> None:
+    """emit_app_intelligence_enriched_overview_card populates features with agent data."""
+    module = _load_emit_module("_enriched")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_enriched"
+
+    module.emit_ui_surface = _fake_emit
+
+    capability_specs = [
+        {
+            "capability_id": "user_auth",
+            "label": "User Authentication",
+            "description": "Handles login, registration, and session management via JWT.",
+            "category": "identity_access",
+            "agent_ready": True,
+            "confidence": "confirmed",
+            "delivery_surface": "rest_api",
+        },
+        {
+            "capability_id": "task_list",
+            "label": "Task List",
+            "description": "Lets users create, assign, and track tasks.",
+            "category": "infrastructure_ops",
+            "agent_ready": False,
+            "confidence": "unverified",
+            "delivery_surface": "rest_api",
+        },
+    ]
+
+    context = _Context(
+        chat_id="chat_enriched",
+        app_name="EnrichedApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_enriched_overview_card(
+        context_variables=context,
+        capability_specs=capability_specs,
+    ))
+
+    assert result["success"] is True
+    features = emitted["payload"]["features"]
+
+    auth_feat = next(f for f in features if f["name"] == "User Authentication")
+    assert auth_feat["description"] == "Handles login, registration, and session management via JWT."
+    assert auth_feat["category"] == "identity_access"
+
+    task_feat = next(f for f in features if f["name"] == "Task List")
+    assert task_feat["description"] == "Lets users create, assign, and track tasks."
+    assert task_feat["category"] == "infrastructure_ops"
+
+
+def test_enriched_overview_card_accepts_any_agent_category() -> None:
+    """Categories are now open — agent-provided strings pass through directly."""
+    module = _load_emit_module("_enriched_open_cat")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_open_cat"
+
+    module.emit_ui_surface = _fake_emit
+
+    capability_specs = [
+        {
+            "capability_id": "user_auth",
+            "label": "User Authentication",
+            "description": "Auth system.",
+            "category": "marketplace_listings",  # free-form — must pass through
+            "icon": "🏪",
+            "agent_ready": True,
+        }
+    ]
+
+    context = _Context(
+        chat_id="chat_open_cat",
+        app_name="OpenCatApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    asyncio.run(module.emit_app_intelligence_enriched_overview_card(
+        context_variables=context,
+        capability_specs=capability_specs,
+    ))
+
+    features = emitted["payload"]["features"]
+    auth_feat = next(f for f in features if f["name"] == "User Authentication")
+    assert auth_feat["category"] == "marketplace_listings"
+    assert auth_feat["icon"] == "🏪"
+
+
+def test_enriched_overview_card_icon_passes_through() -> None:
+    """Agent-provided icon emoji is passed through to each feature."""
+    module = _load_emit_module("_enriched_icon")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_icon"
+
+    module.emit_ui_surface = _fake_emit
+
+    # Use capability_ids that exist in the flat catalog fixture
+    capability_specs = [
+        {
+            "capability_id": "user_auth",
+            "label": "User Authentication",
+            "description": "Auth via JWT.",
+            "category": "identity_access",
+            "icon": "🛡",
+            "agent_ready": True,
+            "confidence": "confirmed",
+            "delivery_surface": "rest_api",
+        },
+        {
+            "capability_id": "task_list",
+            "label": "Task List",
+            "description": "Task management.",
+            "category": "productivity",
+            "icon": "✅",
+            "agent_ready": True,
+            "confidence": "confirmed",
+            "delivery_surface": "rest_api",
+        },
+    ]
+
+    context = _Context(
+        chat_id="chat_icon",
+        app_name="IconApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    asyncio.run(module.emit_app_intelligence_enriched_overview_card(
+        context_variables=context,
+        capability_specs=capability_specs,
+    ))
+
+    features = emitted["payload"]["features"]
+    auth_feat = next(f for f in features if f["name"] == "User Authentication")
+    task_feat = next(f for f in features if f["name"] == "Task List")
+    assert auth_feat["icon"] == "🛡"
+    assert task_feat["icon"] == "✅"
+    assert task_feat["category"] == "productivity"  # free-form category passes through
+
+
+def test_feature_icon_empty_when_no_spec() -> None:
+    """Features built from catalog alone (no agent spec) have an empty icon string."""
+    module = _load_emit_module("_no_spec_icon")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_no_icon"
+
+    module.emit_ui_surface = _fake_emit
+
+    context = _Context(
+        chat_id="chat_no_icon",
+        app_name="NoIconApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+    assert result["success"] is True
+    features = emitted["payload"]["features"]
+    for feat in features:
+        assert "icon" in feat
+        assert isinstance(feat["icon"], str)  # always present, may be empty
+
+
+def test_flat_repo_fixture_produces_intentional_payload() -> None:
+    """A flat 5-file repo yields a clean, non-empty payload (not broken or empty chrome)."""
+    module = _load_emit_module("_flat_fixture")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_flat"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_flat",
+        app_name="TinyScriptApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_flat_script_repo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+
+    assert result["success"] is True
+    payload = emitted["payload"]
+    assert len(payload["features"]) == 2
+    assert len([n for n in payload["graph"]["nodes"] if n["kind"] == "capability"]) == 2
+    assert len(payload["summary"]) > 10
+    assert not payload["summary"].startswith("{")
+    for w in payload["warnings"]:
+        assert "context_graph" not in w
+        assert "file_limit" not in w.lower()
+
+
+def test_monorepo_fixture_produces_intentional_payload() -> None:
+    """Mixed-language monorepo yields grouped features, resolved services, and a usable graph."""
+    module = _load_emit_module("_mono_fixture")
+    emitted: dict = {}
+
+    async def _fake_emit(component, payload, **kwargs):
+        emitted["payload"] = payload
+        return "ev_mono"
+
+    module.emit_ui_surface = _fake_emit
+    context = _Context(
+        chat_id="chat_mono",
+        app_name="MonorepoApp",
+        app_intelligence_status="ready",
+        app_intelligence_catalog=_monorepo_catalog(),
+        context_graph_warnings=[],
+    )
+
+    result = asyncio.run(module.emit_app_intelligence_overview_card(context_variables=context))
+
+    assert result["success"] is True
+    payload = emitted["payload"]
+
+    assert len(payload["features"]) == 5
+    for f in payload["features"]:
+        assert f["category"] in module.FEATURE_CATEGORIES
+
+    matched_ids = {s["id"] for s in payload["services"]}
+    assert "stripe" in matched_ids
+    assert "sendgrid" in matched_ids
+    assert payload["services_unmatched"] == 1  # unknown_custom_vendor_xyz
+
+    nodes = payload["graph"]["nodes"]
+    assert len([n for n in nodes if n["kind"] == "capability"]) == 5
+    assert len([n for n in nodes if n["kind"] == "external"]) >= 4
+
+    # Stack derives from TypeScript (top) + Next.js framework
+    assert "TypeScript" in payload["stack"] or "Next.js" in payload["stack"]
+    assert len(payload["summary"]) > 20
+    # context_graph_file_limit_reached:600 → truncated=True, no debug leak
+    assert payload["meta"]["truncated"] is True
+    for w in payload["warnings"]:
+        assert "context_graph" not in w
+        assert "file_limit" not in w.lower()
+
+
+def test_structured_outputs_capability_spec_has_category_and_icon_fields() -> None:
+    """CapabilitySpec declares open-ended category and agent-produced icon fields."""
+    data = _read_yaml("factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
+    cap_spec_fields = data["models"]["CapabilitySpec"]["fields"]
+
+    assert "category" in cap_spec_fields
+    cat_field = cap_spec_fields["category"]
+    assert cat_field["type"] == "optional_str"
+    cat_desc = cat_field["description"]
+    # Description must guide the agent toward domain-appropriate labels, not hard-code a closed list
+    assert "snake_case" in cat_desc or "domain" in cat_desc, "category desc should guide toward domain labels"
+    assert "other" in cat_desc, "category desc must mention 'other' as last-resort fallback"
+
+    assert "icon" in cap_spec_fields, "CapabilitySpec must have an icon field"
+    icon_field = cap_spec_fields["icon"]
+    assert icon_field["type"] == "optional_str"
+    icon_desc = icon_field["description"]
+    assert "emoji" in icon_desc.lower(), "icon desc must mention emoji"
+
+
+def test_structured_outputs_artifact_has_app_type_and_app_summary() -> None:
+    """ExistingAppAugmentationArtifact has optional analysis and summary fields."""
+    data = _read_yaml("factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
+    artifact_fields = data["models"]["ExistingAppAugmentationArtifact"]["fields"]
+
+    assert "analysis_summary" in artifact_fields
+    assert "app_type" in artifact_fields
+    assert "app_summary" in artifact_fields
+    assert artifact_fields["analysis_summary"]["type"] == "optional_str"
+    assert artifact_fields["app_type"]["type"] == "optional_str"
+    assert artifact_fields["app_summary"]["type"] == "optional_str"
+
+    analysis_desc = artifact_fields["analysis_summary"]["description"].lower()
+    assert "tree-sitter" in analysis_desc or "ast" in analysis_desc
+    assert "overview card" in analysis_desc or "summary" in analysis_desc
+
+    summary_desc = artifact_fields["app_summary"]["description"].lower()
+    # Must be described as descriptive-only narrative
+    assert "descriptive" in summary_desc
+    # Must explicitly call out what NOT to include (guards generator against adding scores/recommendations)
+    assert "no scores" in summary_desc or "not" in summary_desc
+
+
+def test_known_services_json_is_valid_and_loadable() -> None:
+    """known_services.json loads without error and has the expected structure."""
+    module = _load_emit_module("_known_services")
+
+    # Force a fresh load from disk by clearing the cache
+    module._KNOWN_SERVICES = None
+    services = module._load_known_services()
+
+    assert isinstance(services, dict)
+    assert len(services) >= 30
+
+    for key, entry in services.items():
+        assert "id" in entry, f"Service entry '{key}' missing 'id'"
+        assert "label" in entry, f"Service entry '{key}' missing 'label'"
+        assert isinstance(entry["id"], str)
+        assert isinstance(entry["label"], str)
+
+    # Spot-check known entries and alias mappings
+    assert services["stripe"]["id"] == "stripe"
+    assert services["stripe"]["label"] == "Stripe"
+    assert services["sendgrid"]["id"] == "sendgrid"
+    assert services["openai"]["id"] == "openai"
+    assert services["boto3"]["id"] == "aws"       # alias: boto3 → aws
+    assert services["mongoose"]["id"] == "mongodb"  # alias: mongoose → mongodb
 
 

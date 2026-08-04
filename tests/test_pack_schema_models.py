@@ -173,6 +173,8 @@ def test_parse_global_pack_graph_allows_transition_option_sequence_override() ->
                     "id": "brownfield_app_adoption",
                     "steps": [
                         {"transition": "app_type_selector"},
+                        {"transition": "brownfield_path_selector"},
+                        {"transition": "brownfield_repo_input"},
                         {"workflows": ["ExistingAppDiscovery"]},
                     ],
                 },
@@ -186,11 +188,40 @@ def test_parse_global_pack_graph_allows_transition_option_sequence_override() ->
                         {"id": "greenfield_app", "route_to": "ValueEngine", "sequence": "build"},
                         {
                             "id": "brownfield_app",
+                            "route_to": "brownfield_path_selector",
+                            "sequence": "brownfield_app_adoption",
+                        },
+                    ],
+                },
+                {
+                    "id": "brownfield_path_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldPathSelector", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "light_integration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                        },
+                        {
+                            "id": "full_migration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                        },
+                    ],
+                },
+                {
+                    "id": "brownfield_repo_input",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "start_discovery",
                             "route_to": "ExistingAppDiscovery",
                             "sequence": "brownfield_app_adoption",
                         },
                     ],
-                }
+                },
             ],
         }
     )
@@ -198,6 +229,7 @@ def test_parse_global_pack_graph_allows_transition_option_sequence_override() ->
     option_map = {option.id: option for option in graph.transitions[0].options}
     assert option_map["greenfield_app"].sequence == "build"
     assert option_map["brownfield_app"].sequence == "brownfield_app_adoption"
+    assert option_map["brownfield_app"].route_to == "brownfield_path_selector"
 
 
 def test_parse_global_pack_graph_rejects_unknown_transition_option_sequence() -> None:

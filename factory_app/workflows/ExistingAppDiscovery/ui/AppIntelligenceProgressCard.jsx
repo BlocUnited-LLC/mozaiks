@@ -179,7 +179,9 @@ function StageMarker({ state }) {
   );
 }
 
-export default function AppIntelligenceProgressCard({ metadata = {}, message = "" }) {
+export default function AppIntelligenceProgressCard({ metadata: metadataProp = {}, payload: payloadProp = {}, message = "" }) {
+  // Support both activity-message path (metadata) and inline UI_Surface path (payload)
+  const metadata = Object.keys(metadataProp).length > 0 ? metadataProp : payloadProp;
   const progress = asObject(metadata.app_intelligence_progress || metadata.progress || {});
   const raw = asObject(metadata.raw_activity_metadata);
   const progressDetails = asObject(progress.details || raw.progress_details);

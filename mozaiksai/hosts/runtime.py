@@ -218,6 +218,63 @@ def _validate_internal_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
+def _client_console_bridge_enabled() -> bool:
+    raw = os.getenv("CLIENT_CONSOLE_BRIDGE_ENABLED")
+    if raw is None or not raw.strip():
+        return env != "production"
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+class ClientConsoleLogEntry(BaseModel):
+    level: str = Field(default="info")
+    method: str | None = None
+    message: str | None = None
+    args: list[Any] = Field(default_factory=list)
+    timestamp: str | None = None
+    app_id: str | None = None
+    chat_id: str | None = None
+    workflow_name: str | None = None
+    user_id: str | None = None
+    pathname: str | None = None
+    href: str | None = None
+    origin: str | None = None
+    title: str | None = None
+    source: str | None = None
+    lineno: int | None = None
+    colno: int | None = None
+    stack: str | None = None
+    reason: Any | None = None
+    error: Any | None = None
+    category: str | None = None
+
+    @field_validator("level")
+    @classmethod
+    def _normalize_level(cls, value: str) -> str:
+        normalized = str(value or "info").strip().lower()
+        return normalized or "info"
+
+    @field_validator("message")
+    @classmethod
+    def _normalize_message(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class ClientConsoleBatch(BaseModel):
+    source: str = Field(default="browser_console")
+    reason: str | None = None
+    sent_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    entries: list[ClientConsoleLogEntry] = Field(default_factory=list)
+
+    @field_validator("entries")
+    @classmethod
+    def _limit_entries(cls, value: list[ClientConsoleLogEntry]) -> list[ClientConsoleLogEntry]:
+        return value[:100]
+
+
 _ENFORCE_PRINCIPAL_HEADERS = os.getenv("ENFORCE_PRINCIPAL_HEADERS", "false").lower() in {
     "true",
     "1",
@@ -438,6 +495,61 @@ async def health_check():
         "workflows": status,
         "transport": "initialized" if simple_transport else "not_initialized",
     }
+
+
+@app.post("/api/debug/client-console")
+async def ingest_client_console_logs(request: Request):
+    """Ingest browser console logs so frontend issues appear in backend logs."""
+    if not _client_console_bridge_enabled():
+        raise HTTPException(status_code=404, detail="Client console bridge disabled")
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Unable to read JSON payload") from exc
+
+    try:
+        batch = ClientConsoleBatch.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid client console payload") from exc
+
+    logger = logging.getLogger("mozaiks.workflow.frontend.browser_console")
+    accepted = 0
+    for entry in batch.entries:
+        entry_logger = get_workflow_logger(
+            base_logger=logger,
+            app_id=entry.app_id or batch.metadata.get("app_id"),
+            chat_id=entry.chat_id or batch.metadata.get("chat_id"),
+            workflow_name=entry.workflow_name or batch.metadata.get("workflow_name"),
+            user_id=entry.user_id or batch.metadata.get("user_id"),
+        )
+        message = entry.message or ""
+        details = {
+            "console_category": entry.category or batch.source,
+            "console_method": entry.method or entry.level,
+            "console_args": entry.args,
+            "console_timestamp": entry.timestamp,
+            "console_pathname": entry.pathname or batch.metadata.get("pathname"),
+            "console_href": entry.href or batch.metadata.get("href"),
+            "console_origin": entry.origin or batch.metadata.get("origin"),
+            "console_title": entry.title or batch.metadata.get("title"),
+            "console_source": entry.source,
+            "console_lineno": entry.lineno,
+            "console_colno": entry.colno,
+            "console_stack": entry.stack,
+            "console_reason": entry.reason,
+            "console_error": entry.error,
+            "console_batch_reason": batch.reason,
+            "console_batch_sent_at": batch.sent_at,
+        }
+        level = str(entry.level or "info").lower()
+        log_method = getattr(entry_logger, level, entry_logger.info)
+        log_method(message or "BROWSER_CONSOLE_EVENT", **details)
+        accepted += 1
+
+    return {"status": "accepted", "entries": accepted}
 
 
 @app.get("/api/events/metrics")
@@ -723,6 +835,13 @@ async def websocket_endpoint(
         await websocket.close(code=1011, reason="Transport service unavailable")
         return
 
+    suppress_history_replay = str(websocket.query_params.get("suppress_history_replay", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
     ws_user = await authenticate_websocket_with_path_binding(
         websocket,
         path_user_id=user_id,
@@ -738,6 +857,7 @@ async def websocket_endpoint(
     _raw_claims = getattr(ws_user, "raw_claims", None) or {}
     _token_exp: int = int(_raw_claims.get("exp", 0) or 0)
 
+    ws_id: int | None = None
     try:
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
@@ -976,15 +1096,20 @@ async def websocket_endpoint(
         )
 
         config = workflow_manager.get_config(resolved_workflow_name) or {}
-        startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
+        _config_startup_mode = str(config.get("workflow_startup_mode") or "").strip()
+        startup_mode = _config_startup_mode or "AgentDriven"
         launch_taxonomy = resolve_workflow_launch_taxonomy(
             resolved_workflow_name,
             workflow_startup_mode=startup_mode,
         )
+        # When the operator has explicitly set workflow_startup_mode in the config,
+        # that intent takes precedence over the registry's launch_behavior default.
+        # Pass launch_behavior=None so startup_mode alone drives the auto-start decision.
+        _autostart_launch_behavior = None if _config_startup_mode else launch_taxonomy.get("launch_behavior")
         if (
             should_autostart_empty_workflow(
                 startup_mode,
-                launch_behavior=launch_taxonomy.get("launch_behavior"),
+                launch_behavior=_autostart_launch_behavior,
             )
             and run_history_count == 0
         ):
@@ -1023,22 +1148,23 @@ async def websocket_endpoint(
                 )
                 return
 
-        try:
-            await simple_transport.handle_websocket(
-                websocket=websocket,
-                chat_id=resolved_chat_id,
-                user_id=user_id,
-                workflow_name=resolved_workflow_name,
-                app_id=app_id,
-                ws_id=ws_id,
-                token_exp=_token_exp,
-            )
-        finally:
-            session_registry.remove_session(ws_id)
+        await simple_transport.handle_websocket(
+            websocket=websocket,
+            chat_id=resolved_chat_id,
+            user_id=user_id,
+            workflow_name=resolved_workflow_name,
+            app_id=app_id,
+            ws_id=ws_id,
+            token_exp=_token_exp,
+            suppress_history_replay=suppress_history_replay,
+        )
     except Exception as ownership_err:
         wf_logger.warning("WS_CHAT_PREP_FAILED: %s", ownership_err)
         await websocket.close(code=1011, reason="Failed to prepare chat session")
         return
+    finally:
+        if ws_id is not None:
+            session_registry.remove_session(ws_id)
 
 
 @app.post("/chat/{app_id}/{chat_id}/{user_id}/input")

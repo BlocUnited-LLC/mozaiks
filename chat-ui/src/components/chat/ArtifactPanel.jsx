@@ -1,6 +1,7 @@
 import React from 'react';
 import UIToolRenderer from '../../core/ui/UIToolRenderer';
 import ArtifactActionsBar from '../actions/ArtifactActionsBar';
+import ArtifactLoadingState from '../../ui/primitives/ArtifactLoadingState';
 import {
   applyBrandImageFallback,
   getBrandLogoSrc,
@@ -18,10 +19,13 @@ const ArtifactPanel = ({
   actionStatusMap = null,
   chatTheme = null,
   floatingWidget = null,
+  loading = false,
 }) => {
   const isMobileEmbedded = Boolean(isMobile && isEmbedded);
   const isViewSurface = Boolean(viewMode);
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
+  const hasMessages = Array.isArray(messages) && messages.length > 0;
+  const showLoadingState = Boolean(loading);
 
   const containerClasses = isMobileEmbedded
     ? 'flex flex-col w-full h-full min-h-0'
@@ -53,6 +57,15 @@ const ArtifactPanel = ({
     ? 'This surface is ready for generated artifacts, but nothing has been published into it yet.'
     : 'Artifacts from workflow tools will appear here once the session publishes a UI payload.';
 
+  const loadingSurface = (
+    <ArtifactLoadingState
+      chatTheme={chatTheme}
+      title="Rendering artifact"
+      message="Preparing the generated surface for display."
+      className="min-h-full md:min-h-[500px]"
+    />
+  );
+
   return (
     <div className={containerClasses}>
       {/* Mobile backdrop */}
@@ -68,7 +81,9 @@ const ArtifactPanel = ({
 
           <div className={`absolute inset-0 overflow-y-auto ${scrollPaddingClass} my-scroll1 z-10 h-full flex flex-col`}>
             {/* If no content, show just the Mozaiks logo */}
-            {(!messages || messages.length === 0) ? (
+            {showLoadingState && !hasMessages ? (
+              loadingSurface
+            ) : (!messages || messages.length === 0) ? (
               <div className="flex flex-1 items-center justify-center min-h-full md:min-h-[500px]">
                 <div className="max-w-md w-full rounded-3xl border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(6,11,25,0.72)] shadow-[0_24px_60px_rgba(2,6,23,0.55)] backdrop-blur-xl px-6 py-8 sm:px-8 sm:py-10 text-center">
                   <div className="mx-auto mb-5 w-24 h-24 sm:w-28 sm:h-28 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/45 flex items-center justify-center backdrop-blur-sm shadow-2xl">
@@ -92,6 +107,17 @@ const ArtifactPanel = ({
               </div>
             ) : (
               <div className={contentStackClass}>
+                {showLoadingState && hasMessages && (
+                  <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[rgba(4,8,18,0.38)] backdrop-blur-[1px]">
+                    <div className="w-full max-w-3xl px-2 sm:px-0">
+                      <ArtifactLoadingState
+                        chatTheme={chatTheme}
+                        title="Rendering artifact"
+                        message="Preparing the generated surface for display."
+                      />
+                    </div>
+                  </div>
+                )}
                 {messages.map((m, idx) => {
                   // If message has a workflow tool_call, render the actual UI component
                   if (m.toolCall && m.toolCall.tool_name) {

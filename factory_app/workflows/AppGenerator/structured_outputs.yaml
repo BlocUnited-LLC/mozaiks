@@ -178,6 +178,84 @@ models:
         - str
         - 'null'
         description: Optional implementation note.
+  AppDemoFixtureRecordGroup:
+    type: model
+    fields:
+      module_id:
+        type: str
+        description: Module or facade id that owns the seeded record family.
+      entity_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional entity name or collection hint for the fixture group.
+      route_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Primary route or browser surface that consumes the fixture group.
+      record_role:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Stable semantic role for the record family, such as app, subscription, domain, request, or summary.
+      record_count:
+        type: integer
+        description: Number of records the demo seed should create for this group.
+      required_states:
+        type: optional_list
+        items: str
+        description: Required states or lifecycle values for the records.
+      stable_keys:
+        type: optional_list
+        items: str
+        description: Deterministic field names that should be populated with stable sample values.
+      notes:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional implementation note for local/demo seeding.
+  AppDemoFixtureSet:
+    type: model
+    fields:
+      fixture_id:
+        type: str
+        description: Stable fixture-set id.
+      purpose:
+        type: str
+        description: Why the fixture set exists.
+      scope:
+        type: literal
+        values:
+        - local_smoke
+        - browser_demo
+        - staging_preview
+        - replay_fixture
+        description: Fixture scope. Use local_smoke or browser_demo for no-spend validation data.
+      routes:
+        type: optional_list
+        items: str
+        description: Routes that should be satisfied by the fixture set.
+      record_groups:
+        type: optional_list
+        items: AppDemoFixtureRecordGroup
+        description: Declarative record families that should be seeded for this fixture set.
+      cleanup_strategy:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: How local/demo seeds should be reset between runs.
+      notes:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional additional guidance for the seed tool.
   WorkspaceCatalogCheck:
     type: model
     fields:
@@ -1156,6 +1234,12 @@ models:
         type: optional_list
         items: AppWorkflowTouchpoint
         description: Persistent page entry points that launch or resume workflow sessions from the app UI.
+      demo_fixture_sets:
+        type: optional_list
+        items: AppDemoFixtureSet
+        description: >
+          Declarative demo/local-smoke fixture planning for deterministic browser previews or seeded validation records.
+          These are test/demo planning artifacts only — do not treat them as runtime module behavior or production data.
       agent_backend_required:
         type: bool
         description: Whether this app must integrate with an upstream generated agent backend.

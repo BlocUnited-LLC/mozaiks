@@ -57,7 +57,7 @@ workflow-specific product logic.
 
 | Field | Purpose |
 | --- | --- |
-| `startup_mode` | Backwards-compatible workflow start category from the workflow's `orchestrator.yaml` |
+| `startup_mode` | Workflow start category read from the workflow's `orchestrator.yaml`; all existing orchestrator.yaml files are supported |
 | `interaction_mode` | Whether the workflow is `user_guided`, `agent_directed`, or `backend_only` |
 | `launch_behavior` | Whether an empty workflow chat should `auto_start`, `wait_for_user`, or never start in chat |
 | `handoff_style` | Whether the workflow should feel like `continuous_chat`, a `separate_chat`, or `background` work |
@@ -68,11 +68,12 @@ For user-reachable workflows, the registry should normally use
 conversation. `UserDriven` means the user participates in the workflow; it does
 not mean the user must type the first message after every transition.
 
-For example, Existing App Discovery may route to ValueEngine after the user
-chooses an enhancement path. Both the Add AI Workflows and Build App Features
-choices route into ValueEngine and seed deterministic context such as
-`brownfield_build_path`. ValueEngine then starts as the next conversational
-phase and uses that seeded context as upstream state.
+For example, the brownfield intake path can route to the path selector first.
+Both the Add AI Workflows and Build App Features choices seed deterministic
+context such as `brownfield_build_path` and then continue into
+`ExistingAppDiscovery`, which uses that selected scope while it reads the app.
+The downstream build sequence can use the same context later when it hands off
+into the enhancement or generation phase.
 
 Use this taxonomy instead of hardcoding workflow names in runtime code:
 
@@ -307,24 +308,23 @@ Brownfield generation/build sequences remain separate:
 
 | Sequence | Purpose |
 | --- | --- |
-| `brownfield_app_adoption` | Capture source refs, index App Intelligence, run discovery chat, and pause for enhancement-path selection. |
+| `brownfield_app_adoption` | Capture the app path choice first, then ask which repo to analyze, then run App Intelligence indexing and discovery chat with that scope already selected. |
 | `brownfield_overlay_generation` | User-facing Add AI Workflows path. Starts at `ValueEngine`, then generates approved app-aware AI workflows, chat surfaces, and required safe adapters while the existing app remains source of truth. |
 | `brownfield_module_generation` | User-facing Build App Features path. Starts at `ValueEngine`, then generates Mozaiks-owned modules, workflows, pages, data contracts, and extended functionality only for explicitly approved expansion scope. |
 
-The `brownfield_path_selector` screen should frame Add AI Workflows as the
-normal first move for most existing apps. Build App Features is for intentional
-module and product expansion, not an automatic full-repository rewrite. Both
-choices route to `ValueEngine`; the selected internal value
-(`light_integration` or `full_migration`) becomes downstream scope context.
+The `brownfield_path_selector` screen is the first brownfield decision after
+the app-type selector. It should frame Add AI Workflows as the normal first
+move for most existing apps. Build App Features is for intentional module and
+product expansion, not an automatic full-repository rewrite. Both choices route
+into `brownfield_repo_input`, which asks which repo to analyze before
+`ExistingAppDiscovery` starts. The selected internal value (`light_integration`
+or `full_migration`) becomes downstream scope context.
 
 ### Brownfield App Intelligence UX
 
 The existing-app intake path has two user-facing context surfaces:
 
-1. `BrownfieldRepoInput` stays mounted after the user selects a repository and
-   shows an App Intelligence indexing state while the workflow start request performs
-   source-backed indexing and registers a current `AppContextVersion`.
-2. `ExistingAppDiscovery` streams a persistent chat-feed progress card from
+1. `ExistingAppDiscovery` streams a persistent chat-feed progress card from
    indexing activity events. When indexing reaches ready, that card collapses
    to a compact completed marker so the chat does not compete with the artifact
    panel. After the `before_chat` preload completes and before the first agent
@@ -334,9 +334,12 @@ The existing-app intake path has two user-facing context surfaces:
    raw source contents, graph metrics, source refs, scanner codes, or AI
    opportunity lists. `ValueEngine` owns enhancement recommendations after the
    user chooses an enhancement path.
+2. The brownfield path now enters `brownfield_path_selector` directly after
+   `app_type_selector`, then `brownfield_repo_input`, then `ExistingAppDiscovery`
+   with the selected build path already set. The repo intake screen captures the
+   source repo before discovery starts.
 
-These surfaces are not AppPages. `BrownfieldRepoInput` is transition UI owned by
-the build journey, the progress card is chat activity UI, and
+These surfaces are not AppPages. The progress card is chat activity UI and
 `AppIntelligenceOverviewCard` is workflow artifact UI owned by
 `ExistingAppDiscovery`. The Refinement Engine consumes the same App
 Intelligence through checkpoint tools when the user later asks to revise or

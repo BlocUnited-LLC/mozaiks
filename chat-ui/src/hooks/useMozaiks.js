@@ -84,7 +84,7 @@ export function useMozaiks() {
         error: result.error || 'Failed to start workflow',
       };
     } catch (error) {
-      console.error('[useMozaiks] Failed to start workflow:', error);
+      console.error('❌ [useMozaiks] Failed to start workflow:', error);
       return {
         success: false,
         error: error.message,

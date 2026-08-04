@@ -333,6 +333,7 @@ agents:
              Choose the layout that best fits the app's primary user context and domain. Default to `top_nav` only when truly uncertain. Do NOT leave this null for apps with user profiles.
       9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
          - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `mongodb`, `postgres`, `redis`, `openai`, `anthropic`, `gemini`, `google_oauth`, `microsoft_oauth`, `segment`.
+         - Do not add `redis` for generic production readiness, caching best practice, rate limiting, or future scale. Include Redis only when the approved product scope explicitly requires shared cache, shared sessions, pub/sub, queues, or when scanned source/package evidence already depends on Redis. Redis is BYOK/operator-owned and must not be planned as paid managed infrastructure by default.
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
            - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
@@ -340,6 +341,11 @@ agents:
            - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
          - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
          - This check is read-only and non-blocking. If the tool fails, continue planning with all integrations treated as unchecked.
+      9c. When the app brief explicitly asks for deterministic browser/demo/preview records, populate `demo_fixture_sets` with the route/module/entity groups that need seeded data:
+         - Treat this as planning metadata for local smoke, browser demo, or replay fixtures only.
+         - Name the routes that depend on the fixtures, the module/entity families involved, the required record states, and any stable key hints the seed tool should fill.
+         - Keep the fixture plan deterministic and no-spend: do not turn it into runtime module behavior, production data, or provider-side provisioning.
+         - If the brief does not need preview data, leave `demo_fixture_sets` empty.
       10. If agent-backend context exists (`agent_api_url` or `agent_websocket_url` is non-null), set `agent_backend_required` to true and include the required integration surfaces in `frontend_scope`, `service_scope`, `external_integrations`, and `capability_packs`.
          - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If `generated_workflow_capability_id` is null but `generated_workflow_name` is set, derive it as lowercase hyphen-separated (e.g. `CustomerSupport` → `customer-support`).
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.

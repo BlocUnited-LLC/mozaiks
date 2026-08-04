@@ -6,10 +6,11 @@ import pytest
 
 
 class _FakeWebSocket:
-    def __init__(self) -> None:
+    def __init__(self, *, query_params: dict | None = None) -> None:
         self.accepted = False
         self.sent: list[dict] = []
         self.closed: list[tuple[int | None, str | None]] = []
+        self.query_params: dict = query_params or {}
 
     async def accept(self) -> None:
         self.accepted = True
@@ -273,6 +274,7 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.added_workflows == [
@@ -574,6 +576,7 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events == [
@@ -655,6 +658,7 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events == [
@@ -762,6 +766,7 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events == [
@@ -855,6 +860,7 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_with_r
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events[0][0]["workflow_name"] == "ValueEngine"

@@ -22,7 +22,7 @@ function compactStringList(value, limit = 4) {
 }
 
 function normalizeActivityPayload(payload) {
-  const progress = asPlainObject(payload.progress || payload.activity_progress);
+  const progress = asPlainObject(payload.progress || payload.activity_progress || payload.app_intelligence_progress);
   const activityType = payload.activity_type || progress.activity_type || null;
   if (!activityType) return null;
 

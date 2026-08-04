@@ -185,6 +185,7 @@ async def _get_chat_session_context(*, app_id: str, chat_id: str) -> dict[str, A
             "app_name": 1,
             "app_description": 1,
             "existing_experience_summary": 1,
+            "brownfield_build_path": 1,
             "github_repo": 1,
             "frontend_github_repo": 1,
             "backend_github_repo": 1,
@@ -482,6 +483,7 @@ def _build_context_profile_for_event(*, context: dict[str, Any], payload: dict[s
     if repo_identifier:
         profile["github_repo"] = repo_identifier
     for key in (
+        "brownfield_build_path",
         "current_app_context_version_id",
         "app_context_version_artifact_version_id",
         "source_context_artifact_version_id",

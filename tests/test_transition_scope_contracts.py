@@ -114,17 +114,17 @@ async def test_transition_resolve_workflow_response_includes_context_variables(m
     async def fake_launch_transition(**kwargs):  # noqa: ANN003
         assert kwargs["context_variables"] == {"app_type": "brownfield_app"}
         return SimpleNamespace(
-            resolution_type="workflow",
+            resolution_type="transition",
             option_id="light_integration",
             context_variables=selected_context,
-            workflow_launch=SimpleNamespace(
-                chat_id="chat_1",
-                workflow_id="ValueEngine",
-                requested_workflow_id="ValueEngine",
-                journey_id="brownfield_overlay_generation",
-                websocket_url="/ws/ValueEngine/app_1/chat_1/user_1",
-                routing_explanation="route selected",
-                rerouted_by_dependency=False,
+            next_transition_id="brownfield_repo_input",
+            journey_id="brownfield_app_adoption",
+            transition=SimpleNamespace(
+                model_dump=lambda exclude_none=True: {
+                    "id": "brownfield_repo_input",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
+                }
             ),
         )
 
@@ -141,8 +141,9 @@ async def test_transition_resolve_workflow_response_includes_context_variables(m
         principal=principal,
     )
 
-    assert response["resolution_type"] == "workflow"
-    assert response["workflow_id"] == "ValueEngine"
+    assert response["resolution_type"] == "transition"
+    assert response["transition"]["id"] == "brownfield_repo_input"
+    assert response["next_transition_id"] == "brownfield_repo_input"
     assert response["context_variables"] == selected_context
 
 
@@ -168,6 +169,7 @@ def test_workflow_start_posts_app_and_user_scope_for_triggered_workflows() -> No
 def test_chat_page_transition_handoff_persists_workflow_before_reconnect() -> None:
     source = _read_text("chat-ui/src/pages/ChatPage.js")
     startup_source = _read_text("chat-ui/src/hooks/useChatStartupEffects.js")
+    controller_source = _read_text("chat-ui/src/hooks/useConversationModeController.js")
 
     assert "setStoredActiveWorkflowName(resolvedWorkflowName)" in source
     assert "currentChatId\n        ? activeResolvedWorkflow || urlResolvedWorkflow" in source
@@ -189,4 +191,7 @@ def test_chat_page_transition_handoff_persists_workflow_before_reconnect() -> No
     assert "resolveWorkflowForChat({" in startup_source
     assert "resolvedWorkflowForChat || preferredWorkflow || workflowFromQuery" in startup_source
     assert source.count("navigate(`/chat?${chatParams.toString()}`)") >= 2
+    assert "const targetWorkflow = workflowName" in controller_source
+    assert "resolveKnownWorkflowName(workflowName) || workflowName" in controller_source
+    assert "|| resolveWorkflow()" in controller_source
 

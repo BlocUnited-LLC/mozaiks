@@ -28,6 +28,7 @@ export { Modal }           from './Modal.jsx';
 export { Alert }           from './Alert.jsx';
 export { ContentRail }     from './ContentRail.jsx';
 export { Skeleton, Empty } from './Skeleton.jsx';
+export { default as ArtifactLoadingState } from './ArtifactLoadingState.jsx';
 export { Timeline }        from './Timeline.jsx';
 export { CodeBlock }       from './CodeBlock.jsx';
 export { ProgressTracker } from './ProgressTracker.jsx';

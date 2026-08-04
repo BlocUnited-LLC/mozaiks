@@ -7,6 +7,11 @@ pricing-page groups.
 Add this file when the app is a SaaS app or when module actions need
 entitlement gates. Apps without paid access can omit it.
 
+`subscriptions.yaml` does not provision infrastructure by itself. If a paid
+resource is managed by the host, the plan or add-on only grants the right to
+request it; the actual provisioning decision belongs to the host module or a
+module-owned commercial/service boundary.
+
 ## How It Works
 
 1. Plans grant capability ids.
@@ -144,6 +149,11 @@ marketplace placement rules, usage fees, campaign terms, payout policy, or
 revenue-share display metadata can live in
 `app/modules/{module_id}/contracts/commercial.yaml` when that module owns the
 behavior.
+
+Use a module `service.yaml` or `commercial.yaml` when a capability needs
+managed provisioning, BYOK fallback, or provider-specific fulfillment rules.
+Keep the app-level subscription file focused on entitlement and catalog
+presentation.
 
 Use `add_on_products[]` for the app-level purchasable add-on catalog shown by
 pricing and billing surfaces. Do not put provider product ids, provider price

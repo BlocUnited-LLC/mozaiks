@@ -96,7 +96,9 @@ Generated workflow bundles must keep their helpers workflow-local. Do not emit
 or depend on `workflows/_shared` or `app.workflows._shared` inside generated
 workflow output. Shared factory builder infrastructure belongs under
 `factory_app/workflows/_shared/` and is consumed by the factory workflows
-themselves, not by generated bundles.
+themselves, not by generated bundles. That shared lane may include Python
+helpers and reusable workflow React components, but shared UI is still
+registered by each consuming workflow through its own `ui/index.js`.
 
 ## Workflow Files
 
@@ -105,6 +107,7 @@ Workflow files live under:
 - `workflows/*` — workflows owned by one app workspace
 - `factory_app/workflows/*` — shared factory workflows owned by the builder system, not by individual app workspaces
 - `factory_app/workflows/_shared/*.py` — factory-owned shared Python infrastructure consumed by multiple factory workflows; not part of generated workflow bundles
+- `factory_app/workflows/_shared/ui/*.js` — factory-owned reusable workflow UI components consumed by multiple factory workflows; consuming workflows must re-export/register them from their own `ui/index.js`
 - `factory_app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
 - `workspace-root workflows/extended_orchestration/extension_registry.json` — optional app-local registry used when that app workflow root is selected
 

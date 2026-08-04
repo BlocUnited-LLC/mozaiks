@@ -7,6 +7,60 @@
 import React from 'react';
 import { getComponent } from '../registry/componentRegistry';
 
+function WorkflowUIRenderError({ error, onCancel, toolCallId }) {
+  return (
+    <div className="bg-[rgba(var(--color-error-rgb),0.2)] border border-[var(--color-error)] rounded p-4">
+      <h3 className="text-[var(--color-error)] font-semibold mb-2">Component Render Error</h3>
+      <p className="text-[var(--color-error)] text-sm mb-2">
+        {error?.message || 'The workflow UI component could not render.'}
+      </p>
+      <p className="text-xs text-gray-400">Event ID: {toolCallId || 'unknown'}</p>
+      <button
+        onClick={() => onCancel?.({ status: 'error', error: 'Component render failed' })}
+        className="mt-3 px-3 py-1 bg-[var(--color-error)] hover:bg-[var(--color-error)] rounded text-sm"
+      >
+        Close
+      </button>
+    </div>
+  );
+}
+
+class WorkflowUIErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('🚨 [WorkflowUIRouter] Render error:', error);
+    console.error('🚨 [WorkflowUIRouter] Component stack:', info?.componentStack || '');
+    console.error('🚨 [WorkflowUIRouter] Payload that caused error:', this.props.payload);
+  }
+
+  componentDidUpdate(previousProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <WorkflowUIRenderError
+          error={this.state.error}
+          onCancel={this.props.onCancel}
+          toolCallId={this.props.toolCallId}
+        />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /**
  * 🎯 WORKFLOW UI ROUTER - TRULY MODULAR
  * 
@@ -161,18 +215,14 @@ const WorkflowUIRouter = ({
     );
   }
 
-  // Success state - render the dynamically loaded component
-
-  // CRITICAL: Verify payload structure before passing to component
-  if (payload && typeof payload === 'object') {
-  }
-
-  // Render with error boundary
-  try {
-    return (
-      <div className="workflow-ui-container">
-        
-        {/* Render the dynamically loaded workflow component */}
+  return (
+    <div className="workflow-ui-container">
+      <WorkflowUIErrorBoundary
+        resetKey={toolCallId || `${sourceWorkflowName}-${componentType}`}
+        payload={payload}
+        onCancel={onCancel}
+        toolCallId={toolCallId}
+      >
         {/* CRITICAL: Use toolCallId as key to force remount on new artifact events (prevents state collision on revisions) */}
         {Component && typeof Component === 'function' ? (
           <Component
@@ -193,19 +243,9 @@ const WorkflowUIRouter = ({
             <p>Component not ready: {Component ? typeof Component : 'null'}</p>
           </div>
         )}
-      </div>
-    );
-  } catch (renderError) {
-    console.error('🚨 [WorkflowUIRouter] Render error:', renderError);
-    console.error('🚨 [WorkflowUIRouter] Payload that caused error:', payload);
-    return (
-  <div className="bg-[rgba(var(--color-error-rgb),0.2)] border border-[var(--color-error)] rounded p-4">
-        <h3 className="text-[var(--color-error)] font-semibold mb-2">Component Render Error</h3>
-        <p className="text-[var(--color-error)] text-sm mb-2">{renderError.message}</p>
-        <p className="text-xs text-gray-400">Check console for details</p>
-      </div>
-    );
-  }
+      </WorkflowUIErrorBoundary>
+    </div>
+  );
 };
 
 export default WorkflowUIRouter;

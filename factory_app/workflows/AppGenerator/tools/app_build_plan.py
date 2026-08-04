@@ -1742,6 +1742,7 @@ def app_build_plan(
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
     carry_forward_decisions = _normalize_object_list(AppBuildPlan.get("carry_forward_decisions"))
+    demo_fixture_sets = _normalize_object_list(AppBuildPlan.get("demo_fixture_sets"))
 
     managed_capability_ids = frozenset(
         _pack_id_from_descriptor(p)
@@ -1838,6 +1839,7 @@ def app_build_plan(
         "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,
         "generation_order": generation_order,
         "carry_forward_decisions": carry_forward_decisions,
+        "demo_fixture_sets": demo_fixture_sets,
     }
 
     if context_variables and hasattr(context_variables, "set"):

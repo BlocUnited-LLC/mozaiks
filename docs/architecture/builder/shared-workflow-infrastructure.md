@@ -1,8 +1,8 @@
 # Shared Workflow Infrastructure
 
-This document defines when shared Python infrastructure belongs under
-`factory_app/workflows/_shared/` instead of a workflow-local `tools/`
-directory or the runtime core.
+This document defines when shared factory workflow infrastructure belongs under
+`factory_app/workflows/_shared/` instead of a workflow-local `tools/` or `ui/`
+directory, another workflow folder, or the runtime core.
 
 ## Core Rule
 
@@ -18,6 +18,8 @@ Do not confuse these three cases:
   DesignDocs, ValueEngine, ThemeCapture, or other builder workflows
 - `factory_app/workflows/{WorkflowName}/tools/*.py`:
   workflow-local implementation owned by one workflow pack
+- `factory_app/workflows/{WorkflowName}/ui/`:
+  workflow-local UI registration and workflow-specific React surfaces
 - `mozaiksai.core.*`:
   runtime/framework APIs required by runtime instances beyond the builder
 
@@ -37,11 +39,31 @@ Typical `_shared` examples:
 - deterministic quality gates reused by multiple generator workflows
 - builder-only lifecycle helpers reused across multiple factory workflows
 - static audit/validation helpers shared by AppGenerator and AgentGenerator
+- reusable workflow React components shared by multiple factory workflows
 
 Current canonical examples:
 
 - `factory_app/workflows/_shared/generated_ui_contract.py`
 - `factory_app/workflows/_shared/platform/build_lifecycle.py`
+- `factory_app/workflows/_shared/ui/AgentAPIKeysBundleInput.js`
+
+## Shared Workflow UI
+
+Reusable workflow React components belong under
+`factory_app/workflows/_shared/ui/` when they are consumed by multiple factory
+workflows and are not app-specific or product-specific.
+
+Shared workflow UI is implementation only. It is not auto-discovered or
+registered directly by the workflow UI registry. Each consuming workflow must
+import and re-export/register the shared component from its own
+`factory_app/workflows/{WorkflowName}/ui/index.js`. That keeps the runtime
+component namespace workflow-scoped, for example `AgentGenerator:ComponentName`
+or `AppGenerator:ComponentName`.
+
+Do not import React components from a sibling workflow folder. If two workflows
+need the same component, move the reusable implementation to `_shared/ui/` and
+keep only workflow-specific wrappers or registration barrels inside each
+workflow's `ui/` directory.
 
 ## What Must Stay Workflow-Local
 
@@ -70,6 +92,10 @@ is shared, use this pattern:
 
 That keeps runtime file-path expectations stable while making shared ownership
 explicit.
+
+The same ownership rule applies to workflow UI: generated workflow bundles must
+own their UI locally. `factory_app/workflows/_shared/ui/` is only for the
+factory repo's first-party builder workflows.
 
 ## What Belongs In `mozaiksai.core`
 

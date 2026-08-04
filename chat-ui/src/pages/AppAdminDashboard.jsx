@@ -387,7 +387,7 @@ export function AppAdminPanels({
   const parsedAdminConfig = parseAppBackendAdminConfig(adminConfig);
 
   if (!adminConfigLoading && adminConfig !== null && parsedAdminConfig.issues.length > 0 && process.env.NODE_ENV === 'development') {
-    console.warn('[AppAdminDashboard] Invalid app backend admin config', parsedAdminConfig.issues);
+    console.warn('⚠️ [AppAdminDashboard] Invalid app backend admin config', parsedAdminConfig.issues);
   }
 
   // Client-side role guard (backend enforces independently)
@@ -479,7 +479,7 @@ export function AppAdminPanels({
         }
 
         if (process.env.NODE_ENV === 'development') {
-          console.warn(`[AppAdminDashboard] Unknown custom admin component "${panelConfig.component}" for panel "${id}".`);
+          console.warn(`⚠️ [AppAdminDashboard] Unknown custom admin component "${panelConfig.component}" for panel "${id}".`);
         }
         return null;
       })}

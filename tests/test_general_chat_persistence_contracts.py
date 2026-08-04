@@ -163,8 +163,16 @@ def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None
     chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
 
     assert "mozaiks.workflow_chat_id" in storage_source
+    assert "mozaiks.artifact_workspace_snapshot" in storage_source
+    assert "mozaiks.workflow_transcript_snapshot" in storage_source
+    assert "readStoredArtifactWorkspaceSnapshot" in storage_source
+    assert "writeStoredArtifactWorkspaceSnapshot" in storage_source
+    assert "readStoredWorkflowTranscriptSnapshot" in storage_source
+    assert "writeStoredWorkflowTranscriptSnapshot" in storage_source
     assert "getStoredWorkflowChatId" in storage_source
     assert "setStoredWorkflowChatId" in storage_source
+    assert "writeStoredArtifactWorkspaceSnapshot(currentChatId, artifactWorkspaceSnapshotRef.current)" in controller_source
+    assert "messages: [...currentArtifactMessages]" in controller_source
     assert "restoreStoredArtifactForChat," in controller_source
     assert "snapshotChatId || currentChatId" in controller_source
     assert "restoreStoredArtifactForChat(targetChatId, resolvedWorkflow)" in controller_source
@@ -181,7 +189,7 @@ def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None
     assert "getStoredActiveChatId()," in controller_source
     assert "currentChatId," in controller_source
     assert "const workflowToResume = resolvedCandidateWorkflow || entryWorkflow" in controller_source
-    assert "resumeWorkflowSession(candidateChatId, workflowToResume)" in controller_source
+    assert "resumeWorkflowSession(candidateChatId, workflowToResume, { replayOnSwitch: false })" in controller_source
     assert "rememberWorkflowChat(candidateChatId, workflowToResume)" in controller_source
     assert "rememberWorkflowChat(newChatId, entryWorkflow)" in controller_source
     assert "rememberWorkflowChatSession(data.chat_id, resolvedWorkflowId)" in chat_page_source
@@ -190,7 +198,7 @@ def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None
     assert "applySessionStatePendingTransition(data.session_state)" in chat_page_source
 
     router_state_index = controller_source.index("/api/session/state?")
-    resume_index = controller_source.index("resumeWorkflowSession(candidateChatId, workflowToResume)")
+    resume_index = controller_source.index("resumeWorkflowSession(candidateChatId, workflowToResume, { replayOnSwitch: false })")
     start_index = controller_source.index("api.startChat(")
     assert router_state_index < start_index
     assert resume_index < start_index
@@ -209,14 +217,118 @@ def test_activity_inline_progress_restores_with_artifact_panel() -> None:
     assert "workflowMessagesCacheRef.current = applyRestoredProgress(workflowMessagesCacheRef.current)" in chat_page_source
     assert "workflowMessagesSharedRef.current = applyRestoredProgress(workflowMessagesSharedRef.current)" in chat_page_source
     assert "setWorkflowMessages((prev) => applyRestoredProgress(prev))" in chat_page_source
+    assert "persistWorkflowTranscriptSnapshot(mergedMessages)" in chat_page_source
+    assert "mergeWorkflowTranscriptMessages(" in chat_page_source
+    assert "selectedWorkflowTranscriptSource" in controller_source
+    assert "const cacheWorkflowTranscriptMessage" in chat_page_source
+    assert "workflowMessagesCacheRef.current = applyActivityEntry(workflowMessagesCacheRef.current)" in chat_page_source
+    assert "activity_event_cached_for_workflow_while_in_ask" in chat_page_source
+    assert "if (metadata?.event_type === 'activity')" in chat_page_source
+    assert "writeStoredWorkflowTranscriptSnapshot(targetChatId" in chat_page_source
+    assert "cacheWorkflowTranscriptMessage({" in chat_page_source
+    assert "conversationModeRef.current === 'ask' && streamEndMetadata?.source !== 'general_agent'" in chat_page_source
+    assert "conversationMode === 'ask' && metadataSource?.source !== 'general_agent'" in chat_page_source
 
     assert "restoreStoredActivityForChat = null" in controller_source
     assert "upsertRestoredActivityFromArtifactMessages = null" in controller_source
+    assert "readStoredWorkflowTranscriptSnapshot" in controller_source
+    assert "selectedWorkflowMessages.length > 0" in controller_source
     assert "upsertRestoredActivityFromArtifactMessages(" in controller_source
     assert "restoreStoredActivityForChat(currentChatId, currentWorkflowName)" in controller_source
     assert "restoreStoredActivityForChat(targetChatId, resolvedWorkflow)" in controller_source
 
     assert "restoreStoredActivityForChat = null" in startup_source
     assert "upsertRestoredActivityFromArtifactMessages = null" in startup_source
+    assert "readStoredWorkflowTranscriptSnapshot" in startup_source
+    assert "storedWorkflowMessages.length > 0 && messagesRef.current.length === 0" in startup_source
     assert "upsertRestoredActivityFromArtifactMessages(" in startup_source
     assert "restoreStoredActivityForChat(restoreChatId, urlWorkflowName)" in startup_source
+
+
+def test_workflow_artifact_restore_uses_backend_metadata_and_durable_surfaces() -> None:
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+    startup_source = _read("chat-ui/src/hooks/useChatStartupEffects.js")
+    controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")
+    surface_reducer_source = _read("chat-ui/src/state/uiSurfaceReducer.js")
+
+    assert "const hydrateServerArtifactForChat = useCallback(async" in chat_page_source
+    assert "/api/chats/meta/" in chat_page_source
+    assert "server_artifact_hydrate_requested" in chat_page_source
+    assert "cacheServerLastArtifact(meta.last_artifact" in chat_page_source
+    assert "chatMetaHydrationMissedAtRef" in chat_page_source
+    assert "artifactAutoClearRef.current = false" in chat_page_source
+    assert "currentArtifactMessages.length === 0" in chat_page_source
+    assert "hadStoredArtifact = Boolean(" in chat_page_source
+    assert "storedPanelOpen === false && hadStoredArtifact" in chat_page_source
+
+    select_speaker_start = chat_page_source.index("case 'select_speaker':")
+    select_speaker_end = chat_page_source.index("case 'activity':", select_speaker_start)
+    select_speaker_block = chat_page_source[select_speaker_start:select_speaker_end]
+    assert "clearStoredArtifactState(currentChatId)" not in select_speaker_block
+    assert "setCurrentArtifactMessages([])" not in select_speaker_block
+
+    assert "hydrateServerArtifactForChat = null" in startup_source
+    assert "reason: 'startup_workflow_artifact_restore_miss'" in startup_source
+    assert "reason: 'workflow_mode_empty_artifact'" in startup_source
+    assert "hydrateServerArtifactForChat = null" in controller_source
+    assert "reason: 'ensure_workflow_mode_artifact_restore_miss'" in controller_source
+    assert "reason: 'resume_workflow_session_artifact_restore_miss'" in controller_source
+    assert "eventType === 'tool_call' || eventType === 'chat.tool_call' || eventType === 'ui.render'" in surface_reducer_source
+
+
+def test_dynamic_ui_artifact_subscriber_derives_logged_fields_before_rendering() -> None:
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+
+    subscriber_start = chat_page_source.index("// tool_call (InputRequestEvent path) and ui.render")
+    render_start = chat_page_source.index("if (shouldRenderArtifact)", subscriber_start)
+    subscriber_setup = chat_page_source[subscriber_start:render_start]
+    render_block = chat_page_source[
+        render_start:chat_page_source.index("// Don't inject artifact UIs into the chat feed", render_start)
+    ]
+
+    assert "const toolName =" in subscriber_setup
+    assert "const toolCallId =" in subscriber_setup
+    assert "const componentType =" in subscriber_setup
+    assert "const payloadKeys = Object.keys(payload || {});" in subscriber_setup
+    assert "toolName," in render_block
+    assert "toolCallId," in render_block
+    assert "componentType," in render_block
+    assert "payloadKeys," in render_block
+    assert "component_type: componentType" in render_block
+    assert "setCurrentArtifactMessages([artifactMsg]);" in render_block
+
+
+def test_workflow_replay_merge_prefers_server_identity_over_client_ids() -> None:
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+
+    merge_start = chat_page_source.index("const mergeWorkflowTranscriptMessages = useCallback")
+    merge_block = chat_page_source[
+        merge_start:chat_page_source.index("const persistWorkflowTranscriptSnapshot", merge_start)
+    ]
+
+    replay_index_pos = merge_block.index("if (replayIndex !== null)")
+    server_sequence_pos = merge_block.index("if (serverSequence !== null)")
+    generated_id_pos = merge_block.index("if (message?.id && !isClientGeneratedMessageId(message.id))")
+
+    assert "const stableNumber = (value) => {" in merge_block
+    assert "const isClientGeneratedMessageId = (id) => {" in merge_block
+    assert "return /^(text|activity|tool-call|tool-call-msg|tool-call-artifact|ui-restored|nav-cache)-/.test(value);" in merge_block
+    assert replay_index_pos < generated_id_pos
+    assert server_sequence_pos < generated_id_pos
+
+
+def test_dynamic_ui_artifact_persistence_uses_resolved_tool_identity() -> None:
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+
+    subscriber_start = chat_page_source.index("// tool_call (InputRequestEvent path) and ui.render")
+    render_start = chat_page_source.index("if (shouldRenderArtifact)", subscriber_start)
+    render_block = chat_page_source[
+        render_start:chat_page_source.index("// Don't inject artifact UIs into the chat feed", render_start)
+    ]
+
+    assert "artifact_id: deriveArtifactId(payload, toolCallId || toolName || null)" in render_block
+    assert "id: `tool-call-artifact-${toolCallId || artifactPayload.artifact_id || Date.now()}`" in render_block
+    assert "lastArtifactEventRef.current = toolCallId || toolName || 'artifact';" in render_block
+    assert "tool_name: toolName" in render_block
+    assert "tool_call_id: toolCallId || null" in render_block
+    assert "component_type: componentType || toolName || null" in render_block

@@ -6,6 +6,7 @@ import {
   applyBrandImageFallback,
   getBrandLogoSrc,
 } from "../../styles/brandAssets";
+import { logChatPersistence } from '../../session/chatSessionStorage';
 
 const PENDING_HARNESS_DECISION_TITLES = {
   workflow_reentry: 'Workflow Re-Entry',
@@ -434,6 +435,18 @@ const ModernChatInterface = ({
       return;
     }
 
+    logChatPersistence('ui_mode_toggle_clicked', {
+      conversationMode,
+      isOnChatPage,
+      modeTogglePending,
+      hasPendingHarnessDecision,
+      showModeToggle,
+      workflowName: workflowName || null,
+      shellTitle,
+      conversationSubtitle,
+      source: isOnChatPage ? 'chat_page_shell' : 'embedded_shell',
+    });
+
     // When NOT on chat page and switching from Ask → Workflow:
     // Immediately switch mode (which triggers most recent workflow fetch), navigation will follow
     if (!isOnChatPage && conversationMode === 'ask') {
@@ -470,18 +483,40 @@ const ModernChatInterface = ({
     const isSystem = chat.isTokenMessage || chat.isWarningMessage;
     return !isEmptyContent || chat.isThinking || hasStructured || hasToolCall || hasAttachment || hasTrace || isSystem;
   });
-  const normalizedWorkflowName = String(workflowName || '').trim().toLowerCase();
-  const showValueEngineHandoffPlaceholder = Boolean(
-    conversationMode === 'workflow'
-    && normalizedWorkflowName === 'valueengine'
-    && !hasVisibleMessages
-    && !showComposerBanner
-    && connectionStatus !== 'error'
-  );
-  const valueEngineHandoffStatus = connectionStatus === 'connected'
-    ? 'Starting the planning agent'
-    : 'Connecting to ValueEngine';
 
+  // Show a typing indicator when workflow has produced any output (activity card,
+  // inline tool call, or tool progress) but no agent text has arrived yet.
+  // This covers the before-chat → first-agent gap where before_chat hooks emit
+  // activity/artifact cards, run_complete clears loading=false, and then
+  // DiscoveryHostAgent (or any first agent) starts its run with no stream chunks yet.
+  const showTypingIndicator = loading || (() => {
+    if (!Array.isArray(messages) || connectionStatus === 'error') return false;
+    let hasWorkflowOutput = false;
+    let hasAgentText = false;
+    for (const msg of messages) {
+      if (!msg || msg.metadata?.hideInTranscript) continue;
+      // activity cards (event_type: 'activity'), tool progress, or inline tool calls
+      if (
+        msg.toolCall
+        || msg.metadata?.event_type === 'activity'
+        || msg.metadata?.event_type === 'tool_progress'
+      ) {
+        hasWorkflowOutput = true;
+      }
+      if (
+        msg.sender === 'agent'
+        && !msg.isThinking
+        // tool_call_agent_message = planning text before a tool call — not the final response
+        && msg.metadata?.type !== 'tool_call_agent_message'
+        && msg.content
+        && String(msg.content).trim().length > 0
+      ) {
+        hasAgentText = true;
+      }
+    }
+    // Only fire in workflow mode — ask mode doesn't have this gap
+    return conversationMode === 'workflow' && hasWorkflowOutput && !hasAgentText;
+  })();
   const renderedMessages = (() => {
     // Determine the last chat index with a primary content message
     let lastContentIndex = -1;
@@ -566,30 +601,9 @@ const ModernChatInterface = ({
   const messageStack = (
     <div className={messageStackClass} style={{ rowGap: 'var(--chat-bubble-stack-gap, 1rem)' }}>
       {/* Messages render below */}
-      {showValueEngineHandoffPlaceholder && (
-        <div className="flex justify-start px-0 message-container">
-          <div className="max-w-xl rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(10,16,32,0.72)] shadow-[0_16px_48px_rgba(3,8,24,0.35)] px-5 py-4 backdrop-blur-md">
-            <div className="text-[10px] uppercase tracking-[0.22em] text-[rgba(var(--color-primary-light-rgb),0.9)] font-semibold mb-2">
-              Value Planning
-            </div>
-            <div className="text-white font-semibold text-base mb-1">
-              Preparing your enhancement plan
-            </div>
-            <p className="text-sm leading-relaxed text-slate-300 m-0">
-              Mozaiks is carrying the app readout and selected enhancement path into the next planning step.
-            </p>
-            <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.22)] bg-[rgba(var(--color-primary-rgb),0.08)] px-3 py-2 text-xs text-[rgba(var(--color-primary-light-rgb),0.95)]">
-              <span className="typing-dot" />
-              <span className="typing-dot delay-150" />
-              <span className="typing-dot delay-300" />
-              <span>{valueEngineHandoffStatus}</span>
-            </div>
-          </div>
-        </div>
-      )}
       {renderedMessages}
-      {/* Typing indicator slot (rendered when loading without messages updating) */}
-      {loading && (
+      {/* Typing indicator slot: shown while loading, or when a UI surface arrived before any agent text */}
+      {showTypingIndicator && (
         <div className="flex justify-start px-0 message-container">
           <div className="mt-1 px-2 py-1 rounded-md bg-transparent text-[rgba(var(--color-primary-light-rgb),0.7)] flex items-center gap-1 text-xs font-mono tracking-wide typing-indicator" aria-label="Assistant is typing" role="status">
             <span className="typing-dot" />

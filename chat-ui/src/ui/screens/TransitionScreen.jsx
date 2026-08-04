@@ -124,12 +124,12 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
     if (transition.transition_type !== 'condition') return;
 
     if (!transition.context_key) {
-      console.warn(`[TransitionScreen] condition transition '${transition.id}' is missing context_key`);
+      console.warn(`⚠️ [TransitionScreen] condition transition '${transition.id}' is missing context_key`);
       return;
     }
 
     if (!transition.routes?.length && !transition.default_route) {
-      console.warn(`[TransitionScreen] condition transition '${transition.id}' has no route`);
+      console.warn(`⚠️ [TransitionScreen] condition transition '${transition.id}' has no route`);
       return;
     }
 

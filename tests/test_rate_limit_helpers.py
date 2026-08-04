@@ -141,7 +141,7 @@ class TestPathLimits:
         assert limits["/api/chats/meta"] == 120
         assert limits["/api/chats"] == 10
         assert limits["/chat"] == 30
-        assert limits["/api/workflows"] == 20
+        assert limits["/api/workflows"] == 120
 
     def test_env_entry_merged(self, monkeypatch):
         monkeypatch.setenv("RATE_LIMIT_PATH_LIMITS", "/api/custom:5")

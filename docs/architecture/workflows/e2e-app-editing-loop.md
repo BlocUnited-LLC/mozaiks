@@ -100,7 +100,7 @@ Current implementation status:
   `mozaiks.refinement.review_package.v1` package with route decision,
   write-back mode, affected paths, changed files, validation state, risk notes,
   and available actions.
-- The App Build History Studio page renders the canonical review package for
+- The App Build Review Studio page renders the canonical review package for
   the selected artifact and calls the existing accept, reject, and promote
   endpoints for enabled actions.
 - External repo, overlay, and full-migration write-back modes are modeled but

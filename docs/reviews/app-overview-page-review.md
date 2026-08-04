@@ -86,14 +86,14 @@ These items from the original review are resolved in `AppOverviewPage.jsx` as it
 | Issue | Severity | Detail |
 |---|---|---|
 | SummaryStrip and ActivityPanel both show cost | High | Cost appears in the strip at the top AND in the Activity panel below. Same fact, no deeper context the second time. |
-| Build version is not a link | Medium | "Build v1" in `BuildStatusPanel` is plain text. Should navigate to the artifact in build history. |
+| Build version is not a link | Medium | "Build v1" in `BuildStatusPanel` is plain text. Should navigate to the artifact in build review. |
 | No primary CTA hierarchy | Medium | The next-step `SurfaceCard` has a `LinkButton` but it sits at the same visual weight as the panels. Approval-pending state does surface via the Alert, but the CTA in the card is always the same regardless of urgency. |
 | Mobile panel order | Low | Activity appears before Build Status on narrow screens due to `xl:grid-cols-2` stacking. Build Status is more actionable and should come first on mobile. |
 
 ### Tasks to reach 10
 
 - [ ] Remove `LLM Cost` `Metric` from `ActivityPanel` — it's already in the SummaryStrip. Replace with a more useful stat (e.g. last run duration, most-used workflow, or latest run status)
-- [ ] Make "Build v{n}" a `LinkButton` to `/apps/:appId/activity` or the build history page
+- [ ] Make "Build v{n}" a `LinkButton` to `/apps/:appId/activity` or the build review page
 - [ ] Swap panel order for mobile: `BuildStatusPanel` first, `ActivityPanel` second using `order-first/order-last` on narrow screens
 
 ---
@@ -102,6 +102,6 @@ These items from the original review are resolved in `AppOverviewPage.jsx` as it
 
 1. **Remove cost from ActivityPanel** — it's already in the SummaryStrip; use that space for latest run workflow name + status instead.
 2. **Integration health dot in hero** — workspace integrations module is live; surface a green/yellow/red summary that links to `/integrations`.
-3. **Build version as link** — one-line change: wrap "Build v{n}" in a `LinkButton` to the build history page.
+3. **Build version as link** — one-line change: wrap "Build v{n}" in a `LinkButton` to the build review page.
 4. **Explicit empty state for build panel** — when `build` is `{}` and no artifact exists, say "No build sessions yet" instead of leaving the subtitle orphaned.
 5. **Error boundary** — `React.ErrorBoundary` wrapper around the two panels so a single network failure doesn't blank the page.

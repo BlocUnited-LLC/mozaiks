@@ -95,7 +95,7 @@ export function useCoreWebSocket(userId, { enabled = true } = {}) {
         try {
           cb(message.data || {});
         } catch (err) {
-          console.error(`[useCoreWebSocket] listener error for '${eventName}':`, err);
+          console.error(`❌ [useCoreWebSocket] listener error for '${eventName}':`, err);
         }
       }
     }
@@ -107,7 +107,7 @@ export function useCoreWebSocket(userId, { enabled = true } = {}) {
         try {
           cb(message);
         } catch (err) {
-          console.error('[useCoreWebSocket] wildcard listener error:', err);
+          console.error('❌ [useCoreWebSocket] wildcard listener error:', err);
         }
       }
     }

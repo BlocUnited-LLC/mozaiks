@@ -36,7 +36,7 @@ const UIToolRenderer = ({ event, onResponse, className = '', onArtifactAction, a
       }
     } catch (err) {
       // Do not hard-fail the whole chat UI if a host renderer throws.
-      console.error('UIToolRenderer: host uiToolRenderer threw', err);
+      console.error('❌ UIToolRenderer: host uiToolRenderer threw', err);
       if (isCore) {
         return (
           <div className={className}>

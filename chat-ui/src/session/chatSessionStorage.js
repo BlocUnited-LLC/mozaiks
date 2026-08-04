@@ -44,6 +44,109 @@ const readJsonValue = (key) => {
 
 const writeJsonValue = (key, value) => writeValue(key, JSON.stringify(value));
 
+const CHAT_PERSISTENCE_LOG_PREFIX = '[MOZAIKS_CHAT_PERSISTENCE]';
+
+const stringifyLogDetails = (details) => {
+  try {
+    return JSON.stringify(details, (_key, value) => {
+      if (typeof value === 'function') {
+        return '[Function]';
+      }
+      if (typeof value === 'symbol') {
+        return value.toString();
+      }
+      return value;
+    });
+  } catch (error) {
+    return JSON.stringify({
+      error: 'log_serialization_failed',
+      message: error?.message || String(error),
+    });
+  }
+};
+
+export const logChatPersistence = (event, details = {}) => {
+  try {
+    console.info(`${CHAT_PERSISTENCE_LOG_PREFIX} ${event} ${stringifyLogDetails(details)}`);
+  } catch {
+    // Logging must never break persistence.
+  }
+};
+
+const summarizeMessageList = (messageList) => {
+  const messages = Array.isArray(messageList) ? messageList : [];
+  const componentCounts = new Map();
+  let activityCount = 0;
+  let uiMessageCount = 0;
+  let toolProgressCount = 0;
+
+  for (const message of messages) {
+    const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+    const toolCall = message?.toolCall && typeof message.toolCall === 'object' ? message.toolCall : {};
+    const componentType = String(
+      message?.component_type
+      || toolCall.component_type
+      || metadata.component_type
+      || metadata.activity_component_type
+      || toolCall.tool_name
+      || message?.tool_name
+      || '',
+    ).trim();
+
+    if (metadata.event_type === 'activity') {
+      activityCount += 1;
+    }
+    if (metadata.event_type === 'tool_progress') {
+      toolProgressCount += 1;
+    }
+    if (message?.ui_mode || toolCall.tool_name || componentType) {
+      uiMessageCount += 1;
+    }
+    if (componentType) {
+      componentCounts.set(componentType, (componentCounts.get(componentType) || 0) + 1);
+    }
+  }
+
+  return {
+    total: messages.length,
+    activityCount,
+    toolProgressCount,
+    uiMessageCount,
+    componentTypes: Array.from(componentCounts.entries())
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 5)
+      .map(([componentType, count]) => ({ componentType, count })),
+  };
+};
+
+export const summarizeArtifactWorkspaceSnapshot = (snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return null;
+  }
+
+  return {
+    chatId: snapshot.chatId || null,
+    workflowName: snapshot.workflowName || null,
+    isOpen: Boolean(snapshot.isOpen),
+    layoutMode: snapshot.layoutMode || null,
+    messages: summarizeMessageList(snapshot.messages),
+  };
+};
+
+export const summarizeWorkflowMessages = summarizeMessageList;
+
+export const summarizeWorkflowTranscriptSnapshot = (snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return null;
+  }
+
+  return {
+    chatId: snapshot.chatId || null,
+    workflowName: snapshot.workflowName || null,
+    messages: summarizeMessageList(snapshot.messages),
+  };
+};
+
 export const getStoredActiveChatId = () => readValue(CURRENT_CHAT_ID_KEY);
 
 export const setStoredActiveChatId = (chatId) => {
@@ -129,6 +232,8 @@ export const clearStoredChatCacheSeed = (chatId) => {
 export const getCurrentArtifactKey = (chatId) => `mozaiks.current_artifact.${chatId}`;
 export const getLastArtifactKey = (chatId) => `mozaiks.last_artifact.${chatId}`;
 export const getArtifactPanelKey = (chatId) => `mozaiks.artifact_panel_open.${chatId}`;
+export const getArtifactWorkspaceSnapshotKey = (chatId) => `mozaiks.artifact_workspace_snapshot.${chatId}`;
+export const getWorkflowTranscriptSnapshotKey = (chatId) => `mozaiks.workflow_transcript_snapshot.${chatId}`;
 
 export const readStoredCurrentArtifact = (chatId) => {
   if (!chatId) return null;
@@ -167,11 +272,77 @@ export const clearStoredArtifactPanelOpen = (chatId) => {
   return removeValue(getArtifactPanelKey(chatId));
 };
 
+export const readStoredArtifactWorkspaceSnapshot = (chatId) => {
+  if (!chatId) return null;
+  const snapshot = readJsonValue(getArtifactWorkspaceSnapshotKey(chatId));
+  logChatPersistence('read_artifact_workspace_snapshot', {
+    chatId: String(chatId),
+    found: Boolean(snapshot),
+    snapshot: summarizeArtifactWorkspaceSnapshot(snapshot),
+  });
+  return snapshot;
+};
+
+export const writeStoredArtifactWorkspaceSnapshot = (chatId, snapshot) => {
+  if (!chatId || !snapshot) return false;
+  const written = writeJsonValue(getArtifactWorkspaceSnapshotKey(chatId), snapshot);
+  logChatPersistence('write_artifact_workspace_snapshot', {
+    chatId: String(chatId),
+    wrote: written,
+    snapshot: summarizeArtifactWorkspaceSnapshot(snapshot),
+  });
+  return written;
+};
+
+export const clearStoredArtifactWorkspaceSnapshot = (chatId) => {
+  if (!chatId) return false;
+  const cleared = removeValue(getArtifactWorkspaceSnapshotKey(chatId));
+  logChatPersistence('clear_artifact_workspace_snapshot', {
+    chatId: String(chatId),
+    cleared,
+  });
+  return cleared;
+};
+
+export const readStoredWorkflowTranscriptSnapshot = (chatId) => {
+  if (!chatId) return null;
+  const snapshot = readJsonValue(getWorkflowTranscriptSnapshotKey(chatId));
+  logChatPersistence('read_workflow_transcript_snapshot', {
+    chatId: String(chatId),
+    found: Boolean(snapshot),
+    snapshot: summarizeWorkflowTranscriptSnapshot(snapshot),
+  });
+  return snapshot;
+};
+
+export const writeStoredWorkflowTranscriptSnapshot = (chatId, snapshot) => {
+  if (!chatId || !snapshot) return false;
+  const written = writeJsonValue(getWorkflowTranscriptSnapshotKey(chatId), snapshot);
+  logChatPersistence('write_workflow_transcript_snapshot', {
+    chatId: String(chatId),
+    wrote: written,
+    snapshot: summarizeWorkflowTranscriptSnapshot(snapshot),
+  });
+  return written;
+};
+
+export const clearStoredWorkflowTranscriptSnapshot = (chatId) => {
+  if (!chatId) return false;
+  const cleared = removeValue(getWorkflowTranscriptSnapshotKey(chatId));
+  logChatPersistence('clear_workflow_transcript_snapshot', {
+    chatId: String(chatId),
+    cleared,
+  });
+  return cleared;
+};
+
 export const clearStoredArtifactState = (chatId) => {
   if (!chatId) return false;
   clearStoredArtifactPanelOpen(chatId);
   removeValue(getCurrentArtifactKey(chatId));
   removeValue(getLastArtifactKey(chatId));
+  clearStoredArtifactWorkspaceSnapshot(chatId);
+  clearStoredWorkflowTranscriptSnapshot(chatId);
   return true;
 };
 
