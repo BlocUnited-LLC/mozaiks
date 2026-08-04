@@ -1074,6 +1074,15 @@ test('workspace users route stays responsive across desktop and mobile widths', 
 });
 
 test('workspace integrations route stays responsive across desktop and mobile widths', async ({ page }) => {
+  // Dismiss onboarding tour so its tooltip does not overlap the fixed-position
+  // "Open Studio navigation" / "Manage" buttons during mobile interaction checks.
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildOnboardingStatusPayload({ dismissed: true })),
+    });
+  });
   await page.goto('/integrations');
   const main = page.locator('main');
 
@@ -1401,13 +1410,23 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
   const viewport = page.viewportSize();
   test.skip(!viewport || viewport.width >= 768, 'Mobile app-studio navigation smoke only applies to the mobile project.');
 
+  // Dismiss onboarding tour so its tooltip does not overlap the fixed "Open Studio
+  // navigation" button during mobile navigation click checks.
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildOnboardingStatusPayload({ dismissed: true })),
+    });
+  });
+
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
   const routeChecks = [
     {
       href: `/apps/${APP_ID}/building`,
       heading: 'Building',
-      detail: async () => expect(main.getByRole('heading', { name: 'Build requests' })).toBeVisible(),
+      detail: async () => expect(main.getByRole('heading', { name: 'Build state' })).toBeVisible(),
     },
     {
       href: `/apps/${APP_ID}/usage`,
@@ -1437,6 +1456,16 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
 test('mobile workspace Studio navigation keeps route transitions stable', async ({ page }) => {
   const viewport = page.viewportSize();
   test.skip(!viewport || viewport.width >= 768, 'Mobile workspace-studio navigation smoke only applies to the mobile project.');
+
+  // Dismiss onboarding tour so its tooltip (which overlaps the fixed "Open Studio
+  // navigation" button on mobile) does not block navigation clicks.
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildOnboardingStatusPayload({ dismissed: true })),
+    });
+  });
 
   await page.goto('/apps');
   const main = page.locator('main');
