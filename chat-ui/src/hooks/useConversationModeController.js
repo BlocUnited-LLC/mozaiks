@@ -43,6 +43,17 @@ const selectBestWorkflowTranscriptMessages = (candidates) => {
   return ranked[0] || null;
 };
 
+const filterArtifactPanelMessages = (messages) => {
+  if (!Array.isArray(messages)) return [];
+  return messages.filter((msg) => {
+    if (!msg || typeof msg !== 'object') return false;
+    const meta = msg.metadata || {};
+    if (meta.event_type === 'activity') return false;
+    if (msg.isStreaming) return false;
+    return true;
+  });
+};
+
 export function useConversationModeController({
   activeGeneralChatId,
   conversationMode,
@@ -185,7 +196,7 @@ export function useConversationModeController({
       workflowName: currentWorkflowName || activeWorkflowName || null,
       isOpen: isSidePanelOpen,
       layoutMode: layoutMode || 'split',
-      messages: [...currentArtifactMessages],
+      messages: filterArtifactPanelMessages(currentArtifactMessages),
     };
     if (currentChatId) {
       writeStoredArtifactWorkspaceSnapshot(currentChatId, artifactWorkspaceSnapshotRef.current);
