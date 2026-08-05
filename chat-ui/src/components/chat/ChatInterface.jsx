@@ -484,21 +484,20 @@ const ModernChatInterface = ({
     return !isEmptyContent || chat.isThinking || hasStructured || hasToolCall || hasAttachment || hasTrace || isSystem;
   });
 
-  // Show a typing indicator when workflow has produced any output (activity card,
-  // inline tool call, or tool progress) but no agent text has arrived yet.
+  // Show a typing indicator when workflow has produced any inline tool call or
+  // tool progress but no agent text has arrived yet.
   // This covers the before-chat → first-agent gap where before_chat hooks emit
-  // activity/artifact cards, run_complete clears loading=false, and then
-  // DiscoveryHostAgent (or any first agent) starts its run with no stream chunks yet.
+  // UI surfaces, run_complete clears loading=false, and then DiscoveryHostAgent
+  // (or any first agent) starts its run with no stream chunks yet.
   const showTypingIndicator = loading || (() => {
     if (!Array.isArray(messages) || connectionStatus === 'error') return false;
     let hasWorkflowOutput = false;
     let hasAgentText = false;
     for (const msg of messages) {
       if (!msg || msg.metadata?.hideInTranscript) continue;
-      // activity cards (event_type: 'activity'), tool progress, or inline tool calls
+      // Tool progress or inline tool calls count as visible workflow output.
       if (
         msg.toolCall
-        || msg.metadata?.event_type === 'activity'
         || msg.metadata?.event_type === 'tool_progress'
       ) {
         hasWorkflowOutput = true;

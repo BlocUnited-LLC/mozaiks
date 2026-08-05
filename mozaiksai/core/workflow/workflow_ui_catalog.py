@@ -196,17 +196,17 @@ _WORKFLOW_UI_PRIMITIVES: tuple[WorkflowUIPrimitive, ...] = (
     ),
     WorkflowUIPrimitive(
         primitive_id="progress_stepper",
-        owner="shell",
+        owner="workflow",
         category="status",
         default_display="inline",
         response_mode="none",
-        realization="shell_builtin",
+        realization="generated_component",
         shipped_component=None,
-        plannable=False,
-        description="Framework-owned stage progress indicator driven by workflow planning and runtime status.",
+        plannable=True,
+        description="Workflow-owned inline stage progress indicator with app-specific labels, progress, and warnings.",
     ),
     WorkflowUIPrimitive(
-        primitive_id="agent_activity_feed",
+        primitive_id="agent_status_feed",
         owner="shell",
         category="status",
         default_display="inline",
@@ -214,7 +214,7 @@ _WORKFLOW_UI_PRIMITIVES: tuple[WorkflowUIPrimitive, ...] = (
         realization="shell_builtin",
         shipped_component=None,
         plannable=False,
-        description="Framework-owned agent activity log for background execution and handoffs.",
+        description="Framework-owned agent status log for background execution and handoffs.",
     ),
     WorkflowUIPrimitive(
         primitive_id="awaiting_reply_banner",
@@ -453,7 +453,8 @@ def format_workflow_ui_catalog_guidance() -> str:
     lines.append("Rules:")
     lines.append("- Use `composer_reply` for plain natural-language feedback instead of generating an inline text box.")
     lines.append("- Use a plannable workflow primitive when the user must approve, choose, edit, upload, or review structured content.")
-    lines.append("- Do not encode shell status surfaces as workflow-local React components; the shell owns progress, status, and background activity UX.")
+    lines.append("- Use `progress_stepper` for workflow-owned inline stepper/status cards with app-specific stages.")
+    lines.append("- Do not encode shell status surfaces as workflow-local React components; the shell owns run banners and generic background status feeds.")
     lines.append("- For `shipped_component` primitives, prefer the canonical shipped component name directly in `ui.component`.")
     lines.append("- If a `shipped_component` primitive needs workflow-local branding or extra glue, generate only a thin re-export or wrapper around the shipped component.")
     lines.append("- Generated custom React should only be produced for entries whose realization is `generated_component`.")

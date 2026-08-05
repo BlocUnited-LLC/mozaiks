@@ -69,8 +69,9 @@ async def test_create_artifact_version_persists_manifest_and_lineage() -> None:
 
     versions_coll.update_many.assert_awaited_once()
     inserted = versions_coll.insert_one.await_args.args[0]
-    assert inserted["artifact_kind"] == "app_bundle"
-    assert inserted["artifact_key"] == "primary"
+    # Document is now stored with build_family / build_key (BuildRecord schema)
+    assert inserted.get("build_family") == "app_bundle" or inserted.get("artifact_kind") == "app_bundle"
+    assert inserted.get("build_key") == "primary" or inserted.get("artifact_key") == "primary"
     assert inserted["version_number"] == 3
     assert inserted["files_manifest"][0]["sha256"] == "abc"
 

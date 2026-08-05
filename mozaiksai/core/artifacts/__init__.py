@@ -9,6 +9,8 @@ from .content_store import (
     get_artifact_content_store,
     get_bundle_content_store,
 )
+
+# Prior-api aliases — kept so callers that import old names still work during migration
 from .models import (
     ArtifactCommitMetadata,
     ArtifactFileManifestEntry,
@@ -38,23 +40,25 @@ from .summary_artifacts import (
 )
 
 __all__ = [
+    # Content store — new names
+    "BundleContentStore",
+    "GridFSBundleContentStore",
+    "LocalBundleContentStore",
+    "get_bundle_content_store",
     # Content store — prior-api names
     "ArtifactContentStore",
     "ContentNotFoundError",
     "GridFSArtifactContentStore",
     "LocalArtifactContentStore",
     "get_artifact_content_store",
-    # Content store — new names
-    "BundleContentStore",
-    "GridFSBundleContentStore",
-    "LocalBundleContentStore",
-    "get_bundle_content_store",
-    # Models — prior-api names
+    # Models — new names
+    "BuildRecord",
+    "BuildRecordCommitMetadata",
+    "BuildRecordFileEntry",
+    "BuildRecordStatus",
+    "BuildRecordValidationStatus",
+    # Models — shared/unchanged
     "ArtifactCommitMetadata",
-    "ArtifactFileManifestEntry",
-    "ArtifactLifecycleStatus",
-    "ArtifactValidationStatus",
-    "ArtifactVersionDoc",
     "ChangeClassification",
     "ChangeIntentDoc",
     "ChangeRequestDoc",
@@ -62,23 +66,21 @@ __all__ = [
     "RefinementRequestPayload",
     "RefinementSessionDoc",
     "RefinementSessionStatus",
-    # Models — new names
-    "BuildRecord",
-    "BuildRecordCommitMetadata",
-    "BuildRecordFileEntry",
-    "BuildRecordStatus",
-    "BuildRecordValidationStatus",
-    # Store — prior-api names
-    "ArtifactStore",
-    "get_artifact_store",
+    # Models — prior-api aliases
+    "ArtifactFileManifestEntry",
+    "ArtifactLifecycleStatus",
+    "ArtifactValidationStatus",
+    "ArtifactVersionDoc",
     # Store — new names
     "BuildRecordStore",
     "get_build_record_store",
-    # Summary artifacts — prior-api names
+    # Store — prior-api aliases
+    "ArtifactStore",
+    "get_artifact_store",
+    # Summary artifacts
     "extract_summary_payload",
     "persist_summary_artifact",
-    "resolve_latest_artifact_version_refs",
-    # Summary artifacts — new names
     "persist_summary_build_record",
+    "resolve_latest_artifact_version_refs",
     "resolve_latest_build_record_refs",
 ]

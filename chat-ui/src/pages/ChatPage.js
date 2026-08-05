@@ -77,14 +77,10 @@ import {
   shouldOfferHumanSupport,
 } from '../utils/supportLinks';
 import {
-  activityArtifactFromMessage,
-  buildActivityMessageFromEvent,
   buildComposerArtifactContext,
-  buildRestoredActivityMessage,
-  isRestorableActivityArtifact,
   shouldShowToolProgress,
-  upsertActivityMessage,
-} from '../components/chat/activityArtifacts';
+  upsertInlineToolCallMessage,
+} from '../components/chat/inlineSurfaces';
 
 // Extracted hooks for gradual migration
 // Usage: const { messages, addMessage, ... } = useConversation({ chatId, conversationMode, ... });
@@ -310,7 +306,6 @@ const ChatPage = () => {
   // Prevent duplicate restores per connection
   const artifactRestoredOnceRef = useRef(false);
   const artifactCacheValidRef = useRef(false);
-  const restoredActivityArtifactRef = useRef(null);
   const lastErrorIdRef = useRef(null); // Track last error to prevent duplicates
   const workflowMessagesCacheRef = useRef([]);
   const workflowReplayPendingRef = useRef(false);
@@ -438,10 +433,6 @@ const ChatPage = () => {
       return false;
     }
 
-    if (metadata?.event_type === 'activity') {
-      return true;
-    }
-
     const normalizedAgentName = String(
       event.agentName
       || event.agent
@@ -543,15 +534,6 @@ const ChatPage = () => {
           'server_sequence',
           metadata.workflow_name || toolCall.workflow_name || '',
           serverSequence,
-        ].join(':');
-      }
-      if (metadata.event_type === 'activity') {
-        return [
-          'activity',
-          metadata.workflow_name || '',
-          metadata.activity_type || '',
-          metadata.component_type || metadata.activity_component_type || '',
-          metadata.display_variant || '',
         ].join(':');
       }
       if (metadata.event_type === 'tool_progress') {
@@ -925,7 +907,6 @@ const ChatPage = () => {
       && (
         sanitizedWorkflowMessages.length !== workflowMessages.length
         || mergedWorkflowMessages.length !== sanitizedWorkflowMessages.length
-        || mergedSummary.activityCount !== sanitizedSummary.activityCount
         || mergedSummary.uiMessageCount !== sanitizedSummary.uiMessageCount
       )
     ) {
@@ -989,14 +970,11 @@ const ChatPage = () => {
         persistWorkflowTranscriptSnapshot(mergedMessages);
         const mergedSummary = summarizeWorkflowMessages(mergedMessages);
         const sanitizedSummary = summarizeWorkflowMessages(sanitizedMessages);
-        // Only merge back when the stored/shared transcript adds activity or UI surface
+        // Only merge back when the stored/shared transcript adds UI surface
         // messages that the current list is missing. Never merge back plain agent text
         // that would create duplicate content (same text under a different key) for one
         // render frame before sanitizeVisibleWorkflowMessages dedupes it next tick.
-        if (
-          mergedSummary.activityCount > sanitizedSummary.activityCount
-          || mergedSummary.uiMessageCount > sanitizedSummary.uiMessageCount
-        ) {
+        if (mergedSummary.uiMessageCount > sanitizedSummary.uiMessageCount) {
           setMessagesWithLogging(mergedMessages);
         }
       }
@@ -1045,7 +1023,7 @@ const ChatPage = () => {
 
     const sanitizedMessages = sanitizeVisibleWorkflowMessages(messages);
     const messageSummary = summarizeWorkflowMessages(messages);
-    if (messageSummary.activityCount > 0 || messageSummary.uiMessageCount > 0) {
+    if (messageSummary.uiMessageCount > 0) {
       logChatPersistence('workflow_transcript_sync', {
         currentChatId: currentChatId || null,
         currentWorkflowName: currentWorkflowName || null,
@@ -1888,146 +1866,6 @@ const ChatPage = () => {
     updateArtifactPayload(artifactId, (payload) => applyArtifactUpdate(payload, update));
   }, [updateArtifactPayload]);
 
-  const upsertRestoredActivityArtifact = useCallback((artifact) => {
-    if (isRestorableActivityArtifact(artifact)) {
-      restoredActivityArtifactRef.current = artifact;
-    }
-
-    logChatPersistence('restore_activity_artifact', {
-      currentChatId: currentChatId || null,
-      currentWorkflowName: currentWorkflowName || null,
-      artifact: {
-        tool_name: artifact?.tool_name || null,
-        component_type: artifact?.component_type || null,
-        display: artifact?.display || null,
-        activity_type: artifact?.payload?.activity_type || artifact?.payload?.activity_progress?.activity_type || null,
-        activity_display_variant: artifact?.payload?.activity_display_variant || artifact?.payload?.display_variant || null,
-      },
-      cacheBefore: summarizeWorkflowMessages(workflowMessagesCacheRef.current),
-      sharedBefore: summarizeWorkflowMessages(workflowMessagesSharedRef.current),
-    });
-
-    const restoredMessage = buildRestoredActivityMessage({
-      artifact,
-      chatId: currentChatId,
-      workflowName: currentWorkflowName,
-    });
-    if (!restoredMessage) {
-      return;
-    }
-
-    const applyRestoredProgress = (messageList) => upsertActivityMessage(messageList, restoredMessage);
-
-    workflowMessagesCacheRef.current = applyRestoredProgress(workflowMessagesCacheRef.current);
-    workflowMessagesSharedRef.current = applyRestoredProgress(workflowMessagesSharedRef.current);
-    setWorkflowMessages((prev) => applyRestoredProgress(prev));
-    setMessagesWithLogging((prev) => applyRestoredProgress(prev));
-  }, [
-    currentChatId,
-    currentWorkflowName,
-    setMessagesWithLogging,
-    setWorkflowMessages,
-    restoredActivityArtifactRef,
-    workflowMessagesCacheRef,
-    workflowMessagesSharedRef,
-  ]);
-
-  const summarizeStoredArtifactRecord = useCallback((artifact) => {
-    if (!artifact || typeof artifact !== 'object') {
-      return null;
-    }
-
-    const toolCall = artifact.toolCall && typeof artifact.toolCall === 'object' ? artifact.toolCall : {};
-    const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
-
-    return {
-      tool_name: artifact.tool_name || toolCall.tool_name || null,
-      component_type: artifact.component_type || toolCall.component_type || null,
-      display: artifact.display || toolCall.display || payload.display || payload.mode || null,
-      workflow_name: artifact.workflow_name || toolCall.workflow_name || null,
-      activity_type: payload.activity_type || payload.activity_progress?.activity_type || null,
-      activity_component_type: payload.activity_component_type || payload.component_type || null,
-      activity_display_variant: payload.activity_display_variant || payload.display_variant || null,
-    };
-  }, []);
-
-  const upsertRestoredActivityFromArtifactMessages = useCallback((artifactMessages, fallbackWorkflowName = null) => {
-    const messagesList = Array.isArray(artifactMessages) ? artifactMessages : [];
-    for (const message of messagesList) {
-      const artifact = activityArtifactFromMessage(message, fallbackWorkflowName || currentWorkflowName);
-      if (artifact) {
-        upsertRestoredActivityArtifact(artifact);
-        return true;
-      }
-    }
-    return false;
-  }, [currentWorkflowName, upsertRestoredActivityArtifact]);
-
-  const restoreStoredActivityForChat = useCallback((chatId, fallbackWorkflowName = null) => {
-    if (!chatId) {
-      return false;
-    }
-
-    try {
-      const cachedCurrent = readStoredCurrentArtifact(chatId);
-      const cachedLast = readStoredLastArtifact(chatId);
-      const cached = (
-        cachedCurrent?.tool_name || cachedCurrent?.toolCall?.tool_name
-          ? cachedCurrent
-          : cachedLast
-      );
-      if (!cached) {
-        return false;
-      }
-
-      const artifact = activityArtifactFromMessage(
-        cached,
-        fallbackWorkflowName || currentWorkflowName,
-      ) || (
-        isRestorableActivityArtifact(cached)
-          ? {
-              tool_name: cached.tool_name || cached.component_type,
-              component_type: cached.component_type || cached.tool_name,
-              tool_call_id: cached.tool_call_id || null,
-              workflow_name: cached.workflow_name || fallbackWorkflowName || currentWorkflowName,
-              payload: cached.payload || {},
-              display: cached.display || 'artifact',
-            }
-          : null
-      );
-
-      if (!artifact) {
-        logChatPersistence('restore_stored_activity_failed', {
-          chatId: String(chatId),
-          workflowName: fallbackWorkflowName || currentWorkflowName || null,
-          hasCachedCurrent: Boolean(cachedCurrent),
-          hasCachedLast: Boolean(cachedLast),
-          cachedCurrent: summarizeStoredArtifactRecord(cachedCurrent),
-          cachedLast: summarizeStoredArtifactRecord(cachedLast),
-        });
-        return false;
-      }
-
-      upsertRestoredActivityArtifact(artifact);
-      logChatPersistence('restore_stored_activity_success', {
-        chatId: String(chatId),
-        workflowName: fallbackWorkflowName || currentWorkflowName || null,
-        artifact: {
-          tool_name: artifact.tool_name || null,
-          component_type: artifact.component_type || null,
-          display: artifact.display || null,
-          activity_type: artifact.payload?.activity_type || artifact.payload?.activity_progress?.activity_type || null,
-          activity_component_type: artifact.payload?.activity_component_type || artifact.payload?.component_type || null,
-          activity_display_variant: artifact.payload?.activity_display_variant || artifact.payload?.display_variant || null,
-        },
-      });
-      return true;
-    } catch (e) {
-      console.warn('💾 [RESTORE] Failed to restore activity progress from stored artifact:', e);
-      return false;
-    }
-  }, [currentWorkflowName, upsertRestoredActivityArtifact]);
-
   const cacheServerLastArtifact = useCallback((lastArtifact, options = {}) => {
     const targetChatId = options?.chatId || currentChatId;
     const targetWorkflowName = options?.workflowName || lastArtifact?.workflow_name || currentWorkflowName;
@@ -2125,12 +1963,8 @@ const ChatPage = () => {
       }
     }
 
-    if (isRestorableActivityArtifact(cachedArtifact)) {
-      restoredActivityArtifactRef.current = cachedArtifact;
-      upsertRestoredActivityArtifact(cachedArtifact);
-    }
     return true;
-  }, [currentChatId, currentWorkflowName, setIsSidePanelOpen, setLayoutMode, upsertRestoredActivityArtifact]);
+  }, [currentChatId, currentWorkflowName, setIsSidePanelOpen, setLayoutMode]);
 
   const handleMissingBackendArtifact = useCallback((chatId, workflowName = null) => {
     if (!chatId) {
@@ -2138,7 +1972,6 @@ const ChatPage = () => {
     }
     const restored = restoreStoredArtifactForChat(chatId, workflowName || currentWorkflowName);
     if (restored) {
-      restoreStoredActivityForChat(chatId, workflowName || currentWorkflowName);
       return true;
     }
 
@@ -2158,7 +1991,6 @@ const ChatPage = () => {
     return false;
   }, [
     currentWorkflowName,
-    restoreStoredActivityForChat,
     restoreStoredArtifactForChat,
     setCurrentArtifactMessages,
   ]);
@@ -2278,28 +2110,18 @@ const ChatPage = () => {
       return undefined;
     }
 
-    let cancelled = false;
     hydrateServerArtifactForChat({
       chatId: currentChatId,
       workflowName: currentWorkflowName,
       reason: 'workflow_chat_meta_effect',
-    }).then((hydrated) => {
-      if (cancelled || !hydrated) {
-        return;
-      }
-      restoreStoredActivityForChat(currentChatId, currentWorkflowName);
     });
-
-    return () => {
-      cancelled = true;
-    };
+    return undefined;
   }, [
     conversationMode,
     currentAppId,
     currentWorkflowName,
     currentChatId,
     hydrateServerArtifactForChat,
-    restoreStoredActivityForChat,
   ]);
 
   const handleIncomingRef = useRef(null);
@@ -3483,55 +3305,6 @@ const ChatPage = () => {
         
         return;
       }
-      case 'activity': {
-        const activityEntry = buildActivityMessageFromEvent(data, currentWorkflowName);
-        const visibleConversationMode = conversationModeRef.current || conversationMode;
-        const activityChatId = data.chat_id || data.chatId || currentChatId || activeChatId || null;
-        const activityWorkflowName = activityEntry?.metadata?.workflow_name || currentWorkflowName || activeWorkflowName || null;
-        const applyActivityEntry = (messageList) => upsertActivityMessage(messageList, activityEntry);
-
-        workflowMessagesCacheRef.current = applyActivityEntry(workflowMessagesCacheRef.current);
-        workflowMessagesSharedRef.current = applyActivityEntry(workflowMessagesSharedRef.current);
-        setWorkflowMessages((prev) => applyActivityEntry(prev));
-        persistWorkflowTranscriptSnapshot(workflowMessagesCacheRef.current, {
-          chatId: activityChatId,
-          workflowName: activityWorkflowName,
-        });
-
-        logChatPersistence('activity_event_received', {
-          currentChatId: activityChatId,
-          currentWorkflowName: activityWorkflowName,
-          conversationMode: visibleConversationMode,
-          activity: {
-            activity_type: activityEntry?.metadata?.activity_type || null,
-            activity_status: activityEntry?.metadata?.activity_status || null,
-            activity_agent: activityEntry?.metadata?.activity_agent || null,
-            component_type: activityEntry?.metadata?.component_type || null,
-            display_variant: activityEntry?.metadata?.display_variant || null,
-            content: activityEntry?.content || null,
-          },
-          currentMessages: summarizeWorkflowMessages(messagesRef.current),
-          workflowCache: summarizeWorkflowMessages(workflowMessagesCacheRef.current),
-        });
-
-        if (visibleConversationMode !== 'workflow') {
-          logChatPersistence('activity_event_cached_for_workflow_while_in_ask', {
-            currentChatId: activityChatId,
-            currentWorkflowName: activityWorkflowName,
-            activity: {
-              activity_type: activityEntry?.metadata?.activity_type || null,
-              component_type: activityEntry?.metadata?.component_type || null,
-            },
-            workflowCache: summarizeWorkflowMessages(workflowMessagesCacheRef.current),
-          });
-          return;
-        }
-
-        setMessagesWithLogging(prev => {
-          return applyActivityEntry(prev);
-        });
-        return;
-      }
       case 'tool_progress': {
         // Update or append progress for a long-running tool
         const progress = Number(data.progress_percent || 0);
@@ -3837,9 +3610,6 @@ const ChatPage = () => {
             }
           }
         }
-        if (restoredActivityArtifactRef.current) {
-          upsertRestoredActivityArtifact(restoredActivityArtifactRef.current);
-        }
         if (showSystemMessages) {
           // Replay boundary marker for debug visibility
           setMessagesWithLogging(prev => [...prev, { id:`resume-${Date.now()}`, sender:'system', agentName:'System', content:`🔄 Session replay complete. Live events resumed.`, isStreaming:false }]);
@@ -3848,7 +3618,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [activeChatId, activeWorkflowName, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, upsertRestoredActivityArtifact, urlWorkflowName]);
+  }, [activeChatId, activeWorkflowName, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -5084,53 +4854,42 @@ const ChatPage = () => {
             // Don't inject artifact UIs into the chat feed; they'll render in ArtifactPanel only
             return;
           }
-          setMessagesWithLogging((prev) => {
-            const thinkingMessages = prev.filter(m => m.isThinking);
-            if (thinkingMessages.length > 0) {
-            }
-            
-            const withoutThinking = prev.filter(m => !m.isThinking); // Remove thinking bubbles when UI tool event arrives
-            const messageKey = toolCallId || toolName;
-            const existingIndex = withoutThinking.findIndex(
-              (msg) => msg?.metadata?.toolCallId === messageKey && msg?.toolCall
-            );
-            const inlineMessage = {
-              id: `tool-call-${messageKey || Date.now()}`,
-              sender: 'agent',
-              agentName: resolvedAgentName,
-              content: (payload.agent_message || payload.description || ''), // Surface agent context alongside inline UI
-              isStreaming: false,
-              toolCall: {
-                tool_name: toolName,
-                payload,
-                tool_call_id: toolCallId,
-                workflow_name,
-                onResponse,
-                // Surface display mode for inline Completed chip logic
-                display: displayMode || 'inline',
-                component_type: componentType,
-              },
-              metadata: {
-                toolCallId: messageKey,
-                tool_name: toolName,
-                component_type: componentType,
-                display: displayMode || 'inline',
-              },
-            };
-            if (existingIndex >= 0) {
-              const next = [...withoutThinking];
-              next[existingIndex] = {
-                ...next[existingIndex],
-                ...inlineMessage,
-                id: next[existingIndex]?.id || inlineMessage.id,
-              };
-              return next;
-            }
-            return [
-              ...withoutThinking,
-              inlineMessage,
-            ];
+          const messageKey = toolCallId || toolName;
+          const resolvedWorkflowNameForMessage = workflow_name || currentWorkflowName || null;
+          const inlineMessage = {
+            id: `tool-call-${messageKey || Date.now()}`,
+            sender: 'agent',
+            agentName: resolvedAgentName,
+            content: (payload.agent_message || payload.description || ''),
+            isStreaming: false,
+            toolCall: {
+              tool_name: toolName,
+              payload,
+              tool_call_id: toolCallId,
+              workflow_name: resolvedWorkflowNameForMessage,
+              onResponse,
+              display: displayMode || 'inline',
+              component_type: componentType,
+            },
+            metadata: {
+              toolCallId: messageKey,
+              tool_call_id: toolCallId,
+              tool_name: toolName,
+              component_type: componentType,
+              workflow_name: resolvedWorkflowNameForMessage,
+              display: displayMode || 'inline',
+              interaction_type: update.interaction_type || payload.interaction_type || 'ui_surface',
+              awaiting_response: update.awaiting_response ?? payload.awaiting_response ?? false,
+            },
+          };
+          cacheWorkflowTranscriptMessage(inlineMessage, {
+            chatId: currentChatId,
+            workflowName: resolvedWorkflowNameForMessage,
           });
+          setMessagesWithLogging((prev) => upsertInlineToolCallMessage(
+            prev.filter(m => !m.isThinking),
+            inlineMessage,
+          ));
         }
       } catch (err) {
         console.error('❌ Failed to handle DynamicUIHandler update in ChatPage:', err, {
@@ -5146,7 +4905,12 @@ const ChatPage = () => {
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-    }, [setMessagesWithLogging, currentChatId]);
+    }, [
+      cacheWorkflowTranscriptMessage,
+      currentChatId,
+      currentWorkflowName,
+      setMessagesWithLogging,
+    ]);
 
   const isComposerInputRequestToolCall = (toolCall, message = null) => {
     if (!toolCall?.tool_call_id || message?.tool_call_completed) {
@@ -5539,9 +5303,7 @@ const ChatPage = () => {
     restoreViewSnapshot,
     clearViewArtifacts,
     restoreStoredArtifactForChat,
-    restoreStoredActivityForChat,
     hydrateServerArtifactForChat,
-    upsertRestoredActivityFromArtifactMessages,
     queryMode,
     queryGeneralChatId,
     setConnectionInitialized,
@@ -5575,9 +5337,7 @@ const ChatPage = () => {
     currentChatId,
     activeChatId,
     restoreStoredArtifactForChat,
-    restoreStoredActivityForChat,
     hydrateServerArtifactForChat,
-    upsertRestoredActivityFromArtifactMessages,
     urlWorkflowName,
     conversationMode,
     connectionStatus,

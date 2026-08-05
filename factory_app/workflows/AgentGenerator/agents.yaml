@@ -862,8 +862,9 @@ agents:
       - Check whether some integrations may already be ready from the workspace integrations/admin surface before treating them as a missing dependency.
 
       ## UI CONTRACT RULES
-      - Every tool that presents UI must reference a `workflow_primitive` from the shipped library.
-      - Do NOT emit workflow-local UI requirements for framework-owned shell status surfaces (status bar, notifications, header).
+      - Every tool that presents UI must reference a `workflow_primitive` from the canonical workflow UI catalog.
+      - Use `progress_stepper` with `mode: inline` and `realization: generated_component` when a workflow needs an app-specific staged status card.
+      - Do NOT emit workflow-local UI requirements for framework-owned shell status surfaces (status bar, notifications, header, generic run status feeds).
       - `composer_reply` is the primitive for agent-to-user text interactions; do not build a custom text surface for it.
       - When the workflow needs a custom transition surface, prefer a file-backed transition component exported from `extended_orchestration/ui/index.js`. Use `ui.props` only for lightweight built-in fallback tuning.
       - For any generated React UI file: Typography must come from semantic theme tokens; never hardcode `font-family` names in component code.

@@ -14,11 +14,10 @@ from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
 
 from .models import (
     ArtifactCommitMetadata,
-    ArtifactFileManifestEntry,
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
     BuildRecord,
+    BuildRecordFileEntry,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
     ChangeClassification,
     ChangeIntentDoc,
     ChangeRequestDoc,
@@ -28,6 +27,12 @@ from .models import (
     RefinementSessionStatus,
 )
 
+# Prior-api aliases used internally in this module
+ArtifactFileManifestEntry = BuildRecordFileEntry
+ArtifactLifecycleStatus = BuildRecordStatus
+ArtifactValidationStatus = BuildRecordValidationStatus
+ArtifactVersionDoc = BuildRecord
+
 logger = get_workflow_logger("artifact_store")
 
 
@@ -35,8 +40,8 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class ArtifactStore:
-    """Canonical artifact persistence for versioned build/refinement state."""
+class BuildRecordStore:
+    """Canonical build record persistence for versioned build/refinement state."""
 
     def __init__(self) -> None:
         self.client: Any | None = None
@@ -1148,27 +1153,29 @@ class ArtifactStore:
         return bool(result.modified_count)
 
 
-_artifact_store: ArtifactStore | None = None
+_build_record_store: BuildRecordStore | None = None
 
 
-def get_artifact_store() -> ArtifactStore:
-    global _artifact_store
-    if _artifact_store is None:
-        _artifact_store = ArtifactStore()
-    return _artifact_store
+def get_build_record_store() -> BuildRecordStore:
+    global _build_record_store
+    if _build_record_store is None:
+        _build_record_store = BuildRecordStore()
+    return _build_record_store
 
 
-# Prior-api aliases
-BuildRecordStore = ArtifactStore
+# Prior-api aliases — kept so callers that haven't been updated yet still work
+ArtifactStore = BuildRecordStore
+_artifact_store: BuildRecordStore | None = None
 
 
-def get_build_record_store() -> ArtifactStore:
-    return get_artifact_store()
+def get_artifact_store() -> BuildRecordStore:
+    return get_build_record_store()
 
 
 __all__ = [
-    "ArtifactStore",
-    "get_artifact_store",
     "BuildRecordStore",
     "get_build_record_store",
+    # Prior-api aliases
+    "ArtifactStore",
+    "get_artifact_store",
 ]

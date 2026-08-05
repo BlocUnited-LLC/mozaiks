@@ -6,7 +6,7 @@ Mozaiks needs a **workflow UI catalog** that is narrower and more intentional th
 The catalog serves two different jobs:
 
 1. **Shell-owned workflow status UI**
-2. **Workflow-owned interaction and review UI**
+2. **Workflow-owned interaction, status, and review UI**
 
 Those are not the same surface contract and should not be generated the same way.
 
@@ -22,7 +22,8 @@ The canonical rule is:
 
 - plain natural-language workflow reply uses the chat composer
 - structured workflow interaction uses a workflow UI primitive
-- workflow execution status uses shell-owned status primitives
+- workflow-specific staged progress uses an inline `progress_stepper` UI surface
+- generic runtime execution status uses shell-owned status primitives
 - persistent app UI stays in page schemas and `workflow_touchpoints`
 
 ---
@@ -37,8 +38,7 @@ components.
 | Primitive | Purpose | Canonical owner | Realization |
 |-----------|---------|-----------------|-------------|
 | `run_status_banner` | Show running, paused, failed, completed | shell | built-in |
-| `progress_stepper` | Show named workflow stages and current progress | shell | built-in |
-| `agent_activity_feed` | Show background agent activity, handoffs, and work in progress | shell | built-in |
+| `agent_status_feed` | Show background agent status, handoffs, and work in progress | shell | built-in |
 | `awaiting_reply_banner` | Show that the next composer reply goes to a pending workflow checkpoint | shell | built-in |
 
 Rules:
@@ -58,6 +58,7 @@ These represent actual workflow checkpoints or review surfaces.
 | `choice_picker` | `inline` | Choose from bounded options |
 | `confirmation_summary` | `inline` | Confirm captured facts or request edits |
 | `form_card` | `inline` | Structured multi-field input |
+| `progress_stepper` | `inline` | Show app-specific staged workflow progress without asking for input |
 | `record_picker` | `artifact` | Search/select records or entities |
 | `file_upload_prompt` | `inline` | Upload one or more files |
 | `diff_review` | `artifact` | Review before/after changes |
@@ -72,13 +73,14 @@ These represent actual workflow checkpoints or review surfaces.
 Rules:
 
 - `composer_reply` is shell-owned input UX but still a plannable workflow checkpoint.
-- All other entries are **workflow interaction patterns**.
+- All other entries are **workflow-owned UI patterns**.
 - The primitive id is the canonical planning contract.
 - `ui.realization` is the realization contract.
 - `component` is the concrete runtime identifier for that realization.
 - `ui.workflow_primitive` is required on every emitted `UI_Tool` and `UI_Surface` manifest entry.
 - `ui.realization` is required on every emitted `UI_Tool` and `UI_Surface` manifest entry.
 - Only renderable workflow primitives may appear in `tools.yaml`; shell status primitives and `composer_reply` must not.
+- `progress_stepper` is renderable and may appear in `tools.yaml` as an inline `UI_Surface` with `realization: generated_component`.
 
 ### Shipped Shared Workflow Components
 
@@ -126,6 +128,7 @@ Rules:
 
 - Use `composer_reply` for plain text feedback.
 - Use a structured workflow primitive for bounded interaction.
+- Use `progress_stepper` when a workflow needs a custom inline stepper tied to app-specific work such as repo scan, code indexing, import, deployment, or verification.
 - Do not emit shell status primitives here.
 
 This is the **decision point** for workflow UI.
@@ -199,7 +202,7 @@ The runtime and shell own:
 - `chat.tool_call`
 - `tool_call_response`
 - composer-mode input routing
-- progress/status/activity shell UI
+- generic progress/status shell UI
 - payload enrichment from `tools.yaml` so workflow UI events carry canonical `workflow_primitive`, `ui_contract`, and projected action metadata
 
 These are not AppGenerator responsibilities.

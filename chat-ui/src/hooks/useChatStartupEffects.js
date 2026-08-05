@@ -44,9 +44,7 @@ export function useChatStartupEffects({
   currentChatId,
   activeChatId,
   restoreStoredArtifactForChat,
-  restoreStoredActivityForChat = null,
   hydrateServerArtifactForChat = null,
-  upsertRestoredActivityFromArtifactMessages = null,
   urlWorkflowName,
   conversationMode,
   connectionStatus,
@@ -205,12 +203,6 @@ export function useChatStartupEffects({
             if (artifactRestoredOnceRef) {
               artifactRestoredOnceRef.current = true;
             }
-            if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
-              upsertRestoredActivityFromArtifactMessages(
-                snapshot.messages,
-                snapshot.workflowName || currentWorkflowName || urlWorkflowName,
-              );
-            }
           }
           if (snapshot?.isOpen) {
             setIsSidePanelOpen(true);
@@ -233,25 +225,13 @@ export function useChatStartupEffects({
             restored,
             workflowName: urlWorkflowName || currentWorkflowName || null,
           });
-          if (restored) {
-            if (typeof restoreStoredActivityForChat === 'function') {
-              restoreStoredActivityForChat(restoreChatId, urlWorkflowName);
-            }
-          } else if (typeof restoreStoredActivityForChat === 'function') {
-            // Restore workflow-owned inline activity even when no artifact exists yet.
-            restoreStoredActivityForChat(restoreChatId, urlWorkflowName);
-          }
           if (!restored && typeof hydrateServerArtifactForChat === 'function') {
             Promise.resolve(hydrateServerArtifactForChat({
               chatId: restoreChatId,
               workflowName: urlWorkflowName || currentWorkflowName,
               reason: 'startup_workflow_artifact_restore_miss',
               force: true,
-            })).then((hydrated) => {
-              if (hydrated && typeof restoreStoredActivityForChat === 'function') {
-                restoreStoredActivityForChat(restoreChatId, urlWorkflowName || currentWorkflowName);
-              }
-            });
+            }));
           }
         }
       }
@@ -293,7 +273,6 @@ export function useChatStartupEffects({
     navigationLoading,
     queryChatId,
     queryMode,
-    restoreStoredActivityForChat,
     restoreStoredArtifactForChat,
     hydrateServerArtifactForChat,
     setConversationMode,
@@ -304,7 +283,6 @@ export function useChatStartupEffects({
     setWorkflowMessages,
     sanitizeVisibleWorkflowMessages,
     urlWorkflowName,
-    upsertRestoredActivityFromArtifactMessages,
     artifactWorkspaceSnapshotRef,
     messagesRef,
     workflowMessagesCacheRef,
@@ -382,25 +360,15 @@ export function useChatStartupEffects({
       ? restoreStoredArtifactForChat(currentChatId, currentWorkflowName)
       : false;
     if (restored) {
-      if (typeof restoreStoredActivityForChat === 'function') {
-        restoreStoredActivityForChat(currentChatId, currentWorkflowName);
-      }
       return;
     }
 
-    if (typeof restoreStoredActivityForChat === 'function') {
-      restoreStoredActivityForChat(currentChatId, currentWorkflowName);
-    }
     if (typeof hydrateServerArtifactForChat === 'function') {
       Promise.resolve(hydrateServerArtifactForChat({
         chatId: currentChatId,
         workflowName: currentWorkflowName,
         reason: 'workflow_mode_empty_artifact',
-      })).then((hydrated) => {
-        if (hydrated && typeof restoreStoredActivityForChat === 'function') {
-          restoreStoredActivityForChat(currentChatId, currentWorkflowName);
-        }
-      });
+      }));
     }
   }, [
     conversationMode,
@@ -408,7 +376,6 @@ export function useChatStartupEffects({
     currentChatId,
     currentWorkflowName,
     hydrateServerArtifactForChat,
-    restoreStoredActivityForChat,
     restoreStoredArtifactForChat,
     surfaceState,
   ]);

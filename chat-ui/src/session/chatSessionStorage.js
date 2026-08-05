@@ -76,7 +76,6 @@ export const logChatPersistence = (event, details = {}) => {
 const summarizeMessageList = (messageList) => {
   const messages = Array.isArray(messageList) ? messageList : [];
   const componentCounts = new Map();
-  let activityCount = 0;
   let uiMessageCount = 0;
   let toolProgressCount = 0;
 
@@ -87,15 +86,11 @@ const summarizeMessageList = (messageList) => {
       message?.component_type
       || toolCall.component_type
       || metadata.component_type
-      || metadata.activity_component_type
       || toolCall.tool_name
       || message?.tool_name
       || '',
     ).trim();
 
-    if (metadata.event_type === 'activity') {
-      activityCount += 1;
-    }
     if (metadata.event_type === 'tool_progress') {
       toolProgressCount += 1;
     }
@@ -109,7 +104,6 @@ const summarizeMessageList = (messageList) => {
 
   return {
     total: messages.length,
-    activityCount,
     toolProgressCount,
     uiMessageCount,
     componentTypes: Array.from(componentCounts.entries())

@@ -448,6 +448,7 @@ models:
     - choice_picker
     - confirmation_summary
     - form_card
+    - progress_stepper
     - record_picker
     - file_upload_prompt
     - diff_review
@@ -466,6 +467,7 @@ models:
     - choice_picker
     - confirmation_summary
     - form_card
+    - progress_stepper
     - record_picker
     - file_upload_prompt
     - diff_review
@@ -1242,7 +1244,7 @@ models:
           "composer" — shell-owned free-text reply lane using the main chat composer.
             Use for plain natural-language answers or clarifications.
           "inline" — agent-driven output rendered conversationally in the chat flow.
-            Use for status updates, single stats, short confirmations, streaming text.
+            Use for status updates, progress steppers, single stats, short confirmations, streaming text.
           "artifact" — agent-driven output rendered in a side tray or modal panel.
             Use for complex interactive UIs: approval wizards, multi-field forms,
             data tables with actions, diagrams, streaming action plans.

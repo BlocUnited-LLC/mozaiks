@@ -74,6 +74,10 @@ class TestGetWorkflowUIPrimitives:
         ids = {e.primitive_id for e in get_workflow_ui_primitives()}
         assert "approval_card" in ids
 
+    def test_contains_progress_stepper(self):
+        ids = {e.primitive_id for e in get_workflow_ui_primitives()}
+        assert "progress_stepper" in ids
+
 
 # ---------------------------------------------------------------------------
 # 2. get_workflow_ui_realization_ids
@@ -161,6 +165,10 @@ class TestGetWorkflowRenderablePrimitiveIds:
         shell_ids = {e.primitive_id for e in get_workflow_ui_primitives() if not e.plannable}
         renderable = set(get_workflow_renderable_primitive_ids())
         assert not shell_ids.intersection(renderable)
+
+    def test_includes_progress_stepper(self):
+        renderable = set(get_workflow_renderable_primitive_ids())
+        assert "progress_stepper" in renderable
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +323,10 @@ class TestValidateWorkflowRenderablePrimitiveIds:
     def test_valid_renderable_passes(self):
         result = validate_workflow_renderable_primitive_ids(["approval_card"], context="test")
         assert "approval_card" in result
+
+    def test_progress_stepper_is_renderable(self):
+        result = validate_workflow_renderable_primitive_ids(["progress_stepper"], context="test")
+        assert result == ["progress_stepper"]
 
     def test_none_returns_empty(self):
         result = validate_workflow_renderable_primitive_ids(None, context="test")

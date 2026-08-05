@@ -180,19 +180,17 @@ function StageMarker({ state }) {
 }
 
 export default function AppIntelligenceProgressCard({ metadata: metadataProp = {}, payload: payloadProp = {}, message = "" }) {
-  // Support both activity-message path (metadata) and inline UI_Surface path (payload)
+  // Support normal inline UI surface payloads and restored transcript metadata.
   const metadata = Object.keys(metadataProp).length > 0 ? metadataProp : payloadProp;
   const progress = asObject(metadata.app_intelligence_progress || metadata.progress || {});
-  const raw = asObject(metadata.raw_activity_metadata);
-  const progressDetails = asObject(progress.details || raw.progress_details);
-  const stage = String(metadata.progress_stage || progress.stage || raw.progress_stage || "").trim().toLowerCase();
-  const status = String(metadata.progress_status || progress.status || metadata.activity_status || "").trim().toLowerCase();
+  const progressDetails = asObject(metadata.progress_details || progress.details);
+  const stage = String(metadata.progress_stage || progress.stage || "").trim().toLowerCase();
+  const status = String(metadata.progress_status || progress.status || "").trim().toLowerCase();
   const percent = clampPercent(metadata.progress_percent ?? progress.percent);
   const currentIndex = resolveStageIndex(stage, percent);
   const warnings = dedupeWarnings([
     ...asArray(metadata.progress_warnings),
     ...asArray(progress.warnings),
-    ...asArray(raw.progress_warnings),
   ]);
 
   const isReady = stage === "ready" || TERMINAL_READY.has(status);
@@ -207,7 +205,7 @@ export default function AppIntelligenceProgressCard({ metadata: metadataProp = {
         : "border-primary/35 bg-primary/10 text-primary";
   const badgeLabel = isBlocked ? "Needs attention" : isPartial ? "Partial" : isReady ? "Ready" : "Working";
   const statusMessage = String(message || progress.message || "Building app context.").trim();
-  const repositorySource = progressDetails.source || raw.source || "";
+  const repositorySource = progressDetails.source || "";
   const downloaded = progressDetails.downloaded_file_count;
   const total = progressDetails.fetch_candidate_count;
 

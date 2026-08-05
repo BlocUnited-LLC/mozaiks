@@ -127,7 +127,7 @@ class _FakeArtifactStore:
     async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
         return []
 
-    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
         return [
             _FakeChangeRequest(ChangeClassification.FEATURE),
             _FakeChangeRequest(ChangeClassification.PATCH),
@@ -337,7 +337,7 @@ class _RevisionArtifactStore(_FakeArtifactStore):
             ),
         )
 
-    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
         return [
             await self.get_change_request(app_id=app_id, change_request_id="cr_1"),
         ]

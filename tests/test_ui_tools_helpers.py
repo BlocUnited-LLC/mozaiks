@@ -249,3 +249,51 @@ def test_use_ui_tool_resolves_manifest_component_when_called_by_function_name() 
     assert captured["payload"]["workflow_primitive"] == "approval_card"
     assert captured["payload"]["ui_realization"] == "shipped_component"
 
+
+def test_emit_ui_surface_emits_passive_inline_progress_stepper() -> None:
+    workflow_manager.records["AppIntelligenceProgressCard"] = {
+        "mode": "inline",
+        "agent": "App Intelligence",
+        "component": "AppIntelligenceProgressCard",
+        "workflow_primitive": "progress_stepper",
+        "realization": "generated_component",
+    }
+    captured = {}
+
+    async def _fake_emit(**kwargs):
+        captured.update(kwargs)
+        return "evt_progress_stepper_1"
+
+    ui_tools_module._emit_tool_call_core = _fake_emit
+
+    result = asyncio.run(
+        ui_tools_module.emit_ui_surface(
+            "AppIntelligenceProgressCard",
+            {
+                "progress": {"stage": "fetching_source_files", "percent": 42},
+                "status": "working",
+                "message": "Obtaining app context.",
+                "progress_percent": 42,
+                "component_type": "AppIntelligenceProgressCard",
+                "display_variant": "app_intelligence_progress",
+            },
+            chat_id="chat_activity_1",
+            workflow_name="ExistingAppDiscovery",
+            agent_name="App Intelligence",
+            display="inline",
+        )
+    )
+
+    assert result == "evt_progress_stepper_1"
+    assert captured["tool_id"] == "AppIntelligenceProgressCard"
+    assert captured["chat_id"] == "chat_activity_1"
+    assert captured["workflow_name"] == "ExistingAppDiscovery"
+    assert captured["display"] == "inline"
+    assert captured["agent_name"] == "App Intelligence"
+    assert captured["awaiting_response"] is False
+    assert captured["component_name"] == "AppIntelligenceProgressCard"
+    assert captured["payload"]["component_type"] == "AppIntelligenceProgressCard"
+    assert captured["payload"]["display_variant"] == "app_intelligence_progress"
+    assert captured["payload"]["workflow_primitive"] == "progress_stepper"
+    assert captured["payload"]["ui_realization"] == "generated_component"
+
