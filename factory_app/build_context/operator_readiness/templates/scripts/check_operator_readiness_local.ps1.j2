@@ -1,0 +1,14 @@
+$ErrorActionPreference = 'Stop'
+
+$ReadinessProfile = "{{ readiness_profile }}"
+$EvidenceMode = "{{ evidence_mode | default("local_no_spend") }}"
+$EvidenceLedgerPath = "{{ evidence_ledger_path | default("docs/operations/evidence-log.json") }}"
+$LaunchCheck = "{{ launch_check_command | default("python scripts/check_launch_readiness.py --json") }}"
+$MonetizationCheck = "{{ monetization_check_command | default("python scripts/check_monetization_readiness.py --json") }}"
+
+Write-Host "Operator readiness profile: $ReadinessProfile"
+Write-Host "Evidence mode: $EvidenceMode"
+Write-Host "Evidence ledger: $EvidenceLedgerPath"
+Write-Host "Launch check: $LaunchCheck"
+Write-Host "Monetization check: $MonetizationCheck"
+Write-Host "This wrapper is a deterministic local scaffold; wire the commands into your workspace launcher as needed."

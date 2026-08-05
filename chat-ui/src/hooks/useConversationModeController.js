@@ -25,8 +25,7 @@ import {
 const scoreWorkflowTranscriptMessages = (messageList) => {
   const summary = summarizeWorkflowMessages(messageList);
   return (
-    summary.activityCount * 1000
-    + summary.uiMessageCount * 100
+    summary.uiMessageCount * 100
     + summary.toolProgressCount * 50
     + summary.total
   );
@@ -48,7 +47,6 @@ const filterArtifactPanelMessages = (messages) => {
   return messages.filter((msg) => {
     if (!msg || typeof msg !== 'object') return false;
     const meta = msg.metadata || {};
-    if (meta.event_type === 'activity') return false;
     if (msg.isStreaming) return false;
     return true;
   });
@@ -115,9 +113,7 @@ export function useConversationModeController({
   restoreViewSnapshot,
   clearViewArtifacts,
   restoreStoredArtifactForChat,
-  restoreStoredActivityForChat = null,
   hydrateServerArtifactForChat = null,
-  upsertRestoredActivityFromArtifactMessages = null,
   artifactCacheValidRef = null,
   artifactRestoredOnceRef = null,
   queryGeneralChatId = null,
@@ -412,12 +408,6 @@ export function useConversationModeController({
             if (artifactRestoredOnceRef) {
               artifactRestoredOnceRef.current = true;
             }
-            if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
-              upsertRestoredActivityFromArtifactMessages(
-                snapshotMessages,
-                snapshotWorkflowName || currentWorkflowName,
-              );
-            }
           } else if (snapshot.isOpen && typeof restoreStoredArtifactForChat === 'function') {
             const restored = restoreStoredArtifactForChat(
               snapshotChatId || currentChatId,
@@ -428,12 +418,6 @@ export function useConversationModeController({
               currentWorkflowName: currentWorkflowName || null,
               restored,
             });
-            if (restored && typeof restoreStoredActivityForChat === 'function') {
-              restoreStoredActivityForChat(
-                snapshotChatId || currentChatId,
-                snapshotWorkflowName || currentWorkflowName,
-              );
-            }
             if (!restored) {
               setCurrentArtifactMessages([]);
             }
@@ -471,36 +455,19 @@ export function useConversationModeController({
         ));
         if (artifactMessages.length > 0) {
           setCurrentArtifactMessages(artifactMessages);
-          if (typeof upsertRestoredActivityFromArtifactMessages === 'function') {
-            upsertRestoredActivityFromArtifactMessages(
-              artifactMessages,
-              currentWorkflowName,
-            );
-          }
         }
       } else if (typeof restoreStoredArtifactForChat === 'function'
         && restoreStoredArtifactForChat(currentChatId, currentWorkflowName)) {
-        if (typeof restoreStoredActivityForChat === 'function') {
-          restoreStoredActivityForChat(currentChatId, currentWorkflowName);
-        }
         setIsSidePanelOpen(true);
         if (setLayoutMode) setLayoutMode('split');
       } else {
-        // Still restore workflow-owned inline activity even when no artifact exists yet.
-        if (typeof restoreStoredActivityForChat === 'function') {
-          restoreStoredActivityForChat(currentChatId, currentWorkflowName);
-        }
         if (typeof hydrateServerArtifactForChat === 'function') {
           Promise.resolve(hydrateServerArtifactForChat({
             chatId: currentChatId,
             workflowName: currentWorkflowName,
             reason: 'ensure_workflow_mode_artifact_restore_miss',
             force: true,
-          })).then((hydrated) => {
-            if (hydrated && typeof restoreStoredActivityForChat === 'function') {
-              restoreStoredActivityForChat(currentChatId, currentWorkflowName);
-            }
-          });
+          }));
         }
         setCurrentArtifactMessages([]);
         setIsSidePanelOpen(false);
@@ -523,10 +490,8 @@ export function useConversationModeController({
     setLayoutMode,
     setMessagesWithLogging,
     restoreStoredArtifactForChat,
-    restoreStoredActivityForChat,
     hydrateServerArtifactForChat,
     surfaceStateRef,
-    upsertRestoredActivityFromArtifactMessages,
     artifactWorkspaceSnapshotRef,
     workflowMessages,
     workflowMessagesCacheRef,
@@ -619,19 +584,13 @@ export function useConversationModeController({
       if (typeof restoreStoredArtifactForChat === 'function') {
         setTimeout(() => {
           const restored = restoreStoredArtifactForChat(targetChatId, resolvedWorkflow);
-          if (restored && typeof restoreStoredActivityForChat === 'function') {
-            restoreStoredActivityForChat(targetChatId, resolvedWorkflow);
-          } else if (!restored && typeof hydrateServerArtifactForChat === 'function') {
+          if (!restored && typeof hydrateServerArtifactForChat === 'function') {
             Promise.resolve(hydrateServerArtifactForChat({
               chatId: targetChatId,
               workflowName: resolvedWorkflow,
               reason: 'resume_workflow_session_artifact_restore_miss',
               force: true,
-            })).then((hydrated) => {
-              if (hydrated && typeof restoreStoredActivityForChat === 'function') {
-                restoreStoredActivityForChat(targetChatId, resolvedWorkflow);
-              }
-            });
+            }));
           }
         }, 100);
       }
@@ -656,7 +615,6 @@ export function useConversationModeController({
     setMessagesWithLogging,
     rememberWorkflowChat,
     selectBestWorkflowTranscriptMessages,
-    restoreStoredActivityForChat,
     restoreStoredArtifactForChat,
     readStoredWorkflowTranscriptSnapshot,
     hydrateServerArtifactForChat,

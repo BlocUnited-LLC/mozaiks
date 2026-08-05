@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { WebSocketApiAdapter } from '../../adapters/api';
 import config from '../../config';
 import { useChatWebSocket } from '../../pages/hooks';
+import ShellUIToolRenderer from '../../core/ui/ShellUIToolRenderer';
+import { buildInlineToolCallMessageFromEvent, upsertInlineToolCallMessage } from './inlineSurfaces';
 
 function normalizeWorkflowEvent(event) {
   if (!event || typeof event !== 'object') {
@@ -189,37 +191,19 @@ function WorkflowChat({
       case 'stream_end':
         finalizeStream(setMessages, event, onMessage);
         return;
-      case 'activity': {
-        const content = String(
-          event?.message
-          || `${getWorkflowAgentName(event)} is working in the background.`
-        );
+      case 'tool_call':
+      case 'ui.render': {
+        const inlineEntry = buildInlineToolCallMessageFromEvent(event, workflow);
+        if (!inlineEntry) {
+          return;
+        }
         setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated.length ? updated[updated.length - 1] : null;
-          const activityKey = `${event?.activity_type || 'background'}:${event?.agent || event?.agent_name || 'System'}`;
-          const nextMessage = {
-            id: last?.metadata?.activityKey === activityKey ? last.id : `activity-${Date.now()}`,
-            sender: 'system',
-            content: `⏳ ${content}`,
-            agentName: 'System',
+          return upsertInlineToolCallMessage(prev, {
+            ...inlineEntry,
             timestamp: new Date().toISOString(),
-            metadata: {
-              eventType: 'activity',
-              activityKey,
-              activityStatus: event?.status || 'working',
-            },
-          };
-          if (last?.metadata?.activityKey === activityKey) {
-            updated[updated.length - 1] = nextMessage;
-            return updated;
-          }
-          if (last?.content === nextMessage.content && last?.metadata?.eventType === 'activity') {
-            return updated;
-          }
-          updated.push(nextMessage);
-          return updated;
+          });
         });
+        onMessage?.(inlineEntry);
         return;
       }
       case 'run_complete':
@@ -240,7 +224,7 @@ function WorkflowChat({
       default:
         return;
     }
-  }, [onComplete, onMessage]);
+  }, [onComplete, onMessage, workflow]);
 
   const { connectionStatus } = useChatWebSocket({
     api: workflowApi,
@@ -433,32 +417,54 @@ function WorkflowChat({
             <p className="text-sm">This workflow is ready when you are.</p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                message.sender === 'user' ? 'ml-auto' : 'mr-auto'
-              }`}
-              style={{
-                backgroundColor: message.sender === 'user'
+          messages.map((message) => {
+            const hasContent = Boolean(message.content && String(message.content).trim());
+            const hasToolCall = Boolean(message.toolCall);
+            if (!hasContent && !hasToolCall) {
+              return null;
+            }
+
+            const isUser = message.sender === 'user';
+            const isToolOnly = hasToolCall && !hasContent;
+            const messageStyle = isToolOnly
+              ? { color: 'var(--color-text-primary, #f8fafc)' }
+              : {
+                backgroundColor: isUser
                   ? 'var(--mozaiks-primary, #3b82f6)'
                   : 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
-                color: message.sender === 'user'
+                color: isUser
                   ? 'var(--color-text-on-accent, #ffffff)'
                   : 'var(--color-text-primary, #f8fafc)',
-                border: message.sender === 'user'
+                border: isUser
                   ? 'none'
                   : '1px solid var(--color-border-subtle, var(--mozaiks-border, #334155))',
-              }}
-            >
-              <div className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</div>
-              {message.agentName && message.sender !== 'user' && (
-                <div className="mt-2 text-[11px] uppercase tracking-[0.18em]" style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}>
-                  {message.agentName}
-                </div>
-              )}
-            </div>
-          ))
+              };
+
+            return (
+              <div
+                key={message.id}
+                className={`${isToolOnly ? 'max-w-[90%]' : 'max-w-[80%] rounded-2xl px-4 py-3'} ${
+                  isUser ? 'ml-auto' : 'mr-auto'
+                }`}
+                style={messageStyle}
+              >
+                {hasContent && (
+                  <div className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                )}
+                {hasToolCall && (
+                  <ShellUIToolRenderer
+                    event={message.toolCall}
+                    className={hasContent ? 'mt-3' : ''}
+                  />
+                )}
+                {hasContent && message.agentName && !isUser && (
+                  <div className="mt-2 text-[11px] uppercase tracking-[0.18em]" style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}>
+                    {message.agentName}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 

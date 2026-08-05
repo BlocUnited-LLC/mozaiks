@@ -204,45 +204,40 @@ def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None
     assert resume_index < start_index
 
 
-def test_activity_inline_progress_restores_with_artifact_panel() -> None:
+def test_inline_ui_progress_restores_from_workflow_transcript_not_artifact_state() -> None:
     controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")
     startup_source = _read("chat-ui/src/hooks/useChatStartupEffects.js")
     chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
-    activity_helper_source = _read("chat-ui/src/components/chat/activityArtifacts.js")
+    inline_helper_source = _read("chat-ui/src/components/chat/inlineSurfaces.js")
 
-    assert "export function upsertActivityMessage" in activity_helper_source
-    assert "export function activityArtifactFromMessage" in activity_helper_source
-    assert "const upsertRestoredActivityFromArtifactMessages" in chat_page_source
-    assert "const restoreStoredActivityForChat" in chat_page_source
-    assert "workflowMessagesCacheRef.current = applyRestoredProgress(workflowMessagesCacheRef.current)" in chat_page_source
-    assert "workflowMessagesSharedRef.current = applyRestoredProgress(workflowMessagesSharedRef.current)" in chat_page_source
-    assert "setWorkflowMessages((prev) => applyRestoredProgress(prev))" in chat_page_source
-    assert "persistWorkflowTranscriptSnapshot(mergedMessages)" in chat_page_source
+    assert not (_workspace() / "chat-ui/src/components/chat/activityArtifacts.js").exists()
+    assert "export function buildInlineToolCallMessageFromEvent" in inline_helper_source
+    assert "export function upsertInlineToolCallMessage" in inline_helper_source
+    assert "display !== INLINE_DISPLAY" in inline_helper_source
+    assert "metadata: {" in inline_helper_source
+    assert "interaction_type: interactionType" in inline_helper_source
+    assert "awaiting_response: awaitingResponse" in inline_helper_source
+    assert "const cacheWorkflowTranscriptMessage" in chat_page_source
+    assert "cacheWorkflowTranscriptMessage(inlineMessage" in chat_page_source
+    assert "upsertInlineToolCallMessage(" in chat_page_source
+    assert "persistWorkflowTranscriptSnapshot(nextCache" in chat_page_source
     assert "mergeWorkflowTranscriptMessages(" in chat_page_source
     assert "selectedWorkflowTranscriptSource" in controller_source
-    assert "const cacheWorkflowTranscriptMessage" in chat_page_source
-    assert "workflowMessagesCacheRef.current = applyActivityEntry(workflowMessagesCacheRef.current)" in chat_page_source
-    assert "activity_event_cached_for_workflow_while_in_ask" in chat_page_source
-    assert "if (metadata?.event_type === 'activity')" in chat_page_source
     assert "writeStoredWorkflowTranscriptSnapshot(targetChatId" in chat_page_source
     assert "cacheWorkflowTranscriptMessage({" in chat_page_source
     assert "conversationModeRef.current === 'ask' && streamEndMetadata?.source !== 'general_agent'" in chat_page_source
     assert "conversationMode === 'ask' && metadataSource?.source !== 'general_agent'" in chat_page_source
 
-    assert "restoreStoredActivityForChat = null" in controller_source
-    assert "upsertRestoredActivityFromArtifactMessages = null" in controller_source
     assert "readStoredWorkflowTranscriptSnapshot" in controller_source
     assert "selectedWorkflowMessages.length > 0" in controller_source
-    assert "upsertRestoredActivityFromArtifactMessages(" in controller_source
-    assert "restoreStoredActivityForChat(currentChatId, currentWorkflowName)" in controller_source
-    assert "restoreStoredActivityForChat(targetChatId, resolvedWorkflow)" in controller_source
+    assert "restoreStoredActivityForChat" not in controller_source
+    assert "upsertRestoredActivityFromArtifactMessages" not in controller_source
 
-    assert "restoreStoredActivityForChat = null" in startup_source
-    assert "upsertRestoredActivityFromArtifactMessages = null" in startup_source
     assert "readStoredWorkflowTranscriptSnapshot" in startup_source
     assert "storedWorkflowMessages.length > 0 && messagesRef.current.length === 0" in startup_source
-    assert "upsertRestoredActivityFromArtifactMessages(" in startup_source
-    assert "restoreStoredActivityForChat(restoreChatId, urlWorkflowName)" in startup_source
+    assert "restoreStoredActivityForChat" not in startup_source
+    assert "upsertRestoredActivityFromArtifactMessages" not in startup_source
+    assert "case 'activity':" not in chat_page_source
 
 
 def test_workflow_artifact_restore_uses_backend_metadata_and_durable_surfaces() -> None:
@@ -262,7 +257,7 @@ def test_workflow_artifact_restore_uses_backend_metadata_and_durable_surfaces() 
     assert "storedPanelOpen === false && hadStoredArtifact" in chat_page_source
 
     select_speaker_start = chat_page_source.index("case 'select_speaker':")
-    select_speaker_end = chat_page_source.index("case 'activity':", select_speaker_start)
+    select_speaker_end = chat_page_source.index("case 'tool_progress':", select_speaker_start)
     select_speaker_block = chat_page_source[select_speaker_start:select_speaker_end]
     assert "clearStoredArtifactState(currentChatId)" not in select_speaker_block
     assert "setCurrentArtifactMessages([])" not in select_speaker_block

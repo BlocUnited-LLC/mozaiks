@@ -81,12 +81,12 @@ class RefinementValidationPlan(BaseModel):
 
 
 class RefinementExecutionPlan(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     request_id: str
     app_id: str | None = None
     request: str
-    artifact_kind: str
+    build_family: str = Field(alias="artifact_kind")
     change_class: str
     refinement_lane: str | None = None
     workflow_id: str
@@ -110,6 +110,11 @@ class RefinementExecutionPlan(BaseModel):
     context_policy_decision: AppContextPolicyResult | None = None
     app_context_policy_override: AppContextPolicyOverride | None = None
     app_context_impact_hints: AppContextImpactHints | None = None
+
+    @property
+    def artifact_kind(self) -> str:
+        """Prior-api alias for build_family."""
+        return self.build_family
 
 
 class RefinementDryRunPlan(BaseModel):

@@ -289,6 +289,87 @@ archetypes:
       - emits declarations in module.yaml must match events declared in contracts/events.yaml.
         Cross-module events subscribed to in reactions.yaml are declared by the producing module.
 
+  state_machine:
+    summary: >
+      Deterministic module that owns records with a named status field driven
+      by time-based transitions (e.g. pending → active → expired) or explicit
+      operator/system triggers. Use when records progress through a lifecycle
+      that includes at least one timestamp-gated automatic transition and
+      requires an audit trail of every status change.
+    select_when:
+      - The module owns records with a status field that advances based on
+        publish_at, expire_at, end_at, activate_at, or similar timestamps.
+      - Status transitions must happen automatically without human operator action.
+      - Records require an audit trail of every status change and who/what triggered it.
+      - The transition logic is too heavy or operationally distinct to run
+        inline in a request handler or as a startup_service background task.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+        - contracts/events.yaml
+      optional:
+        - contracts/reactions.yaml
+        - contracts/notifications.yaml
+        - contracts/admin.yaml
+        - contracts/settings.yaml
+    backend_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/schemas.py
+    hard_constraints:
+      - >
+        Expose a run_<entity>_lifecycle_tick(ctx) method on the service layer.
+        This is the canonical tick: it scans for records with pending
+        timestamp-gated transitions, advances their status, emits a
+        domain event per transition, and returns a summary dict with
+        { published_count, expired_count, errors } or equivalent keys.
+        The method must be idempotent and safe to call frequently.
+      - >
+        Declare the tick as an internal module action (api_surface: internal,
+        permissions: []) in module.yaml so operators can trigger it manually
+        and tests can exercise it without a scheduler. Name it
+        run_<entity>_lifecycle_tick consistently.
+      - >
+        Every status transition must emit a named domain event
+        (e.g. domain.<module>.status_changed) and record an audit entry with
+        the previous status, new status, timestamp, and trigger source.
+      - >
+        The repo layer must expose indexed query methods named
+        find_pending_<transition>(now) that filter by status and timestamp
+        field (e.g. publish_at <= now). Index both fields; never do a
+        collection scan inside the tick.
+      - >
+        Choose the right tick delivery mechanism based on scale and isolation
+        needs:
+
+        startup_service (runtime_extensions.yaml): run inside the web server
+        process as an asyncio background task. Suitable for lightweight expiry
+        sweeps on small collections where sub-minute precision is not required,
+        where a failed sweep can be retried on the next interval, and where
+        running inside the server process is acceptable.
+
+        external cron script (scripts/cron_<entity>_lifecycle.py): run as a
+        separate process or container job outside the web server. Use this
+        when the tick is operationally distinct (needs its own resource limits,
+        must survive a web server restart, or must be independently observable
+        in logs and metrics), when the collection is large enough that a slow
+        tick could block the event loop, or when the deploy target supports
+        scheduled jobs (azure_container_apps, fly with cron, GitHub Actions
+        schedule). For azure_container_apps, the InfraScaffoldAgent should
+        emit a Microsoft.App/jobs resource alongside the Container App.
+      - >
+        External cron entry points must use the _MinimalCtx pattern:
+        a lightweight context stub with an async emit() method that captures
+        emitted events without dispatching them to the live event bus.
+        The script connects via get_mongo_client(), calls the service tick,
+        and exits with a non-zero code on errors.
+        Required env vars must be documented in the script module docstring.
+      - >
+        Do not call the tick from a user-facing request handler. The tick is
+        a background concern. Operators may invoke it via the internal action
+        surface; the scheduler invokes it on a fixed cadence.
+
   transactional:
     summary: Deterministic module for balances, ledgers, audit trails, or append-only value tracking.
     select_when:

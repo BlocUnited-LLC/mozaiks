@@ -127,7 +127,7 @@ class _FakeArtifactStore:
     async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
         return []
 
-    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
         return [
             _FakeChangeRequest(ChangeClassification.FEATURE),
             _FakeChangeRequest(ChangeClassification.PATCH),
@@ -308,15 +308,15 @@ class _RevisionArtifactStore(_FakeArtifactStore):
         return ChangeRequestDoc(
             _id=change_request_id,
             app_id=app_id,
-            artifact_kind="business_plan_bundle",
-            artifact_key="business_plan_bundle",
-            artifact_version_id="av_bp_2",
+            build_family="business_plan_bundle",
+            build_key="business_plan_bundle",
+            build_record_id="av_bp_2",
             raw_user_request="Target enterprise banks instead of small businesses.",
             classification=ChangeClassification.CORE,
             refinement_request=RefinementRequestPayload(
-                artifact_kind="business_plan_bundle",
-                artifact_key="business_plan_bundle",
-                artifact_version_id="av_bp_2",
+                build_family="business_plan_bundle",
+                build_key="business_plan_bundle",
+                build_record_id="av_bp_2",
                 raw_user_request="Target enterprise banks instead of small businesses.",
                 app_id=app_id,
             ),
@@ -337,7 +337,7 @@ class _RevisionArtifactStore(_FakeArtifactStore):
             ),
         )
 
-    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
         return [
             await self.get_change_request(app_id=app_id, change_request_id="cr_1"),
         ]

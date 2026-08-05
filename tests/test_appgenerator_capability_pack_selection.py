@@ -103,6 +103,18 @@ def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     assert "billing provider" in rule
 
 
+def test_capability_routing_includes_operator_readiness_pack() -> None:
+    routing = _read_yaml("factory_app/build_context/AppGenerator/capability_routing.yaml")
+    packs = {pack["id"]: pack for pack in routing["layers"]["capability_pack"]["packs"]}
+
+    assert "operator_readiness" in packs
+    readiness = packs["operator_readiness"]
+    assert readiness["capability_kind"] == "operator_pack"
+    assert "readiness" in readiness["covers"].lower()
+    assert "no-spend" in readiness["use_when"].lower()
+    assert "brochure site" in readiness["avoid_when"].lower()
+
+
 @pytest.mark.parametrize("pack_id", ["messaging", "support", "social", "entitlement_dispatch"])
 def test_pack_contexts_are_registered_for_appgenerator(pack_id: str) -> None:
     context = _read_yaml(f"factory_app/build_context/{pack_id}/context.yaml")

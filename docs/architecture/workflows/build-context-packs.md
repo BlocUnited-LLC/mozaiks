@@ -150,6 +150,11 @@ app bundle paths.
   bring-your-own provider adapter.
 - `mozaikspay`: managed-capability templates and connector contracts for apps
   that consume the MozaiksPay payment/subscription boundary.
+- `operator_readiness`: deterministic launch/evidence templates for
+  host-operator apps, SaaS workspaces, and other platform-style products that
+  need reproducible no-spend validation. This pack is intentionally narrow: it
+  is for platform/operator workspaces, not ordinary customer apps or brochure
+  sites.
 
 UI primitives stay first-class in `chat-ui`. Build-context packs compose page
 schemas from those primitives; they do not define their own primitive layer.
@@ -395,6 +400,12 @@ settings, or level data, then the production move is not just adding a
 must first add bounded fields or artifact families for those outputs. After
 that, a `game_builder` build context can provide the domain catalogs,
 contracts, templates, and selected defaults.
+
+The same rule applies to `operator_readiness`: only add the pack when the
+workflow already has a bounded `readiness_profile` or similar typed output to
+drive it. If the product is not a host/operator platform, the pack should stay
+absent. Do not infer it from prose alone, and do not make it the default for
+customer-facing app generation.
 
 For that reason, a reusable builder pack should be designed in this order:
 

@@ -404,10 +404,10 @@ async def test_rejects_write_back_mode_mismatch(tmp_path: Path) -> None:
 async def test_rejects_non_app_bundle_artifact_kind(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
-        update={"artifact_kind": "workflow_bundle"}
+        update={"build_family": "workflow_bundle"}
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="artifact_kind='app_bundle'"):
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="'app_bundle'"):
         await accept_staged_refinement_artifact_version(
             app_id=context["app_id"],
             draft_artifact_version_id=context["draft_result"].artifact_version_id,

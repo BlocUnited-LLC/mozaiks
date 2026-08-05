@@ -8,7 +8,7 @@ const asObject = (value) => (
 );
 
 const titleCase = (value) => (
-  String(value || 'activity')
+  String(value || 'status')
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase())
 );
@@ -19,19 +19,18 @@ const clampPercent = (value) => {
   return Math.max(0, Math.min(100, Math.round(number)));
 };
 
-export default function SystemActivityCard({ payload = {} }) {
-  const progress = asObject(payload.progress || payload.activity_progress);
+export default function SystemStatusCard({ payload = {} }) {
+  const progress = asObject(payload.progress);
   const status = String(
-    payload.activity_status
-    || payload.status
+    payload.status
     || progress.status
     || 'working'
   ).trim().toLowerCase();
   const stage = String(payload.progress_stage || progress.stage || status).trim();
   const percent = clampPercent(payload.progress_percent ?? progress.percent);
-  const agent = String(payload.activity_agent || payload.agent || 'System').trim();
+  const agent = String(payload.agent || payload.agent_name || 'System').trim();
   const message = String(
-    payload.activity_message
+    payload.message
     || progress.message
     || `${agent} is working.`
   ).trim();

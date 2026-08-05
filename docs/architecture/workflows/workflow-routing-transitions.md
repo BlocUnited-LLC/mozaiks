@@ -324,11 +324,12 @@ or `full_migration`) becomes downstream scope context.
 
 The existing-app intake path has two user-facing context surfaces:
 
-1. `ExistingAppDiscovery` streams a persistent chat-feed progress card from
-   indexing activity events. When indexing reaches ready, that card collapses
-   to a compact completed marker so the chat does not compete with the artifact
-   panel. After the `before_chat` preload completes and before the first agent
-   message, it emits `AppIntelligenceOverviewCard` in the artifact panel. The
+1. `ExistingAppDiscovery` streams a persistent inline `AppIntelligenceProgressCard`
+   from normal `UI_Surface` tool-call events. When indexing reaches ready, that
+   card collapses to a compact completed marker so the chat does not compete
+   with the artifact panel. After the `before_chat` preload completes and
+   before the first agent message, it emits `AppIntelligenceOverviewCard` in
+   the artifact panel. The
    card renders the prompt-safe product readout: a concise app summary and
    major feature areas translated out of code terminology. It does not render
    raw source contents, graph metrics, source refs, scanner codes, or AI
@@ -339,8 +340,8 @@ The existing-app intake path has two user-facing context surfaces:
    with the selected build path already set. The repo intake screen captures the
    source repo before discovery starts.
 
-These surfaces are not AppPages. The progress card is chat activity UI and
-`AppIntelligenceOverviewCard` is workflow artifact UI owned by
+These surfaces are not AppPages. The progress card is inline workflow UI and
+`AppIntelligenceOverviewCard` is artifact workflow UI owned by
 `ExistingAppDiscovery`. The Refinement Engine consumes the same App
 Intelligence through checkpoint tools when the user later asks to revise or
 extend the app.

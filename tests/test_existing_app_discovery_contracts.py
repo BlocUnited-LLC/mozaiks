@@ -233,12 +233,17 @@ def test_existing_app_discovery_before_chat_tools_registered() -> None:
     before_chat = [item for item in tools["lifecycle_tools"] if item["trigger"] == "before_chat"]
     manifest_text = _read_text("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
 
-    # Canonical before_chat order: collector → overview card (artifact) → repo recovery (inline)
+    # Canonical before_chat order: collector -> overview card (artifact) -> repo recovery (inline)
     assert [(item["file"], item["function"]) for item in before_chat] == [
         ("preload_discovery_context.py", "collect_prechat_discovery_context"),
         ("emit_app_intelligence_overview.py", "emit_app_intelligence_overview_card"),
         ("emit_app_intelligence_overview.py", "emit_repo_access_recovery_card"),
     ]
+    progress_tool = next(item for item in tools["tools"] if item["function"] == "_emit_app_intelligence_progress_card")
+    assert progress_tool["tool_type"] == "UI_Surface"
+    assert progress_tool["bind_to_agent"] is False
+    assert progress_tool["ui"]["component"] == "AppIntelligenceProgressCard"
+    assert progress_tool["ui"]["mode"] == "inline"
 
     # Overview card — emitted to artifact panel when catalog is ready
     overview_tool = before_chat[1]
@@ -262,17 +267,20 @@ def test_existing_app_discovery_before_chat_tools_registered() -> None:
     assert "read_preloaded_source_file" in manifest_text
     assert "get_related_preloaded_source_files" in manifest_text
     assert "emit_app_intelligence_inline_brief" not in manifest_text
+    assert "_emit_app_intelligence_progress_card" in manifest_text
     assert "emit_app_intelligence_overview_card" in manifest_text
     assert "get_repo_app_intelligence" not in manifest_text
     assert "search_repo_source_context" not in manifest_text
     assert "read_repo_source_file" not in manifest_text
 
 
-def test_existing_app_discovery_activity_uses_canonical_runtime_helper() -> None:
+def test_existing_app_discovery_progress_uses_inline_ui_surface_helper() -> None:
     source = _read_text("factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py")
 
-    assert "from mozaiksai.core.workflow.ui_tools import emit_workflow_activity" in source
-    assert "emit_workflow_activity(" in source
+    assert "from mozaiksai.core.workflow.ui_tools import emit_ui_surface" in source
+    assert "emit_ui_surface(" in source
+    assert "_emit_app_intelligence_progress_card" in source
+    assert "emit_workflow_activity" not in source
     assert '"kind": "activity"' not in source
     assert "send_event_to_ui(event, chat_id)" not in source
 
@@ -325,8 +333,9 @@ def test_repo_access_recovery_emitter_surfaces_private_github_blocker() -> None:
     assert emitted["payload"]["github_repo"] == "BlocUnited-LLC/mozaiks-app"
     assert emitted["payload"]["http_status"] == 404
     assert emitted["payload"]["recovery_actions"][0]["id"] == "connect_github"
-    assert emitted["payload"]["activity_display_variant"] == "app_intelligence_progress"
-    assert emitted["payload"]["activity_component_type"] == "AppIntelligenceProgressCard"
+    assert "activity_display_variant" not in emitted["payload"]
+    assert "activity_component_type" not in emitted["payload"]
+    assert "activity_type" not in emitted["payload"]
     assert "component_type" not in emitted["payload"]
     assert emitted["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
     assert emitted["kwargs"]["agent_name"] == "App Intelligence"
@@ -394,12 +403,12 @@ def test_app_intelligence_overview_card_emitter_surfaces_full_artifact_payload()
     assert payload["current_app_context_version_id"] == "acv_abc123"
     assert payload["artifact_version_ids"]["app_context_version"] == "av_ctx_1"
     assert payload["artifact_version_ids"]["app_intelligence_snapshot"] == "av_intel_1"
-    # Activity context fields are included for frontend mode-toggle restore
-    assert payload.get("activity_type") == "app_intelligence_indexing"
-    assert payload.get("activity_display_variant") == "app_intelligence_progress"
-    assert payload.get("activity_component_type") == "AppIntelligenceProgressCard"
-    assert payload.get("display_variant") == "app_intelligence_progress"
-    assert payload.get("component_type") == "AppIntelligenceProgressCard"
+    # Artifact payloads must not carry inline progress/activity restore fields.
+    assert "activity_type" not in payload
+    assert "activity_display_variant" not in payload
+    assert "activity_component_type" not in payload
+    assert "display_variant" not in payload
+    assert "component_type" not in payload
     # Overview card includes full catalog
     assert "app_intelligence_catalog" in payload
     assert payload["app_intelligence_catalog"]["coverage"]["file_count"] == 200
@@ -418,63 +427,56 @@ def test_app_intelligence_overview_card_skipped_when_no_catalog() -> None:
     assert result["reason"] == "no_app_intelligence_catalog"
 
 
-def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch) -> None:
+def test_existing_app_preload_progress_emits_visible_inline_status(monkeypatch) -> None:
     module = _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
-        "tests.preload_activity_emit",
+        "tests.preload_progress_emit",
     )
-    transport_mod = __import__("mozaiksai.core.transport.simple_transport", fromlist=["SimpleTransport"])
 
-    class _FakeTransport:
-        def __init__(self) -> None:
-            self.events: list[tuple[dict[str, Any], str | None]] = []
+    emitted: list[dict[str, Any]] = []
 
-        async def send_event_to_ui(self, event: dict[str, Any], chat_id: str | None = None) -> None:
-            self.events.append((event, chat_id))
+    async def _fake_emit(component, payload, **kwargs):
+        emitted.append({"component": component, "payload": payload, "kwargs": kwargs})
+        return f"ui_progress_{len(emitted)}"
 
-    fake_transport = _FakeTransport()
-
-    async def _get_instance():
-        return fake_transport
-
-    monkeypatch.setattr(transport_mod.SimpleTransport, "get_instance", staticmethod(_get_instance))
+    monkeypatch.setattr(module, "emit_ui_surface", _fake_emit)
 
     context = _Context(chat_id="chat_app_intelligence_progress", app_id="app_1")
     module._set_app_intelligence_progress(context, "collecting_evidence")
-    result = asyncio.run(module._emit_app_intelligence_activity(context))
+    result = asyncio.run(module._emit_app_intelligence_progress_card(context))
 
     assert result["success"] is True
-    assert fake_transport.events
-    event, chat_id = fake_transport.events[-1]
-    assert chat_id == "chat_app_intelligence_progress"
-    assert event["kind"] == "activity"
-    assert event["activity_type"] == "app_intelligence_indexing"
-    assert event["agent"] == "App Intelligence"
-    assert event["status"] == "working"
-    assert event["progress_percent"] == 25
-    assert event["display_variant"] == "app_intelligence_progress"
-    assert event["component_type"] == "AppIntelligenceProgressCard"
-    assert event["activity_display_variant"] == "app_intelligence_progress"
-    assert event["activity_component_type"] == "AppIntelligenceProgressCard"
-    assert "Obtaining app context" in event["message"]
-    assert event["metadata"]["display_variant"] == "app_intelligence_progress"
-    assert event["metadata"]["component_type"] == "AppIntelligenceProgressCard"
-    assert event["metadata"]["activity_display_variant"] == "app_intelligence_progress"
-    assert event["metadata"]["activity_component_type"] == "AppIntelligenceProgressCard"
-    assert event["metadata"]["progress_stage"] == "collecting_evidence"
-    assert event["metadata"]["progress_status"] == "indexing"
-    assert event["metadata"]["progress"]["stage"] == "collecting_evidence"
-    assert event["metadata"]["app_intelligence_progress"]["stage"] == "collecting_evidence"
-    assert event["metadata"]["progress_details"] == {}
-    assert event["metadata"]["progress_warnings"] == []
+    assert emitted
+    event = emitted[-1]
+    payload = event["payload"]
+    assert event["component"] == "AppIntelligenceProgressCard"
+    assert event["kwargs"]["chat_id"] == "chat_app_intelligence_progress"
+    assert event["kwargs"]["workflow_name"] == "ExistingAppDiscovery"
+    assert event["kwargs"]["agent_name"] == "App Intelligence"
+    assert event["kwargs"]["display"] == "inline"
+    assert payload["component_type"] == "AppIntelligenceProgressCard"
+    assert payload["display_variant"] == "app_intelligence_progress"
+    assert payload["interaction_type"] == "ui_surface"
+    assert payload["awaiting_response"] is False
+    assert payload["status"] == "working"
+    assert payload["progress_percent"] == 25
+    assert "Obtaining app context" in payload["message"]
+    assert payload["progress_stage"] == "collecting_evidence"
+    assert payload["progress_status"] == "indexing"
+    assert payload["progress"]["stage"] == "collecting_evidence"
+    assert payload["app_intelligence_progress"]["stage"] == "collecting_evidence"
+    assert payload["progress_details"] == {}
+    assert payload["progress_warnings"] == []
+    assert "activity_type" not in payload
+    assert "activity_component_type" not in payload
 
     module._set_app_intelligence_progress(context, "ready")
-    result = asyncio.run(module._emit_app_intelligence_activity(context))
+    result = asyncio.run(module._emit_app_intelligence_progress_card(context))
 
     assert result["status"] == "complete"
-    ready_event, _ = fake_transport.events[-1]
-    assert ready_event["status"] == "complete"
-    assert ready_event["message"] == "App context ready. Starting the discovery agent."
+    ready_payload = emitted[-1]["payload"]
+    assert ready_payload["status"] == "complete"
+    assert ready_payload["message"] == "App context ready. Starting the discovery agent."
 
     module._set_app_intelligence_progress(
         context,
@@ -482,27 +484,28 @@ def test_existing_app_preload_activity_emits_visible_indexing_status(monkeypatch
         message="Downloading selected source files from GitHub (60/120).",
         percent=48,
     )
-    result = asyncio.run(module._emit_app_intelligence_activity(context))
+    result = asyncio.run(module._emit_app_intelligence_progress_card(context))
 
     assert result["status"] == "working"
-    download_event, _ = fake_transport.events[-1]
-    assert download_event["status"] == "working"
-    assert download_event["progress_percent"] == 48
-    assert "Downloading selected source files from GitHub (60/120)." in download_event["message"]
+    download_payload = emitted[-1]["payload"]
+    assert download_payload["status"] == "working"
+    assert download_payload["progress_percent"] == 48
+    assert "Downloading selected source files from GitHub (60/120)." in download_payload["message"]
 
 
 def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     source = _read_text("chat-ui/src/pages/ChatPage.js")
     chat_message = _read_text("chat-ui/src/components/chat/ChatMessage.jsx")
     chat_interface = _read_text("chat-ui/src/components/chat/ChatInterface.jsx")
-    activity_helper = _read_text("chat-ui/src/components/chat/activityArtifacts.js")
+    inline_helper = _read_text("chat-ui/src/components/chat/inlineSurfaces.js")
     existing_app_ui_index = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/index.js")
     core_ui_index = _read_text("chat-ui/src/core/ui/index.js")
 
     assert "!data.type.startsWith('ui.')" in source
-    assert "buildActivityMessageFromEvent(data, currentWorkflowName)" in source
     assert "shouldShowToolProgress(data)" in source
-    assert "buildRestoredActivityMessage" in source
+    assert "buildInlineToolCallMessageFromEvent" not in source
+    assert "upsertInlineToolCallMessage(" in source
+    assert "cacheWorkflowTranscriptMessage(inlineMessage" in source
     assert "buildComposerArtifactContext" in source
     assert "const artifactContextPayload = buildComposerArtifactContext" in source
     assert "artifactContextPayload ? { artifact_context: artifactContextPayload } : null" in source
@@ -520,11 +523,9 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "App Intelligence" not in source
     assert "app_intelligence" not in source
 
-    composer_context_helper = activity_helper[
-        activity_helper.index("export function buildComposerArtifactContext"):
-        activity_helper.index("// Extracted hooks for gradual migration")
-        if "// Extracted hooks for gradual migration" in activity_helper
-        else len(activity_helper)
+    composer_context_helper = inline_helper[
+        inline_helper.index("export function buildComposerArtifactContext"):
+        len(inline_helper)
     ]
     assert "app_intelligence_catalog:" not in composer_context_helper
     assert "app_intelligence_catalog," not in composer_context_helper
@@ -548,25 +549,35 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "cacheServerLastArtifact(metaData.last_artifact, {" in source
     assert "cacheServerLastArtifact(meta.last_artifact, {" in source
     assert "handleMissingBackendArtifact(metaChatId, metaWorkflowName)" in source
-    assert "restoredActivityArtifactRef.current" in source
-    assert "restored_from_last_artifact" in activity_helper
-    assert "toolCall: inlineToolCall" in activity_helper
-    assert "display: INLINE_DISPLAY" in activity_helper
-    assert "interaction_type: 'ui_surface'" in activity_helper
-    assert "awaiting_response: false" in activity_helper
-    assert "SystemActivityCard" in core_ui_index
+    assert "restoredActivityArtifactRef.current" not in source
+    assert "restoreStoredActivityForChat" not in source
+    assert "upsertRestoredActivityFromArtifactMessages" not in source
+    assert "export function buildInlineToolCallMessageFromEvent" in inline_helper
+    assert "export function upsertInlineToolCallMessage" in inline_helper
+    assert "display !== INLINE_DISPLAY" in inline_helper
+    assert "interactionType" in inline_helper
+    assert "awaiting_response: awaitingResponse" in inline_helper
+    assert "SystemStatusCard" in core_ui_index
+    assert "SystemActivityCard" not in core_ui_index
     assert "const userVisibleToolProgress = shouldShowToolProgress(data)" in source
-    assert "agentName: activityAgent" in activity_helper
     assert "agentName: tool" in source
     assert "shouldShowToolProgress(data)" in source
     assert "ActivityRenderer" not in chat_message
     assert "resolveActivityComponent" not in chat_message
     assert "AppIntelligenceProgressCard" not in chat_message
     assert "app_intelligence_indexing" not in chat_message
+    assert not (WORKSPACE / "chat-ui/src/components/chat/ActivityRenderer.jsx").exists()
     assert "ExistingAppDiscovery" not in chat_message
     assert "AppIntelligenceProgressCard" in existing_app_ui_index
-    assert "app_intelligence_progress" in existing_app_ui_index
+    assert "inline UI surface events" in existing_app_ui_index
     assert "metadata={chat.metadata}" in chat_interface
+    assert not (WORKSPACE / "chat-ui/src/components/chat/activityArtifacts.js").exists()
+
+    workflow_chat = _read_text("chat-ui/src/components/chat/WorkflowChat.jsx")
+    assert "buildInlineToolCallMessageFromEvent(event, workflow)" in workflow_chat
+    assert "upsertInlineToolCallMessage(prev" in workflow_chat
+    assert "<ShellUIToolRenderer" in workflow_chat
+    assert "⏳ ${content}" not in workflow_chat
     assert "artifactWorkspaceSnapshotRef" in source
     assert "workflowArtifactSnapshotRef" not in source
 
@@ -586,10 +597,13 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "workflowArtifactSnapshotRef" not in startup_source
     assert "AppIntelligenceProgressCard" not in controller_source
     assert "AppIntelligenceProgressCard" not in startup_source
+    assert "restoreStoredActivityForChat" not in controller_source
+    assert "restoreStoredActivityForChat" not in startup_source
 
 
 def test_app_intelligence_progress_card_is_stage_based_and_persistent() -> None:
     source = _read_text("factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceProgressCard.jsx")
+    tools_manifest = _read_text("factory_app/workflows/ExistingAppDiscovery/tools.yaml")
 
     assert "Understanding your codebase" in source
     assert "if (isReady)" in source
@@ -610,6 +624,10 @@ def test_app_intelligence_progress_card_is_stage_based_and_persistent() -> None:
     assert "The agent has not started editing files." in source
     assert "repo_access_required" in source
     assert "Needs attention" in source
+    assert "raw_activity_metadata" not in source
+    assert "activity_status" not in source
+    assert "activity_component_type" not in source
+    assert "workflow_primitive: progress_stepper" in tools_manifest
 
 
 def test_app_intelligence_overview_graph_view_is_deterministic_and_app_agnostic() -> None:

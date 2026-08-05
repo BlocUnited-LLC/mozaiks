@@ -206,7 +206,7 @@ def test_send_event_to_ui_does_not_filter_run_complete_for_non_visual_agent(monk
     assert transport.connections["chat-1"]["ui_run_complete_sent"] is True
 
 
-def test_send_event_to_ui_does_not_filter_activity_for_non_visual_agent(monkeypatch):
+def test_send_event_to_ui_does_not_filter_inline_ui_surface_for_non_visual_agent(monkeypatch):
     transport = SimpleTransport()
     transport.connections = {"chat-1": {"workflow_name": "AppGenerator", "user_id": "user-1"}}
     sent = []
@@ -214,12 +214,17 @@ def test_send_event_to_ui_does_not_filter_activity_for_non_visual_agent(monkeypa
     class _FakeDispatcher:
         def build_outbound_event_envelope(self, *, raw_event, chat_id, get_sequence_cb, workflow_name):  # noqa: ANN001
             return {
-                "type": "chat.activity",
+                "type": "chat.tool_call",
                 "data": {
-                    "kind": "activity",
-                    "activity_type": "structured_output",
+                    "kind": "tool_call",
                     "agent": "AppGenerator",
-                    "message": "AppGenerator produced validated plan output.",
+                    "tool_name": "SystemStatusCard",
+                    "component_type": "SystemStatusCard",
+                    "tool_call_id": "ui_surface_inline_1",
+                    "display": "inline",
+                    "awaiting_response": False,
+                    "interaction_type": "ui_surface",
+                    "payload": {"message": "AppGenerator produced validated plan output."},
                     "status": "validated",
                 },
             }
@@ -232,7 +237,13 @@ def test_send_event_to_ui_does_not_filter_activity_for_non_visual_agent(monkeypa
 
     asyncio.run(
         transport.send_event_to_ui(
-            {"kind": "activity", "agent": "AppGenerator", "message": "AppGenerator produced validated plan output."},
+            {
+                "kind": "tool_call",
+                "agent": "AppGenerator",
+                "tool_name": "SystemStatusCard",
+                "component_type": "SystemStatusCard",
+                "awaiting_response": False,
+            },
             "chat-1",
         )
     )
@@ -240,12 +251,17 @@ def test_send_event_to_ui_does_not_filter_activity_for_non_visual_agent(monkeypa
     assert sent == [
         (
             {
-                "type": "chat.activity",
+                "type": "chat.tool_call",
                 "data": {
-                    "kind": "activity",
-                    "activity_type": "structured_output",
+                    "kind": "tool_call",
                     "agent": "AppGenerator",
-                    "message": "AppGenerator produced validated plan output.",
+                    "tool_name": "SystemStatusCard",
+                    "component_type": "SystemStatusCard",
+                    "tool_call_id": "ui_surface_inline_1",
+                    "display": "inline",
+                    "awaiting_response": False,
+                    "interaction_type": "ui_surface",
+                    "payload": {"message": "AppGenerator produced validated plan output."},
                     "status": "validated",
                 },
             },

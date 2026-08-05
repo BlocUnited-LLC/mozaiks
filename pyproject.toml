@@ -101,6 +101,9 @@ Documentation = "https://github.com/BlocUnited-LLC/mozaiks#readme"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = [
+  "factory_app/build_context/*/templates/**",
+]
 
 [tool.setuptools]
 include-package-data = true
@@ -137,6 +140,8 @@ ignore_missing_imports = true
 # Suppress noise that comes from untyped third-party stubs and unannotated
 # function bodies — these are not actionable without touching upstream libs.
 disable_error_code = ["import-untyped", "annotation-unchecked"]
+# Jinja2 template files use {{PLACEHOLDER}} syntax which mypy cannot parse.
+exclude = ["factory_app/build_context/.*/templates/.*\\.py$"]
 
 # High-complexity files that use AG2/pydantic dynamic patterns extensively.
 # Suppressed as a baseline; re-enable per-file as typing coverage improves.

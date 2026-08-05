@@ -7,7 +7,12 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from typing import Any
 
-from .models import ArtifactLifecycleStatus, ArtifactValidationStatus, ArtifactVersionDoc
+from .models import (
+    ArtifactLifecycleStatus,
+    ArtifactValidationStatus,
+    ArtifactVersionDoc,
+    BuildRecord,
+)
 from .store import ArtifactStore, get_artifact_store
 
 logger = logging.getLogger(__name__)
@@ -35,7 +40,7 @@ def _summary_bytes(summary_payload: Any) -> bytes:
     ).encode("utf-8")
 
 
-def extract_summary_payload(artifact: ArtifactVersionDoc | Mapping[str, Any] | None) -> Any:
+def extract_summary_payload(artifact: ArtifactVersionDoc | BuildRecord | Mapping[str, Any] | None) -> Any:
     if artifact is None:
         return None
     commit_metadata = getattr(artifact, "commit_metadata", None)
@@ -189,8 +194,143 @@ async def persist_summary_artifact(
     )
 
 
+# ── New BuildRecord summary API ────────────────────────────────────────────────
+
+async def resolve_latest_build_record_refs(
+    *,
+    app_id: str,
+    build_families: Iterable[str],
+    build_key_by_family: Mapping[str, str] | None = None,
+    build_record_store: Any | None = None,
+) -> dict[str, str]:
+    resolved_app_id = str(app_id or "").strip()
+    if not resolved_app_id:
+        raise ValueError("app_id is required")
+
+    store = build_record_store or get_artifact_store()
+    resolved_refs: dict[str, str] = {}
+    seen_families: set[str] = set()
+
+    for raw_family in build_families:
+        build_family = str(raw_family or "").strip()
+        if not build_family or build_family in seen_families:
+            continue
+        seen_families.add(build_family)
+
+        build_key = str((build_key_by_family or {}).get(build_family) or build_family).strip() or None
+        records = await store.list_build_records(
+            app_id=resolved_app_id,
+            build_family=build_family,
+            build_key=build_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+            limit=1,
+        )
+        if records:
+            resolved_refs[build_family] = records[0].id
+        else:
+            logger.debug(
+                "[BUILD_RECORDS] No CURRENT record found for family=%r app=%s — "
+                "canonical input absent (first-run or all records are DRAFT/STALE).",
+                build_family,
+                resolved_app_id,
+            )
+
+    return resolved_refs
+
+
+async def persist_summary_build_record(
+    *,
+    app_id: str,
+    build_family: str,
+    summary_payload: Any,
+    source_workflow: str | None = None,
+    source_chat_id: str | None = None,
+    author_user_id: str | None = None,
+    build_key: str | None = None,
+    message: str | None = None,
+    revision_mode: bool = False,
+    parent_build_record_id: str | None = None,
+    canonical_inputs_version: Mapping[str, str] | None = None,
+    input_build_families: Iterable[str] | None = None,
+    build_record_store: Any | None = None,
+) -> BuildRecord:
+    resolved_app_id = str(app_id or "").strip()
+    resolved_build_family = str(build_family or "").strip()
+    resolved_build_key = str(build_key or build_family or "").strip()
+    if not resolved_app_id:
+        raise ValueError("app_id is required")
+    if not resolved_build_family:
+        raise ValueError("build_family is required")
+    if not resolved_build_key:
+        raise ValueError("build_key is required")
+
+    store = build_record_store or get_artifact_store()
+    resolved_parent_id = str(parent_build_record_id or "").strip() or None
+    if not resolved_parent_id:
+        prior_records = await store.list_build_records(
+            app_id=resolved_app_id,
+            build_family=resolved_build_family,
+            build_key=resolved_build_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+            limit=1,
+        )
+        if prior_records:
+            resolved_parent_id = prior_records[0].id
+
+    resolved_inputs = await resolve_latest_build_record_refs(
+        app_id=resolved_app_id,
+        build_families=input_build_families or (),
+        build_record_store=store,
+    )
+    for input_family, record_id in dict(canonical_inputs_version or {}).items():
+        normalized_family = str(input_family or "").strip()
+        normalized_record_id = str(record_id or "").strip()
+        if normalized_family and normalized_record_id:
+            resolved_inputs[normalized_family] = normalized_record_id
+
+    summary_bytes = _summary_bytes(summary_payload)
+    lifecycle_status = (
+        ArtifactLifecycleStatus.DRAFT
+        if revision_mode and resolved_parent_id
+        else ArtifactLifecycleStatus.CURRENT
+    )
+    summary_file_name = f"{resolved_build_key}.json"
+
+    return await store.create_build_record(
+        app_id=resolved_app_id,
+        build_family=resolved_build_family,
+        build_key=resolved_build_key,
+        parent_build_record_id=resolved_parent_id,
+        canonical_inputs_version=resolved_inputs,
+        files_manifest=[
+            {
+                "path": summary_file_name,
+                "sha256": hashlib.sha256(summary_bytes).hexdigest(),
+                "size_bytes": len(summary_bytes),
+                "content_type": "application/json",
+            }
+        ],
+        source_workflow=source_workflow,
+        source_chat_id=source_chat_id,
+        lifecycle_status=lifecycle_status,
+        validation_status=ArtifactValidationStatus.SKIPPED,
+        commit_metadata={
+            "message": message or f"{source_workflow or 'summary'}: {resolved_build_family}",
+            "author_user_id": author_user_id,
+            "source_workflow": source_workflow,
+            "source_chat_id": source_chat_id,
+            "metadata": {
+                "summary_payload": summary_payload,
+                "summary_format": "json",
+            },
+        },
+    )
+
+
 __all__ = [
     "extract_summary_payload",
     "persist_summary_artifact",
     "resolve_latest_artifact_version_refs",
+    "persist_summary_build_record",
+    "resolve_latest_build_record_refs",
 ]

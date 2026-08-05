@@ -1,8 +1,8 @@
 # ExistingAppDiscovery Tools
 #
 # before_chat collector builds deterministic App Intelligence context.
-# Indexing progress is streamed as chat activity, then ExistingAppDiscovery emits
-# its workflow-owned AppIntelligenceOverviewCard in the artifact panel from the
+# Indexing progress is streamed as inline UI, then ExistingAppDiscovery emits its
+# workflow-owned AppIntelligenceOverviewCard in the artifact panel from the
 # discovery assembler's structured synthesis of the indexed source context.
 # DiscoveryArtifactAssemblerAgent later persists canonical artifacts and
 # re-emits the overview card with the synthesized summary.
@@ -17,6 +17,21 @@ tools:
     agent-context policy summaries. Use this before requesting exact files.
   tool_type: Agent_Tool
   auto_tool_call: false
+- agent: DiscoveryHostAgent
+  file: preload_discovery_context.py
+  function: _emit_app_intelligence_progress_card
+  description: >
+    Workflow-owned inline status surface for App Intelligence indexing progress.
+    Emitted deterministically by the preload lifecycle hook; not exposed as an
+    agent-callable tool.
+  tool_type: UI_Surface
+  auto_tool_call: false
+  bind_to_agent: false
+  ui:
+    component: AppIntelligenceProgressCard
+    mode: inline
+    workflow_primitive: progress_stepper
+    realization: generated_component
 - agent: DiscoveryHostAgent
   file: source_context_retrieval.py
   function: search_preloaded_source_context

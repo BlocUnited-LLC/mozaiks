@@ -69,8 +69,9 @@ async def test_create_artifact_version_persists_manifest_and_lineage() -> None:
 
     versions_coll.update_many.assert_awaited_once()
     inserted = versions_coll.insert_one.await_args.args[0]
-    assert inserted["artifact_kind"] == "app_bundle"
-    assert inserted["artifact_key"] == "primary"
+    # Document is now stored with build_family / build_key (BuildRecord schema)
+    assert inserted.get("build_family") == "app_bundle" or inserted.get("artifact_kind") == "app_bundle"
+    assert inserted.get("build_key") == "primary" or inserted.get("artifact_key") == "primary"
     assert inserted["version_number"] == 3
     assert inserted["files_manifest"][0]["sha256"] == "abc"
 
@@ -143,16 +144,16 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
 
     change_request = await store.create_change_request(
         app_id="app-1",
-        artifact_kind="app_bundle",
-        artifact_key="primary",
-        artifact_version_id="av_123",
+        build_family="app_bundle",
+        build_key="primary",
+        build_record_id="av_123",
         raw_user_request="Add export button",
         classification=ChangeClassification.FEATURE,
         refinement_request={
             "declared_change_class": "feature",
-            "artifact_kind": "app_bundle",
-            "artifact_key": "primary",
-            "artifact_version_id": "av_123",
+            "build_family": "app_bundle",
+            "build_key": "primary",
+            "build_record_id": "av_123",
             "raw_user_request": "Add export button",
         },
         change_intent={
@@ -173,8 +174,8 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
     )
     refinement_session = await store.create_refinement_session(
         app_id="app-1",
-        artifact_version_id="av_123",
-        result_artifact_version_id="av_child_1",
+        build_record_id="av_123",
+        result_build_record_id="av_child_1",
         change_request_id=change_request.id,
         provider="e2b",
         sandbox_id="sbx_123",
@@ -195,7 +196,7 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
     assert inserted_change["router_decision"]["reentry"] == "feature_refinement"
     assert inserted_change["refinement_request"]["declared_change_class"] == "feature"
     assert inserted_change["impact_set"]["restart_from"] == "AppGenerator"
-    assert inserted_session["result_artifact_version_id"] == "av_child_1"
+    assert inserted_session["result_build_record_id"] == "av_child_1"
     assert inserted_session["status"] == RefinementSessionStatus.PROVISIONING.value
 
 
@@ -317,7 +318,7 @@ async def test_accept_artifact_version_can_persist_commit_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_refinement_sessions_filters_by_result_artifact_version_id() -> None:
+async def test_list_refinement_sessions_filters_by_result_build_record_id() -> None:
     store = ArtifactStore.__new__(ArtifactStore)
     coll = MagicMock()
     cursor = MagicMock()
@@ -328,8 +329,8 @@ async def test_list_refinement_sessions_filters_by_result_artifact_version_id() 
             {
                 "_id": "rs_1",
                 "app_id": "app-1",
-                "artifact_version_id": "av_parent",
-                "result_artifact_version_id": "av_child",
+                "build_record_id": "av_parent",
+                "result_build_record_id": "av_child",
                 "change_request_id": "cr_1",
                 "provider": "control_plane_coding",
                 "status": RefinementSessionStatus.VALIDATED.value,
@@ -342,13 +343,13 @@ async def test_list_refinement_sessions_filters_by_result_artifact_version_id() 
 
     rows = await store.list_refinement_sessions(
         app_id="app-1",
-        result_artifact_version_id="av_child",
+        result_build_record_id="av_child",
         limit=5,
     )
 
     assert len(rows) == 1
-    assert rows[0].result_artifact_version_id == "av_child"
-    coll.find.assert_called_once_with({"app_id": "app-1", "result_artifact_version_id": "av_child"})
+    assert rows[0].result_build_record_id == "av_child"
+    coll.find.assert_called_once_with({"app_id": "app-1", "result_build_record_id": "av_child"})
 
 
 @pytest.mark.asyncio

@@ -389,7 +389,7 @@ async def execute_task_batches_for_trigger(
                 resolved_task_model,
             )
         _validate_batch_owned_paths(batch, task_items)
-        await _emit_task_batch_activity(
+        await _emit_task_batch_status(
             transport,
             chat_id,
             {
@@ -422,7 +422,7 @@ async def execute_task_batches_for_trigger(
         context_variables[batch.result.context_key] = batch_output["outputs"]
         context_variables[batch.result.status_key] = batch_output["status"]
         results[batch.id] = batch_output
-        await _emit_task_batch_activity(
+        await _emit_task_batch_status(
             transport,
             chat_id,
             {
@@ -1063,21 +1063,39 @@ def _to_plain_data(value: Any) -> Any:
     return value
 
 
-async def _emit_task_batch_activity(
+async def _emit_task_batch_status(
     transport: Any | None,
     chat_id: str | None,
     payload: dict[str, Any],
 ) -> None:
     if not transport or not chat_id:
         return
+    batch_id = str(payload.get("batch_id") or "task_batch").strip() or "task_batch"
+    phase = str(payload.get("phase") or "working").strip() or "working"
+    status = "complete" if phase in {"completed", "complete", "success", "succeeded", "done"} else phase
+    message = f"Task batch {batch_id} {phase}."
     try:
-        await transport.send_event_to_ui(
-            {
-                "kind": "activity",
-                "activity_type": "task_batch",
+        await transport.send_tool_call_event(
+            event_id=f"task-batch-{batch_id}",
+            chat_id=chat_id,
+            tool_name="SystemStatusCard",
+            component_name="SystemStatusCard",
+            display_type="inline",
+            awaiting_response=False,
+            agent_name="System",
+            payload={
                 **payload,
+                "schema_version": "mozaiks.system_status.ui.v1",
+                "workflow_name": payload.get("workflow_name"),
+                "agent": "System",
+                "status": status,
+                "message": message,
+                "display": "inline",
+                "mode": "inline",
+                "interaction_type": "ui_surface",
+                "awaiting_response": False,
+                "component_type": "SystemStatusCard",
             },
-            chat_id,
         )
     except Exception:
         return

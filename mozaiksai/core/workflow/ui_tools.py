@@ -485,70 +485,6 @@ async def emit_ui_surface(
 
     return event_id
 
-async def emit_workflow_activity(
-    *,
-    workflow_name: str,
-    chat_id: str | None,
-    activity_type: str,
-    agent_name: str | None = None,
-    status: str = "in_progress",
-    message: str = "",
-    progress_percent: float | int | None = None,
-    component_type: str = "WorkflowActivity",
-    display_variant: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Emit a workflow activity event directly via the UI transport.
-
-    Sends a structured ``kind="activity"`` event via ``send_event_to_ui``
-    (not a tool-call event). The metadata dict is enriched with
-    ``component_type`` / ``display_variant`` fields so the frontend can
-    restore the correct activity card after a mode toggle.
-
-    Returns ``{"success": True}`` on success or ``{"success": False, ...}``
-    on failure so callers can branch without catching exceptions.
-    """
-    if not chat_id:
-        return {"success": False, "reason": "missing_chat_id"}
-
-    enriched_metadata: dict[str, Any] = dict(metadata or {})
-    enriched_metadata["component_type"] = component_type
-    enriched_metadata["activity_component_type"] = component_type
-    if display_variant:
-        enriched_metadata["display_variant"] = display_variant
-        enriched_metadata["activity_display_variant"] = display_variant
-
-    event: dict[str, Any] = {
-        "kind": "activity",
-        "activity_type": activity_type,
-        "agent": agent_name or "",
-        "status": status,
-        "message": message,
-        "component_type": component_type,
-        "activity_component_type": component_type,
-        "metadata": enriched_metadata,
-    }
-    if progress_percent is not None:
-        event["progress_percent"] = float(progress_percent)
-    if display_variant:
-        event["display_variant"] = display_variant
-        event["activity_display_variant"] = display_variant
-
-    try:
-        from mozaiksai.core.transport.simple_transport import SimpleTransport
-
-        transport = await SimpleTransport.get_instance()
-        await transport.send_event_to_ui(event, chat_id)
-        return {"success": True}
-    except Exception as exc:
-        logger.warning(
-            "[emit_workflow_activity] Failed to emit %s activity: %s",
-            activity_type,
-            exc,
-        )
-        return {"success": False, "error": str(exc)}
-
-
 async def emit_tool_progress_event(
     tool_name: str,
     progress_percent: float,
@@ -684,7 +620,6 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     
 __all__ = [
     "emit_ui_surface",
-    "emit_workflow_activity",
     "use_ui_tool",
     "handle_tool_call_for_ui_interaction",
     "emit_tool_progress_event",

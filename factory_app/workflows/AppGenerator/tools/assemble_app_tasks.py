@@ -151,7 +151,10 @@ def _apply_managed_capability_templates(
     if not isinstance(capability_packs, list):
         return code_files
 
-    template_files = resolve_managed_capability_templates(capability_packs)
+    template_files = resolve_managed_capability_templates(
+        capability_packs,
+        context_variables=context_variables,
+    )
     if not template_files:
         return code_files
 

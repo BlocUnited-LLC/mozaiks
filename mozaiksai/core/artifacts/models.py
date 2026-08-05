@@ -4,14 +4,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class ArtifactLifecycleStatus(StrEnum):
+class BuildRecordStatus(StrEnum):
     DRAFT = "draft"
     CURRENT = "current"
     STALE = "stale"
@@ -20,7 +20,7 @@ class ArtifactLifecycleStatus(StrEnum):
     DELETED = "deleted"
 
 
-class ArtifactValidationStatus(StrEnum):
+class BuildRecordValidationStatus(StrEnum):
     PENDING = "pending"
     PASSED = "passed"
     FAILED = "failed"
@@ -47,7 +47,7 @@ class RefinementSessionStatus(StrEnum):
     TERMINATED = "terminated"
 
 
-class ArtifactFileManifestEntry(BaseModel):
+class BuildRecordFileEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
@@ -67,19 +67,56 @@ class ArtifactCommitMetadata(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+# Module-internal alias
+BuildRecordCommitMetadata = ArtifactCommitMetadata
+
+
 class RefinementRequestPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_kind: str = "refinement"
     declared_change_class: ChangeClassification | None = None
-    artifact_kind: str
-    artifact_key: str | None = None
-    artifact_version_id: str | None = None
+    build_family: str
+    build_key: str | None = None
+    build_record_id: str | None = None
     raw_user_request: str = ""
     source_surface: str | None = None
     app_id: str | None = None
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        remapped = dict(data)
+        if "artifact_kind" in remapped and "build_family" not in remapped:
+            remapped["build_family"] = remapped.pop("artifact_kind")
+        else:
+            remapped.pop("artifact_kind", None)
+        if "artifact_key" in remapped and "build_key" not in remapped:
+            remapped["build_key"] = remapped.pop("artifact_key")
+        else:
+            remapped.pop("artifact_key", None)
+        if "artifact_version_id" in remapped and "build_record_id" not in remapped:
+            remapped["build_record_id"] = remapped.pop("artifact_version_id")
+        else:
+            remapped.pop("artifact_version_id", None)
+        return remapped
+
+    # Prior-api attribute aliases
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str | None:
+        return self.build_key
+
+    @property
+    def artifact_version_id(self) -> str | None:
+        return self.build_record_id
 
 
 class ChangeIntentDoc(BaseModel):
@@ -110,28 +147,76 @@ class ImpactSetDoc(BaseModel):
     scope_summary: str = ""
 
 
-class ArtifactVersionDoc(BaseModel):
+class BuildRecord(BaseModel):
+    """Canonical build record model (versioned artifact document)."""
+
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str = Field(alias="_id")
     app_id: str
-    artifact_kind: str
-    artifact_key: str
+    build_family: str
+    build_key: str
     version_number: int = Field(ge=1)
-    parent_version_id: str | None = None
+    parent_build_record_id: str | None = None
     lineage_root_id: str
     source_workflow: str | None = None
     source_chat_id: str | None = None
     canonical_inputs_version: dict[str, str] = Field(default_factory=dict)
-    lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.DRAFT
-    validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PENDING
-    invalidated_by_version_id: str | None = None
+    lifecycle_status: BuildRecordStatus = BuildRecordStatus.DRAFT
+    validation_status: BuildRecordValidationStatus = BuildRecordValidationStatus.PENDING
+    invalidated_by_build_record_id: str | None = None
     invalidation_reason: str | None = None
     stale_at: datetime | None = None
-    files_manifest: list[ArtifactFileManifestEntry] = Field(default_factory=list)
+    files_manifest: list[BuildRecordFileEntry] = Field(default_factory=list)
     commit_metadata: ArtifactCommitMetadata = Field(default_factory=ArtifactCommitMetadata)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        """Remap old ArtifactVersionDoc field names from stored MongoDB docs."""
+        if not isinstance(data, dict):
+            return data
+        remapped = dict(data)
+        # artifact_kind → build_family
+        if "artifact_kind" in remapped and "build_family" not in remapped:
+            remapped["build_family"] = remapped.pop("artifact_kind")
+        else:
+            remapped.pop("artifact_kind", None)
+        # artifact_key → build_key
+        if "artifact_key" in remapped and "build_key" not in remapped:
+            remapped["build_key"] = remapped.pop("artifact_key")
+        else:
+            remapped.pop("artifact_key", None)
+        # parent_version_id → parent_build_record_id
+        if "parent_version_id" in remapped and "parent_build_record_id" not in remapped:
+            remapped["parent_build_record_id"] = remapped.pop("parent_version_id")
+        else:
+            remapped.pop("parent_version_id", None)
+        # invalidated_by_version_id → invalidated_by_build_record_id
+        if "invalidated_by_version_id" in remapped and "invalidated_by_build_record_id" not in remapped:
+            remapped["invalidated_by_build_record_id"] = remapped.pop("invalidated_by_version_id")
+        else:
+            remapped.pop("invalidated_by_version_id", None)
+        return remapped
+
+    # Prior-api attribute aliases (for callers that haven't been updated yet)
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str:
+        return self.build_key
+
+    @property
+    def parent_version_id(self) -> str | None:
+        return self.parent_build_record_id
+
+    @property
+    def invalidated_by_version_id(self) -> str | None:
+        return self.invalidated_by_build_record_id
 
 
 class ChangeRequestDoc(BaseModel):
@@ -139,9 +224,9 @@ class ChangeRequestDoc(BaseModel):
 
     id: str = Field(alias="_id")
     app_id: str
-    artifact_kind: str
-    artifact_key: str
-    artifact_version_id: str | None = None
+    build_family: str
+    build_key: str
+    build_record_id: str | None = None
     raw_user_request: str = ""
     classification: ChangeClassification
     refinement_request: RefinementRequestPayload
@@ -151,19 +236,86 @@ class ChangeRequestDoc(BaseModel):
     created_by_user_id: str | None = None
     created_at: datetime = Field(default_factory=_utc_now)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        remapped = dict(data)
+        if "artifact_kind" in remapped and "build_family" not in remapped:
+            remapped["build_family"] = remapped.pop("artifact_kind")
+        else:
+            remapped.pop("artifact_kind", None)
+        if "artifact_key" in remapped and "build_key" not in remapped:
+            remapped["build_key"] = remapped.pop("artifact_key")
+        else:
+            remapped.pop("artifact_key", None)
+        if "artifact_version_id" in remapped and "build_record_id" not in remapped:
+            remapped["build_record_id"] = remapped.pop("artifact_version_id")
+        else:
+            remapped.pop("artifact_version_id", None)
+        return remapped
+
+    # Prior-api attribute aliases
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str:
+        return self.build_key
+
+    @property
+    def artifact_version_id(self) -> str | None:
+        return self.build_record_id
+
 
 class RefinementSessionDoc(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str = Field(alias="_id")
     app_id: str
-    artifact_version_id: str
-    result_artifact_version_id: str | None = None
+    build_record_id: str
+    result_build_record_id: str | None = None
     change_request_id: str
     provider: str = "e2b"
     sandbox_id: str | None = None
     status: RefinementSessionStatus = RefinementSessionStatus.PENDING
     preview_url: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        remapped = dict(data)
+        if "artifact_version_id" in remapped and "build_record_id" not in remapped:
+            remapped["build_record_id"] = remapped.pop("artifact_version_id")
+        else:
+            remapped.pop("artifact_version_id", None)
+        if "result_artifact_version_id" in remapped and "result_build_record_id" not in remapped:
+            remapped["result_build_record_id"] = remapped.pop("result_artifact_version_id")
+        else:
+            remapped.pop("result_artifact_version_id", None)
+        return remapped
+
     metadata: dict[str, Any] = Field(default_factory=dict)
     started_at: datetime = Field(default_factory=_utc_now)
     ended_at: datetime | None = None
+
+    # Prior-api attribute aliases
+    @property
+    def artifact_version_id(self) -> str:
+        return self.build_record_id
+
+    @property
+    def result_artifact_version_id(self) -> str | None:
+        return self.result_build_record_id
+
+
+# Prior-api class aliases — kept so callers that import the old names still work
+# during the migration period. Remove once all callers are updated.
+ArtifactLifecycleStatus = BuildRecordStatus
+ArtifactValidationStatus = BuildRecordValidationStatus
+ArtifactFileManifestEntry = BuildRecordFileEntry
+ArtifactVersionDoc = BuildRecord

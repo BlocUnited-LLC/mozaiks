@@ -69,8 +69,16 @@ class LocalArtifactContentStore:
     def __init__(self, root: Path | str | None = None) -> None:
         self._root = Path(root) if root else Path("generated_artifacts")
 
-    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
-        dest_dir = self._root / app_id / artifact_version_id
+    async def put_bundle(
+        self,
+        data: bytes,
+        *,
+        app_id: str,
+        artifact_version_id: str = "",
+        build_record_id: str = "",
+    ) -> str:
+        record_id = build_record_id or artifact_version_id
+        dest_dir = self._root / app_id / record_id
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / "artifact.zip"
         dest.write_bytes(data)
@@ -142,12 +150,20 @@ class GridFSArtifactContentStore:
         self._fs = motor.AsyncIOMotorGridFSBucket(db, bucket_name="artifact_bundles")
         return self._fs
 
-    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
+    async def put_bundle(
+        self,
+        data: bytes,
+        *,
+        app_id: str,
+        artifact_version_id: str = "",
+        build_record_id: str = "",
+    ) -> str:
+        record_id = build_record_id or artifact_version_id
         fs = await self._ensure_fs()
         file_id = await fs.upload_from_stream(
-            f"{app_id}/{artifact_version_id}/artifact.zip",
+            f"{app_id}/{record_id}/artifact.zip",
             io.BytesIO(data),
-            metadata={"app_id": app_id, "artifact_version_id": artifact_version_id},
+            metadata={"app_id": app_id, "artifact_version_id": record_id},
         )
         return str(file_id)
 
@@ -203,8 +219,10 @@ class GridFSArtifactContentStore:
 
 
 _CONTENT_BACKEND_ENV_VAR = "MOZAIKS_ARTIFACT_CONTENT_BACKEND"
+_BUNDLE_CONTENT_BACKEND_ENV_VAR = "MOZAIKS_BUNDLE_CONTENT_BACKEND"
 
 _content_store: ArtifactContentStore | None = None
+_bundle_content_store: ArtifactContentStore | None = None
 
 
 def get_artifact_content_store() -> ArtifactContentStore:
@@ -228,10 +246,41 @@ def get_artifact_content_store() -> ArtifactContentStore:
     return _content_store
 
 
+def get_bundle_content_store() -> ArtifactContentStore:
+    """Return the process-wide bundle content store singleton.
+
+    Backend selection is driven by the ``MOZAIKS_BUNDLE_CONTENT_BACKEND``
+    environment variable:
+
+    - ``"local"`` (default) — :class:`LocalArtifactContentStore`
+    - ``"gridfs"`` — :class:`GridFSArtifactContentStore`
+
+    Unknown values fall back to ``"local"``.
+    """
+    global _bundle_content_store
+    if _bundle_content_store is None:
+        backend = os.environ.get(_BUNDLE_CONTENT_BACKEND_ENV_VAR, "local").strip().lower()
+        if backend == "gridfs":
+            _bundle_content_store = GridFSArtifactContentStore()
+        else:
+            _bundle_content_store = LocalArtifactContentStore()
+    return _bundle_content_store
+
+
+# New-API name aliases (bundle naming)
+BundleContentStore = ArtifactContentStore
+LocalBundleContentStore = LocalArtifactContentStore
+GridFSBundleContentStore = GridFSArtifactContentStore
+
+
 __all__ = [
     "ContentNotFoundError",
     "ArtifactContentStore",
     "LocalArtifactContentStore",
     "GridFSArtifactContentStore",
     "get_artifact_content_store",
+    "BundleContentStore",
+    "LocalBundleContentStore",
+    "GridFSBundleContentStore",
+    "get_bundle_content_store",
 ]

@@ -94,6 +94,12 @@ layers:
         use_when: App needs to deliver domain-event alerts outside the app through provider-backed channels such as email, push, or SMS
         avoid_when: You only need in-app alerts, unread badge counts, and a notification center — declare contracts/notifications.yaml on the event-producing module instead
 
+      - id: operator_readiness
+        covers: deterministic launch/readiness evidence packs for host/operator platforms, SaaS workspaces, and platform-style apps
+        capability_kind: operator_pack
+        use_when: App needs reproducible no-spend launch gates, evidence stamping, or an operator readiness wrapper for staging-like validation
+        avoid_when: App is a normal customer app, a brochure site, or a single-purpose UI without launch/evidence gates
+
     rule: >
       For these domains declare capability_kind as operator_pack.
       Generate the app-specific wiring (pages, façade module actions, event flows)
