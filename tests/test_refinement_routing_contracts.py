@@ -44,11 +44,11 @@ def test_refinement_routes_reference_declared_workflow_sequences() -> None:
 
     missing: list[str] = []
     for artifact in harness["routing"]["artifacts"]:
-        artifact_kind = artifact["artifact_kind"]
+        build_family = artifact["build_family"]
         for change_class, route in artifact["routes"].items():
             sequence_id = str(route.get("workflow_sequence") or "").strip()
             if sequence_id not in sequence_ids:
-                missing.append(f"{artifact_kind}.{change_class}->{sequence_id}")
+                missing.append(f"{build_family}.{change_class}->{sequence_id}")
 
     assert missing == []
 
