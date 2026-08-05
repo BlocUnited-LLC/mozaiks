@@ -142,8 +142,8 @@ class ArtifactInvalidationService:
                 for family in sorted(downstream):
                     count = await resolved_store.invalidate_artifact_family(
                         app_id=app_id,
-                        build_family=family,
-                        build_key=family,
+                        artifact_kind=family,
+                        artifact_key=family,
                         reason=reason,
                     )
                     if count:

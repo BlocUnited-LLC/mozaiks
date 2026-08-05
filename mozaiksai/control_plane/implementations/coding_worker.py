@@ -524,7 +524,7 @@ class ScopedRefinementCodingWorker:
                 content_ref = await content_store.put_bundle(
                     zip_bytes,
                     app_id=request.app_id,
-                    build_record_id=f"pending_{zip_sha[:16]}",
+                    artifact_version_id=f"pending_{zip_sha[:16]}",
                 )
                 commit_content_metadata["content_ref"] = content_ref
                 commit_content_metadata["content_backend"] = content_store.backend_name
@@ -540,8 +540,8 @@ class ScopedRefinementCodingWorker:
         commit_content_metadata["validation_status"] = validation_status.value
         artifact_version = await artifact_store.create_artifact_version(
             app_id=request.app_id,
-            build_family=resolved_artifact_kind,
-            build_key=build_key,
+            artifact_kind=resolved_artifact_kind,
+            artifact_key=build_key,
             parent_version_id=request.build_record_id,
             source_workflow=request.requested_workflow_id or "control_plane_coding",
             source_chat_id=None,
