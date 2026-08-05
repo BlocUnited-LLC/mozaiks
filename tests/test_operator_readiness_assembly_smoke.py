@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 
-
 WORKSPACE = Path(__file__).resolve().parents[1]
 OPERATOR_READINESS_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "operator_readiness"
 
