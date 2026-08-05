@@ -259,7 +259,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
 
     assert result.status == "validated"
     assert "artifact_persistence_error" not in result.metadata
-    assert result.metadata["artifact_version_id"] == "av_refinement_live_worker_smoke_persisted"
+    assert result.metadata["build_record_id"] == "av_refinement_live_worker_smoke_persisted"
     assert len(store.created_versions) == 1
     assert store.calls and store.calls[0]["artifact_kind"] == "app_bundle"
     assert store.created_versions[0].app_id == APP_ID

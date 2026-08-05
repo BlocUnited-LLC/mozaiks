@@ -108,8 +108,8 @@ The target workflow input contract is:
 - `build_mode` — `initial` or `revision`
 - `revision_scope` — `patch`, `design`, `feature`, or `core`
 - `change_request_id` — stable revision lineage id
-- `artifact_kind`
-- `artifact_version_id`
+- `build_family` — canonical name for the build record category (e.g. `app_bundle`); `artifact_kind` is also seeded for workflow compat during the naming transition
+- `build_record_id` — canonical name for the target build record ID; `artifact_version_id` is also seeded for workflow compat during the naming transition
 - `refinement_request`
 - `refinement_request_meta`
 - `change_intent`

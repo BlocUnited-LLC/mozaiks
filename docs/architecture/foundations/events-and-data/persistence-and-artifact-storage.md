@@ -322,6 +322,7 @@ hardcode database names. Do not generate `backend/models.py`,
 
 ## Related Contracts
 
+- [Artifact Terminology](../../artifacts/terminology.md) — canonical names for build records, blob storage, UI artifacts, and legacy field aliases
 - [Workflow Architecture](../../workflows/workflow-architecture.md)
 - [Workflow Authoring Contracts](../../workflows/workflow-authoring-contracts.md)
 - [App Bundle Declaratives](../../app/app-bundle-declaratives.md)

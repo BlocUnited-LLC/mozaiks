@@ -8,6 +8,7 @@ sequence rather than always triggering a full rebuild.
 
 Related documents:
 
+- [Artifact Terminology](../artifacts/terminology.md) — canonical names for build records, build families, blob storage, and legacy field aliases
 - [Refinement Engine](../workflows/refinement-engine.md)
 - [End-to-End Build Lifecycle](end-to-end-build-lifecycle.md)
 - [Refinement Harness Architecture](../workflows/refinement-harness-architecture.md)
@@ -69,7 +70,7 @@ documentation as stale.
 
 ## When a Family Becomes Stale
 
-Every `ArtifactVersionDoc` carries a `lifecycle_status`:
+Every `BuildRecord` (formerly `ArtifactVersionDoc` — same class, legacy alias) carries a `lifecycle_status`:
 
 | Status | Meaning |
 |--------|---------|
@@ -200,7 +201,7 @@ must carry a non-empty `files_manifest` before Studio restore can proceed.
 ## Artifact Persistence Per Workflow
 
 Every workflow that produces a canonical artifact family must call
-`persist_summary_artifact()` so that `ArtifactVersionDoc` records exist in the
+`persist_summary_artifact()` so that `BuildRecord` documents exist in the
 DB with accurate lifecycle status. The stale-routing chain depends on these
 records being present.
 
@@ -230,7 +231,7 @@ invalidation). Those refs must be accurate for every refinement request, includi
 the very first one after an initial build.
 
 After each workflow run completes, `SessionRouter.advance_journey_after_run_complete()`
-calls `ArtifactStore.get_current_artifact_version_refs()` to fetch all CURRENT
+calls `BuildRecordStore.get_current_artifact_version_refs()` to fetch all CURRENT
 artifact version IDs for the app, and merges them into `state.artifact_version_refs`
 before upserting. This means:
 

@@ -210,7 +210,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.validation_result["validation_status"] == "passed"
     assert result.validation_result["validation_strategy"] == "local"
     assert result.validation_result["overlay_file_count"] == 1
-    assert result.metadata["artifact_version_id"] == "av_child_1"
+    assert result.metadata["build_record_id"] == "av_child_1"
     assert result.metadata["bundle_mode"] == "staged_refinement_bundle"
     assert result.metadata["source_validation_status"] == "passed"
 

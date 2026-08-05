@@ -1,8 +1,8 @@
 schema_version: mozaiks.refinement_harness.v1
 routing:
-  default_artifact_kind: app_bundle
+  default_build_family: app_bundle
   artifacts:
-    - artifact_kind: concept
+    - build_family: concept
       label: concept
       routes:
         patch:
@@ -13,7 +13,7 @@ routing:
           workflow_sequence: full_rebuild
         core:
           workflow_sequence: conceptual_replan
-    - artifact_kind: design_docs
+    - build_family: design_docs
       label: design docs
       routes:
         patch:
@@ -24,7 +24,7 @@ routing:
           workflow_sequence: design_revision
         core:
           workflow_sequence: full_rebuild
-    - artifact_kind: workflow_bundle
+    - build_family: workflow_bundle
       label: workflow bundle
       routes:
         patch:
@@ -35,7 +35,7 @@ routing:
           workflow_sequence: workflow_revision
         core:
           workflow_sequence: full_rebuild
-    - artifact_kind: app_bundle
+    - build_family: app_bundle
       label: app bundle
       routes:
         patch:
@@ -46,7 +46,7 @@ routing:
           workflow_sequence: app_revision
         core:
           workflow_sequence: full_rebuild
-    - artifact_kind: theme_config
+    - build_family: theme_config
       label: theme config
       routes:
         patch:
