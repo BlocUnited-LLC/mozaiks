@@ -81,12 +81,12 @@ class RefinementValidationPlan(BaseModel):
 
 
 class RefinementExecutionPlan(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     request_id: str
     app_id: str | None = None
     request: str
-    build_family: str = Field(alias="artifact_kind")
+    build_family: str
     change_class: str
     refinement_lane: str | None = None
     workflow_id: str
@@ -111,17 +111,11 @@ class RefinementExecutionPlan(BaseModel):
     app_context_policy_override: AppContextPolicyOverride | None = None
     app_context_impact_hints: AppContextImpactHints | None = None
 
-    @property
-    def artifact_kind(self) -> str:
-        """Prior-api alias for build_family."""
-        return self.build_family
-
-
 class RefinementDryRunPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request: str
-    artifact_kind: str
+    build_family: str
     change_class: str
     refinement_lane: str | None = None
     workflow_id: str
@@ -287,14 +281,14 @@ def _stable_request_id(
     *,
     app_id: str | None,
     request: str,
-    artifact_kind: str,
+    build_family: str,
     change_class: str,
     workflow_sequence: str,
     affected_bundle_paths: list[str],
 ) -> str:
     payload = {
         "app_id": app_id or "",
-        "artifact_kind": artifact_kind,
+        "build_family": build_family,
         "change_class": change_class,
         "request": request,
         "workflow_sequence": workflow_sequence,
@@ -550,7 +544,7 @@ def _app_context_impact_warnings(hints: AppContextImpactHints | None) -> list[st
 def build_refinement_execution_plan_from_route(
     *,
     request: str,
-    artifact_kind: str,
+    build_family: str,
     change_class: str,
     workflow_id: str,
     workflow_sequence: str | None,
@@ -615,7 +609,7 @@ def build_refinement_execution_plan_from_route(
     resolved_request_id = request_id or _stable_request_id(
         app_id=app_id,
         request=request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         change_class=normalized_change_class,
         workflow_sequence=resolved_workflow_sequence,
         affected_bundle_paths=paths,
@@ -681,7 +675,7 @@ def build_refinement_execution_plan_from_route(
         request_id=resolved_request_id,
         app_id=app_id,
         request=request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         change_class=normalized_change_class,
         refinement_lane=refinement_lane,
         workflow_id=workflow_id,
@@ -713,7 +707,7 @@ def build_refinement_execution_plan_from_route(
 async def build_refinement_execution_plan(
     *,
     request: str,
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
     change_class: str | None = None,
     files_manifest: list[dict[str, Any]] | None = None,
     app_root: Path | None = None,
@@ -748,8 +742,8 @@ async def build_refinement_execution_plan(
     refinement_request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": artifact_kind,
-                "artifact_key": artifact_kind,
+                "build_family": build_family,
+                "build_key": build_family,
                 "raw_user_request": request,
                 "source_surface": source_surface,
                 "extra": {"files_manifest": manifest},
@@ -780,7 +774,7 @@ async def build_refinement_execution_plan(
     )
     return build_refinement_execution_plan_from_route(
         request=request,
-        artifact_kind=refinement_request.artifact_kind,
+        build_family=refinement_request.build_family,
         change_class=change_class_value,
         workflow_id=decision.workflow_id,
         workflow_sequence=workflow_sequence,
@@ -805,7 +799,7 @@ async def build_refinement_execution_plan(
 async def build_refinement_dry_run_plan(
     *,
     request: str,
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
     change_class: str | None = None,
     files_manifest: list[dict[str, Any]] | None = None,
     app_root: Path | None = None,
@@ -815,7 +809,7 @@ async def build_refinement_dry_run_plan(
 ) -> RefinementDryRunPlan:
     execution_plan = await build_refinement_execution_plan(
         request=request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         change_class=change_class,
         files_manifest=files_manifest,
         app_root=app_root,
@@ -825,7 +819,7 @@ async def build_refinement_dry_run_plan(
     )
     return RefinementDryRunPlan(
         request=request,
-        artifact_kind=execution_plan.artifact_kind,
+        build_family=execution_plan.build_family,
         change_class=execution_plan.change_class,
         refinement_lane=execution_plan.refinement_lane,
         workflow_id=execution_plan.workflow_id,

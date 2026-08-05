@@ -141,7 +141,7 @@ def _make_request_id(**kwargs) -> str:
     defaults = {
         "app_id": "my-app",
         "request": "Add search",
-        "artifact_kind": "app_bundle",
+        "build_family": "app_bundle",
         "change_class": "feature",
         "workflow_sequence": "app_revision",
         "affected_bundle_paths": [],
@@ -175,9 +175,9 @@ class TestStableRequestId:
         r2 = _make_request_id(request="Remove search")
         assert r1 != r2
 
-    def test_different_artifact_kind_different_id(self):
-        r1 = _make_request_id(artifact_kind="app_bundle")
-        r2 = _make_request_id(artifact_kind="workflow_bundle")
+    def test_different_build_family_different_id(self):
+        r1 = _make_request_id(build_family="app_bundle")
+        r2 = _make_request_id(build_family="workflow_bundle")
         assert r1 != r2
 
     def test_none_app_id_treated_as_empty(self):
