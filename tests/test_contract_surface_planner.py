@@ -124,27 +124,27 @@ def test_contract_surface_update_model():
 
 def test_planner_eligible_feature_app_bundle():
     planner = ContractSurfacePlanner.__new__(ContractSurfacePlanner)
-    assert planner.eligible(change_class="feature", artifact_kind="app_bundle") is True
+    assert planner.eligible(change_class="feature", build_family="app_bundle") is True
 
 
 def test_planner_eligible_design_app_bundle():
     planner = ContractSurfacePlanner.__new__(ContractSurfacePlanner)
-    assert planner.eligible(change_class="design", artifact_kind="app_bundle") is True
+    assert planner.eligible(change_class="design", build_family="app_bundle") is True
 
 
 def test_planner_not_eligible_patch():
     planner = ContractSurfacePlanner.__new__(ContractSurfacePlanner)
-    assert planner.eligible(change_class="patch", artifact_kind="app_bundle") is False
+    assert planner.eligible(change_class="patch", build_family="app_bundle") is False
 
 
 def test_planner_not_eligible_core():
     planner = ContractSurfacePlanner.__new__(ContractSurfacePlanner)
-    assert planner.eligible(change_class="core", artifact_kind="app_bundle") is False
+    assert planner.eligible(change_class="core", build_family="app_bundle") is False
 
 
 def test_planner_not_eligible_unknown_artifact():
     planner = ContractSurfacePlanner.__new__(ContractSurfacePlanner)
-    assert planner.eligible(change_class="feature", artifact_kind="concept") is False
+    assert planner.eligible(change_class="feature", build_family="concept") is False
 
 
 # ---------------------------------------------------------------------------

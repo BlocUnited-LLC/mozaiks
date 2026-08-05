@@ -150,7 +150,7 @@ class TestArtifactLabel:
 
     def test_policy_label_used(self):
         policy = ArtifactRoutePolicy(
-            artifact_kind="app_bundle",
+            build_family="app_bundle",
             label="App_Bundle",
             patch=_route(),
             design=_route(),
@@ -173,7 +173,7 @@ class TestToPolicy:
     def test_artifact_kind_stored(self):
         manifest = _artifact_routing_manifest("app_bundle")
         policy = RefinementTriggerRouteResolver._to_policy(manifest)
-        assert policy.artifact_kind == "app_bundle"
+        assert policy.build_family == "app_bundle"
 
     def test_explicit_label_stored(self):
         manifest = _artifact_routing_manifest("app_bundle", label="App Bundle")

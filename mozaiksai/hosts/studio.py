@@ -2281,7 +2281,7 @@ async def trigger_workflow(
             persisted_change_request = await artifact_store.create_change_request(
                 app_id=app_id,
                 artifact_kind=refinement_request.artifact_kind,
-                artifact_key=body.artifact_key or refinement_request.normalized_artifact_key(),
+                artifact_key=body.artifact_key or refinement_request.normalized_build_key(),
                 artifact_version_id=refinement_request.artifact_version_id,
                 raw_user_request=refinement_request.raw_user_request,
                 classification=ChangeClassification(refinement_decision.change_intent.change_class.value),

@@ -19,7 +19,7 @@ def test_load_default_factory_refinement_harness() -> None:
     pack = load_refinement_harness(app_root=app_root)
 
     assert pack.path == (Path(__file__).resolve().parents[1] / "factory_app" / "refinement_harness").resolve()
-    assert pack.manifest.routing.default_artifact_kind == "app_bundle"
+    assert pack.manifest.routing.default_build_family == "app_bundle"
     app_bundle = pack.routing_for_artifact("app_bundle")
     assert app_bundle is not None
     assert app_bundle.routes.core.workflow_sequence == "full_rebuild"
@@ -199,7 +199,7 @@ def test_load_selected_refinement_harness_extends_default_with_overlay(tmp_path:
                     "routing": {
                         "artifacts": [
                             {
-                                "artifact_kind": "app_bundle",
+                                "build_family": "app_bundle",
                                 "label": "App Zero app bundle",
                             }
                         ]

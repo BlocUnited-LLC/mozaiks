@@ -296,7 +296,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
     assert result.eligible is True
     assert result.status == "validated"
     assert result.applied_files[_DASHBOARD_PATH] == _DASHBOARD_UPDATED
-    assert result.metadata["artifact_version_id"] == "av_child_promotion_001"
+    assert result.metadata["build_record_id"] == "av_child_promotion_001"
     assert "artifact_persistence_error" not in result.metadata
 
     # Artifact store call assertions — the full promotion contract
@@ -419,7 +419,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
     )
 
     assert result.status == "validated"
-    assert result.metadata["artifact_version_id"] == "av_child_promo_contract"
+    assert result.metadata["build_record_id"] == "av_child_promo_contract"
 
     call = artifact_store.last_call
     # Parent lineage

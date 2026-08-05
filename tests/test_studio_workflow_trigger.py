@@ -275,9 +275,9 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         "refinement_request": {
             "request_kind": "refinement",
             "declared_change_class": None,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": "av_123",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": "av_123",
             "raw_user_request": "Add an export action",
             "source_surface": "app_build",
             "app_id": captured_prepare["app_id"],
@@ -308,9 +308,9 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "refinement_request": {
                 "request_kind": "refinement",
                 "declared_change_class": None,
-                "artifact_kind": "app_bundle",
-                "artifact_key": "app_bundle",
-                "artifact_version_id": "av_123",
+                "build_family": "app_bundle",
+                "build_key": "app_bundle",
+                "build_record_id": "av_123",
                 "raw_user_request": "Add an export action",
                 "source_surface": "app_build",
                 "app_id": captured_prepare["app_id"],
@@ -1247,8 +1247,8 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert captured_pending_harness_decision["context_variables"] == {}
     assert captured_pending_harness_decision["trigger_payload"]["change_request_id"] == "cr_core_1"
     assert captured_pending_harness_decision["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
-    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["artifact_kind"] == "app_bundle"
-    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["artifact_version_id"] == "av_core_1"
+    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["build_family"] == "app_bundle"
+    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["build_record_id"] == "av_core_1"
 
     second = client.post(
         "/api/workflows/trigger",
@@ -1392,7 +1392,7 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
     assert seed["refinement_request_meta"]["extra"]["build_registry_id"] == "appreg_review_1"
 
     pending_request = captured_pending["pending_trigger_payload"]["refinement_request"]
-    assert pending_request["artifact_version_id"] == "av_review_1"
+    assert pending_request["build_record_id"] == "av_review_1"
     assert pending_request["source_surface"] == "app_review"
     assert pending_request["extra"]["bundle_path"] == staged_bundle_path
 

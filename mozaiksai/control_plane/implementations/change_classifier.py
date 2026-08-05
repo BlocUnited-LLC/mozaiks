@@ -64,7 +64,7 @@ class LLMChangeClassifier:
         build_key = build_key or artifact_key
         build_record_id = build_record_id or artifact_version_id
         if not build_family:
-            raise TypeError("classify requires build_family (or legacy artifact_kind)")
+            raise TypeError("classify requires build_family (artifact_kind alias accepted for transition)")
 
         control_plane = self._load_config()
         if not control_plane.enabled:
