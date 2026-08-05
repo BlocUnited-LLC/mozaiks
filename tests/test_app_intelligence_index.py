@@ -172,9 +172,9 @@ async def test_app_intelligence_index_feeds_graph_aware_scope_catalog(tmp_path: 
         context=ControlPlaneToolContext(
             checkpoint="scope_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-            artifact_version_id=result.app_bundle_artifact_version_id,
+            build_family="app_bundle",
+            build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+            build_record_id=result.app_bundle_artifact_version_id,
             raw_user_request="Update wallet checkout entitlement behavior",
         ),
         artifact_store=store,
@@ -212,9 +212,9 @@ async def test_app_intelligence_index_feeds_persisted_source_context_tools(tmp_p
     context = ControlPlaneToolContext(
         checkpoint="coding_requested",
         app_id="app_1",
-        artifact_kind="app_bundle",
-        artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-        artifact_version_id=result.app_bundle_artifact_version_id,
+        build_family="app_bundle",
+        build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+        build_record_id=result.app_bundle_artifact_version_id,
         raw_user_request="Update dashboard metrics",
     )
 

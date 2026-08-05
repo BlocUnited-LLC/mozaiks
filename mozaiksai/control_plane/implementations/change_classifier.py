@@ -46,7 +46,7 @@ class LLMChangeClassifier:
     async def classify(
         self,
         *,
-        build_family: str | None = None,
+        build_family: str,
         build_key: str | None = None,
         raw_user_request: str,
         declared_change_class: str | None = None,
@@ -56,16 +56,7 @@ class LLMChangeClassifier:
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         extra: dict[str, Any] | None = None,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
-        artifact_version_id: str | None = None,
     ) -> ChangeClassifierResult:
-        build_family = build_family or artifact_kind
-        build_key = build_key or artifact_key
-        build_record_id = build_record_id or artifact_version_id
-        if not build_family:
-            raise TypeError("classify requires build_family (artifact_kind alias accepted for transition)")
-
         control_plane = self._load_config()
         if not control_plane.enabled:
             raise RuntimeError("Refinement Engine is disabled in app/config/refinement_policy.yaml")
@@ -83,10 +74,10 @@ class LLMChangeClassifier:
             app_id=app_id,
             requested_workflow_id=requested_workflow_id,
             control_plane_context=await self._load_control_plane_context(
-                build_family=build_family,
-                build_key=build_key,
-                raw_user_request=raw_user_request,
-                build_record_id=build_record_id,
+            build_family=build_family,
+            build_key=build_key,
+            raw_user_request=raw_user_request,
+            build_record_id=build_record_id,
                 source_surface=source_surface,
                 app_id=app_id,
                 user_id=user_id,

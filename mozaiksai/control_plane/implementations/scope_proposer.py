@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from factory_app.refinement_harness.tools._artifact_workspace import (
-    load_artifact_workspace,
-    safe_relpath,
-)
+from factory_app.refinement_harness.tools._bundle_workspace import load_bundle_workspace, safe_relpath
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     ControlPlaneToolCall,
@@ -96,10 +93,10 @@ class ArtifactScopeProposer:
             return {}
 
         store = self._artifact_store or get_artifact_store()
-        workspace = await load_artifact_workspace(
-            artifact_store=store,
+        workspace = await load_bundle_workspace(
+            record_store=store,
             app_id=app_id,
-            artifact_version_id=build_record_id,
+            build_record_id=build_record_id,
         )
         if not workspace.get("present"):
             return {}
@@ -278,10 +275,10 @@ class ArtifactScopeProposer:
             return set()
 
         store = self._artifact_store or get_artifact_store()
-        workspace = await load_artifact_workspace(
-            artifact_store=store,
+        workspace = await load_bundle_workspace(
+            record_store=store,
             app_id=app_id,
-            artifact_version_id=build_record_id,
+            build_record_id=build_record_id,
         )
         if not workspace.get("present"):
             return set()

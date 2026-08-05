@@ -63,7 +63,7 @@ class ArtifactInvalidationService:
         artifact_store: ArtifactStore | None = None,
     ) -> dict[str, object]:
         resolved_change_request_id = str(change_request_id or "").strip() or None
-        affected_artifact_kinds = [
+        affected_build_families = [
             str(kind).strip()
             for kind in list(routing_decision.impact_set.affected_declarative_families or [])
             if str(kind).strip()
@@ -71,16 +71,16 @@ class ArtifactInvalidationService:
         if not resolved_change_request_id:
             return {
                 "change_request_id": None,
-                "affected_artifact_kinds": affected_artifact_kinds,
-                "invalidated_artifact_version_ids": [],
+                "affected_build_families": affected_build_families,
+                "invalidated_build_record_ids": [],
                 "downstream_staled_families": [],
             }
 
         if not routing_decision.impact_set.requires_rebuild:
             return {
                 "change_request_id": resolved_change_request_id,
-                "affected_artifact_kinds": affected_artifact_kinds,
-                "invalidated_artifact_version_ids": [],
+                "affected_build_families": affected_build_families,
+                "invalidated_build_record_ids": [],
                 "downstream_staled_families": [],
             }
 
@@ -88,8 +88,8 @@ class ArtifactInvalidationService:
         if not app_id:
             return {
                 "change_request_id": resolved_change_request_id,
-                "affected_artifact_kinds": affected_artifact_kinds,
-                "invalidated_artifact_version_ids": [],
+                "affected_build_families": affected_build_families,
+                "invalidated_build_record_ids": [],
                 "downstream_staled_families": [],
             }
 
@@ -108,20 +108,20 @@ class ArtifactInvalidationService:
             if state is not None:
                 artifact_version_refs.update(dict(state.artifact_version_refs or {}))
 
-        request_artifact_kind = str(refinement_request.build_family or "").strip()
-        request_artifact_version_id = str(refinement_request.build_record_id or "").strip()
-        if request_artifact_kind and request_artifact_version_id:
-            artifact_version_refs[request_artifact_kind] = request_artifact_version_id
+        request_build_family = str(refinement_request.build_family or "").strip()
+        request_build_record_id = str(refinement_request.build_record_id or "").strip()
+        if request_build_family and request_build_record_id:
+            artifact_version_refs[request_build_family] = request_build_record_id
 
-        if not affected_artifact_kinds and request_artifact_kind:
-            affected_artifact_kinds = [request_artifact_kind]
+        if not affected_build_families and request_build_family:
+            affected_build_families = [request_build_family]
 
-        invalidated_artifact_version_ids: list[str] = []
-        if artifact_version_refs and affected_artifact_kinds:
-            invalidated_artifact_version_ids = await resolved_store.invalidate_artifact_version_refs(
+        invalidated_build_record_ids: list[str] = []
+        if artifact_version_refs and affected_build_families:
+            invalidated_build_record_ids = await resolved_store.invalidate_artifact_version_refs(
                 app_id=app_id,
                 artifact_version_refs=artifact_version_refs,
-                affected_artifact_kinds=affected_artifact_kinds,
+                affected_artifact_kinds=affected_build_families,
                 reason=reason,
             )
 
@@ -137,8 +137,8 @@ class ArtifactInvalidationService:
                 if pack is not None
                 else {}
             )
-            if dependency_graph and affected_artifact_kinds:
-                downstream = _get_downstream_families(set(affected_artifact_kinds), dependency_graph)
+            if dependency_graph and affected_build_families:
+                downstream = _get_downstream_families(set(affected_build_families), dependency_graph)
                 for family in sorted(downstream):
                     count = await resolved_store.invalidate_artifact_family(
                         app_id=app_id,
@@ -150,7 +150,7 @@ class ArtifactInvalidationService:
                         downstream_staled_families.append(family)
                         logger.info(
                             "Downstream staleness propagated: %s → %s (%d version(s) staled)",
-                            affected_artifact_kinds,
+                            affected_build_families,
                             family,
                             count,
                         )
@@ -159,8 +159,8 @@ class ArtifactInvalidationService:
 
         return {
             "change_request_id": resolved_change_request_id,
-            "affected_artifact_kinds": affected_artifact_kinds,
-            "invalidated_artifact_version_ids": invalidated_artifact_version_ids,
+            "affected_build_families": affected_build_families,
+            "invalidated_build_record_ids": invalidated_build_record_ids,
             "downstream_staled_families": downstream_staled_families,
         }
 

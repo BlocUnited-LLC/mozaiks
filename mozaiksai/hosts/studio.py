@@ -853,7 +853,7 @@ class AppIntelligenceIndexRequest(BaseModel):
     monorepo_path: str | None = Field(default=None, max_length=1000)
     auth_connector_id: str | None = Field(default=None, max_length=160)
     ignored_paths: list[str] = Field(default_factory=list)
-    artifact_key: str = "app_intelligence_workspace"
+    workspace_key: str = "app_intelligence_workspace"
     make_current: bool = True
     scan_policy: dict[str, Any] | None = None
 
@@ -1107,7 +1107,7 @@ async def _start_studio_app_intelligence_index_job(
             monorepo_path=body.monorepo_path,
             auth_connector_id=body.auth_connector_id,
             ignored_paths=body.ignored_paths,
-            artifact_key=body.artifact_key,
+            workspace_key=body.workspace_key,
             make_current=body.make_current,
             scan_policy=body.scan_policy,
         )
@@ -1170,7 +1170,7 @@ async def _run_studio_app_intelligence_index_job(app_id: str, job_id: str) -> No
             app_id=job.app_id,
             workspace_root=import_result.selected_root,
             artifact_store=get_artifact_store(),
-            artifact_key=job.artifact_key,
+            workspace_key=job.workspace_key,
             source_workflow="studio_app_intelligence_index",
             source_chat_id=job.requested_by,
             scan_policy=source_import_scan_policy(job.scan_policy, ignored_paths=import_result.ignored_paths),

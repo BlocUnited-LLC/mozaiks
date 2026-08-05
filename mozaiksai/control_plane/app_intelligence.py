@@ -84,7 +84,7 @@ async def index_workspace_app_intelligence(
     app_id: str,
     workspace_root: str | Path,
     artifact_store: ArtifactStore | None = None,
-    artifact_key: str = APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+    workspace_key: str = APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
     source_workflow: str = APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW,
     source_chat_id: str | None = None,
     scan_policy: dict[str, Any] | None = None,
@@ -141,7 +141,7 @@ async def index_workspace_app_intelligence(
     app_bundle_artifact = await store.create_artifact_version(
         app_id=resolved_app_id,
         artifact_kind="app_bundle",
-        artifact_key=artifact_key,
+        artifact_key=workspace_key,
         files_manifest=[entry.model_dump(mode="python") for entry in files_manifest],
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
@@ -179,7 +179,7 @@ async def index_workspace_app_intelligence(
         indexed_at=indexed_at,
         metadata={
             "artifact_kind": "app_bundle",
-            "artifact_key": artifact_key,
+            "artifact_key": workspace_key,
             "artifact_version_id": app_bundle_artifact.id,
             "scan_policy": policy.policy_id,
         },
@@ -189,7 +189,7 @@ async def index_workspace_app_intelligence(
         scan_result=scan_result,
         artifact_version_id=app_bundle_artifact.id,
         artifact_kind="app_bundle",
-        artifact_key=artifact_key,
+        artifact_key=workspace_key,
         source_ref=source_ref,
         indexed_at=indexed_at,
     )
@@ -198,7 +198,7 @@ async def index_workspace_app_intelligence(
         framework_detection = snapshot_detection
     app_bundle_ref = ArtifactRef(
         artifact_kind="app_bundle",
-        artifact_key=artifact_key,
+        artifact_key=workspace_key,
         artifact_version_id=app_bundle_artifact.id,
         lifecycle_status=app_bundle_artifact.lifecycle_status.value,
         source_ref_id=source_ref.source_ref_id,
