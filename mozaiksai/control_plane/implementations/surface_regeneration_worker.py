@@ -166,7 +166,7 @@ class SurfaceRegenerationWorker:
                 "surfaces_succeeded": succeeded,
                 "surfaces_failed": total - succeeded,
                 "change_class": plan.change_class,
-                "artifact_kind": plan.artifact_kind,
+                "artifact_kind": plan.build_family,
             },
         )
 

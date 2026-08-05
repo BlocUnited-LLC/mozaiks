@@ -108,8 +108,8 @@ class ArtifactInvalidationService:
             if state is not None:
                 artifact_version_refs.update(dict(state.artifact_version_refs or {}))
 
-        request_artifact_kind = str(refinement_request.artifact_kind or "").strip()
-        request_artifact_version_id = str(refinement_request.artifact_version_id or "").strip()
+        request_artifact_kind = str(refinement_request.build_family or "").strip()
+        request_artifact_version_id = str(refinement_request.build_record_id or "").strip()
         if request_artifact_kind and request_artifact_version_id:
             artifact_version_refs[request_artifact_kind] = request_artifact_version_id
 
@@ -142,8 +142,8 @@ class ArtifactInvalidationService:
                 for family in sorted(downstream):
                     count = await resolved_store.invalidate_artifact_family(
                         app_id=app_id,
-                        artifact_kind=family,
-                        artifact_key=family,
+                        build_family=family,
+                        build_key=family,
                         reason=reason,
                     )
                     if count:

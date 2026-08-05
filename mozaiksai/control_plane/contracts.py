@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ---------------------------------------------------------------------------
 # Contract surface types
@@ -70,6 +70,21 @@ CONTRACT_SURFACE_CANONICAL_PATHS: dict[str, list[str]] = {
 }
 
 
+def _remap_legacy_artifact_fields(values: Any) -> Any:
+    if not isinstance(values, dict):
+        return values
+    for old, new in (
+        ("artifact_kind", "build_family"),
+        ("artifact_key", "build_key"),
+        ("artifact_version_id", "build_record_id"),
+    ):
+        if old in values:
+            if new not in values:
+                values[new] = values[old]
+            values.pop(old, None)
+    return values
+
+
 class ControlPlaneToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -84,13 +99,30 @@ class ControlPlaneToolContext(BaseModel):
     checkpoint: str | None = None
     app_id: str | None = None
     user_id: str | None = None
-    artifact_kind: str | None = None
-    artifact_key: str | None = None
-    artifact_version_id: str | None = None
+    build_family: str | None = None
+    build_key: str | None = None
+    build_record_id: str | None = None
     requested_workflow_id: str | None = None
     source_surface: str | None = None
     raw_user_request: str = ""
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, values: Any) -> Any:
+        return _remap_legacy_artifact_fields(values)
+
+    @property
+    def artifact_kind(self) -> str | None:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str | None:
+        return self.build_key
+
+    @property
+    def artifact_version_id(self) -> str | None:
+        return self.build_record_id
 
 
 class ControlPlaneToolResult(BaseModel):
@@ -117,9 +149,9 @@ class CodingWorkerRequest(BaseModel):
 
     app_id: str
     user_id: str | None = None
-    artifact_kind: str
-    artifact_key: str | None = None
-    artifact_version_id: str | None = None
+    build_family: str
+    build_key: str | None = None
+    build_record_id: str | None = None
     requested_workflow_id: str | None = None
     raw_user_request: str = ""
     source_surface: str | None = None
@@ -129,6 +161,23 @@ class CodingWorkerRequest(BaseModel):
     start_preview: bool = False
     context_seed: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, values: Any) -> Any:
+        return _remap_legacy_artifact_fields(values)
+
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str | None:
+        return self.build_key
+
+    @property
+    def artifact_version_id(self) -> str | None:
+        return self.build_record_id
 
 
 class ScopeProposal(BaseModel):
@@ -165,11 +214,20 @@ class ContractSurfacePlan(BaseModel):
     surfaces: list[ContractSurfaceUpdate] = Field(default_factory=list)
     summary: str = Field(min_length=1)
     change_class: str = ""
-    artifact_kind: str = ""
+    build_family: str = ""
     requires_schema_migration: bool = False
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     fallback_to_workflow: bool = False
     fallback_reason: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, values: Any) -> Any:
+        return _remap_legacy_artifact_fields(values)
+
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
 
 
 class HarnessDecisionAction(BaseModel):

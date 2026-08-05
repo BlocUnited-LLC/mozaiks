@@ -133,11 +133,11 @@ class ContractSurfacePlanner:
         self,
         *,
         change_class: str,
-        artifact_kind: str,
+        build_family: str,
     ) -> bool:
         return (
             str(change_class or "").strip().lower() in _ELIGIBLE_CHANGE_CLASSES
-            and str(artifact_kind or "").strip().lower() in _ELIGIBLE_ARTIFACT_KINDS
+            and str(build_family or "").strip().lower() in _ELIGIBLE_ARTIFACT_KINDS
         )
 
     async def propose(
@@ -148,13 +148,13 @@ class ContractSurfacePlanner:
         context_graph_catalog: dict[str, Any] | None = None,
     ) -> ContractSurfacePlan:
         change_class = str(routing_decision.change_intent.change_class.value or "").strip().lower()
-        artifact_kind = str(refinement_request.artifact_kind or "").strip().lower()
+        build_family = str(refinement_request.build_family or "").strip().lower()
 
-        if not self.eligible(change_class=change_class, artifact_kind=artifact_kind):
+        if not self.eligible(change_class=change_class, build_family=build_family):
             return ContractSurfacePlan(
                 summary="Contract surface planning not applicable for this change class.",
                 change_class=change_class,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 fallback_to_workflow=True,
                 fallback_reason=f"change_class={change_class!r} is not eligible for contract surface planning",
                 confidence=0.0,
@@ -166,7 +166,7 @@ class ContractSurfacePlanner:
             return ContractSurfacePlan(
                 summary="No contract_surface_requested checkpoint declared in this refinement harness.",
                 change_class=change_class,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 fallback_to_workflow=True,
                 fallback_reason="missing checkpoint declaration",
                 confidence=0.0,
@@ -177,7 +177,7 @@ class ContractSurfacePlanner:
             return ContractSurfacePlan(
                 summary=f"Prompt '{checkpoint.prompt_id}' not found.",
                 change_class=change_class,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 fallback_to_workflow=True,
                 fallback_reason="missing prompt",
                 confidence=0.0,
@@ -203,7 +203,7 @@ class ContractSurfacePlanner:
             return ContractSurfacePlan(
                 summary="Contract surface classification failed.",
                 change_class=change_class,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 fallback_to_workflow=True,
                 fallback_reason=str(exc),
                 confidence=0.0,
@@ -213,7 +213,7 @@ class ContractSurfacePlanner:
             return ContractSurfacePlan(
                 summary=classification.summary or "Change is too broad for targeted surface regeneration.",
                 change_class=change_class,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 fallback_to_workflow=True,
                 fallback_reason=classification.fallback_reason or "low confidence",
                 confidence=float(classification.confidence),
@@ -228,7 +228,7 @@ class ContractSurfacePlanner:
             return ContractSurfacePlan(
                 summary="No contract surfaces could be resolved from the classification.",
                 change_class=change_class,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 fallback_to_workflow=True,
                 fallback_reason="empty surface resolution",
                 confidence=float(classification.confidence),
@@ -238,7 +238,7 @@ class ContractSurfacePlanner:
             surfaces=surfaces,
             summary=classification.summary or f"Targeted update across {len(surfaces)} contract surface(s).",
             change_class=change_class,
-            artifact_kind=artifact_kind,
+            build_family=build_family,
             requires_schema_migration=classification.requires_schema_migration,
             confidence=float(classification.confidence),
             fallback_to_workflow=False,
@@ -329,7 +329,7 @@ class ContractSurfacePlanner:
     ) -> str:
         payload: dict[str, Any] = {
             "change_class": routing_decision.change_intent.change_class.value,
-            "artifact_kind": request.artifact_kind,
+            "build_family": request.build_family,
             "raw_user_request": request.raw_user_request,
             "workflow_sequence": routing_decision.workflow_sequence,
             "rationale": routing_decision.change_intent.rationale,

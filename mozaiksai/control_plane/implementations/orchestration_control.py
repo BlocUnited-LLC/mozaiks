@@ -283,9 +283,9 @@ class OrchestrationControlHarness:
         return CodingWorkerRequest(
             app_id=str(refinement_request.app_id or "").strip(),
             user_id=str(refinement_request.user_id or "").strip() or None,
-            artifact_kind=refinement_request.artifact_kind,
-            artifact_key=refinement_request.normalized_artifact_key(),
-            artifact_version_id=refinement_request.artifact_version_id,
+            build_family=refinement_request.build_family,
+            build_key=refinement_request.normalized_build_key(),
+            build_record_id=refinement_request.build_record_id,
             requested_workflow_id=routing_decision.workflow_id,
             raw_user_request=refinement_request.raw_user_request,
             source_surface=refinement_request.source_surface,
