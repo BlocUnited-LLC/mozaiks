@@ -1,0 +1,7 @@
+version: 1
+readiness_profile: {{ readiness_profile }}
+evidence_mode: {{ evidence_mode | default("local_no_spend") }}
+evidence_ledger_path: {{ evidence_ledger_path | default("docs/operations/evidence-log.json") }}
+local_launcher: {{ local_launcher | default("scripts/check_operator_readiness_local.ps1") }}
+launch_check_command: {{ launch_check_command | default("python scripts/check_launch_readiness.py --json") }}
+monetization_check_command: {{ monetization_check_command | default("python scripts/check_monetization_readiness.py --json") }}

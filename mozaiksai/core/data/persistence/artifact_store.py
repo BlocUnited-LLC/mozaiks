@@ -234,13 +234,15 @@ class BuilderArtifactStore:
         *,
         app_id: str,
         build_id: str,
-        artifact_version_id: str | None,
+        build_record_id: str | None = None,
+        artifact_version_id: str | None = None,
         change_class: str | None,
         data_contract: dict[str, Any],
         user_id: str | None,
         source_workflow: str,
         source_chat_id: str | None,
     ) -> None:
+        resolved_build_record_id = build_record_id if build_record_id is not None else artifact_version_id
         await self.ensure_data_contract_indexes()
         coll = await self._collection(BuilderCollections.DATA_CONTRACTS)
         now = datetime.now(UTC)
@@ -250,7 +252,8 @@ class BuilderArtifactStore:
                 "$set": {
                     "app_id": app_id,
                     "build_id": build_id,
-                    "artifact_version_id": artifact_version_id,
+                    "build_record_id": resolved_build_record_id,
+                    "artifact_version_id": resolved_build_record_id,
                     "change_class": change_class,
                     "data_contract": data_contract,
                     "status": "succeeded",
@@ -348,7 +351,8 @@ class BuilderArtifactStore:
         *,
         app_id: str,
         build_id: str,
-        artifact_version_id: str | None,
+        build_record_id: str | None = None,
+        artifact_version_id: str | None = None,
         change_class: str | None,
         migration: dict[str, Any],
         status: str,
@@ -357,6 +361,7 @@ class BuilderArtifactStore:
         generated_app_dir: str | None = None,
         bundle_relative_path: str | None = None,
     ) -> dict[str, Any]:
+        resolved_build_record_id = build_record_id if build_record_id is not None else artifact_version_id
         await self.ensure_database_migration_indexes()
         coll = await self._collection(BuilderCollections.DATABASE_MIGRATIONS)
         now = datetime.now(UTC)
@@ -368,7 +373,8 @@ class BuilderArtifactStore:
             "app_id": app_id,
             "build_id": build_id,
             "migration_id": migration_id,
-            "artifact_version_id": artifact_version_id,
+            "build_record_id": resolved_build_record_id,
+            "artifact_version_id": resolved_build_record_id,
             "change_class": change_class,
             "status": status,
             "bundle_relative_path": relative_path,

@@ -1183,6 +1183,25 @@ models:
         type: optional_list
         items: AppCapabilityPack
         description: Canonical product capability packs selected before deriving pages, entities, and build tasks.
+      readiness_profile:
+        type: literal
+        values:
+        - none
+        - basic_app
+        - saas_app
+        - host_operator_platform
+        - marketplace_platform
+        default: none
+        description: >
+          Deterministic launch/readiness classification for platform-style apps.
+          Use none for ordinary customer apps. Use basic_app for lightweight
+          apps that still want a local no-spend readiness wrapper. Use saas_app
+          for subscription products that need launch evidence but not a full
+          host-operator matrix. Use host_operator_platform when the app runs
+          hosted apps, launch gates, compliance checks, or evidence stamping.
+          Use marketplace_platform when the app manages multi-party platform
+          operations and needs the same deterministic evidence pattern. This is
+          a planning signal only; it does not enable runtime behavior by itself.
       revenue_model:
         type: union
         variants:
@@ -2075,6 +2094,7 @@ models:
         - entitlement_dispatch
         - file_storage
         - notification_preferences
+        - state_machine
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
           standard = request/response CRUD (default).
@@ -2087,6 +2107,7 @@ models:
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
           file_storage = metadata-only file record module; blobs are stored externally via services/adapters/storage/{provider}.py; emits file_uploaded and file_deleted events; always user_data_scope=true.
           notification_preferences = user notification opt-in preferences module; external delivery via services/adapters/notifications/; triggered by reactions.yaml observing domain events; always user_data_scope=true.
+          state_machine = timestamp-gated status transition module (pending→active→expired patterns); owns a run_<entity>_lifecycle_tick(ctx) internal action; uses indexed find_pending_<transition>(now) repo queries; tick is idempotent and testable without a scheduler.
       description:
         type: str
         description: Short module summary.

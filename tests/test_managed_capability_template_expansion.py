@@ -94,6 +94,38 @@ def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> N
     }
 
 
+def test_selected_pack_renders_jinja_templates_and_strips_suffix(resolver, tmp_path: Path) -> None:
+    pack_root = _write_pack(
+        tmp_path,
+        "operator_readiness",
+        {
+            "config/operator_readiness.yaml.j2": "profile: {{ readiness_profile }}\nledger: {{ evidence_ledger_path }}\n",
+        },
+    )
+
+    result = resolver.resolve_managed_capability_templates(
+        [
+            {
+                "id": "operator_readiness",
+                "capability_source": "config_file",
+                "pack_source_path": str(pack_root),
+            }
+        ],
+        context_variables={
+            "readiness_profile": "host_operator_platform",
+            "evidence_ledger_path": "docs/operations/evidence-log.json",
+        },
+    )
+
+    files = {item["filename"]: item["content"] for item in result}
+    assert files == {
+        "config/operator_readiness.yaml": (
+            "profile: host_operator_platform\n"
+            "ledger: docs/operations/evidence-log.json"
+        )
+    }
+
+
 def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path) -> None:
     pack_root = _write_pack(
         tmp_path,

@@ -977,6 +977,17 @@ definitions:
     source:
       type: build_context
       default: []
+  readiness_profile:
+    type: string
+    description: >
+      Deterministic operator readiness classification emitted by AppPlanAgent.
+      Values: none, basic_app, saas_app, host_operator_platform, or
+      marketplace_platform. Downstream template renderers and operator helper
+      packs use this to choose the no-spend launch profile. Empty/none in OSS
+      mode or when the app does not need a readiness pack.
+    source:
+      type: computed
+      default: none
   capability_registry:
     type: object
     description: >
@@ -1487,6 +1498,7 @@ agents:
     - ready_connector_services
     - missing_connector_services
     - capability_packs
+    - readiness_profile
     - brownfield_build_path
     - adoption_plan
     - ownership_boundary

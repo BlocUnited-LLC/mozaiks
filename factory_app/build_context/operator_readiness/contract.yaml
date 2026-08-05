@@ -1,0 +1,86 @@
+contract_id: operator_readiness
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_platform_and_operator_apps
+    when:
+      intent_any:
+        - operator readiness
+        - launch readiness
+        - readiness gate
+        - evidence ledger
+        - no-spend launch
+        - staging verification
+        - compliance approvals
+        - host operator platform
+        - platform ops
+    action: select_pack
+  - id: require_confirmation_for_simple_apps
+    when:
+      intent_any:
+        - brochure site
+        - simple app
+        - single-purpose app
+        - normal customer app
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - platform
+  - hosting
+  - launch
+  - compliance
+  - operations
+
+required_outputs:
+  - path: config/operator_readiness.yaml
+    owner: templates
+    notes: >
+      Canonical readiness config rendered from the AppBuildPlan readiness_profile.
+      Presence of this file enables the reusable no-spend operator readiness lane.
+  - path: scripts/check_operator_readiness_local.ps1
+    owner: templates
+    notes: >
+      Local wrapper rendered from the selected readiness_profile and evidence
+      mode. The script is generic and does not hardcode App Zero-specific env
+      var names or provider ids.
+  - path: docs/operations/operator-readiness.md
+    owner: templates
+    notes: >
+      Short operator guide explaining the reproducible launch/evidence pattern.
+
+forbidden_outputs:
+  - path: scripts/check_launch_readiness_local.ps1
+    reason: App Zero-specific launcher name. Generated apps should use the canonical operator_readiness filename.
+  - path_prefix: app/build_context/
+    reason: Build-context packs live at the workspace root build_context/ and must not be recreated under app/.
+
+runtime_boundaries:
+  - id: structured_output_is_source_of_truth
+    rule: >
+      The downstream generator must read AppBuildPlan.readiness_profile and the
+      selected pack templates. It must not scrape freeform agent prose to decide
+      whether operator readiness is enabled or which profile was chosen.
+  - id: config_file_is_the_feature_flag
+    rule: >
+      Presence of config/operator_readiness.yaml enables the operator readiness
+      lane. Absence disables it. Do not add ad hoc env flags or hidden
+      conditionals to decide whether the pack is active.
+  - id: local_evidence_is_not_production_proof
+    rule: >
+      Any local no-spend evidence stamped by the operator readiness pack is
+      proof of local verification only. It is not a substitute for staging or
+      production evidence.
+  - id: no_app_zero_defaults
+    rule: >
+      Do not bake App Zero-specific env var names, provider ids, or paid-service
+      defaults into this pack. The pack must remain reusable across platform
+      workspaces.
+
+facades: []
+
+cross_pack_integrations:
+  - pack_id: mozaikspay
+    description: >
+      When the app is a SaaS platform, the readiness profile may include
+      monetization evidence and launch gates alongside billing checks, but the
+      pack itself remains generic and does not own billing internals.

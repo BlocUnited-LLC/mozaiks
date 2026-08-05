@@ -244,6 +244,33 @@ capabilities:
       - onboarding.tour.dismiss
       - onboarding.tour.progress.read
 
+  - id: operator_readiness
+    label: Operator Readiness
+    capability_kind: operator_pack
+    recommendation_rank: 9
+    domains:
+      - platform
+      - launch
+      - readiness
+      - hosting
+      - compliance
+    intent_signals:
+      - App is a host-operator platform or SaaS workspace that needs reproducible no-spend launch gates.
+      - Product spec mentions launch readiness, evidence stamping, staging verification, or operator readiness.
+      - App manages hosted customer apps, release gates, compliance approvals, or platform launch checklists.
+    selection_aliases:
+      - operator readiness
+      - launch readiness
+      - readiness gate
+      - evidence ledger
+      - no-spend launch
+      - staging verification
+    generator_notes:
+      - Select this pack only for platform-style apps that need a deterministic launch/evidence workflow. Do not select it for ordinary customer apps or simple brochure sites.
+      - AppPlanAgent must emit a readiness_profile and the generated files must be rendered from the pack templates, not scraped from freeform agent prose.
+      - The primary generated output is config/operator_readiness.yaml. The pack also emits a local wrapper script and a short operator guide for reproducible no-spend checks.
+      - Keep the generated outputs generic. Do not bake App Zero-specific env var names, provider ids, or paid-service defaults into this pack.
+
   - id: files_pack
     label: Files & Media Storage
     capability_kind: operator_pack

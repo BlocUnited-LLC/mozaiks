@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from jinja2 import Template
 
 from mozaiksai.core.session.build_context import (
     BuildContextError,
@@ -54,6 +55,8 @@ def _template_output_path(path: Path, templates_root: Path) -> str:
     except ValueError as exc:
         raise ManagedCapabilityTemplateError(f"Template path escapes templates root: {path}") from exc
     output_path = relative.as_posix()
+    if output_path.endswith(".j2"):
+        output_path = output_path[: -len(".j2")]
     if not output_path or output_path.startswith("/") or ".." in output_path.split("/"):
         raise ManagedCapabilityTemplateError(f"Unsafe template output path: {output_path}")
     return output_path
@@ -83,9 +86,56 @@ def _is_materializable_template_file(path: Path, templates_root: Path) -> bool:
     return True
 
 
+def _template_variables(
+    *,
+    pack: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    variables: dict[str, Any] = {}
+    for source in (context, pack):
+        for key, value in source.items():
+            if key in {"assets", "capabilities", "facades", "pack"}:
+                continue
+            variables[key] = value
+    variables.setdefault("pack_id", str(pack.get("id") or pack.get("pack_id") or ""))
+    variables.setdefault("capability_source", str(pack.get("capability_source") or ""))
+    return variables
+
+
+def _context_to_dict(context_variables: Any | None) -> dict[str, Any]:
+    if context_variables is None:
+        return {}
+    if isinstance(context_variables, dict):
+        return dict(context_variables)
+    data = getattr(context_variables, "data", None)
+    if isinstance(data, dict):
+        return dict(data)
+    if hasattr(context_variables, "get"):
+        try:
+            keys = [
+                "readiness_profile",
+                "evidence_mode",
+                "evidence_ledger_path",
+                "launch_check_command",
+                "monetization_check_command",
+                "pack_source_path",
+            ]
+            result: dict[str, Any] = {}
+            for key in keys:
+                value = context_variables.get(key)
+                if value is not None:
+                    result[key] = value
+            return result
+        except Exception:
+            return {}
+    return {}
+
+
 def resolve_templates_for_pack(
     pack_source_path: Path,
     pack_id: str,
+    *,
+    context_variables: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Return all files under a selected pack's ``templates/`` tree."""
 
@@ -101,6 +151,7 @@ def resolve_templates_for_pack(
         logger.info("Skipping template materialization for inactive pack '%s'", pack_id)
         return []
 
+    template_vars = _template_variables(pack=pack, context={**context, **_context_to_dict(context_variables)})
     template_roots = _template_roots(context_root, context)
     if not template_roots:
         return []
@@ -115,6 +166,8 @@ def resolve_templates_for_pack(
         ):
             output_path = _template_output_path(path, templates_root)
             content = path.read_text(encoding="utf-8")
+            if path.suffix == ".j2":
+                content = Template(content).render(**template_vars)
             existing = by_filename.get(output_path)
             if existing is not None and existing != content:
                 raise ManagedCapabilityTemplateError(
@@ -128,6 +181,8 @@ def resolve_templates_for_pack(
 
 def resolve_managed_capability_templates(
     capability_packs: list[dict[str, Any]] | None,
+    *,
+    context_variables: Any | None = None,
 ) -> list[dict[str, str]]:
     """Materialize all template files from selected managed capabilities."""
 
@@ -142,7 +197,11 @@ def resolve_managed_capability_templates(
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
         if not raw_path or not pack_id:
             continue
-        for file in resolve_templates_for_pack(Path(raw_path), pack_id):
+        for file in resolve_templates_for_pack(
+            Path(raw_path),
+            pack_id,
+            context_variables=context_variables or {},
+        ):
             filename = file["filename"]
             content = file["content"]
             existing = results_by_filename.get(filename)

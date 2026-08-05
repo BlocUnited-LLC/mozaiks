@@ -55,9 +55,9 @@ def _change_request_summary(change_request: ChangeRequestDoc) -> dict[str, Any]:
     return {
         "present": True,
         "change_request_id": change_request.id,
-        "artifact_kind": change_request.artifact_kind,
-        "artifact_key": change_request.artifact_key,
-        "artifact_version_id": change_request.artifact_version_id,
+        "artifact_kind": change_request.build_family,
+        "artifact_key": change_request.build_key,
+        "artifact_version_id": change_request.build_record_id,
         "classification": change_request.classification.value,
         "raw_user_request": change_request.raw_user_request,
         "created_by_user_id": change_request.created_by_user_id,
@@ -287,7 +287,7 @@ async def assemble_revision_context(
     if current_artifact is not None:
         for change_request in await store.list_change_requests(
             app_id=app_id,
-            artifact_version_id=current_artifact.id,
+            build_record_id=current_artifact.id,
             limit=3,
         ):
             recent_change_requests.append(

@@ -18,6 +18,7 @@ from .models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
     ArtifactVersionDoc,
+    BuildRecord,
     ChangeClassification,
     ChangeIntentDoc,
     ChangeRequestDoc,
@@ -75,8 +76,8 @@ class ArtifactStore:
 
         change_requests = await self._coll("ChangeRequests")
         await change_requests.create_index(
-            [("app_id", 1), ("artifact_version_id", 1), ("created_at", -1)],
-            name="cr_app_version_created",
+            [("app_id", 1), ("build_record_id", 1), ("created_at", -1)],
+            name="cr_app_record_created",
         )
         await change_requests.create_index(
             [("app_id", 1), ("classification", 1), ("created_at", -1)],
@@ -85,12 +86,12 @@ class ArtifactStore:
 
         refinement_sessions = await self._coll("RefinementSessions")
         await refinement_sessions.create_index(
-            [("app_id", 1), ("artifact_version_id", 1), ("started_at", -1)],
-            name="rs_app_version_started",
+            [("app_id", 1), ("build_record_id", 1), ("started_at", -1)],
+            name="rs_app_record_started",
         )
         await refinement_sessions.create_index(
-            [("app_id", 1), ("result_artifact_version_id", 1), ("started_at", -1)],
-            name="rs_app_result_version_started",
+            [("app_id", 1), ("result_build_record_id", 1), ("started_at", -1)],
+            name="rs_app_result_record_started",
             sparse=True,
         )
         await refinement_sessions.create_index(
@@ -124,6 +125,30 @@ class ArtifactStore:
             return_document=ReturnDocument.AFTER,
         )
         return int((doc or {}).get("sequence") or 1)
+
+    async def _next_build_record_version_number(self, *, app_id: str, build_family: str, build_key: str) -> int:
+        counters = await self._coll("ArtifactVersionCounters")
+        now = _utc_now()
+        counter_id = f"{app_id}:{build_family}:{build_key}"
+        doc = await counters.find_one_and_update(
+            {"_id": counter_id, **build_app_scope_filter(app_id)},
+            {
+                "$inc": {"sequence": 1},
+                "$setOnInsert": {
+                    "_id": counter_id,
+                    "app_id": app_id,
+                    "build_family": build_family,
+                    "build_key": build_key,
+                    "created_at": now,
+                },
+                "$set": {"updated_at": now},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return int((doc or {}).get("sequence") or 1)
+
+    # ── Legacy ArtifactVersionDoc API (274 callers — keep until cleaned up) ──
 
     async def create_artifact_version(
         self,
@@ -366,11 +391,15 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        artifact_version_id: str | None = None,
+        build_record_id: str | None = None,
         validation_status: ArtifactValidationStatus,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
     ) -> bool:
+        resolved_id = str(build_record_id or artifact_version_id or "").strip()
+        if not resolved_id:
+            raise ValueError("artifact_version_id or build_record_id is required")
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -390,7 +419,7 @@ class ArtifactStore:
 
         versions = await self._coll("ArtifactVersions")
         result = await versions.update_one(
-            {"_id": artifact_version_id, **build_app_scope_filter(resolved_app_id)},
+            {"_id": resolved_id, **build_app_scope_filter(resolved_app_id)},
             {"$set": updates},
         )
         return bool(result.modified_count)
@@ -399,9 +428,9 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str,
-        artifact_version_id: str | None,
+        build_family: str,
+        build_key: str,
+        build_record_id: str | None,
         raw_user_request: str,
         classification: ChangeClassification,
         refinement_request: dict[str, Any] | RefinementRequestPayload,
@@ -431,9 +460,9 @@ class ArtifactStore:
         doc = ChangeRequestDoc(
             _id=f"cr_{uuid4().hex[:24]}",
             app_id=resolved_app_id,
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
-            artifact_version_id=artifact_version_id,
+            build_family=build_family,
+            build_key=build_key,
+            build_record_id=build_record_id,
             raw_user_request=raw_user_request,
             classification=classification,
             refinement_request=refinement_request_doc,
@@ -450,7 +479,7 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_id: str | None = None,
+        build_record_id: str | None = None,
         classification: ChangeClassification | None = None,
         limit: int = 50,
     ) -> list[ChangeRequestDoc]:
@@ -458,8 +487,8 @@ class ArtifactStore:
         if not resolved_app_id:
             raise ValueError("app_id is required")
         query: dict[str, Any] = {"app_id": resolved_app_id}
-        if artifact_version_id:
-            query["artifact_version_id"] = artifact_version_id
+        if build_record_id:
+            query["build_record_id"] = build_record_id
         if classification:
             query["classification"] = classification.value
         coll = await self._coll("ChangeRequests")
@@ -597,9 +626,9 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         change_request_id: str,
-        result_artifact_version_id: str | None = None,
+        result_build_record_id: str | None = None,
         provider: str = "e2b",
         sandbox_id: str | None = None,
         status: RefinementSessionStatus = RefinementSessionStatus.PROVISIONING,
@@ -612,8 +641,8 @@ class ArtifactStore:
         doc = RefinementSessionDoc(
             _id=f"rs_{uuid4().hex[:24]}",
             app_id=resolved_app_id,
-            artifact_version_id=artifact_version_id,
-            result_artifact_version_id=result_artifact_version_id,
+            build_record_id=build_record_id,
+            result_build_record_id=result_build_record_id,
             change_request_id=change_request_id,
             provider=provider,
             sandbox_id=sandbox_id,
@@ -632,7 +661,7 @@ class ArtifactStore:
         session_id: str,
         status: RefinementSessionStatus | None = None,
         sandbox_id: str | None = None,
-        result_artifact_version_id: str | None = None,
+        result_build_record_id: str | None = None,
         preview_url: str | None = None,
         metadata: dict[str, Any] | None = None,
         ended_at: datetime | None = None,
@@ -645,8 +674,8 @@ class ArtifactStore:
             set_doc["status"] = status.value
         if sandbox_id is not None:
             set_doc["sandbox_id"] = sandbox_id
-        if result_artifact_version_id is not None:
-            set_doc["result_artifact_version_id"] = result_artifact_version_id
+        if result_build_record_id is not None:
+            set_doc["result_build_record_id"] = result_build_record_id
         if preview_url is not None:
             set_doc["preview_url"] = preview_url
         if ended_at is not None:
@@ -665,8 +694,8 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_id: str | None = None,
-        result_artifact_version_id: str | None = None,
+        build_record_id: str | None = None,
+        result_build_record_id: str | None = None,
         change_request_id: str | None = None,
         limit: int = 20,
     ) -> list[RefinementSessionDoc]:
@@ -674,10 +703,10 @@ class ArtifactStore:
         if not resolved_app_id:
             raise ValueError("app_id is required")
         query: dict[str, Any] = {"app_id": resolved_app_id}
-        if artifact_version_id:
-            query["artifact_version_id"] = artifact_version_id
-        if result_artifact_version_id:
-            query["result_artifact_version_id"] = result_artifact_version_id
+        if build_record_id:
+            query["build_record_id"] = build_record_id
+        if result_build_record_id:
+            query["result_build_record_id"] = result_build_record_id
         if change_request_id:
             query["change_request_id"] = change_request_id
         coll = await self._coll("RefinementSessions")
@@ -685,16 +714,8 @@ class ArtifactStore:
         rows = await cursor.to_list(length=max(1, int(limit)))
         return [RefinementSessionDoc.model_validate(row) for row in rows]
 
-
     async def get_current_artifact_version_refs(self, *, app_id: str) -> dict[str, str]:
-        """Return a mapping of artifact_kind → artifact_version_id for all CURRENT versions.
-
-        Used to keep SessionState.artifact_version_refs in sync after each workflow
-        completion, so that ArtifactInvalidationService can accurately mark specific
-        version IDs stale when a refinement request arrives.
-
-        Only the highest-numbered CURRENT version per artifact_kind is returned.
-        """
+        """Return a mapping of artifact_kind → artifact_version_id for all CURRENT versions."""
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             return {}
@@ -704,12 +725,12 @@ class ArtifactStore:
             scope = build_app_scope_filter(resolved_app_id)
             cursor = versions.find(
                 {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                projection={"artifact_kind": 1, "_id": 1, "version_number": 1},
+                projection={"artifact_kind": 1, "build_family": 1, "_id": 1, "version_number": 1},
             ).sort("version_number", -1)
             rows = await cursor.to_list(length=200)
             refs: dict[str, str] = {}
             for row in rows:
-                kind = str(row.get("artifact_kind") or "").strip()
+                kind = str(row.get("artifact_kind") or row.get("build_family") or "").strip()
                 version_id = str(row.get("_id") or "").strip()
                 if kind and version_id and kind not in refs:
                     refs[kind] = version_id
@@ -718,17 +739,33 @@ class ArtifactStore:
             logger.warning("get_current_artifact_version_refs failed for app %s: %s", resolved_app_id, exc)
             return {}
 
+    async def get_current_build_record_refs(self, *, app_id: str) -> dict[str, str]:
+        """Return a mapping of build_family → build_record_id for all CURRENT build records."""
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            return {}
+        await self._ensure_client()
+        versions = await self._coll("ArtifactVersions")
+        try:
+            scope = build_app_scope_filter(resolved_app_id)
+            cursor = versions.find(
+                {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
+                projection={"build_family": 1, "artifact_kind": 1, "_id": 1, "version_number": 1},
+            ).sort("version_number", -1)
+            rows = await cursor.to_list(length=200)
+            refs: dict[str, str] = {}
+            for row in rows:
+                family = str(row.get("build_family") or row.get("artifact_kind") or "").strip()
+                record_id = str(row.get("_id") or "").strip()
+                if family and record_id and family not in refs:
+                    refs[family] = record_id
+            return refs
+        except Exception as exc:
+            logger.warning("get_current_build_record_refs failed for app %s: %s", resolved_app_id, exc)
+            return {}
+
     async def get_stale_artifact_families(self, *, app_id: str) -> list[str]:
-        """Return artifact family names that are genuinely stale.
-
-        A family is stale when it has at least one STALE version AND no CURRENT
-        version.  If a rebuild has already produced a new CURRENT version for that
-        family the STALE record is superseded in effect, even if not yet archived,
-        so the family must not appear as stale to the classifier.
-
-        Used by the control-plane classifier to detect upstream families that were
-        invalidated by a prior change request and need to be included in the next build.
-        """
+        """Return artifact family names that are genuinely stale (STALE but no CURRENT)."""
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             return []
@@ -755,6 +792,361 @@ class ArtifactStore:
             logger.warning("get_stale_artifact_families failed for app %s: %s", resolved_app_id, exc)
             return []
 
+    async def get_stale_build_families(self, *, app_id: str) -> list[str]:
+        """Return build family names that are genuinely stale (STALE but no CURRENT)."""
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            return []
+        await self._ensure_client()
+        versions = await self._coll("ArtifactVersions")
+        try:
+            scope = build_app_scope_filter(resolved_app_id)
+            stale_families: set[str] = set(
+                await versions.distinct(
+                    "build_family",
+                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.STALE.value},
+                )
+            )
+            if not stale_families:
+                return []
+            current_families: set[str] = set(
+                await versions.distinct(
+                    "build_family",
+                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
+                )
+            )
+            return sorted(str(k) for k in (stale_families - current_families) if k)
+        except Exception as exc:
+            logger.warning("get_stale_build_families failed for app %s: %s", resolved_app_id, exc)
+            return []
+
+    # ── New BuildRecord API methods ────────────────────────────────────────────
+
+    async def create_build_record(
+        self,
+        *,
+        app_id: str,
+        build_family: str,
+        build_key: str,
+        files_manifest: Iterable[dict[str, Any] | ArtifactFileManifestEntry] | None = None,
+        source_workflow: str | None = None,
+        source_chat_id: str | None = None,
+        parent_build_record_id: str | None = None,
+        canonical_inputs_version: dict[str, str] | None = None,
+        lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
+        validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PENDING,
+        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
+    ) -> BuildRecord:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+
+        versions = await self._coll("ArtifactVersions")
+        parent_doc: BuildRecord | None = None
+        if parent_build_record_id:
+            parent_raw = await versions.find_one(
+                {"_id": parent_build_record_id, **build_app_scope_filter(resolved_app_id)}
+            )
+            if not isinstance(parent_raw, dict):
+                raise ValueError(f"Unknown parent_build_record_id: {parent_build_record_id}")
+            parent_doc = BuildRecord.model_validate(parent_raw)
+
+        build_record_id = f"av_{uuid4().hex[:24]}"
+        version_number = await self._next_build_record_version_number(
+            app_id=resolved_app_id,
+            build_family=build_family,
+            build_key=build_key,
+        )
+        lineage_root_id = parent_doc.lineage_root_id if parent_doc else build_record_id
+        manifest_entries = [
+            entry if isinstance(entry, ArtifactFileManifestEntry) else ArtifactFileManifestEntry.model_validate(entry)
+            for entry in (files_manifest or [])
+        ]
+        commit_doc = (
+            commit_metadata
+            if isinstance(commit_metadata, ArtifactCommitMetadata)
+            else ArtifactCommitMetadata.model_validate(commit_metadata or {})
+        )
+        now = _utc_now()
+        record = BuildRecord(
+            _id=build_record_id,
+            app_id=resolved_app_id,
+            build_family=build_family,
+            build_key=build_key,
+            version_number=version_number,
+            parent_build_record_id=parent_build_record_id,
+            lineage_root_id=lineage_root_id,
+            source_workflow=source_workflow,
+            source_chat_id=source_chat_id,
+            canonical_inputs_version=dict(canonical_inputs_version or {}),
+            lifecycle_status=lifecycle_status,
+            validation_status=validation_status,
+            files_manifest=manifest_entries,
+            commit_metadata=commit_doc,
+            created_at=now,
+            updated_at=now,
+        )
+
+        if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
+            await versions.update_many(
+                {
+                    "app_id": resolved_app_id,
+                    "build_family": build_family,
+                    "build_key": build_key,
+                    "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+                },
+                {
+                    "$set": {
+                        "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED.value,
+                        "updated_at": now,
+                    }
+                },
+            )
+
+        await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+        return record
+
+    async def get_build_record(
+        self,
+        *,
+        app_id: str,
+        build_record_id: str,
+    ) -> BuildRecord | None:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        versions = await self._coll("ArtifactVersions")
+        raw = await versions.find_one({"_id": build_record_id, **build_app_scope_filter(resolved_app_id)})
+        if not isinstance(raw, dict):
+            return None
+        return BuildRecord.model_validate(raw)
+
+    async def list_build_records(
+        self,
+        *,
+        app_id: str,
+        build_family: str | None = None,
+        build_key: str | None = None,
+        lineage_root_id: str | None = None,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        limit: int = 50,
+    ) -> list[BuildRecord]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        query: dict[str, Any] = {"app_id": resolved_app_id}
+        if build_family:
+            # Handle both new docs (build_family) and legacy docs (artifact_kind)
+            query["$or"] = [{"build_family": build_family}, {"artifact_kind": build_family}]
+        if build_key:
+            key_or: list[dict[str, Any]] = [{"build_key": build_key}, {"artifact_key": build_key}]
+            if "$and" in query:
+                query["$and"].append({"$or": key_or})  # type: ignore[attr-defined]
+            else:
+                query["$and"] = [{"$or": key_or}]
+        if lineage_root_id:
+            query["lineage_root_id"] = lineage_root_id
+        if lifecycle_status is not None:
+            query["lifecycle_status"] = lifecycle_status.value
+        versions = await self._coll("ArtifactVersions")
+        cursor = versions.find(query).sort([("version_number", -1), ("created_at", -1)]).limit(max(1, int(limit)))
+        rows = await cursor.to_list(length=max(1, int(limit)))
+        return [BuildRecord.model_validate(row) for row in rows]
+
+    async def mark_build_record_stale(
+        self,
+        *,
+        app_id: str,
+        build_record_id: str,
+        reason: str,
+        invalidated_by_version_id: str | None = None,
+    ) -> bool:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        versions = await self._coll("ArtifactVersions")
+        now = _utc_now()
+        result = await versions.update_one(
+            {
+                "_id": build_record_id,
+                **build_app_scope_filter(resolved_app_id),
+                "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value]},
+            },
+            {
+                "$set": {
+                    "lifecycle_status": ArtifactLifecycleStatus.STALE.value,
+                    "invalidation_reason": reason,
+                    "invalidated_by_version_id": invalidated_by_version_id,
+                    "stale_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        return bool(result.modified_count)
+
+    async def invalidate_build_family(
+        self,
+        *,
+        app_id: str,
+        build_family: str,
+        build_key: str,
+        reason: str,
+        invalidated_by_version_id: str | None = None,
+        exclude_version_id: str | None = None,
+    ) -> int:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        query: dict[str, Any] = {
+            "app_id": resolved_app_id,
+            "build_family": build_family,
+            "build_key": build_key,
+            "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value, ArtifactLifecycleStatus.STALE.value]},
+        }
+        if exclude_version_id:
+            query["_id"] = {"$ne": exclude_version_id}
+        versions = await self._coll("ArtifactVersions")
+        now = _utc_now()
+        result = await versions.update_many(
+            query,
+            {
+                "$set": {
+                    "lifecycle_status": ArtifactLifecycleStatus.STALE.value,
+                    "invalidation_reason": reason,
+                    "invalidated_by_version_id": invalidated_by_version_id,
+                    "stale_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        return int(result.modified_count)
+
+    async def invalidate_build_record_refs(
+        self,
+        *,
+        app_id: str,
+        build_record_refs: dict[str, str],
+        affected_build_families: Iterable[str] | None = None,
+        reason: str,
+        invalidated_by_version_id: str | None = None,
+    ) -> list[str]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+
+        normalized_refs: dict[str, str] = {}
+        for raw_family, raw_record_id in dict(build_record_refs or {}).items():
+            family = str(raw_family or "").strip()
+            record_id = str(raw_record_id or "").strip()
+            if family and record_id:
+                normalized_refs[family] = record_id
+
+        target_families: list[str] = []
+        raw_target_families = list(affected_build_families or normalized_refs.keys())
+        for raw_family in raw_target_families:
+            family = str(raw_family or "").strip()
+            if family and family not in target_families:
+                target_families.append(family)
+
+        invalidated_ids: list[str] = []
+        seen_record_ids: set[str] = set()
+        for family in target_families:
+            build_record_id = normalized_refs.get(family)
+            if not build_record_id or build_record_id in seen_record_ids:
+                continue
+            seen_record_ids.add(build_record_id)
+            if await self.mark_build_record_stale(
+                app_id=resolved_app_id,
+                build_record_id=build_record_id,
+                reason=reason,
+                invalidated_by_version_id=invalidated_by_version_id,
+            ):
+                invalidated_ids.append(build_record_id)
+        return invalidated_ids
+
+    async def accept_build_record(
+        self,
+        *,
+        app_id: str,
+        build_record_id: str,
+        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
+    ) -> BuildRecord | None:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        versions = await self._coll("ArtifactVersions")
+        raw = await versions.find_one({"_id": build_record_id, **build_app_scope_filter(resolved_app_id)})
+        if not isinstance(raw, dict):
+            return None
+        target = BuildRecord.model_validate(raw)
+        now = _utc_now()
+        updates: dict[str, Any] = {
+            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+            "updated_at": now,
+        }
+        if commit_metadata is not None:
+            commit_doc = (
+                commit_metadata
+                if isinstance(commit_metadata, ArtifactCommitMetadata)
+                else ArtifactCommitMetadata.model_validate(commit_metadata)
+            )
+            updates["commit_metadata"] = commit_doc.model_dump(mode="python")
+
+        await versions.update_many(
+            {
+                "app_id": resolved_app_id,
+                "build_family": target.build_family,
+                "build_key": target.build_key,
+                "_id": {"$ne": target.id},
+                "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+            },
+            {
+                "$set": {
+                    "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED.value,
+                    "updated_at": now,
+                }
+            },
+        )
+        await versions.update_one(
+            {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
+            {"$set": updates},
+        )
+        refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
+        return BuildRecord.model_validate(refreshed) if isinstance(refreshed, dict) else target
+
+    async def set_validation_status_for_build_record(
+        self,
+        *,
+        app_id: str,
+        build_record_id: str,
+        validation_status: ArtifactValidationStatus,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
+    ) -> bool:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        updates: dict[str, Any] = {
+            "validation_status": validation_status.value,
+            "updated_at": _utc_now(),
+        }
+        if lifecycle_status is not None:
+            updates["lifecycle_status"] = lifecycle_status.value
+        if commit_metadata is not None:
+            commit_doc = (
+                commit_metadata
+                if isinstance(commit_metadata, ArtifactCommitMetadata)
+                else ArtifactCommitMetadata.model_validate(commit_metadata)
+            )
+            updates["commit_metadata"] = commit_doc.model_dump(mode="python")
+
+        versions = await self._coll("ArtifactVersions")
+        result = await versions.update_one(
+            {"_id": build_record_id, **build_app_scope_filter(resolved_app_id)},
+            {"$set": updates},
+        )
+        return bool(result.modified_count)
+
 
 _artifact_store: ArtifactStore | None = None
 
@@ -766,4 +1158,17 @@ def get_artifact_store() -> ArtifactStore:
     return _artifact_store
 
 
-__all__ = ["ArtifactStore", "get_artifact_store"]
+# Backward-compat aliases
+BuildRecordStore = ArtifactStore
+
+
+def get_build_record_store() -> ArtifactStore:
+    return get_artifact_store()
+
+
+__all__ = [
+    "ArtifactStore",
+    "get_artifact_store",
+    "BuildRecordStore",
+    "get_build_record_store",
+]
