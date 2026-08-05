@@ -242,8 +242,8 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
     assert decision.lifecycle_state == _session_model.SessionLifecycle.ACTIVE
     assert decision.context_seed.get("build_mode") == "revision"
     assert decision.context_seed.get("revision_scope") == "patch"
-    assert decision.context_seed.get("artifact_kind") == "workflow_bundle"
-    assert decision.context_seed.get("artifact_version_id") == "v1"
+    assert decision.context_seed.get("build_family") == "workflow_bundle"
+    assert decision.context_seed.get("build_record_id") == "v1"
     assert decision.context_seed.get("sequence_status") == "in_progress"
     assert decision.context_seed.get("change_intent", {}).get("change_class") == "patch"
     assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
