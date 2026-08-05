@@ -30,8 +30,11 @@ def _artifact_summary(
         "present": True,
         "source": source,
         "artifact_version_id": artifact.id,
-        "artifact_kind": artifact.artifact_kind,
-        "artifact_key": artifact.artifact_key,
+        "build_record_id": artifact.id,
+        "build_family": artifact.build_family,
+        "build_key": artifact.build_key,
+        "artifact_kind": artifact.build_family,
+        "artifact_key": artifact.build_key,
         "version_number": artifact.version_number,
         "lineage_root_id": artifact.lineage_root_id,
         "parent_version_id": artifact.parent_version_id,
@@ -55,9 +58,9 @@ def _change_request_summary(change_request: ChangeRequestDoc) -> dict[str, Any]:
     return {
         "present": True,
         "change_request_id": change_request.id,
-        "artifact_kind": change_request.build_family,
-        "artifact_key": change_request.build_key,
-        "artifact_version_id": change_request.build_record_id,
+        "build_family": change_request.build_family,
+        "build_key": change_request.build_key,
+        "build_record_id": change_request.build_record_id,
         "classification": change_request.classification.value,
         "raw_user_request": change_request.raw_user_request,
         "created_by_user_id": change_request.created_by_user_id,
@@ -74,18 +77,18 @@ async def _resolve_current_artifact(
     app_id: str,
     context: ControlPlaneToolContext,
 ) -> tuple[ArtifactVersionDoc | None, str]:
-    if context.artifact_version_id:
+    if context.build_record_id:
         artifact = await artifact_store.get_artifact_version(
             app_id=app_id,
-            artifact_version_id=str(context.artifact_version_id),
+            artifact_version_id=str(context.build_record_id),
         )
         return artifact, "request_version" if artifact is not None else "request_version_missing"
 
-    if context.artifact_kind:
+    if context.build_family:
         versions = await artifact_store.list_artifact_versions(
             app_id=app_id,
-            artifact_kind=str(context.artifact_kind),
-            artifact_key=str(context.artifact_key or "").strip() or None,
+            artifact_kind=str(context.build_family),
+            artifact_key=str(context.build_key or "").strip() or None,
             limit=1,
         )
         if versions:
@@ -112,6 +115,7 @@ async def _resolve_input_artifacts(
         if input_artifact is None:
             resolved_inputs[artifact_kind] = {
                 "present": False,
+                "build_family": artifact_kind,
                 "artifact_kind": artifact_kind,
                 "artifact_version_id": artifact_version_id,
                 "source": "canonical_input_missing",
@@ -253,6 +257,7 @@ async def assemble_revision_context(
             tracked_artifacts.append(
                 {
                     "present": False,
+                    "build_family": artifact_kind,
                     "artifact_kind": artifact_kind,
                     "source": source,
                 }
@@ -305,10 +310,10 @@ async def assemble_revision_context(
         "user_id": user_id or None,
         "requested_workflow_id": tool_context.requested_workflow_id,
         "source_surface": tool_context.source_surface,
-        "artifact_kind": tool_context.artifact_kind,
-        "artifact_key": tool_context.artifact_key,
-        "artifact_version_id": tool_context.artifact_version_id,
-        "routing": _routing_summary(pack, tool_context.artifact_kind),
+        "build_family": tool_context.build_family,
+        "build_key": tool_context.build_key,
+        "build_record_id": tool_context.build_record_id,
+        "routing": _routing_summary(pack, tool_context.build_family),
         "session": _session_summary(session_state),
         "current_artifact": (
             _artifact_summary(
@@ -323,9 +328,9 @@ async def assemble_revision_context(
             if current_artifact is not None
             else {
                 "present": False,
-                "artifact_kind": tool_context.artifact_kind,
-                "artifact_key": tool_context.artifact_key,
-                "artifact_version_id": tool_context.artifact_version_id,
+                "build_family": tool_context.build_family,
+                "build_key": tool_context.build_key,
+                "build_record_id": tool_context.build_record_id,
                 "source": current_artifact_source,
             }
         ),
