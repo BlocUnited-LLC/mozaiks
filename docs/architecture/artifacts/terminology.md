@@ -34,7 +34,7 @@ collision points where an LLM or contributor will most likely confuse them.
 | Location | What it is | Methods |
 |---|---|---|
 | `mozaiksai/core/ports/artifact_store.py` | Protocol for binary blob I/O (disk/S3) | `write`, `read`, `delete`, `exists`, `url_for` |
-| `mozaiksai/core/artifacts/store.py:1167` | Legacy alias for `BuildRecordStore` | `create_build_record`, `get_build_record`, `list_build_records`, … |
+| `mozaiksai/core/artifacts/store.py:1167` | Retained alias for `BuildRecordStore` | `create_build_record`, `get_build_record`, `list_build_records`, … |
 
 These have no overlapping methods. Importing `ArtifactStore` without the full
 module path produces code that calls the wrong object.
@@ -83,14 +83,14 @@ operation and the results are not interchangeable.
 
 ---
 
-## Legacy Field Names Still in the Codebase
+## Renamed Fields Still Accepted
 
 The `BuildRecord` model and its callers are partway through a rename. The table
 below shows which old names are still present and where they live.
 
 | Old name | New canonical name | Status |
 |---|---|---|
-| `artifact_kind` | `build_family` | Remapped by `model_validator(mode="before")` in `BuildRecord`, `RefinementRequest`, `CodingWorkerRequest`, `ContractSurfacePlan`. Prior-api `@property` aliases remain for backward compat. |
+| `artifact_kind` | `build_family` | Remapped by `model_validator(mode="before")` in `BuildRecord`, `RefinementRequest`, `CodingWorkerRequest`, `ContractSurfacePlan`. Prior-api `@property` aliases remain for prior-API compat. |
 | `artifact_key` | `build_key` | Same remapping pattern. |
 | `artifact_version_id` | `build_record_id` | Same remapping pattern. |
 | `ArtifactVersionDoc` | `BuildRecord` | `ArtifactVersionDoc = BuildRecord` alias in `models.py`. These are the same class. Do not write migration code between them. |
@@ -98,7 +98,7 @@ below shows which old names are still present and where they live.
 | `get_stale_artifact_families()` | `get_stale_build_families()` | Both exist in `store.py`. Prefer `get_stale_build_families()` in new code. |
 | `default_artifact_kind` | `default_build_family` | Harness routing YAML and schema; remapped by `model_validator`. |
 
-The backward-compat remappers mean old field names in incoming payloads and
+The field-name remappers mean old field names in incoming payloads and
 MongoDB documents still parse correctly. They do not mean old names are the
 right choice in new code.
 

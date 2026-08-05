@@ -8,7 +8,7 @@ sequence rather than always triggering a full rebuild.
 
 Related documents:
 
-- [Artifact Terminology](../artifacts/terminology.md) — canonical names for build records, build families, blob storage, and legacy field aliases
+- [Artifact Terminology](../artifacts/terminology.md) — canonical names for build records, build families, blob storage, and prior-API field aliases
 - [Refinement Engine](../workflows/refinement-engine.md)
 - [End-to-End Build Lifecycle](end-to-end-build-lifecycle.md)
 - [Refinement Harness Architecture](../workflows/refinement-harness-architecture.md)
@@ -70,7 +70,7 @@ documentation as stale.
 
 ## When a Family Becomes Stale
 
-Every `BuildRecord` (formerly `ArtifactVersionDoc` — same class, legacy alias) carries a `lifecycle_status`:
+Every `BuildRecord` (formerly `ArtifactVersionDoc` — same class, retained alias) carries a `lifecycle_status`:
 
 | Status | Meaning |
 |--------|---------|
