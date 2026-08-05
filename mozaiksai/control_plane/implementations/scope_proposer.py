@@ -91,15 +91,15 @@ class ArtifactScopeProposer:
         selected_paths: list[str],
     ) -> dict[str, str]:
         app_id = str(refinement_request.app_id or "").strip()
-        artifact_version_id = str(refinement_request.artifact_version_id or "").strip()
-        if not app_id or not artifact_version_id:
+        build_record_id = str(refinement_request.build_record_id or "").strip()
+        if not app_id or not build_record_id:
             return {}
 
         store = self._artifact_store or get_artifact_store()
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if not workspace.get("present"):
             return {}
@@ -148,9 +148,9 @@ class ArtifactScopeProposer:
             checkpoint=_CHECKPOINT_EVENT,
             app_id=refinement_request.app_id,
             user_id=refinement_request.user_id,
-            artifact_kind=refinement_request.artifact_kind,
-            artifact_key=refinement_request.normalized_artifact_key(),
-            artifact_version_id=refinement_request.artifact_version_id,
+            build_family=refinement_request.build_family,
+            build_key=refinement_request.normalized_build_key(),
+            build_record_id=refinement_request.build_record_id,
             requested_workflow_id=routing_decision.workflow_id,
             source_surface=refinement_request.source_surface,
             raw_user_request=refinement_request.raw_user_request,
@@ -184,9 +184,9 @@ class ArtifactScopeProposer:
         payload: dict[str, Any],
     ) -> str:
         body = {
-            "artifact_kind": refinement_request.artifact_kind,
-            "artifact_key": refinement_request.normalized_artifact_key(),
-            "artifact_version_id": refinement_request.artifact_version_id,
+            "build_family": refinement_request.build_family,
+            "build_key": refinement_request.normalized_build_key(),
+            "build_record_id": refinement_request.build_record_id,
             "requested_workflow_id": routing_decision.workflow_id,
             "change_class": routing_decision.change_intent.change_class.value,
             "raw_user_request": refinement_request.raw_user_request,
@@ -273,15 +273,15 @@ class ArtifactScopeProposer:
 
     async def _available_workspace_paths(self, refinement_request: RefinementRequest) -> set[str]:
         app_id = str(refinement_request.app_id or "").strip()
-        artifact_version_id = str(refinement_request.artifact_version_id or "").strip()
-        if not app_id or not artifact_version_id:
+        build_record_id = str(refinement_request.build_record_id or "").strip()
+        if not app_id or not build_record_id:
             return set()
 
         store = self._artifact_store or get_artifact_store()
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if not workspace.get("present"):
             return set()

@@ -84,7 +84,7 @@ class ScopedRefinementCodingWorker:
                 eligible=False,
                 status="ineligible",
                 blocked_reason=blocked_reason,
-                metadata={"artifact_kind": request.artifact_kind, "change_class": request.change_class},
+                metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
         try:
@@ -104,7 +104,7 @@ class ScopedRefinementCodingWorker:
                 eligible=True,
                 status="failed",
                 error=str(exc),
-                metadata={"artifact_kind": request.artifact_kind, "change_class": request.change_class},
+                metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
         try:
@@ -115,7 +115,7 @@ class ScopedRefinementCodingWorker:
                 eligible=True,
                 status="failed",
                 error=str(exc),
-                metadata={"artifact_kind": request.artifact_kind, "change_class": request.change_class},
+                metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
         resolved_strategy = self._resolve_validation_strategy(
@@ -132,7 +132,7 @@ class ScopedRefinementCodingWorker:
 
         # Resolve aliased artifact kinds so validation and persistence use the
         # backing store kind (e.g. theme_config → app_bundle).
-        resolved_artifact_kind = _ARTIFACT_KIND_ALIASES.get(request.artifact_kind, request.artifact_kind)
+        resolved_artifact_kind = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
 
         validation_result = None
         status = "planned"
@@ -152,7 +152,7 @@ class ScopedRefinementCodingWorker:
                 status = "planned"
 
         metadata = {
-            "artifact_kind": request.artifact_kind,
+            "build_family": request.build_family,
             "change_class": request.change_class,
             "tool_context_loaded": bool(control_plane_context),
             "applied_paths": sorted(applied_files.keys()),
@@ -231,9 +231,9 @@ class ScopedRefinementCodingWorker:
             checkpoint=_CHECKPOINT_EVENT,
             app_id=request.app_id,
             user_id=request.user_id,
-            artifact_kind=request.artifact_kind,
-            artifact_key=request.artifact_key,
-            artifact_version_id=request.artifact_version_id,
+            build_family=request.build_family,
+            build_key=request.build_key,
+            build_record_id=request.build_record_id,
             requested_workflow_id=request.requested_workflow_id,
             source_surface=request.source_surface,
             raw_user_request=request.raw_user_request,
@@ -327,10 +327,10 @@ class ScopedRefinementCodingWorker:
             return False, "app_id is required"
         if str(request.change_class or "").strip().lower() not in _ELIGIBLE_CHANGE_CLASSES:
             return False, "coding worker only supports patch refinements in v1"
-        if str(request.artifact_kind or "").strip() not in _ELIGIBLE_ARTIFACT_KINDS:
+        if str(request.build_family or "").strip() not in _ELIGIBLE_ARTIFACT_KINDS:
             return False, "coding worker only supports app_bundle or workflow_bundle artifacts"
-        if not str(request.artifact_version_id or "").strip():
-            return False, "coding worker requires artifact_version_id for scoped refinement"
+        if not str(request.build_record_id or "").strip():
+            return False, "coding worker requires build_record_id for scoped refinement"
         if not isinstance(request.files, dict) or not request.files:
             return False, "coding worker requires explicit scoped files in v1"
         return True, None
@@ -354,9 +354,9 @@ class ScopedRefinementCodingWorker:
         control_plane_context: dict[str, Any],
     ) -> str:
         payload = {
-            "artifact_kind": request.artifact_kind,
-            "artifact_key": request.artifact_key,
-            "artifact_version_id": request.artifact_version_id,
+            "build_family": request.build_family,
+            "build_key": request.build_key,
+            "build_record_id": request.build_record_id,
             "requested_workflow_id": request.requested_workflow_id,
             "change_class": request.change_class,
             "source_surface": request.source_surface,
@@ -468,11 +468,11 @@ class ScopedRefinementCodingWorker:
         plan: CodingWorkerPlan,
         validation_result: dict[str, Any],
     ) -> dict[str, Any]:
-        artifact_key = str(request.artifact_key or resolved_artifact_kind or "artifact").strip() or "artifact"
+        build_key = str(request.build_key or resolved_artifact_kind or "artifact").strip() or "artifact"
         bundle_token = uuid.uuid4().hex[:12]
         # Use the resolved (aliased) kind for file system layout so theme patches
         # land alongside app_bundle artifacts, not in a separate tree.
-        bundle_root = self._output_root / request.app_id / resolved_artifact_kind / artifact_key / bundle_token
+        bundle_root = self._output_root / request.app_id / resolved_artifact_kind / build_key / bundle_token
         workspace_dir = bundle_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -524,7 +524,7 @@ class ScopedRefinementCodingWorker:
                 content_ref = await content_store.put_bundle(
                     zip_bytes,
                     app_id=request.app_id,
-                    artifact_version_id=f"pending_{zip_sha[:16]}",
+                    build_record_id=f"pending_{zip_sha[:16]}",
                 )
                 commit_content_metadata["content_ref"] = content_ref
                 commit_content_metadata["content_backend"] = content_store.backend_name
@@ -540,16 +540,16 @@ class ScopedRefinementCodingWorker:
         commit_content_metadata["validation_status"] = validation_status.value
         artifact_version = await artifact_store.create_artifact_version(
             app_id=request.app_id,
-            artifact_kind=resolved_artifact_kind,
-            artifact_key=artifact_key,
-            parent_version_id=request.artifact_version_id,
+            build_family=resolved_artifact_kind,
+            build_key=build_key,
+            parent_version_id=request.build_record_id,
             source_workflow=request.requested_workflow_id or "control_plane_coding",
             source_chat_id=None,
             lifecycle_status=ArtifactLifecycleStatus.DRAFT,
             validation_status=validation_status,
             files_manifest=[
                 {
-                    "path": f"{artifact_key}/{zip_path.name}",
+                    "path": f"{build_key}/{zip_path.name}",
                     "sha256": zip_sha,
                     "size_bytes": zip_path.stat().st_size,
                     "content_type": "application/zip",
@@ -562,7 +562,7 @@ class ScopedRefinementCodingWorker:
             },
         )
         return {
-            "artifact_version_id": artifact_version.id,
+            "build_record_id": artifact_version.id,
             "artifact_path": str(zip_path.resolve()),
             "workspace_dir": str(workspace_dir.resolve()),
             "bundle_mode": "staged_refinement_bundle",

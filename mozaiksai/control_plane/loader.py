@@ -261,8 +261,11 @@ def _merge_harness_manifest_overlay(
 
 def _merge_routing(base_routing: dict[str, Any], routing_override: dict[str, Any]) -> dict[str, Any]:
     merged = deepcopy(base_routing)
-    if "default_artifact_kind" in routing_override:
-        merged["default_artifact_kind"] = routing_override["default_artifact_kind"]
+    if "default_artifact_kind" in routing_override and "default_build_family" not in routing_override:
+        routing_override = dict(routing_override)
+        routing_override["default_build_family"] = routing_override["default_artifact_kind"]
+    if "default_build_family" in routing_override:
+        merged["default_build_family"] = routing_override["default_build_family"]
     if "artifacts" in routing_override:
         artifact_overrides = routing_override["artifacts"]
         if not isinstance(artifact_overrides, list):
@@ -270,11 +273,11 @@ def _merge_routing(base_routing: dict[str, Any], routing_override: dict[str, Any
         merged["artifacts"] = _merge_list_by_key(
             merged.get("artifacts") or [],
             artifact_overrides,
-            key="artifact_kind",
+            key="build_family",
             item_label="artifact route",
             merge_item=_deep_merge_mapping,
         )
-    unknown_keys = set(routing_override) - {"default_artifact_kind", "artifacts"}
+    unknown_keys = set(routing_override) - {"default_artifact_kind", "default_build_family", "artifacts"}
     if unknown_keys:
         raise ControlPlanePackLoadError(
             f"overrides.routing contains unsupported key(s): {', '.join(sorted(unknown_keys))}"
@@ -552,7 +555,7 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
     for artifact in manifest.routing.artifacts:
         for change_class in ("patch", "design", "feature", "core"):
             route = getattr(artifact.routes, change_class)
-            route_refs.append((artifact.artifact_kind, change_class, route.workflow_sequence))
+            route_refs.append((artifact.build_family, change_class, route.workflow_sequence))
 
     if not route_refs:
         return
@@ -564,12 +567,12 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
             "extension_registry.json workflow graph is loaded."
         )
 
-    for artifact_kind, change_class, sequence_id in route_refs:
+    for build_family, change_class, sequence_id in route_refs:
         sequence = get_workflow_sequence(pack_graph, sequence_id)
         if sequence is None:
             raise ControlPlanePackLoadError(
                 "harness.yaml route "
-                f"{artifact_kind}.{change_class} references unknown workflow_sequence "
+                f"{build_family}.{change_class} references unknown workflow_sequence "
                 f"'{sequence_id}' in {pack_path / 'config' / 'harness.yaml'}"
             )
         families = [
@@ -580,7 +583,7 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
         if not families:
             raise ControlPlanePackLoadError(
                 "workflow_sequence "
-                f"'{sequence_id}' used by harness.yaml route {artifact_kind}.{change_class} "
+                f"'{sequence_id}' used by harness.yaml route {build_family}.{change_class} "
                 "must declare affected_declarative_families in extension_registry.json"
             )
 

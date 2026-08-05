@@ -46,17 +46,26 @@ class LLMChangeClassifier:
     async def classify(
         self,
         *,
-        artifact_kind: str,
-        artifact_key: str | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
         raw_user_request: str,
         declared_change_class: str | None = None,
-        artifact_version_id: str | None = None,
+        build_record_id: str | None = None,
         source_surface: str | None = None,
         app_id: str | None = None,
         user_id: str | None = None,
         requested_workflow_id: str | None = None,
         extra: dict[str, Any] | None = None,
+        artifact_kind: str | None = None,
+        artifact_key: str | None = None,
+        artifact_version_id: str | None = None,
     ) -> ChangeClassifierResult:
+        build_family = build_family or artifact_kind
+        build_key = build_key or artifact_key
+        build_record_id = build_record_id or artifact_version_id
+        if not build_family:
+            raise TypeError("classify requires build_family (or legacy artifact_kind)")
+
         control_plane = self._load_config()
         if not control_plane.enabled:
             raise RuntimeError("Refinement Engine is disabled in app/config/refinement_policy.yaml")
@@ -66,18 +75,18 @@ class LLMChangeClassifier:
         llm_config = control_plane.resolve_capability_llm_config("classifier") or {}
 
         user_prompt = self._build_user_prompt(
-            artifact_kind=artifact_kind,
+            build_family=build_family,
             raw_user_request=raw_user_request,
             declared_change_class=declared_change_class,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
             source_surface=source_surface,
             app_id=app_id,
             requested_workflow_id=requested_workflow_id,
             control_plane_context=await self._load_control_plane_context(
-                artifact_kind=artifact_kind,
-                artifact_key=artifact_key,
+                build_family=build_family,
+                build_key=build_key,
                 raw_user_request=raw_user_request,
-                artifact_version_id=artifact_version_id,
+                build_record_id=build_record_id,
                 source_surface=source_surface,
                 app_id=app_id,
                 user_id=user_id,
@@ -119,10 +128,10 @@ class LLMChangeClassifier:
     async def _load_control_plane_context(
         self,
         *,
-        artifact_kind: str,
-        artifact_key: str | None,
+        build_family: str,
+        build_key: str | None,
         raw_user_request: str,
-        artifact_version_id: str | None,
+        build_record_id: str | None,
         source_surface: str | None,
         app_id: str | None,
         user_id: str | None,
@@ -138,9 +147,9 @@ class LLMChangeClassifier:
             checkpoint=_CHECKPOINT_EVENT,
             app_id=app_id,
             user_id=user_id,
-            artifact_kind=artifact_kind or None,
-            artifact_key=artifact_key,
-            artifact_version_id=artifact_version_id,
+            build_family=build_family or None,
+            build_key=build_key,
+            build_record_id=build_record_id,
             requested_workflow_id=requested_workflow_id,
             source_surface=source_surface,
             raw_user_request=raw_user_request or "",
@@ -164,10 +173,10 @@ class LLMChangeClassifier:
     @staticmethod
     def _build_user_prompt(
         *,
-        artifact_kind: str,
+        build_family: str,
         raw_user_request: str,
         declared_change_class: str | None,
-        artifact_version_id: str | None,
+        build_record_id: str | None,
         source_surface: str | None,
         app_id: str | None,
         requested_workflow_id: str | None,
@@ -176,8 +185,8 @@ class LLMChangeClassifier:
     ) -> str:
         lines = [
             "Classify this Mozaiks refinement request.",
-            f"artifact_kind: {artifact_kind or 'unknown'}",
-            f"artifact_version_id: {artifact_version_id or 'unknown'}",
+            f"build_family: {build_family or 'unknown'}",
+            f"build_record_id: {build_record_id or 'unknown'}",
             f"requested_workflow_id: {requested_workflow_id or 'unknown'}",
             f"source_surface: {source_surface or 'unknown'}",
             f"app_id: {app_id or 'unknown'}",
