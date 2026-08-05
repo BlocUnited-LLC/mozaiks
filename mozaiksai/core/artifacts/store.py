@@ -148,7 +148,7 @@ class ArtifactStore:
         )
         return int((doc or {}).get("sequence") or 1)
 
-    # ── Legacy ArtifactVersionDoc API (274 callers — keep until cleaned up) ──
+    # ── ArtifactVersionDoc API (274 callers — kept while callers are updated) ──
 
     async def create_artifact_version(
         self,
@@ -936,7 +936,7 @@ class ArtifactStore:
             raise ValueError("app_id is required")
         query: dict[str, Any] = {"app_id": resolved_app_id}
         if build_family:
-            # Handle both new docs (build_family) and legacy docs (artifact_kind)
+            # Handle both build_family (new docs) and artifact_kind (prior docs)
             query["$or"] = [{"build_family": build_family}, {"artifact_kind": build_family}]
         if build_key:
             key_or: list[dict[str, Any]] = [{"build_key": build_key}, {"artifact_key": build_key}]
@@ -1158,7 +1158,7 @@ def get_artifact_store() -> ArtifactStore:
     return _artifact_store
 
 
-# Backward-compat aliases
+# Prior-api aliases
 BuildRecordStore = ArtifactStore
 
 

@@ -38,7 +38,7 @@ from .summary_artifacts import (
 )
 
 __all__ = [
-    # Content store — legacy names
+    # Content store — prior-api names
     "ArtifactContentStore",
     "ContentNotFoundError",
     "GridFSArtifactContentStore",
@@ -49,7 +49,7 @@ __all__ = [
     "GridFSBundleContentStore",
     "LocalBundleContentStore",
     "get_bundle_content_store",
-    # Models — legacy names
+    # Models — prior-api names
     "ArtifactCommitMetadata",
     "ArtifactFileManifestEntry",
     "ArtifactLifecycleStatus",
@@ -68,13 +68,13 @@ __all__ = [
     "BuildRecordFileEntry",
     "BuildRecordStatus",
     "BuildRecordValidationStatus",
-    # Store — legacy names
+    # Store — prior-api names
     "ArtifactStore",
     "get_artifact_store",
     # Store — new names
     "BuildRecordStore",
     "get_build_record_store",
-    # Summary artifacts — legacy names
+    # Summary artifacts — prior-api names
     "extract_summary_payload",
     "persist_summary_artifact",
     "resolve_latest_artifact_version_refs",
