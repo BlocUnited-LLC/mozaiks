@@ -99,7 +99,7 @@ class ArtifactScopeProposer:
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            build_record_id=build_record_id,
+            artifact_version_id=build_record_id,
         )
         if not workspace.get("present"):
             return {}
@@ -281,7 +281,7 @@ class ArtifactScopeProposer:
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            build_record_id=build_record_id,
+            artifact_version_id=build_record_id,
         )
         if not workspace.get("present"):
             return set()

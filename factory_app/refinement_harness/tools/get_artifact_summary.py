@@ -45,7 +45,7 @@ async def get_artifact_summary(
 
     recent_changes = await store.list_change_requests(
         app_id=app_id,
-        artifact_version_id=artifact.id,
+        build_record_id=artifact.id,
         limit=5,
     )
     return {

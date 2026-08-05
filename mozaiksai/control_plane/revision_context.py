@@ -134,8 +134,8 @@ def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: str | None) ->
             }
 
         current_routes = {
-            "artifact_kind": artifact.artifact_kind,
-            "label": artifact.label or artifact.artifact_kind,
+            "artifact_kind": artifact.build_family,
+            "label": artifact.label or artifact.build_family,
             "routes": {
                 "patch": route_summary(artifact.routes.patch),
                 "design": route_summary(artifact.routes.design),
@@ -144,8 +144,8 @@ def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: str | None) ->
             },
         }
     return {
-        "default_artifact_kind": pack.manifest.routing.default_artifact_kind,
-        "known_artifact_kinds": [artifact.artifact_kind for artifact in pack.manifest.routing.artifacts],
+        "default_artifact_kind": pack.manifest.routing.default_build_family,
+        "known_artifact_kinds": [artifact.build_family for artifact in pack.manifest.routing.artifacts],
         "current_artifact": current_routes,
     }
 
@@ -218,7 +218,7 @@ async def assemble_revision_context(
     tracked_artifact_kinds: set[str] = set()
     pending_artifact_kinds: list[str] = []
     for raw_kind in (
-        [artifact.artifact_kind for artifact in pack.manifest.routing.artifacts]
+        [artifact.build_family for artifact in pack.manifest.routing.artifacts]
         + list((session_state.artifact_version_refs or {}).keys() if session_state is not None else [])
         + ([str(tool_context.artifact_kind)] if tool_context.artifact_kind else [])
     ):

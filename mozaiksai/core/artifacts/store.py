@@ -204,10 +204,10 @@ class BuildRecordStore:
         version_doc = ArtifactVersionDoc(
             _id=artifact_version_id,
             app_id=resolved_app_id,
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
+            build_family=artifact_kind,
+            build_key=artifact_key,
             version_number=version_number,
-            parent_version_id=parent_version_id,
+            parent_build_record_id=parent_version_id,
             lineage_root_id=lineage_root_id,
             source_workflow=source_workflow,
             source_chat_id=source_chat_id,
