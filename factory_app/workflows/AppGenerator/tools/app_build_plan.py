@@ -295,6 +295,90 @@ def _join_unique_text(parts: Iterable[Any], *, separator: str = " ") -> str:
     return separator.join(_dedupe_preserving_order(parts)).strip()
 
 
+_READINESS_PROFILE_VALUES = {
+    "none",
+    "basic_app",
+    "saas_app",
+    "host_operator_platform",
+    "marketplace_platform",
+}
+
+
+def _normalize_readiness_profile(value: Any) -> str:
+    profile = str(value or "").strip()
+    return profile if profile in _READINESS_PROFILE_VALUES else "none"
+
+
+def _infer_readiness_profile(
+    plan: dict[str, Any],
+    *,
+    context_variables: Any | None,
+) -> str:
+    explicit = _normalize_readiness_profile(plan.get("readiness_profile"))
+    if explicit != "none":
+        return explicit
+
+    parts: list[str] = [
+        str(plan.get("agent_message") or ""),
+        str(plan.get("app_kind") or ""),
+        str(plan.get("profile_layout") or ""),
+        " ".join(_normalize_string_list(plan.get("service_scope"))),
+        " ".join(_normalize_string_list(plan.get("frontend_scope"))),
+        " ".join(_normalize_string_list(plan.get("roles"))),
+        " ".join(
+            str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "")
+            for pack in _normalize_object_list(plan.get("capability_packs"))
+            if isinstance(pack, dict)
+        ),
+    ]
+    if context_variables is not None and hasattr(context_variables, "get"):
+        for key in ("app_type", "concept_overview", "build_mode"):
+            try:
+                parts.append(str(context_variables.get(key) or ""))
+            except Exception:
+                continue
+
+    haystack = " ".join(parts).lower()
+    host_operator_terms = (
+        "host operator",
+        "host-operator",
+        "hosted app",
+        "hosted apps",
+        "operator platform",
+        "platform ops",
+        "launch readiness",
+        "readiness gate",
+        "evidence ledger",
+        "staging verification",
+        "compliance",
+        "launch gate",
+        "hosting",
+        "domains",
+    )
+    if any(term in haystack for term in host_operator_terms):
+        return "host_operator_platform"
+
+    if "marketplace" in haystack or "multi-tenant marketplace" in haystack:
+        return "marketplace_platform"
+
+    saas_terms = (
+        "saas",
+        "subscription",
+        "subscriptions",
+        "seat",
+        "tier",
+        "pricing",
+        "billing portal",
+    )
+    if any(term in haystack for term in saas_terms):
+        return "saas_app"
+
+    if "simple app" in haystack or "single-purpose" in haystack or "basic app" in haystack:
+        return "basic_app"
+
+    return "none"
+
+
 def _merge_persistence_contract_tasks(build_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     persistence_tasks = [
         task
@@ -1694,6 +1778,7 @@ def app_build_plan(
     profile_layout = str(AppBuildPlan.get("profile_layout") or "").strip() or None
     if profile_layout and profile_layout not in _valid_profile_layouts:
         profile_layout = None
+    readiness_profile = _infer_readiness_profile(AppBuildPlan, context_variables=context_variables)
     capability_packs = _ensure_context_selected_capability_packs(
         _normalize_object_list(AppBuildPlan.get("capability_packs")),
         context_variables=context_variables,
@@ -1831,6 +1916,7 @@ def app_build_plan(
         "theme_preferences": theme_preferences,
         "brand_intent": brand_intent if isinstance(brand_intent, dict) else None,
         "profile_layout": profile_layout,
+        "readiness_profile": readiness_profile,
         "capability_packs": capability_packs,
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
