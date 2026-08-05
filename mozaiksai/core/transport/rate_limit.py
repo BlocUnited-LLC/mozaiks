@@ -76,7 +76,7 @@ def _excluded_paths() -> set[str]:
         for path in os.getenv(
             "RATE_LIMIT_EXCLUDED_PATHS",
             (
-                "/api/health,/api/health/live,/api/health/ready,"
+                "/api/health,/api/health/live,/api/health/ready,/api/health/readiness,"
                 "/api/shell-config,/api/theme-config,/api/me,/api/me/preferences"
             ),
         ).split(",")
