@@ -27,12 +27,12 @@ ArtifactLifecycleStatus = _artifact_models_mod.ArtifactLifecycleStatus
 ArtifactValidationStatus = _artifact_models_mod.ArtifactValidationStatus
 ChangeClassification = _artifact_models_mod.ChangeClassification
 RefinementSessionStatus = _artifact_models_mod.RefinementSessionStatus
-ArtifactStore = _artifact_store_mod.ArtifactStore
+BuildRecordStore = _artifact_store_mod.BuildRecordStore
 
 
 @pytest.mark.asyncio
-async def test_create_artifact_version_persists_manifest_and_lineage() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+async def test_create_build_record_persists_manifest_and_lineage() -> None:
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     versions_coll.find_one = AsyncMock(return_value=None)
     versions_coll.update_many = AsyncMock()
@@ -50,10 +50,10 @@ async def test_create_artifact_version_persists_manifest_and_lineage() -> None:
 
     store._coll = AsyncMock(side_effect=_fake_coll)
 
-    doc = await store.create_artifact_version(
+    doc = await store.create_build_record(
         app_id="app-1",
-        artifact_kind="app_bundle",
-        artifact_key="primary",
+        build_family="app_bundle",
+        build_key="primary",
         files_manifest=[{"path": "src/App.tsx", "sha256": "abc", "size_bytes": 42}],
         source_workflow="AppGenerator",
         source_chat_id="chat-1",
@@ -69,16 +69,15 @@ async def test_create_artifact_version_persists_manifest_and_lineage() -> None:
 
     versions_coll.update_many.assert_awaited_once()
     inserted = versions_coll.insert_one.await_args.args[0]
-    # Document is now stored with build_family / build_key (BuildRecord schema)
-    assert inserted.get("build_family") == "app_bundle" or inserted.get("artifact_kind") == "app_bundle"
-    assert inserted.get("build_key") == "primary" or inserted.get("artifact_key") == "primary"
+    assert inserted["build_family"] == "app_bundle"
+    assert inserted["build_key"] == "primary"
     assert inserted["version_number"] == 3
     assert inserted["files_manifest"][0]["sha256"] == "abc"
 
 
 @pytest.mark.asyncio
 async def test_invalidate_artifact_family_marks_versions_stale() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     versions_coll.update_many = AsyncMock(return_value=MagicMock(modified_count=2))
     store._coll = AsyncMock(return_value=versions_coll)
@@ -106,7 +105,7 @@ async def test_invalidate_artifact_family_marks_versions_stale() -> None:
 
 @pytest.mark.asyncio
 async def test_invalidate_artifact_version_refs_marks_only_targeted_known_versions() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     store.mark_artifact_version_stale = AsyncMock(side_effect=[True, False, True])
 
     invalidated = await store.invalidate_artifact_version_refs(
@@ -128,7 +127,7 @@ async def test_invalidate_artifact_version_refs_marks_only_targeted_known_versio
 
 @pytest.mark.asyncio
 async def test_create_change_request_and_refinement_session_persist_structured_records() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     change_coll = MagicMock()
     change_coll.insert_one = AsyncMock()
     session_coll = MagicMock()
@@ -202,7 +201,7 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
 
 @pytest.mark.asyncio
 async def test_update_change_request_router_decision_updates_only_router_metadata() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     change_coll = MagicMock()
     change_coll.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
     store._coll = AsyncMock(return_value=change_coll)
@@ -226,16 +225,16 @@ async def test_update_change_request_router_decision_updates_only_router_metadat
 
 
 @pytest.mark.asyncio
-async def test_accept_artifact_version_supersedes_prior_current_version() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+async def test_accept_build_record_supersedes_prior_current_version() -> None:
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     current_raw = {
         "_id": "av_child",
         "app_id": "app-1",
-        "artifact_kind": "app_bundle",
-        "artifact_key": "primary",
+        "build_family": "app_bundle",
+        "build_key": "primary",
         "version_number": 2,
-        "parent_version_id": "av_parent",
+        "parent_build_record_id": "av_parent",
         "lineage_root_id": "av_parent",
         "source_workflow": "AppGenerator",
         "source_chat_id": "chat-1",
@@ -252,13 +251,13 @@ async def test_accept_artifact_version_supersedes_prior_current_version() -> Non
     versions_coll.update_one = AsyncMock()
     store._coll = AsyncMock(return_value=versions_coll)
 
-    accepted = await store.accept_artifact_version(app_id="app-1", artifact_version_id="av_child")
+    accepted = await store.accept_build_record(app_id="app-1", build_record_id="av_child")
 
     assert accepted is not None
     assert accepted.lifecycle_status == ArtifactLifecycleStatus.CURRENT
     update_many_query, update_many_doc = versions_coll.update_many.await_args.args
-    assert update_many_query["artifact_kind"] == "app_bundle"
-    assert update_many_query["artifact_key"] == "primary"
+    assert update_many_query["build_family"] == "app_bundle"
+    assert update_many_query["build_key"] == "primary"
     assert update_many_doc["$set"]["lifecycle_status"] == ArtifactLifecycleStatus.SUPERSEDED.value
     update_one_query, update_one_doc = versions_coll.update_one.await_args.args
     assert update_one_query["_id"] == "av_child"
@@ -266,16 +265,16 @@ async def test_accept_artifact_version_supersedes_prior_current_version() -> Non
 
 
 @pytest.mark.asyncio
-async def test_accept_artifact_version_can_persist_commit_metadata() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+async def test_accept_build_record_can_persist_commit_metadata() -> None:
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     current_raw = {
         "_id": "av_child",
         "app_id": "app-1",
-        "artifact_kind": "app_bundle",
-        "artifact_key": "primary",
+        "build_family": "app_bundle",
+        "build_key": "primary",
         "version_number": 2,
-        "parent_version_id": "av_parent",
+        "parent_build_record_id": "av_parent",
         "lineage_root_id": "av_parent",
         "source_workflow": "AppGenerator",
         "source_chat_id": "chat-1",
@@ -303,9 +302,9 @@ async def test_accept_artifact_version_can_persist_commit_metadata() -> None:
     versions_coll.update_one = AsyncMock()
     store._coll = AsyncMock(return_value=versions_coll)
 
-    accepted = await store.accept_artifact_version(
+    accepted = await store.accept_build_record(
         app_id="app-1",
-        artifact_version_id="av_child",
+        build_record_id="av_child",
         commit_metadata=refreshed_raw["commit_metadata"],
     )
 
@@ -319,7 +318,7 @@ async def test_accept_artifact_version_can_persist_commit_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_list_refinement_sessions_filters_by_result_build_record_id() -> None:
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     coll = MagicMock()
     cursor = MagicMock()
     cursor.sort.return_value = cursor
@@ -355,12 +354,12 @@ async def test_list_refinement_sessions_filters_by_result_build_record_id() -> N
 @pytest.mark.asyncio
 async def test_get_stale_artifact_families_returns_stale_without_current() -> None:
     """Families with a STALE version but no CURRENT version are returned."""
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     versions_coll.distinct = AsyncMock(
         side_effect=[
             ["design_docs", "workflow_bundle"],  # stale query
-            ["workflow_bundle"],                 # current query — workflow_bundle was rebuilt
+            ["workflow_bundle"],                 # current query -- workflow_bundle was rebuilt
         ]
     )
     store._coll = AsyncMock(return_value=versions_coll)
@@ -377,7 +376,7 @@ async def test_get_stale_artifact_families_returns_stale_without_current() -> No
 @pytest.mark.asyncio
 async def test_get_current_artifact_version_refs_returns_highest_current_per_kind() -> None:
     """Returns the highest-versioned CURRENT artifact_version_id for each kind."""
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     cursor = MagicMock()
     # sort() returns cursor; to_list() returns rows sorted by version_number desc
@@ -395,7 +394,7 @@ async def test_get_current_artifact_version_refs_returns_highest_current_per_kin
 
     refs = await store.get_current_artifact_version_refs(app_id="app-1")
 
-    # concept → highest version (av_concept_2); design_docs → only version
+    # concept -> highest version (av_concept_2); design_docs -> only version
     assert refs == {"concept": "av_concept_2", "design_docs": "av_design_1"}
     # confirm only CURRENT versions were queried
     query = versions_coll.find.call_args.args[0]
@@ -406,7 +405,7 @@ async def test_get_current_artifact_version_refs_returns_highest_current_per_kin
 @pytest.mark.asyncio
 async def test_get_current_artifact_version_refs_returns_empty_when_no_current() -> None:
     """Returns empty dict when no CURRENT artifact versions exist."""
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     cursor = MagicMock()
     cursor.sort.return_value = cursor
@@ -423,12 +422,12 @@ async def test_get_current_artifact_version_refs_returns_empty_when_no_current()
 @pytest.mark.asyncio
 async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
     """If every stale family has a CURRENT version, the list is empty."""
-    store = ArtifactStore.__new__(ArtifactStore)
+    store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     versions_coll.distinct = AsyncMock(
         side_effect=[
             ["design_docs"],   # stale query
-            ["design_docs"],   # current query — rebuilt successfully
+            ["design_docs"],   # current query -- rebuilt successfully
         ]
     )
     store._coll = AsyncMock(return_value=versions_coll)
@@ -437,4 +436,3 @@ async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
     result = await store.get_stale_artifact_families(app_id="app-1")
 
     assert result == []
-

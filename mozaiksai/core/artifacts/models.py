@@ -85,39 +85,6 @@ class RefinementRequestPayload(BaseModel):
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _remap_legacy_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        remapped = dict(data)
-        if "artifact_kind" in remapped and "build_family" not in remapped:
-            remapped["build_family"] = remapped.pop("artifact_kind")
-        else:
-            remapped.pop("artifact_kind", None)
-        if "artifact_key" in remapped and "build_key" not in remapped:
-            remapped["build_key"] = remapped.pop("artifact_key")
-        else:
-            remapped.pop("artifact_key", None)
-        if "artifact_version_id" in remapped and "build_record_id" not in remapped:
-            remapped["build_record_id"] = remapped.pop("artifact_version_id")
-        else:
-            remapped.pop("artifact_version_id", None)
-        return remapped
-
-    # Prior-api attribute aliases
-    @property
-    def artifact_kind(self) -> str:
-        return self.build_family
-
-    @property
-    def artifact_key(self) -> str | None:
-        return self.build_key
-
-    @property
-    def artifact_version_id(self) -> str | None:
-        return self.build_record_id
-
 
 class ChangeIntentDoc(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -179,36 +146,17 @@ class BuildRecord(BaseModel):
         if not isinstance(data, dict):
             return data
         remapped = dict(data)
-        # artifact_kind → build_family
-        if "artifact_kind" in remapped and "build_family" not in remapped:
-            remapped["build_family"] = remapped.pop("artifact_kind")
-        else:
-            remapped.pop("artifact_kind", None)
-        # artifact_key → build_key
-        if "artifact_key" in remapped and "build_key" not in remapped:
-            remapped["build_key"] = remapped.pop("artifact_key")
-        else:
-            remapped.pop("artifact_key", None)
-        # parent_version_id → parent_build_record_id
+        # parent_version_id -> parent_build_record_id
         if "parent_version_id" in remapped and "parent_build_record_id" not in remapped:
             remapped["parent_build_record_id"] = remapped.pop("parent_version_id")
         else:
             remapped.pop("parent_version_id", None)
-        # invalidated_by_version_id → invalidated_by_build_record_id
+        # invalidated_by_version_id -> invalidated_by_build_record_id
         if "invalidated_by_version_id" in remapped and "invalidated_by_build_record_id" not in remapped:
             remapped["invalidated_by_build_record_id"] = remapped.pop("invalidated_by_version_id")
         else:
             remapped.pop("invalidated_by_version_id", None)
         return remapped
-
-    # Prior-api attribute aliases (for callers that haven't been updated yet)
-    @property
-    def artifact_kind(self) -> str:
-        return self.build_family
-
-    @property
-    def artifact_key(self) -> str:
-        return self.build_key
 
     @property
     def parent_version_id(self) -> str | None:
@@ -235,39 +183,6 @@ class ChangeRequestDoc(BaseModel):
     router_decision: dict[str, Any] = Field(default_factory=dict)
     created_by_user_id: str | None = None
     created_at: datetime = Field(default_factory=_utc_now)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _remap_legacy_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        remapped = dict(data)
-        if "artifact_kind" in remapped and "build_family" not in remapped:
-            remapped["build_family"] = remapped.pop("artifact_kind")
-        else:
-            remapped.pop("artifact_kind", None)
-        if "artifact_key" in remapped and "build_key" not in remapped:
-            remapped["build_key"] = remapped.pop("artifact_key")
-        else:
-            remapped.pop("artifact_key", None)
-        if "artifact_version_id" in remapped and "build_record_id" not in remapped:
-            remapped["build_record_id"] = remapped.pop("artifact_version_id")
-        else:
-            remapped.pop("artifact_version_id", None)
-        return remapped
-
-    # Prior-api attribute aliases
-    @property
-    def artifact_kind(self) -> str:
-        return self.build_family
-
-    @property
-    def artifact_key(self) -> str:
-        return self.build_key
-
-    @property
-    def artifact_version_id(self) -> str | None:
-        return self.build_record_id
 
 
 class RefinementSessionDoc(BaseModel):
@@ -313,7 +228,7 @@ class RefinementSessionDoc(BaseModel):
         return self.result_build_record_id
 
 
-# Prior-api class aliases — kept so callers that import the old names still work
+# Prior-api class aliases -- kept so callers that import the old names still work
 # during the migration period. Remove once all callers are updated.
 ArtifactLifecycleStatus = BuildRecordStatus
 ArtifactValidationStatus = BuildRecordValidationStatus

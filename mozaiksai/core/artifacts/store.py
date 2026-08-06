@@ -31,7 +31,6 @@ from .models import (
 ArtifactFileManifestEntry = BuildRecordFileEntry
 ArtifactLifecycleStatus = BuildRecordStatus
 ArtifactValidationStatus = BuildRecordValidationStatus
-ArtifactVersionDoc = BuildRecord
 
 logger = get_workflow_logger("artifact_store")
 
@@ -109,28 +108,6 @@ class BuildRecordStore:
         await self._ensure_client()
         return self.client["mozaiksai"][name]  # type: ignore[index]
 
-    async def _next_version_number(self, *, app_id: str, artifact_kind: str, artifact_key: str) -> int:
-        counters = await self._coll("ArtifactVersionCounters")
-        now = _utc_now()
-        counter_id = f"{app_id}:{artifact_kind}:{artifact_key}"
-        doc = await counters.find_one_and_update(
-            {"_id": counter_id, **build_app_scope_filter(app_id)},
-            {
-                "$inc": {"sequence": 1},
-                "$setOnInsert": {
-                    "_id": counter_id,
-                    "app_id": app_id,
-                    "artifact_kind": artifact_kind,
-                    "artifact_key": artifact_key,
-                    "created_at": now,
-                },
-                "$set": {"updated_at": now},
-            },
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
-        return int((doc or {}).get("sequence") or 1)
-
     async def _next_build_record_version_number(self, *, app_id: str, build_family: str, build_key: str) -> int:
         counters = await self._coll("ArtifactVersionCounters")
         now = _utc_now()
@@ -152,134 +129,6 @@ class BuildRecordStore:
             return_document=ReturnDocument.AFTER,
         )
         return int((doc or {}).get("sequence") or 1)
-
-    # ── ArtifactVersionDoc API (274 callers — kept while callers are updated) ──
-
-    async def create_artifact_version(
-        self,
-        *,
-        app_id: str,
-        artifact_kind: str,
-        artifact_key: str,
-        files_manifest: Iterable[dict[str, Any] | ArtifactFileManifestEntry] | None = None,
-        source_workflow: str | None = None,
-        source_chat_id: str | None = None,
-        parent_version_id: str | None = None,
-        canonical_inputs_version: dict[str, str] | None = None,
-        lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
-        validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PENDING,
-        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
-    ) -> ArtifactVersionDoc:
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-
-        versions = await self._coll("ArtifactVersions")
-        parent_doc: ArtifactVersionDoc | None = None
-        if parent_version_id:
-            parent_raw = await versions.find_one(
-                {"_id": parent_version_id, **build_app_scope_filter(resolved_app_id)}
-            )
-            if not isinstance(parent_raw, dict):
-                raise ValueError(f"Unknown parent_version_id: {parent_version_id}")
-            parent_doc = ArtifactVersionDoc.model_validate(parent_raw)
-
-        artifact_version_id = f"av_{uuid4().hex[:24]}"
-        version_number = await self._next_version_number(
-            app_id=resolved_app_id,
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
-        )
-        lineage_root_id = parent_doc.lineage_root_id if parent_doc else artifact_version_id
-        manifest_entries = [
-            entry if isinstance(entry, ArtifactFileManifestEntry) else ArtifactFileManifestEntry.model_validate(entry)
-            for entry in (files_manifest or [])
-        ]
-        commit_doc = (
-            commit_metadata
-            if isinstance(commit_metadata, ArtifactCommitMetadata)
-            else ArtifactCommitMetadata.model_validate(commit_metadata or {})
-        )
-        now = _utc_now()
-        version_doc = ArtifactVersionDoc(
-            _id=artifact_version_id,
-            app_id=resolved_app_id,
-            build_family=artifact_kind,
-            build_key=artifact_key,
-            version_number=version_number,
-            parent_build_record_id=parent_version_id,
-            lineage_root_id=lineage_root_id,
-            source_workflow=source_workflow,
-            source_chat_id=source_chat_id,
-            canonical_inputs_version=dict(canonical_inputs_version or {}),
-            lifecycle_status=lifecycle_status,
-            validation_status=validation_status,
-            files_manifest=manifest_entries,
-            commit_metadata=commit_doc,
-            created_at=now,
-            updated_at=now,
-        )
-
-        if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
-            await versions.update_many(
-                {
-                    "app_id": resolved_app_id,
-                    "artifact_kind": artifact_kind,
-                    "artifact_key": artifact_key,
-                    "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-                },
-                {
-                    "$set": {
-                        "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED.value,
-                        "updated_at": now,
-                    }
-                },
-            )
-
-        await versions.insert_one(version_doc.model_dump(by_alias=True, mode="python"))
-        return version_doc
-
-    async def get_artifact_version(
-        self,
-        *,
-        app_id: str,
-        artifact_version_id: str,
-    ) -> ArtifactVersionDoc | None:
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        versions = await self._coll("ArtifactVersions")
-        raw = await versions.find_one({"_id": artifact_version_id, **build_app_scope_filter(resolved_app_id)})
-        if not isinstance(raw, dict):
-            return None
-        return ArtifactVersionDoc.model_validate(raw)
-
-    async def list_artifact_versions(
-        self,
-        *,
-        app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
-        lineage_root_id: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
-        limit: int = 50,
-    ) -> list[ArtifactVersionDoc]:
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        query: dict[str, Any] = {"app_id": resolved_app_id}
-        if artifact_kind:
-            query["artifact_kind"] = artifact_kind
-        if artifact_key:
-            query["artifact_key"] = artifact_key
-        if lineage_root_id:
-            query["lineage_root_id"] = lineage_root_id
-        if lifecycle_status is not None:
-            query["lifecycle_status"] = lifecycle_status.value
-        versions = await self._coll("ArtifactVersions")
-        cursor = versions.find(query).sort([("version_number", -1), ("created_at", -1)]).limit(max(1, int(limit)))
-        rows = await cursor.to_list(length=max(1, int(limit)))
-        return [ArtifactVersionDoc.model_validate(row) for row in rows]
 
     async def mark_artifact_version_stale(
         self,
@@ -563,55 +412,6 @@ class BuildRecordStore:
         )
         return bool(result.modified_count)
 
-    async def accept_artifact_version(
-        self,
-        *,
-        app_id: str,
-        artifact_version_id: str,
-        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
-    ) -> ArtifactVersionDoc | None:
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        versions = await self._coll("ArtifactVersions")
-        raw = await versions.find_one({"_id": artifact_version_id, **build_app_scope_filter(resolved_app_id)})
-        if not isinstance(raw, dict):
-            return None
-        target = ArtifactVersionDoc.model_validate(raw)
-        now = _utc_now()
-        updates: dict[str, Any] = {
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "updated_at": now,
-        }
-        if commit_metadata is not None:
-            commit_doc = (
-                commit_metadata
-                if isinstance(commit_metadata, ArtifactCommitMetadata)
-                else ArtifactCommitMetadata.model_validate(commit_metadata)
-            )
-            updates["commit_metadata"] = commit_doc.model_dump(mode="python")
-
-        await versions.update_many(
-            {
-                "app_id": resolved_app_id,
-                "artifact_kind": target.artifact_kind,
-                "artifact_key": target.artifact_key,
-                "_id": {"$ne": target.id},
-                "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            },
-            {
-                "$set": {
-                    "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED.value,
-                    "updated_at": now,
-                }
-            },
-        )
-        await versions.update_one(
-            {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
-            {"$set": updates},
-        )
-        refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
-        return ArtifactVersionDoc.model_validate(refreshed) if isinstance(refreshed, dict) else target
 
     async def reject_artifact_version(
         self,
