@@ -32,6 +32,32 @@ gh pr merge <number> --squash --delete-branch --auto
 
 Auto-merge fires once required CI checks pass. No human action needed.
 
+## Branch Cleanup
+
+Feature branches are temporary work queues, not permanent project state. A
+branch is safe to delete once its PR is merged or closed — deleting it does
+not remove any code, since the changes already live on `main` (or were
+abandoned). Always merge with `--delete-branch` so this happens automatically:
+
+```bash
+gh pr merge <number> --squash --delete-branch --auto
+```
+
+If branches were merged without `--delete-branch`, clean them up afterward:
+
+```bash
+git fetch origin --prune
+gh pr list --state merged --limit 200 --json headRefName \
+  | jq -r '.[].headRefName' > merged_branches.txt
+# delete only remote branches confirmed merged/closed via `gh pr list --state all`
+# and that are not main or an active in-flight branch
+```
+
+Do not delete a branch tied to an open PR or with no PR history at all —
+inspect it first. Left unchecked, stale branches make it hard to tell which
+work is real and which is abandoned, especially with multiple agents pushing
+branches concurrently.
+
 ## Branch Naming Convention
 
 | Agent | Prefix | Example |
