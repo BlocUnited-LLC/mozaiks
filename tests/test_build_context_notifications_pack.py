@@ -467,3 +467,22 @@ def test_appgenerator_capability_directory_notifications_has_managed_platform_al
     alternatives = entry.get("alternatives") or []
     alt_kinds = {a.get("capability_kind") for a in alternatives}
     assert "managed_capability" in alt_kinds
+
+
+# ---------------------------------------------------------------------------
+# Account-data (GDPR) contract
+# ---------------------------------------------------------------------------
+
+def test_notification_settings_declares_user_data_scope() -> None:
+    """notification_settings stores per-user opt-in preferences — user-owned PII."""
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "notification_settings" / "module.yaml")
+    assert module_yaml.get("module", {}).get("user_data_scope") is True
+
+
+def test_notification_settings_backend_ships_account_data_handler() -> None:
+    handler = TEMPLATES / "modules" / "notification_settings" / "backend" / "account_data_handler.py"
+    assert handler.exists(), "account_data_handler.py must exist alongside user_data_scope=true"
+    source = handler.read_text(encoding="utf-8")
+    assert "class AccountDataHandler" in source
+    assert "async def delete_user_data" in source
+    assert "async def export_user_data" in source
