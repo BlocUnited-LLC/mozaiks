@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -51,7 +52,9 @@ class _MinimalCtx:
 
 
 async def run(mongo_uri: str | None = None) -> int:
-    client = get_mongo_client(mongo_uri=mongo_uri)
+    if mongo_uri:
+        os.environ.setdefault("MONGO_URI", mongo_uri)
+    get_mongo_client()  # validates MONGO_URI is present; raises ValueError early if not
     try:
         ctx = _MinimalCtx()
         service = {{SERVICE_CLASS}}()
@@ -63,12 +66,12 @@ async def run(mongo_uri: str | None = None) -> int:
             print(f"  ERROR: {err}", file=sys.stderr)
         return 1 if errors else 0
     finally:
-        await close_mongo_client(client)
+        close_mongo_client()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="{{ACTION_LABEL}}")
-    parser.add_argument("--mongo-uri", default=None, help="MongoDB connection URI")
+    parser.add_argument("--mongo-uri", default=None, help="MongoDB connection URI (overrides MONGO_URI env var)")
     args = parser.parse_args()
     sys.exit(asyncio.run(run(mongo_uri=args.mongo_uri)))
 
