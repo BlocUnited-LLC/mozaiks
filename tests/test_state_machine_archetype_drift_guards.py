@@ -1,0 +1,483 @@
+"""Drift guards for the state_machine module archetype and cron tick contract.
+
+These tests protect against regressions in:
+- The cron_tick.py template that InfraScaffoldAgent emits for state_machine modules
+- The state_machine archetype spec in module_archetypes.yaml
+- The infra pack context.yaml that declares cron tick template variables
+- The runtime behaviour of _MinimalCtx and the run() exit-code logic
+
+No network calls or real MongoDB are used. Mongo client and service calls are
+patched with unittest.mock to keep each test deterministic and fast.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+import textwrap
+import types
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import yaml
+
+WORKSPACE = Path(__file__).resolve().parents[1]
+INFRA_DIR = WORKSPACE / "factory_app" / "build_context" / "infra"
+CRON_TICK_TEMPLATE = INFRA_DIR / "templates" / "scripts" / "cron_tick.py"
+INFRA_CONTEXT = INFRA_DIR / "context.yaml"
+MODULE_ARCHETYPES = (
+    WORKSPACE / "factory_app" / "build_context" / "AppGenerator" / "module_archetypes.yaml"
+)
+
+# Template variables expected in cron_tick.py
+_EXPECTED_TEMPLATE_VARS = {
+    "{{ACTION_LABEL}}",
+    "{{ACTION_DESCRIPTION}}",
+    "{{CRON_INTERVAL_MINUTES}}",
+    "{{CRON_SCRIPT_NAME}}",
+    "{{MODULE_ID}}",
+    "{{SERVICE_CLASS}}",
+    "{{TICK_METHOD}}",
+    "{{ACTION_ID}}",
+}
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# 1. Cron tick template — file contract
+# ---------------------------------------------------------------------------
+
+
+def test_cron_tick_template_file_exists() -> None:
+    """The cron_tick.py template must exist at the canonical infra scripts path."""
+    assert CRON_TICK_TEMPLATE.exists(), (
+        f"Missing cron tick template at {CRON_TICK_TEMPLATE}. "
+        "InfraScaffoldAgent emits one copy per state_machine module."
+    )
+
+
+def test_cron_tick_template_contains_minimal_ctx_class() -> None:
+    """Template must define _MinimalCtx with an async emit method."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "class _MinimalCtx:" in source, "Template must define class _MinimalCtx"
+    assert "async def emit(" in source, "_MinimalCtx must have an async emit() method"
+
+
+def test_cron_tick_template_imports_get_mongo_client() -> None:
+    """Template must import get_mongo_client from mozaiksai.core.core_config."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "get_mongo_client" in source, (
+        "Template must import and call get_mongo_client from mozaiksai.core.core_config"
+    )
+
+
+def test_cron_tick_template_imports_close_mongo_client() -> None:
+    """Template must import close_mongo_client for cleanup in the finally block."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "close_mongo_client" in source, (
+        "Template must import and call close_mongo_client to release the connection"
+    )
+
+
+def test_cron_tick_template_uses_argparse_with_mongo_uri_arg() -> None:
+    """Template must use argparse and expose --mongo-uri argument."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "import argparse" in source, "Template must import argparse"
+    assert "--mongo-uri" in source, "Template must declare a --mongo-uri argument"
+
+
+def test_cron_tick_template_exits_nonzero_on_errors() -> None:
+    """Template run() must return 1 when errors list is non-empty, 0 otherwise."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "return 1 if errors else 0" in source, (
+        "Template must return 1 when the tick result has errors, 0 on success"
+    )
+
+
+def test_cron_tick_template_documents_mongo_uri_env_var() -> None:
+    """Template docstring must document the MONGO_URI required env var."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "MONGO_URI" in source, (
+        "Template module docstring must document MONGO_URI as a required env var"
+    )
+
+
+def test_cron_tick_template_uses_finally_for_close() -> None:
+    """Template must call close_mongo_client in a finally block.
+
+    The template imports close_mongo_client near the top (before finally:), then
+    calls it inside the finally block.  We therefore check the LAST occurrence of
+    'close_mongo_client' in the source — that is the call site, not the import.
+    """
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "finally:" in source, "Template must use a try/finally to guarantee cleanup"
+    finally_pos = source.index("finally:")
+    # Find the last (call-site) occurrence of close_mongo_client
+    close_pos = source.rfind("close_mongo_client")
+    assert close_pos > finally_pos, (
+        "close_mongo_client must be called inside the finally block (after 'finally:'). "
+        f"finally: at {finally_pos}, last close_mongo_client at {close_pos}"
+    )
+
+
+def test_cron_tick_template_contains_all_expected_template_vars() -> None:
+    """All required {{...}} template variables must appear in the template source."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    missing = [var for var in _EXPECTED_TEMPLATE_VARS if var not in source]
+    assert not missing, (
+        f"Missing template variable(s) in cron_tick.py: {missing}. "
+        "InfraScaffoldAgent substitutes these at generation time."
+    )
+
+
+def test_cron_tick_template_errors_key_from_tick_result() -> None:
+    """Template must read the 'errors' key from the tick result dict."""
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert 'result.get("errors"' in source or "result.get('errors'" in source, (
+        "Template must extract the 'errors' key from the tick result via result.get(\"errors\", [])"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. State machine archetype contract — module_archetypes.yaml
+# ---------------------------------------------------------------------------
+
+
+def test_state_machine_archetype_key_exists() -> None:
+    """module_archetypes.yaml must define a 'state_machine' archetype entry."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    assert "state_machine" in archetypes.get("archetypes", {}), (
+        "module_archetypes.yaml must declare a 'state_machine' archetype key"
+    )
+
+
+def test_state_machine_archetype_mentions_external_cron_script() -> None:
+    """Archetype spec must describe the external cron script pattern."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "external cron script" in spec_text or "external cron" in spec_text, (
+        "state_machine archetype must mention 'external cron script' delivery mechanism"
+    )
+
+
+def test_state_machine_archetype_mandates_minimal_ctx_pattern() -> None:
+    """Archetype spec must require the _MinimalCtx pattern for external cron scripts."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "_MinimalCtx" in spec_text, (
+        "state_machine archetype must require the _MinimalCtx pattern for external cron entry points"
+    )
+
+
+def test_state_machine_archetype_requires_errors_key_in_tick_result() -> None:
+    """Archetype must specify that the tick method returns a dict with an 'errors' key."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "errors" in spec_text, (
+        "state_machine archetype must mention 'errors' as a key in the tick result dict"
+    )
+
+
+def test_state_machine_archetype_describes_azure_container_apps_job() -> None:
+    """Archetype must describe Azure Container Apps job resource requirement."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "azure_container_apps" in spec_text or "Microsoft.App/jobs" in spec_text, (
+        "state_machine archetype must mention azure_container_apps job resource requirement"
+    )
+
+
+def test_state_machine_archetype_mandates_env_vars_in_docstring() -> None:
+    """Archetype must require required env vars to be documented in the script docstring."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "docstring" in spec_text, (
+        "state_machine archetype must mandate that required env vars are documented in the script docstring"
+    )
+
+
+def test_state_machine_archetype_requires_get_mongo_client_usage() -> None:
+    """Archetype must require the script to connect via get_mongo_client()."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "get_mongo_client" in spec_text, (
+        "state_machine archetype must specify that cron scripts connect via get_mongo_client()"
+    )
+
+
+def test_state_machine_archetype_requires_nonzero_exit_on_errors() -> None:
+    """Archetype must require the script to exit non-zero when errors are present."""
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    sm = archetypes["archetypes"]["state_machine"]
+    spec_text = yaml.dump(sm)
+    assert "non-zero" in spec_text or "exits with a non-zero" in spec_text, (
+        "state_machine archetype must require non-zero exit code on errors"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3. Infra pack context.yaml — template variable declarations
+# ---------------------------------------------------------------------------
+
+
+def test_infra_context_declares_cron_tick_template_vars() -> None:
+    """infra/context.yaml must declare the cron tick template variable set."""
+    context_text = _read_text(INFRA_CONTEXT)
+    for var in _EXPECTED_TEMPLATE_VARS:
+        var_name = var.strip("{}")
+        assert var_name in context_text, (
+            f"infra/context.yaml must document cron tick template variable '{var_name}'"
+        )
+
+
+def test_infra_context_declares_azure_container_apps_job_guidance() -> None:
+    """infra/context.yaml must describe the ACA job resource requirement for state_machine modules."""
+    context_text = _read_text(INFRA_CONTEXT)
+    assert "Microsoft.App/jobs" in context_text or "azure_container_apps" in context_text, (
+        "infra/context.yaml must mention Microsoft.App/jobs or azure_container_apps "
+        "for state_machine cron integration"
+    )
+
+
+def test_infra_context_references_cron_tick_template_path() -> None:
+    """infra/context.yaml must reference templates/scripts/cron_tick.py."""
+    context_text = _read_text(INFRA_CONTEXT)
+    assert "cron_tick.py" in context_text, (
+        "infra/context.yaml must reference templates/scripts/cron_tick.py"
+    )
+
+
+def test_infra_context_template_vars_consistent_with_template_file() -> None:
+    """Template variables declared in context.yaml must all appear in cron_tick.py."""
+    context_text = _read_text(INFRA_CONTEXT)
+    template_text = _read_text(CRON_TICK_TEMPLATE)
+    for var in _EXPECTED_TEMPLATE_VARS:
+        var_name = var.strip("{}")
+        # context.yaml uses bare names; template uses {{NAME}}
+        assert var_name in context_text, (
+            f"context.yaml missing variable declaration: {var_name}"
+        )
+        assert var in template_text, (
+            f"cron_tick.py template missing variable usage: {var}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 4. _MinimalCtx behavioural test — using substituted source
+# ---------------------------------------------------------------------------
+
+def _build_runnable_module() -> types.ModuleType:
+    """Return a module object compiled from cron_tick.py with all template vars substituted.
+
+    We replace every {{VAR}} with a dummy value so the source is valid Python,
+    then compile and exec it into a fresh module namespace. The module imports
+    are mocked so no real MongoDB or service packages are needed.
+    """
+    source = _read_text(CRON_TICK_TEMPLATE)
+
+    substitutions = {
+        "{{ACTION_LABEL}}": "Test Lifecycle",
+        "{{ACTION_DESCRIPTION}}": "Runs the test lifecycle tick.",
+        "{{CRON_INTERVAL_MINUTES}}": "5",
+        "{{CRON_SCRIPT_NAME}}": "cron_test_lifecycle",
+        "{{MODULE_ID}}": "test_module",
+        "{{SERVICE_CLASS}}": "TestService",
+        "{{TICK_METHOD}}": "run_test_tick",
+        "{{ACTION_ID}}": "test_lifecycle",
+    }
+    for var, value in substitutions.items():
+        source = source.replace(var, value)
+
+    # Build a fake module namespace with mocked imports so exec() succeeds
+    # without needing real mozaiksai or app packages installed in test context.
+    fake_module = types.ModuleType("cron_test_lifecycle")
+    fake_module.__file__ = str(CRON_TICK_TEMPLATE)
+
+    # Mock out the imports that the generated source performs
+    fake_sys = MagicMock()
+    fake_sys.path = list(sys.path)
+    fake_sys.stderr = sys.stderr
+    fake_sys.exit = sys.exit
+    fake_sys.argv = ["cron_test_lifecycle.py"]
+
+    # Dummy get_mongo_client / close_mongo_client
+    dummy_client = MagicMock()
+    fake_get_mongo = MagicMock(return_value=dummy_client)
+    fake_close_mongo = MagicMock()
+
+    # Dummy service
+    class _DummyService:
+        async def run_test_tick(self, ctx: Any) -> dict:  # noqa: ANN001
+            return {"errors": []}
+
+    # Patch sys.path manipulation in the source: the template does
+    # `if str(ROOT) not in sys.path: sys.path.insert(...)` which is benign.
+    # Then it does `from app.modules... import ServiceClass` and
+    # `from mozaiksai.core.core_config import ...` — we intercept these via
+    # sys.modules patching before exec.
+
+    import importlib
+
+    # Install mock modules before exec
+    _installed: list[str] = []
+    for mod_name in [
+        "app",
+        "app.modules",
+        "app.modules.test_module",
+        "app.modules.test_module.backend",
+        "app.modules.test_module.backend.service",
+        "mozaiksai",
+        "mozaiksai.core",
+        "mozaiksai.core.core_config",
+    ]:
+        if mod_name not in sys.modules:
+            fake = types.ModuleType(mod_name)
+            sys.modules[mod_name] = fake
+            _installed.append(mod_name)
+
+    # Populate leaf modules with the symbols the template imports
+    sys.modules["app.modules.test_module.backend.service"].TestService = _DummyService  # type: ignore[attr-defined]
+    sys.modules["mozaiksai.core.core_config"].get_mongo_client = fake_get_mongo  # type: ignore[attr-defined]
+    sys.modules["mozaiksai.core.core_config"].close_mongo_client = fake_close_mongo  # type: ignore[attr-defined]
+
+    try:
+        code = compile(source, str(CRON_TICK_TEMPLATE), "exec")
+        exec(code, fake_module.__dict__)  # noqa: S102
+    finally:
+        # Remove only the modules we installed to avoid polluting other tests
+        for mod_name in _installed:
+            sys.modules.pop(mod_name, None)
+
+    return fake_module
+
+
+def test_minimal_ctx_emitted_starts_empty() -> None:
+    """_MinimalCtx._emitted must be an empty list on construction."""
+    mod = _build_runnable_module()
+    ctx = mod._MinimalCtx()
+    assert ctx._emitted == [], "_MinimalCtx._emitted must start as an empty list"
+
+
+def test_minimal_ctx_emit_captures_event() -> None:
+    """Calling ctx.emit() must append (event_type, payload) to ctx._emitted."""
+    mod = _build_runnable_module()
+    ctx = mod._MinimalCtx()
+    asyncio.run(ctx.emit("test.event", {"key": "val"}))
+    assert len(ctx._emitted) == 1, "emit() must add one entry to _emitted"
+    event_type, payload = ctx._emitted[0]
+    assert event_type == "test.event"
+    assert payload == {"key": "val"}
+
+
+def test_minimal_ctx_emit_multiple_events() -> None:
+    """Each emit() call appends independently; order is preserved."""
+    mod = _build_runnable_module()
+    ctx = mod._MinimalCtx()
+    asyncio.run(ctx.emit("event.one", {"n": 1}))
+    asyncio.run(ctx.emit("event.two", {"n": 2}))
+    assert len(ctx._emitted) == 2
+    assert ctx._emitted[0][0] == "event.one"
+    assert ctx._emitted[1][0] == "event.two"
+
+
+# ---------------------------------------------------------------------------
+# 5. run() exit-code logic — mock service + mongo client
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_module_with_service(tick_return: dict) -> types.ModuleType:
+    """Build the runnable module and patch the embedded service to return tick_return."""
+    mod = _build_runnable_module()
+
+    class _MockService:
+        async def run_test_tick(self, ctx: Any) -> dict:  # noqa: ANN001
+            return tick_return
+
+    # Replace the TestService class in the module's namespace
+    mod.TestService = _MockService  # type: ignore[attr-defined]
+    return mod
+
+
+def test_run_returns_zero_when_no_errors() -> None:
+    """run() must return 0 when the tick result contains an empty errors list."""
+    mod = _make_mock_module_with_service({"errors": []})
+
+    dummy_client = MagicMock()
+    # The template calls `await close_mongo_client(client)` so the mock must be
+    # an AsyncMock (a synchronous mock would cause a TypeError in the await expr).
+    fake_close = AsyncMock()
+
+    with (
+        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "close_mongo_client", fake_close),
+    ):
+        result = asyncio.run(mod.run())
+
+    assert result == 0, "run() must return 0 when there are no errors"
+
+
+def test_run_returns_one_when_errors_present() -> None:
+    """run() must return 1 when the tick result contains a non-empty errors list."""
+    mod = _make_mock_module_with_service({"errors": ["something failed"]})
+
+    dummy_client = MagicMock()
+    fake_close = AsyncMock()
+
+    with (
+        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "close_mongo_client", fake_close),
+    ):
+        result = asyncio.run(mod.run())
+
+    assert result == 1, "run() must return 1 when the tick result has errors"
+
+
+def test_close_mongo_client_called_even_on_error() -> None:
+    """close_mongo_client must be called in the finally block regardless of errors."""
+    mod = _make_mock_module_with_service({"errors": ["tick error"]})
+
+    dummy_client = MagicMock()
+    # AsyncMock because the template uses `await close_mongo_client(client)`.
+    fake_close = AsyncMock()
+
+    with (
+        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "close_mongo_client", fake_close),
+    ):
+        asyncio.run(mod.run())
+
+    fake_close.assert_called_once(), (
+        "close_mongo_client must be called (finally block) even when errors are present"
+    )
+
+
+def test_close_mongo_client_called_on_success() -> None:
+    """close_mongo_client must also be called on the happy path."""
+    mod = _make_mock_module_with_service({"errors": []})
+
+    dummy_client = MagicMock()
+    fake_close = AsyncMock()
+
+    with (
+        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "close_mongo_client", fake_close),
+    ):
+        asyncio.run(mod.run())
+
+    fake_close.assert_called_once(), (
+        "close_mongo_client must be called on the success path too"
+    )
