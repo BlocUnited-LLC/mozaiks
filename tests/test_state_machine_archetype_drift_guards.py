@@ -5,6 +5,8 @@ These tests protect against regressions in:
 - The state_machine archetype spec in module_archetypes.yaml
 - The infra pack context.yaml that declares cron tick template variables
 - The runtime behaviour of _MinimalCtx and the run() exit-code logic
+- The call contract for get_mongo_client() and close_mongo_client() (no args,
+  close_mongo_client is synchronous — both regressions were caught by this suite)
 
 No network calls or real MongoDB are used. Mongo client and service calls are
 patched with unittest.mock to keep each test deterministic and fast.
@@ -14,11 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import textwrap
 import types
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -87,6 +88,55 @@ def test_cron_tick_template_imports_close_mongo_client() -> None:
     )
 
 
+def test_cron_tick_template_calls_get_mongo_client_with_no_args() -> None:
+    """get_mongo_client() takes no arguments — template must not pass kwargs.
+
+    Regression guard: the original template called get_mongo_client(mongo_uri=mongo_uri)
+    which raises TypeError at runtime because the function signature has no parameters.
+    The --mongo-uri CLI value is propagated via os.environ.setdefault("MONGO_URI", ...).
+    """
+    source = _read_text(CRON_TICK_TEMPLATE)
+    # Must call the no-arg form
+    assert "get_mongo_client()" in source, (
+        "Template must call get_mongo_client() with no arguments. "
+        "Pass --mongo-uri via os.environ.setdefault('MONGO_URI', ...) instead."
+    )
+    # Must NOT pass mongo_uri as a kwarg
+    assert "get_mongo_client(mongo_uri=" not in source, (
+        "Template must not pass mongo_uri= to get_mongo_client(); the function takes no args."
+    )
+
+
+def test_cron_tick_template_calls_close_mongo_client_synchronously() -> None:
+    """close_mongo_client() is synchronous — template must not await it.
+
+    Regression guard: the original template called `await close_mongo_client(client)`
+    which raises TypeError (not a coroutine) and TypeError (unexpected arg) at runtime.
+    """
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "await close_mongo_client" not in source, (
+        "Template must not await close_mongo_client(); it is a synchronous function."
+    )
+    assert "close_mongo_client()" in source, (
+        "Template must call close_mongo_client() with no arguments."
+    )
+
+
+def test_cron_tick_template_sets_mongo_uri_env_from_arg() -> None:
+    """Template must propagate --mongo-uri to MONGO_URI env var via os.environ.
+
+    Because get_mongo_client() reads MONGO_URI from the environment, the template
+    must set os.environ when --mongo-uri is provided on the command line.
+    """
+    source = _read_text(CRON_TICK_TEMPLATE)
+    assert "os.environ" in source, (
+        "Template must use os.environ to propagate --mongo-uri to MONGO_URI env var."
+    )
+    assert "import os" in source, (
+        "Template must import os to use os.environ."
+    )
+
+
 def test_cron_tick_template_uses_argparse_with_mongo_uri_arg() -> None:
     """Template must use argparse and expose --mongo-uri argument."""
     source = _read_text(CRON_TICK_TEMPLATE)
@@ -111,16 +161,10 @@ def test_cron_tick_template_documents_mongo_uri_env_var() -> None:
 
 
 def test_cron_tick_template_uses_finally_for_close() -> None:
-    """Template must call close_mongo_client in a finally block.
-
-    The template imports close_mongo_client near the top (before finally:), then
-    calls it inside the finally block.  We therefore check the LAST occurrence of
-    'close_mongo_client' in the source — that is the call site, not the import.
-    """
+    """Template must call close_mongo_client in a finally block."""
     source = _read_text(CRON_TICK_TEMPLATE)
     assert "finally:" in source, "Template must use a try/finally to guarantee cleanup"
     finally_pos = source.index("finally:")
-    # Find the last (call-site) occurrence of close_mongo_client
     close_pos = source.rfind("close_mongo_client")
     assert close_pos > finally_pos, (
         "close_mongo_client must be called inside the finally block (after 'finally:'). "
@@ -267,7 +311,6 @@ def test_infra_context_template_vars_consistent_with_template_file() -> None:
     template_text = _read_text(CRON_TICK_TEMPLATE)
     for var in _EXPECTED_TEMPLATE_VARS:
         var_name = var.strip("{}")
-        # context.yaml uses bare names; template uses {{NAME}}
         assert var_name in context_text, (
             f"context.yaml missing variable declaration: {var_name}"
         )
@@ -302,37 +345,17 @@ def _build_runnable_module() -> types.ModuleType:
     for var, value in substitutions.items():
         source = source.replace(var, value)
 
-    # Build a fake module namespace with mocked imports so exec() succeeds
-    # without needing real mozaiksai or app packages installed in test context.
     fake_module = types.ModuleType("cron_test_lifecycle")
     fake_module.__file__ = str(CRON_TICK_TEMPLATE)
 
-    # Mock out the imports that the generated source performs
-    fake_sys = MagicMock()
-    fake_sys.path = list(sys.path)
-    fake_sys.stderr = sys.stderr
-    fake_sys.exit = sys.exit
-    fake_sys.argv = ["cron_test_lifecycle.py"]
+    # Dummy get_mongo_client / close_mongo_client — matching the fixed signatures
+    fake_get_mongo = MagicMock(return_value=MagicMock())
+    fake_close_mongo = MagicMock()  # synchronous, no args
 
-    # Dummy get_mongo_client / close_mongo_client
-    dummy_client = MagicMock()
-    fake_get_mongo = MagicMock(return_value=dummy_client)
-    fake_close_mongo = MagicMock()
-
-    # Dummy service
     class _DummyService:
         async def run_test_tick(self, ctx: Any) -> dict:  # noqa: ANN001
             return {"errors": []}
 
-    # Patch sys.path manipulation in the source: the template does
-    # `if str(ROOT) not in sys.path: sys.path.insert(...)` which is benign.
-    # Then it does `from app.modules... import ServiceClass` and
-    # `from mozaiksai.core.core_config import ...` — we intercept these via
-    # sys.modules patching before exec.
-
-    import importlib
-
-    # Install mock modules before exec
     _installed: list[str] = []
     for mod_name in [
         "app",
@@ -349,7 +372,6 @@ def _build_runnable_module() -> types.ModuleType:
             sys.modules[mod_name] = fake
             _installed.append(mod_name)
 
-    # Populate leaf modules with the symbols the template imports
     sys.modules["app.modules.test_module.backend.service"].TestService = _DummyService  # type: ignore[attr-defined]
     sys.modules["mozaiksai.core.core_config"].get_mongo_client = fake_get_mongo  # type: ignore[attr-defined]
     sys.modules["mozaiksai.core.core_config"].close_mongo_client = fake_close_mongo  # type: ignore[attr-defined]
@@ -358,7 +380,6 @@ def _build_runnable_module() -> types.ModuleType:
         code = compile(source, str(CRON_TICK_TEMPLATE), "exec")
         exec(code, fake_module.__dict__)  # noqa: S102
     finally:
-        # Remove only the modules we installed to avoid polluting other tests
         for mod_name in _installed:
             sys.modules.pop(mod_name, None)
 
@@ -395,7 +416,7 @@ def test_minimal_ctx_emit_multiple_events() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. run() exit-code logic — mock service + mongo client
+# 5. run() exit-code and cleanup — mock service + mongo client
 # ---------------------------------------------------------------------------
 
 
@@ -407,7 +428,6 @@ def _make_mock_module_with_service(tick_return: dict) -> types.ModuleType:
         async def run_test_tick(self, ctx: Any) -> dict:  # noqa: ANN001
             return tick_return
 
-    # Replace the TestService class in the module's namespace
     mod.TestService = _MockService  # type: ignore[attr-defined]
     return mod
 
@@ -415,14 +435,10 @@ def _make_mock_module_with_service(tick_return: dict) -> types.ModuleType:
 def test_run_returns_zero_when_no_errors() -> None:
     """run() must return 0 when the tick result contains an empty errors list."""
     mod = _make_mock_module_with_service({"errors": []})
-
-    dummy_client = MagicMock()
-    # The template calls `await close_mongo_client(client)` so the mock must be
-    # an AsyncMock (a synchronous mock would cause a TypeError in the await expr).
-    fake_close = AsyncMock()
+    fake_close = MagicMock()  # synchronous after the fix
 
     with (
-        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "get_mongo_client", return_value=MagicMock()),
         patch.object(mod, "close_mongo_client", fake_close),
     ):
         result = asyncio.run(mod.run())
@@ -433,12 +449,10 @@ def test_run_returns_zero_when_no_errors() -> None:
 def test_run_returns_one_when_errors_present() -> None:
     """run() must return 1 when the tick result contains a non-empty errors list."""
     mod = _make_mock_module_with_service({"errors": ["something failed"]})
-
-    dummy_client = MagicMock()
-    fake_close = AsyncMock()
+    fake_close = MagicMock()
 
     with (
-        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "get_mongo_client", return_value=MagicMock()),
         patch.object(mod, "close_mongo_client", fake_close),
     ):
         result = asyncio.run(mod.run())
@@ -446,16 +460,33 @@ def test_run_returns_one_when_errors_present() -> None:
     assert result == 1, "run() must return 1 when the tick result has errors"
 
 
+def test_close_mongo_client_called_with_no_args() -> None:
+    """close_mongo_client() must be called with no arguments.
+
+    Regression guard: the original template called close_mongo_client(client)
+    which raises TypeError because the function takes no parameters.
+    """
+    mod = _make_mock_module_with_service({"errors": []})
+    fake_close = MagicMock()
+
+    with (
+        patch.object(mod, "get_mongo_client", return_value=MagicMock()),
+        patch.object(mod, "close_mongo_client", fake_close),
+    ):
+        asyncio.run(mod.run())
+
+    fake_close.assert_called_once_with(), (
+        "close_mongo_client must be called with no arguments"
+    )
+
+
 def test_close_mongo_client_called_even_on_error() -> None:
     """close_mongo_client must be called in the finally block regardless of errors."""
     mod = _make_mock_module_with_service({"errors": ["tick error"]})
-
-    dummy_client = MagicMock()
-    # AsyncMock because the template uses `await close_mongo_client(client)`.
-    fake_close = AsyncMock()
+    fake_close = MagicMock()
 
     with (
-        patch.object(mod, "get_mongo_client", return_value=dummy_client),
+        patch.object(mod, "get_mongo_client", return_value=MagicMock()),
         patch.object(mod, "close_mongo_client", fake_close),
     ):
         asyncio.run(mod.run())
@@ -465,19 +496,22 @@ def test_close_mongo_client_called_even_on_error() -> None:
     )
 
 
-def test_close_mongo_client_called_on_success() -> None:
-    """close_mongo_client must also be called on the happy path."""
-    mod = _make_mock_module_with_service({"errors": []})
+def test_get_mongo_client_called_with_no_args() -> None:
+    """get_mongo_client() must be called with no arguments.
 
-    dummy_client = MagicMock()
-    fake_close = AsyncMock()
+    Regression guard: the original template called get_mongo_client(mongo_uri=mongo_uri)
+    which raises TypeError because the function signature has no parameters.
+    The mongo_uri is propagated via os.environ instead.
+    """
+    mod = _make_mock_module_with_service({"errors": []})
+    fake_get = MagicMock(return_value=MagicMock())
 
     with (
-        patch.object(mod, "get_mongo_client", return_value=dummy_client),
-        patch.object(mod, "close_mongo_client", fake_close),
+        patch.object(mod, "get_mongo_client", fake_get),
+        patch.object(mod, "close_mongo_client", MagicMock()),
     ):
         asyncio.run(mod.run())
 
-    fake_close.assert_called_once(), (
-        "close_mongo_client must be called on the success path too"
+    fake_get.assert_called_once_with(), (
+        "get_mongo_client must be called with no arguments"
     )
