@@ -40,15 +40,15 @@ async def load_artifact_workspace(
     *,
     artifact_store: ArtifactStore,
     app_id: str,
-    artifact_version_id: str,
+    build_record_id: str,
     content_store: ArtifactContentStore | None = None,
 ) -> dict[str, Any]:
-    artifact = await artifact_store.get_artifact_version(
+    artifact = await artifact_store.get_build_record(
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
     )
     if artifact is None:
-        return {"present": False, "reason": "artifact_not_found", "artifact_version_id": artifact_version_id}
+        return {"present": False, "reason": "artifact_not_found", "build_record_id": build_record_id}
 
     metadata = dict(artifact.commit_metadata.metadata or {}) if artifact.commit_metadata else {}
     workspace_dir = metadata.get("workspace_dir")
@@ -67,7 +67,7 @@ async def load_artifact_workspace(
             return {
                 "present": False,
                 "reason": "content_store_unavailable",
-                "artifact_version_id": artifact.id,
+                "build_record_id": artifact.id,
                 "content_ref": content_ref,
                 "content_backend": content_backend,
             }
@@ -79,7 +79,7 @@ async def load_artifact_workspace(
             return {
                 "present": False,
                 "reason": "content_ref_not_found",
-                "artifact_version_id": artifact.id,
+                "build_record_id": artifact.id,
                 "content_ref": content_ref,
                 "content_backend": content_backend,
             }
@@ -87,7 +87,7 @@ async def load_artifact_workspace(
             return {
                 "present": False,
                 "reason": "content_store_error",
-                "artifact_version_id": artifact.id,
+                "build_record_id": artifact.id,
                 "content_ref": content_ref,
                 "content_backend": content_backend,
                 "error": str(exc),
@@ -96,7 +96,7 @@ async def load_artifact_workspace(
         return {
             "present": False,
             "reason": "workspace_unavailable",
-            "artifact_version_id": artifact.id,
+            "build_record_id": artifact.id,
             "artifact_path": artifact_path,
             "workspace_dir": workspace_dir,
         }
