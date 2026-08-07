@@ -57,7 +57,7 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls = []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
         return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
 
@@ -170,9 +170,9 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     )
 
     assert artifact_version.id == "av_bundle_1"
-    assert fake_artifact_store.calls[0]["artifact_kind"] == "app_bundle"
-    assert fake_artifact_store.calls[0]["artifact_key"] == "app_bundle"
-    assert fake_artifact_store.calls[0]["parent_version_id"] == "av_parent_1"
+    assert fake_artifact_store.calls[0]["build_family"] == "app_bundle"
+    assert fake_artifact_store.calls[0]["build_key"] == "app_bundle"
+    assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_1",
         "build_plan": "av_build_plan_1",

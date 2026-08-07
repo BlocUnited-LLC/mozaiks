@@ -61,9 +61,9 @@ class _MemoryArtifactStore:
         self.create_calls: list[dict[str, Any]] = []
         self._counter = 0
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
         self._counter += 1
-        artifact_kind = kwargs["artifact_kind"]
+        artifact_kind = kwargs["build_family"]
         version_id = (
             "av_app_bundle_1"
             if artifact_kind == "app_bundle"
@@ -73,8 +73,8 @@ class _MemoryArtifactStore:
         doc = ArtifactVersionDoc(
             _id=version_id,
             app_id=kwargs["app_id"],
-            artifact_kind=artifact_kind,
-            artifact_key=kwargs["artifact_key"],
+            build_family=artifact_kind,
+            build_key=kwargs["build_key"],
             version_number=self._counter,
             parent_version_id=kwargs.get("parent_version_id"),
             lineage_root_id=version_id,
@@ -91,27 +91,27 @@ class _MemoryArtifactStore:
         self.versions[doc.id] = doc
         return doc
 
-    async def get_artifact_version(
+    async def get_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
     ) -> ArtifactVersionDoc | None:
-        doc = self.versions.get(artifact_version_id)
+        doc = self.versions.get(build_record_id)
         if doc is None or doc.app_id != app_id:
             return None
         return doc
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
     ) -> ArtifactVersionDoc | None:
-        doc = await self.get_artifact_version(
+        doc = await self.get_build_record(
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if doc is None:
             return None
@@ -121,21 +121,21 @@ class _MemoryArtifactStore:
             doc.commit_metadata = commit_metadata
         return doc
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
     ) -> list[ArtifactVersionDoc]:
         rows = [doc for doc in self.versions.values() if doc.app_id == app_id]
-        if artifact_kind is not None:
-            rows = [doc for doc in rows if doc.artifact_kind == artifact_kind]
-        if artifact_key is not None:
-            rows = [doc for doc in rows if doc.artifact_key == artifact_key]
+        if build_family is not None:
+            rows = [doc for doc in rows if doc.build_family == build_family]
+        if build_key is not None:
+            rows = [doc for doc in rows if doc.build_key == build_key]
         if lifecycle_status is not None:
             rows = [doc for doc in rows if doc.lifecycle_status is lifecycle_status]
         return sorted(rows, key=lambda doc: doc.version_number, reverse=True)[:limit]
@@ -144,8 +144,8 @@ class _MemoryArtifactStore:
         for doc in self.versions.values():
             if (
                 doc.app_id == target.app_id
-                and doc.artifact_kind == target.artifact_kind
-                and doc.artifact_key == target.artifact_key
+                and doc.build_family == target.build_family
+                and doc.build_key == target.build_key
                 and doc.id != target.id
                 and doc.lifecycle_status is ArtifactLifecycleStatus.CURRENT
             ):
@@ -219,7 +219,7 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
         artifact_store=store,
     )
 
-    persisted_kinds = {call["artifact_kind"] for call in store.create_calls}
+    persisted_kinds = {call["build_family"] for call in store.create_calls}
     assert persisted_kinds == {
         "app_bundle",
         "source_context_bundle",
@@ -243,7 +243,7 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     inventory_payload = next(
         doc.commit_metadata.metadata["summary_payload"]
         for doc in store.versions.values()
-        if doc.artifact_kind == "application_inventory"
+        if doc.build_family == "application_inventory"
     )
     assert any(page["location"] == "ui/pages/home.yaml" for page in inventory_payload["pages"])
     assert any(
@@ -257,7 +257,7 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     ownership_payload = next(
         doc.commit_metadata.metadata["summary_payload"]
         for doc in store.versions.values()
-        if doc.artifact_kind == "ownership_boundary"
+        if doc.build_family == "ownership_boundary"
     )
     file_ownership = {
         boundary["ownership"]
@@ -320,7 +320,7 @@ async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
     assert app_bundle.id == "av_app_bundle_1"
     assert context.data["artifact_version_id"] == "av_app_bundle_1"
     assert "context store unavailable" in context.data["app_context_registration_warning"]
-    assert {call["artifact_kind"] for call in store.create_calls} == {"app_bundle"}
+    assert {call["build_family"] for call in store.create_calls} == {"app_bundle"}
 
 
 async def test_appgenerator_greenfield_context_contract_errors_can_be_strict() -> None:

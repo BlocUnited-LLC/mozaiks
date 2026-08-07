@@ -180,11 +180,11 @@ async def _register_workflow_bundle_artifact_version(
         artifact_kinds=("concept", "build_plan", "design_docs"),
         artifact_store=artifact_store,
     )
-    artifact_version = await artifact_store.create_artifact_version(
+    artifact_version = await artifact_store.create_build_record(
         app_id=str(app_id),
-        artifact_kind="workflow_bundle",
-        artifact_key=bundle_name,
-        parent_version_id=str(parent_version_id) if parent_version_id else None,
+        build_family="workflow_bundle",
+        build_key=bundle_name,
+        parent_build_record_id=str(parent_version_id) if parent_version_id else None,
         canonical_inputs_version=canonical_inputs_version,
         files_manifest=files_manifest,
         source_workflow=workflow_name,

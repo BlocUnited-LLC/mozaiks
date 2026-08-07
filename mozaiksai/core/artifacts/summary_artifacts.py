@@ -78,17 +78,17 @@ async def resolve_latest_artifact_version_refs(
         seen_kinds.add(artifact_kind)
 
         artifact_key = str((artifact_key_by_kind or {}).get(artifact_kind) or artifact_kind).strip() or None
-        versions = await store.list_artifact_versions(
+        versions = await store.list_build_records(
             app_id=resolved_app_id,
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
+            build_family=artifact_kind,
+            build_key=artifact_key,
             lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             limit=1,
         )
         if not versions and artifact_key is not None:
-            versions = await store.list_artifact_versions(
+            versions = await store.list_build_records(
                 app_id=resolved_app_id,
-                artifact_kind=artifact_kind,
+                build_family=artifact_kind,
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 limit=1,
             )
@@ -134,10 +134,10 @@ async def persist_summary_artifact(
     store = artifact_store or get_artifact_store()
     resolved_parent_version_id = str(parent_version_id or "").strip() or None
     if not resolved_parent_version_id:
-        prior_versions = await store.list_artifact_versions(
+        prior_versions = await store.list_build_records(
             app_id=resolved_app_id,
-            artifact_kind=resolved_artifact_kind,
-            artifact_key=resolved_artifact_key,
+            build_family=resolved_artifact_kind,
+            build_key=resolved_artifact_key,
             lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             limit=1,
         )
@@ -163,11 +163,11 @@ async def persist_summary_artifact(
     )
     summary_file_name = f"{resolved_artifact_key}.json"
 
-    return await store.create_artifact_version(
+    return await store.create_build_record(
         app_id=resolved_app_id,
-        artifact_kind=resolved_artifact_kind,
-        artifact_key=resolved_artifact_key,
-        parent_version_id=resolved_parent_version_id,
+        build_family=resolved_artifact_kind,
+        build_key=resolved_artifact_key,
+        parent_build_record_id=resolved_parent_version_id,
         canonical_inputs_version=resolved_inputs,
         files_manifest=[
             {
