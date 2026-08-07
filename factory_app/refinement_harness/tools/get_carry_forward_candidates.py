@@ -22,13 +22,13 @@ Available at the ``route_requested`` checkpoint because:
 
 Input (via ``ControlPlaneToolContext``):
 - ``context.app_id`` — the app being refined.
-- ``context.extra["previous_app_bundle_ref"]`` — artifact version id of the
+- ``context.extra["previous_app_bundle_ref"]`` — build record id of the
   previous app bundle. If absent or empty, returns an empty result + warning.
 
 Output (always a dict, never raises):
 - ``modules`` — list of ``ModuleInventoryEntry`` dicts.
 - ``count`` — number of candidate modules found.
-- ``source_artifact_version_id`` — artifact version id that was read, or None.
+- ``source_build_record_id`` — build record id that was read, or None.
 - ``warnings`` — list of diagnostic strings; non-empty when workspace was
   missing, unreadable, or contained no recognizable modules.
 """
@@ -76,7 +76,7 @@ async def get_carry_forward_candidates(
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            artifact_version_id=previous_app_bundle_ref,
+            build_record_id=previous_app_bundle_ref,
         )
     except Exception as exc:
         logger.warning(
@@ -87,15 +87,15 @@ async def get_carry_forward_candidates(
         )
         return _empty(
             f"workspace_load_error: failed to load artifact workspace "
-            f"(artifact_version_id={previous_app_bundle_ref}): {exc}"
+            f"(build_record_id={previous_app_bundle_ref}): {exc}"
         )
 
     if not workspace.get("present"):
         reason = workspace.get("reason", "unknown")
         return _empty(
             f"workspace_unavailable: {reason} "
-            f"(artifact_version_id={previous_app_bundle_ref})",
-            source_artifact_version_id=previous_app_bundle_ref,
+            f"(build_record_id={previous_app_bundle_ref})",
+            source_build_record_id=previous_app_bundle_ref,
         )
 
     file_map: dict[str, str] = workspace.get("file_map") or {}
@@ -117,7 +117,7 @@ async def get_carry_forward_candidates(
         )
         return _empty(
             f"inventory_extraction_error: {exc}",
-            source_artifact_version_id=resolved_version_id,
+            source_build_record_id=resolved_version_id,
         )
 
     if not entries:
@@ -129,7 +129,7 @@ async def get_carry_forward_candidates(
     return {
         "modules": [entry.model_dump() for entry in entries],
         "count": len(entries),
-        "source_artifact_version_id": resolved_version_id,
+        "source_build_record_id": resolved_version_id,
         "warnings": warnings,
     }
 
@@ -137,12 +137,12 @@ async def get_carry_forward_candidates(
 def _empty(
     warning: str,
     *,
-    source_artifact_version_id: str | None = None,
+    source_build_record_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "modules": [],
         "count": 0,
-        "source_artifact_version_id": source_artifact_version_id,
+        "source_build_record_id": source_build_record_id,
         "warnings": [warning],
     }
 

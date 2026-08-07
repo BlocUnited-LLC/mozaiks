@@ -366,7 +366,7 @@ async def test_experience_spec_impact_uses_concrete_page_paths_from_manifest() -
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Replace the dashboard experience.",
                 "extra": {
                     "files_manifest": [
@@ -401,7 +401,7 @@ async def test_experience_spec_impact_uses_artifact_version_file_manifest(monkey
     monkeypatch.setattr(store_mod.ArtifactStore, "__init__", lambda self: None)
     monkeypatch.setattr(
         store_mod.ArtifactStore,
-        "get_artifact_version",
+        "get_build_record",
         AsyncMock(
             return_value=SimpleNamespace(
                 files_manifest=[
@@ -421,8 +421,8 @@ async def test_experience_spec_impact_uses_artifact_version_file_manifest(monkey
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
-                "artifact_version_id": "av_app_1",
+                "build_family": "app_bundle",
+                "build_record_id": "av_app_1",
                 "raw_user_request": "Move the dashboard into top navigation.",
             }
         },

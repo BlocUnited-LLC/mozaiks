@@ -72,7 +72,7 @@ async def _load_app_intelligence_snapshot(
             "warnings": list(current.warnings),
         }
 
-    if str(tool_context.artifact_version_id or "").strip():
+    if str(tool_context.build_record_id or "").strip():
         loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
         snapshot = loaded.get("app_intelligence_snapshot")
         if loaded.get("present") and isinstance(snapshot, AppIntelligenceSnapshot):

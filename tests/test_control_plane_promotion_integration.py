@@ -11,7 +11,7 @@ The flow under test:
   1. build_refinement_execution_plan_from_route  →  RefinementExecutionPlan
   2. create_refinement_staging_workspace          →  RefinementStagingResult
   3. ScopedRefinementCodingWorker.execute()       →  CodingWorkerResult
-     (internally calls artifact_store.create_artifact_version)
+     (internally calls artifact_store.create_build_record)
   4. Derive StagedCodingWorkerResult from the worker output
   5. run_live_staged_coding_worker               →  ScopedRefinementResult
      (writes changed files into staging area, never touches source)
@@ -103,13 +103,13 @@ class _CapturingArtifactStore:
         self.calls: list[dict[str, Any]] = []
         self._child_id = child_id
 
-    async def create_artifact_version(self, **kwargs: Any) -> _ArtifactVersion:
+    async def create_build_record(self, **kwargs: Any) -> _ArtifactVersion:
         self.calls.append(dict(kwargs))
         return _ArtifactVersion(id=self._child_id, **kwargs)
 
     @property
     def last_call(self) -> dict[str, Any]:
-        assert self.calls, "No create_artifact_version calls recorded"
+        assert self.calls, "No create_build_record calls recorded"
         return self.calls[-1]
 
 
@@ -117,7 +117,7 @@ class _FakeToolExecutor:
     async def execute_tool(self, call: Any, *, context: Any = None) -> ControlPlaneToolResult:
         return ControlPlaneToolResult(
             success=True,
-            output={"tool_id": call.tool_id, "artifact_version_id": context.artifact_version_id},
+            output={"tool_id": call.tool_id, "build_record_id": context.build_record_id},
         )
 
 
@@ -206,9 +206,9 @@ def _write_source_bundle(root: Path) -> None:
 def _make_request(*, request_id: str, staging_root: Path) -> CodingWorkerRequest:
     return CodingWorkerRequest(
         app_id=_APP_ID,
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
-        artifact_version_id=_ARTIFACT_VERSION_ID,
+        build_family="app_bundle",
+        build_key="app_bundle",
+        build_record_id=_ARTIFACT_VERSION_ID,
         requested_workflow_id="AppGenerator",
         raw_user_request="Change the dashboard title to Reports Dashboard.",
         source_surface="cp_promotion_integration_test",
@@ -241,7 +241,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
     # Step 1: build execution plan
     plan = build_refinement_execution_plan_from_route(
         request="Change the dashboard title to Reports Dashboard.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -301,9 +301,9 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
 
     # Artifact store call assertions — the full promotion contract
     call = artifact_store.last_call
-    assert call["parent_version_id"] == _ARTIFACT_VERSION_ID
-    assert call["artifact_kind"] == "app_bundle"
-    assert call["artifact_key"] == "app_bundle"
+    assert call["parent_build_record_id"] == _ARTIFACT_VERSION_ID
+    assert call["build_family"] == "app_bundle"
+    assert call["build_key"] == "app_bundle"
     assert call["lifecycle_status"].value == "draft"
     assert call["validation_status"].value in {"passed", "skipped"}
     applied = call["commit_metadata"]["metadata"]["applied_paths"]
@@ -329,7 +329,7 @@ async def test_staging_workspace_apply_writes_to_staging_only(tmp_path: Path) ->
 
     plan = build_refinement_execution_plan_from_route(
         request="Change the dashboard title to Reports Dashboard.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -402,9 +402,9 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=_APP_ID,
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_parent_promo",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_parent_promo",
             requested_workflow_id="AppGenerator",
             raw_user_request="Change the dashboard title to Reports Dashboard.",
             source_surface="cp_promotion_integration_test",
@@ -423,7 +423,7 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
 
     call = artifact_store.last_call
     # Parent lineage
-    assert call["parent_version_id"] == "av_parent_promo"
+    assert call["parent_build_record_id"] == "av_parent_promo"
 
     # Commit metadata must carry applied_paths for promotion audit
     meta = call["commit_metadata"]["metadata"]
@@ -446,7 +446,7 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
     """
 
     class _BrokenStore:
-        async def create_artifact_version(self, **kwargs: Any) -> None:
+        async def create_build_record(self, **kwargs: Any) -> None:
             raise RuntimeError("artifact store unavailable")
 
     worker = ScopedRefinementCodingWorker(
@@ -462,9 +462,9 @@ async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_p
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=_APP_ID,
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_parent_broken",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_parent_broken",
             requested_workflow_id="AppGenerator",
             raw_user_request="Change the dashboard title to Reports Dashboard.",
             source_surface="cp_promotion_integration_test",
@@ -496,7 +496,7 @@ async def test_request_id_threads_through_all_layers(tmp_path: Path) -> None:
 
     plan = build_refinement_execution_plan_from_route(
         request="Change the dashboard title to Reports Dashboard.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -543,7 +543,7 @@ def test_dry_run_plan_does_not_produce_staging_area(tmp_path: Path) -> None:
     """dry_run execution mode must set execution_mode='dry_run' and no staging_area."""
     plan = build_refinement_execution_plan_from_route(
         request="Change the dashboard title to Reports Dashboard.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -564,7 +564,7 @@ def test_dry_run_plan_carries_required_metadata(tmp_path: Path) -> None:
     """A dry_run plan must carry all fields needed for the caller to decide next action."""
     plan = build_refinement_execution_plan_from_route(
         request="Add an archive action to the projects module.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="feature",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -598,7 +598,7 @@ def test_staged_plan_carries_staging_root_in_output_workspace(tmp_path: Path) ->
     staging_root = tmp_path / ".staging"
     plan = build_refinement_execution_plan_from_route(
         request="Change the dashboard title to Reports Dashboard.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -625,7 +625,7 @@ def test_staging_workspace_skips_secret_files(tmp_path: Path) -> None:
 
     plan = build_refinement_execution_plan_from_route(
         request="Change the dashboard title to Reports Dashboard.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -683,9 +683,9 @@ async def test_coding_worker_rejects_out_of_scope_edits_in_integration(tmp_path:
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=_APP_ID,
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_scope_guard",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_scope_guard",
             requested_workflow_id="AppGenerator",
             raw_user_request="Change the dashboard title.",
             source_surface="cp_promotion_integration_test",

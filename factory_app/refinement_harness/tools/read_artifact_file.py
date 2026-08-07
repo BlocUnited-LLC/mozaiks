@@ -29,7 +29,7 @@ async def read_artifact_file(
           "path": "modules/orders/module.yaml",
           "content": "...",
           "truncated": False,
-          "artifact_version_id": "...",
+          "build_record_id": "...",
           "source": "workspace_dir" | "artifact_zip" | "content_store:...",
         }
 
@@ -37,12 +37,12 @@ async def read_artifact_file(
     """
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()
-    artifact_version_id = str(tool_context.artifact_version_id or "").strip()
+    build_record_id = str(tool_context.build_record_id or "").strip()
     path_raw = (tool_context.extra or {}).get("path") or ""
     path = safe_relpath(str(path_raw).strip())
 
-    if not app_id or not artifact_version_id:
-        return {"present": False, "reason": "missing_app_id_or_artifact_version"}
+    if not app_id or not build_record_id:
+        return {"present": False, "reason": "missing_app_id_or_build_record"}
     if not path:
         return {"present": False, "reason": "missing_or_invalid_path", "path_raw": str(path_raw)}
 
@@ -50,7 +50,7 @@ async def read_artifact_file(
     workspace = await load_artifact_workspace(
         artifact_store=store,
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
     )
     if not workspace.get("present"):
         return workspace
@@ -64,7 +64,7 @@ async def read_artifact_file(
             "present": False,
             "reason": "file_not_found",
             "path": path,
-            "artifact_version_id": artifact.id,
+            "build_record_id": artifact.id,
             "available_top_level": available_prefixes[:20],
         }
 
@@ -76,7 +76,7 @@ async def read_artifact_file(
         "content": content[:_MAX_CONTENT_CHARS],
         "truncated": truncated,
         "char_count": len(content),
-        "artifact_version_id": artifact.id,
-        "artifact_kind": artifact.artifact_kind,
+        "build_record_id": artifact.id,
+        "build_family": artifact.build_family,
         "source": workspace["source"],
     }

@@ -538,11 +538,11 @@ class ScopedRefinementCodingWorker:
         artifact_store = self._artifact_store or get_artifact_store()
         validation_status = self._artifact_validation_status(validation_result)
         commit_content_metadata["validation_status"] = validation_status.value
-        artifact_version = await artifact_store.create_artifact_version(
+        artifact_version = await artifact_store.create_build_record(
             app_id=request.app_id,
-            artifact_kind=resolved_artifact_kind,
-            artifact_key=build_key,
-            parent_version_id=request.build_record_id,
+            build_family=resolved_artifact_kind,
+            build_key=build_key,
+            parent_build_record_id=request.build_record_id,
             source_workflow=request.requested_workflow_id or "control_plane_coding",
             source_chat_id=None,
             lifecycle_status=ArtifactLifecycleStatus.DRAFT,

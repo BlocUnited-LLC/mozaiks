@@ -37,12 +37,12 @@ async def read_bundle_file(
     """
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()
-    build_record_id = str(tool_context.artifact_version_id or "").strip()
+    build_record_id = str(tool_context.build_record_id or "").strip()
     path_raw = (tool_context.extra or {}).get("path") or ""
     path = safe_relpath(str(path_raw).strip())
 
     if not app_id or not build_record_id:
-        return {"present": False, "reason": "missing_app_id_or_artifact_version"}
+        return {"present": False, "reason": "missing_app_id_or_build_record"}
     if not path:
         return {"present": False, "reason": "missing_or_invalid_path", "path_raw": str(path_raw)}
 

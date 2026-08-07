@@ -24,9 +24,9 @@ async def get_bundle_workspace_scope(
 ) -> dict[str, Any]:
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()
-    build_record_id = str(tool_context.artifact_version_id or "").strip()
+    build_record_id = str(tool_context.build_record_id or "").strip()
     if not app_id or not build_record_id:
-        return {"present": False, "reason": "missing_app_id_or_artifact_version"}
+        return {"present": False, "reason": "missing_app_id_or_build_record"}
 
     store = record_store or get_build_record_store()
     workspace = await load_bundle_workspace(

@@ -22,7 +22,7 @@ Input:
   returned.
 - ``context_variables`` — dict containing at minimum:
   - ``app_id``: the app being replanned.
-  - ``previous_app_bundle_ref``: artifact version id of the prior bundle.
+  - ``previous_app_bundle_ref``: build record id of the prior bundle.
 - ``artifact_store`` — optional; injected in tests; resolved from runtime
   when omitted.
 
@@ -150,7 +150,7 @@ async def read_carry_forward_module_contract(
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            artifact_version_id=previous_app_bundle_ref,
+            build_record_id=previous_app_bundle_ref,
         )
     except Exception as exc:
         logger.warning(
@@ -165,7 +165,7 @@ async def read_carry_forward_module_contract(
             module_id=module_id_clean,
             warning=(
                 f"workspace_load_error: failed to load artifact workspace "
-                f"(artifact_version_id={previous_app_bundle_ref}): {exc}"
+                f"(build_record_id={previous_app_bundle_ref}): {exc}"
             ),
         )
 
@@ -175,7 +175,7 @@ async def read_carry_forward_module_contract(
             module_id=module_id_clean,
             warning=(
                 f"workspace_unavailable: {reason} "
-                f"(artifact_version_id={previous_app_bundle_ref})"
+                f"(build_record_id={previous_app_bundle_ref})"
             ),
         )
 

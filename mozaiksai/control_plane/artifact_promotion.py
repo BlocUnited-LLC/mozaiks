@@ -276,12 +276,12 @@ async def _resolve_source_artifact_version(
 ) -> ArtifactVersionDoc | None:
     resolved_source_id = str(source_artifact_version_id or "").strip()
     if resolved_source_id:
-        source_version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=resolved_source_id)
+        source_version = await artifact_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
         return source_version
-    versions = await artifact_store.list_artifact_versions(
+    versions = await artifact_store.list_build_records(
         app_id=app_id,
-        artifact_kind="app_bundle",
-        artifact_key=artifact_key,
+        build_family="app_bundle",
+        build_key=artifact_key,
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         limit=1,
     )
@@ -584,11 +584,11 @@ async def create_draft_app_bundle_from_staged_refinement(
         bundle_hmac_sha256=bundle_hmac_sha256,
     )
 
-    artifact_version = await artifact_store.create_artifact_version(
+    artifact_version = await artifact_store.create_build_record(
         app_id=resolved_app_id,
-        artifact_kind="app_bundle",
-        artifact_key=artifact_key,
-        parent_version_id=resolved_source_artifact_version_id,
+        build_family="app_bundle",
+        build_key=artifact_key,
+        parent_build_record_id=resolved_source_artifact_version_id,
         canonical_inputs_version=resolved_canonical_inputs_version,
         files_manifest=[entry.model_dump(mode="python") for entry in files_manifest],
         source_workflow=source_workflow or None,
@@ -666,9 +666,9 @@ async def create_draft_app_bundle_from_staged_refinement(
                     exc_info=True,
                 )
                 raise
-            refreshed = await artifact_store.get_artifact_version(
+            refreshed = await artifact_store.get_build_record(
                 app_id=resolved_app_id,
-                artifact_version_id=artifact_version.id,
+                build_record_id=artifact_version.id,
             )
             if refreshed is not None:
                 artifact_version = refreshed
@@ -677,9 +677,9 @@ async def create_draft_app_bundle_from_staged_refinement(
         request_id=plan.request_id,
         app_id=resolved_app_id,
         artifact_version_id=artifact_version.id,
-        artifact_kind=artifact_version.artifact_kind,
-        artifact_key=artifact_version.artifact_key,
-        parent_version_id=artifact_version.parent_version_id,
+        artifact_kind=artifact_version.build_family,
+        artifact_key=artifact_version.build_key,
+        parent_version_id=artifact_version.parent_build_record_id,
         lifecycle_status=artifact_version.lifecycle_status,
         validation_status=artifact_version.validation_status,
         artifact_path=artifact_path.as_posix(),
@@ -734,17 +734,17 @@ async def accept_staged_refinement_artifact_version(
         )
 
     artifact_store = artifact_store or get_artifact_store()
-    artifact_version = await artifact_store.get_artifact_version(
+    artifact_version = await artifact_store.get_build_record(
         app_id=resolved_app_id,
-        artifact_version_id=str(draft_artifact_version_id or "").strip(),
+        build_record_id=str(draft_artifact_version_id or "").strip(),
     )
     if artifact_version is None:
         raise AcceptedStagedAppBundleArtifactVersionError(
             f"Draft artifact version not found: {draft_artifact_version_id}"
         )
-    if artifact_version.artifact_kind != "app_bundle":
+    if artifact_version.build_family != "app_bundle":
         raise AcceptedStagedAppBundleArtifactVersionError(
-            f"Staged refinement acceptance only supports artifact_kind='app_bundle'; received {artifact_version.artifact_kind!r}."
+            f"Staged refinement acceptance only supports build_family='app_bundle'; received {artifact_version.build_family!r}."
         )
     if artifact_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise AcceptedStagedAppBundleArtifactVersionError(
@@ -824,9 +824,9 @@ async def accept_staged_refinement_artifact_version(
         validation_status=artifact_version.validation_status,
     )
 
-    accepted_version = await artifact_store.accept_artifact_version(
+    accepted_version = await artifact_store.accept_build_record(
         app_id=resolved_app_id,
-        artifact_version_id=artifact_version.id,
+        build_record_id=artifact_version.id,
         commit_metadata=commit_metadata_update,
     )
     if accepted_version is None:
@@ -838,9 +838,9 @@ async def accept_staged_refinement_artifact_version(
         request_id=resolved_request_id,
         app_id=resolved_app_id,
         artifact_version_id=accepted_version.id,
-        artifact_kind=accepted_version.artifact_kind,
-        artifact_key=accepted_version.artifact_key,
-        parent_version_id=accepted_version.parent_version_id,
+        artifact_kind=accepted_version.build_family,
+        artifact_key=accepted_version.build_key,
+        parent_version_id=accepted_version.parent_build_record_id,
         lifecycle_status=accepted_version.lifecycle_status,
         validation_status=accepted_version.validation_status,
         accepted_by=accepted_by_resolved,
@@ -895,7 +895,7 @@ class DraftAppBundleBuildRecordResult(BaseModel):
     bundle_size_bytes: int
     files_manifest: list[ArtifactFileManifestEntry] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    artifact_version: BuildRecord
+    build_record: BuildRecord
 
 
 class AcceptedStagedAppBundleBuildRecordResult(BaseModel):
@@ -913,7 +913,7 @@ class AcceptedStagedAppBundleBuildRecordResult(BaseModel):
     accepted_at: str
     refinement_review_status: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-    artifact_version: BuildRecord
+    build_record: BuildRecord
 
 
 async def _resolve_source_build_record(
@@ -928,8 +928,8 @@ async def _resolve_source_build_record(
         if hasattr(record_store, "get_build_record"):
             source_record: BuildRecord | None = await record_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
             return source_record
-        elif hasattr(record_store, "get_artifact_version"):
-            doc = await record_store.get_artifact_version(app_id=app_id, artifact_version_id=resolved_source_id)
+        elif hasattr(record_store, "get_build_record"):
+            doc = await record_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
             if doc is None:
                 return None
             return BuildRecord.model_validate(doc.model_dump(mode="python") if hasattr(doc, "model_dump") else doc)
@@ -943,18 +943,6 @@ async def _resolve_source_build_record(
             limit=1,
         )
         return records[0] if records else None
-    elif hasattr(record_store, "list_artifact_versions"):
-        versions = await record_store.list_artifact_versions(
-            app_id=app_id,
-            artifact_kind="app_bundle",
-            artifact_key=build_key,
-            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-            limit=1,
-        )
-        if not versions:
-            return None
-        doc = versions[0]
-        return BuildRecord.model_validate(doc.model_dump(mode="python") if hasattr(doc, "model_dump") else doc)
     return None
 
 
@@ -1199,7 +1187,7 @@ async def _create_draft_app_bundle_build_record(
         bundle_size_bytes=bundle_size_bytes,
         files_manifest=list(files_manifest),
         metadata=final_metadata,
-        artifact_version=build_record,
+        build_record=build_record,
     )
 
 
@@ -1343,7 +1331,7 @@ async def accept_staged_refinement_build_record(
         accepted_at=accepted_at,
         refinement_review_status=loaded_review.status,
         metadata=_commit_metadata_payload(accepted_record.commit_metadata),
-        artifact_version=accepted_record,
+        build_record=accepted_record,
     )
 
 

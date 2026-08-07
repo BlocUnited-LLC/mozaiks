@@ -26,13 +26,13 @@ class _MemoryArtifactStore:
     def __init__(self) -> None:
         self.created: list[ArtifactVersionDoc] = []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
         artifact_id = f"av_{len(self.created) + 1}"
         artifact = ArtifactVersionDoc(
             _id=artifact_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=len(self.created) + 1,
             lineage_root_id=artifact_id,
             source_workflow=kwargs.get("source_workflow"),
@@ -45,18 +45,18 @@ class _MemoryArtifactStore:
         self.created.append(artifact)
         return artifact
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str) -> ArtifactVersionDoc | None:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> ArtifactVersionDoc | None:
         for artifact in self.created:
-            if artifact.app_id == app_id and artifact.id == artifact_version_id:
+            if artifact.app_id == app_id and artifact.id == build_record_id:
                 return artifact
         return None
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
@@ -65,20 +65,20 @@ class _MemoryArtifactStore:
             artifact
             for artifact in self.created
             if artifact.app_id == app_id
-            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
-            and (artifact_key is None or artifact.artifact_key == artifact_key)
+            and (build_family is None or artifact.build_family == build_family)
+            and (build_key is None or artifact.build_key == build_key)
             and (lifecycle_status is None or artifact.lifecycle_status == lifecycle_status)
         ]
         return rows[:limit]
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
     ) -> ArtifactVersionDoc | None:
-        artifact = await self.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+        artifact = await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
         if artifact is None:
             return None
         updates: dict[str, Any] = {"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
@@ -116,7 +116,7 @@ async def test_index_workspace_app_intelligence_creates_artifacts_and_context_ve
     assert Path(result.artifact_path).exists()
     assert "app_intelligence" in Path(result.artifact_path).parts
 
-    kinds = [artifact.artifact_kind for artifact in store.created]
+    kinds = [artifact.build_family for artifact in store.created]
     assert kinds == [
         "app_bundle",
         "source_context_bundle",

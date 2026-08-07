@@ -24,15 +24,15 @@ async def get_artifact_workspace_scope(
 ) -> dict[str, Any]:
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()
-    artifact_version_id = str(tool_context.artifact_version_id or "").strip()
-    if not app_id or not artifact_version_id:
-        return {"present": False, "reason": "missing_app_id_or_artifact_version"}
+    build_record_id = str(tool_context.build_record_id or "").strip()
+    if not app_id or not build_record_id:
+        return {"present": False, "reason": "missing_app_id_or_build_record"}
 
     store = artifact_store or get_artifact_store()
     workspace = await load_artifact_workspace(
         artifact_store=store,
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
     )
     if not workspace.get("present"):
         return workspace
@@ -50,9 +50,9 @@ async def get_artifact_workspace_scope(
     related_previews = _collect_related_previews(selected_paths=selected_paths, file_map=file_map)
     return {
         "present": True,
-        "artifact_version_id": artifact.id,
-        "artifact_kind": artifact.artifact_kind,
-        "artifact_key": artifact.artifact_key,
+        "build_record_id": artifact.id,
+        "build_family": artifact.build_family,
+        "build_key": artifact.build_key,
         "source": workspace["source"],
         "file_count": len(file_tree),
         "file_tree": list_head(file_tree, limit=_MAX_FILE_COUNT),

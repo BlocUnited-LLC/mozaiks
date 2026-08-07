@@ -275,8 +275,8 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert result.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
     assert result.metadata["acceptance"]["accepted_by"] == "operator-1"
     assert result.metadata["acceptance"]["request_id"] == context["plan"].request_id
-    assert result.artifact_version.lifecycle_status == BuildRecordStatus.CURRENT
-    assert result.artifact_version.commit_metadata.metadata["acceptance"]["accepted_by"] == "operator-1"
+    assert result.build_record.lifecycle_status == BuildRecordStatus.CURRENT
+    assert result.build_record.commit_metadata.metadata["acceptance"]["accepted_by"] == "operator-1"
     assert context["build_record_store"].source_record.lifecycle_status == BuildRecordStatus.SUPERSEDED
     assert load_refinement_review_record(context["staging_result"].staging_area).status == "promotion_ready"
 
@@ -467,8 +467,8 @@ async def test_acceptance_preserves_refinement_metadata_and_records_accepted_by(
         notes="operator notes",
     )
 
-    refinement_metadata = result.artifact_version.commit_metadata.metadata["refinement"]
-    acceptance_metadata = result.artifact_version.commit_metadata.metadata["acceptance"]
+    refinement_metadata = result.build_record.commit_metadata.metadata["refinement"]
+    acceptance_metadata = result.build_record.commit_metadata.metadata["acceptance"]
     assert refinement_metadata["request_id"] == context["plan"].request_id
     assert refinement_metadata["review"]["status"] == "promotion_ready"
     assert refinement_metadata["review"]["write_back_mode"] == "generated_artifact"

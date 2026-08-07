@@ -34,10 +34,13 @@ from .app_validation import (
     run_current_app_source_validation,
 )
 from .artifact_promotion import (
+    AcceptedStagedAppBundleBuildRecordError,
     AcceptedStagedAppBundleArtifactVersionError,
     AcceptedStagedAppBundleArtifactVersionResult,
     DraftAppBundleArtifactVersionError,
     DraftAppBundleArtifactVersionResult,
+    DraftAppBundleBuildRecordError,
+    accept_staged_refinement_build_record,
     accept_staged_refinement_artifact_version,
     create_draft_app_bundle_from_staged_refinement,
 )
@@ -171,6 +174,7 @@ __all__ = [
     "ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS",
     "AcceptedStagedAppBundleArtifactVersionError",
     "AcceptedStagedAppBundleArtifactVersionResult",
+    "AcceptedStagedAppBundleBuildRecordError",
     "AppContextPolicyOverride",
     "AppContextPolicyOverrideDecision",
     "AppIntelligenceContextRegistrationResult",
@@ -184,6 +188,7 @@ __all__ = [
     "SourceImportResult",
     "DraftAppBundleArtifactVersionError",
     "DraftAppBundleArtifactVersionResult",
+    "DraftAppBundleBuildRecordError",
     "ChangeClass",
     "ChangeClassifierPort",
     "ChangeClassifierResult",
@@ -244,6 +249,7 @@ __all__ = [
     "build_selected_control_plane_harness",
     "build_refinement_review_package",
     "assemble_revision_context",
+    "accept_staged_refinement_build_record",
     "accept_staged_refinement_artifact_version",
     "apply_app_context_policy_override",
     "create_draft_app_bundle_from_staged_refinement",

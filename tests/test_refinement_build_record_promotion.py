@@ -285,24 +285,24 @@ async def test_creates_draft_build_record_from_staged_workspace(tmp_path: Path) 
     )
 
     assert result.build_family == "app_bundle"
-    assert result.artifact_version.build_family == "app_bundle"
+    assert result.build_record.build_family == "app_bundle"
     assert result.lifecycle_status == BuildRecordStatus.DRAFT
     assert result.parent_build_record_id == source_record.id
     assert result.validation_status == BuildRecordValidationStatus.PASSED
     assert result.content_ref is None
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["request_id"] == plan.request_id
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["change_class"] == "patch"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["refinement_lane"] == "ui_patch"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["validation_evidence"]["completed"] == [
+    assert result.build_record.commit_metadata.metadata["refinement"]["request_id"] == plan.request_id
+    assert result.build_record.commit_metadata.metadata["refinement"]["change_class"] == "patch"
+    assert result.build_record.commit_metadata.metadata["refinement"]["refinement_lane"] == "ui_patch"
+    assert result.build_record.commit_metadata.metadata["refinement"]["validation_evidence"]["completed"] == [
         "route_component_validation",
         "ui_theme_primitive_validation",
     ]
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["status"] == "promotion_ready"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["write_back_target"] is None
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["scoped_execution"]["execution_mode"] == "scoped_staging"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["promotion_policy"]["policy_decisions"] == policy_decisions
-    assert result.artifact_version.commit_metadata.metadata["artifact_path"] == result.artifact_path
+    assert result.build_record.commit_metadata.metadata["refinement"]["review"]["status"] == "promotion_ready"
+    assert result.build_record.commit_metadata.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
+    assert result.build_record.commit_metadata.metadata["refinement"]["review"]["write_back_target"] is None
+    assert result.build_record.commit_metadata.metadata["refinement"]["scoped_execution"]["execution_mode"] == "scoped_staging"
+    assert result.build_record.commit_metadata.metadata["refinement"]["promotion_policy"]["policy_decisions"] == policy_decisions
+    assert result.build_record.commit_metadata.metadata["artifact_path"] == result.artifact_path
 
     created = build_record_store.create_calls[0]
     assert created["build_family"] == "app_bundle"
@@ -532,8 +532,8 @@ async def test_draft_build_record_metadata_contains_lineage_validation_and_revie
     )
 
     metadata = result.metadata["refinement"]
-    assert result.artifact_version.parent_build_record_id == source_record.id
-    assert result.artifact_version.validation_status == BuildRecordValidationStatus.PASSED
+    assert result.build_record.parent_build_record_id == source_record.id
+    assert result.build_record.validation_status == BuildRecordValidationStatus.PASSED
     assert metadata["request_id"] == plan.request_id
     assert metadata["change_class"] == "patch"
     assert metadata["refinement_lane"] == "ui_patch"
@@ -714,7 +714,7 @@ async def test_failed_validation_maps_to_failed_status(tmp_path: Path) -> None:
     )
 
     assert result.validation_status == BuildRecordValidationStatus.FAILED
-    assert result.artifact_version.validation_status == BuildRecordValidationStatus.FAILED
+    assert result.build_record.validation_status == BuildRecordValidationStatus.FAILED
 
 
 @pytest.mark.asyncio

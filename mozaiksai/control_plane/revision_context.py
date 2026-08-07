@@ -29,15 +29,12 @@ def _artifact_summary(
     summary = {
         "present": True,
         "source": source,
-        "artifact_version_id": artifact.id,
         "build_record_id": artifact.id,
         "build_family": artifact.build_family,
         "build_key": artifact.build_key,
-        "artifact_kind": artifact.build_family,
-        "artifact_key": artifact.build_key,
         "version_number": artifact.version_number,
         "lineage_root_id": artifact.lineage_root_id,
-        "parent_version_id": artifact.parent_version_id,
+        "parent_build_record_id": artifact.parent_build_record_id,
         "lifecycle_status": artifact.lifecycle_status.value,
         "validation_status": artifact.validation_status.value,
         "source_workflow": artifact.source_workflow,
@@ -78,17 +75,17 @@ async def _resolve_current_artifact(
     context: ControlPlaneToolContext,
 ) -> tuple[ArtifactVersionDoc | None, str]:
     if context.build_record_id:
-        artifact = await artifact_store.get_artifact_version(
+        artifact = await artifact_store.get_build_record(
             app_id=app_id,
-            artifact_version_id=str(context.build_record_id),
+            build_record_id=str(context.build_record_id),
         )
         return artifact, "request_version" if artifact is not None else "request_version_missing"
 
     if context.build_family:
-        versions = await artifact_store.list_artifact_versions(
+        versions = await artifact_store.list_build_records(
             app_id=app_id,
-            artifact_kind=str(context.build_family),
-            artifact_key=str(context.build_key or "").strip() or None,
+            build_family=str(context.build_family),
+            build_key=str(context.build_key or "").strip() or None,
             limit=1,
         )
         if versions:
@@ -104,32 +101,32 @@ async def _resolve_input_artifacts(
 ) -> dict[str, Any]:
     resolved_inputs: dict[str, Any] = {}
     for raw_kind, raw_version_id in dict(artifact.canonical_inputs_version or {}).items():
-        artifact_kind = str(raw_kind or "").strip()
-        artifact_version_id = str(raw_version_id or "").strip()
-        if not artifact_kind or not artifact_version_id:
+        build_family = str(raw_kind or "").strip()
+        build_record_id = str(raw_version_id or "").strip()
+        if not build_family or not build_record_id:
             continue
-        input_artifact = await artifact_store.get_artifact_version(
+        input_artifact = await artifact_store.get_build_record(
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if input_artifact is None:
-            resolved_inputs[artifact_kind] = {
+            resolved_inputs[build_family] = {
                 "present": False,
-                "build_family": artifact_kind,
-                "artifact_kind": artifact_kind,
-                "artifact_version_id": artifact_version_id,
+                "build_family": build_family,
+                "build_key": build_family,
+                "build_record_id": build_record_id,
                 "source": "canonical_input_missing",
             }
             continue
-        resolved_inputs[artifact_kind] = _artifact_summary(
+        resolved_inputs[build_family] = _artifact_summary(
             input_artifact,
             source="canonical_input",
         )
     return resolved_inputs
 
 
-def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: str | None) -> dict[str, Any]:
-    artifact = pack.routing_for_artifact(str(artifact_kind or "").strip().lower())
+def _routing_summary(pack: LoadedControlPlanePack, build_family: str | None) -> dict[str, Any]:
+    artifact = pack.routing_for_artifact(str(build_family or "").strip().lower())
     current_routes: dict[str, Any] | None = None
     if artifact is not None:
         def route_summary(route: Any) -> dict[str, Any]:
@@ -138,7 +135,7 @@ def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: str | None) ->
             }
 
         current_routes = {
-            "artifact_kind": artifact.build_family,
+            "build_family": artifact.build_family,
             "label": artifact.label or artifact.build_family,
             "routes": {
                 "patch": route_summary(artifact.routes.patch),
@@ -148,9 +145,9 @@ def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: str | None) ->
             },
         }
     return {
-        "default_artifact_kind": pack.manifest.routing.default_build_family,
-        "known_artifact_kinds": [artifact.build_family for artifact in pack.manifest.routing.artifacts],
-        "current_artifact": current_routes,
+        "default_build_family": pack.manifest.routing.default_build_family,
+        "known_build_families": [artifact.build_family for artifact in pack.manifest.routing.artifacts],
+        "current_build_route": current_routes,
     }
 
 
@@ -218,63 +215,62 @@ async def assemble_revision_context(
         context=tool_context,
     )
 
-    tracked_artifacts: list[dict[str, Any]] = []
-    tracked_artifact_kinds: set[str] = set()
-    pending_artifact_kinds: list[str] = []
+    tracked_build_records: list[dict[str, Any]] = []
+    tracked_build_families: set[str] = set()
+    pending_build_families: list[str] = []
     for raw_kind in (
         [artifact.build_family for artifact in pack.manifest.routing.artifacts]
         + list((session_state.artifact_version_refs or {}).keys() if session_state is not None else [])
-        + ([str(tool_context.artifact_kind)] if tool_context.artifact_kind else [])
+        + ([str(tool_context.build_family)] if tool_context.build_family else [])
     ):
         kind = str(raw_kind or "").strip().lower()
         if kind:
-            pending_artifact_kinds.append(kind)
+            pending_build_families.append(kind)
 
-    while pending_artifact_kinds:
-        artifact_kind = str(pending_artifact_kinds.pop(0) or "").strip().lower()
-        if not artifact_kind or artifact_kind in tracked_artifact_kinds:
+    while pending_build_families:
+        build_family = str(pending_build_families.pop(0) or "").strip().lower()
+        if not build_family or build_family in tracked_build_families:
             continue
-        tracked_artifact_kinds.add(artifact_kind)
-        resolved_artifact: ArtifactVersionDoc | None = None
+        tracked_build_families.add(build_family)
+        resolved_build_record: ArtifactVersionDoc | None = None
         source = "latest_for_kind"
         session_version_id = None
         if session_state is not None:
-            session_version_id = str((session_state.artifact_version_refs or {}).get(artifact_kind) or "").strip() or None
-        if current_artifact is not None and current_artifact.artifact_kind == artifact_kind:
-            resolved_artifact = current_artifact
+            session_version_id = str((session_state.artifact_version_refs or {}).get(build_family) or "").strip() or None
+        if current_artifact is not None and current_artifact.build_family == build_family:
+            resolved_build_record = current_artifact
             source = current_artifact_source
         elif session_version_id:
-            resolved_artifact = await store.get_artifact_version(app_id=app_id, artifact_version_id=session_version_id)
+            resolved_build_record = await store.get_build_record(app_id=app_id, build_record_id=session_version_id)
             source = "session_ref"
-        if resolved_artifact is None:
-            versions = await store.list_artifact_versions(
+        if resolved_build_record is None:
+            versions = await store.list_build_records(
                 app_id=app_id,
-                artifact_kind=artifact_kind,
+                build_family=build_family,
                 limit=1,
             )
-            resolved_artifact = versions[0] if versions else None
-        if resolved_artifact is None:
-            tracked_artifacts.append(
+            resolved_build_record = versions[0] if versions else None
+        if resolved_build_record is None:
+            tracked_build_records.append(
                 {
                     "present": False,
-                    "build_family": artifact_kind,
-                    "artifact_kind": artifact_kind,
+                    "build_family": build_family,
                     "source": source,
                 }
             )
         else:
-            for raw_input_kind in dict(resolved_artifact.canonical_inputs_version or {}).keys():
+            for raw_input_kind in dict(resolved_build_record.canonical_inputs_version or {}).keys():
                 input_kind = str(raw_input_kind or "").strip().lower()
-                if input_kind and input_kind not in tracked_artifact_kinds:
-                    pending_artifact_kinds.append(input_kind)
-            tracked_artifacts.append(
+                if input_kind and input_kind not in tracked_build_families:
+                    pending_build_families.append(input_kind)
+            tracked_build_records.append(
                 _artifact_summary(
-                    resolved_artifact,
+                    resolved_build_record,
                     source=source,
                     input_artifacts=await _resolve_input_artifacts(
                         artifact_store=store,
                         app_id=app_id,
-                        artifact=resolved_artifact,
+                        artifact=resolved_build_record,
                     ),
                 )
             )
@@ -315,7 +311,7 @@ async def assemble_revision_context(
         "build_record_id": tool_context.build_record_id,
         "routing": _routing_summary(pack, tool_context.build_family),
         "session": _session_summary(session_state),
-        "current_artifact": (
+        "current_build_record": (
             _artifact_summary(
                 current_artifact,
                 source=current_artifact_source,
@@ -334,7 +330,7 @@ async def assemble_revision_context(
                 "source": current_artifact_source,
             }
         ),
-        "tracked_artifacts": tracked_artifacts,
+        "tracked_build_records": tracked_build_records,
         "active_change_request": (
             _change_request_summary(active_change_request)
             if active_change_request is not None

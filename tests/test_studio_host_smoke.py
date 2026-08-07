@@ -91,7 +91,7 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
     from mozaiksai.hosts import studio as studio_app
 
     class _ArtifactStore:
-        async def list_artifact_versions(self, **_kwargs):
+        async def list_build_records(self, **_kwargs):
             return []
 
         async def list_change_requests(self, **_kwargs):

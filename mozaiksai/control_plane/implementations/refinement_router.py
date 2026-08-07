@@ -538,9 +538,9 @@ class RefinementTriggerRouteResolver:
         try:
             from mozaiksai.core.artifacts.store import ArtifactStore
 
-            artifact = await ArtifactStore().get_artifact_version(
+            artifact = await ArtifactStore().get_build_record(
                 app_id=request.app_id,
-                artifact_version_id=request.build_record_id,
+                build_record_id=request.build_record_id,
             )
         except Exception as exc:
             _logger.debug("ARTIFACT_FILES_LOOKUP_FAILED app=%s artifact=%s: %s", request.app_id, request.build_record_id, exc)
