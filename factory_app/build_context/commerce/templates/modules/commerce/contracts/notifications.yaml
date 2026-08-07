@@ -1,0 +1,33 @@
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: commerce_order_receipt
+    description: Notify the buyer after a successful payment.
+    event_type: domain.commerce.order.paid
+    channels:
+      - in_app
+    audience:
+      user_id_field: buyer_id
+    template:
+      title: "Order confirmed"
+      body: "Your order {{order_id}} has been paid successfully."
+    context_fields:
+      - order_id
+      - status
+      - payment_provider
+      - provider_reference
+
+  - id: commerce_checkout_failed
+    description: Notify the buyer when checkout fails, expires, or is cancelled.
+    event_type: domain.commerce.checkout.failed
+    channels:
+      - in_app
+    audience:
+      user_id_field: buyer_id
+    template:
+      title: "Checkout unsuccessful"
+      body: "Your checkout for order {{order_id}} could not be completed."
+    context_fields:
+      - order_id
+      - status
+      - payment_provider
+      - provider_reference
