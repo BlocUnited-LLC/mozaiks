@@ -254,6 +254,27 @@ def test_appgenerator_selection_wiring_includes_commerce_pack() -> None:
     assert "commerce_pack" in app_outputs["models"]["AppCapabilityPack"]["fields"]["pack_type"]["values"]
 
 
+def test_commerce_module_declares_user_data_scope() -> None:
+    """Commerce stores user-linked carts and orders — user_data_scope must be true."""
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "commerce" / "module.yaml")
+    assert module_yaml["module"].get("user_data_scope") is True, (
+        "commerce/module.yaml must declare user_data_scope: true — "
+        "carts (actor_id) and orders (actor_id) are user-owned PII"
+    )
+
+
+def test_commerce_backend_ships_account_data_handler() -> None:
+    """user_data_scope: true requires a matching account_data_handler.py."""
+    handler = TEMPLATES / "modules" / "commerce" / "backend" / "account_data_handler.py"
+    assert handler.exists(), (
+        "commerce/backend/account_data_handler.py is missing — "
+        "module declares user_data_scope: true but ships no GDPR handler"
+    )
+    src = handler.read_text(encoding="utf-8")
+    assert "delete_user_data" in src
+    assert "export_user_data" in src
+
+
 def test_commerce_pack_does_not_generate_payment_provider_or_marketplace_modules() -> None:
     generated_paths = {
         str(path.relative_to(TEMPLATES)).replace("\\", "/")

@@ -41,6 +41,8 @@ required_outputs:
     owner: templates
   - path: modules/commerce/backend/__init__.py
     owner: templates
+  - path: modules/commerce/backend/account_data_handler.py
+    owner: templates
   - path: modules/commerce/backend/base_handler.py
     owner: templates
   - path: modules/commerce/backend/handler.py

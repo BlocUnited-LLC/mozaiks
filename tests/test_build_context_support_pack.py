@@ -305,6 +305,27 @@ def test_appgenerator_selection_wiring_includes_support_pack() -> None:
     assert packs["support"]["capability_kind"] == "operator_pack"
 
 
+def test_support_module_declares_user_data_scope() -> None:
+    """Support stores user-linked request records — user_data_scope must be true."""
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "support" / "module.yaml")
+    assert module_yaml["module"].get("user_data_scope") is True, (
+        "support/module.yaml must declare user_data_scope: true — "
+        "support requests carry requester_id (user-owned PII)"
+    )
+
+
+def test_support_backend_ships_account_data_handler() -> None:
+    """user_data_scope: true requires a matching account_data_handler.py."""
+    handler = TEMPLATES / "modules" / "support" / "backend" / "account_data_handler.py"
+    assert handler.exists(), (
+        "support/backend/account_data_handler.py is missing — "
+        "module declares user_data_scope: true but ships no GDPR handler"
+    )
+    src = handler.read_text(encoding="utf-8")
+    assert "delete_user_data" in src
+    assert "export_user_data" in src
+
+
 def test_support_pack_does_not_generate_messaging_module() -> None:
     """Support must not generate its own messages module — it uses the messaging pack."""
     generated_paths = {

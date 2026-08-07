@@ -37,6 +37,8 @@ required_outputs:
     owner: templates
   - path: modules/support/backend/__init__.py
     owner: templates
+  - path: modules/support/backend/account_data_handler.py
+    owner: templates
   - path: modules/support/backend/base_handler.py
     owner: templates
   - path: modules/support/backend/handler.py
