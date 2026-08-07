@@ -84,6 +84,7 @@ actions:
         success: { type: boolean }
         event_id: { type: string }
     permissions: [activity_feed.admin]
+    emits: [domain.social.activity.recorded]
 
 capabilities:
   - capability_id: social.feed.read
