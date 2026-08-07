@@ -195,7 +195,7 @@ def build_greenfield_app_context_from_app_bundle(
     resolved_app_id = str(app_id or getattr(app_bundle_artifact, "app_id", "") or "").strip()
     if not resolved_app_id:
         raise ValueError("app_id is required")
-    if getattr(app_bundle_artifact, "artifact_kind", None) != "app_bundle":
+    if getattr(app_bundle_artifact, "build_family", None) != "app_bundle":
         raise ValueError("greenfield app context requires an app_bundle artifact")
 
     artifact_id = str(getattr(app_bundle_artifact, "id", "") or "")
@@ -216,7 +216,7 @@ def build_greenfield_app_context_from_app_bundle(
         indexed_at=resolved_indexed_at,
         metadata={
             "artifact_kind": "app_bundle",
-            "artifact_key": str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+            "artifact_key": str(getattr(app_bundle_artifact, "build_key", "app_bundle")),
             "artifact_version_id": artifact_id,
         },
     )
@@ -299,7 +299,7 @@ async def register_greenfield_app_context_version(
             app_id=drafts.app_id,
             artifact_version_id=str(app_bundle_artifact.id),
             artifact_kind="app_bundle",
-            artifact_key=str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+            artifact_key=str(getattr(app_bundle_artifact, "build_key", "app_bundle")),
             file_map=source_file_map,
             source="greenfield_app_bundle",
             source_ref=drafts.application_inventory.source_refs[0],
@@ -339,7 +339,7 @@ async def register_greenfield_app_context_version(
 
     app_bundle_ref = ArtifactRef(
         artifact_kind="app_bundle",
-        artifact_key=str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+        artifact_key=str(getattr(app_bundle_artifact, "build_key", "app_bundle")),
         artifact_version_id=str(app_bundle_artifact.id),
         lifecycle_status=_lifecycle_value(getattr(app_bundle_artifact, "lifecycle_status", None)),
         source_ref_id="src_app_bundle",

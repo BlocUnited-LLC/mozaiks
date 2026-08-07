@@ -9,8 +9,10 @@ module:
   handler: backend.handler:SupportHandler
 
 permissions:
+  - id: support.submit
+    description: Submit support requests and view own requests.
   - id: support.read
-    description: Read support requests.
+    description: Read all support requests (operator/admin).
   - id: support.manage
     description: Manage support queues, link threads, and update request status.
 
@@ -42,7 +44,7 @@ actions:
         success: { type: boolean }
         request: { type: object }
         error: { type: string }
-    permissions: [access_as_user]
+    permissions: [support.submit]
     emits: [domain.support.request_created]
 
   - id: list_support_requests
@@ -71,7 +73,7 @@ actions:
       properties:
         requests: { type: array }
         total: { type: integer }
-    permissions: [access_as_user]
+    permissions: [support.submit]
 
   - id: link_message_thread
     description: Attach a messages.thread_id to a support request.
@@ -119,12 +121,12 @@ capabilities:
     kind: action
     target: create_support_request
     title: Create support request
-    permissions: [access_as_user]
+    permissions: [support.submit]
   - capability_id: support.requests.list
     kind: action
     target: list_support_requests
     title: List support requests
-    permissions: [access_as_user]
+    permissions: [support.submit]
   - capability_id: support.requests.update_status
     kind: action
     target: update_support_status
