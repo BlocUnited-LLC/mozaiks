@@ -2221,6 +2221,11 @@ agents:
       1. Write content to `/tmp/validate_config_<stem>.yaml`.
       2. Run `python -c "import yaml,sys; yaml.safe_load(open('/tmp/validate_config_<stem>.yaml'))"` — fix parse errors before continuing.
 
+      Cross-reference checks (run after all files parse cleanly):
+      3. Permission consistency — every permission id referenced in `module.yaml.actions[].permissions` and `module.yaml.capabilities[].permissions` must be declared in `module.yaml.permissions[].id`. If any reference is missing, add the declaration or fix the reference before emitting.
+      4. Notification id consistency — every `notification_id` value in `reactions.yaml` targets must appear as an `id` in `notifications.yaml.notifications[]`. If `notifications.yaml` is absent, create it with the required definitions before emitting.
+      5. Emits/events alignment — every event type string in `module.yaml.actions[].emits` must appear as a `type` in `events.yaml.events[]`. Conversely, every `events.yaml.events[].type` must appear in at least one action's `emits` list or be a reaction-only event with a documented source. Flag and resolve any orphaned declarations before emitting.
+
       Emit ConfigMiddlewareOutput only after all files pass. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
@@ -2813,6 +2818,9 @@ agents:
       3. Run `ruff check --select E,F /tmp/validate_handler.py` — fix any undefined-name or import errors before continuing.
 
       Emit ServiceOutput only after all files pass both checks. Do not include validation shell output in ServiceOutput.
+
+      Cross-reference check (run after syntax and lint pass):
+      4. Events.yaml coverage — for every event type declared in `contracts/events.yaml.events[].type`, verify that the exact string literal appears in at least one of `service.py`, `base_handler.py`, or `handler.py` as a `ctx.emit(...)` argument. If any declared event type is absent, add the missing emit call before emitting ServiceOutput.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
