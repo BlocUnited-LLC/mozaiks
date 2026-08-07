@@ -356,13 +356,13 @@ async def _current_context_artifact_ref(
         APP_CONTEXT_VERSION_ARTIFACT_KEY,
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     )
-    from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus
+    from mozaiksai.core.artifacts.models import BuildRecordStatus
 
-    versions = await artifact_store.list_artifact_versions(
+    versions = await artifact_store.list_build_records(
         app_id=app_id,
-        artifact_kind=APP_CONTEXT_VERSION_ARTIFACT_KIND,
-        artifact_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        build_family=APP_CONTEXT_VERSION_ARTIFACT_KIND,
+        build_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
+        lifecycle_status=BuildRecordStatus.CURRENT,
         limit=1,
     )
     if not versions:

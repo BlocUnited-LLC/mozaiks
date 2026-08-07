@@ -7,7 +7,7 @@ filesystem, no real LLM calls.
 Coverage:
 - tool exists and is importable
 - correct delegates: load_artifact_workspace and extract_module_inventory
-- output shape: modules / count / source_artifact_version_id / warnings
+- output shape: modules / count / source_build_record_id / warnings
 - graceful degradation: missing ref, load failure, extraction failure
 - registration in tools.yaml at route_requested
 - read-only: no writes, no LLM calls
@@ -76,7 +76,7 @@ def _absent_workspace(reason: str = "artifact_not_found") -> dict:
     return {
         "present": False,
         "reason": reason,
-        "artifact_version_id": _PREV_REF,
+        "build_record_id": _PREV_REF,
     }
 
 
@@ -138,7 +138,7 @@ class TestOutputShape:
         ):
             result = await get_carry_forward_candidates(context=ctx)
 
-        assert set(result.keys()) == {"modules", "count", "source_artifact_version_id", "warnings"}
+        assert set(result.keys()) == {"modules", "count", "source_build_record_id", "warnings"}
 
     @pytest.mark.asyncio
     async def test_count_matches_modules_length(self) -> None:
@@ -171,7 +171,7 @@ class TestOutputShape:
         assert len(result["modules"]) == 2
 
     @pytest.mark.asyncio
-    async def test_source_artifact_version_id_from_artifact(self) -> None:
+    async def test_source_build_record_id_from_artifact(self) -> None:
         from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
@@ -198,7 +198,7 @@ class TestOutputShape:
         ):
             result = await get_carry_forward_candidates(context=ctx)
 
-        assert result["source_artifact_version_id"] == "resolved_version_99"
+        assert result["source_build_record_id"] == "resolved_version_99"
 
     @pytest.mark.asyncio
     async def test_modules_are_dicts(self) -> None:
@@ -292,7 +292,7 @@ class TestDelegates:
         mock_load.assert_called_once_with(
             artifact_store=mock_store,
             app_id=_APP_ID,
-            artifact_version_id=_PREV_REF,
+            build_record_id=_PREV_REF,
         )
 
     @pytest.mark.asyncio

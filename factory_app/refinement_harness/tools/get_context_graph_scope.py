@@ -31,9 +31,9 @@ async def get_context_graph_scope(
     )
     scope.update(
         {
-            "artifact_version_id": artifact.id,
-            "artifact_kind": artifact.artifact_kind,
-            "artifact_key": artifact.artifact_key,
+            "build_record_id": artifact.id,
+            "build_family": artifact.build_family,
+            "build_key": artifact.build_key,
             "source": loaded["workspace"]["source"],
             "warnings": list(loaded.get("warnings") or []),
             "scan_health": loaded["workspace"].get("scan_health"),

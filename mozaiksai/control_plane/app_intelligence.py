@@ -138,10 +138,10 @@ async def index_workspace_app_intelligence(
     )
 
     store = artifact_store or get_artifact_store()
-    app_bundle_artifact = await store.create_artifact_version(
+    app_bundle_artifact = await store.create_build_record(
         app_id=resolved_app_id,
-        artifact_kind="app_bundle",
-        artifact_key=workspace_key,
+        build_family="app_bundle",
+        build_key=workspace_key,
         files_manifest=[entry.model_dump(mode="python") for entry in files_manifest],
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
@@ -178,9 +178,9 @@ async def index_workspace_app_intelligence(
         checksum=_file_map_checksum(safe_file_map),
         indexed_at=indexed_at,
         metadata={
-            "artifact_kind": "app_bundle",
-            "artifact_key": workspace_key,
-            "artifact_version_id": app_bundle_artifact.id,
+            "build_family": "app_bundle",
+            "build_key": workspace_key,
+            "build_record_id": app_bundle_artifact.id,
             "scan_policy": policy.policy_id,
         },
     )

@@ -1744,7 +1744,7 @@ async def accept_build_artifact_version(
         except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
             logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
             raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
-        accepted = accepted_result.artifact_version
+        accepted = accepted_result.build_record
     else:
         accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if accepted is None:

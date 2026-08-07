@@ -265,8 +265,8 @@ async def persist_app_context_index(
     source_context_artifact = await persist_app_context_payload_artifact(
         store=store,
         app_id=index.app_id,
-        artifact_kind=SOURCE_CONTEXT_ARTIFACT_KIND,
-        artifact_key=SOURCE_CONTEXT_ARTIFACT_KEY,
+        build_family=SOURCE_CONTEXT_ARTIFACT_KIND,
+        build_key=SOURCE_CONTEXT_ARTIFACT_KEY,
         payload=index.source_corpus.model_dump(mode="json"),
         path=source_context_path,
         source_workflow=source_workflow,
@@ -276,8 +276,8 @@ async def persist_app_context_index(
     graph_artifact = await persist_app_context_payload_artifact(
         store=store,
         app_id=index.app_id,
-        artifact_kind=APP_CONTEXT_GRAPH_ARTIFACT_KIND,
-        artifact_key=APP_CONTEXT_GRAPH_ARTIFACT_KEY,
+        build_family=APP_CONTEXT_GRAPH_ARTIFACT_KIND,
+        build_key=APP_CONTEXT_GRAPH_ARTIFACT_KEY,
         payload=index.app_context_graph.model_dump(mode="json"),
         path=graph_path,
         source_workflow=source_workflow,
@@ -287,8 +287,8 @@ async def persist_app_context_index(
     intelligence_artifact = await persist_app_context_payload_artifact(
         store=store,
         app_id=index.app_id,
-        artifact_kind=APP_INTELLIGENCE_ARTIFACT_KIND,
-        artifact_key=APP_INTELLIGENCE_ARTIFACT_KEY,
+        build_family=APP_INTELLIGENCE_ARTIFACT_KIND,
+        build_key=APP_INTELLIGENCE_ARTIFACT_KEY,
         payload=index.app_intelligence_snapshot.model_dump(mode="json"),
         path=intelligence_path,
         source_workflow=source_workflow,
@@ -307,8 +307,8 @@ async def persist_app_context_payload_artifact(
     *,
     store: ArtifactStore,
     app_id: str,
-    artifact_kind: str,
-    artifact_key: str,
+    build_family: str,
+    build_key: str,
     payload: Any,
     path: str,
     source_workflow: str | None,
@@ -317,10 +317,10 @@ async def persist_app_context_payload_artifact(
 ) -> ArtifactVersionDoc:
     """Persist a JSON AppContext payload artifact with canonical metadata."""
     raw = _json_bytes(payload)
-    return await store.create_artifact_version(
+    return await store.create_build_record(
         app_id=app_id,
-        artifact_kind=artifact_kind,
-        artifact_key=artifact_key,
+        build_family=build_family,
+        build_key=build_key,
         files_manifest=[
             {
                 "path": path,
@@ -334,7 +334,7 @@ async def persist_app_context_payload_artifact(
         lifecycle_status=ArtifactLifecycleStatus.DRAFT,
         validation_status=ArtifactValidationStatus.PASSED,
         commit_metadata={
-            "message": f"AppContext: {artifact_kind}",
+            "message": f"AppContext: {build_family}",
             "source_workflow": source_workflow,
             "source_chat_id": source_chat_id,
             "metadata": {
