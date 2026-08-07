@@ -239,6 +239,9 @@ capabilities:
       - Limit to 3–5 steps covering the most important entry points visible to a new user on the free plan.
       - The OSS runtime provides installTour() and the tour overlay. Do not generate a custom React tour component or a separate /welcome page.
       - The user_onboarding state module follows the standard archetype. Step ids in its complete_step enum must match config/onboarding.yaml step ids exactly.
+    capabilities_provided:
+      - onboarding.read
+      - onboarding.write
 
   - id: operator_readiness
     label: Operator Readiness

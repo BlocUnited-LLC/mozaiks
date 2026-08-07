@@ -74,41 +74,39 @@ required_outputs:
       Do not include admin-only or plan-gated steps that are invisible to new users.
 
   - path: modules/user_onboarding/module.yaml
-    owner: generator
+    owner: templates
     notes: >
-      Standard archetype module. Three actions: get_onboarding_status,
-      complete_step (input: step_id enum from config steps), dismiss_onboarding.
-      user_data_scope: true. Emits hosted.onboarding.step_completed and
-      hosted.onboarding.dismissed. Step IDs in the enum must match the ids
-      declared in config/onboarding.yaml.
+      Three actions: get_onboarding_status, complete_step (step_id string),
+      dismiss_onboarding. user_data_scope: true. Emits hosted.onboarding.step_completed
+      and hosted.onboarding.dismissed. Capabilities: onboarding.read, onboarding.write.
 
   - path: modules/user_onboarding/backend/handler.py
     owner: workspace
-    notes: Preserved across regeneration. Subclasses base_handler if present, otherwise thin dispatch only.
+    notes: Preserved across regeneration. Subclasses base_handler — add app-specific hooks here.
+
+  - path: modules/user_onboarding/backend/base_handler.py
+    owner: templates
 
   - path: modules/user_onboarding/backend/account_data_handler.py
-    owner: generator
+    owner: templates
     notes: >
       Implements delete_user_data and export_user_data for per-user onboarding
       state. Required because module.yaml declares user_data_scope: true.
 
   - path: modules/user_onboarding/backend/service.py
-    owner: generator
+    owner: templates
 
   - path: modules/user_onboarding/backend/repo.py
-    owner: generator
-
-  - path: modules/user_onboarding/backend/policy.py
-    owner: generator
+    owner: templates
 
   - path: modules/user_onboarding/backend/schemas.py
-    owner: generator
+    owner: templates
     notes: >
-      Declares VALID_STEPS set (must match config/onboarding.yaml step ids),
-      default_steps() factory, compute_progress() helper, and timestamp_now().
+      Declares VALID_STEPS set (replace with config/onboarding.yaml step ids at
+      generation time), compute_progress() helper, and timestamp_now().
 
   - path: modules/user_onboarding/contracts/events.yaml
-    owner: generator
+    owner: templates
 
 forbidden_outputs:
   - path: ui/pages/custom/WelcomePage.jsx

@@ -1,0 +1,20 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: hosted.onboarding.step_completed
+    description: >
+      A user completed a single tour step. Carries the step_id and current
+      completed_steps list so downstream analytics or notifications can react.
+    payload:
+      user_id: { type: string }
+      step_id: { type: string }
+      completed_steps: { type: array, items: { type: string } }
+      progress: { type: number }
+
+  - type: hosted.onboarding.dismissed
+    description: >
+      A user dismissed the onboarding tour before completing all steps.
+      Useful for analytics (drop-off tracking) and suppressing future tour prompts.
+    payload:
+      user_id: { type: string }
+      completed_steps: { type: array, items: { type: string } }
+      progress: { type: number }
