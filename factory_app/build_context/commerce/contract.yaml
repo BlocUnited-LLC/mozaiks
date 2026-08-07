@@ -61,6 +61,8 @@ required_outputs:
     owner: templates
   - path: modules/commerce/contracts/reactions.yaml
     owner: templates
+  - path: modules/commerce/contracts/notifications.yaml
+    owner: templates
   - path: ui/pages/products.yaml
     owner: templates
   - path: ui/pages/product_detail.yaml
