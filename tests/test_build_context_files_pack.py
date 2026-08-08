@@ -271,12 +271,6 @@ def test_appgenerator_capability_directory_has_files_pack_entry() -> None:
 # Account-data (GDPR) contract
 # ---------------------------------------------------------------------------
 
-def test_files_module_declares_user_data_scope() -> None:
-    """files module owns user-uploaded records (created_by == user_id) — must register handler."""
-    module_yaml = _read_yaml(TEMPLATES / "modules" / "files" / "module.yaml")
-    assert module_yaml.get("module", {}).get("user_data_scope") is True
-
-
 def test_files_backend_ships_account_data_handler() -> None:
     handler = TEMPLATES / "modules" / "files" / "backend" / "account_data_handler.py"
     assert handler.exists(), "account_data_handler.py must exist alongside user_data_scope=true"

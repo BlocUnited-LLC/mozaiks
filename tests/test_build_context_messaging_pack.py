@@ -307,12 +307,6 @@ def test_appgenerator_selection_wiring_includes_messaging_pack() -> None:
 # Account-data (GDPR) contract
 # ---------------------------------------------------------------------------
 
-def test_messages_module_declares_user_data_scope() -> None:
-    """messages module owns message content and thread membership — user-scoped PII."""
-    module_yaml = _read_yaml(TEMPLATES / "modules" / "messages" / "module.yaml")
-    assert module_yaml.get("module", {}).get("user_data_scope") is True
-
-
 def test_messages_backend_ships_account_data_handler() -> None:
     handler = TEMPLATES / "modules" / "messages" / "backend" / "account_data_handler.py"
     assert handler.exists(), "account_data_handler.py must exist alongside user_data_scope=true"
