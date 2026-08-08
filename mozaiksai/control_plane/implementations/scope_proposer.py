@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from factory_app.refinement_harness.tools._bundle_workspace import load_bundle_workspace, safe_relpath
+from factory_app.refinement_harness.tools._bundle_workspace import (
+    load_bundle_workspace,
+    safe_relpath,
+)
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     ControlPlaneToolCall,

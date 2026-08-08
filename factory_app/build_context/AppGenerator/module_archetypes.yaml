@@ -39,6 +39,156 @@ module_yaml_schema_notes:
     runtime reports. Do not conflate the schema_version (always
     "mozaiks.module.v1") with the module identity version.
 
+# Constraints enforced by ModuleLoader at startup for every archetype.
+# Violations cause a hard ModuleLoadError before the app accepts traffic.
+# List them here once rather than duplicating across every archetype block.
+universal_hard_constraints:
+  permission_consistency: >
+    Every permission ID listed in action.permissions[] must be declared in the
+    module-level permissions block. The loader validates this at startup and
+    raises ModuleLoadError on any undeclared reference. Generate all permission
+    IDs that actions reference — including special scopes such as access_as_user
+    — as explicit entries in the top-level permissions block before referencing
+    them in any action.
+  notification_id_consistency: >
+    Every reactions.yaml reaction with target.kind=notification must have a
+    target.notification_id that matches an id declared in
+    contracts/notifications.yaml. The loader validates this at startup and
+    raises ModuleLoadError when notification_id is missing or undeclared, and
+    also when a notification reaction exists but contracts/notifications.yaml
+    does not. Generate contracts/notifications.yaml whenever any reaction
+    dispatches to target.kind=notification.
+  user_data_scope_file_required: >
+    When module.yaml declares module.user_data_scope=true, the loader raises
+    ModuleLoadError at startup if backend/account_data_handler.py is absent.
+    Generate backend/account_data_handler.py implementing the AccountDataHandler
+    protocol (delete_user_data + export_user_data) whenever user_data_scope=true
+    is declared. Omit user_data_scope=true for modules that only reference
+    user_id as a foreign key without owning the user's primary records.
+  handler_method_required: >
+    Every action.handler_method value declared in module.yaml must exist as a
+    callable method on the handler class. The loader raises ModuleLoadError for
+    any undeclared or renamed method. Generated handler classes must implement
+    every method listed in module.yaml before the module can load.
+  emits_events_declared: >
+    Every event type listed in action.emits[] must be declared in
+    contracts/events.yaml. The loader raises ModuleLoadError for any undeclared
+    emit reference. backend/service.py must call ctx.emit() only for event types
+    declared in module.yaml emits[] and contracts/events.yaml — orphaned
+    ctx.emit() calls for events removed from the contract are not caught by the
+    loader and must be covered by module drift-guard tests (see
+    drift_guard_test_guidance below).
+
+# Advisory test-scaffold guidance for AppGenerator. When generating a new
+# module, scaffold tests/test_{module_id}_module_drift.py using these patterns
+# so the app's CI suite catches module contract drift at test time — before
+# the module is deployed or loaded by the runtime.
+drift_guard_test_guidance:
+  summary: >
+    Drift-guard test file pattern for generated app modules. Scaffold once per
+    module at generation time. Tests are intentionally lightweight — they load
+    the module or inspect source, they do not mock business logic or run handler
+    methods. The file should sit in the app-bundle tests/ directory alongside
+    other module tests.
+  patterns:
+    handler_method_alignment:
+      description: >
+        Load the module via ModuleLoader and assert it succeeds. This triggers
+        the handler_method reflection check at test time, catching any
+        module.yaml/handler.py drift on every CI run rather than only at app
+        startup.
+      template: |
+        def test_{module_id}_handler_methods_align_with_module_yaml(tmp_path):
+            # Verify every module.yaml handler_method exists on the handler class.
+            # ModuleLoader raises ModuleLoadError if any method is missing.
+            loader = ModuleLoader(str(Path(__file__).resolve().parents[1] / "app"))
+            loaded = loader.load("{module_id}")
+            declared = {{a.handler_method for a in loaded.definition.actions}}
+            handler_methods = {{m for m in dir(loaded.handler) if not m.startswith("_")}}
+            assert declared <= handler_methods
+    emits_service_alignment:
+      description: >
+        Use the OSS emit_drift utility to AST-scan backend/service.py for
+        ctx.emit() calls with string-literal first arguments and assert each
+        found event type is declared in the module's action.emits[] lists.
+        Catches service.py calling ctx.emit() for events that were never
+        declared or were removed from the contract — a gap ModuleLoader does
+        not statically enforce. Only literal string arguments are checked;
+        dynamic calls using variables are intentionally ignored (cannot be
+        resolved statically). Import check_orphaned_emits from
+        mozaiksai.core.runtime.app.emit_drift — available in any app that
+        has the mozaiksai package installed.
+      template: |
+        from pathlib import Path
+        from mozaiksai.core.runtime.app.emit_drift import check_orphaned_emits
+
+        def test_{module_id}_service_emits_match_declared_events():
+            module_dir = (
+                Path(__file__).resolve().parents[1] / "app" / "modules" / "{module_id}"
+            )
+            orphans = check_orphaned_emits(module_dir)
+            assert orphans == [], (
+                f"backend/service.py calls ctx.emit() for undeclared events: "
+                + ", ".join(f"{{e!r}} (line {{ln}})" for e, ln in orphans)
+            )
+    events_yaml_service_alignment:
+      description: >
+        Lane 4 — contracts/events.yaml ↔ service.py alignment. Use the OSS
+        emit_drift utility to check that every event type declared in
+        module.yaml action.emits[] (and therefore in contracts/events.yaml,
+        since the loader enforces that subset relationship at startup) has a
+        matching ctx.emit("event_type", ...) string-literal call somewhere in
+        backend/service.py. Catches "declared but dead" events — events added
+        to the contract during design but whose ctx.emit() call was never
+        written, or an emit removed from service.py without cleaning up
+        module.yaml and events.yaml. Import check_missing_emits from
+        mozaiksai.core.runtime.app.emit_drift — available in any app that
+        has the mozaiksai package installed. Note: only literal string
+        arguments are detected; a declared event emitted only via a dynamic
+        variable will appear as missing — suppress with a skip marker or
+        convert to a string literal.
+      template: |
+        from pathlib import Path
+        from mozaiksai.core.runtime.app.emit_drift import check_missing_emits
+
+        def test_{module_id}_declared_events_are_emitted():
+            module_dir = (
+                Path(__file__).resolve().parents[1] / "app" / "modules" / "{module_id}"
+            )
+            missing = check_missing_emits(module_dir)
+            assert missing == [], (
+                "Events declared in module.yaml/events.yaml but never emitted "
+                "by backend/service.py: " + ", ".join(repr(e) for e in missing)
+            )
+    user_data_scope_handler_completeness:
+      description: >
+        When user_data_scope=true, assert backend/account_data_handler.py exists
+        and that AccountDataHandler implements both required methods. The loader
+        enforces file existence as a hard error; this test additionally catches
+        accidental removal of methods from a previously correct implementation.
+      template: |
+        import inspect, yaml
+        from pathlib import Path
+
+        def test_{module_id}_account_data_handler_complete():
+            app_root = Path(__file__).resolve().parents[1] / "app"
+            module_dir = app_root / "modules" / "{module_id}"
+            manifest = yaml.safe_load((module_dir / "module.yaml").read_text())
+            if not manifest.get("module", {{}}).get("user_data_scope"):
+                return  # not a user-data-scoped module
+
+            handler_file = module_dir / "backend" / "account_data_handler.py"
+            assert handler_file.exists(), "account_data_handler.py must exist when user_data_scope=true"
+
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("adh", handler_file)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            cls = getattr(mod, "AccountDataHandler", None)
+            assert cls is not None, "AccountDataHandler class must be defined"
+            assert callable(getattr(cls, "delete_user_data", None)), "delete_user_data must be implemented"
+            assert callable(getattr(cls, "export_user_data", None)), "export_user_data must be implemented"
+
 archetypes:
   standard:
     summary: Default deterministic module for CRUD and ordinary business logic.

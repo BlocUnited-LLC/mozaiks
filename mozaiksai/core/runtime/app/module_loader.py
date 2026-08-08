@@ -308,6 +308,17 @@ class ModuleDefinition(ModuleContractModel):
                 raise ValueError(
                     f"action capability {capability.capability_id!r} targets unknown action {capability.target!r}"
                 )
+
+        # Check 3: every permission ID referenced in action.permissions[] must be
+        # declared in the module-level permissions block.
+        declared_permission_ids = set(permission_ids)
+        for action in self.actions:
+            for perm_id in action.permissions:
+                if perm_id not in declared_permission_ids:
+                    raise ValueError(
+                        f"action {action.id!r} references undeclared permission {perm_id!r}; "
+                        "add it to the module-level permissions block"
+                    )
         return self
 
 
@@ -1170,19 +1181,19 @@ class ModuleLoader:
         Protocol).  It is registered under ``module_id`` with the process-global
         ``account_data_registry``.
 
-        Failure to load the handler logs a warning (not a hard error) so a
-        missing handler file does not prevent the rest of the module from loading.
-        Generated modules must declare the file; the warning makes the gap visible.
+        A missing backend/account_data_handler.py raises ModuleLoadError — the
+        module will not load. Generated modules must declare this file whenever
+        user_data_scope=true is set.
         """
         handler_file = module_dir / "backend" / "account_data_handler.py"
         if not handler_file.exists():
-            logger.warning(
-                "ACCOUNT_HANDLER_MISSING: module %r declares user_data_scope=true "
-                "but backend/account_data_handler.py was not found. "
-                "Account deletion and data export will NOT cover this module's data.",
-                module_id,
+            raise ModuleLoadError(
+                f"module {module_id!r} declares user_data_scope=true but "
+                "backend/account_data_handler.py was not found. "
+                "Generate backend/account_data_handler.py implementing the "
+                "AccountDataHandler protocol (delete_user_data + export_user_data), "
+                "or remove user_data_scope=true from module.yaml."
             )
-            return
 
         try:
             import importlib.util as _ilu
@@ -1338,6 +1349,27 @@ class ModuleLoader:
                     raise ModuleLoadError(
                         f"notifications.yaml references non-canonical event {event_type!r}"
                     )
+
+        # Check 6: notification reactions must reference a notification_id
+        # declared in contracts/notifications.yaml.
+        if manifests.reactions is not None:
+            notification_reactions = [
+                r for r in manifests.reactions.reactions if r.target.kind == "notification"
+            ]
+            if notification_reactions:
+                if manifests.notifications is None:
+                    raise ModuleLoadError(
+                        f"reactions.yaml reaction {notification_reactions[0].id!r} has "
+                        "target.kind=notification but contracts/notifications.yaml does not exist"
+                    )
+                declared_notification_ids = {n.id for n in manifests.notifications.notifications}
+                for reaction in notification_reactions:
+                    nid = reaction.target.notification_id
+                    if nid and nid not in declared_notification_ids:
+                        raise ModuleLoadError(
+                            f"reactions.yaml reaction {reaction.id!r} target.notification_id "
+                            f"{nid!r} is not declared in contracts/notifications.yaml"
+                        )
 
     @staticmethod
     def _is_known_or_canonical_event(event_type: str, declared_events: set[str]) -> bool:
