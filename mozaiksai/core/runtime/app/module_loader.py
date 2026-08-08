@@ -1181,19 +1181,19 @@ class ModuleLoader:
         Protocol).  It is registered under ``module_id`` with the process-global
         ``account_data_registry``.
 
-        Failure to load the handler logs a warning (not a hard error) so a
-        missing handler file does not prevent the rest of the module from loading.
-        Generated modules must declare the file; the warning makes the gap visible.
+        A missing backend/account_data_handler.py raises ModuleLoadError — the
+        module will not load. Generated modules must declare this file whenever
+        user_data_scope=true is set.
         """
         handler_file = module_dir / "backend" / "account_data_handler.py"
         if not handler_file.exists():
-            logger.warning(
-                "ACCOUNT_HANDLER_MISSING: module %r declares user_data_scope=true "
-                "but backend/account_data_handler.py was not found. "
-                "Account deletion and data export will NOT cover this module's data.",
-                module_id,
+            raise ModuleLoadError(
+                f"module {module_id!r} declares user_data_scope=true but "
+                "backend/account_data_handler.py was not found. "
+                "Generate backend/account_data_handler.py implementing the "
+                "AccountDataHandler protocol (delete_user_data + export_user_data), "
+                "or remove user_data_scope=true from module.yaml."
             )
-            return
 
         try:
             import importlib.util as _ilu
