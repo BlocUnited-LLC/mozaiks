@@ -18,7 +18,7 @@ def _build_plan(
 ) -> dry_run.RefinementExecutionPlan:
     return dry_run.build_refinement_execution_plan_from_route(
         request="Update the dashboard review surface.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",

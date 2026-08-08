@@ -33,8 +33,8 @@ def _artifact_version(
     *,
     artifact_version_id: str,
     zip_path: Path,
-    artifact_kind: str = "app_bundle",
-    artifact_key: str = "app_bundle",
+    build_family: str = "app_bundle",
+    build_key: str = "app_bundle",
     version_number: int = 1,
     parent_version_id: str | None = None,
     lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.DRAFT,
@@ -53,8 +53,8 @@ def _artifact_version(
         {
             "_id": artifact_version_id,
             "app_id": "app_1",
-            "artifact_kind": artifact_kind,
-            "artifact_key": artifact_key,
+            "build_family": build_family,
+            "build_key": build_key,
             "version_number": version_number,
             "parent_version_id": parent_version_id,
             "lineage_root_id": parent_version_id or artifact_version_id,
@@ -79,15 +79,15 @@ def _change_request_doc(*, artifact_version_id: str) -> ChangeRequestDoc:
         {
             "_id": "cr_review_1",
             "app_id": "app_1",
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": artifact_version_id,
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": artifact_version_id,
             "raw_user_request": "Update the dashboard title and export controls.",
             "classification": ChangeClassification.PATCH.value,
             "refinement_request": RefinementRequestPayload(
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
-                artifact_version_id=artifact_version_id,
+                build_family="app_bundle",
+                build_key="app_bundle",
+                build_record_id=artifact_version_id,
                 raw_user_request="Update the dashboard title and export controls.",
                 source_surface="app_build",
             ).model_dump(mode="python"),
@@ -293,16 +293,16 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     assert captured_prepare["extra_trigger_meta"] == {
         "action_id": None,
         "change_class": "feature",
-        "artifact_version_id": "av_123",
-        "artifact_kind": "app_bundle",
+        "build_record_id": "av_123",
+        "build_family": "app_bundle",
         "workflow_sequence": "app_revision",
     }
     assert persisted_changes == [
         {
             "app_id": captured_prepare["app_id"],
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": "av_123",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": "av_123",
             "raw_user_request": "Add an export action",
             "classification": studio_app.ChangeClassification.FEATURE,
             "refinement_request": {
@@ -669,9 +669,9 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
     assert persisted_sessions == [
         {
             "app_id": persisted_changes[0]["app_id"],
-            "artifact_version_id": "av_456",
+            "build_record_id": "av_456",
             "change_request_id": "cr_code_1",
-            "result_artifact_version_id": "av_child_code_1",
+            "result_build_record_id": "av_child_code_1",
             "provider": "control_plane_coding",
             "status": studio_app.RefinementSessionStatus.VALIDATED,
             "preview_url": None,
@@ -1380,12 +1380,12 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
     assert body["execution_mode"] == "harness_decision"
     assert body["workflow_id"] == "ValueEngine"
     assert body["harness_decision"]["decision_type"] == "core_restart"
-    assert create_calls[0]["artifact_version_id"] == "av_review_1"
+    assert create_calls[0]["build_record_id"] == "av_review_1"
     assert create_calls[0]["refinement_request"]["source_surface"] == "app_review"
     assert create_calls[0]["refinement_request"]["extra"]["bundle_path"] == staged_bundle_path
 
     seed = captured_pending["decision_context_seed"]
-    assert seed["artifact_version_id"] == "av_review_1"
+    assert seed["build_record_id"] == "av_review_1"
     assert seed["artifact_root"] == staged_bundle_path
     assert seed["lifecycle_state"] == "review"
     assert seed["refinement_request_meta"]["source_surface"] == "app_review"
@@ -1412,16 +1412,16 @@ class _ReviewArtifactStore:
         self.session = session
         self.update_calls: list[dict] = []
 
-    async def get_artifact_version(self, **kwargs):  # noqa: ANN003
-        artifact_version_id = kwargs.get("artifact_version_id")
-        if artifact_version_id == self.child_version.id:
+    async def get_build_record(self, **kwargs):  # noqa: ANN003
+        build_record_id = kwargs.get("build_record_id")
+        if build_record_id == self.child_version.id:
             return self.child_version
-        if artifact_version_id == self.parent_version.id:
+        if build_record_id == self.parent_version.id:
             return self.parent_version
         return None
 
     async def list_refinement_sessions(self, **kwargs):  # noqa: ANN003
-        if kwargs.get("result_artifact_version_id") == self.child_version.id:
+        if kwargs.get("result_build_record_id") == self.child_version.id:
             return [self.session]
         return []
 
@@ -1431,11 +1431,11 @@ class _ReviewArtifactStore:
         return None
 
     async def list_change_requests(self, **kwargs):  # noqa: ANN003
-        if kwargs.get("artifact_version_id") == self.parent_version.id:
+        if kwargs.get("build_record_id") == self.parent_version.id:
             return [self.change_request]
         return []
 
-    async def accept_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def accept_build_record(self, **kwargs):  # noqa: ANN003
         self.child_version = self.child_version.model_copy(
             update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
         )
@@ -1538,11 +1538,11 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
     assert response.status_code == 200
     body = response.json()
     assert body["artifact_version_id"] == "av_child_1"
-    assert body["artifact_kind"] == "app_bundle"
+    assert body["build_family"] == "app_bundle"
     assert body["generated_files"]["src/App.jsx"].startswith("export default function App")
     assert body["generated_files"]["package.json"] == '{"name":"demo"}\n'
     assert body["workbench"]["artifact_version_id"] == "av_child_1"
-    assert body["workbench"]["artifact_kind"] == "app_bundle"
+    assert body["workbench"]["build_family"] == "app_bundle"
     assert body["review"]["changed_file_count"] == 1
     assert body["review"]["selected_paths"] == ["src/App.jsx"]
     assert body["change_request"]["classification"] == "patch"
@@ -1846,5 +1846,5 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert body["refinement_session_id"] == "rs_surface_1"
     assert len(persisted_sessions) == 1
     assert persisted_sessions[0]["provider"] == "contract_surface_regeneration"
-    assert persisted_sessions[0]["artifact_version_id"] == "av_456"
+    assert persisted_sessions[0]["build_record_id"] == "av_456"
     assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"
