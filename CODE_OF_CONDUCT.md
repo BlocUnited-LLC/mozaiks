@@ -58,7 +58,7 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the Mozaiks project maintainers at **conduct@blocunited.com**.
+reported to the Mozaiks project maintainers at **info@blocunited.com**.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All project maintainers are obligated to respect the privacy and security of

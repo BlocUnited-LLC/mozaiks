@@ -105,7 +105,7 @@ def test_code_of_conduct_uses_confirmed_email_and_not_security_channel() -> None
     assert "project maintainers" in coc
     # Enforcement contact is the confirmed maintainer email, not an invented
     # individual contact.
-    assert "conduct@blocunited.com" in coc
+    assert "info@blocunited.com" in coc
     # GitHub's security-vulnerability reporting channel must not be offered
     # as a Code of Conduct reporting method — it is reserved for security
     # vulnerabilities only.
