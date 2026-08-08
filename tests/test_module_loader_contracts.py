@@ -983,6 +983,66 @@ def test_module_yaml_rejects_unknown_top_level_field(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Lane 1 — user_data_scope requires account_data_handler.py (hard error)
+# ---------------------------------------------------------------------------
+
+
+def test_module_loader_rejects_user_data_scope_without_account_data_handler(
+    tmp_path: Path,
+) -> None:
+    """Loader must raise ModuleLoadError when user_data_scope=true but
+    backend/account_data_handler.py is absent.
+
+    Regression guard: declaring user_data_scope=true is a compliance contract —
+    account deletion and data export must be implemented. A silent warning
+    allowed this gap to ship undetected; hard error ensures generated modules
+    scaffold the file before the module can load.
+    """
+    module_dir = _write_canonical_module(tmp_path)
+    yaml_path = module_dir / "module.yaml"
+    yaml_path.write_text(
+        yaml_path.read_text(encoding="utf-8").replace(
+            "  handler: backend.handler:TasksModule",
+            "  handler: backend.handler:TasksModule\n  user_data_scope: true",
+        ),
+        encoding="utf-8",
+    )
+    # account_data_handler.py intentionally absent
+
+    with pytest.raises(ModuleLoadError, match="account_data_handler"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+# ---------------------------------------------------------------------------
+# Lane 2 — handler_method alignment (hard error, explicit rejection test)
+# ---------------------------------------------------------------------------
+
+
+def test_module_loader_rejects_missing_handler_method(tmp_path: Path) -> None:
+    """Loader must raise ModuleLoadError when module.yaml declares a
+    handler_method that does not exist on the handler class.
+
+    Regression guard: this is the primary module.yaml/handler.py drift —
+    renaming a handler method without updating module.yaml (or vice versa)
+    produces a module that appears valid from YAML alone but fails at runtime.
+    Catching it at module-load time ensures CI finds the drift before deploy.
+    """
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("backend", "handler.py").write_text(
+        """
+class TasksModule:
+    # create_task deliberately absent — module.yaml declares handler_method: create_task
+    async def renamed_create_task(self, ctx, *, title):
+        return {"task_id": "task_1"}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="missing action method"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+# ---------------------------------------------------------------------------
 # Check 3 — permission consistency (action.permissions[] vs. top-level block)
 # ---------------------------------------------------------------------------
 
