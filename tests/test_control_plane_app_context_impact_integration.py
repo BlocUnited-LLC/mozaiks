@@ -37,24 +37,24 @@ class _MemoryArtifactStore:
     def __init__(self, versions: dict[str, ArtifactVersionDoc] | None = None) -> None:
         self.versions = versions or {}
 
-    async def get_artifact_version(
+    async def get_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
     ) -> ArtifactVersionDoc | None:
-        artifact = self.versions.get(artifact_version_id)
+        artifact = self.versions.get(build_record_id)
         if artifact is None or artifact.app_id != app_id:
             return None
         return artifact
 
-    async def list_artifact_versions(self, *, app_id: str, artifact_kind=None, artifact_key=None, limit=50, **_kwargs):
+    async def list_build_records(self, *, app_id: str, build_family=None, build_key=None, limit=50, **_kwargs):
         versions = [
             artifact
             for artifact in self.versions.values()
             if artifact.app_id == app_id
-            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
-            and (artifact_key is None or artifact.artifact_key == artifact_key)
+            and (build_family is None or artifact.build_family == build_family)
+            and (build_key is None or artifact.build_key == build_key)
         ]
         return versions[:limit]
 
@@ -143,8 +143,8 @@ def _graph_artifact(graph: AppContextGraph) -> ArtifactVersionDoc:
     return ArtifactVersionDoc(
         _id="av_graph",
         app_id="sample_app",
-        artifact_kind="app_context_graph",
-        artifact_key="app_context_graph",
+        build_family="app_context_graph",
+        build_key="app_context_graph",
         version_number=1,
         lineage_root_id="av_graph",
         lifecycle_status=ArtifactLifecycleStatus.DRAFT,
@@ -157,8 +157,8 @@ def _context_version_artifact(context_version: AppContextVersion) -> ArtifactVer
     return ArtifactVersionDoc(
         _id="av_ctx_1",
         app_id="sample_app",
-        artifact_kind="app_context_version",
-        artifact_key="app_context_version",
+        build_family="app_context_version",
+        build_key="app_context_version",
         version_number=1,
         lineage_root_id="av_ctx_1",
         lifecycle_status=ArtifactLifecycleStatus.DRAFT,

@@ -42,7 +42,7 @@ class _MemoryArtifactStore:
         self.versions: dict[str, ArtifactVersionDoc] = {}
         self._counter = 0
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
         self._counter += 1
         version_id = f"av_{self._counter}"
         doc = ArtifactVersionDoc(
@@ -82,16 +82,16 @@ class _MemoryArtifactStore:
     ) -> ArtifactVersionDoc | None:
         return await self.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
     ) -> ArtifactVersionDoc | None:
         doc = await self.get_build_record(
             app_id=app_id,
-            build_record_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if doc is None:
             return None
@@ -109,21 +109,21 @@ class _MemoryArtifactStore:
             doc.commit_metadata = commit_metadata
         return doc
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
     ) -> list[ArtifactVersionDoc]:
         rows = [doc for doc in self.versions.values() if doc.app_id == app_id]
-        if artifact_kind is not None:
-            rows = [doc for doc in rows if doc.build_family == artifact_kind]
-        if artifact_key is not None:
-            rows = [doc for doc in rows if doc.build_key == artifact_key]
+        if build_family is not None:
+            rows = [doc for doc in rows if doc.build_family == build_family]
+        if build_key is not None:
+            rows = [doc for doc in rows if doc.build_key == build_key]
         if lifecycle_status is not None:
             rows = [doc for doc in rows if doc.lifecycle_status is lifecycle_status]
         return sorted(rows, key=lambda doc: doc.version_number, reverse=True)[:limit]

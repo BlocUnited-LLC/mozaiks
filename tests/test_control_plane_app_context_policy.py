@@ -179,7 +179,7 @@ def test_stale_brownfield_source_affecting_change_blocks_for_refresh() -> None:
 def test_context_policy_result_attaches_to_execution_plan_without_rerouting() -> None:
     base_kwargs = {
         "request": "Change the email gateway integration behavior.",
-        "artifact_kind": "app_bundle",
+        "build_family": "app_bundle",
         "change_class": "patch",
         "workflow_id": "AppGenerator",
         "workflow_sequence": "app_revision",

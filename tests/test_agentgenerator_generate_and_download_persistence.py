@@ -29,9 +29,9 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls = []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_workflow_bundle_1"})()
+        return type("BuildRecord", (), {"id": "av_workflow_bundle_1"})()
 
 
 def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeypatch, tmp_path: Path) -> None:
@@ -83,9 +83,9 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
     )
 
     assert artifact_version.id == "av_workflow_bundle_1"
-    assert fake_artifact_store.calls[0]["artifact_kind"] == "workflow_bundle"
-    assert fake_artifact_store.calls[0]["artifact_key"] == "LeadWorkflow"
-    assert fake_artifact_store.calls[0]["parent_version_id"] == "av_parent_1"
+    assert fake_artifact_store.calls[0]["build_family"] == "workflow_bundle"
+    assert fake_artifact_store.calls[0]["build_key"] == "LeadWorkflow"
+    assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_1",
         "build_plan": "av_build_plan_1",
