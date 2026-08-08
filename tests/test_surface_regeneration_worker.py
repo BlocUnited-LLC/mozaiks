@@ -72,7 +72,7 @@ def _make_refinement_request(
     app_id: str = "app-1",
     user_id: str = "user-1",
     raw_user_request: str = "add export controls to projects",
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
 ) -> Any:
     from mozaiksai.control_plane.implementations.refinement_router import RefinementRequest
 
@@ -80,7 +80,7 @@ def _make_refinement_request(
         app_id=app_id,
         user_id=user_id,
         raw_user_request=raw_user_request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
     )
 
 
@@ -241,7 +241,7 @@ async def test_execute_plan_success_two_surfaces():
         surfaces=[schema_surface, action_surface],
         summary="Add export_projects feature",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -300,7 +300,7 @@ async def test_execute_plan_later_surface_sees_earlier_file():
         surfaces=[schema_surface, action_surface],
         summary="Add complete_task action",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -368,7 +368,7 @@ async def test_execute_plan_partial_failure():
         surfaces=[schema_surface, action_surface],
         summary="Add export",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -412,7 +412,7 @@ async def test_execute_plan_all_failed():
         surfaces=[surface],
         summary="test",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -440,7 +440,7 @@ async def test_execute_plan_empty_surfaces():
         surfaces=[],
         summary="nothing",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -467,7 +467,7 @@ async def test_execute_plan_propagates_requires_schema_migration():
         surfaces=[surface],
         summary="Add OrderExport schema",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         requires_schema_migration=True,
         confidence=0.9,
         fallback_to_workflow=False,
@@ -526,7 +526,7 @@ async def test_harness_execute_surface_plan_delegates_to_worker():
         surfaces=[],
         summary="test plan",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -562,7 +562,7 @@ async def test_harness_execute_surface_plan_raises_when_disabled():
         surfaces=[],
         summary="test",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.9,
         fallback_to_workflow=False,
     )
@@ -572,3 +572,4 @@ async def test_harness_execute_surface_plan_raises_when_disabled():
             refinement_request=_make_refinement_request(),
             routing_decision=_make_routing_decision(),
         )
+

@@ -402,7 +402,7 @@ def test_appgenerator_extract_code_file_map_materializes_typed_refinement_harnes
                     "routing": {
                         "artifacts": [
                             {
-                                "artifact_kind": "app_bundle",
+                                "build_family": "app_bundle",
                                 "label": "custom app bundle",
                             }
                         ],
@@ -528,10 +528,10 @@ def test_appgenerator_refinement_harness_rejects_full_pack_manifest() -> None:
             "harness_yaml": {
                 "schema_version": "mozaiks.refinement_harness.v1",
                 "routing": {
-                    "default_artifact_kind": "app_bundle",
+                    "default_ARTIFACT_KIND": "app_bundle",
                     "artifacts": [
                         {
-                            "artifact_kind": "app_bundle",
+                            "build_family": "app_bundle",
                             "label": "app bundle",
                             "routes": {
                                 "patch": {
@@ -642,4 +642,6 @@ def test_assembly_phase_merges_typed_database_model_and_service_foundation_outpu
     assert file_map["data/contract.json"] == "{\"collections\":[]}\n"
     assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
     assert file_map["backend/config.py"] == "SETTINGS = {}\n"
+
+
 

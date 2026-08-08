@@ -59,7 +59,7 @@ class _FakeArtifactStore:
 
     async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
+        return type("BuildRecord", (), {"id": "av_bundle_1"})()
 
 
 def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:
@@ -104,7 +104,7 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     fake_store = _FakeStore()
     monkeypatch.setattr(generate_and_download_module, "BuilderArtifactStore", lambda: fake_store)
 
-    context = _Context({"artifact_version_id": "artifact_123", "revision_scope": "feature"})
+    context = _Context({"build_record_id": "artifact_123", "revision_scope": "feature"})
     record = asyncio.run(
         generate_and_download_module._persist_pending_schema_migration(
             pending_migration={"migration_id": "m_1", "changes": {"new_collections": ["users"]}},
@@ -118,20 +118,20 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     )
 
     assert record["migration_id"] == "m_1"
-    assert fake_store.calls[0]["artifact_version_id"] == "artifact_123"
+    assert fake_store.calls[0]["build_record_id"] == "artifact_123"
     assert fake_store.calls[0]["change_class"] == "feature"
     assert context.data["persisted_database_migration"]["status"] == "staged"
     assert context.data["staged_database_migration_path"] == "data/migrations/m_1.json"
     assert (tmp_path / "data" / "migrations" / "m_1.json").exists()
 
 
-def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
+def test_register_app_bundle_build_record_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
     monkeypatch.setattr(
         artifacts_mod,
-        "resolve_latest_artifact_version_refs",
+        "resolve_latest_build_record_refs",
         lambda **kwargs: asyncio.sleep(0, result={
             "concept": "av_concept_1",
             "build_plan": "av_build_plan_1",
@@ -145,7 +145,7 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context(
         {
-            "artifact_version_id": "av_parent_1",
+            "build_record_id": "av_parent_1",
             "build_id": "build_1",
             "build_registry_id": "appreg_1",
             "app_bundle_acceptance_status": "passed",
@@ -157,8 +157,8 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
         }
     )
 
-    artifact_version = asyncio.run(
-        generate_and_download_module._register_app_bundle_artifact_version(
+    build_record = asyncio.run(
+        generate_and_download_module._register_app_bundle_build_record(
             app_id="app_123",
             user_id="user_123",
             workflow_name="AppGenerator",
@@ -169,7 +169,7 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
         )
     )
 
-    assert artifact_version.id == "av_bundle_1"
+    assert build_record.id == "av_bundle_1"
     assert fake_artifact_store.calls[0]["build_family"] == "app_bundle"
     assert fake_artifact_store.calls[0]["build_key"] == "app_bundle"
     assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
@@ -187,16 +187,16 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert metadata["build_registry_id"] == "appreg_1"
     assert metadata["app_bundle_acceptance"]["status"] == "passed"
     assert metadata["validation_evidence"]["failed"] == []
-    assert context.data["artifact_version_id"] == "av_bundle_1"
+    assert context.data["build_record_id"] == "av_bundle_1"
 
 
-def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatch, tmp_path: Path) -> None:
+def test_register_app_bundle_build_record_marks_failed_acceptance(monkeypatch, tmp_path: Path) -> None:
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
     monkeypatch.setattr(
         artifacts_mod,
-        "resolve_latest_artifact_version_refs",
+        "resolve_latest_build_record_refs",
         lambda **kwargs: asyncio.sleep(0, result={}),
     )
 
@@ -214,7 +214,7 @@ def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatc
     )
 
     asyncio.run(
-        generate_and_download_module._register_app_bundle_artifact_version(
+        generate_and_download_module._register_app_bundle_build_record(
             app_id="app_123",
             user_id="user_123",
             workflow_name="AppGenerator",
@@ -268,4 +268,5 @@ def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypat
     assert result["app_bundle_acceptance_status"] == "failed"
     assert context.data["app_bundle_acceptance_status"] == "failed"
     assert result["bundle_errors"]
+
 

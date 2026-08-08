@@ -16,19 +16,19 @@ from mozaiksai.control_plane.app_intelligence import (
 )
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self.created: list[ArtifactVersionDoc] = []
+        self.created: list[BuildRecord] = []
 
-    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         artifact_id = f"av_{len(self.created) + 1}"
-        artifact = ArtifactVersionDoc(
+        artifact = BuildRecord(
             _id=artifact_id,
             app_id=kwargs["app_id"],
             build_family=kwargs["build_family"],
@@ -37,15 +37,15 @@ class _MemoryArtifactStore:
             lineage_root_id=artifact_id,
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
-            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
-            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            lifecycle_status=kwargs.get("lifecycle_status", BuildRecordStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", BuildRecordValidationStatus.PENDING),
             files_manifest=list(kwargs.get("files_manifest") or []),
             commit_metadata=kwargs.get("commit_metadata") or {},
         )
         self.created.append(artifact)
         return artifact
 
-    async def get_build_record(self, *, app_id: str, build_record_id: str) -> ArtifactVersionDoc | None:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord | None:
         for artifact in self.created:
             if artifact.app_id == app_id and artifact.id == build_record_id:
                 return artifact
@@ -57,10 +57,10 @@ class _MemoryArtifactStore:
         app_id: str,
         build_family: str | None = None,
         build_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
-    ) -> list[ArtifactVersionDoc]:
+    ) -> list[BuildRecord]:
         rows = [
             artifact
             for artifact in self.created
@@ -77,11 +77,11 @@ class _MemoryArtifactStore:
         app_id: str,
         build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc | None:
+    ) -> BuildRecord | None:
         artifact = await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
         if artifact is None:
             return None
-        updates: dict[str, Any] = {"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+        updates: dict[str, Any] = {"lifecycle_status": BuildRecordStatus.CURRENT}
         if commit_metadata is not None:
             updates["commit_metadata"] = commit_metadata
         refreshed = artifact.model_copy(update=updates)
@@ -129,17 +129,17 @@ async def test_index_workspace_app_intelligence_creates_artifacts_and_context_ve
     source_context_payload = store.created[1].commit_metadata.metadata["summary_payload"]
     assert source_context_payload["schema_version"] == "mozaiks.source_context.bundle.v1"
     assert source_context_payload["file_contents"]["app/modules/wallet/backend/handler.py"]
-    assert result.source_context_artifact_version_id == store.created[1].id
+    assert result.source_context_build_record_id == store.created[1].id
     graph_payload = store.created[2].commit_metadata.metadata["summary_payload"]
     assert len(graph_payload["nodes"]) > 0
     assert store.created[2].commit_metadata.metadata["context_graph_health_report"]["status"] == "healthy"
     intelligence_payload = store.created[3].commit_metadata.metadata["summary_payload"]
     assert intelligence_payload["schema_version"] == "mozaiks.app_intelligence.snapshot.v1"
-    assert result.app_intelligence_artifact_version_id == store.created[3].id
+    assert result.app_intelligence_build_record_id == store.created[3].id
     context_payload = store.created[4].commit_metadata.metadata["summary_payload"]
-    assert context_payload["graph_snapshot_ref"] == result.graph_artifact_version_id
-    assert any(ref["artifact_kind"] == "source_context_bundle" for ref in context_payload["artifact_refs"])
-    assert any(ref["artifact_kind"] == "app_intelligence_snapshot" for ref in context_payload["artifact_refs"])
+    assert context_payload["graph_snapshot_ref"] == result.graph_build_record_id
+    assert any(ref["build_family"] == "source_context_bundle" for ref in context_payload["artifact_refs"])
+    assert any(ref["build_family"] == "app_intelligence_snapshot" for ref in context_payload["artifact_refs"])
     assert context_payload["mode"] == "hybrid"
 
 
@@ -174,7 +174,7 @@ async def test_app_intelligence_index_feeds_graph_aware_scope_catalog(tmp_path: 
             app_id="app_1",
             build_family="app_bundle",
             build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-            build_record_id=result.app_bundle_artifact_version_id,
+            build_record_id=result.app_bundle_build_record_id,
             raw_user_request="Update wallet checkout entitlement behavior",
         ),
         artifact_store=store,
@@ -214,7 +214,7 @@ async def test_app_intelligence_index_feeds_persisted_source_context_tools(tmp_p
         app_id="app_1",
         build_family="app_bundle",
         build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-        build_record_id=result.app_bundle_artifact_version_id,
+        build_record_id=result.app_bundle_build_record_id,
         raw_user_request="Update dashboard metrics",
     )
 
@@ -230,4 +230,6 @@ async def test_app_intelligence_index_feeds_persisted_source_context_tools(tmp_p
     )
     assert read["present"] is True
     assert "fetchMetrics" in read["content"]
+
+
 

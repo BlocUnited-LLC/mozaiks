@@ -31,7 +31,7 @@ What is live (real code exercised):
 
 What is stubbed (no LLM, no MongoDB):
   - Change classifier -- _DeterministicChangeClassifier(change_class="core")
-  - ArtifactStore.get_artifact_version -- synthetic CRM artifact + real temp dir
+  - ArtifactStore.get_build_record -- synthetic CRM artifact + real temp dir
   - carry_forward_decisions -- fixture (settings/notifications=reuse, contacts/pipeline=drop)
 
 Scenario: CRM -> Marketplace conceptual pivot
@@ -64,7 +64,7 @@ LOG_DIR = REPO_ROOT / ".logs" / "refinement-smoke" / "conceptual-replan"
 # ---------------------------------------------------------------------------
 
 _CRM_APP_ID = "smoke-crm-marketplace-001"
-_PREV_ARTIFACT_VERSION_ID = "av_crm_smoke_conceptual_v1"
+_PREV_build_record_id = "av_crm_smoke_conceptual_v1"
 _PIVOT_REQUEST = (
     "Actually this should be a marketplace for sellers and buyers, not a CRM."
 )
@@ -149,16 +149,16 @@ def _write_crm_workspace(tmp_dir: Path) -> None:
 
 
 def _build_mock_artifact_store(workspace_dir: Path) -> Any:
-    """Mock ArtifactStore.get_artifact_version returning synthetic CRM doc."""
-    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, ArtifactVersionDoc
+    """Mock ArtifactStore.get_build_record returning synthetic CRM doc."""
+    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, BuildRecord
 
-    doc = ArtifactVersionDoc.model_validate({
-        "_id": _PREV_ARTIFACT_VERSION_ID,
+    doc = BuildRecord.model_validate({
+        "_id": _PREV_build_record_id,
         "app_id": _CRM_APP_ID,
-        "artifact_kind": "app_bundle",
-        "artifact_key": "app_bundle",
+        "build_family": "app_bundle",
+        "build_key": "app_bundle",
         "version_number": 1,
-        "lineage_root_id": _PREV_ARTIFACT_VERSION_ID,
+        "lineage_root_id": _PREV_build_record_id,
         "commit_metadata": ArtifactCommitMetadata(
             message="Synthetic CRM v1 -- carry-forward smoke",
             metadata={"workspace_dir": str(workspace_dir)},
@@ -166,7 +166,7 @@ def _build_mock_artifact_store(workspace_dir: Path) -> Any:
     })
 
     mock_store = MagicMock()
-    mock_store.get_artifact_version = AsyncMock(return_value=doc)
+    mock_store.get_build_record = AsyncMock(return_value=doc)
     return mock_store
 
 
@@ -198,12 +198,12 @@ async def _run_explicit_variant() -> dict[str, Any]:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
-                "artifact_key": "concept",
+                "build_family": "concept",
+                "build_key": "concept",
                 "raw_user_request": _PIVOT_REQUEST,
                 "source_surface": "conceptual_replan_smoke_explicit",
                 "extra": {
-                    "previous_app_bundle_ref": _PREV_ARTIFACT_VERSION_ID,
+                    "previous_app_bundle_ref": _PREV_build_record_id,
                     "existing_concept_ref": "concept_crm_v1",
                     "carry_forward_modules": ["settings", "notifications"],
                     "preserve_families": ["brand"],
@@ -252,12 +252,12 @@ async def _run_auto_variant(tmp_dir: Path) -> dict[str, Any]:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
-                "artifact_key": "concept",
+                "build_family": "concept",
+                "build_key": "concept",
                 "raw_user_request": _PIVOT_REQUEST,
                 "source_surface": "conceptual_replan_smoke_auto",
                 "extra": {
-                    "previous_app_bundle_ref": _PREV_ARTIFACT_VERSION_ID,
+                    "previous_app_bundle_ref": _PREV_build_record_id,
                     # Intentionally NO carry_forward_modules -- triggers auto-extraction
                 },
             }
@@ -269,14 +269,14 @@ async def _run_auto_variant(tmp_dir: Path) -> dict[str, Any]:
 
     candidates_call_log: list[dict[str, Any]] = []
 
-    # Wrap mock store to record when get_artifact_version is called
-    original_get = mock_store.get_artifact_version
+    # Wrap mock store to record when get_build_record is called
+    original_get = mock_store.get_build_record
 
     async def _tracked_get(*args: Any, **kwargs: Any) -> Any:
         candidates_call_log.append({"args": args, "kwargs": kwargs})
         return await original_get(*args, **kwargs)
 
-    mock_store.get_artifact_version = _tracked_get
+    mock_store.get_build_record = _tracked_get
 
     with patch(
         "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
@@ -331,7 +331,7 @@ async def _run_preservation(tmp_dir: Path) -> dict[str, Any]:
     mock_store = _build_mock_artifact_store(tmp_dir)
     context_variables: dict[str, Any] = {
         "app_id": _CRM_APP_ID,
-        "previous_app_bundle_ref": _PREV_ARTIFACT_VERSION_ID,
+        "previous_app_bundle_ref": _PREV_build_record_id,
         "app_build_plan": {"carry_forward_decisions": _CARRY_FORWARD_DECISIONS},
         "generated_files": dict(_MARKETPLACE_GENERATED_FILES),
     }
@@ -365,7 +365,7 @@ def _validate_variant(
         failures.append(f"[{label}] context_seed missing pivot_description")
     if "preserve_families" not in seed:
         failures.append(f"[{label}] context_seed missing preserve_families")
-    if seed.get("previous_app_bundle_ref") != _PREV_ARTIFACT_VERSION_ID:
+    if seed.get("previous_app_bundle_ref") != _PREV_build_record_id:
         failures.append(f"[{label}] context_seed.previous_app_bundle_ref={seed.get('previous_app_bundle_ref')!r}")
     if "carry_forward_modules" not in seed:
         failures.append(f"[{label}] context_seed missing carry_forward_modules")
@@ -496,7 +496,7 @@ async def run_smoke(mode: str = "both") -> dict[str, Any]:
             ],
             "stubbed": [
                 "_DeterministicChangeClassifier(change_class='core')",
-                "ArtifactStore.get_artifact_version -> synthetic CRM doc + temp dir",
+                "ArtifactStore.get_build_record -> synthetic CRM doc + temp dir",
                 "carry_forward_decisions fixture (settings/notifications=reuse, contacts/pipeline=drop)",
             ],
         },
@@ -626,3 +626,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

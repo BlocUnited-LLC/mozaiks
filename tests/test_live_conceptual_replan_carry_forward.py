@@ -30,7 +30,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -94,18 +94,13 @@ def _run_preservation(tmp_path: Path) -> dict:
     from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
-    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, ArtifactVersionDoc
+    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, BuildRecord
 
-    for rel_path, content in _SAFETY_CRM_FILES.items():
-        dest = tmp_path / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
-
-    doc = ArtifactVersionDoc.model_validate({
+    doc = BuildRecord.model_validate({
         "_id": "av_safety_v1",
         "app_id": "smoke-safety-app",
-        "artifact_kind": "app_bundle",
-        "artifact_key": "app_bundle",
+        "build_family": "app_bundle",
+        "build_key": "app_bundle",
         "version_number": 1,
         "lineage_root_id": "av_safety_v1",
         "commit_metadata": ArtifactCommitMetadata(
@@ -113,7 +108,16 @@ def _run_preservation(tmp_path: Path) -> dict:
         ).model_dump(),
     })
     mock_store = MagicMock()
-    mock_store.get_artifact_version = AsyncMock(return_value=doc)
+    mock_store.get_build_record = AsyncMock(return_value=doc)
+    workspace_result = {
+        "present": True,
+        "source": "workspace_dir",
+        "file_map": dict(_SAFETY_CRM_FILES),
+        "workspace_dir": str(tmp_path),
+        "artifact_path": None,
+        "content_ref": None,
+        "content_backend": None,
+    }
 
     context_variables: dict = {
         "app_id": "smoke-safety-app",
@@ -123,10 +127,14 @@ def _run_preservation(tmp_path: Path) -> dict:
     }
 
     async def _inner():
-        return await resolve_carry_forward_preservation(
-            context_variables=context_variables,
-            artifact_store=mock_store,
-        )
+        with patch(
+            "factory_app.refinement_harness.tools.resolve_carry_forward_preservation.load_artifact_workspace",
+            new=AsyncMock(return_value=workspace_result),
+        ):
+            return await resolve_carry_forward_preservation(
+                context_variables=context_variables,
+                artifact_store=mock_store,
+            )
 
     result = asyncio.run(_inner())
     return result.get("carry_forward_report", {})

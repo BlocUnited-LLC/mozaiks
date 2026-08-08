@@ -89,9 +89,9 @@ def _serialize_sequence(sequence: Any) -> dict[str, Any] | None:
 def _request_payload(spec: CombinedSmokeSpec) -> dict[str, Any]:
     return {
         "refinement_request": {
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": f"av_refinement_task_batch_{spec.id}",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": f"av_refinement_task_batch_{spec.id}",
             "raw_user_request": spec.request,
             "source_surface": "manual_refinement_task_batch_smoke",
             "extra": {"files_manifest": spec.files_manifest},
@@ -386,3 +386,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -10,9 +10,9 @@ from typing import Any
 import pytest
 
 from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 from tests.import_utils import import_module_directly
 
@@ -37,7 +37,7 @@ def _load_subprocess_json_payload(stdout: str) -> dict[str, Any]:
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self._versions: dict[tuple[str, str], list[ArtifactVersionDoc]] = {}
+        self._versions: dict[tuple[str, str], list[BuildRecord]] = {}
         self.create_calls: list[dict[str, Any]] = []
         self._counter = 0
 
@@ -45,38 +45,38 @@ class _MemoryArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str | None = None,
-    ) -> ArtifactVersionDoc:
-        artifact_key = artifact_key or artifact_kind
+        build_family: str,
+        build_key: str | None = None,
+    ) -> BuildRecord:
+        build_key = build_key or build_family
         self._counter += 1
-        artifact = ArtifactVersionDoc(
-            _id=f"av_{artifact_kind}_{self._counter}",
+        artifact = BuildRecord(
+            _id=f"av_{build_family}_{self._counter}",
             app_id=app_id,
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
+            build_family=build_family,
+            build_key=build_key,
             version_number=1,
-            lineage_root_id=f"av_{artifact_kind}_{self._counter}",
-            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-            validation_status=ArtifactValidationStatus.SKIPPED,
-            commit_metadata={"metadata": {"summary_payload": {"seeded": artifact_kind}}},
+            lineage_root_id=f"av_{build_family}_{self._counter}",
+            lifecycle_status=BuildRecordStatus.CURRENT,
+            validation_status=BuildRecordValidationStatus.SKIPPED,
+            commit_metadata={"metadata": {"summary_payload": {"seeded": build_family}}},
         )
-        self._versions.setdefault((artifact_kind, artifact_key), []).insert(0, artifact)
+        self._versions.setdefault((build_family, build_key), []).insert(0, artifact)
         return artifact
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        build_family: str,
+        build_key: str | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 1,
-    ) -> list[ArtifactVersionDoc]:
-        keys = [(artifact_kind, artifact_key)] if artifact_key else [
-            key for key in self._versions if key[0] == artifact_kind
+    ) -> list[BuildRecord]:
+        keys = [(build_family, build_key)] if build_key else [
+            key for key in self._versions if key[0] == build_family
         ]
-        versions: list[ArtifactVersionDoc] = []
+        versions: list[BuildRecord] = []
         for key in keys:
             versions.extend(self._versions.get(key, []))
         versions = [item for item in versions if item.app_id == app_id]
@@ -84,23 +84,23 @@ class _MemoryArtifactStore:
             versions = [item for item in versions if item.lifecycle_status == lifecycle_status]
         return versions[:limit]
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self.create_calls.append(dict(kwargs))
         self._counter += 1
-        artifact = ArtifactVersionDoc(
-            _id=f"av_{kwargs['artifact_kind']}_{self._counter}",
+        artifact = BuildRecord(
+            _id=f"av_{kwargs['build_family']}_{self._counter}",
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=1,
             parent_version_id=kwargs.get("parent_version_id"),
-            lineage_root_id=f"av_{kwargs['artifact_kind']}_{self._counter}",
+            lineage_root_id=f"av_{kwargs['build_family']}_{self._counter}",
             canonical_inputs_version=dict(kwargs.get("canonical_inputs_version") or {}),
             lifecycle_status=kwargs["lifecycle_status"],
             validation_status=kwargs["validation_status"],
             commit_metadata=kwargs["commit_metadata"],
         )
-        self._versions.setdefault((artifact.artifact_kind, artifact.artifact_key), []).insert(0, artifact)
+        self._versions.setdefault((artifact.build_family, artifact.build_key), []).insert(0, artifact)
         return artifact
 
 
@@ -147,9 +147,9 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
 
     store = _MemoryArtifactStore()
     app_id = "offline-build-sequence-smoke"
-    design_docs = store.seed(app_id=app_id, artifact_kind="design_docs")
-    subscription_contract = store.seed(app_id=app_id, artifact_kind="subscription_contract")
-    theme_capture = store.seed(app_id=app_id, artifact_kind="theme_capture")
+    design_docs = store.seed(app_id=app_id, build_family="design_docs")
+    subscription_contract = store.seed(app_id=app_id, build_family="subscription_contract")
+    theme_capture = store.seed(app_id=app_id, build_family="theme_capture")
 
     from factory_app.workflows.AgentGenerator.tools.platform.build_lifecycle import (
         _persist_workflow_bundle_artifact,
@@ -175,8 +175,8 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         artifact_store=store,
     )
 
-    workflow_call = next(call for call in store.create_calls if call["artifact_kind"] == "workflow_bundle")
-    app_call = next(call for call in store.create_calls if call["artifact_kind"] == "app_bundle")
+    workflow_call = next(call for call in store.create_calls if call["build_family"] == "workflow_bundle")
+    app_call = next(call for call in store.create_calls if call["build_family"] == "app_bundle")
     workflow_bundle = store._versions[("workflow_bundle", "workflow_bundle")][0]
 
     assert workflow_call["source_workflow"] == "AgentGenerator"
@@ -192,8 +192,8 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     assert app_inputs["theme_capture"] == theme_capture.id
     assert app_inputs["workflow_bundle"] == workflow_bundle.id
     assert "brand" not in app_inputs
-    assert app_call["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT
-    assert app_call["validation_status"] == ArtifactValidationStatus.SKIPPED
+    assert app_call["lifecycle_status"] == BuildRecordStatus.CURRENT
+    assert app_call["validation_status"] == BuildRecordValidationStatus.SKIPPED
 
 
 @pytest.mark.asyncio
@@ -226,7 +226,7 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert result["hydration"]["status"] == "hydrated"
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
-    assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["workflow_integration_metadata"]["source_build_record_id"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
     assert result["export_gate"]["allow_export"] is True
     assert result["runtime_loader"]["workflow_reaction_loaded"] is True
@@ -298,7 +298,7 @@ def test_real_store_factory_artifact_lineage_smoke_hydrates_workflow_metadata() 
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert result["hydration"]["status"] == "hydrated"
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
-    assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["workflow_integration_metadata"]["source_build_record_id"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
     assert result["export_gate"]["allow_export"] is True
     assert result["runtime_loader"]["workflow_reaction_loaded"] is True
@@ -343,3 +343,4 @@ def test_live_real_store_factory_artifact_lineage_smoke_hydrates_live_workflow_m
     assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
     assert result["export_gate"]["allow_export"] is True
     assert result["runtime_loader"]["workflow_reaction_loaded"] is True
+

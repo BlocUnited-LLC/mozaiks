@@ -116,10 +116,10 @@ def _pack() -> LoadedControlPlanePack:
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.refinement_harness.v1",
             routing=ControlPlaneRoutingManifest(
-                default_artifact_kind="business_plan_bundle",
+                default_ARTIFACT_KIND="business_plan_bundle",
                 artifacts=[
                     ControlPlaneArtifactRoutingManifest(
-                        artifact_kind="business_plan_bundle",
+                        build_family="business_plan_bundle",
                         label="business plan bundle",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
                             patch=ControlPlaneChangeRouteManifest(
@@ -137,7 +137,7 @@ def _pack() -> LoadedControlPlanePack:
                         ),
                     ),
                     ControlPlaneArtifactRoutingManifest(
-                        artifact_kind="executive_summary",
+                        build_family="executive_summary",
                         label="executive summary",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
                             patch=ControlPlaneChangeRouteManifest(
@@ -170,7 +170,7 @@ def _pack() -> LoadedControlPlanePack:
 
 
 @pytest.mark.asyncio
-async def test_refinement_router_uses_pack_default_artifact_kind_for_core_reentry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refinement_router_uses_pack_default_build_family_for_core_reentry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_business_plan_registry(tmp_path, monkeypatch)
     resolver = RefinementTriggerRouteResolver(
         classifier=_FakeChangeClassifier(
@@ -191,7 +191,7 @@ async def test_refinement_router_uses_pack_default_artifact_kind_for_core_reentr
     )
 
     assert request is not None
-    assert request.artifact_kind == "business_plan_bundle"
+    assert request.build_family == "business_plan_bundle"
 
     decision = await resolver.route(request)
 
@@ -199,7 +199,7 @@ async def test_refinement_router_uses_pack_default_artifact_kind_for_core_reentr
     assert decision.is_full_restart is True
     assert decision.impact_set.restart_from == "MarketResearch"
     assert decision.impact_set.affected_workflows[:2] == ["MarketResearch", "CustomerPersona"]
-    assert decision.context_seed["artifact_kind"] == "business_plan_bundle"
+    assert decision.context_seed["build_family"] == "business_plan_bundle"
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_refinement_router_keeps_local_patch_in_declared_owner_workflow(tm
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "executive_summary",
+                "build_family": "executive_summary",
                 "raw_user_request": "Change the title to 'The Future of Banking Automation.'",
             }
         },
@@ -231,7 +231,7 @@ async def test_refinement_router_keeps_local_patch_in_declared_owner_workflow(tm
     assert decision.is_full_restart is False
     assert decision.impact_set.affected_workflows == ["ExecutiveSummary"]
     assert decision.impact_set.requires_replanning is False
-    assert decision.context_seed["artifact_kind"] == "executive_summary"
+    assert decision.context_seed["build_family"] == "executive_summary"
 
 
 @pytest.mark.asyncio
@@ -248,8 +248,8 @@ async def test_refinement_router_derives_route_from_workflow_sequence() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
-                "artifact_version_id": "av_app_1",
+                "build_family": "app_bundle",
+                "build_record_id": "av_app_1",
                 "raw_user_request": "Restructure the app dashboard layout.",
             }
         },
@@ -281,7 +281,7 @@ async def test_concept_core_routes_to_conceptual_replan() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Actually this should be a marketplace, not a CRM.",
             }
         },
@@ -309,7 +309,7 @@ async def test_app_bundle_core_still_routes_to_full_rebuild() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Change the whole product direction.",
             }
         },
@@ -336,7 +336,7 @@ async def test_experience_spec_impact_uses_glob_hints_without_file_manifest() ->
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Replace the dashboard experience.",
             }
         },
@@ -394,7 +394,7 @@ async def test_experience_spec_impact_uses_concrete_page_paths_from_manifest() -
 
 
 @pytest.mark.asyncio
-async def test_experience_spec_impact_uses_artifact_version_file_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_experience_spec_impact_uses_build_record_file_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
     import importlib
 
     store_mod = importlib.import_module("mozaiksai.core.artifacts.store")
@@ -451,7 +451,7 @@ async def test_experience_spec_impact_includes_shell_only_for_navigation_signal(
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Move settings into the sidebar navigation.",
                 "extra": {
                     "files_manifest": [
@@ -487,7 +487,7 @@ async def test_experience_spec_impact_includes_custom_route_files_only_when_pres
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Replace the dashboard experience.",
                 "extra": {
                     "files_manifest": [
@@ -525,7 +525,7 @@ async def test_non_experience_patch_does_not_add_ui_surface_paths() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Fix a typo.",
                 "extra": {
                     "files_manifest": [
@@ -558,7 +558,7 @@ async def test_module_impact_uses_exact_paths_for_known_module_from_manifest() -
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add an archive action to the projects module.",
                 "extra": {
                     "files_manifest": [
@@ -617,7 +617,7 @@ async def test_module_impact_includes_runtime_extensions_only_when_present() -> 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add a cancel endpoint to the orders API.",
                 "extra": {
                     "files_manifest": [
@@ -656,7 +656,7 @@ async def test_module_impact_uses_glob_hints_when_module_id_is_unknown() -> None
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add a backend API endpoint.",
             }
         },
@@ -685,7 +685,7 @@ async def test_visual_ui_patch_does_not_trigger_module_paths() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Tighten visual spacing on the report cards.",
                 "extra": {
                     "files_manifest": [
@@ -717,7 +717,7 @@ async def test_module_impact_handles_multiple_module_ids_deterministically() -> 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Connect the projects and orders APIs.",
                 "extra": {
                     "files_manifest": [
@@ -760,7 +760,7 @@ async def test_data_model_impact_includes_data_contract_migrations_and_known_mod
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add an optional field to the projects data model.",
                 "extra": {
                     "files_manifest": [
@@ -814,7 +814,7 @@ async def test_data_model_impact_unknown_module_uses_conservative_hints() -> Non
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add a required field to the database schema.",
             }
         },
@@ -846,7 +846,7 @@ async def test_data_model_impact_ui_request_includes_page_paths() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add a customers field and show it on the edit form.",
                 "extra": {
                     "files_manifest": [
@@ -889,7 +889,7 @@ async def test_data_model_destructive_change_adds_review_warning() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Remove field from reports and backfill existing records.",
                 "extra": {
                     "files_manifest": [
@@ -924,7 +924,7 @@ async def test_non_data_model_backend_request_does_not_include_database_paths() 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add a tasks backend endpoint for closing tasks.",
                 "extra": {
                     "files_manifest": [
@@ -970,7 +970,7 @@ async def test_managed_capability_impact_includes_adapter_facade_and_dependent_p
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Change how managed analytics metrics display on the dashboard.",
                 "extra": {
                     "files_manifest": [
@@ -1021,7 +1021,7 @@ async def test_integration_impact_includes_app_backend_provider_adapters() -> No
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Update the search provider adapter retry behavior.",
                 "extra": {
                     "files_manifest": [
@@ -1057,7 +1057,7 @@ async def test_managed_capability_non_ui_request_does_not_force_page_paths() -> 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Update managed analytics provider-backed refresh policy.",
                 "extra": {
                     "files_manifest": [
@@ -1094,7 +1094,7 @@ async def test_managed_capability_ui_request_uses_page_glob_when_page_binding_is
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Change managed analytics dashboard display.",
                 "extra": {
                     "files_manifest": [
@@ -1132,7 +1132,7 @@ async def test_managed_capability_without_manifest_uses_conservative_hints() -> 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Change managed capability external adapter behavior.",
             }
         },
@@ -1162,7 +1162,7 @@ async def test_managed_capability_without_manifest_adds_page_hint_only_for_ui_re
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Change managed analytics dashboard page display.",
             }
         },
@@ -1193,7 +1193,7 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Update analytics provider connector sync behavior for reports.",
                 "extra": {
                     "files_manifest": [
@@ -1244,7 +1244,7 @@ async def test_integration_impact_without_manifest_uses_conservative_hints() -> 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Add email provider integration setup.",
             }
         },
@@ -1278,7 +1278,7 @@ async def test_integration_impact_ui_request_includes_setup_page_when_present() 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Update search provider integration setup page.",
                 "extra": {
                     "files_manifest": [
@@ -1318,7 +1318,7 @@ async def test_integration_impact_non_ui_request_does_not_force_pages() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Update reporting provider webhook sync.",
                 "extra": {
                     "files_manifest": [
@@ -1356,7 +1356,7 @@ async def test_integration_impact_never_emits_secret_path_hints() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Update storage provider API key handling.",
                 "extra": {
                     "files_manifest": [
@@ -1419,7 +1419,7 @@ async def test_stale_route_bypasses_llm_and_routes_to_earliest_stale_workflow(mo
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
     request = resolver.request_from_payload(
-        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Add a dark mode toggle."}},
+        payload={"refinement_request": {"build_family": "app_bundle", "raw_user_request": "Add a dark mode toggle."}},
         app_id="app_1",
     )
 
@@ -1445,7 +1445,7 @@ async def test_stale_route_prioritizes_concept_over_downstream_families(monkeypa
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
     request = resolver.request_from_payload(
-        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Revamp the whole thing."}},
+        payload={"refinement_request": {"build_family": "app_bundle", "raw_user_request": "Revamp the whole thing."}},
         app_id="app_1",
     )
 
@@ -1467,7 +1467,7 @@ async def test_stale_route_handles_experience_spec_as_design_owned_surface(monke
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
     request = resolver.request_from_payload(
-        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Replace the dashboard flow."}},
+        payload={"refinement_request": {"build_family": "app_bundle", "raw_user_request": "Replace the dashboard flow."}},
         app_id="app_1",
     )
 
@@ -1499,7 +1499,7 @@ async def test_stale_route_falls_through_to_llm_when_no_stale_families(monkeypat
     patch_classifier = _PatchClassifier()
     resolver = _factory_resolver(patch_classifier)
     request = resolver.request_from_payload(
-        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Fix a typo."}},
+        payload={"refinement_request": {"build_family": "app_bundle", "raw_user_request": "Fix a typo."}},
         app_id="app_1",
     )
 
@@ -1527,7 +1527,7 @@ async def test_conceptual_replan_context_seed_has_pivot_description() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Actually this should be a marketplace, not a CRM.",
             }
         },
@@ -1554,7 +1554,7 @@ async def test_conceptual_replan_context_seed_has_default_preserve_families() ->
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Pivot to a logistics platform.",
             }
         },
@@ -1581,7 +1581,7 @@ async def test_conceptual_replan_context_seed_includes_extra_refs_when_present()
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Rebuild as a marketplace.",
                 "extra": {
                     "existing_concept_ref": "av_concept_42",
@@ -1624,7 +1624,7 @@ async def test_full_rebuild_context_seed_has_no_conceptual_replan_fields() -> No
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Change the whole product direction.",
             }
         },
@@ -1655,7 +1655,7 @@ async def test_conceptual_replan_omits_missing_optional_refs() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Pivot to analytics SaaS.",
             }
         },
@@ -1752,7 +1752,7 @@ async def test_conceptual_replan_context_seed_includes_carry_forward_modules_fro
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Make this a marketplace.",
                 "extra": {
                     "carry_forward_modules": ["notifications", "files", "billing_portal"],
@@ -1782,7 +1782,7 @@ async def test_conceptual_replan_context_seed_defaults_carry_forward_modules_to_
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Rebuild as an analytics platform.",
             }
         },
@@ -1809,7 +1809,7 @@ async def test_full_rebuild_context_seed_has_no_carry_forward_modules() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Reset everything.",
                 "extra": {
                     "carry_forward_modules": ["notifications"],
@@ -1904,7 +1904,7 @@ async def test_conceptual_replan_context_seed_has_architecture_llm_profile() -> 
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Make this a marketplace.",
             }
         },
@@ -1931,7 +1931,7 @@ async def test_full_rebuild_context_seed_has_architecture_llm_profile() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Reset the whole product.",
             }
         },
@@ -1958,7 +1958,7 @@ async def test_patch_route_context_seed_has_no_llm_profile() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Fix a typo in the dashboard label.",
             }
         },
@@ -1984,7 +1984,7 @@ async def test_design_route_context_seed_has_no_llm_profile() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Restructure the sidebar layout.",
             }
         },
@@ -2129,7 +2129,7 @@ async def test_conceptual_replan_explicit_list_used_without_extraction() -> None
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Make this a marketplace.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_explicit",
@@ -2161,7 +2161,7 @@ async def test_conceptual_replan_auto_populates_when_ref_present_no_explicit_lis
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Rebuild as an analytics platform.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_auto",
@@ -2191,7 +2191,7 @@ async def test_conceptual_replan_extraction_called_with_correct_ref() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Pivot to logistics.",
                 "extra": {
                     "previous_app_bundle_ref": "  av_bundle_xyz  ",
@@ -2221,7 +2221,7 @@ async def test_conceptual_replan_extraction_warnings_in_context_seed() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Change the concept.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_warn",
@@ -2252,7 +2252,7 @@ async def test_conceptual_replan_no_warnings_key_when_extraction_clean() -> None
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Rebuild as a marketplace.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_clean",
@@ -2282,7 +2282,7 @@ async def test_conceptual_replan_extraction_failure_returns_empty_with_warning()
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Rebuild as a marketplace.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_fail",
@@ -2313,7 +2313,7 @@ async def test_conceptual_replan_no_ref_no_explicit_list_returns_empty() -> None
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Make this a logistics app.",
             }
         },
@@ -2341,7 +2341,7 @@ async def test_full_rebuild_does_not_invoke_extraction() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Reset everything.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_rebuild",
@@ -2371,7 +2371,7 @@ async def test_conceptual_replan_explicit_empty_list_skips_extraction() -> None:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
+                "build_family": "concept",
                 "raw_user_request": "Pivot to a greenfield build.",
                 "extra": {
                     "previous_app_bundle_ref": "av_app_greenfield",
@@ -2557,3 +2557,5 @@ def test_docs_do_not_say_carry_forward_is_only_manual() -> None:
     )
     doc = doc_path.read_text(encoding="utf-8").lower()
     assert "only manually" not in doc
+
+

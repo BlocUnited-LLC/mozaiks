@@ -9,9 +9,9 @@ from mozaiksai.control_plane.review_package import (
 def test_review_package_merges_refinement_metadata_change_request_and_actions() -> None:
     package = build_refinement_review_package(
         app_id="app_1",
-        artifact_version_id="av_child_1",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_record_id="av_child_1",
+        build_family="app_bundle",
+        build_key="app_bundle",
         parent_version_id="av_parent_1",
         lifecycle_status="draft",
         validation_status="passed",
@@ -81,9 +81,9 @@ def test_review_package_merges_refinement_metadata_change_request_and_actions() 
 def test_review_package_defaults_generated_artifact_write_back() -> None:
     package = build_refinement_review_package(
         app_id="app_1",
-        artifact_version_id="av_child_1",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_record_id="av_child_1",
+        build_family="app_bundle",
+        build_key="app_bundle",
         parent_version_id=None,
         lifecycle_status="draft",
         validation_status="skipped",
@@ -105,3 +105,4 @@ def test_review_package_defaults_generated_artifact_write_back() -> None:
     assert package.actions[0].id == "accept"
     assert package.actions[0].enabled is False
     assert package.actions[0].reason == "Validation has not passed."
+

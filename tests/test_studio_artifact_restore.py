@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from mozaiksai.core.artifacts import (
     ArtifactCommitMetadata,
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
     RefinementSessionDoc,
     RefinementSessionStatus,
 )
@@ -37,15 +37,15 @@ def _write_bundle_zip(zip_path: Path, entries: dict[str, str], *, symlink_entry:
 
 def _version(
     *,
-    artifact_version_id: str,
+    build_record_id: str,
     zip_path: Path,
     build_family: str = "app_bundle",
-    lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
-    validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
+    lifecycle_status: BuildRecordStatus = BuildRecordStatus.CURRENT,
+    validation_status: BuildRecordValidationStatus = BuildRecordValidationStatus.PASSED,
     refinement_request_id: str | None = None,
     files_manifest: list[dict[str, object]] | None = None,
     commit_metadata_extra: dict[str, object] | None = None,
-) -> ArtifactVersionDoc:
+) -> BuildRecord:
     metadata: dict[str, object] = {"artifact_path": str(zip_path)}
     metadata.update(commit_metadata_extra or {})
     if refinement_request_id is not None:
@@ -56,14 +56,14 @@ def _version(
                 "promotion_allowed": True,
             },
         }
-    return ArtifactVersionDoc.model_validate(
+    return BuildRecord.model_validate(
         {
-            "_id": artifact_version_id,
+            "_id": build_record_id,
             "app_id": "app_1",
             "build_family": build_family,
             "build_key": "app_bundle",
             "version_number": 2,
-            "parent_version_id": "av_parent_1" if artifact_version_id != "av_parent_1" else None,
+            "parent_version_id": "av_parent_1" if build_record_id != "av_parent_1" else None,
             "lineage_root_id": "av_parent_1",
             "source_workflow": "AppGenerator",
             "source_chat_id": "chat_1",
@@ -83,15 +83,15 @@ def _version(
 
 def _session(
     *,
-    artifact_version_id: str,
+    build_record_id: str,
     status: RefinementSessionStatus,
 ) -> RefinementSessionDoc:
     return RefinementSessionDoc.model_validate(
         {
             "_id": "rs_1",
             "app_id": "app_1",
-            "artifact_version_id": artifact_version_id,
-            "result_artifact_version_id": artifact_version_id,
+            "build_record_id": build_record_id,
+            "result_build_record_id": build_record_id,
             "change_request_id": "cr_1",
             "provider": "control_plane_coding",
             "status": status.value,
@@ -101,7 +101,7 @@ def _session(
 
 
 class _PromoteStore:
-    def __init__(self, version: ArtifactVersionDoc, *, sessions: list[RefinementSessionDoc] | None = None) -> None:
+    def __init__(self, version: BuildRecord, *, sessions: list[RefinementSessionDoc] | None = None) -> None:
         self.version = version
         self.sessions = list(sessions or [])
         self.updated_sessions: list[dict[str, object]] = []
@@ -187,17 +187,17 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
         },
     )
     version = _version(
-        artifact_version_id="av_current_1",
+        build_record_id="av_current_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_123",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
             {"path": "GeneratedApp/package.json", "sha256": "sha-pkg", "size_bytes": 16},
         ],
     )
-    session = _session(artifact_version_id=version.id, status=RefinementSessionStatus.VALIDATED)
+    session = _session(build_record_id=version.id, status=RefinementSessionStatus.VALIDATED)
     runtime_root = tmp_path / "runtime_app"
     store = _PromoteStore(version, sessions=[session])
     studio_app, client = _promote_client(monkeypatch, runtime_root, store)
@@ -230,10 +230,10 @@ def test_promote_requires_override_for_skipped_validation(monkeypatch, tmp_path:
         },
     )
     version = _version(
-        artifact_version_id="av_skipped_validation_1",
+        build_record_id="av_skipped_validation_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.SKIPPED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.SKIPPED,
         refinement_request_id="refine_skipped_validation",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
@@ -268,10 +268,10 @@ def test_promote_restores_artifact_and_marks_app_registry_active(monkeypatch, tm
         },
     )
     version = _version(
-        artifact_version_id="av_registry_1",
+        build_record_id="av_registry_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_registry",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
@@ -388,10 +388,10 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
     }
     _write_bundle_zip(bundle_zip, bundle_entries)
     version = _version(
-        artifact_version_id="av_platform_root_1",
+        build_record_id="av_platform_root_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_platform_root",
         files_manifest=[
             {"path": path, "sha256": f"sha-{index}", "size_bytes": len(content)}
@@ -446,10 +446,10 @@ def test_promote_rejects_registry_record_not_in_review(monkeypatch, tmp_path: Pa
         {"GeneratedApp/src/App.jsx": "export default function App() { return <div>Active</div>; }\n"},
     )
     version = _version(
-        artifact_version_id="av_registry_active_1",
+        build_record_id="av_registry_active_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
         ],
@@ -475,9 +475,9 @@ def test_promote_rejects_draft_app_bundle(monkeypatch, tmp_path: Path) -> None:
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(bundle_zip, {"GeneratedApp/src/App.jsx": "draft\n"})
     version = _version(
-        artifact_version_id="av_draft_1",
+        build_record_id="av_draft_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+        lifecycle_status=BuildRecordStatus.DRAFT,
     )
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
@@ -492,10 +492,10 @@ def test_promote_rejects_non_app_bundle_artifact(monkeypatch, tmp_path: Path) ->
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(bundle_zip, {"workflows/AppGenerator/orchestrator.yaml": "name: workflow\n"})
     version = _version(
-        artifact_version_id="av_workflow_1",
+        build_record_id="av_workflow_1",
         zip_path=bundle_zip,
         build_family="workflow_bundle",
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        lifecycle_status=BuildRecordStatus.CURRENT,
     )
     store = _PromoteStore(version)
     _, client = _promote_client(monkeypatch, tmp_path / "runtime_app", store)
@@ -507,7 +507,7 @@ def test_promote_rejects_non_app_bundle_artifact(monkeypatch, tmp_path: Path) ->
 
 
 def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> None:
-    version = ArtifactVersionDoc.model_validate(
+    version = BuildRecord.model_validate(
         {
             "_id": "av_missing_1",
             "app_id": "app_1",
@@ -516,8 +516,8 @@ def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> N
             "version_number": 2,
             "lineage_root_id": "av_missing_1",
             "canonical_inputs_version": {},
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "validation_status": ArtifactValidationStatus.PASSED.value,
+            "lifecycle_status": BuildRecordStatus.CURRENT.value,
+            "validation_status": BuildRecordValidationStatus.PASSED.value,
             "files_manifest": [],
             "commit_metadata": {"metadata": {"refinement": {"request_id": "refine_missing"}}},
         }
@@ -535,10 +535,10 @@ def test_promote_rejects_missing_file_manifest(monkeypatch, tmp_path: Path) -> N
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(bundle_zip, {"GeneratedApp/src/App.jsx": "export default function App() { return <div>Keep</div>; }\n"})
     version = _version(
-        artifact_version_id="av_no_manifest_1",
+        build_record_id="av_no_manifest_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         files_manifest=[],
     )
     store = _PromoteStore(version)
@@ -564,10 +564,10 @@ def test_promote_skips_metadata_and_backup_entries(monkeypatch, tmp_path: Path) 
         },
     )
     version = _version(
-        artifact_version_id="av_current_meta_1",
+        build_record_id="av_current_meta_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_789",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 58},
@@ -599,10 +599,10 @@ def test_promote_blocks_path_traversal_entries(monkeypatch, tmp_path: Path) -> N
         },
     )
     version = _version(
-        artifact_version_id="av_traversal_1",
+        build_record_id="av_traversal_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_111",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
@@ -629,10 +629,10 @@ def test_promote_blocks_absolute_path_entries(monkeypatch, tmp_path: Path) -> No
         },
     )
     version = _version(
-        artifact_version_id="av_absolute_1",
+        build_record_id="av_absolute_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_222",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
@@ -659,10 +659,10 @@ def test_promote_skips_symlink_entries(monkeypatch, tmp_path: Path) -> None:
         symlink_entry=("GeneratedApp/src/App.link.jsx", "src/App.jsx"),
     )
     version = _version(
-        artifact_version_id="av_symlink_1",
+        build_record_id="av_symlink_1",
         zip_path=bundle_zip,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         refinement_request_id="refine_333",
         files_manifest=[
             {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 59},
@@ -683,8 +683,9 @@ def test_promote_skips_symlink_entries(monkeypatch, tmp_path: Path) -> None:
 def test_promote_endpoint_source_does_not_call_workflow_or_llm_paths() -> None:
     from mozaiksai.hosts import studio as studio_app
 
-    source = inspect.getsource(studio_app.promote_build_artifact_version)
+    source = inspect.getsource(studio_app.promote_build_build_record)
     assert "prepare_routed_workflow_launch" not in source
     assert "launch_prepared_workflow" not in source
     assert "AppGenerator" not in source
+
 

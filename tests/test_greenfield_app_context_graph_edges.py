@@ -7,9 +7,9 @@ from mozaiksai.control_plane.app_context_impact import derive_app_context_impact
 from mozaiksai.core.app_context.models import GraphEdgeType, GraphNodeType
 from mozaiksai.core.app_context.store import build_greenfield_app_context_from_app_bundle
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,16 +88,16 @@ module_ids:
     ]
 
 
-def _app_bundle() -> ArtifactVersionDoc:
-    return ArtifactVersionDoc(
+def _app_bundle() -> BuildRecord:
+    return BuildRecord(
         _id="av_app_bundle_edges",
         app_id="sample_app",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_family="app_bundle",
+        build_key="app_bundle",
         version_number=1,
         lineage_root_id="av_app_bundle_edges",
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-        validation_status=ArtifactValidationStatus.PASSED,
+        lifecycle_status=BuildRecordStatus.CURRENT,
+        validation_status=BuildRecordValidationStatus.PASSED,
         files_manifest=[{"path": entry["path"]} for entry in _manifest()],
     )
 
@@ -238,4 +238,5 @@ def test_greenfield_graph_edge_enrichment_has_no_graph_database_or_proprietary_t
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
 

@@ -53,9 +53,9 @@ from mozaiksai.control_plane.app_intelligence import (
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.models import (
     ArtifactCommitMetadata,
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 DEFAULT_WORKSPACE = REPO_ROOT.parent / "mozaiks-app"
@@ -64,19 +64,19 @@ DEFAULT_REQUEST = "Update hosted build context behavior for a dogfood code-intel
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self.created: list[ArtifactVersionDoc] = []
+        self.created: list[BuildRecord] = []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         artifact_id = f"av_dogfood_{len(self.created) + 1}"
         lifecycle_status = _enum_value(
             kwargs.get("lifecycle_status"),
-            ArtifactLifecycleStatus,
-            ArtifactLifecycleStatus.DRAFT,
+            BuildRecordStatus,
+            BuildRecordStatus.DRAFT,
         )
         validation_status = _enum_value(
             kwargs.get("validation_status"),
-            ArtifactValidationStatus,
-            ArtifactValidationStatus.PENDING,
+            BuildRecordValidationStatus,
+            BuildRecordValidationStatus.PENDING,
         )
         commit_metadata = kwargs.get("commit_metadata") or {}
         if not isinstance(commit_metadata, ArtifactCommitMetadata):
@@ -87,11 +87,11 @@ class _MemoryArtifactStore:
         if parent_version_id:
             parent = next((artifact for artifact in self.created if artifact.id == parent_version_id), None)
 
-        artifact = ArtifactVersionDoc(
+        artifact = BuildRecord(
             _id=artifact_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=len(self.created) + 1,
             parent_version_id=parent_version_id,
             lineage_root_id=parent.lineage_root_id if parent else artifact_id,
@@ -102,74 +102,74 @@ class _MemoryArtifactStore:
             files_manifest=list(kwargs.get("files_manifest") or []),
             commit_metadata=commit_metadata,
         )
-        if artifact.lifecycle_status == ArtifactLifecycleStatus.CURRENT:
+        if artifact.lifecycle_status == BuildRecordStatus.CURRENT:
             self.created = [
-                existing.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED})
+                existing.model_copy(update={"lifecycle_status": BuildRecordStatus.SUPERSEDED})
                 if existing.app_id == artifact.app_id
-                and existing.artifact_kind == artifact.artifact_kind
-                and existing.artifact_key == artifact.artifact_key
-                and existing.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+                and existing.build_family == artifact.build_family
+                and existing.build_key == artifact.build_key
+                and existing.lifecycle_status == BuildRecordStatus.CURRENT
                 else existing
                 for existing in self.created
             ]
         self.created.append(artifact)
         return artifact
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str) -> ArtifactVersionDoc | None:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord | None:
         return next(
             (
                 artifact
                 for artifact in self.created
-                if artifact.app_id == app_id and artifact.id == artifact_version_id
+                if artifact.app_id == app_id and artifact.id == build_record_id
             ),
             None,
         )
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
-    ) -> list[ArtifactVersionDoc]:
+    ) -> list[BuildRecord]:
         rows = [
             artifact
             for artifact in self.created
             if artifact.app_id == app_id
-            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
-            and (artifact_key is None or artifact.artifact_key == artifact_key)
+            and (build_family is None or artifact.build_family == build_family)
+            and (build_key is None or artifact.build_key == build_key)
             and (lifecycle_status is None or artifact.lifecycle_status == lifecycle_status)
         ]
         rows.sort(key=lambda artifact: artifact.version_number, reverse=True)
         return rows[: max(1, int(limit))]
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
-    ) -> ArtifactVersionDoc | None:
-        target = await self.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    ) -> BuildRecord | None:
+        target = await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
         if target is None:
             return None
         refreshed = target.model_copy(
             update={
-                "lifecycle_status": ArtifactLifecycleStatus.CURRENT,
+                "lifecycle_status": BuildRecordStatus.CURRENT,
                 **({"commit_metadata": commit_metadata} if commit_metadata is not None else {}),
             }
         )
         self.created = [
             refreshed
             if existing.id == target.id
-            else existing.model_copy(update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED})
+            else existing.model_copy(update={"lifecycle_status": BuildRecordStatus.SUPERSEDED})
             if existing.app_id == target.app_id
-            and existing.artifact_kind == target.artifact_kind
-            and existing.artifact_key == target.artifact_key
-            and existing.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+            and existing.build_family == target.build_family
+            and existing.build_key == target.build_key
+            and existing.lifecycle_status == BuildRecordStatus.CURRENT
             else existing
             for existing in self.created
         ]
@@ -263,9 +263,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     catalog_context = ControlPlaneToolContext(
         checkpoint="scope_requested",
         app_id=args.app_id,
-        artifact_kind="app_bundle",
-        artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-        artifact_version_id=result.app_bundle_artifact_version_id,
+        build_family="app_bundle",
+        build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+        build_record_id=result.app_bundle_build_record_id,
         requested_workflow_id="AppGenerator",
         source_surface="dogfood_context_graph_refinement",
         raw_user_request=args.request,
@@ -278,9 +278,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     refinement_request = RefinementRequest(
         request_kind="refinement",
         declared_change_class=ChangeClass.PATCH,
-        artifact_kind=ArtifactKind.APP_BUNDLE,
-        artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-        artifact_version_id=result.app_bundle_artifact_version_id,
+        build_family=ArtifactKind.APP_BUNDLE,
+        build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+        build_record_id=result.app_bundle_build_record_id,
         raw_user_request=args.request,
         source_surface="dogfood_context_graph_refinement",
         app_id=args.app_id,
@@ -350,9 +350,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     coding_result = await worker.execute(
         CodingWorkerRequest(
             app_id=args.app_id,
-            artifact_kind="app_bundle",
-            artifact_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-            artifact_version_id=result.app_bundle_artifact_version_id,
+            build_family="app_bundle",
+            build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+            build_record_id=result.app_bundle_build_record_id,
             requested_workflow_id="AppGenerator",
             raw_user_request=args.request,
             source_surface="dogfood_context_graph_refinement",
@@ -375,9 +375,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "output_root": output_root.as_posix(),
         "request": args.request,
         "app_intelligence": {
-            "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
+            "app_bundle_build_record_id": result.app_bundle_build_record_id,
             "app_context_version_id": result.app_context_version_id,
-            "graph_artifact_version_id": result.graph_artifact_version_id,
+            "graph_build_record_id": result.graph_build_record_id,
             "artifact_path": result.artifact_path,
             "indexed_file_count": result.indexed_file_count,
             "health_report": result.health_report,
@@ -402,7 +402,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             "status": coding_result.status,
             "eligible": coding_result.eligible,
             "applied_paths": sorted(coding_result.applied_files),
-            "artifact_version_id": coding_result.metadata.get("artifact_version_id"),
+            "build_record_id": coding_result.metadata.get("build_record_id"),
             "artifact_path": coding_result.metadata.get("artifact_path"),
             "validation_status": (coding_result.validation_result or {}).get("validation_status"),
         },
@@ -430,7 +430,7 @@ async def _workspace_catalog(
     workspace = await load_artifact_workspace(
         artifact_store=artifact_store,
         app_id=str(context.app_id or ""),
-        artifact_version_id=str(context.artifact_version_id or ""),
+        build_record_id=str(context.build_record_id or ""),
     )
     if not workspace.get("present"):
         return workspace
@@ -450,7 +450,7 @@ async def _workspace_scope(
     workspace = await load_artifact_workspace(
         artifact_store=artifact_store,
         app_id=str(context.app_id or ""),
-        artifact_version_id=str(context.artifact_version_id or ""),
+        build_record_id=str(context.build_record_id or ""),
     )
     file_map = workspace.get("file_map") or {}
     return {
@@ -527,3 +527,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

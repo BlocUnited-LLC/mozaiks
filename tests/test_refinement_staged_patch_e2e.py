@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from mozaiksai.control_plane import dry_run
 from mozaiksai.control_plane.artifact_promotion import (
-    accept_staged_refinement_artifact_version,
+    accept_staged_refinement_build_record,
     create_draft_app_bundle_from_staged_refinement,
 )
 from mozaiksai.control_plane.promotion import promote_refinement_staging
@@ -27,9 +27,9 @@ from mozaiksai.control_plane.validation_evidence import ValidationEvidence
 from mozaiksai.control_plane.validation_runner import run_refinement_validations
 from mozaiksai.core.artifacts import (
     ArtifactCommitMetadata,
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
     RefinementSessionDoc,
     RefinementSessionStatus,
 )
@@ -112,18 +112,18 @@ def _zip_source_bundle(source_bundle: Path, zip_path: Path) -> list[dict[str, ob
     return manifest
 
 
-def _build_source_version(*, app_id: str, source_zip: Path, files_manifest: list[dict[str, object]]) -> ArtifactVersionDoc:
-    return ArtifactVersionDoc.model_validate(
+def _build_source_version(*, app_id: str, source_zip: Path, files_manifest: list[dict[str, object]]) -> BuildRecord:
+    return BuildRecord.model_validate(
         {
             "_id": "av_source_smoke_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_source_smoke_1",
             "canonical_inputs_version": {"concept": "av_concept_smoke_1"},
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "validation_status": ArtifactValidationStatus.PASSED.value,
+            "lifecycle_status": BuildRecordStatus.CURRENT.value,
+            "validation_status": BuildRecordValidationStatus.PASSED.value,
             "files_manifest": list(files_manifest),
             "commit_metadata": ArtifactCommitMetadata(
                 message="Source app bundle",
@@ -136,28 +136,28 @@ def _build_source_version(*, app_id: str, source_zip: Path, files_manifest: list
 
 
 class _E2EArtifactStore:
-    def __init__(self, source_version: ArtifactVersionDoc) -> None:
-        self.versions: dict[str, ArtifactVersionDoc] = {source_version.id: source_version}
+    def __init__(self, source_version: BuildRecord) -> None:
+        self.versions: dict[str, BuildRecord] = {source_version.id: source_version}
         self.sessions: list[RefinementSessionDoc] = []
         self.create_calls: list[dict[str, object]] = []
         self.validation_calls: list[dict[str, object]] = []
         self.accept_calls: list[dict[str, object]] = []
         self.updated_sessions: list[dict[str, object]] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        version = self.versions.get(artifact_version_id)
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        version = self.versions.get(build_record_id)
         if version is None:
             return None
         return version
 
-    async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.create_calls.append(dict(kwargs))
-        version = ArtifactVersionDoc.model_validate(
+        version = BuildRecord.model_validate(
             {
                 "_id": "av_draft_smoke_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
                 "parent_version_id": kwargs.get("parent_version_id"),
                 "lineage_root_id": "av_source_smoke_1",
@@ -175,13 +175,13 @@ class _E2EArtifactStore:
 
     async def set_validation_status(self, **kwargs):  # noqa: ANN003
         self.validation_calls.append(dict(kwargs))
-        version = self.versions.get(kwargs["artifact_version_id"])
+        version = self.versions.get(kwargs["build_record_id"])
         if version is None:
             return False
         commit_metadata = kwargs.get("commit_metadata") or {}
         validation_status = kwargs["validation_status"]
-        if not isinstance(validation_status, ArtifactValidationStatus):
-            validation_status = ArtifactValidationStatus(validation_status)
+        if not isinstance(validation_status, BuildRecordValidationStatus):
+            validation_status = BuildRecordValidationStatus(validation_status)
         updated = version.model_copy(
             update={
                 "validation_status": validation_status,
@@ -191,39 +191,39 @@ class _E2EArtifactStore:
         self.versions[version.id] = updated
         return True
 
-    async def accept_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def accept_build_record(self, **kwargs):  # noqa: ANN003
         self.accept_calls.append(dict(kwargs))
-        version = self.versions.get(kwargs["artifact_version_id"])
+        version = self.versions.get(kwargs["build_record_id"])
         if version is None:
             return None
         for existing_id, existing in list(self.versions.items()):
             if (
                 existing_id != version.id
                 and existing.app_id == version.app_id
-                and existing.artifact_kind == version.artifact_kind
-                and existing.artifact_key == version.artifact_key
-                and existing.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+                and existing.build_family == version.build_family
+                and existing.build_key == version.build_key
+                and existing.lifecycle_status == BuildRecordStatus.CURRENT
             ):
                 self.versions[existing_id] = existing.model_copy(
-                    update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED}
+                    update={"lifecycle_status": BuildRecordStatus.SUPERSEDED}
                 )
         commit_metadata = kwargs.get("commit_metadata") or version.commit_metadata
         if not isinstance(commit_metadata, ArtifactCommitMetadata):
             commit_metadata = ArtifactCommitMetadata.model_validate(commit_metadata)
         updated = version.model_copy(
             update={
-                "lifecycle_status": ArtifactLifecycleStatus.CURRENT,
+                "lifecycle_status": BuildRecordStatus.CURRENT,
                 "commit_metadata": commit_metadata,
             }
         )
         self.versions[updated.id] = updated
         return updated
 
-    async def list_refinement_sessions(self, *, app_id: str, result_artifact_version_id: str, limit: int = 20):
+    async def list_refinement_sessions(self, *, app_id: str, result_build_record_id: str, limit: int = 20):
         matches = [
             session
             for session in self.sessions
-            if session.result_artifact_version_id == result_artifact_version_id
+            if session.result_build_record_id == result_build_record_id
         ]
         return matches[:limit]
 
@@ -250,11 +250,11 @@ class _FakeContentStore:
     def __init__(self) -> None:
         self.put_calls: list[dict[str, object]] = []
 
-    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
+    async def put_bundle(self, data: bytes, *, app_id: str, build_record_id: str) -> str:
         self.put_calls.append(
             {
                 "app_id": app_id,
-                "artifact_version_id": artifact_version_id,
+                "build_record_id": build_record_id,
                 "size_bytes": len(data),
             }
         )
@@ -291,7 +291,7 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     request_id = "refine_smoke_001"
     plan = dry_run.build_refinement_execution_plan_from_route(
         request="Change the dashboard page title to prioritize reports.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -374,12 +374,12 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
         evidence,
         artifact_store=artifact_store,
         content_store=content_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
         promotion_result=promotion_result,
     )
-    assert draft_result.artifact_kind == "app_bundle"
-    assert draft_result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert draft_result.build_family == "app_bundle"
+    assert draft_result.lifecycle_status == BuildRecordStatus.DRAFT
     assert draft_result.parent_version_id == source_version.id
     assert draft_result.metadata["refinement"]["request_id"] == request_id
     assert draft_result.metadata["refinement"]["review"]["status"] == "promotion_ready"
@@ -419,8 +419,8 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
             {
                 "_id": "rs_smoke_1",
                 "app_id": app_id,
-                "artifact_version_id": draft_result.artifact_version_id,
-                "result_artifact_version_id": draft_result.artifact_version_id,
+                "build_record_id": draft_result.build_record_id,
+                "result_build_record_id": draft_result.build_record_id,
                 "change_request_id": "cr_smoke_1",
                 "provider": "control_plane_coding",
                 "status": RefinementSessionStatus.VALIDATED.value,
@@ -430,37 +430,37 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     )
 
     draft_review_response = TestClient(studio_app.app).get(
-        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review"
+        f"/api/studio/build/artifacts/{draft_result.build_record_id}/review"
     )
     assert draft_review_response.status_code == 200
     assert draft_review_response.json()["review"]["write_back_mode"] == "generated_artifact"
     assert draft_review_response.json()["review"]["write_back_target"] is None
 
     draft_promote_response = TestClient(studio_app.app).post(
-        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote"
+        f"/api/studio/build/artifacts/{draft_result.build_record_id}/promote"
     )
     assert draft_promote_response.status_code == 409
     assert "current artifact versions" in draft_promote_response.json()["detail"]
 
-    accepted_result = await accept_staged_refinement_artifact_version(
+    accepted_result = await accept_staged_refinement_build_record(
         app_id=app_id,
-        draft_artifact_version_id=draft_result.artifact_version_id,
+        draft_build_record_id=draft_result.build_record_id,
         review_record=review_record,
         request_id=request_id,
         artifact_store=artifact_store,
         accepted_by="reviewer_1",
     )
-    assert accepted_result.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert accepted_result.lifecycle_status == BuildRecordStatus.CURRENT
     assert accepted_result.refinement_review_status == "promotion_ready"
     assert accepted_result.metadata["refinement"]["review"]["status"] == "promotion_ready"
     assert accepted_result.metadata["acceptance"]["accepted_by"] == "reviewer_1"
 
     client = TestClient(studio_app.app)
-    promote_response = client.post(f"/api/studio/build/artifacts/{accepted_result.artifact_version_id}/promote")
+    promote_response = client.post(f"/api/studio/build/artifacts/{accepted_result.build_record_id}/promote")
     assert promote_response.status_code == 200
     payload = promote_response.json()
     assert payload["promoted"] is True
-    assert payload["artifact_kind"] == "app_bundle"
+    assert payload["build_family"] == "app_bundle"
     assert payload["restored_files"] == [
         "ui/index.js",
         "ui/pages/custom/ReportsOverviewPage.jsx",
@@ -487,7 +487,8 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert (source_bundle / "ui" / "pages" / "dashboard.yaml").read_text(encoding="utf-8") == source_before
     assert (source_bundle / "modules" / "projects" / "backend" / "service.py").read_text(encoding="utf-8") == source_service_before
     assert artifact_store.updated_sessions[-1]["status"] == RefinementSessionStatus.PROMOTED
-    assert artifact_store.versions[accepted_result.artifact_version_id].lifecycle_status == ArtifactLifecycleStatus.CURRENT
-    assert artifact_store.versions[source_version.id].lifecycle_status == ArtifactLifecycleStatus.SUPERSEDED
+    assert artifact_store.versions[accepted_result.build_record_id].lifecycle_status == BuildRecordStatus.CURRENT
+    assert artifact_store.versions[source_version.id].lifecycle_status == BuildRecordStatus.SUPERSEDED
     assert content_store.put_calls
+
 

@@ -37,7 +37,7 @@ async def test_update_build_status_posts_artifact_aware_payload(monkeypatch) -> 
         build_registry_id="appreg_1",
         status="review",
         bundle_path="generated/apps/app_1/build_1/app",
-        artifact_version_id="av_bundle_1",
+        build_record_id="av_bundle_1",
         workflow_sequence="build",
         active_chat_id="chat_1",
         active_workflow_id="AppGenerator",
@@ -45,7 +45,7 @@ async def test_update_build_status_posts_artifact_aware_payload(monkeypatch) -> 
             "build_id": "build_1",
             "workflow_sequence": "build",
             "status": "review",
-            "artifact_version_id": "av_bundle_1",
+            "build_record_id": "av_bundle_1",
         },
     )
 
@@ -54,7 +54,7 @@ async def test_update_build_status_posts_artifact_aware_payload(monkeypatch) -> 
         "build_registry_id": "appreg_1",
         "status": "review",
         "bundle_path": "generated/apps/app_1/build_1/app",
-        "artifact_version_id": "av_bundle_1",
+        "build_record_id": "av_bundle_1",
         "workflow_sequence": "build",
         "active_chat_id": "chat_1",
         "active_workflow_id": "AppGenerator",
@@ -62,6 +62,7 @@ async def test_update_build_status_posts_artifact_aware_payload(monkeypatch) -> 
             "build_id": "build_1",
             "workflow_sequence": "build",
             "status": "review",
-            "artifact_version_id": "av_bundle_1",
+            "build_record_id": "av_bundle_1",
         },
     }
+

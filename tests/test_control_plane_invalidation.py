@@ -18,7 +18,7 @@ from mozaiksai.control_plane import (
 class _FakeSessionStore:
     async def load(self, *, app_id: str, user_id: str):
         return SimpleNamespace(
-            artifact_version_refs={
+            build_record_refs={
                 "concept": "av_concept_1",
                 "design_docs": "av_design_1",
                 "workflow_bundle": "av_workflow_1",
@@ -32,7 +32,7 @@ class _FakeArtifactStore:
         self.calls: list[dict] = []
         self.family_calls: list[dict] = []
 
-    async def invalidate_artifact_version_refs(self, **kwargs):  # noqa: ANN003
+    async def invalidate_build_record_refs(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
         return ["av_design_1", "av_app_1"]
 
@@ -44,9 +44,9 @@ class _FakeArtifactStore:
 def _request() -> RefinementRequest:
     return RefinementRequest(
         request_kind="refinement",
-        artifact_kind=ArtifactKind.APP_BUNDLE,
-        artifact_key="app_bundle",
-        artifact_version_id="av_app_1",
+        build_family=ArtifactKind.APP_BUNDLE,
+        build_key="app_bundle",
+        build_record_id="av_app_1",
         raw_user_request="Refresh the app information architecture.",
         source_surface="app_build",
         app_id="app_1",
@@ -102,7 +102,7 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
 
     assert result == {
         "change_request_id": "cr_123",
-        "affected_build_families": ["design_docs", "app_bundle"],
+        "affected_ARTIFACT_KINDS": ["design_docs", "app_bundle"],
         "invalidated_build_record_ids": ["av_design_1", "av_app_1"],
         # experience_spec, subscription_contract, and workflow_bundle depend on design_docs.
         "downstream_staled_families": ["experience_spec", "subscription_contract", "workflow_bundle"],
@@ -110,13 +110,13 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
     assert artifact_store.calls == [
         {
             "app_id": "app_1",
-            "artifact_version_refs": {
+            "build_record_refs": {
                 "concept": "av_concept_1",
                 "design_docs": "av_design_1",
                 "workflow_bundle": "av_workflow_1",
                 "app_bundle": "av_app_1",
             },
-            "affected_artifact_kinds": ["design_docs", "app_bundle"],
+            "affected_ARTIFACT_KINDS": ["design_docs", "app_bundle"],
             "reason": "change_request:cr_123",
         }
     ]
@@ -124,21 +124,23 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
     assert artifact_store.family_calls == [
         {
             "app_id": "app_1",
-            "artifact_kind": "experience_spec",
-            "artifact_key": "experience_spec",
+            "build_family": "experience_spec",
+            "build_key": "experience_spec",
             "reason": "change_request:cr_123",
         },
         {
             "app_id": "app_1",
-            "artifact_kind": "subscription_contract",
-            "artifact_key": "subscription_contract",
+            "build_family": "subscription_contract",
+            "build_key": "subscription_contract",
             "reason": "change_request:cr_123",
         },
         {
             "app_id": "app_1",
-            "artifact_kind": "workflow_bundle",
-            "artifact_key": "workflow_bundle",
+            "build_family": "workflow_bundle",
+            "build_key": "workflow_bundle",
             "reason": "change_request:cr_123",
         }
     ]
+
+
 

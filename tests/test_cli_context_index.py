@@ -27,12 +27,12 @@ def test_context_index_command_registers_workspace(monkeypatch, tmp_path, capsys
         captured.update(kwargs)
         return SimpleNamespace(
             app_id=kwargs["app_id"],
-            app_bundle_artifact_version_id="av_bundle",
-            source_context_artifact_version_id="av_source",
-            app_intelligence_artifact_version_id="av_intelligence",
+            app_bundle_build_record_id="av_bundle",
+            source_context_build_record_id="av_source",
+            app_intelligence_build_record_id="av_intelligence",
             app_context_version_id="ctx_app",
-            app_context_artifact_version_id="av_context",
-            graph_artifact_version_id="av_graph",
+            app_context_build_record_id="av_context",
+            graph_build_record_id="av_graph",
             artifact_path="generated/app_intelligence/app_1/artifact.zip",
             indexed_file_count=12,
             health_report={"status": "healthy", "warnings": [], "blockers": [], "coverage": {"core_surface_file_count": 4}},
@@ -46,7 +46,7 @@ def test_context_index_command_registers_workspace(monkeypatch, tmp_path, capsys
             context_action="index",
             app_id="app_1",
             workspace=str(tmp_path),
-            artifact_key="app_intelligence_workspace",
+            build_key="app_intelligence_workspace",
             draft=False,
             generated_artifacts_root=None,
             json_output=True,
@@ -58,6 +58,7 @@ def test_context_index_command_registers_workspace(monkeypatch, tmp_path, capsys
     assert captured["workspace_root"] == tmp_path.resolve()
     assert captured["make_current"] is True
     payload = json.loads(capsys.readouterr().out)
-    assert payload["app_bundle_artifact_version_id"] == "av_bundle"
+    assert payload["app_bundle_build_record_id"] == "av_bundle"
     assert payload["health_report"]["status"] == "healthy"
+
 

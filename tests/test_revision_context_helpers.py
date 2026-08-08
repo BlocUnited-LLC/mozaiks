@@ -14,7 +14,7 @@ Covers helpers that do not require DB/IO:
     - session_id included
     - lifecycle_state .value extracted
     - sequence_status .value extracted
-    - artifact_version_refs coerced to dict
+    - build_record_refs coerced to dict
     - stale_layers coerced to dict
     - revision_history tail-3 returned
     - empty revision_history → empty list
@@ -89,7 +89,7 @@ def _fake_state(**kwargs) -> SimpleNamespace:
         "current_revision_scope": "feature_addition",
         "revision_origin_workflow": "AppGenerator",
         "restart_from_workflow": None,
-        "artifact_version_refs": {"app_bundle": "v-1"},
+        "build_record_refs": {"app_bundle": "v-1"},
         "stale_layers": {"ui": True},
         "revision_history": [],
         "updated_at": datetime(2026, 6, 12, 10, 0, 0, tzinfo=UTC),
@@ -119,10 +119,10 @@ class TestSessionSummary:
         result = _session_summary(_fake_state(sequence_status=_FakeEnum("in_progress")))
         assert result["sequence_status"] == "in_progress"
 
-    def test_artifact_version_refs_coerced_to_dict(self):
+    def test_build_record_refs_coerced_to_dict(self):
         refs = {"app_bundle": "v-abc"}
-        result = _session_summary(_fake_state(artifact_version_refs=refs))
-        assert result["artifact_version_refs"] == {"app_bundle": "v-abc"}
+        result = _session_summary(_fake_state(build_record_refs=refs))
+        assert result["build_record_refs"] == {"app_bundle": "v-abc"}
 
     def test_stale_layers_coerced_to_dict(self):
         result = _session_summary(_fake_state(stale_layers={"ui": True}))
@@ -150,10 +150,11 @@ class TestSessionSummary:
         # Should be the last 3 entries
         assert result["recent_revision_history"][0]["revision_id"] == "rev-2"
 
-    def test_none_artifact_version_refs_returns_empty_dict(self):
-        result = _session_summary(_fake_state(artifact_version_refs=None))
-        assert result["artifact_version_refs"] == {}
+    def test_none_build_record_refs_returns_empty_dict(self):
+        result = _session_summary(_fake_state(build_record_refs=None))
+        assert result["build_record_refs"] == {}
 
     def test_current_workflow_id_present(self):
         result = _session_summary(_fake_state(current_workflow_id="MyWorkflow"))
         assert result["current_workflow_id"] == "MyWorkflow"
+

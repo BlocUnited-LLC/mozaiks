@@ -15,9 +15,9 @@ from mozaiksai.core.app_context.store import (
     get_current_app_context_version,
 )
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,23 +57,23 @@ class _Context:
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self.versions: dict[str, ArtifactVersionDoc] = {}
+        self.versions: dict[str, BuildRecord] = {}
         self.create_calls: list[dict[str, Any]] = []
         self._counter = 0
 
-    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self._counter += 1
-        artifact_kind = kwargs["build_family"]
+        build_family = kwargs["build_family"]
         version_id = (
             "av_app_bundle_1"
-            if artifact_kind == "app_bundle"
-            else f"av_{artifact_kind}_{self._counter}"
+            if build_family == "app_bundle"
+            else f"av_{build_family}_{self._counter}"
         )
         self.create_calls.append(dict(kwargs))
-        doc = ArtifactVersionDoc(
+        doc = BuildRecord(
             _id=version_id,
             app_id=kwargs["app_id"],
-            build_family=artifact_kind,
+            build_family=build_family,
             build_key=kwargs["build_key"],
             version_number=self._counter,
             parent_version_id=kwargs.get("parent_version_id"),
@@ -81,12 +81,12 @@ class _MemoryArtifactStore:
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
             canonical_inputs_version=kwargs.get("canonical_inputs_version") or {},
-            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
-            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            lifecycle_status=kwargs.get("lifecycle_status", BuildRecordStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", BuildRecordValidationStatus.PENDING),
             files_manifest=kwargs.get("files_manifest") or [],
             commit_metadata=kwargs.get("commit_metadata") or {},
         )
-        if doc.lifecycle_status is ArtifactLifecycleStatus.CURRENT:
+        if doc.lifecycle_status is BuildRecordStatus.CURRENT:
             self._supersede_current_siblings(doc)
         self.versions[doc.id] = doc
         return doc
@@ -96,7 +96,7 @@ class _MemoryArtifactStore:
         *,
         app_id: str,
         build_record_id: str,
-    ) -> ArtifactVersionDoc | None:
+    ) -> BuildRecord | None:
         doc = self.versions.get(build_record_id)
         if doc is None or doc.app_id != app_id:
             return None
@@ -108,7 +108,7 @@ class _MemoryArtifactStore:
         app_id: str,
         build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc | None:
+    ) -> BuildRecord | None:
         doc = await self.get_build_record(
             app_id=app_id,
             build_record_id=build_record_id,
@@ -116,7 +116,7 @@ class _MemoryArtifactStore:
         if doc is None:
             return None
         self._supersede_current_siblings(doc)
-        doc.lifecycle_status = ArtifactLifecycleStatus.CURRENT
+        doc.lifecycle_status = BuildRecordStatus.CURRENT
         if commit_metadata is not None:
             doc.commit_metadata = commit_metadata
         return doc
@@ -127,10 +127,10 @@ class _MemoryArtifactStore:
         app_id: str,
         build_family: str | None = None,
         build_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
-    ) -> list[ArtifactVersionDoc]:
+    ) -> list[BuildRecord]:
         rows = [doc for doc in self.versions.values() if doc.app_id == app_id]
         if build_family is not None:
             rows = [doc for doc in rows if doc.build_family == build_family]
@@ -140,16 +140,16 @@ class _MemoryArtifactStore:
             rows = [doc for doc in rows if doc.lifecycle_status is lifecycle_status]
         return sorted(rows, key=lambda doc: doc.version_number, reverse=True)[:limit]
 
-    def _supersede_current_siblings(self, target: ArtifactVersionDoc) -> None:
+    def _supersede_current_siblings(self, target: BuildRecord) -> None:
         for doc in self.versions.values():
             if (
                 doc.app_id == target.app_id
                 and doc.build_family == target.build_family
                 and doc.build_key == target.build_key
                 and doc.id != target.id
-                and doc.lifecycle_status is ArtifactLifecycleStatus.CURRENT
+                and doc.lifecycle_status is BuildRecordStatus.CURRENT
             ):
-                doc.lifecycle_status = ArtifactLifecycleStatus.SUPERSEDED
+                doc.lifecycle_status = BuildRecordStatus.SUPERSEDED
 
 
 def _patch_artifact_store(monkeypatch, store: _MemoryArtifactStore) -> None:
@@ -157,7 +157,7 @@ def _patch_artifact_store(monkeypatch, store: _MemoryArtifactStore) -> None:
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: store)
     monkeypatch.setattr(
         artifacts_mod,
-        "resolve_latest_artifact_version_refs",
+        "resolve_latest_build_record_refs",
         lambda **_kwargs: asyncio.sleep(
             0,
             result={
@@ -203,7 +203,7 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context({"app_bundle_acceptance_status": "passed"})
 
-    app_bundle = await generate_and_download_module._register_app_bundle_artifact_version(
+    app_bundle = await generate_and_download_module._register_app_bundle_build_record(
         app_id="field_service",
         user_id="user_123",
         workflow_name="AppGenerator",
@@ -228,15 +228,15 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     }
     assert app_bundle.id == "av_app_bundle_1"
-    assert app_bundle.lifecycle_status is ArtifactLifecycleStatus.CURRENT
+    assert app_bundle.lifecycle_status is BuildRecordStatus.CURRENT
     assert current_context is not None
     assert current_context.mode is AppContextMode.GREENFIELD
     assert any(
-        ref.artifact_kind == "app_bundle"
-        and ref.artifact_version_id == "av_app_bundle_1"
+        ref.build_family == "app_bundle"
+        and ref.build_record_id == "av_app_bundle_1"
         for ref in current_context.artifact_refs
     )
-    assert context.data["artifact_version_id"] == "av_app_bundle_1"
+    assert context.data["build_record_id"] == "av_app_bundle_1"
     assert context.data["greenfield_app_context_registered"] is True
     assert context.data["app_context_version_id"] == current_context.context_version_id
 
@@ -277,8 +277,8 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     assert store.versions["av_app_bundle_1"].commit_metadata.metadata["workspace_dir"] == str(
         app_dir.resolve()
     )
-    assert any(ref.artifact_kind == "source_context_bundle" for ref in current_context.artifact_refs)
-    assert any(ref.artifact_kind == "app_intelligence_snapshot" for ref in current_context.artifact_refs)
+    assert any(ref.build_family == "source_context_bundle" for ref in current_context.artifact_refs)
+    assert any(ref.build_family == "app_intelligence_snapshot" for ref in current_context.artifact_refs)
     for rel_path, content in original_contents.items():
         assert (app_dir / rel_path).read_text(encoding="utf-8") == content
 
@@ -305,7 +305,7 @@ async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context({"app_bundle_acceptance_status": "passed"})
 
-    app_bundle = await generate_and_download_module._register_app_bundle_artifact_version(
+    app_bundle = await generate_and_download_module._register_app_bundle_build_record(
         app_id="field_service",
         user_id="user_123",
         workflow_name="AppGenerator",
@@ -318,7 +318,7 @@ async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
     )
 
     assert app_bundle.id == "av_app_bundle_1"
-    assert context.data["artifact_version_id"] == "av_app_bundle_1"
+    assert context.data["build_record_id"] == "av_app_bundle_1"
     assert "context store unavailable" in context.data["app_context_registration_warning"]
     assert {call["build_family"] for call in store.create_calls} == {"app_bundle"}
 
@@ -355,4 +355,6 @@ def test_appgenerator_context_registration_has_no_graph_database_or_proprietary_
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
+
 

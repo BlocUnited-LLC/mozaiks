@@ -24,9 +24,9 @@ from mozaiksai.core.app_context.models import (
     GraphNodeType,
 )
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,33 +34,33 @@ APP_ROOT = ROOT / "factory_app" / "app"
 
 
 class _MemoryArtifactStore:
-    def __init__(self, versions: dict[str, ArtifactVersionDoc] | None = None) -> None:
+    def __init__(self, versions: dict[str, BuildRecord] | None = None) -> None:
         self.versions = versions or {}
 
-    async def get_artifact_version(
+    async def get_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
-    ) -> ArtifactVersionDoc | None:
-        artifact = self.versions.get(artifact_version_id)
+        build_record_id: str,
+    ) -> BuildRecord | None:
+        artifact = self.versions.get(build_record_id)
         if artifact is None or artifact.app_id != app_id:
             return None
         return artifact
 
-    async def list_artifact_versions(self, *, app_id: str, artifact_kind=None, artifact_key=None, limit=50, **_kwargs):
+    async def list_build_records(self, *, app_id: str, build_family=None, build_key=None, limit=50, **_kwargs):
         versions = [
             artifact
             for artifact in self.versions.values()
             if artifact.app_id == app_id
-            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
-            and (artifact_key is None or artifact.artifact_key == artifact_key)
+            and (build_family is None or artifact.build_family == build_family)
+            and (build_key is None or artifact.build_key == build_key)
         ]
         return versions[:limit]
 
 
 class _FailingArtifactStore:
-    async def get_artifact_version(self, **_kwargs: Any) -> ArtifactVersionDoc | None:
+    async def get_build_record(self, **_kwargs: Any) -> BuildRecord | None:
         raise RuntimeError("store offline")
 
 
@@ -76,7 +76,7 @@ def _node(
         node_type=node_type,
         label=label,
         source_ref_id="src_app_bundle",
-        artifact_version_id="av_graph",
+        build_record_id="av_graph",
         stale_status=AppContextStaleStatus.CURRENT,
         metadata=metadata or {},
     )
@@ -89,7 +89,7 @@ def _edge(source: str, target: str, edge_type: GraphEdgeType) -> AppContextGraph
         source_node_id=source,
         target_node_id=target,
         source_ref_id="src_app_bundle",
-        artifact_version_id="av_graph",
+        build_record_id="av_graph",
         stale_status=AppContextStaleStatus.CURRENT,
     )
 
@@ -139,30 +139,30 @@ def _summary(stale_status: str = "current") -> AppContextSummary:
     )
 
 
-def _graph_artifact(graph: AppContextGraph) -> ArtifactVersionDoc:
-    return ArtifactVersionDoc(
+def _graph_artifact(graph: AppContextGraph) -> BuildRecord:
+    return BuildRecord(
         _id="av_graph",
         app_id="sample_app",
-        artifact_kind="app_context_graph",
-        artifact_key="app_context_graph",
+        build_family="app_context_graph",
+        build_key="app_context_graph",
         version_number=1,
         lineage_root_id="av_graph",
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=ArtifactValidationStatus.PENDING,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
         commit_metadata={"metadata": {"summary_payload": graph.model_dump(mode="json")}},
     )
 
 
-def _context_version_artifact(context_version: AppContextVersion) -> ArtifactVersionDoc:
-    return ArtifactVersionDoc(
+def _context_version_artifact(context_version: AppContextVersion) -> BuildRecord:
+    return BuildRecord(
         _id="av_ctx_1",
         app_id="sample_app",
-        artifact_kind="app_context_version",
-        artifact_key="app_context_version",
+        build_family="app_context_version",
+        build_key="app_context_version",
         version_number=1,
         lineage_root_id="av_ctx_1",
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=ArtifactValidationStatus.PENDING,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
         commit_metadata={"metadata": {"summary_payload": context_version.model_dump(mode="json")}},
     )
 
@@ -188,9 +188,9 @@ async def test_app_context_graph_loads_for_specific_context_version() -> None:
         mode=AppContextMode.BROWNFIELD,
         artifact_refs=[
             ArtifactRef(
-                artifact_kind="app_context_graph",
-                artifact_key="app_context_graph",
-                artifact_version_id="av_graph",
+                build_family="app_context_graph",
+                build_key="app_context_graph",
+                build_record_id="av_graph",
             )
         ],
         graph_snapshot_ref="av_graph",
@@ -377,4 +377,5 @@ def test_app_context_impact_integration_has_no_graph_database_or_proprietary_ter
         text = path.read_text(encoding="utf-8")
         for term in forbidden_terms:
             assert term.lower() not in text.lower()
+
 

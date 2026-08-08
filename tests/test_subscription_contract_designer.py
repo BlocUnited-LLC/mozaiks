@@ -557,9 +557,9 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     assert config.plans[1].token_allowances[0].amount == 250000
     assert context["subscription_contract"]["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
 
-    assert persisted["artifact_kind"] == "subscription_contract"
-    assert persisted["artifact_key"] == "subscription_contract"
-    assert persisted["input_artifact_kinds"] == ("concept", "build_plan", "design_docs")
+    assert persisted["build_family"] == "subscription_contract"
+    assert persisted["build_key"] == "subscription_contract"
+    assert persisted["input_ARTIFACT_KINDS"] == ("concept", "build_plan", "design_docs")
 
 
 @pytest.mark.asyncio
@@ -662,3 +662,5 @@ def test_subscription_contract_rejects_token_wallets_without_usage_credit_or_quo
 
     with pytest.raises(ValueError, match="token_wallets are only valid"):
         normalize_subscription_contract(contract)
+
+

@@ -1020,7 +1020,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
 
     async def _fake_persist_summary_artifact(**kwargs):
         summary_artifact.update(kwargs)
-        return type("ArtifactVersion", (), {"id": "av_concept_1"})()
+        return type("BuildRecord", (), {"id": "av_concept_1"})()
 
     module.emit_ui_surface = _fake_emit
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
@@ -1064,7 +1064,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     assert emitted["component"] == "ConceptBlueprint"
     assert emitted["payload"]["blueprint"]["brand_intent"]["appearance_hint"] == "dark"
     assert emitted["payload"]["blueprint"]["agentic_capabilities"] == ["thread_summary"]
-    assert summary_artifact["artifact_kind"] == "concept"
+    assert summary_artifact["build_family"] == "concept"
     assert summary_artifact["summary_payload"]["app_name"] == "Mozaiks Social"
     assert summary_artifact["author_user_id"] == "user_123"
 
@@ -1079,7 +1079,7 @@ def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blue
 
     async def _fake_persist_summary_artifact(**kwargs):
         summary_artifact.update(kwargs)
-        return type("ArtifactVersion", (), {"id": "av_build_plan_1"})()
+        return type("BuildRecord", (), {"id": "av_build_plan_1"})()
 
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
     context = _Context(
@@ -1122,8 +1122,8 @@ def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blue
     assert context.data["build_plan"]["concept_blueprint"]["app_name"] == "AdMarket"
     assert context.data["build_plan"]["capability_packs"][0]["pack_type"] == "marketplace_pack"
     assert context.data["capability_packs"][0]["capability_pack_id"] == "marketplace_core"
-    assert summary_artifact["artifact_kind"] == "build_plan"
-    assert summary_artifact["input_artifact_kinds"] == ("concept",)
+    assert summary_artifact["build_family"] == "build_plan"
+    assert summary_artifact["input_ARTIFACT_KINDS"] == ("concept",)
     assert summary_artifact["summary_payload"]["capability_packs"][0]["capability_pack_id"] == "marketplace_core"
 
 
@@ -1231,3 +1231,5 @@ def test_app_build_plan_tool_rejects_data_migrations_with_non_migration_path() -
             ),
             context_variables=_Context(),
         )
+
+

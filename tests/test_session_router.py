@@ -224,9 +224,9 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
             trigger_payload={
                 "refinement_request": {
                     "declared_change_class": "patch",
-                    "artifact_kind": "workflow_bundle",
-                    "artifact_key": "workflow_bundle",
-                    "artifact_version_id": "v1",
+                    "build_family": "workflow_bundle",
+                    "build_key": "workflow_bundle",
+                    "build_record_id": "v1",
                     "raw_user_request": "Update workflow naming",
                     "source_surface": "app_build",
                 }
@@ -287,9 +287,9 @@ async def test_route_trigger_refinement_classifier_uses_authoritative_llm_result
             trigger_payload={
                 "refinement_request": {
                     "declared_change_class": "patch",
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "v9",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "v9",
                     "raw_user_request": "Actually pivot this into a blockchain marketplace instead of an internal ops tool.",
                 }
             },
@@ -343,9 +343,9 @@ async def test_orchestration_control_harness_delegates_refinement_into_session_r
             workflow_id=None,
             trigger_payload={
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "v11",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "v11",
                     "raw_user_request": "Add a workflow that handles premium escalations.",
                 }
             },
@@ -1368,8 +1368,8 @@ async def test_persist_revision_intent_reuses_active_revision_for_follow_up_laun
             context_seed={
                 "build_mode": "revision",
                 "revision_scope": "core",
-                "artifact_kind": "app_bundle",
-                "artifact_version_id": "av_core_1",
+                "build_family": "app_bundle",
+                "build_record_id": "av_core_1",
                 "change_request_id": "cr_core_1",
                 "impact_set": {
                     "restart_from": "ValueEngine",
@@ -1434,9 +1434,9 @@ async def test_persist_revision_intent_reuses_active_revision_for_follow_up_laun
                 "change_request_id": "cr_core_1",
                 "revision_id": revision_id,
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_core_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_core_1",
                     "raw_user_request": "Actually pivot this into a blockchain marketplace.",
                 },
             },
@@ -1483,9 +1483,9 @@ async def test_fail_active_revision_clears_revision_state_and_sets_stale(monkeyp
             trigger_source="refinement",
             trigger_payload={
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "v1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "v1",
                     "raw_user_request": "Fix a label",
                 }
             },
@@ -1543,4 +1543,5 @@ async def test_fail_active_revision_ignores_empty_app_or_user():
     # Should not raise.
     await router.fail_active_revision(app_id="", user_id="user_1", workflow_id="AppGenerator")
     await router.fail_active_revision(app_id="app_1", user_id="", workflow_id="AppGenerator")
+
 

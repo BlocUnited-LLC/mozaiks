@@ -19,7 +19,7 @@ def test_load_default_factory_refinement_harness() -> None:
     pack = load_refinement_harness(app_root=app_root)
 
     assert pack.path == (Path(__file__).resolve().parents[1] / "factory_app" / "refinement_harness").resolve()
-    assert pack.manifest.routing.default_build_family == "app_bundle"
+    assert pack.manifest.routing.default_ARTIFACT_KIND == "app_bundle"
     app_bundle = pack.routing_for_artifact("app_bundle")
     assert app_bundle is not None
     assert app_bundle.routes.core.workflow_sequence == "full_rebuild"
@@ -293,7 +293,7 @@ def test_extended_refinement_harness_rejects_whole_pack_fields(tmp_path: Path) -
             {
                 "schema_version": "mozaiks.refinement_harness.v1",
                 "extends": DEFAULT_REFINEMENT_HARNESS_EXTENDS,
-                "routing": {"default_artifact_kind": "app_bundle"},
+                "routing": {"default_ARTIFACT_KIND": "app_bundle"},
             },
             sort_keys=False,
         ),
@@ -490,10 +490,10 @@ def _write_minimal_refinement_harness(pack_root: Path, *, route_payload: dict) -
     manifest = {
         "schema_version": "mozaiks.refinement_harness.v1",
         "routing": {
-            "default_artifact_kind": "app_bundle",
+            "default_ARTIFACT_KIND": "app_bundle",
             "artifacts": [
                 {
-                    "artifact_kind": "app_bundle",
+                    "build_family": "app_bundle",
                     "routes": {
                         "patch": route_payload,
                         "design": route_payload,
@@ -589,3 +589,5 @@ def test_control_plane_routes_reject_duplicated_impact_fields(tmp_path: Path) ->
 
     with pytest.raises(ControlPlanePackLoadError, match="affected_workflows"):
         load_refinement_harness(app_root=app_root, factory_root=pack_root)
+
+

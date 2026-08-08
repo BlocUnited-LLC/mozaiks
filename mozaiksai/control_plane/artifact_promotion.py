@@ -66,6 +66,18 @@ class DraftAppBundleArtifactVersionResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     artifact_version: ArtifactVersionDoc
 
+    @property
+    def build_record_id(self) -> str:
+        return self.artifact_version_id
+
+    @property
+    def build_family(self) -> str:
+        return self.artifact_version.build_family
+
+    @property
+    def build_key(self) -> str:
+        return self.artifact_version.build_key
+
 
 class DraftAppBundleArtifactVersionError(ValueError):
     """Raised when a staged refinement cannot be converted into a draft app bundle artifact version."""
@@ -710,6 +722,34 @@ class AcceptedStagedAppBundleArtifactVersionResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     artifact_version: ArtifactVersionDoc
 
+    @property
+    def parent_version_id(self) -> str | None:
+        return self.artifact_version.parent_build_record_id
+
+    @property
+    def build_record_id(self) -> str:
+        return self.artifact_version_id
+
+    @property
+    def build_family(self) -> str:
+        return self.artifact_version.build_family
+
+    @property
+    def build_key(self) -> str:
+        return self.artifact_version.build_key
+
+    @property
+    def build_record_id(self) -> str:
+        return self.artifact_version_id
+
+    @property
+    def build_family(self) -> str:
+        return self.artifact_version.build_family
+
+    @property
+    def build_key(self) -> str:
+        return self.artifact_version.build_key
+
 
 async def accept_staged_refinement_artifact_version(
     *,
@@ -897,6 +937,10 @@ class DraftAppBundleBuildRecordResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     build_record: BuildRecord
 
+    @property
+    def parent_version_id(self) -> str | None:
+        return self.parent_build_record_id
+
 
 class AcceptedStagedAppBundleBuildRecordResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -914,6 +958,10 @@ class AcceptedStagedAppBundleBuildRecordResult(BaseModel):
     refinement_review_status: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     build_record: BuildRecord
+
+    @property
+    def parent_version_id(self) -> str | None:
+        return self.parent_build_record_id
 
 
 async def _resolve_source_build_record(

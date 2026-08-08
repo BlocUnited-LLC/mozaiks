@@ -28,7 +28,7 @@ import yaml
 # ---------------------------------------------------------------------------
 
 _APP_ID = "app_test_123"
-_PREV_REF = "artifact_version_abc"
+_PREV_REF = "build_record_abc"
 
 _MINIMAL_FILE_MAP = {
     "modules/projects/module.yaml": "id: projects\nactions:\n  - id: create_project\n",
@@ -866,4 +866,5 @@ class TestClassificationInToolOutput:
         assert "carry_forward_classification" in mod
         assert "carry_forward_reasons" in mod
         assert mod["carry_forward_reasons"]  # always non-empty
+
 

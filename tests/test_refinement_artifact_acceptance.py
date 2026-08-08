@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from mozaiksai.control_plane.artifact_promotion import (
-    AcceptedStagedAppBundleArtifactVersionError,
-    accept_staged_refinement_artifact_version,
+    AcceptedStagedAppBundleBuildRecordError,
+    accept_staged_refinement_build_record,
     create_draft_app_bundle_from_staged_refinement,
 )
 from mozaiksai.control_plane.dry_run import (
@@ -30,9 +30,9 @@ from mozaiksai.control_plane.scoped_execution import (
 from mozaiksai.control_plane.staging import create_refinement_staging_workspace
 from mozaiksai.control_plane.validation_evidence import ValidationEvidence
 from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 
@@ -59,7 +59,7 @@ def _build_plan(*, request_id: str, app_id: str, staging_area: Path) -> Refineme
         request_id=request_id,
         app_id=app_id,
         request="Update the dashboard surface.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         refinement_lane="ui_patch",
         workflow_id="workflow_app",
@@ -105,18 +105,18 @@ def _build_plan(*, request_id: str, app_id: str, staging_area: Path) -> Refineme
     )
 
 
-def _build_source_version(*, app_id: str, source_zip: Path) -> ArtifactVersionDoc:
-    return ArtifactVersionDoc.model_validate(
+def _build_source_version(*, app_id: str, source_zip: Path) -> BuildRecord:
+    return BuildRecord.model_validate(
         {
             "_id": "av_source_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_source_1",
             "canonical_inputs_version": {"concept": "av_concept_1"},
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "validation_status": ArtifactValidationStatus.PASSED.value,
+            "lifecycle_status": BuildRecordStatus.CURRENT.value,
+            "validation_status": BuildRecordValidationStatus.PASSED.value,
             "files_manifest": [
                 {"path": "ui/pages/dashboard.yaml", "sha256": "sha-source", "size_bytes": 27},
             ],
@@ -126,36 +126,36 @@ def _build_source_version(*, app_id: str, source_zip: Path) -> ArtifactVersionDo
 
 
 class _FakeArtifactStore:
-    def __init__(self, source_version: ArtifactVersionDoc) -> None:
+    def __init__(self, source_version: BuildRecord) -> None:
         self.source_version = source_version
-        self.created_version: ArtifactVersionDoc | None = None
+        self.created_version: BuildRecord | None = None
         self.create_calls: list[dict] = []
         self.accept_calls: list[dict] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if self.created_version is not None and app_id == self.created_version.app_id and artifact_version_id == self.created_version.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if self.created_version is not None and app_id == self.created_version.app_id and build_record_id == self.created_version.id:
             return self.created_version
-        if app_id == self.source_version.app_id and artifact_version_id == self.source_version.id:
+        if app_id == self.source_version.app_id and build_record_id == self.source_version.id:
             return self.source_version
         return None
 
-    async def list_artifact_versions(self, **kwargs):
+    async def list_build_records(self, **kwargs):
         if (
             kwargs.get("app_id") == self.source_version.app_id
-            and kwargs.get("artifact_kind") == "app_bundle"
-            and kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT
+            and kwargs.get("build_family") == "app_bundle"
+            and kwargs.get("lifecycle_status") == BuildRecordStatus.CURRENT
         ):
             return [self.source_version]
         return []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
-        self.created_version = ArtifactVersionDoc.model_validate(
+        self.created_version = BuildRecord.model_validate(
             {
                 "_id": "av_draft_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
                 "parent_version_id": kwargs.get("parent_version_id"),
                 "lineage_root_id": self.source_version.lineage_root_id,
@@ -168,23 +168,23 @@ class _FakeArtifactStore:
         )
         return self.created_version
 
-    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata=None):
+    async def accept_build_record(self, *, app_id: str, build_record_id: str, commit_metadata=None):
         self.accept_calls.append(
             {
                 "app_id": app_id,
-                "artifact_version_id": artifact_version_id,
+                "build_record_id": build_record_id,
                 "commit_metadata": commit_metadata,
             }
         )
-        if self.created_version is None or app_id != self.created_version.app_id or artifact_version_id != self.created_version.id:
+        if self.created_version is None or app_id != self.created_version.app_id or build_record_id != self.created_version.id:
             return None
         self.source_version = self.source_version.model_copy(
-            update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED}
+            update={"lifecycle_status": BuildRecordStatus.SUPERSEDED}
         )
         payload = self.created_version.model_dump(mode="python")
-        payload["lifecycle_status"] = ArtifactLifecycleStatus.CURRENT.value
+        payload["lifecycle_status"] = BuildRecordStatus.CURRENT.value
         payload["commit_metadata"] = commit_metadata or payload["commit_metadata"]
-        self.created_version = ArtifactVersionDoc.model_validate(payload)
+        self.created_version = BuildRecord.model_validate(payload)
         return self.created_version
 
 
@@ -235,7 +235,7 @@ async def _build_acceptance_context(tmp_path: Path):
         review_record,
         validation_evidence,
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         app_id=app_id,
         generated_artifacts_root=tmp_path / "generated",
     )
@@ -256,9 +256,9 @@ async def _build_acceptance_context(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
-    result = await accept_staged_refinement_artifact_version(
+    result = await accept_staged_refinement_build_record(
         app_id=context["app_id"],
-        draft_artifact_version_id=context["draft_result"].artifact_version_id,
+        draft_build_record_id=context["draft_result"].build_record_id,
         review_record=context["review_record"],
         request_id=context["plan"].request_id,
         artifact_store=context["artifact_store"],
@@ -266,8 +266,8 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
         notes="review complete",
     )
 
-    assert result.artifact_kind == "app_bundle"
-    assert result.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert result.build_family == "app_bundle"
+    assert result.lifecycle_status == BuildRecordStatus.CURRENT
     assert result.accepted_by == "operator-1"
     assert result.refinement_review_status == "promotion_ready"
     assert result.metadata["refinement"]["request_id"] == context["plan"].request_id
@@ -275,9 +275,9 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert result.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
     assert result.metadata["acceptance"]["accepted_by"] == "operator-1"
     assert result.metadata["acceptance"]["request_id"] == context["plan"].request_id
-    assert result.artifact_version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
-    assert result.artifact_version.commit_metadata.metadata["acceptance"]["accepted_by"] == "operator-1"
-    assert context["artifact_store"].source_version.lifecycle_status == ArtifactLifecycleStatus.SUPERSEDED
+    assert result.build_record.lifecycle_status == BuildRecordStatus.CURRENT
+    assert result.build_record.commit_metadata.metadata["acceptance"]["accepted_by"] == "operator-1"
+    assert context["artifact_store"].source_version.lifecycle_status == BuildRecordStatus.SUPERSEDED
     assert load_refinement_review_record(context["staging_result"].staging_area).status == "promotion_ready"
 
 
@@ -285,22 +285,22 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
 async def test_acceptance_requires_override_for_skipped_validation(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
-        update={"validation_status": ArtifactValidationStatus.SKIPPED}
+        update={"validation_status": BuildRecordValidationStatus.SKIPPED}
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="explicit validation override"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="explicit validation override"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=context["review_record"],
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
             accepted_by="operator-1",
         )
 
-    result = await accept_staged_refinement_artifact_version(
+    result = await accept_staged_refinement_build_record(
         app_id=context["app_id"],
-        draft_artifact_version_id=context["draft_result"].artifact_version_id,
+        draft_build_record_id=context["draft_result"].build_record_id,
         review_record=context["review_record"],
         request_id=context["plan"].request_id,
         artifact_store=context["artifact_store"],
@@ -309,24 +309,24 @@ async def test_acceptance_requires_override_for_skipped_validation(tmp_path: Pat
     )
 
     acceptance = result.metadata["acceptance"]
-    assert result.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert result.lifecycle_status == BuildRecordStatus.CURRENT
     assert acceptance["validation_override"] is True
-    assert acceptance["validation_status"] == ArtifactValidationStatus.SKIPPED.value
+    assert acceptance["validation_status"] == BuildRecordValidationStatus.SKIPPED.value
 
 
 @pytest.mark.asyncio
 async def test_previous_current_app_bundle_is_superseded(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
-    await accept_staged_refinement_artifact_version(
+    await accept_staged_refinement_build_record(
         app_id=context["app_id"],
-        draft_artifact_version_id=context["draft_result"].artifact_version_id,
+        draft_build_record_id=context["draft_result"].build_record_id,
         review_record=context["review_record"],
         request_id=context["plan"].request_id,
         artifact_store=context["artifact_store"],
         accepted_by="operator-1",
     )
 
-    assert context["artifact_store"].source_version.lifecycle_status == ArtifactLifecycleStatus.SUPERSEDED
+    assert context["artifact_store"].source_version.lifecycle_status == BuildRecordStatus.SUPERSEDED
 
 
 @pytest.mark.asyncio
@@ -335,10 +335,10 @@ async def test_rejects_if_review_status_is_approved_but_not_promotion_ready(tmp_
     create_refinement_review_record(context["staging_result"])
     approved_record = approve_refinement_staging(context["staging_result"].staging_area, reviewer="reviewer_1")
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="promotion_ready"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="promotion_ready"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=approved_record,
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
@@ -355,10 +355,10 @@ async def test_rejects_if_promotion_allowed_is_false(tmp_path: Path) -> None:
     review_path.write_text(json.dumps(review_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     review_record = load_refinement_review_record(context["staging_result"].staging_area)
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="promotion_allowed"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="promotion_allowed"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=review_record,
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
@@ -370,10 +370,10 @@ async def test_rejects_if_promotion_allowed_is_false(tmp_path: Path) -> None:
 async def test_rejects_request_id_mismatch(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="request_id"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="request_id"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=context["review_record"],
             request_id="refine_other",
             artifact_store=context["artifact_store"],
@@ -389,10 +389,10 @@ async def test_rejects_write_back_mode_mismatch(tmp_path: Path) -> None:
     metadata["metadata"]["refinement"]["review"]["write_back_mode"] = "external_patch"
     context["artifact_store"].created_version = version.model_copy(update={"commit_metadata": metadata})
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="write_back_mode"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="write_back_mode"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=context["review_record"],
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
@@ -401,16 +401,16 @@ async def test_rejects_write_back_mode_mismatch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rejects_non_app_bundle_artifact_kind(tmp_path: Path) -> None:
+async def test_rejects_non_app_bundle_ARTIFACT_KIND(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
         update={"build_family": "workflow_bundle"}
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="'app_bundle'"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="'app_bundle'"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=context["review_record"],
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
@@ -422,13 +422,13 @@ async def test_rejects_non_app_bundle_artifact_kind(tmp_path: Path) -> None:
 async def test_rejects_non_draft_artifact(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
-        update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+        update={"lifecycle_status": BuildRecordStatus.CURRENT}
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="DRAFT artifact version"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="DRAFT artifact version"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=context["review_record"],
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
@@ -443,10 +443,10 @@ async def test_rejects_missing_refinement_metadata(tmp_path: Path) -> None:
         update={"commit_metadata": {"metadata": {}}}
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="missing staged refinement metadata"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="missing staged refinement metadata"):
+        await accept_staged_refinement_build_record(
             app_id=context["app_id"],
-            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            draft_build_record_id=context["draft_result"].build_record_id,
             review_record=context["review_record"],
             request_id=context["plan"].request_id,
             artifact_store=context["artifact_store"],
@@ -457,9 +457,9 @@ async def test_rejects_missing_refinement_metadata(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_acceptance_preserves_refinement_metadata_and_records_accepted_by(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
-    result = await accept_staged_refinement_artifact_version(
+    result = await accept_staged_refinement_build_record(
         app_id=context["app_id"],
-        draft_artifact_version_id=context["draft_result"].artifact_version_id,
+        draft_build_record_id=context["draft_result"].build_record_id,
         review_record=context["review_record"],
         request_id=context["plan"].request_id,
         artifact_store=context["artifact_store"],
@@ -467,8 +467,8 @@ async def test_acceptance_preserves_refinement_metadata_and_records_accepted_by(
         notes="operator notes",
     )
 
-    refinement_metadata = result.artifact_version.commit_metadata.metadata["refinement"]
-    acceptance_metadata = result.artifact_version.commit_metadata.metadata["acceptance"]
+    refinement_metadata = result.build_record.commit_metadata.metadata["refinement"]
+    acceptance_metadata = result.build_record.commit_metadata.metadata["acceptance"]
     assert refinement_metadata["request_id"] == context["plan"].request_id
     assert refinement_metadata["review"]["status"] == "promotion_ready"
     assert refinement_metadata["review"]["write_back_mode"] == "generated_artifact"
@@ -483,9 +483,9 @@ async def test_acceptance_does_not_mutate_source_files_or_restore_root(tmp_path:
     source_file = context["source_bundle"] / "ui/pages/dashboard.yaml"
     before = source_file.read_text(encoding="utf-8")
 
-    await accept_staged_refinement_artifact_version(
+    await accept_staged_refinement_build_record(
         app_id=context["app_id"],
-        draft_artifact_version_id=context["draft_result"].artifact_version_id,
+        draft_build_record_id=context["draft_result"].build_record_id,
         review_record=context["review_record"],
         request_id=context["plan"].request_id,
         artifact_store=context["artifact_store"],
@@ -505,4 +505,6 @@ def test_acceptance_module_stays_out_of_workflow_and_llm_paths() -> None:
     assert "execute_workflow" not in text
     assert "conceptual_replan" not in text
     assert "carry_forward" not in text
+
+
 

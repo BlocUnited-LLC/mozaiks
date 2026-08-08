@@ -194,7 +194,7 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
 
     async def _fake_persist_summary_artifact(**kwargs):
         summary_artifact.update(kwargs)
-        return type("ArtifactVersion", (), {"id": "av_theme_capture_1"})()
+        return type("BuildRecord", (), {"id": "av_theme_capture_1"})()
 
     monkeypatch.setattr(module, "emit_ui_surface", _fake_emit)
     monkeypatch.setattr(module, "_HAS_PERSISTENCE", False)
@@ -230,7 +230,7 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
     assert context["captured_theme_config"]["identity"]["app_name"] == "MOZ-UI"
     assert emitted["component_name"] == "ThemePreviewCard"
     assert emitted["kwargs"]["workflow_name"] == "ThemeCapture"
-    assert summary_artifact["artifact_kind"] == "theme_capture"
+    assert summary_artifact["build_family"] == "theme_capture"
     assert summary_artifact["summary_payload"]["theme_config"]["identity"]["app_name"] == "MOZ-UI"
 
 
@@ -271,6 +271,7 @@ def test_workflow_chat_uses_websocket_adapter_and_workflow_send_path() -> None:
     assert "workflowApi.startChat(" in source
     assert "workflowApi.sendMessageToWorkflow(" in source
     assert "wsSendMessage" not in source
+
 
 
 

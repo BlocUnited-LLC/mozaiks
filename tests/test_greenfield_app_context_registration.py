@@ -218,7 +218,7 @@ def test_greenfield_app_context_graph_is_deterministic_and_source_ref_backed() -
     assert {"app", "file", "module", "route", "integration", "generated_overlay"} <= node_types
     assert all(node.source_ref_id for node in first.app_context_graph.nodes)
     assert all(edge.source_ref_id for edge in first.app_context_graph.edges)
-    assert all(edge.artifact_version_id == "av_app_bundle_1" for edge in first.app_context_graph.edges)
+    assert all(edge.build_record_id == "av_app_bundle_1" for edge in first.app_context_graph.edges)
 
 
 async def test_register_greenfield_app_context_version_persists_and_sets_current() -> None:
@@ -242,12 +242,12 @@ async def test_register_greenfield_app_context_version_persists_and_sets_current
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     }
     assert registered.context_version.mode is AppContextMode.GREENFIELD
-    assert registered.artifact_version.lifecycle_status is BuildRecordStatus.CURRENT
+    assert registered.build_record.lifecycle_status is BuildRecordStatus.CURRENT
     assert current is not None
     assert current.mode is AppContextMode.GREENFIELD
-    assert any(ref.artifact_kind == "app_bundle" for ref in current.artifact_refs)
+    assert any(ref.build_family == "app_bundle" for ref in current.artifact_refs)
     assert any(
-        ref.artifact_kind == "app_bundle" and ref.artifact_version_id == "av_app_bundle_1"
+        ref.build_family == "app_bundle" and ref.build_record_id == "av_app_bundle_1"
         for ref in current.artifact_refs
     )
 
@@ -291,7 +291,7 @@ async def test_register_greenfield_app_context_version_indexes_source_workspace(
     persisted_kinds = [call["build_family"] for call in store.create_calls]
     assert "source_context_bundle" in persisted_kinds
     assert registered.context_version.graph_snapshot_ref
-    assert any(ref.artifact_kind == "source_context_bundle" for ref in registered.context_version.artifact_refs)
+    assert any(ref.build_family == "source_context_bundle" for ref in registered.context_version.artifact_refs)
     source_payload = next(
         doc.commit_metadata.metadata["summary_payload"]
         for doc in store.versions.values()
@@ -318,4 +318,6 @@ def test_greenfield_registration_has_no_graph_database_or_proprietary_dependency
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
+
 

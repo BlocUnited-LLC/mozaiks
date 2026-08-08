@@ -175,18 +175,18 @@ def test_artifact_lifecycle_builder_uses_canonical_names() -> None:
     event = build_artifact_lifecycle_event(
         event_type=ARTIFACT_EVENT_CREATED,
         artifact_id="artifact-1",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         chat_id="chat-1",
         workflow_name="AppGenerator",
-        artifact_version_id="av_1",
+        build_record_id="av_1",
         files_manifest=[{"path": "src/App.tsx"}],
         metadata={"source": "compile"},
     )
 
     assert event["kind"] == ARTIFACT_EVENT_CREATED
     assert event["runtime_event_type"] == ARTIFACT_EVENT_CREATED
-    assert event["artifact_kind"] == "app_bundle"
-    assert event["artifact_version_id"] == "av_1"
+    assert event["build_family"] == "app_bundle"
+    assert event["build_record_id"] == "av_1"
     assert event["files_manifest"] == [{"path": "src/App.tsx"}]
 
 
@@ -213,10 +213,11 @@ def test_artifact_lifecycle_builder_rejects_removed_alias_names() -> None:
         build_artifact_lifecycle_event(
             event_type="runtime.artifact_updated",
             artifact_id="artifact-1",
-            artifact_kind="app_bundle",
+            build_family="app_bundle",
             chat_id="chat-1",
             workflow_name="AppGenerator",
         )
+
 
 
 

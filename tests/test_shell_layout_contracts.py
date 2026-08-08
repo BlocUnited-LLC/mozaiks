@@ -114,11 +114,11 @@ def test_build_satisfaction_transition_is_optional_and_registered() -> None:
 def test_app_review_revision_event_preserves_refinement_provenance() -> None:
     source = _read("chat-ui/src/pages/ChatPage.js")
 
-    assert "const artifactKey = detail.artifact_key || artifactKind;" in source
-    assert "const artifactVersionId = detail.artifact_version_id || null;" in source
+    assert "const artifactKey = detail.build_key || artifactKind;" in source
+    assert "const BuildRecordId = detail.build_record_id || null;" in source
     assert "const sourceSurface = detail.source_surface || 'app_review';" in source
     assert "const triggerPayload = {" in source
-    assert "refinementRequest.artifact_version_id = artifactVersionId;" in source
+    assert "refinementRequest.build_record_id = BuildRecordId;" in source
     assert "refinementRequest.extra = requestExtra;" in source
     assert "trigger_payload: triggerPayload" in source
 
@@ -143,14 +143,15 @@ def test_chat_page_declares_workflow_completion_reset_state() -> None:
     assert "setCompletionData(null);" in source
 
 
-def test_app_review_summary_promotes_reviewed_artifact_version() -> None:
+def test_app_review_summary_promotes_reviewed_build_record() -> None:
     source = _read("factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx")
 
     assert "/api/modules/app_registry/promote_build" not in source
     assert "No artifact version available. Cannot promote." in source
-    assert "encodeURIComponent(payload.artifact_version_id)" in source
+    assert "encodeURIComponent(payload.build_record_id)" in source
     assert "const appIdQuery = payload?.app_id ? `?app_id=${encodeURIComponent(payload.app_id)}` : '';" in source
-    assert "/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}" in source
+    assert "/api/studio/build/artifacts/${encodeURIComponent(payload.build_record_id)}/promote${appIdQuery}" in source
     assert "body: JSON.stringify({ build_registry_id: payload.build_registry_id || null })" in source
-    assert "Boolean(payload?.artifact_version_id)" in source
+    assert "Boolean(payload?.build_record_id)" in source
+
 

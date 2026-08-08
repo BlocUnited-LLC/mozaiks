@@ -28,9 +28,9 @@ def _review_context(**overrides: Any) -> _Context:
         "app_id": "app_1",
         "build_id": "build_1",
         "build_registry_id": "appreg_1",
-        "artifact_kind": "app_bundle",
-        "artifact_key": "app_bundle",
-        "artifact_version_id": "av_app_bundle_1",
+        "build_family": "app_bundle",
+        "build_key": "app_bundle",
+        "build_record_id": "av_app_bundle_1",
         "bundle_path": "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app",
         "lifecycle_state": "review",
         "app_validation_status": "skipped",
@@ -48,9 +48,9 @@ def test_review_summary_payload_preserves_appgenerator_handoff_metadata() -> Non
     assert payload["review_ready"] is True
     assert payload["can_promote"] is True
     assert payload["can_revise"] is True
-    assert payload["artifact_kind"] == "app_bundle"
-    assert payload["artifact_key"] == "app_bundle"
-    assert payload["artifact_version_id"] == "av_app_bundle_1"
+    assert payload["build_family"] == "app_bundle"
+    assert payload["build_key"] == "app_bundle"
+    assert payload["build_record_id"] == "av_app_bundle_1"
     assert payload["build_registry_id"] == "appreg_1"
     assert payload["bundle_path"].endswith("/generated/apps/app_1/build_1/app")
     assert payload["promotion_blockers"] == []
@@ -61,7 +61,7 @@ def test_review_summary_blocks_promotion_when_handoff_is_incomplete() -> None:
     payload = build_review_summary_payload(
         _review_context(
             build_registry_id=None,
-            artifact_version_id=None,
+            build_record_id=None,
             app_validation_status=None,
             integration_tests_passed=False,
             bundle_path=None,
@@ -73,7 +73,7 @@ def test_review_summary_blocks_promotion_when_handoff_is_incomplete() -> None:
     assert payload["can_revise"] is False
     assert payload["promotion_blockers"] == [
         "missing_build_registry_id",
-        "missing_artifact_version_id",
+        "missing_build_record_id",
         "missing_app_validation_status",
         "integration_tests_failed",
     ]
@@ -85,9 +85,9 @@ def test_refinement_payload_matches_studio_trigger_contract() -> None:
 
     assert payload == {
         "raw_user_request": "Add dark mode.",
-        "artifact_kind": "app_bundle",
-        "artifact_key": "app_bundle",
-        "artifact_version_id": "av_app_bundle_1",
+        "build_family": "app_bundle",
+        "build_key": "app_bundle",
+        "build_record_id": "av_app_bundle_1",
         "source_surface": "app_review",
         "extra": {
             "lifecycle_state": "review",
@@ -119,7 +119,7 @@ async def test_present_review_summary_emits_canonical_payload(monkeypatch: pytes
 
     assert result == {"presented": True}
     assert emitted["tool_id"] == "present_review_summary"
-    assert emitted["payload"]["artifact_version_id"] == "av_app_bundle_1"
+    assert emitted["payload"]["build_record_id"] == "av_app_bundle_1"
     assert emitted["payload"]["review_ready"] is True
     assert emitted["kwargs"]["chat_id"] == "chat_review_1"
     assert emitted["kwargs"]["workflow_name"] == "AppReview"
@@ -158,15 +158,15 @@ async def test_submit_revision_request_records_and_emits_refinement_payload(
     assert ctx.data["review_complete"] is True
     assert ctx.data["revision_submitted"] is True
     assert ctx.data["refinement_request"] == "Add a dark mode toggle."
-    assert ctx.data["refinement_request_meta"]["artifact_version_id"] == "av_app_bundle_1"
+    assert ctx.data["refinement_request_meta"]["build_record_id"] == "av_app_bundle_1"
     assert events == [
         (
             {
                 "kind": "chat.revision_requested",
                 "refinement_request": "Add a dark mode toggle.",
-                "artifact_kind": "app_bundle",
-                "artifact_key": "app_bundle",
-                "artifact_version_id": "av_app_bundle_1",
+                "build_family": "app_bundle",
+                "build_key": "app_bundle",
+                "build_record_id": "av_app_bundle_1",
                 "source_surface": "app_review",
                 "extra": {
                     "lifecycle_state": "review",
@@ -208,3 +208,4 @@ async def test_submit_revision_request_marks_promotion_complete() -> None:
     assert result == {"success": True, "action": "promote", "revision_request": None}
     assert ctx.data["review_complete"] is True
     assert ctx.data["lifecycle_state"] == "active"
+

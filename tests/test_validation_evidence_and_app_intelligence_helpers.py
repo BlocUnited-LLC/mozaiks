@@ -42,7 +42,7 @@ Covers:
 
   _context_version_id (app_intelligence):
     - starts with "ctx_"
-    - contains normalized app_id and artifact_version_id
+    - contains normalized app_id and build_record_id
     - special chars replaced
     - lowercased
     - max 80 chars after "ctx_" prefix
@@ -335,3 +335,4 @@ class TestOwnershipBoundaries:
     def test_empty_file_map_returns_empty(self):
         boundaries = _ownership_boundaries({}, "ref-001")
         assert boundaries == []
+

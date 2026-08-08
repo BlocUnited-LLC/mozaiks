@@ -14,7 +14,7 @@ from mozaiksai.core.app_context.models import (
     OwnershipClass,
 )
 from mozaiksai.core.app_context.store import APP_CONTEXT_VERSION_ARTIFACT_KIND
-from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus, ArtifactValidationStatus
+from mozaiksai.core.artifacts.models import BuildRecordStatus, BuildRecordValidationStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 save_module = importlib.import_module(
@@ -28,15 +28,15 @@ class _FakeArtifactStore:
         self.versions: dict[str, SimpleNamespace] = {}
         self._counter = 0
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self._counter += 1
-        version_id = f"av_{kwargs['artifact_kind']}_{self._counter}"
+        version_id = f"av_{kwargs['build_family']}_{self._counter}"
         self.calls.append(kwargs)
         doc = SimpleNamespace(
             id=version_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             lifecycle_status=kwargs["lifecycle_status"],
             commit_metadata=SimpleNamespace(
                 metadata=kwargs.get("commit_metadata", {}).get("metadata", {})
@@ -45,29 +45,29 @@ class _FakeArtifactStore:
         self.versions[version_id] = doc
         return doc
 
-    async def get_artifact_version(self, *, app_id, artifact_version_id):
-        artifact = self.versions.get(artifact_version_id)
+    async def get_build_record(self, *, app_id, build_record_id):
+        artifact = self.versions.get(build_record_id)
         if artifact is None or artifact.app_id != app_id:
             return None
         return artifact
 
-    async def accept_artifact_version(self, *, app_id, artifact_version_id):
-        artifact = await self.get_artifact_version(
+    async def accept_build_record(self, *, app_id, build_record_id):
+        artifact = await self.get_build_record(
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if artifact is None:
             return None
         for version in self.versions.values():
             if (
                 version.app_id == app_id
-                and version.artifact_kind == artifact.artifact_kind
-                and version.artifact_key == artifact.artifact_key
+                and version.build_family == artifact.build_family
+                and version.build_key == artifact.build_key
                 and version.id != artifact.id
-                and version.lifecycle_status is ArtifactLifecycleStatus.CURRENT
+                and version.lifecycle_status is BuildRecordStatus.CURRENT
             ):
-                version.lifecycle_status = ArtifactLifecycleStatus.SUPERSEDED
-        artifact.lifecycle_status = ArtifactLifecycleStatus.CURRENT
+                version.lifecycle_status = BuildRecordStatus.SUPERSEDED
+        artifact.lifecycle_status = BuildRecordStatus.CURRENT
         return artifact
 
 
@@ -176,7 +176,7 @@ def _discovery_output() -> dict:
                 "priority": "high",
             }
         ],
-        "artifact_version": "1.0",
+        "build_record": "1.0",
     }
 
 
@@ -294,7 +294,7 @@ def test_brownfield_registration_and_graph_are_draft_source_ref_backed() -> None
     assert all(edge.source_ref_id for edge in graph.edges)
 
 
-def test_save_step_persists_draft_artifact_versions_and_preserves_existing_context(
+def test_save_step_persists_draft_build_records_and_preserves_existing_context(
     monkeypatch,
 ) -> None:
     context = _context()
@@ -324,26 +324,26 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     assert "module_decomposition_plan" not in context["existing_app_discovery_artifact"]
     assert emitted["component"] == "AppIntelligenceOverviewCard"
 
-    persisted_kinds = {call["artifact_kind"] for call in fake_store.calls}
+    persisted_kinds = {call["build_family"] for call in fake_store.calls}
     assert persisted_kinds == {
         *app_context_mapping.APP_CONTEXT_ARTIFACT_KINDS,
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     }
     assert "module_decomposition_plan" not in persisted_kinds
-    assert context["brownfield_app_context_artifact_version_refs"]["application_inventory"]
-    assert context["brownfield_app_context_artifact_version_refs"]["source_context_bundle"]
-    assert context["brownfield_app_context_artifact_version_refs"]["app_intelligence_snapshot"]
-    assert context["app_context_version_artifact_version_id"]
+    assert context["brownfield_app_context_build_record_refs"]["application_inventory"]
+    assert context["brownfield_app_context_build_record_refs"]["source_context_bundle"]
+    assert context["brownfield_app_context_build_record_refs"]["app_intelligence_snapshot"]
+    assert context["app_context_version_build_record_id"]
     assert context["current_app_context_version_id"] == context["brownfield_registration"][
         "context_version_id"
     ]
     assert context["app_context_version"]["mode"] == "brownfield"
     assert any(
-        ref["artifact_kind"] == "source_context_bundle"
+        ref["build_family"] == "source_context_bundle"
         for ref in context["app_context_version"]["artifact_refs"]
     )
     assert any(
-        ref["artifact_kind"] == "app_intelligence_snapshot"
+        ref["build_family"] == "app_intelligence_snapshot"
         for ref in context["app_context_version"]["artifact_refs"]
     )
     assert context["app_context_version"]["stale_status"] == "current"
@@ -352,8 +352,8 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     assert context["integration_inventory"]["integrations"][0]["secret_required"] is True
 
     for call in fake_store.calls:
-        assert call["lifecycle_status"] is ArtifactLifecycleStatus.DRAFT
-        assert call["validation_status"] is ArtifactValidationStatus.PENDING
+        assert call["lifecycle_status"] is BuildRecordStatus.DRAFT
+        assert call["validation_status"] is BuildRecordValidationStatus.PENDING
         assert call["source_workflow"] == "ExistingAppDiscovery"
         assert call["source_chat_id"] == "chat_ops_001"
         assert call["commit_metadata"]["metadata"]["source_workflow"] == "ExistingAppDiscovery"
@@ -391,4 +391,6 @@ def test_existing_app_context_persistence_uses_neutral_oss_terms() -> None:
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term not in text
+
+
 

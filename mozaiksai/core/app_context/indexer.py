@@ -78,6 +78,18 @@ class AppContextIndex:
         health["app_context_index_schema_version"] = APP_CONTEXT_INDEX_SCHEMA_VERSION
         return health
 
+    @property
+    def build_record_id(self) -> str:
+        return self.artifact_version_id
+
+    @property
+    def build_family(self) -> str:
+        return self.artifact_kind
+
+    @property
+    def build_key(self) -> str:
+        return self.artifact_key
+
 
 @dataclass(frozen=True)
 class PersistedAppContextIndex:
@@ -91,18 +103,21 @@ def index_source_scan(
     *,
     app_id: str,
     scan_result: SourceScanResult,
-    artifact_version_id: str,
+    artifact_version_id: str | None = None,
+    build_record_id: str | None = None,
     artifact_kind: str = "app_bundle",
+    build_family: str | None = None,
     artifact_key: str | None = None,
+    build_key: str | None = None,
     source_ref: SourceRef | None = None,
     indexed_at: datetime | None = None,
     parser_status: dict[str, Any] | None = None,
 ) -> AppContextIndex:
     """Build the canonical source corpus and graph for a selected source scan."""
     resolved_app_id = str(app_id or "").strip()
-    resolved_artifact_version_id = str(artifact_version_id or "").strip()
-    resolved_artifact_kind = str(artifact_kind or "app_bundle").strip()
-    resolved_artifact_key = str(artifact_key or resolved_artifact_kind).strip()
+    resolved_artifact_version_id = str(build_record_id or artifact_version_id or "").strip()
+    resolved_artifact_kind = str(build_family or artifact_kind or "app_bundle").strip()
+    resolved_artifact_key = str(build_key or artifact_key or resolved_artifact_kind).strip()
     if not resolved_app_id:
         raise ValueError("app_id is required")
     if not resolved_artifact_version_id:
@@ -187,9 +202,12 @@ def index_file_map(
     *,
     app_id: str,
     file_map: dict[str, str],
-    artifact_version_id: str,
+    artifact_version_id: str | None = None,
+    build_record_id: str | None = None,
     artifact_kind: str = "app_bundle",
+    build_family: str | None = None,
     artifact_key: str | None = None,
+    build_key: str | None = None,
     source: str = "file_map",
     scan_policy: SourceScanPolicy | dict[str, Any] | None = None,
     source_ref: SourceRef | None = None,
@@ -208,8 +226,11 @@ def index_file_map(
         app_id=app_id,
         scan_result=scan_result,
         artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
         artifact_kind=artifact_kind,
+        build_family=build_family,
         artifact_key=artifact_key,
+        build_key=build_key,
         source_ref=source_ref,
         indexed_at=indexed_at,
     )
@@ -219,9 +240,12 @@ def index_workspace_root(
     *,
     app_id: str,
     workspace_root: str | Path,
-    artifact_version_id: str,
+    artifact_version_id: str | None = None,
+    build_record_id: str | None = None,
     artifact_kind: str = "app_bundle",
+    build_family: str | None = None,
     artifact_key: str | None = None,
+    build_key: str | None = None,
     scan_policy: SourceScanPolicy | dict[str, Any] | None = None,
     source_ref: SourceRef | None = None,
     indexed_at: datetime | None = None,
@@ -238,8 +262,11 @@ def index_workspace_root(
         app_id=app_id,
         scan_result=scan_result,
         artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
         artifact_kind=artifact_kind,
+        build_family=build_family,
         artifact_key=artifact_key,
+        build_key=build_key,
         source_ref=source_ref,
         indexed_at=indexed_at,
     )

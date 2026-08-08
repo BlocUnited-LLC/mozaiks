@@ -157,15 +157,15 @@ def _ownership() -> list[OwnershipBoundary]:
 
 def _artifact_refs(suffix: str = "1") -> dict[str, str]:
     return {
-        artifact_kind: f"av_{artifact_kind}_{suffix}"
-        for artifact_kind in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
+        build_family: f"av_{build_family}_{suffix}"
+        for build_family in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     }
 
 
 def test_builds_brownfield_app_context_version_from_artifact_refs() -> None:
     context_version = build_brownfield_app_context_version(
         app_id="ops_studio",
-        artifact_version_refs=_artifact_refs(),
+        build_record_refs=_artifact_refs(),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
         application_inventory=_inventory(),
@@ -176,7 +176,7 @@ def test_builds_brownfield_app_context_version_from_artifact_refs() -> None:
     assert context_version.mode is AppContextMode.BROWNFIELD
     assert context_version.stale_status is AppContextStaleStatus.CURRENT
     assert context_version.graph_snapshot_ref == "av_app_context_graph_1"
-    assert {ref.artifact_kind for ref in context_version.artifact_refs} == set(
+    assert {ref.build_family for ref in context_version.artifact_refs} == set(
         BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     )
     assert context_version.surface_indexes.routes[0].location == "/orders"
@@ -189,18 +189,18 @@ def test_missing_required_artifact_refs_fail_clearly() -> None:
     with pytest.raises(ValueError, match="risk_report"):
         build_brownfield_app_context_version(
             app_id="ops_studio",
-            artifact_version_refs=refs,
+            build_record_refs=refs,
             source_refs=[_source_ref()],
             ownership_boundaries=_ownership(),
             application_inventory=_inventory(),
         )
 
 
-async def test_registers_app_context_version_as_artifact_kind() -> None:
+async def test_registers_app_context_version_as_ARTIFACT_KIND() -> None:
     store = _MemoryBuildRecordStore()
     context_version = build_brownfield_app_context_version(
         app_id="ops_studio",
-        artifact_version_refs=_artifact_refs(),
+        build_record_refs=_artifact_refs(),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
         application_inventory=_inventory(),
@@ -214,9 +214,9 @@ async def test_registers_app_context_version_as_artifact_kind() -> None:
         source_chat_id="chat_1",
     )
 
-    assert registered.artifact_version.build_family == APP_CONTEXT_VERSION_ARTIFACT_KIND
-    assert registered.artifact_version.build_key == APP_CONTEXT_VERSION_ARTIFACT_KEY
-    assert registered.artifact_version.lifecycle_status is BuildRecordStatus.DRAFT
+    assert registered.build_record.build_family == APP_CONTEXT_VERSION_ARTIFACT_KIND
+    assert registered.build_record.build_key == APP_CONTEXT_VERSION_ARTIFACT_KEY
+    assert registered.build_record.lifecycle_status is BuildRecordStatus.DRAFT
     assert store.create_calls[0]["build_family"] == "app_context_version"
 
 
@@ -224,7 +224,7 @@ async def test_current_context_selection_can_be_set_and_retrieved() -> None:
     store = _MemoryBuildRecordStore()
     context_version = build_brownfield_app_context_version(
         app_id="ops_studio",
-        artifact_version_refs=_artifact_refs(),
+        build_record_refs=_artifact_refs(),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
         application_inventory=_inventory(),
@@ -236,7 +236,7 @@ async def test_current_context_selection_can_be_set_and_retrieved() -> None:
 
     current_artifact = await set_current_app_context_version(
         app_id="ops_studio",
-        build_record_id=registered.artifact_version.id,
+        build_record_id=registered.build_record.id,
         artifact_store=store,
     )
     current_context = await get_current_app_context_version(
@@ -254,7 +254,7 @@ async def test_new_current_context_supersedes_prior_current_context() -> None:
     store = _MemoryBuildRecordStore()
     first = build_brownfield_app_context_version(
         app_id="ops_studio",
-        artifact_version_refs=_artifact_refs("1"),
+        build_record_refs=_artifact_refs("1"),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
         application_inventory=_inventory(),
@@ -262,7 +262,7 @@ async def test_new_current_context_supersedes_prior_current_context() -> None:
     )
     second = build_brownfield_app_context_version(
         app_id="ops_studio",
-        artifact_version_refs=_artifact_refs("2"),
+        build_record_refs=_artifact_refs("2"),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
         application_inventory=_inventory(),
@@ -284,8 +284,8 @@ async def test_new_current_context_supersedes_prior_current_context() -> None:
         artifact_store=store,
     )
 
-    assert first_registered.artifact_version.lifecycle_status is BuildRecordStatus.SUPERSEDED
-    assert second_registered.artifact_version.lifecycle_status is BuildRecordStatus.CURRENT
+    assert first_registered.build_record.lifecycle_status is BuildRecordStatus.SUPERSEDED
+    assert second_registered.build_record.lifecycle_status is BuildRecordStatus.CURRENT
     assert current_context is not None
     assert current_context.context_version_id == "ctx_ops_2"
 
@@ -325,4 +325,6 @@ def test_registration_store_does_not_canonicalize_legacy_placeholders() -> None:
 
     assert "native_migration" not in text
     assert "module_decomposition_plan" not in text
+
+
 

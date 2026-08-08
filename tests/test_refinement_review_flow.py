@@ -25,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _build_plan(staging_root: Path, *, request_id: str = "req_review_001") -> dry_run.RefinementExecutionPlan:
     return dry_run.build_refinement_execution_plan_from_route(
         request="Update the dashboard review surface.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -331,4 +331,5 @@ def test_review_fixtures_are_neutral() -> None:
     ]
 
     assert not any(term in combined for term in forbidden_terms)
+
 

@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from mozaiksai.control_plane.artifact_promotion import (
-    AcceptedStagedAppBundleArtifactVersionError,
-    DraftAppBundleArtifactVersionError,
-    accept_staged_refinement_artifact_version,
+    AcceptedStagedAppBundleBuildRecordError,
+    DraftAppBundleBuildRecordError,
+    accept_staged_refinement_build_record,
     create_draft_app_bundle_from_staged_refinement,
 )
 from mozaiksai.control_plane.dry_run import (
@@ -35,9 +35,9 @@ from mozaiksai.control_plane.staging import (
 )
 from mozaiksai.control_plane.validation_evidence import ValidationEvidence
 from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 
@@ -63,7 +63,7 @@ def _build_plan(*, request_id: str, app_id: str, staging_area: Path) -> Refineme
         request_id=request_id,
         app_id=app_id,
         request="Update the dashboard surface.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         refinement_lane="ui_patch",
         workflow_id="workflow_app",
@@ -109,18 +109,18 @@ def _build_plan(*, request_id: str, app_id: str, staging_area: Path) -> Refineme
     )
 
 
-def _build_source_version(*, app_id: str, source_zip: Path) -> ArtifactVersionDoc:
-    return ArtifactVersionDoc.model_validate(
+def _build_source_version(*, app_id: str, source_zip: Path) -> BuildRecord:
+    return BuildRecord.model_validate(
         {
             "_id": "av_source_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_source_1",
             "canonical_inputs_version": {"concept": "av_concept_1"},
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "validation_status": ArtifactValidationStatus.PASSED.value,
+            "lifecycle_status": BuildRecordStatus.CURRENT.value,
+            "validation_status": BuildRecordValidationStatus.PASSED.value,
             "files_manifest": [
                 {"path": "ui/pages/dashboard.yaml", "sha256": "sha-source", "size_bytes": 27},
             ],
@@ -130,36 +130,36 @@ def _build_source_version(*, app_id: str, source_zip: Path) -> ArtifactVersionDo
 
 
 class _FakeArtifactStore:
-    def __init__(self, source_version: ArtifactVersionDoc) -> None:
+    def __init__(self, source_version: BuildRecord) -> None:
         self.source_version = source_version
         self.create_calls: list[dict] = []
         self.validation_calls: list[dict] = []
-        self.created_version: ArtifactVersionDoc | None = None
+        self.created_version: BuildRecord | None = None
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if app_id == self.source_version.app_id and artifact_version_id == self.source_version.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if app_id == self.source_version.app_id and build_record_id == self.source_version.id:
             return self.source_version
-        if self.created_version is not None and app_id == self.created_version.app_id and artifact_version_id == self.created_version.id:
+        if self.created_version is not None and app_id == self.created_version.app_id and build_record_id == self.created_version.id:
             return self.created_version
         return None
 
-    async def list_artifact_versions(self, **kwargs):
+    async def list_build_records(self, **kwargs):
         if (
             kwargs.get("app_id") == self.source_version.app_id
-            and kwargs.get("artifact_kind") == "app_bundle"
-            and kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT
+            and kwargs.get("build_family") == "app_bundle"
+            and kwargs.get("lifecycle_status") == BuildRecordStatus.CURRENT
         ):
             return [self.source_version]
         return []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
-        self.created_version = ArtifactVersionDoc.model_validate(
+        self.created_version = BuildRecord.model_validate(
             {
                 "_id": "av_draft_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
                 "parent_version_id": kwargs.get("parent_version_id"),
                 "lineage_root_id": self.source_version.lineage_root_id,
@@ -174,7 +174,7 @@ class _FakeArtifactStore:
 
     async def set_validation_status(self, **kwargs):
         self.validation_calls.append(dict(kwargs))
-        if self.created_version is not None and kwargs.get("artifact_version_id") == self.created_version.id:
+        if self.created_version is not None and kwargs.get("build_record_id") == self.created_version.id:
             commit_metadata = kwargs.get("commit_metadata") or {}
             self.created_version = self.created_version.model_copy(
                 update={
@@ -184,17 +184,17 @@ class _FakeArtifactStore:
             )
         return True
 
-    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata: dict | None = None):
+    async def accept_build_record(self, *, app_id: str, build_record_id: str, commit_metadata: dict | None = None):
         version = None
-        if self.created_version is not None and self.created_version.id == artifact_version_id and self.created_version.app_id == app_id:
+        if self.created_version is not None and self.created_version.id == build_record_id and self.created_version.app_id == app_id:
             version = self.created_version
-        elif self.source_version.id == artifact_version_id and self.source_version.app_id == app_id:
+        elif self.source_version.id == build_record_id and self.source_version.app_id == app_id:
             version = self.source_version
         if version is None:
             return None
         accepted = version.model_copy(
             update={
-                "lifecycle_status": ArtifactLifecycleStatus.CURRENT,
+                "lifecycle_status": BuildRecordStatus.CURRENT,
                 "commit_metadata": commit_metadata or version.commit_metadata,
             }
         )
@@ -209,19 +209,19 @@ class _FakeGridFSContentStore:
     def __init__(self) -> None:
         self.put_calls: list[dict] = []
 
-    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
+    async def put_bundle(self, data: bytes, *, app_id: str, build_record_id: str) -> str:
         self.put_calls.append(
             {
                 "data": data,
                 "app_id": app_id,
-                "artifact_version_id": artifact_version_id,
+                "build_record_id": build_record_id,
             }
         )
         return "gridfs_ref_1"
 
 
 @pytest.mark.asyncio
-async def test_creates_draft_app_bundle_artifact_version_from_staged_workspace(tmp_path: Path) -> None:
+async def test_creates_draft_app_bundle_build_record_from_staged_workspace(tmp_path: Path) -> None:
     app_id = "app_1"
     source_bundle = tmp_path / "source_bundle"
     _write_source_bundle(source_bundle)
@@ -279,37 +279,37 @@ async def test_creates_draft_app_bundle_artifact_version_from_staged_workspace(t
         review_record,
         evidence,
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
         policy_decisions=policy_decisions,
     )
 
-    assert result.artifact_kind == "app_bundle"
-    assert result.artifact_version.artifact_kind == "app_bundle"
-    assert result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert result.build_family == "app_bundle"
+    assert result.build_record.build_family == "app_bundle"
+    assert result.lifecycle_status == BuildRecordStatus.DRAFT
     assert result.parent_version_id == source_version.id
-    assert result.validation_status == ArtifactValidationStatus.PASSED
+    assert result.validation_status == BuildRecordValidationStatus.PASSED
     assert result.content_ref is None
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["request_id"] == plan.request_id
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["change_class"] == "patch"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["refinement_lane"] == "ui_patch"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["validation_evidence"]["completed"] == [
+    assert result.build_record.commit_metadata.metadata["refinement"]["request_id"] == plan.request_id
+    assert result.build_record.commit_metadata.metadata["refinement"]["change_class"] == "patch"
+    assert result.build_record.commit_metadata.metadata["refinement"]["refinement_lane"] == "ui_patch"
+    assert result.build_record.commit_metadata.metadata["refinement"]["validation_evidence"]["completed"] == [
         "route_component_validation",
         "ui_theme_primitive_validation",
     ]
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["status"] == "promotion_ready"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["review"]["write_back_target"] is None
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["scoped_execution"]["execution_mode"] == "scoped_staging"
-    assert result.artifact_version.commit_metadata.metadata["refinement"]["promotion_policy"]["policy_decisions"] == policy_decisions
-    assert result.artifact_version.commit_metadata.metadata["artifact_path"] == result.artifact_path
+    assert result.build_record.commit_metadata.metadata["refinement"]["review"]["status"] == "promotion_ready"
+    assert result.build_record.commit_metadata.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
+    assert result.build_record.commit_metadata.metadata["refinement"]["review"]["write_back_target"] is None
+    assert result.build_record.commit_metadata.metadata["refinement"]["scoped_execution"]["execution_mode"] == "scoped_staging"
+    assert result.build_record.commit_metadata.metadata["refinement"]["promotion_policy"]["policy_decisions"] == policy_decisions
+    assert result.build_record.commit_metadata.metadata["artifact_path"] == result.artifact_path
 
     created = artifact_store.create_calls[0]
-    assert created["artifact_kind"] == "app_bundle"
-    assert created["artifact_key"] == "app_bundle"
+    assert created["build_family"] == "app_bundle"
+    assert created["build_key"] == "app_bundle"
     assert created["parent_version_id"] == source_version.id
-    assert created["lifecycle_status"] == ArtifactLifecycleStatus.DRAFT
-    assert created["validation_status"] == ArtifactValidationStatus.PASSED
+    assert created["lifecycle_status"] == BuildRecordStatus.DRAFT
+    assert created["validation_status"] == BuildRecordValidationStatus.PASSED
     manifest_paths = [entry["path"] for entry in created["files_manifest"]]
     assert manifest_paths == [
         "config/shell.json",
@@ -383,13 +383,13 @@ async def test_non_local_content_store_records_content_ref_and_backend(tmp_path:
         evidence,
         artifact_store=artifact_store,
         content_store=content_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
 
     assert result.content_ref == "gridfs_ref_1"
     assert result.content_backend == "gridfs"
-    assert content_store.put_calls[0]["artifact_version_id"] == "av_draft_1"
+    assert content_store.put_calls[0]["build_record_id"] == "av_draft_1"
     assert result.metadata["content_ref"] == "gridfs_ref_1"
     assert result.metadata["content_backend"] == "gridfs"
 
@@ -453,7 +453,7 @@ async def test_bundle_excludes_secret_paths_symlinks_and_staging_metadata(tmp_pa
         review_record,
         evidence,
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
 
@@ -470,7 +470,7 @@ async def test_bundle_excludes_secret_paths_symlinks_and_staging_metadata(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_draft_artifact_version_metadata_contains_lineage_validation_and_review(tmp_path: Path) -> None:
+async def test_draft_build_record_metadata_contains_lineage_validation_and_review(tmp_path: Path) -> None:
     app_id = "app_1"
     source_bundle = tmp_path / "source_bundle"
     _write_source_bundle(source_bundle)
@@ -517,7 +517,7 @@ async def test_draft_artifact_version_metadata_contains_lineage_validation_and_r
         review_record,
         evidence,
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
         policy_decisions=[
             {
@@ -532,8 +532,8 @@ async def test_draft_artifact_version_metadata_contains_lineage_validation_and_r
     )
 
     metadata = result.metadata["refinement"]
-    assert result.artifact_version.parent_version_id == source_version.id
-    assert result.artifact_version.validation_status == ArtifactValidationStatus.PASSED
+    assert result.build_record.parent_version_id == source_version.id
+    assert result.build_record.validation_status == BuildRecordValidationStatus.PASSED
     assert metadata["request_id"] == plan.request_id
     assert metadata["change_class"] == "patch"
     assert metadata["refinement_lane"] == "ui_patch"
@@ -541,7 +541,7 @@ async def test_draft_artifact_version_metadata_contains_lineage_validation_and_r
     assert metadata["affected_bundle_paths"] == plan.affected_bundle_paths
     assert metadata["staging_area"] == staging_result.staging_area
     assert metadata["source_bundle_path"] == staging_result.source_bundle_path
-    assert metadata["source_artifact_version_id"] == source_version.id
+    assert metadata["source_build_record_id"] == source_version.id
     assert metadata["validation_evidence"]["warnings"] == ["validator warning"]
     assert metadata["review"]["status"] == "promotion_ready"
     assert metadata["review"]["reviewer"] == "reviewer_1"
@@ -590,7 +590,7 @@ async def test_request_id_mismatch_blocks_creation(tmp_path: Path) -> None:
         ],
     )
 
-    with pytest.raises(DraftAppBundleArtifactVersionError):
+    with pytest.raises(DraftAppBundleBuildRecordError):
         await create_draft_app_bundle_from_staged_refinement(
             plan,
             staging_result,
@@ -598,7 +598,7 @@ async def test_request_id_mismatch_blocks_creation(tmp_path: Path) -> None:
             review_record,
             ValidationEvidence(completed=["route_component_validation"], failed=[], warnings=[], artifacts=[]),
             artifact_store=artifact_store,
-            source_artifact_version_id=source_version.id,
+            source_build_record_id=source_version.id,
             generated_artifacts_root=tmp_path / "generated",
         )
 
@@ -636,7 +636,7 @@ async def test_missing_workspace_blocks_creation(tmp_path: Path) -> None:
         result_path=str(Path(staging_result.staging_area) / "execution_result.json"),
     )
 
-    with pytest.raises(DraftAppBundleArtifactVersionError):
+    with pytest.raises(DraftAppBundleBuildRecordError):
         await create_draft_app_bundle_from_staged_refinement(
             plan,
             staging_result,
@@ -645,21 +645,21 @@ async def test_missing_workspace_blocks_creation(tmp_path: Path) -> None:
             ValidationEvidence(completed=[], failed=[], warnings=[], artifacts=[]),
             app_id="app_1",
             artifact_store=_FakeArtifactStore(
-                ArtifactVersionDoc.model_validate(
+                BuildRecord.model_validate(
                     {
                         "_id": "av_source_1",
                         "app_id": "app_1",
-                        "artifact_kind": "app_bundle",
-                        "artifact_key": "app_bundle",
+                        "build_family": "app_bundle",
+                        "build_key": "app_bundle",
                         "version_number": 1,
                         "lineage_root_id": "av_source_1",
-                        "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-                        "validation_status": ArtifactValidationStatus.PASSED.value,
+                        "lifecycle_status": BuildRecordStatus.CURRENT.value,
+                        "validation_status": BuildRecordValidationStatus.PASSED.value,
                         "commit_metadata": {"metadata": {}},
                     }
                 )
             ),
-            source_artifact_version_id="av_source_1",
+            source_build_record_id="av_source_1",
             generated_artifacts_root=tmp_path / "generated",
         )
 
@@ -709,16 +709,16 @@ async def test_failed_validation_maps_to_failed_status(tmp_path: Path) -> None:
             artifacts=[],
         ),
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
 
-    assert result.validation_status == ArtifactValidationStatus.FAILED
-    assert result.artifact_version.validation_status == ArtifactValidationStatus.FAILED
+    assert result.validation_status == BuildRecordValidationStatus.FAILED
+    assert result.build_record.validation_status == BuildRecordValidationStatus.FAILED
 
 
 @pytest.mark.asyncio
-async def test_accept_staged_refinement_artifact_version_promotes_draft_to_current(tmp_path: Path) -> None:
+async def test_accept_staged_refinement_build_record_promotes_draft_to_current(tmp_path: Path) -> None:
     app_id = "app_accept_1"
     source_bundle = tmp_path / "source_bundle"
     _write_source_bundle(source_bundle)
@@ -747,22 +747,22 @@ async def test_accept_staged_refinement_artifact_version_promotes_draft_to_curre
         review_record,
         ValidationEvidence(completed=["route_component_validation", "ui_theme_primitive_validation"], failed=[], warnings=[], artifacts=[]),
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
-    assert draft_result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert draft_result.lifecycle_status == BuildRecordStatus.DRAFT
 
-    accepted_result = await accept_staged_refinement_artifact_version(
+    accepted_result = await accept_staged_refinement_build_record(
         app_id=app_id,
-        draft_artifact_version_id=draft_result.artifact_version_id,
+        draft_build_record_id=draft_result.build_record_id,
         review_record=review_record,
         request_id=plan.request_id,
         artifact_store=artifact_store,
         accepted_by="reviewer_1",
     )
 
-    assert accepted_result.lifecycle_status == ArtifactLifecycleStatus.CURRENT
-    assert accepted_result.artifact_kind == "app_bundle"
+    assert accepted_result.lifecycle_status == BuildRecordStatus.CURRENT
+    assert accepted_result.build_family == "app_bundle"
     assert accepted_result.request_id == plan.request_id
     assert accepted_result.accepted_by == "reviewer_1"
     assert accepted_result.refinement_review_status == "promotion_ready"
@@ -808,22 +808,22 @@ async def test_accept_staged_refinement_rejects_non_draft_version(tmp_path: Path
             artifacts=[],
         ),
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
     # Accept once to promote to CURRENT
-    await accept_staged_refinement_artifact_version(
+    await accept_staged_refinement_build_record(
         app_id=app_id,
-        draft_artifact_version_id=draft_result.artifact_version_id,
+        draft_build_record_id=draft_result.build_record_id,
         review_record=review_record,
         request_id=plan.request_id,
         artifact_store=artifact_store,
     )
     # Second accept must be rejected — version is now CURRENT, not DRAFT
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="DRAFT"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="DRAFT"):
+        await accept_staged_refinement_build_record(
             app_id=app_id,
-            draft_artifact_version_id=draft_result.artifact_version_id,
+            draft_build_record_id=draft_result.build_record_id,
             review_record=review_record,
             request_id=plan.request_id,
             artifact_store=artifact_store,
@@ -865,14 +865,14 @@ async def test_accept_staged_refinement_rejects_request_id_mismatch(tmp_path: Pa
             artifacts=[],
         ),
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="request_id mismatch"):
-        await accept_staged_refinement_artifact_version(
+    with pytest.raises(AcceptedStagedAppBundleBuildRecordError, match="request_id mismatch"):
+        await accept_staged_refinement_build_record(
             app_id=app_id,
-            draft_artifact_version_id=draft_result.artifact_version_id,
+            draft_build_record_id=draft_result.build_record_id,
             review_record=review_record,
             request_id="wrong_request_id",
             artifact_store=artifact_store,
@@ -888,4 +888,5 @@ def test_artifact_promotion_module_stays_out_of_conceptual_replan_and_workflow_o
     assert "AppGenerator" not in source
     assert "LLMChangeClassifier" not in source
     assert "execute_workflow" not in source
+
 

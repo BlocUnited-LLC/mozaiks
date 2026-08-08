@@ -124,7 +124,7 @@ def test_graph_hints_attach_to_plan_without_mutating_paths_or_routing() -> None:
     affected_paths = ["ui/pages/orders.yaml"]
     plan = build_refinement_execution_plan_from_route(
         request="Adjust the orders page layout.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -163,4 +163,5 @@ def test_app_context_policy_graph_hints_have_no_graph_database_or_proprietary_te
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
 

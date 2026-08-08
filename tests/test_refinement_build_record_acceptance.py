@@ -401,7 +401,7 @@ async def test_rejects_write_back_mode_mismatch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rejects_non_app_bundle_build_family(tmp_path: Path) -> None:
+async def test_rejects_non_app_bundle_ARTIFACT_KIND(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["build_record_store"].created_record = context["build_record_store"].created_record.model_copy(
         update={"build_family": "workflow_bundle"}
@@ -505,3 +505,4 @@ def test_acceptance_module_stays_out_of_workflow_and_llm_paths() -> None:
     assert "execute_workflow" not in text
     assert "conceptual_replan" not in text
     assert "carry_forward" not in text
+

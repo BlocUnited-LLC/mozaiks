@@ -10,7 +10,7 @@ from mozaiksai.core.app_context import (
 def test_app_intelligence_snapshot_summarizes_code_without_source_dump() -> None:
     indexed = index_file_map(
         app_id="market_app",
-        artifact_version_id="av_market",
+        build_record_id="av_market",
         file_map={
             "app/modules/listings/module.yaml": "id: listings\nactions:\n  - id: publish_listing\n",
             "app/modules/listings/backend/handler.py": "def publish_listing(payload):\n    return payload\n",
@@ -37,3 +37,4 @@ def test_app_intelligence_snapshot_summarizes_code_without_source_dump() -> None
     results = search_app_intelligence_snapshot(snapshot, "listing checkout", max_results=5)
     assert results
     assert any("listings" in str(item).lower() for item in results)
+

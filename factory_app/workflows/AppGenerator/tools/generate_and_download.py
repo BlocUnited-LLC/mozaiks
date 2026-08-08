@@ -576,6 +576,7 @@ async def _register_greenfield_app_context_for_bundle(
 
     _context_set(context_variables, "app_context_version_id", registered.context_version.context_version_id)
     _context_set(context_variables, "app_context_artifact_version_id", registered.artifact_version.id)
+    _context_set(context_variables, "app_context_version_build_record_id", registered.context_version.context_version_id)
     _context_set(context_variables, "greenfield_app_context_registered", True)
     return registered
 
@@ -730,6 +731,7 @@ async def _register_app_bundle_artifact_version(
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("artifact_version_id", artifact_version.id)
+            context_variables.set("build_record_id", artifact_version.id)
         except Exception:
             pass
     await _register_greenfield_app_context_for_bundle(
@@ -741,6 +743,31 @@ async def _register_app_bundle_artifact_version(
         context_variables=context_variables,
     )
     return artifact_version
+
+
+async def _register_app_bundle_build_record(
+    *,
+    app_id: str,
+    user_id: str | None,
+    workflow_name: str,
+    chat_id: str | None,
+    bundle_name: str,
+    zip_path: Path,
+    app_dir: Path | None = None,
+    written_paths: list[str] | None = None,
+    context_variables: Any | None,
+):
+    return await _register_app_bundle_artifact_version(
+        app_id=app_id,
+        user_id=user_id,
+        workflow_name=workflow_name,
+        chat_id=chat_id,
+        bundle_name=bundle_name,
+        zip_path=zip_path,
+        app_dir=app_dir,
+        written_paths=written_paths,
+        context_variables=context_variables,
+    )
 
 
 async def generate_and_download(

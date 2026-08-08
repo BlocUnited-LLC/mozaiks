@@ -213,9 +213,9 @@ def _planner_pack() -> LoadedControlPlanePack:
 def _planner_request() -> RefinementRequest:
     return RefinementRequest(
         request_kind="refinement",
-        artifact_kind=ArtifactKind.APP_BUNDLE,
-        artifact_key="app_bundle",
-        artifact_version_id="av_123",
+        build_family=ArtifactKind.APP_BUNDLE,
+        build_key="app_bundle",
+        build_record_id="av_123",
         raw_user_request="Add exports to the projects module and page.",
         app_id="app_1",
         requested_workflow_id="AppGenerator",
@@ -491,7 +491,7 @@ def test_for_contract_surface_plan_targeted_regeneration():
         ],
         summary="Add export_projects action and expose on projects page.",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.88,
         fallback_to_workflow=False,
     )
@@ -517,7 +517,7 @@ def test_for_contract_surface_plan_fallback_to_workflow_reentry():
     plan = ContractSurfacePlan(
         summary="Change too broad.",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         fallback_to_workflow=True,
         fallback_reason="confidence below threshold",
         confidence=0.45,
@@ -541,7 +541,7 @@ def test_for_contract_surface_plan_empty_surfaces_falls_back():
         surfaces=[],
         summary="no surfaces resolved",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         fallback_to_workflow=False,  # planner didn't set fallback but surfaces are empty
         confidence=0.8,
     )
@@ -552,3 +552,4 @@ def test_for_contract_surface_plan_empty_surfaces_falls_back():
     )
     # Empty surfaces should still fall back
     assert decision.decision_type == "workflow_reentry"
+

@@ -6,13 +6,13 @@ Covers RefinementTriggerRouteResolver static/class methods that have
 no external IO or global state dependency:
 
   _artifact_label:
-    - no policy → underscores replaced with spaces in artifact_kind
+    - no policy → underscores replaced with spaces in build_family
     - policy with label → label used (underscores replaced)
-    - None artifact_kind handled
+    - None build_family handled
 
   _to_policy:
-    - artifact_kind and label stored
-    - empty label falls back to artifact_kind
+    - build_family and label stored
+    - empty label falls back to build_family
     - patch, design, feature, core routes stored
 
   _dedupe_paths:
@@ -72,7 +72,7 @@ no external IO or global state dependency:
     - non-matching path → []
     - duplicates removed
 
-  RefinementRequest._normalize_artifact_kind:
+  RefinementRequest._normalize_ARTIFACT_KIND:
     - uppercase normalized to lowercase
     - enum value used
     - whitespace stripped
@@ -110,9 +110,9 @@ def _route(seq: str = "full_build") -> ControlPlaneChangeRouteManifest:
     return ControlPlaneChangeRouteManifest(workflow_sequence=seq)
 
 
-def _artifact_routing_manifest(artifact_kind: str, label: str | None = None) -> ControlPlaneArtifactRoutingManifest:
+def _artifact_routing_manifest(build_family: str, label: str | None = None) -> ControlPlaneArtifactRoutingManifest:
     return ControlPlaneArtifactRoutingManifest(
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         label=label,
         routes=ControlPlaneArtifactChangeRoutesManifest(
             patch=_route("patch_seq"),
@@ -124,7 +124,7 @@ def _artifact_routing_manifest(artifact_kind: str, label: str | None = None) -> 
 
 
 def _request(raw: str = "", surface: str | None = None) -> RefinementRequest:
-    return RefinementRequest(artifact_kind="app_bundle", raw_user_request=raw, source_surface=surface)
+    return RefinementRequest(build_family="app_bundle", raw_user_request=raw, source_surface=surface)
 
 
 def _intent(signals: list[str] | None = None) -> ChangeIntent:
@@ -160,7 +160,7 @@ class TestArtifactLabel:
         result = RefinementTriggerRouteResolver._artifact_label("app_bundle", policy)
         assert result == "App Bundle"
 
-    def test_policy_none_uses_artifact_kind(self):
+    def test_policy_none_uses_ARTIFACT_KIND(self):
         result = RefinementTriggerRouteResolver._artifact_label("design_docs", None)
         assert result == "design docs"
 
@@ -170,7 +170,7 @@ class TestArtifactLabel:
 # ---------------------------------------------------------------------------
 
 class TestToPolicy:
-    def test_artifact_kind_stored(self):
+    def test_build_family_stored(self):
         manifest = _artifact_routing_manifest("app_bundle")
         policy = RefinementTriggerRouteResolver._to_policy(manifest)
         assert policy.build_family == "app_bundle"
@@ -180,7 +180,7 @@ class TestToPolicy:
         policy = RefinementTriggerRouteResolver._to_policy(manifest)
         assert policy.label == "App Bundle"
 
-    def test_empty_label_falls_back_to_artifact_kind(self):
+    def test_empty_label_falls_back_to_ARTIFACT_KIND(self):
         manifest = _artifact_routing_manifest("app_bundle", label=None)
         policy = RefinementTriggerRouteResolver._to_policy(manifest)
         assert policy.label == "app_bundle"
@@ -554,30 +554,30 @@ class TestPackIdsFromIntegrationClients:
 
 
 # ---------------------------------------------------------------------------
-# 10. RefinementRequest._normalize_artifact_kind (via Pydantic validation)
+# 10. RefinementRequest._normalize_ARTIFACT_KIND (via Pydantic validation)
 # ---------------------------------------------------------------------------
 
 class TestNormalizeArtifactKind:
     def test_uppercase_normalized_to_lowercase(self):
-        req = RefinementRequest(artifact_kind="APP_BUNDLE")
-        assert req.artifact_kind == "app_bundle"
+        req = RefinementRequest(build_family="APP_BUNDLE")
+        assert req.build_family == "app_bundle"
 
     def test_whitespace_stripped(self):
-        req = RefinementRequest(artifact_kind="  app_bundle  ")
-        assert req.artifact_kind == "app_bundle"
+        req = RefinementRequest(build_family="  app_bundle  ")
+        assert req.build_family == "app_bundle"
 
     def test_enum_value_used(self):
         from mozaiksai.control_plane.implementations.refinement_router import ArtifactKind
-        req = RefinementRequest(artifact_kind=ArtifactKind.APP_BUNDLE)
-        assert req.artifact_kind == "app_bundle"
+        req = RefinementRequest(build_family=ArtifactKind.APP_BUNDLE)
+        assert req.build_family == "app_bundle"
 
     def test_empty_string_raises(self):
         with pytest.raises(ValidationError):
-            RefinementRequest(artifact_kind="")
+            RefinementRequest(build_family="")
 
     def test_whitespace_only_raises(self):
         with pytest.raises(ValidationError):
-            RefinementRequest(artifact_kind="   ")
+            RefinementRequest(build_family="   ")
 
 
 # ---------------------------------------------------------------------------
@@ -616,3 +616,5 @@ class TestRequestImpactText:
         intent = _intent()
         result = RefinementTriggerRouteResolver._request_impact_text(request=req, intent=intent)
         assert isinstance(result, str)
+
+

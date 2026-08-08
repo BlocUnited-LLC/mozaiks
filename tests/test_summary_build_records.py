@@ -117,7 +117,7 @@ async def test_persist_summary_build_record_registers_parent_inputs_and_summary_
         source_chat_id="chat_1",
         author_user_id="user_1",
         revision_mode=True,
-        input_build_families=("concept", "build_plan"),
+        input_ARTIFACT_KINDS=("concept", "build_plan"),
         build_record_store=store,
     )
 
@@ -227,3 +227,4 @@ async def test_persist_summary_build_record_first_run_has_no_parent() -> None:
     )
 
     assert store.create_calls[0]["parent_build_record_id"] is None
+

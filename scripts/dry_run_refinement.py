@@ -68,7 +68,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest_file(Path(args.manifest).resolve()) if args.manifest else neutral_manifest()
     plan = await build_refinement_dry_run_plan(
         request=args.request,
-        artifact_kind=args.artifact_kind,
+        build_family=args.build_family,
         change_class=args.change_class,
         files_manifest=manifest,
         app_root=APP_ROOT,
@@ -122,3 +122,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

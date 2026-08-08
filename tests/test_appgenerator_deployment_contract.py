@@ -617,7 +617,7 @@ def test_appgenerator_guidance_mentions_provider_neutral_target_profiles() -> No
     assert "deployment_profile" in source
     assert "ci_secret_requirements" in source
     assert ".github/workflows/readiness.yml" in source
-    assert "ArtifactVersion promotion" in source
+    assert "BuildRecord promotion" in source
     assert "environment staging" in source
 
 
@@ -994,3 +994,4 @@ def test_generated_workflow_passes_bundle_validation() -> None:
     )
     assert result["bundle_errors"] == []
     assert result["deploy_target_spec_errors"] == []
+

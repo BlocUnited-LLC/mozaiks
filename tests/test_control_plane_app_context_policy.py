@@ -179,7 +179,7 @@ def test_stale_brownfield_source_affecting_change_blocks_for_refresh() -> None:
 def test_context_policy_result_attaches_to_execution_plan_without_rerouting() -> None:
     base_kwargs = {
         "request": "Change the email gateway integration behavior.",
-        "artifact_kind": "app_bundle",
+        "build_family": "app_bundle",
         "change_class": "patch",
         "workflow_id": "AppGenerator",
         "workflow_sequence": "app_revision",
@@ -223,4 +223,5 @@ def test_control_plane_app_context_policy_has_no_graph_database_or_proprietary_t
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
 

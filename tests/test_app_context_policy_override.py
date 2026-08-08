@@ -50,7 +50,7 @@ def _missing_context() -> AppContextSummary:
 def _blocked_execution_plan():
     return build_refinement_execution_plan_from_route(
         request="Add a required project phase field and migrate existing records.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="feature",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -293,4 +293,5 @@ def test_override_has_no_graph_database_or_proprietary_terms() -> None:
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
 

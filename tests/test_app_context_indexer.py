@@ -16,29 +16,29 @@ from mozaiksai.core.app_context import (
     persist_app_context_index,
 )
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self.created: list[ArtifactVersionDoc] = []
+        self.created: list[BuildRecord] = []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         artifact_id = f"av_{len(self.created) + 1}"
-        artifact = ArtifactVersionDoc(
+        artifact = BuildRecord(
             _id=artifact_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=len(self.created) + 1,
             lineage_root_id=artifact_id,
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
-            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
-            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            lifecycle_status=kwargs.get("lifecycle_status", BuildRecordStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", BuildRecordValidationStatus.PENDING),
             files_manifest=list(kwargs.get("files_manifest") or []),
             commit_metadata=kwargs.get("commit_metadata") or {},
         )
@@ -49,9 +49,9 @@ class _MemoryArtifactStore:
 def test_index_file_map_builds_canonical_source_corpus_graph_and_health() -> None:
     indexed = index_file_map(
         app_id="app_1",
-        artifact_version_id="av_app_1",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_record_id="av_app_1",
+        build_family="app_bundle",
+        build_key="app_bundle",
         source="artifact_workspace",
         file_map={
             "app/ui/pages/Dashboard.jsx": (
@@ -87,7 +87,7 @@ def test_index_workspace_root_respects_scan_policy_and_source_ref(tmp_path: Path
     indexed = index_workspace_root(
         app_id="app_2",
         workspace_root=tmp_path,
-        artifact_version_id="av_workspace",
+        build_record_id="av_workspace",
         scan_policy=default_context_graph_scan_policy({"max_files": 20}),
     )
 
@@ -101,7 +101,7 @@ def test_index_workspace_root_respects_scan_policy_and_source_ref(tmp_path: Path
 async def test_persist_app_context_index_creates_source_and_graph_artifacts() -> None:
     indexed = index_file_map(
         app_id="app_1",
-        artifact_version_id="av_app_1",
+        build_record_id="av_app_1",
         file_map={"src/App.jsx": "export default function App() { return <main />; }\n"},
     )
     store = _MemoryArtifactStore()
@@ -112,10 +112,10 @@ async def test_persist_app_context_index_creates_source_and_graph_artifacts() ->
         source_workflow="test_workflow",
     )
 
-    assert persisted.source_context_artifact.artifact_kind == SOURCE_CONTEXT_ARTIFACT_KIND
-    assert persisted.graph_artifact.artifact_kind == APP_CONTEXT_GRAPH_ARTIFACT_KIND
-    assert persisted.intelligence_artifact.artifact_kind == APP_INTELLIGENCE_ARTIFACT_KIND
-    assert [artifact.artifact_kind for artifact in store.created] == [
+    assert persisted.source_context_artifact.build_family == SOURCE_CONTEXT_ARTIFACT_KIND
+    assert persisted.graph_artifact.build_family == APP_CONTEXT_GRAPH_ARTIFACT_KIND
+    assert persisted.intelligence_artifact.build_family == APP_INTELLIGENCE_ARTIFACT_KIND
+    assert [artifact.build_family for artifact in store.created] == [
         "source_context_bundle",
         "app_context_graph",
         "app_intelligence_snapshot",
@@ -123,3 +123,5 @@ async def test_persist_app_context_index_creates_source_and_graph_artifacts() ->
     metadata = store.created[0].commit_metadata.metadata
     assert metadata["summary_payload"]["bundle_id"] == indexed.source_corpus.bundle_id
     assert metadata["index_schema_version"] == APP_CONTEXT_INDEX_SCHEMA_VERSION
+
+

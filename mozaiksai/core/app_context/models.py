@@ -162,13 +162,25 @@ class SourceRef(BaseModel):
 
 
 class ArtifactRef(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    artifact_kind: str = Field(min_length=1)
-    artifact_key: str | None = None
-    artifact_version_id: str = Field(min_length=1)
+    build_family: str = Field(min_length=1, alias="artifact_kind")
+    build_key: str | None = Field(default=None, alias="artifact_key")
+    build_record_id: str = Field(min_length=1, alias="artifact_version_id")
     lifecycle_status: str | None = None
     source_ref_id: str | None = None
+
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str | None:
+        return self.build_key
+
+    @property
+    def artifact_version_id(self) -> str:
+        return self.build_record_id
 
 
 class ValidationSummary(BaseModel):

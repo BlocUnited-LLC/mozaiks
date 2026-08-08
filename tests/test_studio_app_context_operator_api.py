@@ -167,12 +167,12 @@ def test_app_intelligence_index_endpoint_starts_and_completes_job(monkeypatch) -
             "Result",
             (),
             {
-                "app_bundle_artifact_version_id": "av_bundle",
-                "source_context_artifact_version_id": "av_source",
-                "app_intelligence_artifact_version_id": "av_intelligence",
+                "app_bundle_build_record_id": "av_bundle",
+                "source_context_build_record_id": "av_source",
+                "app_intelligence_build_record_id": "av_intelligence",
                 "app_context_version_id": "ctx_app_1",
-                "app_context_artifact_version_id": "av_context",
-                "graph_artifact_version_id": "av_graph",
+                "app_context_build_record_id": "av_context",
+                "graph_build_record_id": "av_graph",
                 "artifact_path": "generated/app_intelligence/app_1/artifact.zip",
                 "indexed_file_count": 42,
                 "scan_health": {"selected_file_count": 42},
@@ -206,10 +206,10 @@ def test_app_intelligence_index_endpoint_starts_and_completes_job(monkeypatch) -
     completed = latest_response.json()["index_job"]
     assert completed["status"] == "succeeded"
     intelligence = completed["app_intelligence"]
-    assert intelligence["app_bundle_artifact_version_id"] == "av_bundle"
-    assert intelligence["source_context_artifact_version_id"] == "av_source"
-    assert intelligence["app_intelligence_artifact_version_id"] == "av_intelligence"
-    assert intelligence["graph_artifact_version_id"] == "av_graph"
+    assert intelligence["app_bundle_build_record_id"] == "av_bundle"
+    assert intelligence["source_context_build_record_id"] == "av_source"
+    assert intelligence["app_intelligence_build_record_id"] == "av_intelligence"
+    assert intelligence["graph_build_record_id"] == "av_graph"
     assert intelligence["scan_health"]["selected_file_count"] == 42
     assert intelligence["health_report"]["status"] == "healthy"
     assert intelligence["framework_detection"]["primary_framework_label"] == "Next.js"
@@ -405,7 +405,7 @@ def test_override_allow_with_warning_is_non_mutating_and_preserves_plan_scope(mo
     _, client = _client(monkeypatch)
     plan = build_refinement_execution_plan_from_route(
         request="Change the orders data model.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="feature",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -471,8 +471,9 @@ def test_operator_api_source_does_not_call_generation_promotion_or_graph_databas
 
     assert "AppGenerator" not in source
     assert "AgentGenerator" not in source
-    assert "promote_build_artifact_version" not in source
-    assert "revert_to_artifact_version" not in source
+    assert "promote_build_build_record" not in source
+    assert "revert_to_build_record" not in source
     assert "Falkor" not in source
     assert "mozaiks" + "-app" not in source.lower()
+
 

@@ -19,7 +19,7 @@ What is live (real LLM + real code):
 
 What is stubbed (no MongoDB, no full workflow sequence):
     - Change classifier: _DeterministicChangeClassifier(change_class="core")
-    - ArtifactStore.get_artifact_version: synthetic CRM doc + real temp dir
+    - ArtifactStore.get_build_record: synthetic CRM doc + real temp dir
     - This is a single-agent live benchmark, NOT a full workflow sequence run
 
 Scenario: CRM -> Marketplace conceptual pivot
@@ -82,7 +82,7 @@ _FIXTURE_PATH = _FIXTURES_DIR / "live_conceptual_replan_output.json"
 # ---------------------------------------------------------------------------
 
 _CRM_APP_ID = "smoke-crm-marketplace-live-001"
-_PREV_ARTIFACT_VERSION_ID = "av_crm_live_smoke_v1"
+_PREV_build_record_id = "av_crm_live_smoke_v1"
 
 _PIVOT_REQUEST = (
     "Actually, let's turn this into a marketplace where sellers can list products "
@@ -317,15 +317,15 @@ def _write_crm_workspace(tmp_dir: Path) -> None:
 
 
 def _build_mock_artifact_store(workspace_dir: Path) -> Any:
-    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, ArtifactVersionDoc
+    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, BuildRecord
 
-    doc = ArtifactVersionDoc.model_validate({
-        "_id": _PREV_ARTIFACT_VERSION_ID,
+    doc = BuildRecord.model_validate({
+        "_id": _PREV_build_record_id,
         "app_id": _CRM_APP_ID,
-        "artifact_kind": "app_bundle",
-        "artifact_key": "app_bundle",
+        "build_family": "app_bundle",
+        "build_key": "app_bundle",
         "version_number": 1,
-        "lineage_root_id": _PREV_ARTIFACT_VERSION_ID,
+        "lineage_root_id": _PREV_build_record_id,
         "commit_metadata": ArtifactCommitMetadata(
             message="Synthetic CRM v1 -- live replan smoke",
             metadata={"workspace_dir": str(workspace_dir)},
@@ -333,7 +333,7 @@ def _build_mock_artifact_store(workspace_dir: Path) -> Any:
     })
 
     mock_store = MagicMock()
-    mock_store.get_artifact_version = AsyncMock(return_value=doc)
+    mock_store.get_build_record = AsyncMock(return_value=doc)
     return mock_store
 
 
@@ -364,12 +364,12 @@ async def _run_routing() -> dict[str, Any]:
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "concept",
-                "artifact_key": "concept",
+                "build_family": "concept",
+                "build_key": "concept",
                 "raw_user_request": _PIVOT_REQUEST,
                 "source_surface": "live_conceptual_replan_smoke",
                 "extra": {
-                    "previous_app_bundle_ref": _PREV_ARTIFACT_VERSION_ID,
+                    "previous_app_bundle_ref": _PREV_build_record_id,
                     "existing_concept_ref": "concept_crm_v1",
                     "carry_forward_modules": [m["module_id"] for m in _CARRY_FORWARD_MODULES],
                     "preserve_families": ["brand"],
@@ -520,7 +520,7 @@ async def _run_preservation(
     mock_store = _build_mock_artifact_store(tmp_dir)
     context_variables: dict[str, Any] = {
         "app_id": _CRM_APP_ID,
-        "previous_app_bundle_ref": _PREV_ARTIFACT_VERSION_ID,
+        "previous_app_bundle_ref": _PREV_build_record_id,
         "app_build_plan": {
             "carry_forward_decisions": plan.get("carry_forward_decisions") or [],
         },
@@ -565,7 +565,7 @@ def _validate_output(
         failures.append("[2] context_seed.pivot_description is absent or empty")
 
     # 3. previous_app_bundle_ref present
-    if seed.get("previous_app_bundle_ref") != _PREV_ARTIFACT_VERSION_ID:
+    if seed.get("previous_app_bundle_ref") != _PREV_build_record_id:
         failures.append(
             f"[3] context_seed.previous_app_bundle_ref={seed.get('previous_app_bundle_ref')!r}"
         )
@@ -765,7 +765,7 @@ async def run_benchmark(*, save_fixture: bool = False, model: str = "gpt-5-nano"
             ],
             "stubbed": [
                 "_DeterministicChangeClassifier(change_class='core')",
-                "ArtifactStore.get_artifact_version -- synthetic CRM doc + temp dir",
+                "ArtifactStore.get_build_record -- synthetic CRM doc + temp dir",
             ],
             "note": (
                 "Single-agent live benchmark. Not a full workflow sequence run. "
@@ -774,7 +774,7 @@ async def run_benchmark(*, save_fixture: bool = False, model: str = "gpt-5-nano"
         },
         "scenario": {
             "app_id": _CRM_APP_ID,
-            "previous_artifact": _PREV_ARTIFACT_VERSION_ID,
+            "previous_artifact": _PREV_build_record_id,
             "pivot_request": _PIVOT_REQUEST,
             "carry_forward_candidates": [m["module_id"] for m in _CARRY_FORWARD_MODULES],
         },
@@ -841,3 +841,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

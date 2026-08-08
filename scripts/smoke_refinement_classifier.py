@@ -207,9 +207,9 @@ def _rendered_has_proprietary_term(payload: Any) -> bool:
 def _request_payload(case: SmokeCase) -> dict[str, Any]:
     return {
         "refinement_request": {
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": f"av_classifier_smoke_{case.id}",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": f"av_classifier_smoke_{case.id}",
             "raw_user_request": case.request,
             "source_surface": "manual_refinement_classifier_smoke",
             "extra": {"files_manifest": case.files_manifest},
@@ -491,3 +491,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

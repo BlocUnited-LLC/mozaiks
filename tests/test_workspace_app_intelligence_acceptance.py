@@ -17,19 +17,19 @@ from mozaiksai.control_plane.app_intelligence import (
 )
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self.created: list[ArtifactVersionDoc] = []
+        self.created: list[BuildRecord] = []
 
-    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         artifact_id = f"av_{len(self.created) + 1}"
-        artifact = ArtifactVersionDoc(
+        artifact = BuildRecord(
             _id=artifact_id,
             app_id=kwargs["app_id"],
             build_family=kwargs["build_family"],
@@ -38,15 +38,15 @@ class _MemoryArtifactStore:
             lineage_root_id=artifact_id,
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
-            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
-            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            lifecycle_status=kwargs.get("lifecycle_status", BuildRecordStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", BuildRecordValidationStatus.PENDING),
             files_manifest=list(kwargs.get("files_manifest") or []),
             commit_metadata=kwargs.get("commit_metadata") or {},
         )
         self.created.append(artifact)
         return artifact
 
-    async def get_build_record(self, *, app_id: str, build_record_id: str) -> ArtifactVersionDoc | None:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord | None:
         for artifact in self.created:
             if artifact.app_id == app_id and artifact.id == build_record_id:
                 return artifact
@@ -58,10 +58,10 @@ class _MemoryArtifactStore:
         app_id: str,
         build_family: str | None = None,
         build_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
-    ) -> list[ArtifactVersionDoc]:
+    ) -> list[BuildRecord]:
         rows = [
             artifact
             for artifact in self.created
@@ -78,11 +78,11 @@ class _MemoryArtifactStore:
         app_id: str,
         build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc | None:
+    ) -> BuildRecord | None:
         artifact = await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
         if artifact is None:
             return None
-        updates: dict[str, Any] = {"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+        updates: dict[str, Any] = {"lifecycle_status": BuildRecordStatus.CURRENT}
         if commit_metadata is not None:
             updates["commit_metadata"] = commit_metadata
         refreshed = artifact.model_copy(update=updates)
@@ -157,14 +157,14 @@ async def test_active_workspace_app_intelligence_feeds_refinement_and_chat_ui(
         "app_intelligence_snapshot",
         "app_context_version",
     ]
-    assert store.created[-1].lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert store.created[-1].lifecycle_status == BuildRecordStatus.CURRENT
 
     tool_context = ControlPlaneToolContext(
         checkpoint="coding_requested",
         app_id="workspace_app_intelligence_acceptance",
         build_family="app_bundle",
         build_key=APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
-        build_record_id=registration.app_bundle_artifact_version_id,
+        build_record_id=registration.app_bundle_build_record_id,
         raw_user_request="Update onboarding tour app build flow",
     )
 
@@ -250,3 +250,5 @@ async def test_active_workspace_app_intelligence_feeds_refinement_and_chat_ui(
     assert event["awaiting_response"] is False
     assert event["payload"]["interaction_type"] == "ui_surface"
     assert event["payload"]["app_intelligence_catalog"]["coverage"]["file_count"] == registration.indexed_file_count
+
+

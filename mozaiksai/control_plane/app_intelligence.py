@@ -61,6 +61,22 @@ class AppIntelligenceContextRegistrationResult:
     health_report: dict[str, Any]
     warnings: list[str]
 
+    @property
+    def source_context_build_record_id(self) -> str:
+        return self.source_context_artifact_version_id
+
+    @property
+    def app_intelligence_build_record_id(self) -> str:
+        return self.app_intelligence_artifact_version_id
+
+    @property
+    def app_context_build_record_id(self) -> str:
+        return self.app_context_artifact_version_id
+
+    @property
+    def graph_build_record_id(self) -> str:
+        return self.graph_artifact_version_id
+
 
 @dataclass(frozen=True)
 class AppIntelligenceIndexResult:
@@ -77,6 +93,26 @@ class AppIntelligenceIndexResult:
     health_report: dict[str, Any]
     framework_detection: dict[str, Any]
     warnings: list[str]
+
+    @property
+    def app_bundle_build_record_id(self) -> str:
+        return self.app_bundle_artifact_version_id
+
+    @property
+    def source_context_build_record_id(self) -> str:
+        return self.source_context_artifact_version_id
+
+    @property
+    def app_intelligence_build_record_id(self) -> str:
+        return self.app_intelligence_artifact_version_id
+
+    @property
+    def app_context_build_record_id(self) -> str:
+        return self.app_context_artifact_version_id
+
+    @property
+    def graph_build_record_id(self) -> str:
+        return self.graph_artifact_version_id
 
 
 async def index_workspace_app_intelligence(

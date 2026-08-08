@@ -84,7 +84,7 @@ from mozaiksai.control_plane.scoped_execution import (
     ScopedRefinementResult,
 )
 from mozaiksai.control_plane.validation_evidence import ValidationEvidence
-from mozaiksai.core.artifacts import ArtifactValidationStatus as BuildRecordValidationStatus
+from mozaiksai.core.artifacts import BuildRecordValidationStatus as BuildRecordValidationStatus
 
 # ---------------------------------------------------------------------------
 # 1. _is_relative_to
@@ -389,3 +389,4 @@ class TestBuildAcceptanceCommitMetadata:
         )
         assert result["metadata"]["existing_key"] == "existing_val"
         assert "acceptance" in result["metadata"]
+

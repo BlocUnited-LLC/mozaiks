@@ -84,7 +84,7 @@ from mozaiksai.control_plane.scoped_execution import (
     ScopedRefinementResult,
 )
 from mozaiksai.control_plane.validation_evidence import ValidationEvidence
-from mozaiksai.core.artifacts import ArtifactValidationStatus
+from mozaiksai.core.artifacts import BuildRecordValidationStatus
 
 # ---------------------------------------------------------------------------
 # 1. _is_relative_to
@@ -180,19 +180,19 @@ class TestNormalizeRelativePath:
 class TestValidationStatusFromEvidence:
     def test_failed_non_empty_returns_failed(self):
         evidence = ValidationEvidence(failed=["check_a"])
-        assert _validation_status_from_evidence(evidence) == ArtifactValidationStatus.FAILED
+        assert _validation_status_from_evidence(evidence) == BuildRecordValidationStatus.FAILED
 
     def test_completed_no_failed_returns_passed(self):
         evidence = ValidationEvidence(completed=["check_a"], failed=[])
-        assert _validation_status_from_evidence(evidence) == ArtifactValidationStatus.PASSED
+        assert _validation_status_from_evidence(evidence) == BuildRecordValidationStatus.PASSED
 
     def test_both_empty_returns_pending(self):
         evidence = ValidationEvidence()
-        assert _validation_status_from_evidence(evidence) == ArtifactValidationStatus.PENDING
+        assert _validation_status_from_evidence(evidence) == BuildRecordValidationStatus.PENDING
 
     def test_failed_takes_priority_over_completed(self):
         evidence = ValidationEvidence(completed=["check_a"], failed=["check_b"])
-        assert _validation_status_from_evidence(evidence) == ArtifactValidationStatus.FAILED
+        assert _validation_status_from_evidence(evidence) == BuildRecordValidationStatus.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -389,3 +389,4 @@ class TestBuildAcceptanceCommitMetadata:
         )
         assert result["metadata"]["existing_key"] == "existing_val"
         assert "acceptance" in result["metadata"]
+

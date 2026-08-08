@@ -31,7 +31,7 @@ import yaml
 # ---------------------------------------------------------------------------
 
 _APP_ID = "app_phase4_test"
-_PREV_REF = "artifact_version_phase4"
+_PREV_REF = "build_record_phase4"
 
 _MODULE_YAML_CONTENT = "id: notifications\nactions:\n  - id: send_notification\n"
 _EVENTS_YAML_CONTENT = "events:\n  - type: notification.sent\n"
@@ -72,7 +72,7 @@ def _absent_workspace(reason: str = "artifact_not_found") -> dict:
     return {
         "present": False,
         "reason": reason,
-        "artifact_version_id": _PREV_REF,
+        "build_record_id": _PREV_REF,
     }
 
 
@@ -618,7 +618,7 @@ class TestDelegatesWorkspaceLoading:
 
         call_kwargs = mock_load.call_args.kwargs
         assert call_kwargs["app_id"] == "my_app_99"
-        assert call_kwargs["artifact_version_id"] == "ver_xyz"
+        assert call_kwargs["build_record_id"] == "ver_xyz"
 
     @pytest.mark.asyncio
     async def test_missing_app_id_skips_load(self) -> None:
@@ -896,4 +896,5 @@ class TestExistingTestsUnaffected:
             "contracts/relationships.yaml",
         }
         assert required == set(_ALLOWED_CONTRACT_FILES)
+
 

@@ -196,7 +196,7 @@ def _data_contract():
     return {
         "version": "1",
         "app_id": "app_123",
-        "artifact_version_id": None,
+        "build_record_id": None,
         "surfaces": [
             {
                 "surface_id": "users",
@@ -1178,4 +1178,5 @@ def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> N
     assert (target / "provenance.yaml").exists()
     assert (target / "ui" / "pages" / "Dashboard.yaml").exists()
     assert (target / "services" / "integrations" / "email_client.py").exists()
+
 

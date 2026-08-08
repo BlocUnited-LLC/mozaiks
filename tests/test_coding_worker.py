@@ -83,7 +83,7 @@ class _FakeToolExecutor:
 
     async def execute_tool(self, call, *, context=None):  # noqa: ANN001, ANN003
         self.calls.append({"call": call, "context": context})
-        return ControlPlaneToolResult(success=True, output={"tool_id": call.tool_id, "artifact_version_id": context.artifact_version_id})
+        return ControlPlaneToolResult(success=True, output={"tool_id": call.tool_id, "build_record_id": context.build_record_id})
 
 
 async def _fake_source_validation_runner(**kwargs):  # noqa: ANN003
@@ -104,9 +104,9 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_child_1"})()
+        return type("BuildRecord", (), {"id": "av_child_1"})()
 
 
 def _enabled_control_plane() -> ControlPlaneConfig:
@@ -187,9 +187,9 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     result = await worker.execute(
         CodingWorkerRequest(
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_123",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Fix the dashboard spacing",
             source_surface="app_build",
@@ -222,7 +222,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
 
     assert len(tool_executor.calls) == 2
     assert artifact_store.calls[0]["parent_version_id"] == "av_123"
-    assert artifact_store.calls[0]["artifact_kind"] == "app_bundle"
+    assert artifact_store.calls[0]["build_family"] == "app_bundle"
     assert artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert artifact_store.calls[0]["validation_status"].value == "passed"
     assert artifact_store.calls[0]["commit_metadata"]["metadata"]["applied_paths"] == [
@@ -244,9 +244,9 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
     result = await worker.execute(
         CodingWorkerRequest(
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_123",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Add a brand new approvals capability",
             source_surface="app_build",
@@ -275,9 +275,9 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
     result = await worker.execute(
         CodingWorkerRequest(
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_123",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Fix the dashboard spacing",
             source_surface="app_build",
@@ -295,7 +295,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
 @pytest.mark.asyncio
 async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path) -> None:
     class _BrokenArtifactStore:
-        async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+        async def create_build_record(self, **kwargs):  # noqa: ANN003
             raise RuntimeError('artifact store unavailable')
 
     worker = ScopedRefinementCodingWorker(
@@ -311,9 +311,9 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
     result = await worker.execute(
         CodingWorkerRequest(
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_123",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Fix the dashboard spacing",
             source_surface="app_build",
@@ -327,3 +327,4 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
     assert result.status == "failed"
     assert result.error is not None and "ARTIFACT_PERSISTENCE_FAILED" in result.error
     assert "ARTIFACT_PERSISTENCE_FAILED" in result.metadata["artifact_persistence_error"]
+

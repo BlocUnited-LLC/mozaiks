@@ -26,7 +26,7 @@ def test_app_registry_module_contract_is_present() -> None:
     update_props = next(entry for entry in manifest["actions"] if entry["id"] == "update_build_status")["input_schema"]["properties"]
     assert "build_context_profile" in create_props
     assert "current_build_run" in create_props
-    assert "artifact_version_id" in update_props
+    assert "build_record_id" in update_props
     assert "current_build_run" in update_props
     assert contracts_dir.exists()
     assert (contracts_dir / "events.yaml").exists()
@@ -67,7 +67,7 @@ class _FakeRepo:
             or {
                 **(self.record.get("current_build_run") or {}),
                 "status": kwargs["lifecycle_state"],
-                "artifact_version_id": kwargs.get("artifact_version_id"),
+                "build_record_id": kwargs.get("build_record_id"),
                 "workflow_sequence": kwargs.get("workflow_sequence"),
             },
         }
@@ -170,13 +170,13 @@ async def test_app_registry_service_persists_build_context_and_current_run() -> 
         build_registry_id="appreg_1",
         status="review",
         bundle_path="generated/apps/app_1/build_1/app",
-        artifact_version_id="av_bundle_1",
+        build_record_id="av_bundle_1",
         workflow_sequence="build",
     )
 
     assert updated["app"]["current_build_run"]["status"] == "review"
-    assert updated["app"]["current_build_run"]["artifact_version_id"] == "av_bundle_1"
-    assert updated["app"]["build_runs"][0]["artifact_version_id"] == "av_bundle_1"
+    assert updated["app"]["current_build_run"]["build_record_id"] == "av_bundle_1"
+    assert updated["app"]["build_runs"][0]["build_record_id"] == "av_bundle_1"
 
 
 @pytest.mark.asyncio
@@ -207,4 +207,5 @@ async def test_app_registry_enriches_legacy_active_chat_with_session_app_id(monk
     assert enriched["chat_app_id"] == "factory-session-app"
     assert enriched["active_workflow_id"] == "ValueEngine"
     assert record.get("chat_app_id") is None
+
 

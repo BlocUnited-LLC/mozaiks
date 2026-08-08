@@ -182,7 +182,7 @@ def normalize_workflow_integration_metadata(
         "workflows": workflows,
         "primary_workflow": deepcopy(primary) if primary else None,
     }
-    for key in ("source", "source_artifact_version_id", "source_chat_id"):
+    for key in ("source", "source_artifact_version_id", "source_build_record_id", "source_chat_id"):
         value = _text(raw.get(key))
         if value:
             metadata[key] = value
@@ -277,8 +277,10 @@ def apply_workflow_integration_context(
     _context_set(context_variables, "generated_workflow_capability_id", primary.get("capability_id"))
     _context_set(context_variables, "generated_workflow_startup_mode", primary.get("startup_mode"))
     _context_set(context_variables, "generated_workflow_trigger_events", primary.get("trigger_events") or [])
-    if normalized.get("source_artifact_version_id"):
-        _context_set(context_variables, "workflow_bundle_artifact_version_id", normalized["source_artifact_version_id"])
+    source_build_record_id = normalized.get("source_build_record_id") or normalized.get("source_artifact_version_id")
+    if source_build_record_id:
+        _context_set(context_variables, "workflow_bundle_build_record_id", source_build_record_id)
+        _context_set(context_variables, "workflow_bundle_artifact_version_id", source_build_record_id)
     return normalized
 
 
@@ -291,6 +293,7 @@ def workflow_integration_metadata_from_artifact(artifact: Any) -> dict[str, Any]
         artifact_id = _text(getattr(artifact, "id", None) or getattr(artifact, "_id", None))
         if artifact_id:
             metadata["source_artifact_version_id"] = artifact_id
+            metadata["source_build_record_id"] = artifact_id
         return metadata
 
     commit_metadata = getattr(artifact, "commit_metadata", None)
@@ -305,6 +308,7 @@ def workflow_integration_metadata_from_artifact(artifact: Any) -> dict[str, Any]
         artifact_id = _text(getattr(artifact, "id", None) or getattr(artifact, "_id", None))
         if artifact_id:
             metadata["source_artifact_version_id"] = artifact_id
+            metadata["source_build_record_id"] = artifact_id
     return metadata
 
 
@@ -331,9 +335,21 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
             return {"status": "skipped", "reason": "artifact_store_unavailable", "error": str(exc)}
 
     candidates: list[Any] = []
-    refs = _context_get(context_variables, "artifact_version_refs", {})
+    refs = _context_get(context_variables, "build_record_refs", {})
+    if not isinstance(refs, dict):
+        refs = _context_get(context_variables, "artifact_version_refs", {})
     workflow_ref = refs.get("workflow_bundle") if isinstance(refs, dict) else None
-    if workflow_ref and hasattr(artifact_store, "get_artifact_version"):
+    if workflow_ref and hasattr(artifact_store, "get_build_record"):
+        try:
+            artifact = await artifact_store.get_build_record(
+                app_id=app_id,
+                build_record_id=str(workflow_ref),
+            )
+            if artifact is not None:
+                candidates.append(artifact)
+        except Exception:
+            pass
+    elif workflow_ref and hasattr(artifact_store, "get_artifact_version"):
         try:
             artifact = await artifact_store.get_artifact_version(
                 app_id=app_id,
@@ -344,7 +360,21 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
         except Exception:
             pass
 
-    if hasattr(artifact_store, "list_artifact_versions"):
+    if hasattr(artifact_store, "list_build_records"):
+        try:
+            from mozaiksai.core.artifacts import BuildRecordStatus
+
+            candidates.extend(
+                await artifact_store.list_build_records(
+                    app_id=app_id,
+                    build_family="workflow_bundle",
+                    lifecycle_status=BuildRecordStatus.CURRENT,
+                    limit=5,
+                )
+            )
+        except Exception as exc:
+            return {"status": "skipped", "reason": "artifact_lookup_failed", "error": str(exc)}
+    elif hasattr(artifact_store, "list_artifact_versions"):
         try:
             from mozaiksai.core.artifacts import ArtifactLifecycleStatus
 
@@ -368,6 +398,7 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
             "status": "hydrated",
             "source": "workflow_bundle_artifact",
             "artifact_version_id": metadata.get("source_artifact_version_id"),
+            "build_record_id": metadata.get("source_build_record_id"),
             "workflow_count": len(metadata["workflows"]),
         }
 

@@ -10,9 +10,9 @@ import pytest
 import yaml
 
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -43,64 +43,64 @@ class _Context(dict):
 
 class _MemoryArtifactStore:
     def __init__(self) -> None:
-        self.created: list[ArtifactVersionDoc] = []
+        self.created: list[BuildRecord] = []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         artifact_id = f"av_{len(self.created) + 1}"
-        artifact = ArtifactVersionDoc(
+        artifact = BuildRecord(
             _id=artifact_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=len(self.created) + 1,
             lineage_root_id=artifact_id,
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
-            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
-            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            lifecycle_status=kwargs.get("lifecycle_status", BuildRecordStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", BuildRecordValidationStatus.PENDING),
             files_manifest=list(kwargs.get("files_manifest") or []),
             commit_metadata=kwargs.get("commit_metadata") or {},
         )
         self.created.append(artifact)
         return artifact
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str) -> ArtifactVersionDoc | None:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord | None:
         for artifact in self.created:
-            if artifact.app_id == app_id and artifact.id == artifact_version_id:
+            if artifact.app_id == app_id and artifact.id == build_record_id:
                 return artifact
         return None
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
-    ) -> list[ArtifactVersionDoc]:
+    ) -> list[BuildRecord]:
         rows = [
             artifact
             for artifact in self.created
             if artifact.app_id == app_id
-            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
-            and (artifact_key is None or artifact.artifact_key == artifact_key)
+            and (build_family is None or artifact.build_family == build_family)
+            and (build_key is None or artifact.build_key == build_key)
             and (lifecycle_status is None or artifact.lifecycle_status == lifecycle_status)
         ]
         return rows[:limit]
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc | None:
-        artifact = await self.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    ) -> BuildRecord | None:
+        artifact = await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
         if artifact is None:
             return None
-        updates: dict[str, Any] = {"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+        updates: dict[str, Any] = {"lifecycle_status": BuildRecordStatus.CURRENT}
         if commit_metadata is not None:
             updates["commit_metadata"] = commit_metadata
         refreshed = artifact.model_copy(update=updates)
@@ -382,10 +382,10 @@ def test_app_intelligence_overview_card_emitter_surfaces_full_artifact_payload()
         app_intelligence_progress={"stage": "complete", "status": "ready", "percent": 100},
         app_intelligence_health={"status": "healthy"},
         current_app_context_version_id="acv_abc123",
-        app_context_version_artifact_version_id="av_ctx_1",
-        source_context_artifact_version_id="av_src_1",
-        graph_artifact_version_id="av_graph_1",
-        app_intelligence_artifact_version_id="av_intel_1",
+        app_context_version_build_record_id="av_ctx_1",
+        source_context_build_record_id="av_src_1",
+        graph_build_record_id="av_graph_1",
+        app_intelligence_build_record_id="av_intel_1",
         context_graph_warnings=[],
     )
 
@@ -401,8 +401,8 @@ def test_app_intelligence_overview_card_emitter_surfaces_full_artifact_payload()
     assert payload["status"] == "ready"
     assert payload["app_name"] == "My App"
     assert payload["current_app_context_version_id"] == "acv_abc123"
-    assert payload["artifact_version_ids"]["app_context_version"] == "av_ctx_1"
-    assert payload["artifact_version_ids"]["app_intelligence_snapshot"] == "av_intel_1"
+    assert payload["build_record_ids"]["app_context_version"] == "av_ctx_1"
+    assert payload["build_record_ids"]["app_intelligence_snapshot"] == "av_intel_1"
     # Artifact payloads must not carry inline progress/activity restore fields.
     assert "activity_type" not in payload
     assert "activity_display_variant" not in payload
@@ -536,7 +536,7 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "source_chunks" not in composer_context_helper
     assert "graph_relationships" not in composer_context_helper
     assert "suggested_adjustments_count" in composer_context_helper
-    assert "artifact_version_ids" in composer_context_helper
+    assert "build_record_ids" in composer_context_helper
     assert "/api/chats/meta/${encodedAppId}/${encodedWorkflow}/${encodedChatId}" in source
     assert "cachedCurrent?.tool_name || cachedCurrent?.toolCall?.tool_name" in source
     assert "cached?.payload || cachedToolCall.payload" in source
@@ -999,22 +999,22 @@ def test_existing_app_preload_builds_context_graph_pack_for_local_repo(
     assert context["app_intelligence_progress"]["details"]["app_context_persisted"] is True
     assert context["current_context_version_id"].startswith("ctx_")
     assert context["current_app_context_version_id"] == context["current_context_version_id"]
-    assert context["app_context_version_artifact_version_id"] == store.created[-1].id
-    assert context["source_context_artifact_version_id"] == store.created[0].id
-    assert context["graph_artifact_version_id"] == store.created[1].id
-    assert context["app_intelligence_artifact_version_id"] == store.created[2].id
+    assert context["app_context_version_build_record_id"] == store.created[-1].id
+    assert context["source_context_build_record_id"] == store.created[0].id
+    assert context["graph_build_record_id"] == store.created[1].id
+    assert context["app_intelligence_build_record_id"] == store.created[2].id
     assert context["app_intelligence_registration"]["persisted"] is True
-    assert [artifact.artifact_kind for artifact in store.created] == [
+    assert [artifact.build_family for artifact in store.created] == [
         "source_context_bundle",
         "app_context_graph",
         "app_intelligence_snapshot",
         "app_context_version",
     ]
-    assert store.created[-1].lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert store.created[-1].lifecycle_status == BuildRecordStatus.CURRENT
     context_payload = store.created[-1].commit_metadata.metadata["summary_payload"]
     assert context_payload["mode"] == "brownfield"
-    assert any(ref["artifact_kind"] == "source_context_bundle" for ref in context_payload["artifact_refs"])
-    assert any(ref["artifact_kind"] == "app_intelligence_snapshot" for ref in context_payload["artifact_refs"])
+    assert any(ref["build_family"] == "source_context_bundle" for ref in context_payload["artifact_refs"])
+    assert any(ref["build_family"] == "app_intelligence_snapshot" for ref in context_payload["artifact_refs"])
     assert context["app_intelligence_health"]["status"] in {"healthy", "warning"}
     assert "App Intelligence indexed" in context["app_intelligence_summary"]
     assert context["context_graph_catalog"]["source_context_chunk_count"] >= 1
@@ -1033,8 +1033,8 @@ def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(
 
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_graph_1",
-        artifact_kind="app_context_graph",
+        build_record_id="av_graph_1",
+        build_family="app_context_graph",
         file_map={
             "modules/tasks/backend/service.py": "def list_tasks():\n    return []\n",
         },
@@ -1275,7 +1275,7 @@ def test_existing_app_preload_builds_context_graph_pack_for_github_repo_url(
     assert context["app_intelligence_progress"]["details"]["app_context_persisted"] is True
     assert context["current_app_context_version_id"] == context["current_context_version_id"]
     assert context["app_intelligence_registration"]["app_context_version_id"] == context["current_context_version_id"]
-    assert [artifact.artifact_kind for artifact in store.created] == [
+    assert [artifact.build_family for artifact in store.created] == [
         "source_context_bundle",
         "app_context_graph",
         "app_intelligence_snapshot",
@@ -1306,8 +1306,8 @@ def test_existing_app_refresh_preloads_prior_source_context_bundle_when_availabl
     }
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_graph_1",
-        artifact_kind="app_context_graph",
+        build_record_id="av_graph_1",
+        build_family="app_context_graph",
         file_map=file_map,
     )
     bundle = build_source_corpus_bundle(
@@ -1412,7 +1412,7 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
                 "embed_theme_ready": True,
             },
             "discovery_brief": "Start by bridging messaging and attaching a summary workflow.",
-            "artifact_version": "1.0",
+            "build_record": "1.0",
         },
     )
     save_module = module
@@ -2258,5 +2258,6 @@ def test_known_services_json_is_valid_and_loadable() -> None:
     assert services["openai"]["id"] == "openai"
     assert services["boto3"]["id"] == "aws"       # alias: boto3 → aws
     assert services["mongoose"]["id"] == "mongodb"  # alias: mongoose → mongodb
+
 
 

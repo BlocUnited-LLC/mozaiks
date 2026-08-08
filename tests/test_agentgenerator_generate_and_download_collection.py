@@ -168,7 +168,7 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: f"wss://ws.test/{app_id}")
     monkeypatch.setattr(
         generate_and_download_module,
-        "_register_workflow_bundle_artifact_version",
+        "_register_workflow_bundle_build_record",
         AsyncMock(return_value=type("AV", (), {"id": "av_1"})()),
     )
     monkeypatch.setattr(
@@ -234,7 +234,7 @@ def test_generate_and_download_multi_workflow_pack_zips_all_bundles(
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: f"wss://ws.test/{app_id}")
     monkeypatch.setattr(
         generate_and_download_module,
-        "_register_workflow_bundle_artifact_version",
+        "_register_workflow_bundle_build_record",
         AsyncMock(return_value=type("AV", (), {"id": "av_2"})()),
     )
     monkeypatch.setattr(
@@ -312,7 +312,7 @@ def test_generate_and_download_skips_meta_key(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(generate_and_download_module, "resolve_agent_websocket_url", lambda app_id: "wss://ws.test")
     monkeypatch.setattr(
         generate_and_download_module,
-        "_register_workflow_bundle_artifact_version",
+        "_register_workflow_bundle_build_record",
         AsyncMock(return_value=type("AV", (), {"id": "av_4"})()),
     )
     monkeypatch.setattr(
@@ -609,4 +609,5 @@ def test_merge_workflow_bundle_repair_results_preserves_successful_outputs() -> 
         if not key.startswith("_") and value["workflow_name"] == "BrokenWorkflow"
     )
     assert len(repaired_entry["files"]) == len(_minimal_workflow_files("BrokenWorkflow"))
+
 

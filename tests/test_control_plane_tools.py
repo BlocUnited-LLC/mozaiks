@@ -38,9 +38,9 @@ from mozaiksai.control_plane import (
 )
 from mozaiksai.control_plane.tools.get_revision_context import get_revision_context
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
     ChangeClassification,
     ChangeIntentDoc,
     ChangeRequestDoc,
@@ -108,7 +108,7 @@ class _FakeChangeRequest:
 
 class _FakeArtifactStore:
     async def get_build_record(self, *, app_id: str, build_record_id: str):
-        return ArtifactVersionDoc(
+        return BuildRecord(
             _id=build_record_id,
             app_id=app_id,
             build_family="app_bundle",
@@ -116,8 +116,8 @@ class _FakeArtifactStore:
             version_number=4,
             lineage_root_id="av_root",
             parent_build_record_id="av_parent",
-            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-            validation_status=ArtifactValidationStatus.PASSED,
+            lifecycle_status=BuildRecordStatus.CURRENT,
+            validation_status=BuildRecordValidationStatus.PASSED,
             source_workflow="AppGenerator",
             commit_metadata={
                 "metadata": {},
@@ -127,7 +127,7 @@ class _FakeArtifactStore:
     async def list_build_records(self, **kwargs):  # noqa: ANN003
         return []
 
-    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, build_record_id: str | None = None, limit: int):
         return [
             _FakeChangeRequest(ChangeClassification.FEATURE),
             _FakeChangeRequest(ChangeClassification.PATCH),
@@ -152,7 +152,7 @@ class _FakeSessionStore:
             journey_key="plan_build",
             journey_position=7,
             journey_total_steps=8,
-            artifact_version_refs={
+            build_record_refs={
                 "business_plan_bundle": "av_bp_2",
                 "executive_summary": "av_exec_1",
             },
@@ -176,7 +176,7 @@ def _revision_pack() -> LoadedControlPlanePack:
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.refinement_harness.v1",
             routing=ControlPlaneRoutingManifest(
-                default_build_family="business_plan_bundle",
+                default_ARTIFACT_KIND="business_plan_bundle",
                 artifacts=[
                     ControlPlaneArtifactRoutingManifest(
                         build_family="business_plan_bundle",
@@ -209,7 +209,7 @@ def _revision_pack() -> LoadedControlPlanePack:
 class _RevisionArtifactStore(_FakeArtifactStore):
     async def get_build_record(self, *, app_id: str, build_record_id: str):
         if build_record_id == "av_bp_2":
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="business_plan_bundle",
@@ -221,8 +221,8 @@ class _RevisionArtifactStore(_FakeArtifactStore):
                     "market_research": "av_market_1",
                     "customer_persona": "av_persona_1",
                 },
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="FinalMemoAssembly",
                 commit_metadata={
                     "metadata": {
@@ -234,7 +234,7 @@ class _RevisionArtifactStore(_FakeArtifactStore):
                 },
             )
         if build_record_id == "av_exec_1":
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="executive_summary",
@@ -242,21 +242,21 @@ class _RevisionArtifactStore(_FakeArtifactStore):
                 version_number=1,
                 lineage_root_id="av_exec_root",
                 parent_build_record_id=None,
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="ExecutiveSummary",
                 commit_metadata={"metadata": {}},
             )
         if build_record_id == "av_market_1":
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="market_research",
                 build_key="market_research",
                 version_number=1,
                 lineage_root_id="av_market_1",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.SKIPPED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.SKIPPED,
                 source_workflow="MarketResearch",
                 commit_metadata={
                     "metadata": {
@@ -268,15 +268,15 @@ class _RevisionArtifactStore(_FakeArtifactStore):
                 },
             )
         if build_record_id == "av_persona_1":
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="customer_persona",
                 build_key="customer_persona",
                 version_number=1,
                 lineage_root_id="av_persona_1",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.SKIPPED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.SKIPPED,
                 source_workflow="CustomerPersona",
                 commit_metadata={
                     "metadata": {
@@ -337,7 +337,7 @@ class _RevisionArtifactStore(_FakeArtifactStore):
             ),
         )
 
-    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, build_record_id: str | None = None, limit: int):
         return [
             await self.get_change_request(app_id=app_id, change_request_id="cr_1"),
         ]
@@ -397,7 +397,7 @@ async def test_workspace_scope_tool_reads_artifact_zip_and_related_files(tmp_pat
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -405,8 +405,8 @@ async def test_workspace_scope_tool_reads_artifact_zip_and_related_files(tmp_pat
                 version_number=2,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -452,7 +452,7 @@ async def test_workspace_catalog_tool_ranks_request_matched_files(tmp_path: Path
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -460,8 +460,8 @@ async def test_workspace_catalog_tool_ranks_request_matched_files(tmp_path: Path
                 version_number=5,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -501,7 +501,7 @@ async def test_context_graph_catalog_tool_ranks_graph_files_from_artifact_zip(tm
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -509,8 +509,8 @@ async def test_context_graph_catalog_tool_ranks_graph_files_from_artifact_zip(tm
                 version_number=6,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -558,7 +558,7 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -566,8 +566,8 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
                 version_number=10,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -608,7 +608,7 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -616,8 +616,8 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
                 version_number=7,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -660,7 +660,7 @@ async def test_source_context_tools_search_read_and_related_files_from_artifact_
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -668,8 +668,8 @@ async def test_source_context_tools_search_read_and_related_files_from_artifact_
                 version_number=8,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -723,7 +723,7 @@ async def test_contract_surface_context_uses_canonical_context_graph_loader(tmp_
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
-            return ArtifactVersionDoc(
+            return BuildRecord(
                 _id=build_record_id,
                 app_id=app_id,
                 build_family="app_bundle",
@@ -731,8 +731,8 @@ async def test_contract_surface_context_uses_canonical_context_graph_loader(tmp_
                 version_number=9,
                 lineage_root_id="av_root",
                 parent_build_record_id="av_parent",
-                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                validation_status=ArtifactValidationStatus.PASSED,
+                lifecycle_status=BuildRecordStatus.CURRENT,
+                validation_status=BuildRecordValidationStatus.PASSED,
                 source_workflow="AppGenerator",
                 commit_metadata={
                     "metadata": {"artifact_path": str(zip_path)},
@@ -758,3 +758,5 @@ async def test_contract_surface_context_uses_canonical_context_graph_loader(tmp_
         item["path"] == "app/modules/reports/backend/handler.py"
         for item in surface_context["context_graph"]["candidate_files"]
     )
+
+

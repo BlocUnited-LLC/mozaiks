@@ -97,14 +97,14 @@ def _plan(app_id: str = "my-app", **kwargs) -> ContextRefreshPlan:
 
 
 def _artifact_ref(
-    artifact_kind: str = "app_context_version",
-    artifact_key: str | None = "default",
-    artifact_version_id: str = "v1",
+    build_family: str = "app_context_version",
+    build_key: str | None = "default",
+    build_record_id: str = "v1",
 ) -> ArtifactRef:
     return ArtifactRef(
-        artifact_kind=artifact_kind,
-        artifact_key=artifact_key,
-        artifact_version_id=artifact_version_id,
+        build_family=build_family,
+        build_key=build_key,
+        build_record_id=build_record_id,
     )
 
 
@@ -288,8 +288,8 @@ class TestDedupeArtifactRefs:
             _artifact_ref("kind_b", "key2", "v2"),
         ]
         result = _dedupe_artifact_refs(refs)
-        assert result[0].artifact_kind == "kind_a"
-        assert result[1].artifact_kind == "kind_b"
+        assert result[0].build_family == "kind_a"
+        assert result[1].build_family == "kind_b"
 
 
 # ---------------------------------------------------------------------------
@@ -452,3 +452,4 @@ class TestValidateRefreshPlan:
         plan = _plan(app_id="my-app")
         resolved = _validate_refresh_plan(plan, app_id=None)
         assert resolved == "my-app"
+

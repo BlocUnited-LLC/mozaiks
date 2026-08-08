@@ -637,7 +637,7 @@ def _patched_download_tool():
         "use_ui_tool": download_module.use_ui_tool,
         "record_workflow_export": download_module.record_workflow_export,
         "record_workflow_artifacts": download_module.record_workflow_artifacts,
-        "_register_workflow_bundle_artifact_version": download_module._register_workflow_bundle_artifact_version,
+        "_register_workflow_bundle_build_record": download_module._register_workflow_bundle_build_record,
         "resolve_agent_api_url": download_module.resolve_agent_api_url,
         "resolve_agent_websocket_url": download_module.resolve_agent_websocket_url,
         "_promote_workflow_to_app_workspace": download_module._promote_workflow_to_app_workspace,
@@ -654,13 +654,13 @@ def _patched_download_tool():
     async def _noop_async(*args: Any, **kwargs: Any) -> None:
         return None
 
-    async def _fake_artifact_version(*args: Any, **kwargs: Any) -> Any:
-        return type("ArtifactVersion", (), {"id": "live_smoke_artifact"})()
+    async def _fake_build_record(*args: Any, **kwargs: Any) -> Any:
+        return type("BuildRecord", (), {"id": "live_smoke_artifact"})()
 
     download_module.use_ui_tool = _fake_use_ui_tool
     download_module.record_workflow_export = _noop_async
     download_module.record_workflow_artifacts = _noop_async
-    download_module._register_workflow_bundle_artifact_version = _fake_artifact_version
+    download_module._register_workflow_bundle_build_record = _fake_build_record
     download_module.resolve_agent_api_url = lambda app_id: f"https://api.local/{app_id}"
     download_module.resolve_agent_websocket_url = lambda app_id: f"wss://ws.local/{app_id}"
     download_module._promote_workflow_to_app_workspace = lambda *args, **kwargs: None
@@ -1025,3 +1025,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

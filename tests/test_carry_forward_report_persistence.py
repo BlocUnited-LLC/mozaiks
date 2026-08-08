@@ -4,16 +4,16 @@ Tests for carry_forward_report persistence through artifact creation.
 Proves the full persistence path:
     resolve_carry_forward_preservation
       → context_variables["carry_forward_report"]
-      → _register_app_bundle_artifact_version reads "carry_forward_report"
+      → _register_app_bundle_build_record reads "carry_forward_report"
       → commit_metadata={"metadata": {"carry_forward_report": report, ...}}
-      → ArtifactVersionDoc.commit_metadata.metadata
+      → BuildRecord.commit_metadata.metadata
       → Studio build history: v.model_dump()["commit_metadata"]["metadata"]["carry_forward_report"]
 
 12 tests:
  - Tests 1-4  verify the carry_forward_report → metadata path via source inspection.
    Direct import of generate_and_download triggers a circular import when run in
    isolation (see test_carry_forward_preservation.py test 26 for the same pattern).
- - Tests 5-7  verify the ArtifactCommitMetadata / ArtifactVersionDoc model shapes.
+ - Tests 5-7  verify the ArtifactCommitMetadata / BuildRecord model shapes.
  - Tests 8-9  verify the resolver writes the report to the context key.
  - Tests 10-11 verify the Studio build history model_dump path.
  - Test 12    verifies the context key identity ("carry_forward_report", not "carry_forward_additions").
@@ -82,9 +82,9 @@ _REQUIRED_REPORT_KEYS = {
 
 
 def test_generate_and_download_reads_carry_forward_report_from_context() -> None:
-    """[1] _register_app_bundle_artifact_version reads "carry_forward_report" from context."""
+    """[1] _register_app_bundle_build_record reads "carry_forward_report" from context."""
     assert 'context_variables.get("carry_forward_report")' in _GENERATE_AND_DOWNLOAD_SRC, (
-        '_register_app_bundle_artifact_version must read "carry_forward_report" from context'
+        '_register_app_bundle_build_record must read "carry_forward_report" from context'
     )
 
 
@@ -92,7 +92,7 @@ def test_generate_and_download_guards_with_isinstance_dict() -> None:
     """[2] Report is only included when it is a dict (absent/non-dict context returns are skipped)."""
     # Covers both "absent from context" (None) and "non-dict" (str, list, ...) cases.
     assert "isinstance(cf_report, dict)" in _GENERATE_AND_DOWNLOAD_SRC, (
-        "_register_app_bundle_artifact_version must guard carry_forward_report with isinstance(cf_report, dict)"
+        "_register_app_bundle_build_record must guard carry_forward_report with isinstance(cf_report, dict)"
     )
 
 
@@ -117,12 +117,12 @@ def test_generate_and_download_has_try_except_for_report_read() -> None:
 def test_generate_and_download_assigns_report_to_bundle_content_metadata() -> None:
     """[4] Report dict is written to bundle_content_metadata["carry_forward_report"]."""
     assert 'bundle_content_metadata["carry_forward_report"] = cf_report' in _GENERATE_AND_DOWNLOAD_SRC, (
-        "_register_app_bundle_artifact_version must write carry_forward_report to bundle_content_metadata"
+        "_register_app_bundle_build_record must write carry_forward_report to bundle_content_metadata"
     )
 
 
 # ---------------------------------------------------------------------------
-# Group 2: ArtifactCommitMetadata and ArtifactVersionDoc model shape (3 tests)
+# Group 2: ArtifactCommitMetadata and BuildRecord model shape (3 tests)
 # ---------------------------------------------------------------------------
 
 
@@ -136,11 +136,11 @@ def test_artifact_commit_metadata_accepts_carry_forward_report() -> None:
     assert meta.metadata["carry_forward_report"] == _MINIMAL_REPORT
 
 
-def test_artifact_version_doc_model_dump_includes_commit_metadata_metadata() -> None:
-    """[6] ArtifactVersionDoc.model_dump() includes commit_metadata.metadata (studio build history path)."""
-    from mozaiksai.core.artifacts.models import ArtifactVersionDoc
+def test_build_record_doc_model_dump_includes_commit_metadata_metadata() -> None:
+    """[6] BuildRecord.model_dump() includes commit_metadata.metadata (studio build history path)."""
+    from mozaiksai.core.artifacts.models import BuildRecord
 
-    doc = ArtifactVersionDoc.model_validate(
+    doc = BuildRecord.model_validate(
         {
             "_id": "av_test_01",
             "app_id": _APP_ID,
@@ -156,11 +156,11 @@ def test_artifact_version_doc_model_dump_includes_commit_metadata_metadata() -> 
     assert "metadata" in dumped["commit_metadata"]
 
 
-def test_artifact_version_doc_report_survives_model_dump_roundtrip() -> None:
+def test_build_record_doc_report_survives_model_dump_roundtrip() -> None:
     """[7] carry_forward_report value preserved after model_dump() — no data loss."""
-    from mozaiksai.core.artifacts.models import ArtifactVersionDoc
+    from mozaiksai.core.artifacts.models import BuildRecord
 
-    doc = ArtifactVersionDoc.model_validate(
+    doc = BuildRecord.model_validate(
         {
             "_id": "av_test_02",
             "app_id": _APP_ID,
@@ -281,10 +281,10 @@ async def test_resolver_report_has_required_keys() -> None:
 
 
 def test_studio_build_history_includes_commit_metadata_in_model_dump() -> None:
-    """[10] ArtifactVersionDoc.model_dump() (studio build history) includes nested commit_metadata.metadata."""
-    from mozaiksai.core.artifacts.models import ArtifactVersionDoc
+    """[10] BuildRecord.model_dump() (studio build history) includes nested commit_metadata.metadata."""
+    from mozaiksai.core.artifacts.models import BuildRecord
 
-    doc = ArtifactVersionDoc.model_validate(
+    doc = BuildRecord.model_validate(
         {
             "_id": "av_hist_01",
             "app_id": _APP_ID,
@@ -311,9 +311,9 @@ def test_studio_build_history_includes_commit_metadata_in_model_dump() -> None:
 
 def test_studio_build_history_report_nested_correctly() -> None:
     """[11] Studio build history: carry_forward_report at commit_metadata.metadata.carry_forward_report."""
-    from mozaiksai.core.artifacts.models import ArtifactVersionDoc
+    from mozaiksai.core.artifacts.models import BuildRecord
 
-    doc = ArtifactVersionDoc.model_validate(
+    doc = BuildRecord.model_validate(
         {
             "_id": "av_hist_02",
             "app_id": _APP_ID,
@@ -355,4 +355,5 @@ def test_artifact_metadata_key_is_carry_forward_report_not_additions() -> None:
     assert 'bundle_content_metadata["carry_forward_additions"]' not in src, (
         '"carry_forward_additions" must not be written to bundle_content_metadata'
     )
+
 

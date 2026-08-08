@@ -8,7 +8,7 @@
     ],
     "stubbed": [
       "_DeterministicChangeClassifier(change_class='core')",
-      "ArtifactStore.get_artifact_version -> synthetic CRM doc + temp dir",
+      "ArtifactStore.get_build_record -> synthetic CRM doc + temp dir",
       "carry_forward_decisions fixture (settings/notifications=reuse, contacts/pipeline=drop)"
     ]
   },
@@ -202,3 +202,4 @@
   },
   "violations": []
 }
+

@@ -25,10 +25,10 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
+    BuildRecordStatus,
     ArtifactStore,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordValidationStatus,
+    BuildRecord,
     persist_summary_artifact,
 )
 from mozaiksai.core.runtime.app.loader import AppLoader
@@ -58,7 +58,7 @@ def _configure_event_loop_policy() -> None:
 
 class MemoryArtifactStore:
     def __init__(self) -> None:
-        self._versions: dict[tuple[str, str], list[ArtifactVersionDoc]] = {}
+        self._versions: dict[tuple[str, str], list[BuildRecord]] = {}
         self.create_calls: list[dict[str, Any]] = []
         self._counter = 0
 
@@ -66,49 +66,49 @@ class MemoryArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str | None = None,
+        build_family: str,
+        build_key: str | None = None,
         summary_payload: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc:
-        artifact_key = artifact_key or artifact_kind
+    ) -> BuildRecord:
+        build_key = build_key or build_family
         self._counter += 1
-        artifact = ArtifactVersionDoc(
-            _id=f"av_{artifact_kind}_{self._counter}",
+        artifact = BuildRecord(
+            _id=f"av_{build_family}_{self._counter}",
             app_id=app_id,
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
+            build_family=build_family,
+            build_key=build_key,
             version_number=1,
-            lineage_root_id=f"av_{artifact_kind}_{self._counter}",
-            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-            validation_status=ArtifactValidationStatus.SKIPPED,
+            lineage_root_id=f"av_{build_family}_{self._counter}",
+            lifecycle_status=BuildRecordStatus.CURRENT,
+            validation_status=BuildRecordValidationStatus.SKIPPED,
             commit_metadata={
                 "metadata": {
-                    "summary_payload": summary_payload or {"seeded": artifact_kind},
+                    "summary_payload": summary_payload or {"seeded": build_family},
                     "summary_format": "json",
                 }
             },
         )
-        self._versions.setdefault((artifact_kind, artifact_key), []).insert(0, artifact)
+        self._versions.setdefault((build_family, build_key), []).insert(0, artifact)
         return artifact
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_: Any,
-    ) -> list[ArtifactVersionDoc]:
-        if artifact_kind is None:
+    ) -> list[BuildRecord]:
+        if build_family is None:
             keys = list(self._versions)
-        elif artifact_key is None:
-            keys = [key for key in self._versions if key[0] == artifact_kind]
+        elif build_key is None:
+            keys = [key for key in self._versions if key[0] == build_family]
         else:
-            keys = [(artifact_kind, artifact_key)]
+            keys = [(build_family, build_key)]
 
-        versions: list[ArtifactVersionDoc] = []
+        versions: list[BuildRecord] = []
         for key in keys:
             versions.extend(self._versions.get(key, []))
         versions = [item for item in versions if item.app_id == app_id]
@@ -116,37 +116,37 @@ class MemoryArtifactStore:
             versions = [item for item in versions if item.lifecycle_status == lifecycle_status]
         return versions[: max(1, int(limit))]
 
-    async def get_artifact_version(
+    async def get_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
-    ) -> ArtifactVersionDoc | None:
+        build_record_id: str,
+    ) -> BuildRecord | None:
         for versions in self._versions.values():
             for artifact in versions:
-                if artifact.app_id == app_id and artifact.id == artifact_version_id:
+                if artifact.app_id == app_id and artifact.id == build_record_id:
                     return artifact
         return None
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self.create_calls.append(dict(kwargs))
         self._counter += 1
-        artifact_kind = str(kwargs["artifact_kind"])
-        artifact_key = str(kwargs["artifact_key"])
+        build_family = str(kwargs["build_family"])
+        build_key = str(kwargs["build_key"])
         lifecycle_status = kwargs["lifecycle_status"]
-        if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
-            for item in self._versions.get((artifact_kind, artifact_key), []):
-                if item.app_id == kwargs["app_id"] and item.lifecycle_status == ArtifactLifecycleStatus.CURRENT:
-                    item.lifecycle_status = ArtifactLifecycleStatus.SUPERSEDED
+        if lifecycle_status == BuildRecordStatus.CURRENT:
+            for item in self._versions.get((build_family, build_key), []):
+                if item.app_id == kwargs["app_id"] and item.lifecycle_status == BuildRecordStatus.CURRENT:
+                    item.lifecycle_status = BuildRecordStatus.SUPERSEDED
 
-        artifact = ArtifactVersionDoc(
-            _id=f"av_{artifact_kind}_{self._counter}",
+        artifact = BuildRecord(
+            _id=f"av_{build_family}_{self._counter}",
             app_id=kwargs["app_id"],
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_key,
-            version_number=len(self._versions.get((artifact_kind, artifact_key), [])) + 1,
+            build_family=build_family,
+            build_key=build_key,
+            version_number=len(self._versions.get((build_family, build_key), [])) + 1,
             parent_version_id=kwargs.get("parent_version_id"),
-            lineage_root_id=f"av_{artifact_kind}_{self._counter}",
+            lineage_root_id=f"av_{build_family}_{self._counter}",
             canonical_inputs_version=dict(kwargs.get("canonical_inputs_version") or {}),
             lifecycle_status=lifecycle_status,
             validation_status=kwargs["validation_status"],
@@ -155,15 +155,15 @@ class MemoryArtifactStore:
             source_chat_id=kwargs.get("source_chat_id"),
             commit_metadata=kwargs["commit_metadata"],
         )
-        self._versions.setdefault((artifact.artifact_kind, artifact.artifact_key), []).insert(0, artifact)
+        self._versions.setdefault((artifact.build_family, artifact.build_key), []).insert(0, artifact)
         return artifact
 
-    async def get_current_artifact_version_refs(self, *, app_id: str) -> dict[str, str]:
+    async def get_current_build_record_refs(self, *, app_id: str) -> dict[str, str]:
         refs: dict[str, str] = {}
-        for (artifact_kind, _artifact_key), versions in self._versions.items():
+        for (build_family, _build_key), versions in self._versions.items():
             for artifact in versions:
-                if artifact.app_id == app_id and artifact.lifecycle_status == ArtifactLifecycleStatus.CURRENT:
-                    refs.setdefault(artifact_kind, artifact.id)
+                if artifact.app_id == app_id and artifact.lifecycle_status == BuildRecordStatus.CURRENT:
+                    refs.setdefault(build_family, artifact.id)
                     break
         return refs
 
@@ -265,11 +265,11 @@ async def _seed_summary_artifacts(
     *,
     app_id: str,
     artifact_store: Any,
-) -> tuple[ArtifactVersionDoc, ArtifactVersionDoc, ArtifactVersionDoc]:
+) -> tuple[BuildRecord, BuildRecord, BuildRecord]:
     design_docs = await persist_summary_artifact(
         app_id=app_id,
-        artifact_kind="design_docs",
-        artifact_key="design_docs",
+        build_family="design_docs",
+        build_key="design_docs",
         summary_payload={"surface_map": {"surfaces": [{"surface_id": "support_tickets"}]}},
         source_workflow="DesignDocs",
         source_chat_id="chat_designdocs",
@@ -278,8 +278,8 @@ async def _seed_summary_artifacts(
     )
     subscription_contract = await persist_summary_artifact(
         app_id=app_id,
-        artifact_kind="subscription_contract",
-        artifact_key="subscription_contract",
+        build_family="subscription_contract",
+        build_key="subscription_contract",
         summary_payload={
             "contract_required": False,
             "rationale": "No generated-app SaaS subscription contract required.",
@@ -288,13 +288,13 @@ async def _seed_summary_artifacts(
         source_workflow="SubscriptionContractDesigner",
         source_chat_id="chat_subscriptioncontractdesigner",
         author_user_id="user_1",
-        input_artifact_kinds=("concept", "build_plan", "design_docs"),
+        input_ARTIFACT_KINDS=("concept", "build_plan", "design_docs"),
         artifact_store=artifact_store,
     )
     theme_capture = await persist_summary_artifact(
         app_id=app_id,
-        artifact_kind="theme_capture",
-        artifact_key="theme_capture",
+        build_family="theme_capture",
+        build_key="theme_capture",
         summary_payload={"theme": {"name": "Support Operations"}},
         source_workflow="ThemeCapture",
         source_chat_id="chat_themecapture",
@@ -346,8 +346,8 @@ async def _cleanup_real_store_app_id(app_id: str) -> None:
     client = get_mongo_client()
     db = client[SYSTEM_DATABASE]
     for collection_name in (
-        "ArtifactVersions",
-        "ArtifactVersionCounters",
+        "BuildRecords",
+        "BuildRecordCounters",
         "ChangeRequests",
         "RefinementSessions",
     ):
@@ -359,9 +359,9 @@ async def _run_lineage_smoke_with_store(
     app_id: str,
     store: Any,
     mode: str,
-    design_docs: ArtifactVersionDoc,
-    subscription_contract: ArtifactVersionDoc,
-    theme_capture: ArtifactVersionDoc,
+    design_docs: BuildRecord,
+    subscription_contract: BuildRecord,
+    theme_capture: BuildRecord,
     workflow_integration_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     graph = _configure_repo_factory_workflows()
@@ -399,14 +399,14 @@ async def _run_lineage_smoke_with_store(
         artifact_store=store,
     )
 
-    current_refs = await store.get_current_artifact_version_refs(app_id=app_id)
-    workflow_bundle = await store.get_artifact_version(
+    current_refs = await store.get_current_build_record_refs(app_id=app_id)
+    workflow_bundle = await store.get_build_record(
         app_id=app_id,
-        artifact_version_id=current_refs["workflow_bundle"],
+        build_record_id=current_refs["workflow_bundle"],
     )
-    app_bundle = await store.get_artifact_version(
+    app_bundle = await store.get_build_record(
         app_id=app_id,
-        artifact_version_id=current_refs["app_bundle"],
+        build_record_id=current_refs["app_bundle"],
     )
     if workflow_bundle is None or app_bundle is None:
         return {"success": False, "validation_errors": ["Expected current workflow_bundle and app_bundle artifacts."]}
@@ -415,7 +415,7 @@ async def _run_lineage_smoke_with_store(
         (
             call
             for call in reversed(create_calls)
-            if call["artifact_kind"] == "workflow_bundle"
+            if call["build_family"] == "workflow_bundle"
         ),
         {
             "source_workflow": workflow_bundle.source_workflow,
@@ -426,7 +426,7 @@ async def _run_lineage_smoke_with_store(
         (
             call
             for call in reversed(create_calls)
-            if call["artifact_kind"] == "app_bundle"
+            if call["build_family"] == "app_bundle"
         ),
         {
             "source_workflow": app_bundle.source_workflow,
@@ -439,7 +439,7 @@ async def _run_lineage_smoke_with_store(
             "workflow_name": "AppGenerator",
             "app_id": app_id,
             "chat_id": "chat_appgenerator",
-            "artifact_version_refs": current_refs,
+            "build_record_refs": current_refs,
         }
     )
     hydration = await hydrate_workflow_integration_context_from_latest_artifact(
@@ -507,7 +507,7 @@ async def _run_lineage_smoke_with_store(
         errors.append("app_bundle canonical inputs did not resolve workflow_bundle.")
     if hydration.get("status") != "hydrated" or hydration.get("source") != "workflow_bundle_artifact":
         errors.append(f"AppGenerator workflow metadata hydration failed: {hydration!r}.")
-    if context.get("workflow_bundle_artifact_version_id") != workflow_bundle.id:
+    if context.get("workflow_bundle_build_record_id") != workflow_bundle.id:
         errors.append("Hydrated workflow metadata did not retain workflow_bundle artifact version id.")
     if not acceptance.get("passed"):
         errors.append("AppGenerator deterministic acceptance gate did not pass.")
@@ -565,12 +565,12 @@ async def run_offline_factory_artifact_lineage_smoke(
     store = MemoryArtifactStore()
     design_docs = store.seed(
         app_id=app_id,
-        artifact_kind="design_docs",
+        build_family="design_docs",
         summary_payload={"surface_map": {"surfaces": [{"surface_id": "support_tickets"}]}},
     )
     subscription_contract = store.seed(
         app_id=app_id,
-        artifact_kind="subscription_contract",
+        build_family="subscription_contract",
         summary_payload={
             "contract_required": False,
             "rationale": "No generated-app SaaS subscription contract required.",
@@ -579,7 +579,7 @@ async def run_offline_factory_artifact_lineage_smoke(
     )
     theme_capture = store.seed(
         app_id=app_id,
-        artifact_kind="theme_capture",
+        build_family="theme_capture",
         summary_payload={"theme": {"name": "Support Operations"}},
     )
     return await _run_lineage_smoke_with_store(
@@ -779,3 +779,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

@@ -195,7 +195,7 @@ def test_builder_artifact_store_persists_database_migration_history() -> None:
         store.save_database_migration(
             app_id="app_1",
             build_id="build_1",
-            artifact_version_id="artifact_1",
+            build_record_id="artifact_1",
             change_class="feature",
             migration={
                 "migration_id": "m_20260503_120000",
@@ -212,7 +212,7 @@ def test_builder_artifact_store_persists_database_migration_history() -> None:
 
     assert record["migration_id"] == "m_20260503_120000"
     assert record["bundle_relative_path"] == "data/migrations/m_20260503_120000.json"
-    assert collection.docs[0]["artifact_version_id"] == "artifact_1"
+    assert collection.docs[0]["build_record_id"] == "artifact_1"
     assert any(kwargs.get("name") == "dbm_app_migration" for _keys, kwargs in collection.indexes)
 
 
@@ -236,7 +236,7 @@ def test_builder_artifact_store_reads_design_docs_data_contracts_and_theme_captu
         store.save_data_contract(
             app_id="app_1",
             build_id="build_1",
-            artifact_version_id="artifact_1",
+            build_record_id="artifact_1",
             change_class="feature",
             data_contract={"surfaces": [{"surface_id": "workflow"}], "shared_collections": [], "policies": {}},
             user_id="user_1",
@@ -262,6 +262,7 @@ def test_builder_artifact_store_reads_design_docs_data_contracts_and_theme_captu
     assert design_doc["content"] == "Backend design"
     assert design_doc["surface_map"]["surfaces"][0]["surface_id"] == "workflow"
     assert len(design_docs) == 1
-    assert data_contract["artifact_version_id"] == "artifact_1"
+    assert data_contract["build_record_id"] == "artifact_1"
     assert theme_capture["identity"]["brand_name"] == "Investor Hub"
+
 

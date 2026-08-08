@@ -55,9 +55,9 @@ from mozaiksai.control_plane.staged_coding_worker import select_staged_coding_wo
 from mozaiksai.control_plane.staging import create_refinement_staging_workspace
 from mozaiksai.core.artifacts import (
     ArtifactCommitMetadata,
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -76,13 +76,13 @@ class SmokeScenarioSpec:
     request_id: str
     request_text: str
     app_id: str
-    artifact_version_id: str
+    build_record_id: str
     source_files: dict[str, str]
     request_files: dict[str, str]
     affected_bundle_paths: list[str]
     scope_summary: str
-    artifact_kind: str = "app_bundle"
-    artifact_key: str = "app_bundle"
+    build_family: str = "app_bundle"
+    build_key: str = "app_bundle"
     change_class: str = "patch"
     workflow_id: str = "AppGenerator"
     workflow_sequence: str = "app_revision"
@@ -102,27 +102,27 @@ class _SmokeContentStore:
 
 class _SmokeArtifactStore:
     def __init__(self) -> None:
-        self.created_versions: list[ArtifactVersionDoc] = []
+        self.created_versions: list[BuildRecord] = []
         self.calls: list[dict[str, Any]] = []
 
-    async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
         version_id = "av_refinement_live_worker_smoke_persisted"
-        validation_status = kwargs.get("validation_status") or ArtifactValidationStatus.PENDING
-        lifecycle_status = kwargs.get("lifecycle_status") or ArtifactLifecycleStatus.DRAFT
-        if not isinstance(validation_status, ArtifactValidationStatus):
-            validation_status = ArtifactValidationStatus(validation_status)
-        if not isinstance(lifecycle_status, ArtifactLifecycleStatus):
-            lifecycle_status = ArtifactLifecycleStatus(lifecycle_status)
+        validation_status = kwargs.get("validation_status") or BuildRecordValidationStatus.PENDING
+        lifecycle_status = kwargs.get("lifecycle_status") or BuildRecordStatus.DRAFT
+        if not isinstance(validation_status, BuildRecordValidationStatus):
+            validation_status = BuildRecordValidationStatus(validation_status)
+        if not isinstance(lifecycle_status, BuildRecordStatus):
+            lifecycle_status = BuildRecordStatus(lifecycle_status)
         commit_metadata = kwargs.get("commit_metadata") or {}
         if not isinstance(commit_metadata, ArtifactCommitMetadata):
             commit_metadata = ArtifactCommitMetadata.model_validate(commit_metadata)
-        version = ArtifactVersionDoc.model_validate(
+        version = BuildRecord.model_validate(
             {
                 "_id": version_id,
                 "app_id": kwargs.get("app_id") or APP_ID,
-                "artifact_kind": kwargs.get("artifact_kind") or "app_bundle",
-                "artifact_key": kwargs.get("artifact_key") or "app_bundle",
+                "build_family": kwargs.get("build_family") or "app_bundle",
+                "build_key": kwargs.get("build_key") or "app_bundle",
                 "version_number": len(self.created_versions) + 1,
                 "parent_version_id": kwargs.get("parent_version_id"),
                 "lineage_root_id": kwargs.get("parent_version_id") or version_id,
@@ -138,14 +138,14 @@ class _SmokeArtifactStore:
         self.created_versions.append(version)
         return version
 
-    async def get_artifact_version(self, **kwargs):  # noqa: ANN003
-        version_id = str(kwargs.get("artifact_version_id") or "")
+    async def get_build_record(self, **kwargs):  # noqa: ANN003
+        version_id = str(kwargs.get("build_record_id") or "")
         for version in self.created_versions:
             if version.id == version_id:
                 return version
         return None
 
-    async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
+    async def list_build_records(self, **kwargs):  # noqa: ANN003
         return list(self.created_versions)
 
     async def list_change_requests(self, **kwargs):  # noqa: ANN003
@@ -288,7 +288,7 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
             request_id=REQUEST_ID,
             request_text=REQUEST_TEXT,
             app_id=APP_ID,
-            artifact_version_id="av_refinement_live_worker_smoke_001",
+            build_record_id="av_refinement_live_worker_smoke_001",
             source_files=dict(source_files),
             request_files={"ui/pages/dashboard.yaml": source_files["ui/pages/dashboard.yaml"]},
             affected_bundle_paths=["ui/pages/dashboard.yaml"],
@@ -299,7 +299,7 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
             request_id="req_refinement_live_worker_module_backend_001",
             request_text="Add a short no-op archive_project action stub to the projects module service.",
             app_id=f"{APP_ID}-module",
-            artifact_version_id="av_refinement_live_worker_module_backend_001",
+            build_record_id="av_refinement_live_worker_module_backend_001",
             source_files=dict(source_files),
             request_files={"modules/projects/backend/service.py": source_files["modules/projects/backend/service.py"]},
             affected_bundle_paths=["modules/projects/backend/service.py"],
@@ -310,7 +310,7 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
             request_id="req_refinement_live_worker_integration_001",
             request_text="Add a comment explaining analytics_provider retry behavior in the analytics provider client.",
             app_id=f"{APP_ID}-integration",
-            artifact_version_id="av_refinement_live_worker_integration_001",
+            build_record_id="av_refinement_live_worker_integration_001",
             source_files=dict(source_files),
             request_files={
                 "backend/integrations/analytics_provider_client.py": source_files[
@@ -325,7 +325,7 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
             request_id="req_refinement_live_worker_data_model_001",
             request_text="Add a short future-migration note in the projects schema explaining that project_phase will require new phases.",
             app_id=f"{APP_ID}-data-model",
-            artifact_version_id="av_refinement_live_worker_data_model_001",
+            build_record_id="av_refinement_live_worker_data_model_001",
             source_files=dict(source_files),
             request_files={"modules/projects/backend/schemas.py": source_files["modules/projects/backend/schemas.py"]},
             affected_bundle_paths=["modules/projects/backend/schemas.py"],
@@ -336,7 +336,7 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
             request_id="req_refinement_live_worker_managed_001",
             request_text="Add a comment explaining managed analytics display mapping in the analytics dashboard service.",
             app_id=f"{APP_ID}-managed",
-            artifact_version_id="av_refinement_live_worker_managed_001",
+            build_record_id="av_refinement_live_worker_managed_001",
             source_files=dict(source_files),
             request_files={"modules/analytics_dashboard/backend/service.py": source_files["modules/analytics_dashboard/backend/service.py"]},
             affected_bundle_paths=["modules/analytics_dashboard/backend/service.py"],
@@ -361,7 +361,7 @@ def _select_scenarios(choice: str) -> list[SmokeScenarioSpec]:
 def _build_plan(*, spec: SmokeScenarioSpec, staging_root: Path) -> RefinementExecutionPlan:
     return dry_run.build_refinement_execution_plan_from_route(
         request=spec.request_text,
-        artifact_kind=spec.artifact_kind,
+        build_family=spec.build_family,
         change_class=spec.change_class,
         workflow_id=spec.workflow_id,
         workflow_sequence=spec.workflow_sequence,
@@ -379,9 +379,9 @@ def _build_plan(*, spec: SmokeScenarioSpec, staging_root: Path) -> RefinementExe
 def _build_worker_request(*, spec: SmokeScenarioSpec, plan: RefinementExecutionPlan) -> CodingWorkerRequest:
     return CodingWorkerRequest(
         app_id=spec.app_id,
-        artifact_kind=spec.artifact_kind,
-        artifact_key=spec.artifact_key,
-        artifact_version_id=spec.artifact_version_id,
+        build_family=spec.build_family,
+        build_key=spec.build_key,
+        build_record_id=spec.build_record_id,
         requested_workflow_id=spec.requested_workflow_id,
         raw_user_request=spec.request_text,
         source_surface=spec.source_surface,
@@ -417,14 +417,14 @@ class _SmokeControlPlaneToolExecutor:
         app_id: str,
         request_id: str,
         request_text: str,
-        artifact_version_id: str,
+        build_record_id: str,
         source_file_map: dict[str, str],
         plan: RefinementExecutionPlan,
     ) -> None:
         self._app_id = app_id
         self._request_id = request_id
         self._request_text = request_text
-        self._artifact_version_id = artifact_version_id
+        self._build_record_id = build_record_id
         self._source_file_map = dict(source_file_map)
         self._plan = plan
 
@@ -460,14 +460,14 @@ class _SmokeControlPlaneToolExecutor:
             "user_id": tool_context.user_id or None,
             "requested_workflow_id": tool_context.requested_workflow_id,
             "source_surface": tool_context.source_surface,
-            "artifact_kind": tool_context.artifact_kind,
-            "artifact_key": tool_context.artifact_key,
-            "artifact_version_id": tool_context.artifact_version_id,
+            "build_family": tool_context.build_family,
+            "build_key": tool_context.build_key,
+            "build_record_id": tool_context.build_record_id,
             "routing": {
-                "default_artifact_kind": "app_bundle",
-                "known_artifact_kinds": ["app_bundle"],
+                "default_ARTIFACT_KIND": "app_bundle",
+                "known_ARTIFACT_KINDS": ["app_bundle"],
                 "current_artifact": {
-                    "artifact_kind": "app_bundle",
+                    "build_family": "app_bundle",
                     "label": "app bundle",
                     "routes": {
                         "patch": {"workflow_sequence": self._plan.workflow_sequence},
@@ -482,9 +482,9 @@ class _SmokeControlPlaneToolExecutor:
             "tracked_artifacts": [
                 {
                     "present": True,
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": self._artifact_version_id,
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": self._build_record_id,
                     "source": "smoke_stub",
                 }
             ],
@@ -496,11 +496,11 @@ class _SmokeControlPlaneToolExecutor:
         return {
             "present": True,
             "app_id": self._app_id,
-            "artifact_version_id": self._artifact_version_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_record_id": self._build_record_id,
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
-            "lineage_root_id": self._artifact_version_id,
+            "lineage_root_id": self._build_record_id,
             "parent_version_id": None,
             "lifecycle_status": "current",
             "validation_status": "passed",
@@ -513,7 +513,7 @@ class _SmokeControlPlaneToolExecutor:
                 "request_id": self._request_id,
                 "request_text": self._request_text,
             },
-            "artifact_kind_requested": tool_context.artifact_kind,
+            "build_family_requested": tool_context.build_family,
         }
 
     def _workspace_scope(self, tool_context: ControlPlaneToolContext) -> dict[str, Any]:
@@ -530,9 +530,9 @@ class _SmokeControlPlaneToolExecutor:
             }
         return {
             "present": True,
-            "artifact_version_id": self._artifact_version_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_record_id": self._build_record_id,
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "source": "smoke_stub",
             "file_count": len(file_tree),
             "file_tree": file_tree,
@@ -701,7 +701,7 @@ async def _run_scenario(
                 app_id=spec.app_id,
                 request_id=spec.request_id,
                 request_text=spec.request_text,
-                artifact_version_id=spec.artifact_version_id,
+                build_record_id=spec.build_record_id,
                 source_file_map=source_before,
                 plan=plan,
             ),
@@ -967,3 +967,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

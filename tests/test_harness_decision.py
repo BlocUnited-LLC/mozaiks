@@ -15,9 +15,9 @@ from mozaiksai.control_plane import (
 def _routing_decision(change_class: ChangeClass) -> RefinementRoutingDecision:
     request = RefinementRequest(
         request_kind="refinement",
-        artifact_kind=ArtifactKind.APP_BUNDLE,
-        artifact_key="app_bundle",
-        artifact_version_id="av_123",
+        build_family=ArtifactKind.APP_BUNDLE,
+        build_key="app_bundle",
+        build_record_id="av_123",
         raw_user_request="Change the dashboard",
         source_surface="app_build",
         app_id="app_1",
@@ -127,4 +127,5 @@ def test_decision_policy_requires_confirmation_for_multi_file_scope() -> None:
 
     assert decision.decision_type == "clarify_scope"
     assert decision.actions[0].action_id == "apply_proposed_scope"
+
 

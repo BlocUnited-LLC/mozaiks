@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 
 from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
     extract_summary_payload,
     persist_summary_artifact,
-    resolve_latest_artifact_version_refs,
+    resolve_latest_build_record_refs,
 )
 
 
@@ -22,25 +22,25 @@ class _FakeArtifactStore:
         app_id: str,
         build_family: str,
         build_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 1,
     ):
         data = {
             ("design_docs", "design_docs"): [
-                ArtifactVersionDoc(
+                BuildRecord(
                     _id="av_design_docs_1",
                     app_id=app_id,
                     build_family="design_docs",
                     build_key="design_docs",
                     version_number=1,
                     lineage_root_id="av_design_docs_1",
-                    lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                    validation_status=ArtifactValidationStatus.SKIPPED,
+                    lifecycle_status=BuildRecordStatus.CURRENT,
+                    validation_status=BuildRecordValidationStatus.SKIPPED,
                     commit_metadata={"metadata": {}},
                 )
             ],
             ("concept", "concept"): [
-                ArtifactVersionDoc(
+                BuildRecord(
                     _id="av_concept_2",
                     app_id=app_id,
                     build_family="concept",
@@ -48,21 +48,21 @@ class _FakeArtifactStore:
                     version_number=2,
                     lineage_root_id="av_concept_1",
                     parent_build_record_id="av_concept_1",
-                    lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                    validation_status=ArtifactValidationStatus.SKIPPED,
+                    lifecycle_status=BuildRecordStatus.CURRENT,
+                    validation_status=BuildRecordValidationStatus.SKIPPED,
                     commit_metadata={"metadata": {"summary_payload": {"app_name": "Demo"}}},
                 )
             ],
             ("build_plan", "build_plan"): [
-                ArtifactVersionDoc(
+                BuildRecord(
                     _id="av_build_plan_1",
                     app_id=app_id,
                     build_family="build_plan",
                     build_key="build_plan",
                     version_number=1,
                     lineage_root_id="av_build_plan_1",
-                    lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                    validation_status=ArtifactValidationStatus.SKIPPED,
+                    lifecycle_status=BuildRecordStatus.CURRENT,
+                    validation_status=BuildRecordValidationStatus.SKIPPED,
                     commit_metadata={"metadata": {}},
                 )
             ],
@@ -75,7 +75,7 @@ class _FakeArtifactStore:
 
     async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
-        return ArtifactVersionDoc(
+        return BuildRecord(
             _id="av_design_docs_2",
             app_id=kwargs["app_id"],
             build_family=kwargs["build_family"],
@@ -91,10 +91,10 @@ class _FakeArtifactStore:
 
 
 @pytest.mark.asyncio
-async def test_resolve_latest_artifact_version_refs_returns_latest_ids() -> None:
-    refs = await resolve_latest_artifact_version_refs(
+async def test_resolve_latest_build_record_refs_returns_latest_ids() -> None:
+    refs = await resolve_latest_build_record_refs(
         app_id="app_1",
-        artifact_kinds=("concept", "build_plan", "missing"),
+        build_families=("concept", "build_plan", "missing"),
         artifact_store=_FakeArtifactStore(),
     )
 
@@ -110,14 +110,14 @@ async def test_persist_summary_artifact_registers_parent_inputs_and_summary_payl
 
     artifact = await persist_summary_artifact(
         app_id="app_1",
-        artifact_kind="design_docs",
-        artifact_key="design_docs",
+        build_family="design_docs",
+        build_key="design_docs",
         summary_payload={"surface_map": {"surfaces": [{"surface_id": "dashboard"}]}},
         source_workflow="DesignDocs",
         source_chat_id="chat_1",
         author_user_id="user_1",
         revision_mode=True,
-        input_artifact_kinds=("concept", "build_plan"),
+        input_ARTIFACT_KINDS=("concept", "build_plan"),
         artifact_store=store,
     )
 
@@ -126,8 +126,8 @@ async def test_persist_summary_artifact_registers_parent_inputs_and_summary_payl
         "concept": "av_concept_2",
         "build_plan": "av_build_plan_1",
     }
-    assert store.create_calls[0]["lifecycle_status"] == ArtifactLifecycleStatus.DRAFT
-    assert store.create_calls[0]["validation_status"] == ArtifactValidationStatus.SKIPPED
+    assert store.create_calls[0]["lifecycle_status"] == BuildRecordStatus.DRAFT
+    assert store.create_calls[0]["validation_status"] == BuildRecordValidationStatus.SKIPPED
     assert extract_summary_payload(artifact) == {"surface_map": {"surfaces": [{"surface_id": "dashboard"}]}}
 
 
@@ -146,11 +146,11 @@ class _DraftOnlyArtifactStore:
         app_id: str,
         build_family: str,
         build_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 1,
     ):
         all_versions = [
-            ArtifactVersionDoc(
+            BuildRecord(
                 _id="av_concept_draft_1",
                 app_id=app_id,
                 build_family="concept",
@@ -158,8 +158,8 @@ class _DraftOnlyArtifactStore:
                 version_number=2,
                 lineage_root_id="av_concept_1",
                 parent_build_record_id="av_concept_1",
-                lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-                validation_status=ArtifactValidationStatus.SKIPPED,
+                lifecycle_status=BuildRecordStatus.DRAFT,
+                validation_status=BuildRecordValidationStatus.SKIPPED,
                 commit_metadata={"metadata": {}},
             )
         ] if build_family == "concept" else []
@@ -169,7 +169,7 @@ class _DraftOnlyArtifactStore:
 
     async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
-        return ArtifactVersionDoc(
+        return BuildRecord(
             _id="av_new",
             app_id=kwargs["app_id"],
             build_family=kwargs["build_family"],
@@ -190,11 +190,11 @@ class _EmptyArtifactStore(_DraftOnlyArtifactStore):
 
 
 @pytest.mark.asyncio
-async def test_resolve_latest_artifact_version_refs_excludes_draft_artifacts() -> None:
+async def test_resolve_latest_build_record_refs_excludes_draft_artifacts() -> None:
     """DRAFT artifacts must not be returned; only CURRENT versions are canonical inputs."""
-    refs = await resolve_latest_artifact_version_refs(
+    refs = await resolve_latest_build_record_refs(
         app_id="app_1",
-        artifact_kinds=("concept",),
+        build_families=("concept",),
         artifact_store=_DraftOnlyArtifactStore(),
     )
 
@@ -203,11 +203,11 @@ async def test_resolve_latest_artifact_version_refs_excludes_draft_artifacts() -
 
 
 @pytest.mark.asyncio
-async def test_resolve_latest_artifact_version_refs_returns_empty_on_first_run() -> None:
+async def test_resolve_latest_build_record_refs_returns_empty_on_first_run() -> None:
     """On first run (no prior artifacts) the result is an empty dict, not an error."""
-    refs = await resolve_latest_artifact_version_refs(
+    refs = await resolve_latest_build_record_refs(
         app_id="app_1",
-        artifact_kinds=("concept", "design_docs"),
+        build_families=("concept", "design_docs"),
         artifact_store=_EmptyArtifactStore(),
     )
 
@@ -221,9 +221,11 @@ async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
 
     await persist_summary_artifact(
         app_id="app_1",
-        artifact_kind="concept",
+        build_family="concept",
         summary_payload={"name": "My App"},
         artifact_store=store,
     )
 
     assert store.create_calls[0]["parent_build_record_id"] is None
+
+

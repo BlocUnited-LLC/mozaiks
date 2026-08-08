@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from mozaiksai.control_plane import CodingWorkerResult, ControlPlaneConfig, ScopeProposal
 from mozaiksai.core.artifacts import (
     ArtifactCommitMetadata,
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
     ChangeClassification,
     ChangeIntentDoc,
     ChangeRequestDoc,
@@ -29,18 +29,18 @@ def _make_bundle_zip(zip_path: Path, files: dict[str, str]) -> None:
             archive.writestr(relative_path, content)
 
 
-def _artifact_version(
+def _build_record(
     *,
-    artifact_version_id: str,
+    build_record_id: str,
     zip_path: Path,
     build_family: str = "app_bundle",
     build_key: str = "app_bundle",
     version_number: int = 1,
     parent_version_id: str | None = None,
-    lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.DRAFT,
-    validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
+    lifecycle_status: BuildRecordStatus = BuildRecordStatus.DRAFT,
+    validation_status: BuildRecordValidationStatus = BuildRecordValidationStatus.PASSED,
     files_manifest: list[dict[str, object]] | None = None,
-) -> ArtifactVersionDoc:
+) -> BuildRecord:
     resolved_manifest = files_manifest
     if resolved_manifest is None:
         with zipfile.ZipFile(zip_path, "r") as archive:
@@ -49,15 +49,15 @@ def _artifact_version(
                 for info in archive.infolist()
                 if not info.is_dir()
             ]
-    return ArtifactVersionDoc.model_validate(
+    return BuildRecord.model_validate(
         {
-            "_id": artifact_version_id,
+            "_id": build_record_id,
             "app_id": "app_1",
             "build_family": build_family,
             "build_key": build_key,
             "version_number": version_number,
             "parent_version_id": parent_version_id,
-            "lineage_root_id": parent_version_id or artifact_version_id,
+            "lineage_root_id": parent_version_id or build_record_id,
             "source_workflow": "AppGenerator",
             "source_chat_id": "chat_1",
             "canonical_inputs_version": {},
@@ -74,20 +74,20 @@ def _artifact_version(
     )
 
 
-def _change_request_doc(*, artifact_version_id: str) -> ChangeRequestDoc:
+def _change_request_doc(*, build_record_id: str) -> ChangeRequestDoc:
     return ChangeRequestDoc.model_validate(
         {
             "_id": "cr_review_1",
             "app_id": "app_1",
             "build_family": "app_bundle",
             "build_key": "app_bundle",
-            "build_record_id": artifact_version_id,
+            "build_record_id": build_record_id,
             "raw_user_request": "Update the dashboard title and export controls.",
             "classification": ChangeClassification.PATCH.value,
             "refinement_request": RefinementRequestPayload(
                 build_family="app_bundle",
                 build_key="app_bundle",
-                build_record_id=artifact_version_id,
+                build_record_id=build_record_id,
                 raw_user_request="Update the dashboard title and export controls.",
                 source_surface="app_build",
             ).model_dump(mode="python"),
@@ -115,16 +115,16 @@ def _change_request_doc(*, artifact_version_id: str) -> ChangeRequestDoc:
 
 def _refinement_session_doc(
     *,
-    artifact_version_id: str,
-    result_artifact_version_id: str,
+    build_record_id: str,
+    result_build_record_id: str,
     status: RefinementSessionStatus = RefinementSessionStatus.VALIDATED,
 ) -> RefinementSessionDoc:
     return RefinementSessionDoc.model_validate(
         {
             "_id": "rs_review_1",
             "app_id": "app_1",
-            "artifact_version_id": artifact_version_id,
-            "result_artifact_version_id": result_artifact_version_id,
+            "build_record_id": build_record_id,
+            "result_build_record_id": result_build_record_id,
             "change_request_id": "cr_review_1",
             "provider": "control_plane_coding",
             "status": status.value,
@@ -183,7 +183,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_123")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
+        async def invalidate_build_record_refs(self, **kwargs):
             persisted_invalidations.append(kwargs)
             return ["av_123"]
 
@@ -219,9 +219,9 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_123",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_123",
                     "raw_user_request": "Add an export action",
                     "source_surface": "app_build",
                 },
@@ -287,8 +287,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         },
     }
     assert "change_class" not in captured_prepare
-    assert "artifact_kind" not in captured_prepare
-    assert "artifact_version_id" not in captured_prepare
+    assert "build_family" not in captured_prepare
+    assert "build_record_id" not in captured_prepare
     assert "raw_user_request" not in captured_prepare
     assert captured_prepare["extra_trigger_meta"] == {
         "action_id": None,
@@ -383,8 +383,8 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     assert persisted_invalidations == [
         {
             "app_id": captured_prepare["app_id"],
-            "artifact_version_refs": {"app_bundle": "av_123"},
-            "affected_artifact_kinds": ["app_bundle"],
+            "build_record_refs": {"app_bundle": "av_123"},
+            "affected_ARTIFACT_KINDS": ["app_bundle"],
             "reason": "change_request:cr_123",
         }
     ]
@@ -445,8 +445,8 @@ def test_studio_trigger_endpoint_rejects_removed_top_level_refinement_fields(mon
         json={
             "trigger_source": "refinement",
             "change_class": "patch",
-            "artifact_kind": "app_bundle",
-            "artifact_version_id": "av_123",
+            "build_family": "app_bundle",
+            "build_record_id": "av_123",
             "raw_user_request": "Add an export action",
         },
     )
@@ -478,9 +478,9 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_123",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_123",
                     "raw_user_request": "Add an export action",
                     "source_surface": "app_build",
                 },
@@ -519,8 +519,8 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_code_1")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
-            return [kwargs["artifact_version_refs"]["app_bundle"]]
+        async def invalidate_build_record_refs(self, **kwargs):
+            return [kwargs["build_record_refs"]["app_bundle"]]
 
         async def create_refinement_session(self, **kwargs):
             persisted_sessions.append(kwargs)
@@ -577,7 +577,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {"artifact_version_id": "av_child_code_1"},
+                "metadata": {"build_record_id": "av_child_code_1"},
             }
         ),
     )
@@ -589,9 +589,9 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_456",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_456",
                     "raw_user_request": "Fix the dashboard spacing",
                     "source_surface": "app_build",
                 },
@@ -662,7 +662,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {"artifact_version_id": "av_child_code_1"},
+                "metadata": {"build_record_id": "av_child_code_1"},
             },
     }
     assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
@@ -706,8 +706,8 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_code_auto_1")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
-            return [kwargs["artifact_version_refs"]["app_bundle"]]
+        async def invalidate_build_record_refs(self, **kwargs):
+            return [kwargs["build_record_refs"]["app_bundle"]]
 
         async def create_refinement_session(self, **kwargs):
             return SimpleNamespace(id="rs_code_auto_1")
@@ -804,9 +804,9 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_789",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_789",
                     "raw_user_request": "Fix the dashboard spacing",
                     "source_surface": "app_build",
                 },
@@ -845,8 +845,8 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
             persisted_changes.append(kwargs)
             return SimpleNamespace(id=f"cr_scope_{len(persisted_changes)}")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
-            return [kwargs["artifact_version_refs"]["app_bundle"]]
+        async def invalidate_build_record_refs(self, **kwargs):
+            return [kwargs["build_record_refs"]["app_bundle"]]
 
         async def create_refinement_session(self, **kwargs):
             return SimpleNamespace(id="rs_scope_1")
@@ -912,7 +912,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
                 "validation_result": {"validation_status": "skipped", "preview_url": None},
                 "blocked_reason": None,
                 "error": None,
-                "metadata": {"artifact_version_id": "av_child_multi_1"},
+                "metadata": {"build_record_id": "av_child_multi_1"},
             }
         )
 
@@ -959,9 +959,9 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_scope_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_scope_1",
                     "raw_user_request": "Update the dashboard and export panel copy",
                     "source_surface": "app_build",
                 },
@@ -984,9 +984,9 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_scope_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_scope_1",
                     "raw_user_request": "Update the dashboard and export panel copy",
                     "source_surface": "app_build",
                 },
@@ -1003,7 +1003,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     assert second.status_code == 200
     second_body = second.json()
     assert second_body["execution_mode"] == "coding_worker"
-    assert second_body["coding_worker"]["metadata"]["artifact_version_id"] == "av_child_multi_1"
+    assert second_body["coding_worker"]["metadata"]["build_record_id"] == "av_child_multi_1"
 
 
 def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(monkeypatch):
@@ -1026,8 +1026,8 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
         async def create_change_request(self, **kwargs):
             return SimpleNamespace(id="cr_core_1")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
-            return [kwargs["artifact_version_refs"]["app_bundle"]]
+        async def invalidate_build_record_refs(self, **kwargs):
+            return [kwargs["build_record_refs"]["app_bundle"]]
 
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
@@ -1052,9 +1052,9 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_core_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
                     "source_surface": "app_build",
                 },
@@ -1191,8 +1191,8 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
             create_calls.append(kwargs)
             return SimpleNamespace(id="cr_core_1")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
-            return [kwargs["artifact_version_refs"]["app_bundle"]]
+        async def invalidate_build_record_refs(self, **kwargs):
+            return [kwargs["build_record_refs"]["app_bundle"]]
 
         async def update_change_request_router_decision(self, **kwargs):
             return True
@@ -1226,9 +1226,9 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_core_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
                     "source_surface": "app_build",
                 },
@@ -1256,9 +1256,9 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_core_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
                     "source_surface": "app_build",
                 },
@@ -1323,8 +1323,8 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
             create_calls.append(kwargs)
             return SimpleNamespace(id="cr_app_review_1")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
-            return [kwargs["artifact_version_refs"]["app_bundle"]]
+        async def invalidate_build_record_refs(self, **kwargs):
+            return [kwargs["build_record_refs"]["app_bundle"]]
 
     monkeypatch.setattr(
         studio_app,
@@ -1356,9 +1356,9 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
             "user_id": "demo-user",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_review_1",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_review_1",
                     "raw_user_request": "Turn this into a marketplace instead of a CRM.",
                     "source_surface": "app_review",
                     "extra": {
@@ -1401,8 +1401,8 @@ class _ReviewArtifactStore:
     def __init__(
         self,
         *,
-        parent_version: ArtifactVersionDoc,
-        child_version: ArtifactVersionDoc,
+        parent_version: BuildRecord,
+        child_version: BuildRecord,
         change_request: ChangeRequestDoc,
         session: RefinementSessionDoc,
     ) -> None:
@@ -1437,14 +1437,14 @@ class _ReviewArtifactStore:
 
     async def accept_build_record(self, **kwargs):  # noqa: ANN003
         self.child_version = self.child_version.model_copy(
-            update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+            update={"lifecycle_status": BuildRecordStatus.CURRENT}
         )
         return self.child_version
 
-    async def reject_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def reject_build_record(self, **kwargs):  # noqa: ANN003
         self.child_version = self.child_version.model_copy(
             update={
-                "lifecycle_status": ArtifactLifecycleStatus.ARCHIVED,
+                "lifecycle_status": BuildRecordStatus.ARCHIVED,
                 "invalidation_reason": kwargs.get("reason"),
             }
         )
@@ -1467,8 +1467,8 @@ class _ReviewArtifactStore:
 def _build_review_store(
     tmp_path: Path,
     *,
-    lifecycle_status: ArtifactLifecycleStatus,
-    validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
+    lifecycle_status: BuildRecordStatus,
+    validation_status: BuildRecordValidationStatus = BuildRecordValidationStatus.PASSED,
 ) -> _ReviewArtifactStore:
     parent_zip = tmp_path / "parent_bundle.zip"
     child_zip = tmp_path / "child_bundle.zip"
@@ -1486,29 +1486,29 @@ def _build_review_store(
             "GeneratedApp/package.json": '{"name":"demo"}\n',
         },
     )
-    parent_version = _artifact_version(
-        artifact_version_id="av_parent_1",
+    parent_version = _build_record(
+        build_record_id="av_parent_1",
         zip_path=parent_zip,
         version_number=1,
-        lifecycle_status=ArtifactLifecycleStatus.SUPERSEDED,
+        lifecycle_status=BuildRecordStatus.SUPERSEDED,
     )
-    child_version = _artifact_version(
-        artifact_version_id="av_child_1",
+    child_version = _build_record(
+        build_record_id="av_child_1",
         zip_path=child_zip,
         version_number=2,
         parent_version_id="av_parent_1",
         lifecycle_status=lifecycle_status,
         validation_status=validation_status,
     )
-    change_request = _change_request_doc(artifact_version_id="av_parent_1")
+    change_request = _change_request_doc(build_record_id="av_parent_1")
     session_status = (
         RefinementSessionStatus.ACCEPTED
-        if lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        if lifecycle_status == BuildRecordStatus.CURRENT
         else RefinementSessionStatus.VALIDATED
     )
     session = _refinement_session_doc(
-        artifact_version_id="av_parent_1",
-        result_artifact_version_id="av_child_1",
+        build_record_id="av_parent_1",
+        result_build_record_id="av_child_1",
         status=session_status,
     )
     return _ReviewArtifactStore(
@@ -1529,7 +1529,7 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
 
     from mozaiksai.hosts import studio as studio_app
 
-    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    store = _build_review_store(tmp_path, lifecycle_status=BuildRecordStatus.DRAFT)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
@@ -1537,11 +1537,11 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["artifact_version_id"] == "av_child_1"
+    assert body["build_record_id"] == "av_child_1"
     assert body["build_family"] == "app_bundle"
     assert body["generated_files"]["src/App.jsx"].startswith("export default function App")
     assert body["generated_files"]["package.json"] == '{"name":"demo"}\n'
-    assert body["workbench"]["artifact_version_id"] == "av_child_1"
+    assert body["workbench"]["build_record_id"] == "av_child_1"
     assert body["workbench"]["build_family"] == "app_bundle"
     assert body["review"]["changed_file_count"] == 1
     assert body["review"]["selected_paths"] == ["src/App.jsx"]
@@ -1558,7 +1558,7 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
 
     from mozaiksai.hosts import studio as studio_app
 
-    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    store = _build_review_store(tmp_path, lifecycle_status=BuildRecordStatus.DRAFT)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
@@ -1596,8 +1596,8 @@ def test_studio_artifact_review_marks_skipped_validation_as_override_required(mo
 
     store = _build_review_store(
         tmp_path,
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=ArtifactValidationStatus.SKIPPED,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.SKIPPED,
     )
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
@@ -1624,7 +1624,7 @@ def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monke
 
     from mozaiksai.hosts import studio as studio_app
 
-    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    store = _build_review_store(tmp_path, lifecycle_status=BuildRecordStatus.DRAFT)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
@@ -1634,7 +1634,7 @@ def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monke
     body = response.json()
     assert body["accepted"] is True
     assert body["review"]["lifecycle_status"] == "current"
-    assert store.child_version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert store.child_version.lifecycle_status == BuildRecordStatus.CURRENT
     assert store.update_calls[-1]["status"] == RefinementSessionStatus.ACCEPTED
 
 
@@ -1648,7 +1648,7 @@ def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatc
 
     from mozaiksai.hosts import studio as studio_app
 
-    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    store = _build_review_store(tmp_path, lifecycle_status=BuildRecordStatus.DRAFT)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
@@ -1658,7 +1658,7 @@ def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatc
     body = response.json()
     assert body["rejected"] is True
     assert body["review"]["lifecycle_status"] == "archived"
-    assert store.child_version.lifecycle_status == ArtifactLifecycleStatus.ARCHIVED
+    assert store.child_version.lifecycle_status == BuildRecordStatus.ARCHIVED
     assert store.update_calls[-1]["status"] == RefinementSessionStatus.REJECTED
 
 
@@ -1672,7 +1672,7 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
 
     from mozaiksai.hosts import studio as studio_app
 
-    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.CURRENT)
+    store = _build_review_store(tmp_path, lifecycle_status=BuildRecordStatus.CURRENT)
     runtime_root = tmp_path / "runtime_app"
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
@@ -1729,7 +1729,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     _plan = ContractSurfacePlan(
         summary="Add export action to product module",
         change_class="feature",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         confidence=0.92,
         surfaces=[
             ContractSurfaceUpdate(
@@ -1784,7 +1784,7 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
             persisted_sessions.append(kwargs)
             return SimpleNamespace(id="rs_surface_1")
 
-        async def invalidate_artifact_version_refs(self, **kwargs):
+        async def invalidate_build_record_refs(self, **kwargs):
             return []
 
         async def update_change_request_router_decision(self, **kwargs):
@@ -1822,9 +1822,9 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
             "trigger_source": "refinement",
             "trigger_payload": {
                 "refinement_request": {
-                    "artifact_kind": "app_bundle",
-                    "artifact_key": "app_bundle",
-                    "artifact_version_id": "av_456",
+                    "build_family": "app_bundle",
+                    "build_key": "app_bundle",
+                    "build_record_id": "av_456",
                     "raw_user_request": "Add an export action to the product module",
                     "source_surface": "app_build",
                 },
@@ -1848,3 +1848,5 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     assert persisted_sessions[0]["provider"] == "contract_surface_regeneration"
     assert persisted_sessions[0]["build_record_id"] == "av_456"
     assert persisted_sessions[0]["change_request_id"] == "cr_surface_1"
+
+

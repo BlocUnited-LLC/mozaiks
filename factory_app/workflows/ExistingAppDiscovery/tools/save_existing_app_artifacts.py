@@ -230,6 +230,11 @@ async def save_existing_app_artifacts(
                 "brownfield_app_context_artifact_version_refs",
                 persisted_refs,
             )
+            _set_context_value(
+                context_variables,
+                "brownfield_app_context_build_record_refs",
+                persisted_refs,
+            )
 
             app_context_version = build_brownfield_app_context_version(
                 app_id=app_context_artifacts.app_id,
@@ -256,6 +261,11 @@ async def save_existing_app_artifacts(
                 context_variables,
                 "app_context_version_artifact_version_id",
                 registered_context.artifact_version.id,
+            )
+            _set_context_value(
+                context_variables,
+                "app_context_version_build_record_id",
+                registered_context.context_version.context_version_id,
             )
             _set_context_value(
                 context_variables,

@@ -405,7 +405,7 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
                 "embed_theme_ready": False,
             },
             "discovery_brief": "Gradual modernization of DNS management tooling.",
-            "artifact_version": "1.0",
+            "build_record": "1.0",
         },
     )
 
@@ -495,7 +495,7 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
                 "embed_theme_ready": True,
             },
             "discovery_brief": "Bridge the partner portal API for agentic access.",
-            "artifact_version": "1.0",
+            "build_record": "1.0",
         },
     )
 
@@ -641,4 +641,5 @@ export class CloudflareConnector implements InfraConnector<DnsZone> {
     connectors = mod._detect_connectors([], source)
     provider_ids = [c["provider_id"] for c in connectors]
     assert "cloudflare" in provider_ids, f"Cloudflare not detected via class name; got {provider_ids}"
+
 

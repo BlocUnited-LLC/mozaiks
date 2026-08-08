@@ -23,8 +23,8 @@ REFINEMENT_SEED_KEYS = (
     "revision_scope",
     "change_request_id",
     "revision_id",
-    "artifact_kind",
-    "artifact_version_id",
+    "build_family",
+    "build_record_id",
     "sequence_status",
     "revision_origin_workflow",
     "refinement_request",
@@ -74,7 +74,7 @@ EXISTING_APP_DISCOVERY_OUTPUT_KEYS = (
     "ownership_boundary",
     "brownfield_registration",
     "brownfield_app_context_artifacts",
-    "brownfield_app_context_artifact_version_refs",
+    "brownfield_app_context_build_record_refs",
     "brownfield_app_context_artifact_persistence_error",
     "app_context_version",
 )
@@ -142,3 +142,4 @@ def test_existing_app_discovery_declares_canonical_app_context_outputs() -> None
 
     for key in EXISTING_APP_DISCOVERY_OUTPUT_KEYS:
         assert key in defs, f"ExistingAppDiscovery must declare generated app-context key {key}"
+

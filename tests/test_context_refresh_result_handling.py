@@ -148,8 +148,8 @@ def _ownership() -> list[OwnershipBoundary]:
 
 def _artifact_refs(suffix: str) -> dict[str, str]:
     refs = {
-        artifact_kind: f"av_{artifact_kind}_{suffix}"
-        for artifact_kind in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
+        build_family: f"av_{build_family}_{suffix}"
+        for build_family in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     }
     refs["source_context_bundle"] = f"av_source_context_bundle_{suffix}"
     refs["app_intelligence_snapshot"] = f"av_app_intelligence_snapshot_{suffix}"
@@ -164,7 +164,7 @@ def _context_version(
 ):
     return build_brownfield_app_context_version(
         app_id="field_service",
-        artifact_version_refs=_artifact_refs(suffix),
+        build_record_refs=_artifact_refs(suffix),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
         application_inventory=_inventory(),
@@ -287,7 +287,7 @@ async def test_result_lists_artifacts_from_app_context_version_refs() -> None:
         app_id="field_service",
     )
 
-    assert {ref.artifact_kind for ref in result.artifacts_created} == set(
+    assert {ref.build_family for ref in result.artifacts_created} == set(
         CONTEXT_REFRESH_EXPECTED_ARTIFACTS
     )
 
@@ -369,4 +369,6 @@ def test_context_refresh_result_handling_has_no_graph_database_or_proprietary_te
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
+
 

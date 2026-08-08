@@ -1,7 +1,7 @@
 """Integration test: factory-built app bundle → refinement staging → promotion → AppLoader.
 
 Covers the gap between:
-- Unit tests for accept_staged_refinement_artifact_version (promotion mechanics only)
+- Unit tests for accept_staged_refinement_build_record (promotion mechanics only)
 - Factory lineage smoke (factory build → AppLoader, but artifacts created as CURRENT directly)
 
 This test exercises the full DRAFT → promotion → CURRENT → AppLoader path using
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from mozaiksai.control_plane.artifact_promotion import (
-    accept_staged_refinement_artifact_version,
+    accept_staged_refinement_build_record,
     create_draft_app_bundle_from_staged_refinement,
 )
 from mozaiksai.control_plane.dry_run import (
@@ -38,9 +38,9 @@ from mozaiksai.control_plane.scoped_execution import (
 from mozaiksai.control_plane.staging import create_refinement_staging_workspace
 from mozaiksai.control_plane.validation_evidence import ValidationEvidence
 from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
+    BuildRecord,
 )
 from scripts.smoke_appgenerator_live_acceptance import (
     DEFAULT_WORKFLOW_CAPABILITY_ID,
@@ -68,18 +68,18 @@ def _zip_directory(source_dir: Path, zip_path: Path) -> None:
                 zf.write(file_path, arcname=file_path.relative_to(source_dir).as_posix())
 
 
-def _build_source_artifact(*, app_id: str, source_zip: Path) -> ArtifactVersionDoc:
-    return ArtifactVersionDoc.model_validate(
+def _build_source_artifact(*, app_id: str, source_zip: Path) -> BuildRecord:
+    return BuildRecord.model_validate(
         {
             "_id": "av_factory_source_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_factory_source_1",
             "canonical_inputs_version": {"design_docs": "av_design_docs_1"},
-            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-            "validation_status": ArtifactValidationStatus.PASSED.value,
+            "lifecycle_status": BuildRecordStatus.CURRENT.value,
+            "validation_status": BuildRecordValidationStatus.PASSED.value,
             "files_manifest": [
                 {"path": "modules/support_tickets/module.yaml", "sha256": "sha-factory", "size_bytes": 100},
             ],
@@ -93,7 +93,7 @@ def _build_refinement_plan(*, request_id: str, app_id: str, staging_area: Path) 
         request_id=request_id,
         app_id=app_id,
         request="Add a resolved_at field to the support ticket module.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         refinement_lane="module_patch",
         workflow_id="workflow_app",
@@ -130,35 +130,35 @@ def _build_refinement_plan(*, request_id: str, app_id: str, staging_area: Path) 
 
 
 class _FakeArtifactStore:
-    def __init__(self, source_version: ArtifactVersionDoc) -> None:
+    def __init__(self, source_version: BuildRecord) -> None:
         self._source = source_version
-        self._draft: ArtifactVersionDoc | None = None
+        self._draft: BuildRecord | None = None
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str) -> ArtifactVersionDoc | None:
-        if app_id == self._source.app_id and artifact_version_id == self._source.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> BuildRecord | None:
+        if app_id == self._source.app_id and build_record_id == self._source.id:
             return self._source
-        if self._draft is not None and app_id == self._draft.app_id and artifact_version_id == self._draft.id:
+        if self._draft is not None and app_id == self._draft.app_id and build_record_id == self._draft.id:
             return self._draft
         return None
 
-    async def list_artifact_versions(self, **kwargs: Any) -> list[ArtifactVersionDoc]:
+    async def list_build_records(self, **kwargs: Any) -> list[BuildRecord]:
         if (
             kwargs.get("app_id") == self._source.app_id
-            and kwargs.get("artifact_kind") == "app_bundle"
-            and kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT
+            and kwargs.get("build_family") == "app_bundle"
+            and kwargs.get("lifecycle_status") == BuildRecordStatus.CURRENT
         ):
             return [self._source]
         return []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
-        self._draft = ArtifactVersionDoc.model_validate(
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
+        self._draft = BuildRecord.model_validate(
             {
                 "_id": "av_draft_promotion_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
-                "parent_version_id": kwargs.get("parent_version_id"),
+                "parent_version_id": kwargs.get("parent_build_record_id") or kwargs.get("parent_version_id"),
                 "lineage_root_id": self._source.lineage_root_id,
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
                 "lifecycle_status": kwargs["lifecycle_status"].value,
@@ -169,8 +169,8 @@ class _FakeArtifactStore:
         )
         return self._draft
 
-    async def set_validation_status(self, *, artifact_version_id: str, validation_status: Any, commit_metadata: dict | None = None, **_: Any) -> bool:
-        if self._draft is not None and self._draft.id == artifact_version_id:
+    async def set_validation_status(self, *, build_record_id: str, validation_status: Any, commit_metadata: dict | None = None, **_: Any) -> bool:
+        if self._draft is not None and self._draft.id == build_record_id:
             self._draft = self._draft.model_copy(
                 update={
                     "validation_status": validation_status,
@@ -179,11 +179,11 @@ class _FakeArtifactStore:
             )
         return True
 
-    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata: dict | None = None) -> ArtifactVersionDoc | None:
-        if self._draft is not None and self._draft.id == artifact_version_id and self._draft.app_id == app_id:
+    async def accept_build_record(self, *, app_id: str, build_record_id: str, commit_metadata: dict | None = None) -> BuildRecord | None:
+        if self._draft is not None and self._draft.id == build_record_id and self._draft.app_id == app_id:
             self._draft = self._draft.model_copy(
                 update={
-                    "lifecycle_status": ArtifactLifecycleStatus.CURRENT,
+                    "lifecycle_status": BuildRecordStatus.CURRENT,
                     "commit_metadata": commit_metadata or self._draft.commit_metadata,
                 }
             )
@@ -283,12 +283,12 @@ async def test_factory_bundle_refinement_staging_creates_draft_artifact(tmp_path
             artifacts=[],
         ),
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
 
-    assert draft_result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
-    assert draft_result.artifact_kind == "app_bundle"
+    assert draft_result.lifecycle_status == BuildRecordStatus.DRAFT
+    assert draft_result.build_family == "app_bundle"
     assert draft_result.parent_version_id == source_version.id
 
 
@@ -297,7 +297,7 @@ async def test_factory_bundle_promotion_to_current_and_apploader(tmp_path: Path)
     """Full path: factory files → staging → DRAFT → promotion → CURRENT → AppLoader.
 
     This is the production readiness gap between:
-    - accept_staged_refinement_artifact_version unit tests (promotion mechanics only)
+    - accept_staged_refinement_build_record unit tests (promotion mechanics only)
     - factory lineage smoke (builds CURRENT artifacts directly, no staging/promotion)
     """
     app_id = "promotion-smoke-e2e"
@@ -348,22 +348,22 @@ async def test_factory_bundle_promotion_to_current_and_apploader(tmp_path: Path)
             artifacts=[],
         ),
         artifact_store=artifact_store,
-        source_artifact_version_id=source_version.id,
+        source_build_record_id=source_version.id,
         generated_artifacts_root=tmp_path / "generated",
     )
-    assert draft_result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert draft_result.lifecycle_status == BuildRecordStatus.DRAFT
 
     # Promote to CURRENT
-    accepted = await accept_staged_refinement_artifact_version(
+    accepted = await accept_staged_refinement_build_record(
         app_id=app_id,
-        draft_artifact_version_id=draft_result.artifact_version_id,
+        draft_build_record_id=draft_result.build_record_id,
         review_record=review_record,
         request_id=plan.request_id,
         artifact_store=artifact_store,
         accepted_by="reviewer_1",
     )
-    assert accepted.lifecycle_status == ArtifactLifecycleStatus.CURRENT
-    assert accepted.artifact_kind == "app_bundle"
+    assert accepted.lifecycle_status == BuildRecordStatus.CURRENT
+    assert accepted.build_family == "app_bundle"
     assert accepted.accepted_by == "reviewer_1"
 
     # Load the promoted bundle via AppLoader.
@@ -381,3 +381,4 @@ async def test_factory_bundle_promotion_to_current_and_apploader(tmp_path: Path)
     # Verify the promoted artifact retains the patch in its metadata
     assert accepted.parent_version_id == source_version.id
     assert accepted.refinement_review_status == "promotion_ready"
+

@@ -87,8 +87,8 @@ def _managed_manifest() -> list[dict[str, str]]:
 def _request_payload(raw_user_request: str, files_manifest: list[dict[str, str]]) -> dict:
     return {
         "refinement_request": {
-            "artifact_kind": "app_bundle",
-            "artifact_version_id": "av_smoke_1",
+            "build_family": "app_bundle",
+            "build_record_id": "av_smoke_1",
             "raw_user_request": raw_user_request,
             "extra": {"files_manifest": files_manifest},
         }
@@ -255,4 +255,5 @@ def test_refinement_control_plane_smoke_resolves_llm_profiles_without_provider_a
     )
     with pytest.raises(ValueError, match="references unknown LLM profile 'classifier'"):
         missing_reference.resolve_capability_llm_config("classifier")
+
 

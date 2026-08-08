@@ -125,7 +125,7 @@ def _bundle():
         "data_contract": {
             "version": "1",
             "app_id": None,
-            "artifact_version_id": None,
+            "build_record_id": None,
             "surfaces": [
                 {
                     "surface_id": "users",
@@ -166,7 +166,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
 
     async def _fake_persist_summary_artifact(**kwargs):
         summary_artifact.update(kwargs)
-        return type("ArtifactVersion", (), {"id": "av_design_docs_1"})()
+        return type("BuildRecord", (), {"id": "av_design_docs_1"})()
 
     monkeypatch.setattr(design_docs_module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
@@ -176,7 +176,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
             "chat_id": "chat_123",
             "user_id": "user_123",
             "build_id": "build_123",
-            "artifact_version_id": "artifact_123",
+            "build_record_id": "artifact_123",
             "structured_output": _bundle(),
         }
     )
@@ -204,10 +204,12 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
         update[0].get("kind") == "ui_schema" and "experience_spec" in update[1]["$set"]
         for update in design_docs_collection.updates
     )
-    assert data_contracts_collection.updates[0][1]["$set"]["data_contract"]["artifact_version_id"] == "artifact_123"
-    assert summary_artifact["artifact_kind"] == "design_docs"
-    assert summary_artifact["input_artifact_kinds"] == ("concept", "build_plan")
+    assert data_contracts_collection.updates[0][1]["$set"]["data_contract"]["build_record_id"] == "artifact_123"
+    assert summary_artifact["build_family"] == "design_docs"
+    assert summary_artifact["input_ARTIFACT_KINDS"] == ("concept", "build_plan")
     assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"
     assert summary_artifact["summary_payload"]["experience_spec"]["pages"][0]["name"] == "Users"
     assert result["page_count"] == 1
+
+
 

@@ -23,9 +23,9 @@
       "applied_paths": [
         "ui/pages/dashboard.yaml"
       ],
-      "artifact_kind": "app_bundle",
+      "build_family": "app_bundle",
       "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpfc9qwd6l\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\a2f6f697e6bf\\artifact.zip",
-      "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
+      "build_record_id": "av_refinement_live_worker_smoke_persisted",
       "bundle_mode": "staged_refinement_bundle",
       "change_class": "patch",
       "selected_file_paths": [],
@@ -76,7 +76,7 @@
     "app_context_policy_override": null,
     "app_context_summary": null,
     "app_id": "refinement-live-worker-smoke",
-    "artifact_kind": "app_bundle",
+    "build_family": "app_bundle",
     "change_class": "patch",
     "context_policy_decision": {
       "allowed": true,
@@ -194,9 +194,9 @@
   },
   "worker_request": {
     "app_id": "refinement-live-worker-smoke",
-    "artifact_key": "app_bundle",
-    "artifact_kind": "app_bundle",
-    "artifact_version_id": "av_refinement_live_worker_smoke_001",
+    "build_key": "app_bundle",
+    "build_family": "app_bundle",
+    "build_record_id": "av_refinement_live_worker_smoke_001",
     "change_class": "patch",
     "context_seed": {
       "affected_bundle_paths": [
@@ -237,3 +237,4 @@
     "warnings": []
   }
 }
+

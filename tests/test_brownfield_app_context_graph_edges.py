@@ -100,7 +100,7 @@ def _discovery_output() -> dict:
                 "priority": "high",
             }
         ],
-        "artifact_version": "1.0",
+        "build_record": "1.0",
     }
 
 
@@ -253,4 +253,6 @@ def test_brownfield_graph_mapping_has_no_graph_database_or_proprietary_terms() -
 
 def graph_node(graph, node_id):
     return next(node for node in graph.nodes if node.node_id == node_id)
+
+
 

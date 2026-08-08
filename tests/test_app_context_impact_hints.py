@@ -32,7 +32,7 @@ def _node(
         node_type=node_type,
         label=label,
         source_ref_id="src_app_bundle",
-        artifact_version_id="av_graph",
+        build_record_id="av_graph",
         stale_status=AppContextStaleStatus.CURRENT,
         metadata=metadata or {},
     )
@@ -49,7 +49,7 @@ def _edge(
         source_node_id=source,
         target_node_id=target,
         source_ref_id="src_app_bundle",
-        artifact_version_id="av_graph",
+        build_record_id="av_graph",
         stale_status=AppContextStaleStatus.CURRENT,
     )
 
@@ -394,4 +394,5 @@ def test_app_context_impact_helper_has_no_graph_database_or_proprietary_terms() 
         text = path.read_text(encoding="utf-8")
         for term in forbidden_terms:
             assert term.lower() not in text.lower()
+
 

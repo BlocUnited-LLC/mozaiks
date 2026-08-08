@@ -192,7 +192,7 @@ async def test_emit_build_started_materializes_existing_app_import_in_local_regi
                 "app_name": "mozaiks-app",
                 "brownfield_build_path": "light_integration",
                 "current_app_context_version_id": "ctx_1",
-                "app_intelligence_artifact_version_id": "av_ai_1",
+                "app_intelligence_build_record_id": "av_ai_1",
             },
         }
 
@@ -536,4 +536,5 @@ async def test_deliver_outbox_event_posts_payload_and_marks_attempt(monkeypatch)
             "error": None,
         }
     ]
+
 

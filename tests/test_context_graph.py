@@ -23,8 +23,8 @@ from mozaiksai.core.app_context.models import GraphEdgeType, GraphNodeType
 def test_context_graph_extracts_code_symbols_and_relationships() -> None:
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_1",
-        artifact_kind="app_bundle",
+        build_record_id="av_1",
+        build_family="app_bundle",
         file_map={
             "modules/tasks/module.yaml": "id: tasks\nactions:\n  - id: list_tasks\n",
             "modules/tasks/backend/service.py": (
@@ -67,8 +67,8 @@ def test_context_graph_extracts_code_symbols_and_relationships() -> None:
 def test_context_graph_maps_module_actions_to_handler_symbols() -> None:
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_1",
-        artifact_kind="app_bundle",
+        build_record_id="av_1",
+        build_family="app_bundle",
         file_map={
             "modules/tasks/module.yaml": "id: tasks\nactions:\n  - id: complete_task\n",
             "modules/tasks/backend/handler.py": (
@@ -100,8 +100,8 @@ def test_context_graph_maps_module_actions_to_handler_symbols() -> None:
 def test_semantic_annotation_request_and_apply_are_advisory_metadata() -> None:
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_1",
-        artifact_kind="app_bundle",
+        build_record_id="av_1",
+        build_family="app_bundle",
         file_map={
             "modules/tasks/module.yaml": "id: tasks\nactions:\n  - id: complete_task\n",
             "modules/tasks/backend/handler.py": "def complete_task(payload):\n    return payload\n",
@@ -140,8 +140,8 @@ def test_context_graph_catalog_and_scope_return_llm_context_packs() -> None:
     }
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_1",
-        artifact_kind="app_bundle",
+        build_record_id="av_1",
+        build_family="app_bundle",
         file_map=file_map,
     )
 
@@ -172,8 +172,8 @@ def test_context_graph_catalog_ranks_product_code_before_tests() -> None:
     }
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_1",
-        artifact_kind="app_bundle",
+        build_record_id="av_1",
+        build_family="app_bundle",
         file_map=file_map,
     )
 
@@ -201,8 +201,8 @@ def test_context_graph_parser_status_reports_fallbacks() -> None:
 async def test_context_graph_startup_loader_populates_compact_pack(monkeypatch: pytest.MonkeyPatch) -> None:
     graph = build_context_graph_from_file_map(
         app_id="app_1",
-        artifact_version_id="av_1",
-        artifact_kind="app_bundle",
+        build_record_id="av_1",
+        build_family="app_bundle",
         file_map={
             "modules/tasks/module.yaml": "id: tasks\nactions:\n  - id: list_tasks\n",
             "modules/tasks/backend/handler.py": "def list_tasks(payload):\n    return []\n",
@@ -284,4 +284,5 @@ class _Context:
 
 def graph_node(graph, node_id: str):
     return next(node for node in graph.nodes if node.node_id == node_id)
+
 

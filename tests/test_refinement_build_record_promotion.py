@@ -209,12 +209,12 @@ class _FakeGridFSContentStore:
     def __init__(self) -> None:
         self.put_calls: list[dict] = []
 
-    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
+    async def put_bundle(self, data: bytes, *, app_id: str, build_record_id: str) -> str:
         self.put_calls.append(
             {
                 "data": data,
                 "app_id": app_id,
-                "artifact_version_id": artifact_version_id,
+                "build_record_id": build_record_id,
             }
         )
         return "gridfs_ref_1"
@@ -389,7 +389,7 @@ async def test_non_local_content_store_records_content_ref_and_backend(tmp_path:
 
     assert result.content_ref == "gridfs_ref_1"
     assert result.content_backend == "gridfs"
-    assert content_store.put_calls[0]["artifact_version_id"] == "av_draft_1"
+    assert content_store.put_calls[0]["build_record_id"] == "av_draft_1"
     assert result.metadata["content_ref"] == "gridfs_ref_1"
     assert result.metadata["content_backend"] == "gridfs"
 
@@ -541,7 +541,7 @@ async def test_draft_build_record_metadata_contains_lineage_validation_and_revie
     assert metadata["affected_bundle_paths"] == plan.affected_bundle_paths
     assert metadata["staging_area"] == staging_result.staging_area
     assert metadata["source_bundle_path"] == staging_result.source_bundle_path
-    assert metadata["source_artifact_version_id"] == source_record.id
+    assert metadata["source_build_record_id"] == source_record.id
     assert metadata["validation_evidence"]["warnings"] == ["validator warning"]
     assert metadata["review"]["status"] == "promotion_ready"
     assert metadata["review"]["reviewer"] == "reviewer_1"
@@ -888,3 +888,4 @@ def test_artifact_promotion_module_stays_out_of_conceptual_replan_and_workflow_o
     assert "AppGenerator" not in source
     assert "LLMChangeClassifier" not in source
     assert "execute_workflow" not in source
+

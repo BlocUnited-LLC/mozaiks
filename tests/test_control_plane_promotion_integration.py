@@ -20,7 +20,7 @@ Each test verifies a distinct production concern:
   - artifact version fields (parent, lifecycle, validation, applied paths)
   - source bundle immutability throughout
   - staging area content matches the coding worker plan exactly
-  - metadata flows end-to-end (request_id, artifact_version_id)
+  - metadata flows end-to-end (request_id, build_record_id)
   - error paths (out-of-scope edits, broken artifact store)
 """
 from __future__ import annotations
@@ -59,7 +59,7 @@ from mozaiksai.control_plane.staging import create_refinement_staging_workspace
 # ---------------------------------------------------------------------------
 
 _APP_ID = "cp-promotion-integration"
-_ARTIFACT_VERSION_ID = "av_parent_001"
+_build_record_id = "av_parent_001"
 _DASHBOARD_PATH = "ui/pages/dashboard.yaml"
 _DASHBOARD_ORIGINAL = "page_type: landing\ntitle: Dashboard\n"
 _DASHBOARD_UPDATED = "page_type: landing\ntitle: Reports Dashboard\n"
@@ -89,7 +89,7 @@ class _FakeAgent:
         return _FakeReply(self.plan)
 
 
-class _ArtifactVersion:
+class _BuildRecord:
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
@@ -103,9 +103,9 @@ class _CapturingArtifactStore:
         self.calls: list[dict[str, Any]] = []
         self._child_id = child_id
 
-    async def create_build_record(self, **kwargs: Any) -> _ArtifactVersion:
+    async def create_build_record(self, **kwargs: Any) -> _BuildRecord:
         self.calls.append(dict(kwargs))
-        return _ArtifactVersion(id=self._child_id, **kwargs)
+        return _BuildRecord(id=self._child_id, **kwargs)
 
     @property
     def last_call(self) -> dict[str, Any]:
@@ -208,7 +208,7 @@ def _make_request(*, request_id: str, staging_root: Path) -> CodingWorkerRequest
         app_id=_APP_ID,
         build_family="app_bundle",
         build_key="app_bundle",
-        build_record_id=_ARTIFACT_VERSION_ID,
+        build_record_id=_build_record_id,
         requested_workflow_id="AppGenerator",
         raw_user_request="Change the dashboard title to Reports Dashboard.",
         source_surface="cp_promotion_integration_test",
@@ -301,7 +301,7 @@ async def test_full_plan_stage_code_persist_chain(tmp_path: Path) -> None:
 
     # Artifact store call assertions — the full promotion contract
     call = artifact_store.last_call
-    assert call["parent_build_record_id"] == _ARTIFACT_VERSION_ID
+    assert call["parent_build_record_id"] == _build_record_id
     assert call["build_family"] == "app_bundle"
     assert call["build_key"] == "app_bundle"
     assert call["lifecycle_status"].value == "draft"
@@ -698,3 +698,4 @@ async def test_coding_worker_rejects_out_of_scope_edits_in_integration(tmp_path:
     assert result.eligible is True
     assert result.status == "failed"
     assert "outside the explicit scoped files" in str(result.error)
+

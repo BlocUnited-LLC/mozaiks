@@ -2,7 +2,7 @@
 
 Verifies that AppGenerator.emit_build_completed and
 AgentGenerator.emit_build_completed call persist_summary_artifact()
-with the correct artifact_kind and revision_mode, and that failures
+with the correct build_family and revision_mode, and that failures
 in artifact persistence do not propagate (best-effort).
 """
 
@@ -121,9 +121,9 @@ class TestAppGeneratorEmitBuildCompleted:
                 build_mode=None,
             )
 
-        assert captured.get("artifact_kind") == "app_bundle"
+        assert captured.get("build_family") == "app_bundle"
         assert captured.get("revision_mode") is False
-        input_kinds = captured.get("input_artifact_kinds") or []
+        input_kinds = captured.get("input_ARTIFACT_KINDS") or []
         assert "design_docs" in input_kinds
         assert "workflow_bundle" in input_kinds
         assert "theme_capture" in input_kinds
@@ -245,8 +245,10 @@ class TestAgentGeneratorEmitBuildCompleted:
                 build_mode=None,
             )
 
-        assert captured["artifact_kind"] == "workflow_bundle"
+        assert captured["build_family"] == "workflow_bundle"
         assert captured["summary_payload"]["source_workflow"] == "AgentGenerator"
         assert captured["summary_payload"]["source_chat_id"] == "chat-1"
         assert captured["summary_payload"]["workflow_integration_metadata"] == workflow_integration_metadata
+
+
 

@@ -50,8 +50,8 @@ def _make_zip_bytes(entries: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
-def _make_artifact_version(metadata: dict[str, Any]):
-    """Return a MagicMock shaped like ArtifactVersionDoc with given commit_metadata.metadata."""
+def _make_build_record(metadata: dict[str, Any]):
+    """Return a MagicMock shaped like BuildRecord with given commit_metadata.metadata."""
     commit_meta = MagicMock()
     commit_meta.metadata = metadata
     artifact = MagicMock()
@@ -84,7 +84,7 @@ class TestLocalArtifactContentStore:
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"file.txt": "hello"})
         ref = _run_async(
-            store.put_bundle(data, app_id="app1", artifact_version_id="av1")
+            store.put_bundle(data, app_id="app1", build_record_id="av1")
         )
         assert isinstance(ref, str)
         assert Path(ref).is_absolute()
@@ -93,14 +93,14 @@ class TestLocalArtifactContentStore:
     def test_get_returns_stored_bytes(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"a.txt": "content"})
-        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av2"))
+        ref = _run_async(store.put_bundle(data, app_id="app1", build_record_id="av2"))
         retrieved = _run_async(store.get_bundle(ref))
         assert retrieved == data
 
     def test_exists_true_after_put(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"x.py": "pass"})
-        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av3"))
+        ref = _run_async(store.put_bundle(data, app_id="app1", build_record_id="av3"))
         assert _run_async(store.exists(ref)) is True
 
     def test_exists_false_for_missing(self, tmp_path):
@@ -119,7 +119,7 @@ class TestLocalArtifactContentStore:
     def test_delete_removes_file_returns_true(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"d.txt": "bye"})
-        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av4"))
+        ref = _run_async(store.put_bundle(data, app_id="app1", build_record_id="av4"))
         assert _run_async(store.delete(ref)) is True
         assert not Path(ref).exists()
 
@@ -139,13 +139,13 @@ class TestLocalChecksum:
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"f.txt": "data"})
         sha = hashlib.sha256(data).hexdigest()
-        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av5"))
+        ref = _run_async(store.put_bundle(data, app_id="app1", build_record_id="av5"))
         assert _run_async(store.verify_checksum(ref, sha)) is True
 
     def test_verify_checksum_wrong_hash_returns_false(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"f.txt": "data"})
-        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av6"))
+        ref = _run_async(store.put_bundle(data, app_id="app1", build_record_id="av6"))
         assert _run_async(store.verify_checksum(ref, "a" * 64)) is False
 
     def test_verify_checksum_missing_ref_returns_false(self, tmp_path):
@@ -257,7 +257,7 @@ class TestArtifactWorkspaceContentRef:
         from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
 
         if artifact_store is None:
-            artifact = _make_artifact_version(metadata)
+            artifact = _make_build_record(metadata)
             mock_store = AsyncMock()
             mock_store.get_build_record = AsyncMock(return_value=artifact)
             artifact_store = mock_store
@@ -349,4 +349,5 @@ class TestArtifactWorkspaceContentRef:
         result = await self._call({})
         assert result["present"] is False
         assert result["reason"] == "workspace_unavailable"
+
 

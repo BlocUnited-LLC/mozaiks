@@ -209,8 +209,8 @@ def test_refresh_result_contract_records_new_context() -> None:
         stale_resolved=True,
         artifacts_created=[
             ArtifactRef(
-                artifact_kind="app_context_version",
-                artifact_version_id="av_ctx_new",
+                build_family="app_context_version",
+                build_record_id="av_ctx_new",
             )
         ],
     )
@@ -218,7 +218,7 @@ def test_refresh_result_contract_records_new_context() -> None:
     assert result.previous_context_version_id == "ctx_old"
     assert result.new_context_version_id == "ctx_new"
     assert result.stale_resolved is True
-    assert result.artifacts_created[0].artifact_kind == "app_context_version"
+    assert result.artifacts_created[0].build_family == "app_context_version"
 
 
 def test_plan_lists_expected_canonical_brownfield_artifacts() -> None:
@@ -363,4 +363,5 @@ def test_context_refresh_contract_has_no_graph_database_or_proprietary_terms() -
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+
 

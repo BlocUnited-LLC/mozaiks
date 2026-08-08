@@ -51,7 +51,7 @@ def _write_source_bundle(root: Path, *, title: str = "Dashboard") -> None:
 def _build_plan(*, request_id: str, staging_root: Path, request: str, app_id: str) -> RefinementExecutionPlan:
     return dry_run.build_refinement_execution_plan_from_route(
         request=request,
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -139,7 +139,7 @@ async def test_smoke_control_plane_tool_executor_returns_structured_stub_context
         app_id="refinement-live-worker-smoke",
         request_id=REQUEST_ID,
         request_text=REQUEST_TEXT,
-        artifact_version_id="av_refinement_live_worker_smoke_001",
+        build_record_id="av_refinement_live_worker_smoke_001",
         source_file_map={"ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n"},
         plan=_build_plan(
             request_id=REQUEST_ID,
@@ -154,9 +154,9 @@ async def test_smoke_control_plane_tool_executor_returns_structured_stub_context
         context={
             "checkpoint": "coding_requested",
             "app_id": "refinement-live-worker-smoke",
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": "av_refinement_live_worker_smoke_001",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": "av_refinement_live_worker_smoke_001",
             "requested_workflow_id": "AppGenerator",
             "source_surface": "refinement_live_coding_worker_smoke",
             "raw_user_request": REQUEST_TEXT,
@@ -165,16 +165,16 @@ async def test_smoke_control_plane_tool_executor_returns_structured_stub_context
     )
     assert revision_context.success is True
     assert revision_context.output["present"] is True
-    assert revision_context.output["current_artifact"]["artifact_version_id"] == "av_refinement_live_worker_smoke_001"
+    assert revision_context.output["current_artifact"]["build_record_id"] == "av_refinement_live_worker_smoke_001"
 
     workspace_scope = await executor.execute_tool(
         ControlPlaneToolCall(tool_id="get_artifact_workspace_scope", arguments={}, target="coding_requested"),
         context={
             "checkpoint": "coding_requested",
             "app_id": "refinement-live-worker-smoke",
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
-            "artifact_version_id": "av_refinement_live_worker_smoke_001",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
+            "build_record_id": "av_refinement_live_worker_smoke_001",
             "requested_workflow_id": "AppGenerator",
             "source_surface": "refinement_live_coding_worker_smoke",
             "raw_user_request": REQUEST_TEXT,
@@ -224,7 +224,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
         app_id=APP_ID,
         request_id=REQUEST_ID,
         request_text=REQUEST_TEXT,
-        artifact_version_id="av_refinement_live_worker_smoke_001",
+        build_record_id="av_refinement_live_worker_smoke_001",
         source_file_map={"ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n"},
         plan=_build_plan(request_id=REQUEST_ID, staging_root=tmp_path / ".refinement_staging", request=REQUEST_TEXT, app_id=APP_ID),
     )
@@ -239,9 +239,9 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
     result = await worker.execute(
         CodingWorkerRequest(
             app_id=APP_ID,
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_refinement_live_worker_smoke_001",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_refinement_live_worker_smoke_001",
             requested_workflow_id="AppGenerator",
             raw_user_request=REQUEST_TEXT,
             source_surface="refinement_live_coding_worker_smoke",
@@ -261,7 +261,8 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
     assert "artifact_persistence_error" not in result.metadata
     assert result.metadata["build_record_id"] == "av_refinement_live_worker_smoke_persisted"
     assert len(store.created_versions) == 1
-    assert store.calls and store.calls[0]["artifact_kind"] == "app_bundle"
+    assert store.calls and store.calls[0]["build_family"] == "app_bundle"
     assert store.created_versions[0].app_id == APP_ID
-    assert store.created_versions[0].artifact_kind == "app_bundle"
+    assert store.created_versions[0].build_family == "app_bundle"
+
 

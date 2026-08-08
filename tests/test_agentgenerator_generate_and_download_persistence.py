@@ -29,18 +29,18 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls = []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_workflow_bundle_1"})()
+        return type("BuildRecord", (), {"id": "av_workflow_bundle_1"})()
 
 
-def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeypatch, tmp_path: Path) -> None:
+def test_register_workflow_bundle_build_record_sets_canonical_inputs(monkeypatch, tmp_path: Path) -> None:
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
     monkeypatch.setattr(
         artifacts_mod,
-        "resolve_latest_artifact_version_refs",
+        "resolve_latest_build_record_refs",
         lambda **kwargs: asyncio.sleep(0, result={
             "concept": "av_concept_1",
             "build_plan": "av_build_plan_1",
@@ -50,7 +50,7 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
 
     zip_path = tmp_path / "GeneratedWorkflow.zip"
     zip_path.write_bytes(b"fake workflow bytes")
-    context = _Context({"artifact_version_id": "av_parent_1"})
+    context = _Context({"build_record_id": "av_parent_1"})
     workflow_integration_metadata = {
         "contract_version": "1.0",
         "workflows": [
@@ -69,8 +69,8 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
         ],
     }
 
-    artifact_version = asyncio.run(
-        generate_and_download_module._register_workflow_bundle_artifact_version(
+    build_record = asyncio.run(
+        generate_and_download_module._register_workflow_bundle_build_record(
             app_id="app_123",
             user_id="user_123",
             workflow_name="AgentGenerator",
@@ -82,9 +82,9 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
         )
     )
 
-    assert artifact_version.id == "av_workflow_bundle_1"
-    assert fake_artifact_store.calls[0]["artifact_kind"] == "workflow_bundle"
-    assert fake_artifact_store.calls[0]["artifact_key"] == "LeadWorkflow"
+    assert build_record.id == "av_workflow_bundle_1"
+    assert fake_artifact_store.calls[0]["build_family"] == "workflow_bundle"
+    assert fake_artifact_store.calls[0]["build_key"] == "LeadWorkflow"
     assert fake_artifact_store.calls[0]["parent_version_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_1",
@@ -97,5 +97,6 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
         fake_artifact_store.calls[0]["commit_metadata"]["metadata"]["workflow_integration_metadata"]
         == workflow_integration_metadata
     )
-    assert context.data["artifact_version_id"] == "av_workflow_bundle_1"
+    assert context.data["build_record_id"] == "av_workflow_bundle_1"
+
 
