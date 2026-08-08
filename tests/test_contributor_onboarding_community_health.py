@@ -21,6 +21,21 @@ def test_contributing_has_human_first_quickstart() -> None:
     assert "**Open a pull request** against `main` using the pull request template." in contributing
 
 
+def test_contributing_documents_focused_test_coverage_gate_in_human_section() -> None:
+    contributing = _read("CONTRIBUTING.md")
+
+    assert "## Running Tests Locally" in contributing
+    assert "--cov-fail-under=30" in contributing
+    assert "python -m pytest tests/test_your_file.py -q --no-cov" in contributing
+    assert "CI remains authoritative" in contributing
+
+    # This guidance must live in the human-first path, not be deferred behind
+    # the optional AI-agent section or left as a future contributor task.
+    running_tests_index = contributing.index("## Running Tests Locally")
+    ai_agent_section_index = contributing.index("## Working With an AI Coding Agent (Optional)")
+    assert running_tests_index < ai_agent_section_index
+
+
 def test_contributing_explains_no_extra_setup_paths() -> None:
     contributing = _read("CONTRIBUTING.md")
 
@@ -79,14 +94,24 @@ def test_security_md_prefers_private_reporting_and_invents_no_email() -> None:
     assert "Report a vulnerability" in security
     assert "@" not in security
 
+    # SECURITY.md must stay scoped to vulnerability reporting only.
+    assert "Code of Conduct" not in security
 
-def test_code_of_conduct_is_contributor_covenant_with_no_individual_contact() -> None:
+
+def test_code_of_conduct_uses_confirmed_email_and_not_security_channel() -> None:
     coc = _read("CODE_OF_CONDUCT.md")
 
     assert "Contributor Covenant" in coc
     assert "project maintainers" in coc
-    # No invented individual person or email address as the enforcement contact.
-    assert "@" not in coc
+    # Enforcement contact is the confirmed maintainer email, not an invented
+    # individual contact.
+    assert "conduct@blocunited.com" in coc
+    # GitHub's security-vulnerability reporting channel must not be offered
+    # as a Code of Conduct reporting method — it is reserved for security
+    # vulnerabilities only.
+    assert "github.com/BlocUnited-LLC/mozaiks/security" not in coc
+    assert "exclusively for security vulnerabilities" in coc
+    assert "Do not use it to report Code of" in coc
 
 
 def test_issue_templates_cover_bug_feature_and_docs() -> None:

@@ -58,16 +58,17 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the Mozaiks project maintainers by opening a private report
-through this repository's [GitHub private vulnerability reporting form](https://github.com/BlocUnited-LLC/mozaiks/security)
-(select **Report a vulnerability**, then describe the conduct concern in the
-report body) or by contacting a listed maintainer of the
-[BlocUnited-LLC/mozaiks](https://github.com/BlocUnited-LLC/mozaiks) repository
-directly through their GitHub profile. All complaints will be reviewed and
-investigated promptly and fairly.
+reported to the Mozaiks project maintainers at **conduct@blocunited.com**.
+All complaints will be reviewed and investigated promptly and fairly.
 
 All project maintainers are obligated to respect the privacy and security of
 the reporter of any incident.
+
+GitHub's private security vulnerability reporting channel (the **Report a
+vulnerability** form under this repository's Security tab) is reserved
+exclusively for security vulnerabilities. Do not use it to report Code of
+Conduct violations — use the email address above instead. See
+[SECURITY.md](SECURITY.md) for how to report a security vulnerability.
 
 ## Enforcement Guidelines
 

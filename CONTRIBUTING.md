@@ -21,7 +21,7 @@ change, a new test, or a small feature:
    ```
 
 4. **Make a focused change.** Keep the diff scoped to one thing and avoid unrelated refactors.
-5. **Run the relevant tests** for what you changed. Use the narrowest test slice that covers your change (see [Focused Tests](#focused-tests) below), or run the full suite with `pytest`.
+5. **Run the relevant tests** for what you changed. Use the narrowest test slice that covers your change (see [Running Tests Locally](#running-tests-locally) below), or run the full suite with `pytest`.
 6. **Open a pull request** against `main` using the pull request template. Describe what changed, why, and what you tested.
 
 Using an AI coding agent (Claude Code, Cursor, Copilot, or similar)? See
@@ -53,6 +53,35 @@ You only need Docker/MongoDB, Node.js 18+, and an LLM API key when you are
 changing or manually verifying behavior that talks to a real database, a real
 frontend build, or a real LLM call. See [Local Setup](docs/local-setup.md) when
 you get there.
+
+## Running Tests Locally
+
+You do not need to run the entire test suite for every change. Pick the
+focused test file(s) that cover what you touched:
+
+```bash
+python -m pytest tests/test_your_file.py -q
+```
+
+**Coverage gate note:** This repo's shared `pytest` configuration enforces a
+repository-wide minimum coverage threshold (`--cov-fail-under=30`, measured
+against `mozaiksai`). Running a narrow test file against that global
+threshold will often report a coverage failure even when every test you ran
+passes. That failure reflects the coverage math for the whole package, not a
+problem with your change.
+
+To run a focused slice without tripping the repository-wide coverage gate,
+use the verified command:
+
+```bash
+python -m pytest tests/test_your_file.py -q --no-cov
+```
+
+**CI remains authoritative.** `--no-cov` is a local convenience for fast
+iteration on a narrow slice. It does not weaken what is enforced in CI — the
+full test suite still runs in CI with the project's coverage requirements
+enforced, and your pull request must pass CI regardless of what you ran
+locally.
 
 ## Working With an AI Coding Agent (Optional)
 
