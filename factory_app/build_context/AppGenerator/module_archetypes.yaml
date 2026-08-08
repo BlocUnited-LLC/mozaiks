@@ -108,43 +108,29 @@ drift_guard_test_guidance:
             assert declared <= handler_methods
     emits_service_alignment:
       description: >
-        AST-scan backend/service.py for ctx.emit() calls with string-literal
-        first arguments and assert each found event type is declared in the
-        module's action.emits[] lists. Catches service.py calling ctx.emit()
-        for events that were never declared or were removed from the contract —
-        a gap the ModuleLoader does not statically enforce.
+        Use the OSS emit_drift utility to AST-scan backend/service.py for
+        ctx.emit() calls with string-literal first arguments and assert each
+        found event type is declared in the module's action.emits[] lists.
+        Catches service.py calling ctx.emit() for events that were never
+        declared or were removed from the contract — a gap ModuleLoader does
+        not statically enforce. Only literal string arguments are checked;
+        dynamic calls using variables are intentionally ignored (cannot be
+        resolved statically). Import check_orphaned_emits from
+        mozaiksai.core.runtime.app.emit_drift — available in any app that
+        has the mozaiksai package installed.
       template: |
-        import ast, yaml
         from pathlib import Path
+        from mozaiksai.core.runtime.app.emit_drift import check_orphaned_emits
 
         def test_{module_id}_service_emits_match_declared_events():
-            app_root = Path(__file__).resolve().parents[1] / "app"
-            module_dir = app_root / "modules" / "{module_id}"
-            service_py = module_dir / "backend" / "service.py"
-            manifest = yaml.safe_load((module_dir / "module.yaml").read_text())
-
-            declared_emits = set()
-            for action in manifest.get("actions", []):
-                declared_emits.update(action.get("emits", []))
-
-            if not service_py.exists():
-                return  # module has no service layer — no emits to check
-
-            tree = ast.parse(service_py.read_text())
-            for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "emit"
-                    and node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)
-                ):
-                    event_type = node.args[0].value
-                    assert event_type in declared_emits, (
-                        f"service.py calls ctx.emit({{event_type!r}}) but "
-                        f"{{event_type!r}} is not declared in module.yaml emits[]"
-                    )
+            module_dir = (
+                Path(__file__).resolve().parents[1] / "app" / "modules" / "{module_id}"
+            )
+            orphans = check_orphaned_emits(module_dir)
+            assert orphans == [], (
+                f"backend/service.py calls ctx.emit() for undeclared events: "
+                + ", ".join(f"{{e!r}} (line {{ln}})" for e, ln in orphans)
+            )
     user_data_scope_handler_completeness:
       description: >
         When user_data_scope=true, assert backend/account_data_handler.py exists
