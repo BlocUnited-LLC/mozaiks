@@ -39,6 +39,26 @@ module_yaml_schema_notes:
     runtime reports. Do not conflate the schema_version (always
     "mozaiks.module.v1") with the module identity version.
 
+# Constraints enforced by ModuleLoader at startup for every archetype.
+# Violations cause a hard ModuleLoadError before the app accepts traffic.
+# List them here once rather than duplicating across every archetype block.
+universal_hard_constraints:
+  permission_consistency: >
+    Every permission ID listed in action.permissions[] must be declared in the
+    module-level permissions block. The loader validates this at startup and
+    raises ModuleLoadError on any undeclared reference. Generate all permission
+    IDs that actions reference — including special scopes such as access_as_user
+    — as explicit entries in the top-level permissions block before referencing
+    them in any action.
+  notification_id_consistency: >
+    Every reactions.yaml reaction with target.kind=notification must have a
+    target.notification_id that matches an id declared in
+    contracts/notifications.yaml. The loader validates this at startup and
+    raises ModuleLoadError when notification_id is missing or undeclared, and
+    also when a notification reaction exists but contracts/notifications.yaml
+    does not. Generate contracts/notifications.yaml whenever any reaction
+    dispatches to target.kind=notification.
+
 archetypes:
   standard:
     summary: Default deterministic module for CRUD and ordinary business logic.

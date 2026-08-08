@@ -981,3 +981,118 @@ def test_module_yaml_rejects_unknown_top_level_field(tmp_path: Path) -> None:
     with pytest.raises(ModuleLoadError):
         ModuleLoader(str(tmp_path)).load("tasks")
 
+
+# ---------------------------------------------------------------------------
+# Check 3 — permission consistency (action.permissions[] vs. top-level block)
+# ---------------------------------------------------------------------------
+
+
+def test_module_loader_rejects_action_referencing_undeclared_permission(tmp_path: Path) -> None:
+    """Loader must reject an action whose permissions[] list references a
+    permission ID not declared in the module-level permissions block.
+
+    Regression guard: this bug class appeared in workspace_support where
+    access_as_user was used in action.permissions but was absent from the
+    top-level permissions block.
+    """
+    module_dir = _write_canonical_module(tmp_path)
+    yaml_path = module_dir / "module.yaml"
+    yaml_path.write_text(
+        """
+schema_version: mozaiks.module.v1
+module:
+  id: tasks
+  display_name: Tasks
+  version: 1.0.0
+  description: Task management
+  handler: backend.handler:TasksModule
+permissions:
+  - id: tasks.write
+    description: Create and update tasks
+actions:
+  - id: create
+    description: Create a task
+    handler_method: create_task
+    permissions: [tasks.write, undeclared.permission]
+    emits: [domain.tasks.task_created]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="undeclared permission"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+# ---------------------------------------------------------------------------
+# Check 6 — notification_id consistency (reactions.yaml vs notifications.yaml)
+# ---------------------------------------------------------------------------
+
+
+def test_module_loader_rejects_reaction_notification_id_not_in_notifications_yaml(
+    tmp_path: Path,
+) -> None:
+    """Loader must reject a notification reaction whose notification_id is not
+    declared in contracts/notifications.yaml.
+
+    Regression guard: this bug class can silently wire a reaction to a
+    non-existent notification template, resulting in a runtime dispatch error
+    that only appears at event-emission time rather than at startup.
+    """
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "reactions.yaml").write_text(
+        """
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: task_created_notify
+    event_type: domain.tasks.task_created
+    target:
+      kind: notification
+      notification_id: nonexistent_notification
+""".lstrip(),
+        encoding="utf-8",
+    )
+    # notifications.yaml only declares 'task_created', not 'nonexistent_notification'
+    module_dir.joinpath("contracts", "notifications.yaml").write_text(
+        """
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: task_created
+    event_type: domain.tasks.task_created
+    channels: [in_app]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="nonexistent_notification"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_loader_rejects_notification_reaction_without_notifications_yaml(
+    tmp_path: Path,
+) -> None:
+    """Loader must reject a notification reaction when notifications.yaml is absent.
+
+    A reaction that dispatches to a notification template requires the template
+    to be declared — missing notifications.yaml is a hard contract gap.
+    """
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "reactions.yaml").write_text(
+        """
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: task_created_notify
+    event_type: domain.tasks.task_created
+    target:
+      kind: notification
+      notification_id: task_created
+""".lstrip(),
+        encoding="utf-8",
+    )
+    # Remove notifications.yaml so the reaction target has no backing declaration
+    notif_path = module_dir / "contracts" / "notifications.yaml"
+    if notif_path.exists():
+        notif_path.unlink()
+
+    with pytest.raises(ModuleLoadError, match="notifications.yaml"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
