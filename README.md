@@ -129,7 +129,11 @@ Build the docs locally with `pip install -r requirements-docs.txt` and `./script
 
 ## Contributing
 
-See `CONTRIBUTING.md`.
+Fork, branch, install development dependencies with `pip install -e ".[dev]"`,
+make a focused change, run the relevant tests, and open a pull request.
+Documentation, most tests, and many CLI changes don't need MongoDB, Node.js,
+or an LLM API key. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full path.
+This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

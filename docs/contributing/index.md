@@ -7,6 +7,16 @@ improving Studio, or maintaining the release pipeline.
 If you are building an app with Mozaiks, you do not need this section.
 Start with [Getting Started](../getting-started.md) instead.
 
+## Your First Pull Request
+
+The full mechanical path — fork, branch, install development dependencies,
+make a focused change, run the relevant tests, and open a pull request — plus
+what you can contribute **without** MongoDB, Node.js, a running Studio
+instance, or an LLM API key (documentation, most Python tests, and many CLI
+changes) is documented once, in
+[CONTRIBUTING.md](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md#quickstart-your-first-pull-request).
+Start there.
+
 ## Where to start
 
 - **[Local Setup](../local-setup.md)** — source checkout, editable install, and how to run the builder stack from repo
