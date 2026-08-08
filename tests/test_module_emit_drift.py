@@ -25,9 +25,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-import yaml
-
 from mozaiksai.core.runtime.app.emit_drift import (
     check_missing_emits,
     check_orphaned_emits,
@@ -36,7 +33,6 @@ from mozaiksai.core.runtime.app.emit_drift import (
     scan_service_emit_literals,
     scan_service_emit_literals_with_lines,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
