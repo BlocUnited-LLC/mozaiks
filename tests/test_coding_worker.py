@@ -104,7 +104,7 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
         return type("ArtifactVersion", (), {"id": "av_child_1"})()
 
@@ -221,8 +221,8 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert '"refinement_context"' in created[0].calls[0]["user_prompt"]
 
     assert len(tool_executor.calls) == 2
-    assert artifact_store.calls[0]["parent_version_id"] == "av_123"
-    assert artifact_store.calls[0]["artifact_kind"] == "app_bundle"
+    assert artifact_store.calls[0]["parent_build_record_id"] == "av_123"
+    assert artifact_store.calls[0]["build_family"] == "app_bundle"
     assert artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert artifact_store.calls[0]["validation_status"].value == "passed"
     assert artifact_store.calls[0]["commit_metadata"]["metadata"]["applied_paths"] == [
@@ -295,7 +295,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
 @pytest.mark.asyncio
 async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path) -> None:
     class _BrokenArtifactStore:
-        async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+        async def create_build_record(self, **kwargs):  # noqa: ANN003
             raise RuntimeError('artifact store unavailable')
 
     worker = ScopedRefinementCodingWorker(

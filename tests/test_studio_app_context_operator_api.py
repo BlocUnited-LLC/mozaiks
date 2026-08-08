@@ -405,7 +405,7 @@ def test_override_allow_with_warning_is_non_mutating_and_preserves_plan_scope(mo
     _, client = _client(monkeypatch)
     plan = build_refinement_execution_plan_from_route(
         request="Change the orders data model.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="feature",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",

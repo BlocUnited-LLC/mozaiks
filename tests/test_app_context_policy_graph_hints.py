@@ -124,7 +124,7 @@ def test_graph_hints_attach_to_plan_without_mutating_paths_or_routing() -> None:
     affected_paths = ["ui/pages/orders.yaml"]
     plan = build_refinement_execution_plan_from_route(
         request="Adjust the orders page layout.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",

@@ -618,7 +618,7 @@ class TestDelegatesWorkspaceLoading:
 
         call_kwargs = mock_load.call_args.kwargs
         assert call_kwargs["app_id"] == "my_app_99"
-        assert call_kwargs["artifact_version_id"] == "ver_xyz"
+        assert call_kwargs["build_record_id"] == "ver_xyz"
 
     @pytest.mark.asyncio
     async def test_missing_app_id_skips_load(self) -> None:

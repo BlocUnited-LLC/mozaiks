@@ -269,6 +269,9 @@ module:
   display_name: Reports
   version: 1.0.0
   handler: backend.handler:ReportsModule
+permissions:
+  - id: reports.read
+    description: View reports visible to the authenticated user.
 actions:
   - id: list_reports
     description: List reports visible to the authenticated user.

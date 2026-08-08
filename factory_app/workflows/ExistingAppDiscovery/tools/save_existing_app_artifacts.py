@@ -84,10 +84,10 @@ async def _persist_app_context_artifact_drafts(
             continue
 
         raw = _json_bytes(payload)
-        version_doc = await store.create_artifact_version(
+        version_doc = await store.create_build_record(
             app_id=str(app_id),
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_kind,
+            build_family=artifact_kind,
+            build_key=artifact_kind,
             files_manifest=[
                 {
                     "path": f"existing_app_discovery/{artifact_kind}.json",
