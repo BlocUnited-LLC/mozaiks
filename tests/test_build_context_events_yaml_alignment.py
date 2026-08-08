@@ -22,10 +22,10 @@ event type — not just a bulk assertion failure.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
-import json
 import pytest
 import yaml
 
