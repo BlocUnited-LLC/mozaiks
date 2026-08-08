@@ -476,8 +476,8 @@ async def create_draft_app_bundle_from_staged_refinement(
             promotion_result=promotion_result,
             policy_decisions=policy_decisions,
         )
-    if str(plan.artifact_kind or "").strip() != "app_bundle":
-        raise DraftAppBundleArtifactVersionError("Draft app bundle creation only supports artifact_kind='app_bundle'.")
+    if str(plan.build_family or "").strip() != "app_bundle":
+        raise DraftAppBundleArtifactVersionError("Draft app bundle creation only supports build_family='app_bundle'.")
     if plan.execution_mode != "staged":
         raise DraftAppBundleArtifactVersionError("Draft app bundle creation requires a staged execution plan.")
     if plan.mutation_allowed is not False or staging_result.mutation_allowed is not False:
@@ -529,9 +529,9 @@ async def create_draft_app_bundle_from_staged_refinement(
         raise DraftAppBundleArtifactVersionError(
             f"Source artifact version not found: {source_artifact_version_id}"
         )
-    if source_version is not None and source_version.artifact_kind != "app_bundle":
+    if source_version is not None and source_version.build_family != "app_bundle":
         raise DraftAppBundleArtifactVersionError(
-            f"Source artifact version must be app_bundle; received {source_version.artifact_kind!r}."
+            f"Source artifact version must be app_bundle; received {source_version.build_family!r}."
         )
 
     resolved_source_artifact_version_id = (
