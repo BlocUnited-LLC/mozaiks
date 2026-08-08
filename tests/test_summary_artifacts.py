@@ -16,12 +16,12 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.create_calls = []
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str | None = None,
+        build_family: str,
+        build_key: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 1,
     ):
@@ -30,8 +30,8 @@ class _FakeArtifactStore:
                 ArtifactVersionDoc(
                     _id="av_design_docs_1",
                     app_id=app_id,
-                    artifact_kind="design_docs",
-                    artifact_key="design_docs",
+                    build_family="design_docs",
+                    build_key="design_docs",
                     version_number=1,
                     lineage_root_id="av_design_docs_1",
                     lifecycle_status=ArtifactLifecycleStatus.CURRENT,
@@ -43,11 +43,11 @@ class _FakeArtifactStore:
                 ArtifactVersionDoc(
                     _id="av_concept_2",
                     app_id=app_id,
-                    artifact_kind="concept",
-                    artifact_key="concept",
+                    build_family="concept",
+                    build_key="concept",
                     version_number=2,
                     lineage_root_id="av_concept_1",
-                    parent_version_id="av_concept_1",
+                    parent_build_record_id="av_concept_1",
                     lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                     validation_status=ArtifactValidationStatus.SKIPPED,
                     commit_metadata={"metadata": {"summary_payload": {"app_name": "Demo"}}},
@@ -57,8 +57,8 @@ class _FakeArtifactStore:
                 ArtifactVersionDoc(
                     _id="av_build_plan_1",
                     app_id=app_id,
-                    artifact_kind="build_plan",
-                    artifact_key="build_plan",
+                    build_family="build_plan",
+                    build_key="build_plan",
                     version_number=1,
                     lineage_root_id="av_build_plan_1",
                     lifecycle_status=ArtifactLifecycleStatus.CURRENT,
@@ -67,21 +67,21 @@ class _FakeArtifactStore:
                 )
             ],
         }
-        rows = data.get((artifact_kind, artifact_key), [])
+        rows = data.get((build_family, build_key), [])
         # Honour lifecycle_status filter so tests verify the CURRENT-only contract.
         if lifecycle_status is not None:
             rows = [r for r in rows if r.lifecycle_status == lifecycle_status]
         return rows
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
         return ArtifactVersionDoc(
             _id="av_design_docs_2",
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=2,
-            parent_version_id=kwargs.get("parent_version_id"),
+            parent_build_record_id=kwargs.get("parent_build_record_id"),
             lineage_root_id="av_design_docs_1",
             canonical_inputs_version=dict(kwargs.get("canonical_inputs_version") or {}),
             lifecycle_status=kwargs["lifecycle_status"],
@@ -121,7 +121,7 @@ async def test_persist_summary_artifact_registers_parent_inputs_and_summary_payl
         artifact_store=store,
     )
 
-    assert store.create_calls[0]["parent_version_id"] == "av_design_docs_1"
+    assert store.create_calls[0]["parent_build_record_id"] == "av_design_docs_1"
     assert store.create_calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_2",
         "build_plan": "av_build_plan_1",
@@ -140,12 +140,12 @@ class _DraftOnlyArtifactStore:
     def __init__(self) -> None:
         self.create_calls: list = []
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str | None = None,
+        build_family: str,
+        build_key: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 1,
     ):
@@ -153,27 +153,27 @@ class _DraftOnlyArtifactStore:
             ArtifactVersionDoc(
                 _id="av_concept_draft_1",
                 app_id=app_id,
-                artifact_kind="concept",
-                artifact_key="concept",
+                build_family="concept",
+                build_key="concept",
                 version_number=2,
                 lineage_root_id="av_concept_1",
-                parent_version_id="av_concept_1",
+                parent_build_record_id="av_concept_1",
                 lifecycle_status=ArtifactLifecycleStatus.DRAFT,
                 validation_status=ArtifactValidationStatus.SKIPPED,
                 commit_metadata={"metadata": {}},
             )
-        ] if artifact_kind == "concept" else []
+        ] if build_family == "concept" else []
         if lifecycle_status is not None:
             return [v for v in all_versions if v.lifecycle_status == lifecycle_status]
         return all_versions
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
         return ArtifactVersionDoc(
             _id="av_new",
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=1,
             lineage_root_id="av_new",
             lifecycle_status=kwargs["lifecycle_status"],
@@ -185,7 +185,7 @@ class _DraftOnlyArtifactStore:
 class _EmptyArtifactStore(_DraftOnlyArtifactStore):
     """Returns no versions — simulates first-run state."""
 
-    async def list_artifact_versions(self, **kwargs):
+    async def list_build_records(self, **kwargs):
         return []
 
 
@@ -216,7 +216,7 @@ async def test_resolve_latest_artifact_version_refs_returns_empty_on_first_run()
 
 @pytest.mark.asyncio
 async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
-    """On first run the parent lookup returns nothing; parent_version_id must be None."""
+    """On first run the parent lookup returns nothing; parent_build_record_id must be None."""
     store = _EmptyArtifactStore()
 
     await persist_summary_artifact(
@@ -226,5 +226,4 @@ async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
         artifact_store=store,
     )
 
-    assert store.create_calls[0]["parent_version_id"] is None
-
+    assert store.create_calls[0]["parent_build_record_id"] is None

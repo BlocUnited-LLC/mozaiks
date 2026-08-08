@@ -53,7 +53,7 @@ def _plan(**kwargs) -> RefinementExecutionPlan:
     defaults = {
         "request_id": "req-abc123",
         "request": "Add a search feature",
-        "artifact_kind": "app_bundle",
+        "build_family": "app_bundle",
         "change_class": "feature",
         "workflow_id": "AppGenerator",
         "workflow_sequence": "full_build",

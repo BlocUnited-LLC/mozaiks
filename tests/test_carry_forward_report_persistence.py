@@ -144,8 +144,8 @@ def test_artifact_version_doc_model_dump_includes_commit_metadata_metadata() -> 
         {
             "_id": "av_test_01",
             "app_id": _APP_ID,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_test_01",
             "commit_metadata": {"metadata": {"carry_forward_report": _MINIMAL_REPORT}},
@@ -164,8 +164,8 @@ def test_artifact_version_doc_report_survives_model_dump_roundtrip() -> None:
         {
             "_id": "av_test_02",
             "app_id": _APP_ID,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_test_02",
             "commit_metadata": {"metadata": {"carry_forward_report": _MINIMAL_REPORT}},
@@ -288,8 +288,8 @@ def test_studio_build_history_includes_commit_metadata_in_model_dump() -> None:
         {
             "_id": "av_hist_01",
             "app_id": _APP_ID,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_hist_01",
             "commit_metadata": {
@@ -317,8 +317,8 @@ def test_studio_build_history_report_nested_correctly() -> None:
         {
             "_id": "av_hist_02",
             "app_id": _APP_ID,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 2,
             "lineage_root_id": "av_hist_02",
             "commit_metadata": {

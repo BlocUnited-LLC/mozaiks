@@ -39,7 +39,7 @@ def _version(
     *,
     artifact_version_id: str,
     zip_path: Path,
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
     lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
     validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
     refinement_request_id: str | None = None,
@@ -60,8 +60,8 @@ def _version(
         {
             "_id": artifact_version_id,
             "app_id": "app_1",
-            "artifact_kind": artifact_kind,
-            "artifact_key": "app_bundle",
+            "build_family": build_family,
+            "build_key": "app_bundle",
             "version_number": 2,
             "parent_version_id": "av_parent_1" if artifact_version_id != "av_parent_1" else None,
             "lineage_root_id": "av_parent_1",
@@ -106,13 +106,13 @@ class _PromoteStore:
         self.sessions = list(sessions or [])
         self.updated_sessions: list[dict[str, object]] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if artifact_version_id == self.version.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if build_record_id == self.version.id:
             return self.version
         return None
 
-    async def list_refinement_sessions(self, *, app_id: str, result_artifact_version_id: str, limit: int = 20):
-        if result_artifact_version_id == self.version.id:
+    async def list_refinement_sessions(self, *, app_id: str, result_build_record_id: str, limit: int = 20):
+        if result_build_record_id == self.version.id:
             return list(self.sessions[:limit])
         return []
 
@@ -494,7 +494,7 @@ def test_promote_rejects_non_app_bundle_artifact(monkeypatch, tmp_path: Path) ->
     version = _version(
         artifact_version_id="av_workflow_1",
         zip_path=bundle_zip,
-        artifact_kind="workflow_bundle",
+        build_family="workflow_bundle",
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
     )
     store = _PromoteStore(version)
@@ -511,8 +511,8 @@ def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> N
         {
             "_id": "av_missing_1",
             "app_id": "app_1",
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 2,
             "lineage_root_id": "av_missing_1",
             "canonical_inputs_version": {},
