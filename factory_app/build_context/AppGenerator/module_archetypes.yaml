@@ -131,6 +131,35 @@ drift_guard_test_guidance:
                 f"backend/service.py calls ctx.emit() for undeclared events: "
                 + ", ".join(f"{{e!r}} (line {{ln}})" for e, ln in orphans)
             )
+    events_yaml_service_alignment:
+      description: >
+        Lane 4 — contracts/events.yaml ↔ service.py alignment. Use the OSS
+        emit_drift utility to check that every event type declared in
+        module.yaml action.emits[] (and therefore in contracts/events.yaml,
+        since the loader enforces that subset relationship at startup) has a
+        matching ctx.emit("event_type", ...) string-literal call somewhere in
+        backend/service.py. Catches "declared but dead" events — events added
+        to the contract during design but whose ctx.emit() call was never
+        written, or an emit removed from service.py without cleaning up
+        module.yaml and events.yaml. Import check_missing_emits from
+        mozaiksai.core.runtime.app.emit_drift — available in any app that
+        has the mozaiksai package installed. Note: only literal string
+        arguments are detected; a declared event emitted only via a dynamic
+        variable will appear as missing — suppress with a skip marker or
+        convert to a string literal.
+      template: |
+        from pathlib import Path
+        from mozaiksai.core.runtime.app.emit_drift import check_missing_emits
+
+        def test_{module_id}_declared_events_are_emitted():
+            module_dir = (
+                Path(__file__).resolve().parents[1] / "app" / "modules" / "{module_id}"
+            )
+            missing = check_missing_emits(module_dir)
+            assert missing == [], (
+                "Events declared in module.yaml/events.yaml but never emitted "
+                "by backend/service.py: " + ", ".join(repr(e) for e in missing)
+            )
     user_data_scope_handler_completeness:
       description: >
         When user_data_scope=true, assert backend/account_data_handler.py exists

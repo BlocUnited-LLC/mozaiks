@@ -10,14 +10,17 @@ The ModuleLoader enforces at startup that every event type in
 scan ``backend/service.py`` source code to verify that:
 
 1. Every ``ctx.emit()`` call in service.py uses an event type that is
-   declared in ``module.yaml action.emits[]`` / ``contracts/events.yaml``.
-2. Every event type declared in ``module.yaml action.emits[]`` is actually
-   emitted by service.py (optional completeness check).
+   declared in ``module.yaml action.emits[]`` / ``contracts/events.yaml``
+   (Lane 3 — orphaned emits).
+2. Every event type declared in ``module.yaml action.emits[]`` and
+   ``contracts/events.yaml`` is actually emitted somewhere in service.py
+   (Lane 4 — missing emits / contracts/events.yaml ↔ service.py).
 
-These two checks together close the "orphaned emit" and "declared-but-missing
-emit" drift classes. They are intentionally test-time / CI checks — not
-startup validators — because service.py may legitimately use dynamic event
-types via variables (which the AST cannot statically resolve to a declaration).
+Both checks close drift classes that are invisible to the loader. They are
+intentionally test-time / CI checks — not startup validators — because
+service.py may use dynamic event types via variables that cannot be resolved
+statically, and because a module might legitimately emit a declared event from
+a background worker rather than service.py directly.
 
 Public API
 ----------
@@ -29,26 +32,44 @@ Public API
     Return the set of event types declared in ``actions[].emits[]`` across
     all actions in a module.yaml file.
 
-``check_orphaned_emits(module_dir)``
-    Return a list of ``(event_type, line_no)`` pairs for ``ctx.emit()``
-    calls whose event type is not declared in the module contract.
-    Returns an empty list when service.py does not exist or when no
-    orphaned emits are found.
+``load_declared_events_from_yaml(events_yaml)``
+    Return the set of event types declared in a ``contracts/events.yaml``
+    file. Complements ``load_declared_emits``; both sets are equal for a
+    well-formed module because the loader enforces
+    ``module.yaml emits[] ⊆ events.yaml`` as a hard startup error.
 
-Typical usage in a generated app's drift-guard test
-----------------------------------------------------
+``check_orphaned_emits(module_dir)``
+    Lane 3. Return ``(event_type, line_no)`` pairs for ``ctx.emit()`` calls
+    in service.py whose event type is absent from ``module.yaml emits[]``.
+    Returns an empty list when service.py does not exist or all emits are
+    declared.
+
+``check_missing_emits(module_dir)``
+    Lane 4. Return a sorted list of event types declared in
+    ``module.yaml emits[]`` (backed by ``contracts/events.yaml``) that are
+    absent from service.py ``ctx.emit()`` string literals. Returns an empty
+    list when events.yaml does not exist, when no events are declared, or
+    when all declared events have a matching emit in service.py.
+
+Typical usage in a generated app's drift-guard tests
+-----------------------------------------------------
 ::
 
-    from mozaiksai.core.runtime.app.emit_drift import check_orphaned_emits
+    from mozaiksai.core.runtime.app.emit_drift import (
+        check_orphaned_emits,
+        check_missing_emits,
+    )
     from pathlib import Path
 
+    MODULE_DIR = Path(__file__).resolve().parents[1] / "app" / "modules" / "tasks"
+
     def test_tasks_service_emits_match_contract():
-        orphans = check_orphaned_emits(
-            Path(__file__).resolve().parents[1] / "app" / "modules" / "tasks"
-        )
-        assert orphans == [], (
-            f"service.py calls ctx.emit() for undeclared events: {orphans}"
-        )
+        orphans = check_orphaned_emits(MODULE_DIR)
+        assert orphans == [], f"undeclared emits: {orphans}"
+
+    def test_tasks_declared_events_are_emitted():
+        missing = check_missing_emits(MODULE_DIR)
+        assert missing == [], f"declared but never emitted: {missing}"
 """
 
 from __future__ import annotations
@@ -142,6 +163,71 @@ def load_declared_emits(module_yaml: Path) -> set[str]:
             if isinstance(event_type, str):
                 declared.add(event_type)
     return declared
+
+
+def load_declared_events_from_yaml(events_yaml: Path) -> set[str]:
+    """Return the set of event types declared in ``contracts/events.yaml``.
+
+    The loader enforces ``module.yaml emits[] ⊆ events.yaml`` at startup, so
+    this set equals ``load_declared_emits(module.yaml)`` for any well-formed
+    module.  Use this function when you want to read directly from the events
+    catalog rather than through module.yaml.
+
+    Returns an empty set when ``events_yaml`` does not exist or contains no
+    events.
+    """
+    if not events_yaml.exists():
+        return set()
+
+    raw: Any = yaml.safe_load(events_yaml.read_text(encoding="utf-8")) or {}
+    declared: set[str] = set()
+    for event in raw.get("events", []):
+        if isinstance(event, dict):
+            event_type = event.get("type")
+            if isinstance(event_type, str) and event_type:
+                declared.add(event_type)
+    return declared
+
+
+def check_missing_emits(module_dir: Path) -> list[str]:
+    """Return event types declared in module.yaml but absent from service.py.
+
+    Lane 4 — contracts/events.yaml ↔ service.py alignment.
+
+    An event is *missing* when ``module.yaml action.emits[]`` declares it
+    (meaning it is also declared in ``contracts/events.yaml``, enforced by the
+    loader) but ``backend/service.py`` contains no ``ctx.emit("event_type",
+    ...)`` string-literal call for it.
+
+    This catches "declared but never emitted" drift — e.g. an event added to
+    module.yaml and events.yaml during design but whose ctx.emit() call was
+    never written, or an emit that was removed from service.py without cleaning
+    up the declaration.
+
+    Returns an empty list when:
+    - ``module.yaml`` declares no emits (nothing to check)
+    - ``backend/service.py`` does not exist and no events are declared
+    - all declared events have a matching ctx.emit() literal in service.py
+
+    When ``backend/service.py`` does not exist but events are declared, all
+    declared events are returned as missing — they cannot be emitted by a
+    non-existent service layer.
+
+    Note: only string-literal ``ctx.emit("event_type", ...)`` calls are
+    detected. Dynamic emit calls using variables are not captured, so a
+    declared event emitted dynamically will appear as missing. In that case,
+    suppress the check for that event by excluding it from the assertion or by
+    adding a ``# emit: event_type`` marker comment as documentation.
+    """
+    module_yaml = module_dir / "module.yaml"
+    service_py = module_dir / "backend" / "service.py"
+
+    declared = load_declared_emits(module_yaml)
+    if not declared:
+        return []
+
+    actual = scan_service_emit_literals(service_py)
+    return sorted(declared - actual)
 
 
 def check_orphaned_emits(module_dir: Path) -> list[tuple[str, int]]:

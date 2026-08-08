@@ -5,13 +5,14 @@ enforce at startup:
 
 Lane 3 — emits ↔ service.py alignment:
   service.py calls ctx.emit("event_A") but event_A is absent from
-  module.yaml action.emits[]. The loader only checks the declaration
-  direction (module.yaml → events.yaml) — it does not read service.py.
+  module.yaml action.emits[]. Covered by check_orphaned_emits.
 
 Lane 4 — contracts/events.yaml ↔ service.py alignment:
-  Same gap viewed from events.yaml: since the loader already enforces
-  module.yaml emits[] → events.yaml (hard error), an orphan in service.py
-  implies a missing declaration in BOTH module.yaml and events.yaml.
+  module.yaml declares event_A in action.emits[] (backed by events.yaml)
+  but service.py never calls ctx.emit("event_A"). Covered by
+  check_missing_emits. This catches "declared but dead" events — added to
+  the contract during design but whose emit call was never written, or an
+  emit removed from service.py without cleaning up the declaration.
 
 The fix for both lanes is the same: every ctx.emit() string literal in
 service.py must be declared in module.yaml action.emits[].
@@ -28,8 +29,10 @@ import pytest
 import yaml
 
 from mozaiksai.core.runtime.app.emit_drift import (
+    check_missing_emits,
     check_orphaned_emits,
     load_declared_emits,
+    load_declared_events_from_yaml,
     scan_service_emit_literals,
     scan_service_emit_literals_with_lines,
 )
@@ -45,10 +48,17 @@ def _write_module(
     *,
     declared_emits: list[str] | None = None,
     service_src: str | None = None,
+    write_events_yaml: bool = False,
 ) -> Path:
-    """Write a minimal module directory under root/modules/tasks/."""
+    """Write a minimal module directory under root/modules/tasks/.
+
+    When ``write_events_yaml=True``, a ``contracts/events.yaml`` is created
+    that mirrors ``declared_emits`` so the module is well-formed with respect
+    to the loader's events.yaml requirement.
+    """
     module_dir = root / "modules" / "tasks"
     (module_dir / "backend").mkdir(parents=True, exist_ok=True)
+    (module_dir / "contracts").mkdir(parents=True, exist_ok=True)
 
     emits_yaml = (
         "    emits: [" + ", ".join(declared_emits) + "]"
@@ -77,6 +87,16 @@ actions:
 """.lstrip(),
         encoding="utf-8",
     )
+
+    if write_events_yaml and declared_emits:
+        events_entries = "\n".join(
+            f"  - type: {et}\n    version: 1\n    producer: tasks\n    payload_schema: {{}}"
+            for et in declared_emits
+        )
+        module_dir.joinpath("contracts", "events.yaml").write_text(
+            f"schema_version: mozaiks.events.v1\nevents:\n{events_entries}\n",
+            encoding="utf-8",
+        )
 
     if service_src is not None:
         module_dir.joinpath("backend", "service.py").write_text(
@@ -410,3 +430,232 @@ def test_drift_guard_pattern_used_by_generated_app_tests(tmp_path: Path) -> None
     )
     orphaned_types = {e for e, _ in orphans}
     assert "domain.tasks.task_queued_for_indexing" in orphaned_types
+
+
+# ---------------------------------------------------------------------------
+# load_declared_events_from_yaml — contracts/events.yaml reader
+# ---------------------------------------------------------------------------
+
+
+def test_load_declared_events_from_yaml_reads_event_types(tmp_path: Path) -> None:
+    events_yaml = tmp_path / "events.yaml"
+    events_yaml.write_text(
+        """
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.tasks.task_created
+    version: 1
+    producer: tasks
+    payload_schema: {}
+  - type: domain.tasks.task_deleted
+    version: 1
+    producer: tasks
+    payload_schema: {}
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    result = load_declared_events_from_yaml(events_yaml)
+    assert result == {"domain.tasks.task_created", "domain.tasks.task_deleted"}
+
+
+def test_load_declared_events_from_yaml_returns_empty_when_absent(
+    tmp_path: Path,
+) -> None:
+    result = load_declared_events_from_yaml(tmp_path / "nonexistent.yaml")
+    assert result == set()
+
+
+def test_load_declared_events_from_yaml_returns_empty_for_no_events(
+    tmp_path: Path,
+) -> None:
+    events_yaml = tmp_path / "events.yaml"
+    events_yaml.write_text(
+        "schema_version: mozaiks.events.v1\nevents: []\n", encoding="utf-8"
+    )
+    assert load_declared_events_from_yaml(events_yaml) == set()
+
+
+def test_load_declared_events_matches_load_declared_emits_for_well_formed_module(
+    tmp_path: Path,
+) -> None:
+    """For a well-formed module (loader invariant holds), the event types in
+    events.yaml and module.yaml emits[] must be the same set.
+
+    The loader enforces module.yaml emits[] ⊆ events.yaml as a hard error, so
+    for any module that loads successfully, these two sets are equal.
+    """
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=["domain.tasks.task_created", "domain.tasks.task_deleted"],
+        write_events_yaml=True,
+    )
+    from_module_yaml = load_declared_emits(module_dir / "module.yaml")
+    from_events_yaml = load_declared_events_from_yaml(
+        module_dir / "contracts" / "events.yaml"
+    )
+    assert from_module_yaml == from_events_yaml
+
+
+# ---------------------------------------------------------------------------
+# Lane 4: check_missing_emits — contracts/events.yaml ↔ service.py alignment
+# ---------------------------------------------------------------------------
+
+
+def test_check_missing_emits_returns_empty_when_no_declared_emits(
+    tmp_path: Path,
+) -> None:
+    """No declared emits in module.yaml → nothing can be missing."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=[],
+        service_src="async def create_task(self, ctx, *, title):\n    return {}\n",
+    )
+    assert check_missing_emits(module_dir) == []
+
+
+def test_check_missing_emits_returns_empty_when_service_emits_all_declared(
+    tmp_path: Path,
+) -> None:
+    """service.py emits every declared event → no missing emits."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=["domain.tasks.task_created"],
+        service_src=(
+            'async def create_task(self, ctx, *, title):\n'
+            '    await ctx.emit("domain.tasks.task_created", {"title": title})\n'
+            '    return {"task_id": "t1"}\n'
+        ),
+    )
+    assert check_missing_emits(module_dir) == []
+
+
+def test_check_missing_emits_catches_declared_event_never_emitted(
+    tmp_path: Path,
+) -> None:
+    """Declared event absent from service.py → reported as missing.
+
+    Regression guard for Lane 4: this exact pattern appeared in the App Zero
+    sweep where module.yaml and events.yaml declared an event (e.g.
+    hosted.wallet.payout.failed) but service.py never called ctx.emit() for it.
+    The loader cannot catch this because it only enforces the declaration
+    direction; the check requires reading service.py.
+    """
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=[
+            "domain.tasks.task_created",
+            "domain.tasks.task_failed",  # declared but never emitted
+        ],
+        service_src=(
+            'async def create_task(self, ctx, *, title):\n'
+            '    await ctx.emit("domain.tasks.task_created", {"title": title})\n'
+            '    return {"task_id": "t1"}\n'
+            '    # NOTE: task_failed is declared but the emit call was never written\n'
+        ),
+    )
+
+    missing = check_missing_emits(module_dir)
+    assert missing == ["domain.tasks.task_failed"]
+
+
+def test_check_missing_emits_reports_all_missing_events(tmp_path: Path) -> None:
+    """All missing events are returned, not just the first."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=[
+            "domain.tasks.task_created",
+            "domain.tasks.task_deleted",
+            "domain.tasks.task_archived",
+        ],
+        service_src="async def noop(self, ctx): return {}\n",
+    )
+
+    missing = check_missing_emits(module_dir)
+    assert set(missing) == {
+        "domain.tasks.task_created",
+        "domain.tasks.task_deleted",
+        "domain.tasks.task_archived",
+    }
+    # Result must be sorted for deterministic output
+    assert missing == sorted(missing)
+
+
+def test_check_missing_emits_returns_all_when_no_service_py(tmp_path: Path) -> None:
+    """No service.py + declared emits → all declared events are missing."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=["domain.tasks.task_created"],
+        # service_src intentionally absent
+    )
+    assert check_missing_emits(module_dir) == ["domain.tasks.task_created"]
+
+
+def test_check_missing_emits_ignores_dynamic_emits_as_non_matching(
+    tmp_path: Path,
+) -> None:
+    """Dynamic ctx.emit(variable, ...) does not count as covering a declared event.
+
+    A declared event emitted dynamically still appears as missing. The
+    developer must either use a string literal or suppress the assertion.
+    """
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=["domain.tasks.task_created"],
+        service_src=(
+            'async def create_task(self, ctx, *, event_name):\n'
+            '    await ctx.emit(event_name, {})\n'  # dynamic — not captured
+        ),
+    )
+
+    missing = check_missing_emits(module_dir)
+    assert "domain.tasks.task_created" in missing
+
+
+def test_check_missing_emits_returns_empty_when_no_module_yaml(
+    tmp_path: Path,
+) -> None:
+    """No module.yaml → no declared emits → nothing to report."""
+    module_dir = tmp_path / "modules" / "tasks"
+    (module_dir / "backend").mkdir(parents=True, exist_ok=True)
+    # module.yaml intentionally absent
+    assert check_missing_emits(module_dir) == []
+
+
+# ---------------------------------------------------------------------------
+# Integration: drift-guard pattern for contracts/events.yaml ↔ service.py
+# ---------------------------------------------------------------------------
+
+
+def test_drift_guard_pattern_for_events_yaml_service_alignment(tmp_path: Path) -> None:
+    """The events_yaml_service_alignment pattern from module_archetypes.yaml
+    drift_guard_test_guidance must correctly catch declared-but-never-emitted
+    events in a freshly-generated module.
+
+    This test mimics what AppGenerator scaffolds into
+    tests/test_{module_id}_module_drift.py for the Lane 4 check.
+    """
+    # Simulate a module where events.yaml and module.yaml declare an event
+    # that was added during design but whose ctx.emit() call was never written.
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=[
+            "hosted.schema_migrations.migration.applied",
+            "hosted.schema_migrations.migration.failed",  # declared but missing
+        ],
+        service_src=(
+            'async def run_migration(self, ctx, *, migration_id):\n'
+            '    await ctx.emit("hosted.schema_migrations.migration.applied", {})\n'
+            '    # migration.failed was declared in module.yaml but the\n'
+            '    # except branch and its ctx.emit were never implemented\n'
+            '    return {"success": True}\n'
+        ),
+    )
+
+    # Exact assertion a generated drift-guard test would make:
+    missing = check_missing_emits(module_dir)
+    assert missing != [], (
+        "Expected the drift-guard to catch the declared-but-missing emit; "
+        "the events_yaml_service_alignment pattern is broken"
+    )
+    assert "hosted.schema_migrations.migration.failed" in missing
