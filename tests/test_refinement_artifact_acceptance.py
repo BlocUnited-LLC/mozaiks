@@ -59,7 +59,7 @@ def _build_plan(*, request_id: str, app_id: str, staging_area: Path) -> Refineme
         request_id=request_id,
         app_id=app_id,
         request="Update the dashboard surface.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         refinement_lane="ui_patch",
         workflow_id="workflow_app",
@@ -110,8 +110,8 @@ def _build_source_version(*, app_id: str, source_zip: Path) -> ArtifactVersionDo
         {
             "_id": "av_source_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_source_1",
             "canonical_inputs_version": {"concept": "av_concept_1"},
@@ -132,32 +132,32 @@ class _FakeArtifactStore:
         self.create_calls: list[dict] = []
         self.accept_calls: list[dict] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if self.created_version is not None and app_id == self.created_version.app_id and artifact_version_id == self.created_version.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if self.created_version is not None and app_id == self.created_version.app_id and build_record_id == self.created_version.id:
             return self.created_version
-        if app_id == self.source_version.app_id and artifact_version_id == self.source_version.id:
+        if app_id == self.source_version.app_id and build_record_id == self.source_version.id:
             return self.source_version
         return None
 
-    async def list_artifact_versions(self, **kwargs):
+    async def list_build_records(self, **kwargs):
         if (
             kwargs.get("app_id") == self.source_version.app_id
-            and kwargs.get("artifact_kind") == "app_bundle"
+            and kwargs.get("build_family") == "app_bundle"
             and kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT
         ):
             return [self.source_version]
         return []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
         self.created_version = ArtifactVersionDoc.model_validate(
             {
                 "_id": "av_draft_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
-                "parent_version_id": kwargs.get("parent_version_id"),
+                "parent_build_record_id": kwargs.get("parent_build_record_id"),
                 "lineage_root_id": self.source_version.lineage_root_id,
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
                 "lifecycle_status": kwargs["lifecycle_status"].value,
@@ -168,15 +168,15 @@ class _FakeArtifactStore:
         )
         return self.created_version
 
-    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata=None):
+    async def accept_build_record(self, *, app_id: str, build_record_id: str, commit_metadata=None):
         self.accept_calls.append(
             {
                 "app_id": app_id,
-                "artifact_version_id": artifact_version_id,
+                "build_record_id": build_record_id,
                 "commit_metadata": commit_metadata,
             }
         )
-        if self.created_version is None or app_id != self.created_version.app_id or artifact_version_id != self.created_version.id:
+        if self.created_version is None or app_id != self.created_version.app_id or build_record_id != self.created_version.id:
             return None
         self.source_version = self.source_version.model_copy(
             update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED}
