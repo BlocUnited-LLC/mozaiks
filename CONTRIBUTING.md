@@ -4,7 +4,64 @@ Mozaiks is the OSS runtime, platform, Studio, and factory framework repo.
 `factory_app` is the first-party builder/reference app workspace that dogfoods
 the same contracts external app workspaces consume.
 
-## Start Here
+All participation in this repository is governed by the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Quickstart: Your First Pull Request
+
+Follow this path for any human-authored contribution — a bug fix, a docs
+change, a new test, or a small feature:
+
+1. **Fork** the repository and clone your fork.
+2. **Create a branch** for your change, e.g. `git checkout -b fix/short-description`.
+3. **Install development dependencies**:
+
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+4. **Make a focused change.** Keep the diff scoped to one thing and avoid unrelated refactors.
+5. **Run the relevant tests** for what you changed. Use the narrowest test slice that covers your change (see [Focused Tests](#focused-tests) below), or run the full suite with `pytest`.
+6. **Open a pull request** against `main` using the pull request template. Describe what changed, why, and what you tested.
+
+Using an AI coding agent (Claude Code, Cursor, Copilot, or similar)? See
+[Working With an AI Coding Agent](#working-with-an-ai-coding-agent-optional)
+below — it is optional tooling this repo supports, not a prerequisite for
+contributing.
+
+## What You Can Contribute Without Extra Setup
+
+Running the full Mozaiks Studio stack needs MongoDB, Node.js, and an LLM API
+key. Most first contributions need none of that:
+
+- **Documentation** changes (`docs/`, `README.md`, `CONTRIBUTING.md`, and other
+  Markdown) only need Python and the docs extra to preview locally:
+
+  ```bash
+  pip install -e ".[docs]"
+  python -m mkdocs serve
+  ```
+
+- **Most Python tests** run with no external services. `tests/conftest.py`
+  automatically skips the tests that need a real app workspace
+  (`MOZAIKS_APP_WORKSPACE_PATH` or `PLATFORM_PATH`) — you do not need to set
+  those to add or fix an ordinary test.
+- **Many `mozaiks_cli` changes** can be developed and verified through the
+  CLI's own unit tests without MongoDB, Node.js, or a running Studio instance.
+
+You only need Docker/MongoDB, Node.js 18+, and an LLM API key when you are
+changing or manually verifying behavior that talks to a real database, a real
+frontend build, or a real LLM call. See [Local Setup](docs/local-setup.md) when
+you get there.
+
+## Working With an AI Coding Agent (Optional)
+
+This repo also maintains a skill/rule routing system that AI coding agents
+(Claude Code, Cursor, Copilot, and similar tools) use to find the right
+context before nontrivial changes. Human contributors may use it too, but
+nothing below is required to complete the Quickstart above.
+
+### Start Here
 
 Use this order before nontrivial work:
 
@@ -15,7 +72,7 @@ Use this order before nontrivial work:
 If scope spans layers or the right owner is unclear, start with the
 `oss-contribution-review` skill.
 
-## Common Task Map
+### Common Task Map
 
 - Runtime or platform change: use `runtime-change` plus the runtime and architecture-boundary rules. Use `runtime-architecture-review` when you need a review-only scope or boundary pass before or after edits.
 - Auth change: use `runtime-change` unless the task is purely docs or tests.
@@ -36,7 +93,7 @@ If scope spans layers or the right owner is unclear, start with the
 - Managed-capability support change: use `oss-contribution-review` plus the managed-capabilities rule for now; no dedicated `managed-capability-change` skill exists yet.
 - Unsure: use `oss-contribution-review` first.
 
-## Build And Refinement Truth
+### Build And Refinement Truth
 
 - Build is `workflow_sequence`-driven through `factory_app/workflows/extended_orchestration/extension_registry.json`.
 - `AppGenerator` is one workflow inside that build system, not the whole build.
@@ -45,7 +102,7 @@ If scope spans layers or the right owner is unclear, start with the
 - Refinement today is checkpoint-driven re-entry through `app/config/refinement_policy.yaml` runtime policy and the selected `refinement_harness/config/harness.yaml` pack, with normal chat/workflow startup still in `app/config/ai.json`; it is not a dedicated `RefinementWorkflow`.
 - `workflow_sequence` is not a human-in-the-loop handoff. Keep sequences, transitions, entrypoints, and workflow-local `transition_graph.yaml` separate.
 
-## Final Report Requirements
+### Final Report Requirements
 
 Every nontrivial change should include `Tests run` plus the relevant sections
 from [.claude/rules/testing.md](.claude/rules/testing.md):
@@ -56,7 +113,7 @@ from [.claude/rules/testing.md](.claude/rules/testing.md):
 - `Module Contract Impact` when module contracts or module loader expectations changed
 - `Managed Capability Boundary Check` when managed-capability, facade, or adapter boundaries changed
 
-## Focused Tests
+### Focused Tests
 
 Prefer the narrowest test slice that matches the layer you changed.
 
@@ -80,13 +137,12 @@ python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_re
 - Do not author `contracts/subscriptions.yaml`; use `contracts/reactions.yaml`.
 - Do not route contributors toward `app/capability_packs`, `transport.py`, or direct provider internals as current canonical extension points.
 
-## Development Setup
-
-```bash
-pip install -e .[dev]
-```
-
 ## Pull Request Expectations
+
+Opening a pull request uses the repository's pull request template, which asks
+for the related issue (if any), a summary, the tests you ran, screenshots for
+UI changes, and confirmation that no private hosted-product logic was
+introduced. In addition:
 
 - Explain scope and motivation.
 - Call out public API changes in `mozaiksai/`.
@@ -101,5 +157,6 @@ pip install -e .[dev]
 
 ## Security
 
-Do not commit secrets, production tokens, or private keys.
+Do not commit secrets, production tokens, or private keys. To report a security
+vulnerability, see [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
