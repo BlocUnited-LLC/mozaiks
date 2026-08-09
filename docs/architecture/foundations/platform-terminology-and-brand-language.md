@@ -64,8 +64,9 @@ These are the preferred visible terms.
 | Term | Use For | Notes |
 | --- | --- | --- |
 | `Mozaiks` | the overall product | product name |
-| `Mozaiks Studio` | browser product for creating and managing apps | canonical visible product term |
-| `Workspace` | the tenant/account context | not the name of the app builder |
+| `Mozaiks Studio` | browser product for creating and managing a workspace or portfolio of apps | canonical visible product term |
+| `Workspace` | the tenant/org context | brandable home base for a portfolio of apps, not a person profile |
+| `Profile` | the signed-in person | personal identity and preferences only |
 | `Apps` | the multi-app directory and default landing area | canonical workspace landing area |
 | `App Studio` | the single-app management context | prose and IA term, not necessarily a literal heading on every screen |
 | `Build` | app creation and revision surface | canonical creation and revision surface |
@@ -146,12 +147,16 @@ Do not use these as visible product concepts:
 - `Refinement Engine`
 - `workflow_sequence`
 - `Adapters`
+- `Org Profile`
+- `Workspace Profile`
+- `Company Profile`
 
 Preferred replacements:
 
 - `Hub` -> `Apps`
 - `Adapters` -> `Integrations`
 - `Activity` -> `Operations` when the scope is health, incidents, runtime state, or deployment state
+- `Org Profile` / `Workspace Profile` -> `Studio` or `Workspace`, depending on whether the surface is the management shell or the managed container
 
 ## Documentation Rule
 

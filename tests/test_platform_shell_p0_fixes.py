@@ -150,7 +150,7 @@ def test_explicit_appshell_false_not_overridden(monkeypatch, tmp_path: Path) -> 
 
 
 # ---------------------------------------------------------------------------
-# Fix 3 – _inject_admin_portal guarantee
+# Fix 3 – Studio-only admin portal injection
 # ---------------------------------------------------------------------------
 
 
@@ -222,8 +222,8 @@ def test_inject_admin_portal_creates_profile_when_missing() -> None:
     assert "admin-portal" in ids
 
 
-def test_build_shell_config_always_injects_admin_portal(monkeypatch, tmp_path: Path) -> None:
-    """build_shell_config must inject admin-portal even with no shortcuts configured."""
+def test_build_shell_config_platform_does_not_inject_admin_portal(monkeypatch, tmp_path: Path) -> None:
+    """App/platform shell config must not auto-inject admin-portal."""
     from mozaiksai.hosts import platform as platform_app
 
     # Minimal app with no shell.json shortcuts at all
@@ -249,7 +249,36 @@ def test_build_shell_config_always_injects_admin_portal(monkeypatch, tmp_path: P
     profile = shell.get("profile", {})
     menu = profile.get("menu", [])
     ids = [item.get("id") for item in menu if isinstance(item, dict)]
-    assert "admin-portal" in ids, (
-        "admin-portal must appear in profile menu even when no shortcuts are configured"
+    assert "admin-portal" not in ids, (
+        "admin-portal must not appear in the app/platform profile menu"
     )
+
+
+def test_build_shell_config_studio_injects_admin_portal(monkeypatch, tmp_path: Path) -> None:
+    """Studio shell config should still inject admin-portal for admins."""
+    from mozaiksai.hosts import platform as platform_app
+
+    app_root = tmp_path / "app"
+    (app_root / "config").mkdir(parents=True)
+    (app_root / "ui").mkdir(parents=True)
+    (app_root / "app.json").write_text(
+        json.dumps({"appName": "Studio App", "startup": {"landing_spot": "/apps"}}),
+        encoding="utf-8",
+    )
+    (app_root / "config" / "ai.json").write_text(
+        json.dumps({"chat": {"chat_startup_mode": "ask"}, "workflows": {"entry_point": "Chat"}}),
+        encoding="utf-8",
+    )
+    (app_root / "config" / "shell.json").write_text(json.dumps({}), encoding="utf-8")
+    (app_root / "ui" / "route_manifest.json").write_text(
+        json.dumps({"pages": []}), encoding="utf-8"
+    )
+    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+
+    shell = asyncio.run(platform_app.build_shell_config(surface="studio"))
+
+    profile = shell.get("profile", {})
+    menu = profile.get("menu", [])
+    ids = [item.get("id") for item in menu if isinstance(item, dict)]
+    assert "admin-portal" in ids, "admin-portal must appear in the Studio profile menu"
 

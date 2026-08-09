@@ -4,12 +4,13 @@ The profile contract lets modules declare account-scoped panels and profile
 tabs they contribute to the user profile page. Profile is the signed-in
 person's surface: identity, personal preferences, personal relationship
 inventory, safe personal summaries, and social sections such as friends, posts,
-activity, and messages. It is not an app/workspace management surface.
+activity, and messages. It is not an app/workspace management surface and it is
+not the org/workspace home.
 
 Billing, subscriptions, entitlements, app access, collaborators, deployments,
 governance, build runs, and revenue participation belong in Admin Portal or
-Studio. Do not use profile panels or tabs to continue app builds or manage
-app/workspace operations.
+Studio / Workspace Shell. Do not use profile panels or tabs to continue app
+builds or manage app/workspace operations.
 
 ## Design Goals
 
@@ -244,7 +245,7 @@ Forbidden examples:
 - deployments, domains, hosting, health, incidents, or audit logs
 - app/workspace integrations or provider configuration
 
-Those belong in Admin Portal or Studio.
+Those belong in Admin Portal or Studio / Workspace Shell.
 
 Do not add profile-owned social surfaces to `config/shell.json` shortcuts or
 global navigation by default. Generate a separate `/feed`, `/friends`,

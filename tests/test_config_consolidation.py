@@ -198,6 +198,10 @@ class TestShellConfig:
         ids = [item["id"] for item in result["profile"]["menu"]]
         assert ids == ["profile", "admin-portal", "signout"]
 
+    def test_platform_shell_profile_menu_stays_person_scoped(self, shell):
+        ids = shell["shortcuts"]["profile"]
+        assert ids == ["profile", "signout"]
+
 
 # ── Framework-only tests (no app workspace needed) ──────────────────────────
 

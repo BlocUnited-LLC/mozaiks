@@ -18,6 +18,8 @@ This repo uses layered FastAPI hosts as the canonical OSS server composition:
 
 **CLI and Studio are parallel interfaces**, not a superset chain. CLI owns developer tooling (filesystem, scaffolding, process management). Studio owns the management interface (workspace status, build lifecycle, artifacts, run history, config). Do not conflate them.
 
+Profile stays person-scoped. Studio / Workspace Shell is the org/workspace home base. App shells remain separate and brandable per app; do not collapse org management into `/me`.
+
 **`mozaiks gen` is a developer convenience**, not the canonical build lifecycle. Do not expand CLI commands to duplicate Studio surfaces (artifact review, diff, run history, promotion, build state). Those belong in Studio. The CLI hands off to Studio — it does not grow a parallel project-management surface.
 
 The current repo layout is transitional. The canonical target architecture is
