@@ -655,3 +655,201 @@ def test_drift_guard_pattern_for_events_yaml_service_alignment(tmp_path: Path) -
         "the events_yaml_service_alignment pattern is broken"
     )
     assert "hosted.schema_migrations.migration.failed" in missing
+
+
+# ---------------------------------------------------------------------------
+# New pattern: ternary in ctx.emit() first arg
+# ---------------------------------------------------------------------------
+
+
+def test_scan_detects_ternary_emit(tmp_path: Path) -> None:
+    """Both branches of a ternary in ctx.emit() must be captured.
+
+    Pattern:
+        await ctx.emit("evt.a" if cond else "evt.b", payload)
+
+    Both "evt.a" and "evt.b" are string literals that the module contract
+    must declare.  This pattern appears when service.py branches between two
+    related event types in a single expression.
+    """
+    service_py = tmp_path / "service.py"
+    service_py.write_text(
+        """
+async def upsert(self, ctx, *, existing):
+    await ctx.emit(
+        "tasks.task_created" if existing is None else "tasks.task_updated",
+        {"id": 1},
+    )
+""",
+        encoding="utf-8",
+    )
+
+    result = scan_service_emit_literals(service_py)
+    assert result == {"tasks.task_created", "tasks.task_updated"}
+
+
+def test_scan_detects_ternary_emit_with_lines(tmp_path: Path) -> None:
+    """scan_service_emit_literals_with_lines must capture both ternary branches."""
+    service_py = tmp_path / "service.py"
+    service_py.write_text(
+        'async def upsert(self, ctx, *, existing):\n'
+        '    await ctx.emit(\n'
+        '        "tasks.task_created" if existing is None else "tasks.task_updated",\n'
+        '        {},\n'
+        '    )\n',
+        encoding="utf-8",
+    )
+
+    result = scan_service_emit_literals_with_lines(service_py)
+    event_types = {e for e, _ in result}
+    assert event_types == {"tasks.task_created", "tasks.task_updated"}
+    assert all(ln > 0 for _, ln in result)
+
+
+def test_check_missing_emits_resolves_ternary(tmp_path: Path) -> None:
+    """Both ternary branches satisfy declared emits — neither is reported missing."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=["tasks.task_created", "tasks.task_updated"],
+        service_src=(
+            'async def upsert(self, ctx, *, existing):\n'
+            '    await ctx.emit(\n'
+            '        "tasks.task_created" if existing is None else "tasks.task_updated",\n'
+            '        {},\n'
+            '    )\n'
+        ),
+    )
+    assert check_missing_emits(module_dir) == []
+
+
+# ---------------------------------------------------------------------------
+# New pattern: _emit_* delegate helpers
+# ---------------------------------------------------------------------------
+
+
+def test_scan_detects_emit_delegate_helper(tmp_path: Path) -> None:
+    """String literals in _emit_* helper calls must be captured.
+
+    Pattern:
+        await self._emit_best_effort(ctx, "event_type", payload)
+        await self._emit_if_available(ctx, "event_type", payload)
+
+    These wrappers forward to ctx.emit() with timeout/error handling.
+    The event type string is the second positional argument.
+    """
+    service_py = tmp_path / "service.py"
+    service_py.write_text(
+        """
+async def create(self, ctx, *, data):
+    await self._emit_if_available(ctx, "tasks.task_created", {"id": data["id"]})
+    return {"success": True}
+
+async def delete(self, ctx, *, task_id):
+    await self._emit_best_effort(ctx, "tasks.task_deleted", {"id": task_id})
+    return {"success": True}
+""",
+        encoding="utf-8",
+    )
+
+    result = scan_service_emit_literals(service_py)
+    assert result == {"tasks.task_created", "tasks.task_deleted"}
+
+
+def test_check_missing_emits_resolves_delegate_helper(tmp_path: Path) -> None:
+    """Events emitted via _emit_* helpers satisfy declared emits."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=["tasks.task_created"],
+        service_src=(
+            'async def create(self, ctx, *, data):\n'
+            '    await self._emit_if_available(ctx, "tasks.task_created", {})\n'
+            '    return {"success": True}\n'
+        ),
+    )
+    assert check_missing_emits(module_dir) == []
+
+
+def test_check_orphaned_emits_catches_undeclared_delegate_emit(
+    tmp_path: Path,
+) -> None:
+    """Undeclared event in _emit_* helper is reported as orphaned."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=[],
+        service_src=(
+            'async def create(self, ctx, *, data):\n'
+            '    await self._emit_best_effort(ctx, "tasks.task_created", {})\n'
+        ),
+    )
+    orphans = check_orphaned_emits(module_dir)
+    orphaned_types = {e for e, _ in orphans}
+    assert "tasks.task_created" in orphaned_types
+
+
+# ---------------------------------------------------------------------------
+# New pattern: # emit: marker comments
+# ---------------------------------------------------------------------------
+
+
+def test_scan_detects_emit_marker_comment(tmp_path: Path) -> None:
+    """``# emit: event_type`` comments must be captured by the scanner.
+
+    Use this pattern to document events that are emitted via dynamic variables,
+    background workers, or other files that the AST scanner cannot reach::
+
+        # emit: hosted.billing.subscription.activated
+        # emit: hosted.billing.subscription.updated
+        await ctx.emit(event_type, payload)  # event_type set above
+    """
+    service_py = tmp_path / "service.py"
+    service_py.write_text(
+        """
+async def assign_plan(self, ctx, *, app_id, plan_id, existing):
+    if existing is None:
+        event_type = "hosted.billing.subscription.activated"
+    else:
+        event_type = "hosted.billing.subscription.updated"
+    # emit: hosted.billing.subscription.activated
+    # emit: hosted.billing.subscription.updated
+    await ctx.emit(event_type, {"app_id": app_id, "plan_id": plan_id})
+""",
+        encoding="utf-8",
+    )
+
+    result = scan_service_emit_literals(service_py)
+    assert "hosted.billing.subscription.activated" in result
+    assert "hosted.billing.subscription.updated" in result
+
+
+def test_check_missing_emits_resolves_marker_comment(tmp_path: Path) -> None:
+    """Declared events covered only by # emit: comments are not reported missing."""
+    module_dir = _write_module(
+        tmp_path,
+        declared_emits=[
+            "hosted.billing.subscription.activated",
+            "hosted.billing.subscription.updated",
+        ],
+        service_src=(
+            'async def assign_plan(self, ctx, *, existing):\n'
+            '    event_type = "activated" if existing is None else "updated"\n'
+            '    # emit: hosted.billing.subscription.activated\n'
+            '    # emit: hosted.billing.subscription.updated\n'
+            '    await ctx.emit(event_type, {})\n'
+        ),
+    )
+    assert check_missing_emits(module_dir) == []
+
+
+def test_scan_detects_marker_comment_with_lines(tmp_path: Path) -> None:
+    """scan_service_emit_literals_with_lines must include # emit: comment events."""
+    service_py = tmp_path / "service.py"
+    service_py.write_text(
+        "async def run(self, ctx):\n"
+        "    # emit: domain.tasks.worker_done\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    result = scan_service_emit_literals_with_lines(service_py)
+    event_types = {e for e, _ in result}
+    assert "domain.tasks.worker_done" in event_types
+    assert all(ln > 0 for _, ln in result)
