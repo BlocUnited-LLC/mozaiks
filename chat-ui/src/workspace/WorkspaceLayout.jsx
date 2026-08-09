@@ -51,6 +51,21 @@ function resolveIcon(iconHint) {
   return ICON_MAP[iconHint] || RiDashboardFill
 }
 
+function resolveShellLabel(appName, appId) {
+  const trimmed = typeof appName === 'string' ? appName.trim() : ''
+  if (trimmed) return trimmed
+  return appId ? 'App Workspace' : 'Studio'
+}
+
+function resolveShellSubtext(appId) {
+  return appId ? 'App workspace' : 'Manage your apps'
+}
+
+function resolveShellMonogram(label) {
+  const first = String(label || '').trim().charAt(0).toUpperCase()
+  return first || 'S'
+}
+
 function buildNavGroupsFromPages(pages, appId = null, roles = []) {
   const group = appId ? 'app-studio' : 'workspace-studio'
   const items = (Array.isArray(pages) ? pages : [])
@@ -125,11 +140,11 @@ function WorkspaceSidebar({
   navGroups,
   onNavigate = null,
   surface = 'sidebar',
-  shellLabel = 'App Workspace',
-  shellSubtext = 'Manage this app',
+  shellLabel = 'Studio',
+  shellSubtext = 'Manage your apps',
 }) {
   const location = useLocation()
-  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
+  const navigationLabel = `${shellLabel} navigation`
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -152,7 +167,7 @@ function WorkspaceSidebar({
       ) : (
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/26 bg-primary/8 text-sm font-bold text-primary">
-            {String(shellLabel || 'S').trim().charAt(0).toUpperCase() || 'S'}
+            {resolveShellMonogram(shellLabel)}
           </div>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-foreground">{shellLabel}</div>
@@ -198,15 +213,14 @@ function WorkspaceSidebar({
   )
 }
 
-function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'App Workspace' }) {
-  const openMenuLabel = 'Open Studio navigation'
+function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio' }) {
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
         className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label={openMenuLabel}
+        aria-label={`Open ${shellLabel} navigation`}
       >
         <MenuGlyph />
         <span className="text-sm font-semibold">{shellLabel}</span>
@@ -221,12 +235,12 @@ function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLa
 export function WorkspaceLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { pages, appName, surface } = useNavigation()
+  const { pages, appName } = useNavigation()
   const { user } = useChatUI()
   const userRoles = useMemo(() => getUserRoles(user), [user])
   const appId = resolveAppId(location.pathname)
-  const shellLabel = resolveShellLabel(appName, surface)
-  const shellSubtext = resolveShellSubtext(surface)
+  const shellLabel = resolveShellLabel(appName, appId)
+  const shellSubtext = resolveShellSubtext(appId)
   const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId, userRoles), [pages, appId, userRoles])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'

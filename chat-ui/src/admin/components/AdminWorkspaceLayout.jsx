@@ -11,6 +11,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { useNavigation } from '../../providers/NavigationProvider.jsx'
 import {
   RiAppsFill,
   RiCustomerServiceFill,
@@ -45,18 +46,19 @@ function resolveIcon(iconHint) {
   return ICON_MAP[iconHint] || RiDashboardFill
 }
 
-function resolveShellLabel(appName, surface) {
+function resolveShellLabel(appName, appId) {
   const trimmed = typeof appName === 'string' ? appName.trim() : ''
   if (trimmed) return trimmed
-  if (surface === 'studio') return 'Studio'
-  if (surface === 'user') return 'Profile'
-  return 'App Admin'
+  return appId ? 'App Admin' : 'Studio'
 }
 
-function resolveShellSubtext(surface) {
-  if (surface === 'studio') return 'Manage all apps'
-  if (surface === 'user') return 'Your account'
-  return 'Configure this app'
+function resolveShellSubtext(appId) {
+  return appId ? 'App admin' : 'Manage all apps'
+}
+
+function resolveShellMonogram(label) {
+  const first = String(label || '').trim().charAt(0).toUpperCase()
+  return first || 'S'
 }
 
 function resolveAppId(pathname) {
@@ -151,8 +153,8 @@ function AdminSidebar({
   onNavigate = null,
   navGroups: providedNavGroups = null,
   surface = 'sidebar',
-  shellLabel = 'App Admin',
-  shellSubtext = 'Configure this app',
+  shellLabel = 'Studio',
+  shellSubtext = 'Manage all apps',
 }) {
   const location = useLocation()
   const appId = resolveAppId(location.pathname)
@@ -181,7 +183,7 @@ function AdminSidebar({
       ) : (
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/26 bg-primary/8 text-sm font-bold text-primary">
-            {String(shellLabel || 'S').trim().charAt(0).toUpperCase() || 'S'}
+            {resolveShellMonogram(shellLabel)}
           </div>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-foreground">{shellLabel}</div>
@@ -260,10 +262,10 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel 
 export function AdminWorkspaceLayout({ children, adminPages = null }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { appName, surface } = useNavigation()
+  const { appName } = useNavigation()
   const appId = resolveAppId(location.pathname)
-  const shellLabel = resolveShellLabel(appName, surface)
-  const shellSubtext = resolveShellSubtext(surface)
+  const shellLabel = resolveShellLabel(appName, appId)
+  const shellSubtext = resolveShellSubtext(appId)
   const navGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
