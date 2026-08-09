@@ -14,7 +14,7 @@
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const URL_RE = /^(https?:\/\/|\/)/;
-const SHELL_ACTION_SURFACES = new Set(['studio', 'app_studio', 'workflow_session', 'transition', 'public', 'page']);
+const SHELL_ACTION_SURFACES = new Set(['studio', 'app', 'user', 'workflow_session', 'transition', 'public', 'page']);
 const SHELL_MODES = new Set(['standard', 'workspace', 'conversation', 'focused', 'immersive', 'public', 'social']);
 const SHELL_ACTION_WHEN_FIELDS = new Set([
   'surface',

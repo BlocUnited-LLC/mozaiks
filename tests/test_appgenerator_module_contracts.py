@@ -202,7 +202,8 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppShellHeaderAction"]["fields"]["variants"]["items"] == "AppShellHeaderActionVariant"
     assert models["AppShellActionSurface"]["values"] == [
         "studio",
-        "app_studio",
+        "app",
+        "user",
         "workflow_session",
         "transition",
         "public",

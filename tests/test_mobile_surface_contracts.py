@@ -181,7 +181,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "npm run test:responsive-smoke" in ci_source
 
 
-def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
+def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     smoke_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
     console_components = {

@@ -5466,7 +5466,8 @@ models:
     type: literal
     values:
     - studio
-    - app_studio
+    - app
+    - user
     - workflow_session
     - transition
     - public
