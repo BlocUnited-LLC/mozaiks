@@ -160,7 +160,7 @@ function AdminSidebar({
   const appId = resolveAppId(location.pathname)
   const derivedNavGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const navGroups = providedNavGroups || derivedNavGroups
-  const navigationLabel = `${shellLabel} navigation`
+  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'

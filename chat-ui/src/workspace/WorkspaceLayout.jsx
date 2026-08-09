@@ -144,7 +144,7 @@ function WorkspaceSidebar({
   shellSubtext = 'Manage your apps',
 }) {
   const location = useLocation()
-  const navigationLabel = `${shellLabel} navigation`
+  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
