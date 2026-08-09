@@ -6,9 +6,9 @@ import pytest
 
 import mozaiksai.core.runtime.composition.module_executor as module_executor_module
 import mozaiksai.core.runtime.persistence.mongo as mongo_module
+from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
-from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 
