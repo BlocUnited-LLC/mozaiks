@@ -90,6 +90,34 @@ drift_guard_test_guidance:
     the module or inspect source, they do not mock business logic or run handler
     methods. The file should sit in the app-bundle tests/ directory alongside
     other module tests.
+
+  scaffold_policy:
+    description: >
+      Which patterns to include when generating tests/test_{module_id}_module_drift.py.
+      AppGenerator emits the test_scaffold task immediately after module_contract
+      for every new module. Pattern selection is conditional on module.yaml content.
+    always_include:
+      - handler_method_alignment
+    include_when_emits_declared:
+      condition: module.yaml declares action.emits[] for at least one action
+      patterns:
+        - emits_service_alignment
+        - events_yaml_service_alignment
+    include_when_user_data_scope:
+      condition: module.yaml declares module.user_data_scope=true
+      patterns:
+        - user_data_scope_handler_completeness
+    app_level_once:
+      description: >
+        App-level tests are scaffolded once per app workspace, not per module.
+        Check whether the file already exists before emitting.
+      include_when_entitlement_gates:
+        condition: >
+          config/subscriptions.yaml exists AND at least one module action
+          declares entitlement_gate across any module in the app
+        output: tests/test_entitlement_gate_coverage.py
+        pattern: entitlement_gate_coverage
+
   patterns:
     handler_method_alignment:
       description: >
