@@ -25,8 +25,9 @@ a background worker rather than service.py directly.
 Public API
 ----------
 ``scan_service_emit_literals(service_py)``
-    Return the set of string-literal event types found in
-    ``ctx.emit("event_type", ...)`` calls in the given file.
+    Return the set of string-literal event types found in the given file via
+    four patterns: direct ``ctx.emit("event", ...)``, ternary first arg,
+    ``_emit_*`` delegate helpers (second-arg string), and ``# emit:`` comments.
 
 ``load_declared_emits(module_yaml)``
     Return the set of event types declared in ``actions[].emits[]`` across
@@ -75,6 +76,7 @@ Typical usage in a generated app's drift-guard tests
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -86,12 +88,28 @@ import yaml
 
 
 def scan_service_emit_literals(service_py: Path) -> set[str]:
-    """Return string-literal event types from ``ctx.emit("...", ...)`` calls.
+    """Return string-literal event types emitted anywhere in ``service_py``.
 
-    Only captures calls of the form ``<expr>.emit(<string_literal>, ...)``.
-    Dynamic calls such as ``ctx.emit(event_var, ...)`` are intentionally
-    ignored — they cannot be resolved statically and should not produce
-    false positives.
+    Detects four patterns:
+
+    1. **Direct**: ``ctx.emit("event", ...)`` — first positional arg is a string
+       literal.
+    2. **Ternary**: ``ctx.emit("a" if cond else "b", ...)`` — both branches of
+       an inline conditional in the first positional arg are extracted.
+    3. **Delegate helper**: ``self._emit_best_effort(ctx, "event", ...)`` or
+       any method whose name starts with ``_emit`` where the second positional
+       argument is a string literal.  Covers common "fire-and-forget with error
+       handling" wrappers such as ``_emit_if_available``.
+    4. **Marker comment**: ``# emit: event_type`` anywhere in the file.  Use
+       this form to document events emitted via dynamic variables, background
+       workers, or other files that cannot be detected by static analysis::
+
+           # emit: hosted.billing.subscription.activated
+           # emit: hosted.billing.subscription.updated
+           await ctx.emit(event_type, payload)  # event_type is set above
+
+    Dynamic calls such as ``ctx.emit(event_var, ...)`` (no literal) continue to
+    be ignored to avoid false positives.
 
     Returns an empty set when ``service_py`` does not exist.
     """
@@ -105,16 +123,35 @@ def scan_service_emit_literals(service_py: Path) -> set[str]:
         return set()
 
     found: set[str] = set()
+
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "emit"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        ):
-            found.add(node.args[0].value)
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr = node.func.attr
+        args = node.args
+
+        # Pattern 1 & 2: <expr>.emit(<literal_or_ternary>, ...)
+        if attr == "emit" and args:
+            first = args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                found.add(first.value)
+            elif isinstance(first, ast.IfExp):
+                for branch in (first.body, first.orelse):
+                    if isinstance(branch, ast.Constant) and isinstance(branch.value, str):
+                        found.add(branch.value)
+
+        # Pattern 3: <expr>._emit*(ctx, <literal>, ...)
+        elif attr.startswith("_emit") and len(args) >= 2:
+            second = args[1]
+            if isinstance(second, ast.Constant) and isinstance(second.value, str):
+                found.add(second.value)
+
+    # Pattern 4: # emit: event_type
+    for line in source.splitlines():
+        m = re.search(r"#\s*emit:\s*(\S+)", line)
+        if m:
+            found.add(m.group(1))
+
     return found
 
 
@@ -122,6 +159,10 @@ def scan_service_emit_literals_with_lines(service_py: Path) -> list[tuple[str, i
     """Like ``scan_service_emit_literals`` but returns ``(event_type, line_no)`` pairs.
 
     Used internally by ``check_orphaned_emits`` for diagnostic output.
+
+    Detects the same patterns as ``scan_service_emit_literals`` (direct, ternary,
+    delegate helper, and ``# emit:`` marker comments) and associates each with
+    its source line number.
     """
     if not service_py.exists():
         return []
@@ -133,16 +174,35 @@ def scan_service_emit_literals_with_lines(service_py: Path) -> list[tuple[str, i
         return []
 
     found: list[tuple[str, int]] = []
+
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "emit"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        ):
-            found.append((node.args[0].value, node.lineno))
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr = node.func.attr
+        args = node.args
+
+        # Pattern 1 & 2: <expr>.emit(<literal_or_ternary>, ...)
+        if attr == "emit" and args:
+            first = args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                found.append((first.value, node.lineno))
+            elif isinstance(first, ast.IfExp):
+                for branch in (first.body, first.orelse):
+                    if isinstance(branch, ast.Constant) and isinstance(branch.value, str):
+                        found.append((branch.value, node.lineno))
+
+        # Pattern 3: <expr>._emit*(ctx, <literal>, ...)
+        elif attr.startswith("_emit") and len(args) >= 2:
+            second = args[1]
+            if isinstance(second, ast.Constant) and isinstance(second.value, str):
+                found.append((second.value, node.lineno))
+
+    # Pattern 4: # emit: event_type (with line number)
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        m = re.search(r"#\s*emit:\s*(\S+)", line)
+        if m:
+            found.append((m.group(1), lineno))
+
     return found
 
 
