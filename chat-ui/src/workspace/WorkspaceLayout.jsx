@@ -213,8 +213,8 @@ function WorkspaceSidebar({
   )
 }
 
-function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio', appId = null }) {
-  const openMenuLabel = appId ? 'Open Studio navigation' : `Open ${shellLabel} navigation`
+function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio' }) {
+  const openMenuLabel = 'Open Studio navigation'
 
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
@@ -312,12 +312,11 @@ export function WorkspaceLayout({ children }) {
         <div className="min-w-0 flex-1 space-y-5 pb-24 md:pb-10 lg:pb-0">
           {children}
         </div>
-          <WorkspaceMobileNavTrigger
-            onOpenMenu={() => setMobileOpen(true)}
-            activeLabel={activeLabel}
-            shellLabel={shellLabel}
-            appId={appId}
-          />
+        <WorkspaceMobileNavTrigger
+          onOpenMenu={() => setMobileOpen(true)}
+          activeLabel={activeLabel}
+          shellLabel={shellLabel}
+        />
       </div>
     </div>
   )

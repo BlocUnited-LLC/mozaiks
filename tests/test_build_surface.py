@@ -273,7 +273,7 @@ def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     assert '"path": "/apps/:appId/operations"' not in manifest_source
     assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert "WorkspaceLayout" in source
-    assert "Open ${shellLabel} navigation" in source
+    assert "Open Studio navigation" in source
     assert "shellLabel={shellLabel}" in source
     assert "lg:hidden" in source
     assert "lg:block" in source
