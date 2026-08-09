@@ -615,7 +615,7 @@ function summarizeDemoUsageRows(rows, appId = null) {
         {
           kind: 'catalog',
           env_name: null,
-          path: 'pricing/catalogs/usage-pricing.generated.json',
+          path: 'ai-pricing/catalogs/usage-pricing.generated.json',
           exists: true,
           status: 'ready',
           error: null,

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEFAULT_GENERATED_CATALOG_PATH = _REPO_ROOT / "pricing" / "catalogs" / "usage-pricing.generated.json"
+_DEFAULT_GENERATED_CATALOG_PATH = _REPO_ROOT / "ai-pricing" / "catalogs" / "usage-pricing.generated.json"
 _PACKAGE_GENERATED_CATALOG_PATH = (
     Path(__file__).resolve().parent / "catalogs" / "usage-pricing.generated.json"
 )
