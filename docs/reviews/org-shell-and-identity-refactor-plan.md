@@ -9,6 +9,8 @@ one blended surface. The target model is deterministic and scope-driven:
 - `Studio` is the workspace/org management shell.
 - `App Shell` is one branded app/product.
 
+This refactor is a clean replacement. The repo is not in production, so the
+new contract can replace the old one directly instead of layering a fallback.
 The repo is not in production, so the clean replacement wins over
 preservation.
 
