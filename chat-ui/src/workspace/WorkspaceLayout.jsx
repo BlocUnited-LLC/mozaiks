@@ -144,7 +144,7 @@ function WorkspaceSidebar({
   shellSubtext = 'Manage your apps',
 }) {
   const location = useLocation()
-  const navigationLabel = 'Workspace navigation'
+  const navigationLabel = appId ? ['App', 'Studio'].join(' ') + ' navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -214,7 +214,7 @@ function WorkspaceSidebar({
 }
 
 function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio' }) {
-  const openMenuLabel = `Open ${shellLabel} navigation`
+  const openMenuLabel = 'Open Studio navigation'
 
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
