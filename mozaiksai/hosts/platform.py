@@ -101,6 +101,7 @@ async def add_api_version_header(request: Request, call_next):
 _DEFAULT_PROFILE_USER_ID = os.getenv("MOZAIKS_DEFAULT_USER_ID", "demo-user").strip() or "demo-user"
 _ACCOUNT_PROFILE_COLLECTION = "UserProfiles"
 _ACCOUNT_PREFERENCES_COLLECTION = "UserPreferences"
+_USER_SETTINGS_COLLECTION = "UserSettings"
 
 
 # Module runtime_extensions.yaml routers are mounted in _platform_startup()
@@ -1552,8 +1553,8 @@ async def get_module_settings_for_user(
             ]
         }
 
-    Values are resolved in priority order: default → (future) app override → (future) user override.
-    Only settings with scope="user" are intended to be user-editable from this endpoint.
+    Values are resolved in priority order: declared default → stored user override.
+    Only settings with scope="user" are user-editable from this endpoint.
     """
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
     module_executor = executor_registry.module_executor
@@ -1561,7 +1562,9 @@ async def get_module_settings_for_user(
         return {"module_id": module_id, "settings": []}
 
     defs = module_executor.setting_defs(module_id)
-    resolved = module_executor.resolve_settings(module_id)
+    defaults = module_executor.resolve_settings(module_id)
+    stored = await _load_user_settings(app_id=resolved_app_id, user_id=user_id, module_id=module_id)
+    resolved = {**defaults, **stored}
 
     return {
         "module_id": module_id,
@@ -1593,9 +1596,7 @@ async def update_module_settings_for_user(
     Only fields whose declared scope is 'user' may be updated via this endpoint.
     App-scoped settings are read-only from this surface (they belong in /api/admin/settings).
     Values are validated against the declared type and enum_values before storage.
-
-    NOTE: Persistence layer (UserSettings collection) is not yet implemented.
-    This endpoint validates and acknowledges the payload but does not persist.
+    Stored values are merged on top of any previously saved overrides (partial update semantics).
     """
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
     module_executor = executor_registry.module_executor
@@ -1624,9 +1625,16 @@ async def update_module_settings_for_user(
     if errors:
         raise HTTPException(status_code=422, detail={"errors": errors})
 
-    # TODO: persist validated values to UserSettings collection
-    # For now return the resolved state with the validated overrides applied
-    resolved = {**module_executor.resolve_settings(module_id), **validated}
+    # Merge validated overrides on top of any previously stored values, then persist.
+    stored = await _load_user_settings(
+        app_id=resolved_app_id, user_id=user_id, module_id=module_id
+    )
+    merged_stored = {**stored, **validated}
+    await _save_user_settings(
+        app_id=resolved_app_id, user_id=user_id, module_id=module_id, values=merged_stored
+    )
+
+    resolved = {**module_executor.resolve_settings(module_id), **merged_stored}
     return {
         "module_id": module_id,
         "settings": [
@@ -2486,6 +2494,52 @@ async def _account_preferences_collection():
     if client is None:
         raise RuntimeError("Mongo client not initialized")
     return client["mozaiksai"][_ACCOUNT_PREFERENCES_COLLECTION]
+
+
+async def _user_settings_collection():
+    await persistence_manager.persistence._ensure_client()
+    client = persistence_manager.persistence.client
+    if client is None:
+        raise RuntimeError("Mongo client not initialized")
+    return client["mozaiksai"][_USER_SETTINGS_COLLECTION]
+
+
+def _user_settings_doc_id(app_id: str, user_id: str, module_id: str) -> str:
+    return f"{app_id}:{user_id}:{module_id}"
+
+
+async def _load_user_settings(*, app_id: str, user_id: str, module_id: str) -> dict[str, Any]:
+    """Load stored user-scoped setting overrides for one module. Returns {} when none stored."""
+    try:
+        collection = await _user_settings_collection()
+        doc = await collection.find_one({"_id": _user_settings_doc_id(app_id, user_id, module_id)})
+        return dict(doc.get("values") or {}) if doc else {}
+    except Exception as exc:
+        logger.warning("[user-settings] Could not load settings for %s/%s/%s: %s", app_id, user_id, module_id, exc)
+        return {}
+
+
+async def _save_user_settings(
+    *, app_id: str, user_id: str, module_id: str, values: dict[str, Any]
+) -> None:
+    """Upsert user-scoped setting overrides for one module."""
+    collection = await _user_settings_collection()
+    doc_id = _user_settings_doc_id(app_id, user_id, module_id)
+    now = datetime.now(UTC)
+    await collection.update_one(
+        {"_id": doc_id},
+        {
+            "$setOnInsert": {
+                "_id": doc_id,
+                "app_id": app_id,
+                "user_id": user_id,
+                "module_id": module_id,
+                "created_at": now,
+            },
+            "$set": {"values": values, "updated_at": now},
+        },
+        upsert=True,
+    )
 
 
 def _resolve_profile_scope(
