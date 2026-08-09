@@ -105,7 +105,7 @@ class _SmokeArtifactStore:
         self.created_versions: list[ArtifactVersionDoc] = []
         self.calls: list[dict[str, Any]] = []
 
-    async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
         version_id = "av_refinement_live_worker_smoke_persisted"
         validation_status = kwargs.get("validation_status") or ArtifactValidationStatus.PENDING
@@ -121,11 +121,11 @@ class _SmokeArtifactStore:
             {
                 "_id": version_id,
                 "app_id": kwargs.get("app_id") or APP_ID,
-                "artifact_kind": kwargs.get("artifact_kind") or "app_bundle",
-                "artifact_key": kwargs.get("artifact_key") or "app_bundle",
+                "build_family": kwargs.get("build_family") or "app_bundle",
+                "build_key": kwargs.get("build_key") or "app_bundle",
                 "version_number": len(self.created_versions) + 1,
-                "parent_version_id": kwargs.get("parent_version_id"),
-                "lineage_root_id": kwargs.get("parent_version_id") or version_id,
+                "parent_build_record_id": kwargs.get("parent_build_record_id"),
+                "lineage_root_id": kwargs.get("parent_build_record_id") or version_id,
                 "source_workflow": kwargs.get("source_workflow"),
                 "source_chat_id": kwargs.get("source_chat_id"),
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
@@ -138,14 +138,14 @@ class _SmokeArtifactStore:
         self.created_versions.append(version)
         return version
 
-    async def get_artifact_version(self, **kwargs):  # noqa: ANN003
-        version_id = str(kwargs.get("artifact_version_id") or "")
+    async def get_build_record(self, **kwargs):  # noqa: ANN003
+        build_record_id = str(kwargs.get("build_record_id") or "")
         for version in self.created_versions:
-            if version.id == version_id:
+            if version.id == build_record_id:
                 return version
         return None
 
-    async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
+    async def list_build_records(self, **kwargs):  # noqa: ANN003
         return list(self.created_versions)
 
     async def list_change_requests(self, **kwargs):  # noqa: ANN003
@@ -361,7 +361,7 @@ def _select_scenarios(choice: str) -> list[SmokeScenarioSpec]:
 def _build_plan(*, spec: SmokeScenarioSpec, staging_root: Path) -> RefinementExecutionPlan:
     return dry_run.build_refinement_execution_plan_from_route(
         request=spec.request_text,
-        artifact_kind=spec.artifact_kind,
+        build_family=spec.artifact_kind,
         change_class=spec.change_class,
         workflow_id=spec.workflow_id,
         workflow_sequence=spec.workflow_sequence,

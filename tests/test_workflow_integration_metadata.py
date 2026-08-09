@@ -38,7 +38,7 @@ class _FakeArtifactStore:
         self.artifact = artifact
         self.list_calls = []
 
-    async def list_artifact_versions(self, **kwargs):
+    async def list_build_records(self, **kwargs):
         self.list_calls.append(dict(kwargs))
         return [self.artifact]
 
@@ -127,4 +127,4 @@ def test_hydrate_workflow_integration_context_from_latest_artifact() -> None:
     }
     assert context["workflow_bundle_artifact_version_id"] == "av_workflow_bundle_1"
     assert context["generated_workflow_capability_id"] == "ticket-batch-triage-workflow"
-    assert store.list_calls[0]["artifact_kind"] == "workflow_bundle"
+    assert store.list_calls[0]["build_family"] == "workflow_bundle"
