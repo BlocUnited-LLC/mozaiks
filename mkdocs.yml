@@ -145,6 +145,7 @@ nav:
           - Context Graph & Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
           - App Context & Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
+          - Profile Panel Contract: architecture/foundations/profile-panel-contract.md
           - Event System: architecture/foundations/events-and-data/event-system.md
           - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
           - Persistence & Artifact Storage: architecture/foundations/events-and-data/persistence-and-artifact-storage.md

@@ -721,6 +721,42 @@ tabs:
     assert by_module["messages"].user_id == "viewer-user"
 
 
+@pytest.mark.asyncio
+async def test_profile_pages_do_not_inject_my_apps(monkeypatch, tmp_path: Path) -> None:
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
+
+    (tmp_path / "app.json").write_text('{"appName": "Test"}', encoding="utf-8")
+    monkeypatch.setenv("PLATFORM_PATH", str(tmp_path))
+
+    class _FakeExecutor:
+        _modules = {"app_registry": object()}
+
+    class _FakeRegistry:
+        @property
+        def module_executor(self):
+            return _FakeExecutor()
+
+    monkeypatch.setattr(platform_app, "executor_registry", _FakeRegistry())
+
+    principal = UserPrincipal(
+        user_id="viewer-user",
+        email="viewer@example.com",
+        name="Viewer",
+        roles=[],
+        scopes=[],
+        raw_claims={},
+        app_id="app_1",
+    )
+
+    result = await platform_app.get_profile_pages(app_id=None, principal=principal)
+
+    ids = [page["id"] for page in result["pages"]]
+    assert "my-apps" not in ids
+    assert "overview" in ids
+    assert "settings" in ids
+
+
 # ---------------------------------------------------------------------------
 # ProfilePage.jsx — page contract surface check
 # ---------------------------------------------------------------------------

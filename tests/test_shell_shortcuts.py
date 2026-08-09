@@ -69,7 +69,6 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
     assert [item["id"] for item in shell["profile"]["menu"]] == [
         "profile",
         "wallet",
-        "admin-portal",
         "signout",
     ]
     assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/", "/apps", "/me"]

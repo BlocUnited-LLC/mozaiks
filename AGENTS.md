@@ -33,6 +33,10 @@ superset chain. Studio is not the CLI's UI. CLI owns developer tooling (filesyst
 scaffolding, process management). Studio owns the management interface (workspace
 status, build lifecycle, artifacts, run history, config).
 
+Profile stays person-scoped. Studio / Workspace Shell is the org/workspace home
+base. App shells remain separate and brandable per app; do not collapse org
+management into `/me`.
+
 The current repo layout is transitional. The canonical target is documented in
 [docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md).
 Do not reintroduce a hybrid root that mixes the starter app bundle with shared

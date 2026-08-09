@@ -8,6 +8,8 @@ module:
   visibility: private
   handler: backend.handler:WorkspaceSupportModule
 permissions:
+  - id: access_as_user
+    description: Access the current user context.
   - id: workspace_support.read
     description: View support requests.
   - id: workspace_support.manage

@@ -9,8 +9,8 @@ object being managed, then route to the surface that owns that object.
 | Surface | Owns | Examples | Must not own |
 | --- | --- | --- | --- |
 | Profile | The signed-in person | identity, avatar, display name, email, personal preferences, personal social graph, personal invitations, personal votes and delegations | app builds, app access, app billing, deployments, workspace settings, team or org operations |
+| Studio / Workspace Shell | The tenant/org home base for a portfolio of apps | app directory, workspace branding, workspace settings, team controls, aggregate usage, create app, app switching | personal identity, personal preferences, app-domain work, app build internals |
 | Admin Portal | An app, workspace, team, or org | access, roles, usage, health, integrations, billing, governance, collaborators, revenue participation, audit, deployment and domain posture | personal identity, personal preferences, direct app creation |
-| Studio | Build lifecycle and generated artifacts | create app, import app, build runs, artifact review, promotion, refinement, build history | user profile data, app runtime business behavior, hosted-only provider operations |
 | App Shell | The app's domain work | dashboards, module pages, customer workflows, operational records | account identity, Studio build state, app/workspace administration |
 | Chat Route | A specific conversation or workflow session | direct `chat_id` resume, live workflow interaction, replay of a selected session | global create intent, app portfolio management |
 
@@ -50,13 +50,22 @@ Profile must not render app/workspace management. Billing plans, subscriptions,
 entitlements, collaborators, deployments, build runs, app access, audit logs, and
 team/org settings belong in Admin Portal or Studio.
 
+Profile is never the org/workspace home. The org/workspace home belongs to
+Studio / Workspace Shell and can carry its own brand, app portfolio, and team
+management entries.
+
+My Apps, app switching, and workspace branding belong in Studio / Workspace
+Shell, not in `/me`.
+
 ## Admin And Studio Boundary
 
-Admin Portal owns durable app/workspace operations. Studio owns build lifecycle.
-They can link to each other, but they do not replace each other.
+Admin Portal owns durable app/workspace operations. Studio / Workspace Shell
+owns the portfolio home and build lifecycle. They can link to each other, but
+they do not replace each other.
 
-- Use Studio for build runs, generated artifacts, refinement, promotion, and
-  unfinished app creation.
+- Use Studio / Workspace Shell for app portfolio navigation, workspace branding,
+  build runs, generated artifacts, refinement, promotion, and unfinished app
+  creation.
 - Use Admin Portal for app access, roles, health, usage, integrations,
   governance, billing, and deployment posture.
 - Use App Shell for the app's normal domain workflow once the app is running.

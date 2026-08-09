@@ -986,7 +986,7 @@ _ADMIN_PORTAL_MENU_ITEM = {
 
 
 def _inject_admin_portal(result: dict) -> None:
-    """Guarantee Admin Portal appears in the profile menu for admin users.
+    """Guarantee Admin Portal appears in the Studio profile menu for admin users.
 
     Called after the full shell config pipeline so nothing can suppress it.
     Inserts before signout, or appends if signout is absent.
@@ -1279,9 +1279,9 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     )
     result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
-    # Admin Portal is a framework guarantee — inject after the full pipeline so
-    # no app config or route processing can accidentally suppress it.
-    _inject_admin_portal(result)
+    # Admin Portal is a Studio guarantee, not an app-shell guarantee.
+    if is_studio:
+        _inject_admin_portal(result)
 
     return result
 
@@ -1865,7 +1865,6 @@ async def get_profile_pages(
     - Platform built-in pages (always present)
     - Module-contributed pages from modules/*/contracts/profile.yaml (v2 native
       pages, or v1 tabs automatically promoted to pages)
-    - A "my-apps" page when the app registry module is available
 
     Each module-contributed page with an ``action`` is hydrated by calling the
     module executor. Pages whose action fails are still returned with
@@ -1984,33 +1983,6 @@ async def get_profile_pages(
                 "source": "platform_builtin",
             }
         )
-
-    # Inject "my-apps" when no module has already claimed that id and the
-    # app registry module is accessible.
-    if "my-apps" not in builtin_ids:
-        _app_registry_accessible = False
-        try:
-            if module_executor is not None:
-                module_names = getattr(module_executor, "_modules", {})
-                _app_registry_accessible = "app_registry" in module_names
-        except Exception:
-            pass
-        if _app_registry_accessible:
-            hydrated.append(
-                {
-                    "id": "my-apps",
-                    "label": "My Apps",
-                    "route": "apps",
-                    "section": "platform",
-                    "order": 50,
-                    "renderer": "custom_component",
-                    "component": "MyAppsPage",
-                    "visibility": "owner_only",
-                    "data": None,
-                    "error": None,
-                    "source": "platform_builtin",
-                }
-            )
 
     hydrated.sort(key=lambda p: (p.get("order") if p.get("order") is not None else 100,))
 

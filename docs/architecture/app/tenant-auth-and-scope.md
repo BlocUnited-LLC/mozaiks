@@ -11,15 +11,16 @@ The key separation is simple:
   or managed provider means.
 
 `mozaiks-app` uses this split for the hosted product: it owns
-`tenant_identity`, workspace memberships, MozaiksPay access, and hosted provider
-defaults. The OSS repo should not copy that product logic.
+`tenant_identity`, workspace memberships, MozaiksPay access, hosted provider
+defaults, and the branded org/workspace home. The OSS repo should not copy that
+product logic.
 
 ## Terms
 
 - User: the authenticated person or service principal.
 - Tenant: the account or organization boundary for product data.
 - Workspace: the working area under a tenant. Hosted products can use it for
-  teams, billing assignment, and app ownership.
+  teams, billing assignment, app ownership, and the Studio/workspace shell.
 - App: the Mozaiks app bundle or generated customer app being hosted.
 - Principal: provider-neutral identity facts decoded from auth.
 - Identity scope: the resolved `{app_id, tenant_id, workspace_id, user_id}`
@@ -47,6 +48,10 @@ Hosted products and app workspaces own:
 - hosted provider defaults such as Mozaiks-hosted auth, hosted AI, MozaiksPay,
   or managed hosting
 - whether a workspace can use proprietary managed capabilities
+- workspace-level branding and shell composition
+
+Tenant/workspace records are not person profiles. Person profile state belongs
+to `/me`; tenant/workspace state belongs to Studio / Workspace Shell.
 
 ## Current Contract
 
