@@ -43,6 +43,16 @@ def _pack_dir(pack_id: str) -> Path:
     return BUILD_CONTEXT / dir_name
 
 
+def _pack_capability_source(pack_dir: Path) -> str | None:
+    context_path = pack_dir / "context.yaml"
+    if not context_path.is_file():
+        return None
+    context = _read_yaml(context_path)
+    pack = context.get("pack") or {}
+    source = pack.get("capability_source")
+    return source if isinstance(source, str) else None
+
+
 def _declared_module_capability_ids(pack_dir: Path) -> set[str]:
     """Return all capability_ids declared in any module.yaml under the pack's templates."""
     ids: set[str] = set()
@@ -95,6 +105,22 @@ def test_capability_directory_id_resolves_to_module(pack_id: str, capability_id:
         f"but no build_context directory found at {pack_dir}. "
         f"Either create the pack directory or remove capabilities_provided from the entry."
     )
+
+    capability_source = _pack_capability_source(pack_dir)
+    if capability_source == "config_file":
+        contract_path = pack_dir / "contract.yaml"
+        assert contract_path.is_file(), (
+            f"{pack_id}: config_file capability packs must ship contract.yaml so "
+            f"capabilities_provided can be validated against the generator contract."
+        )
+        contract_text = contract_path.read_text(encoding="utf-8")
+        assert capability_id in contract_text, (
+            f"{pack_id}: capability_directory.yaml lists {capability_id!r} in "
+            f"capabilities_provided but contract.yaml does not mention that capability_id. "
+            f"config_file packs are validated through their build contract, not templates."
+        )
+        return
+
     declared = _declared_module_capability_ids(pack_dir)
     assert capability_id in declared, (
         f"{pack_id}: capability_directory.yaml lists {capability_id!r} in "

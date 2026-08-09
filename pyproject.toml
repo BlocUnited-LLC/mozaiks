@@ -119,6 +119,7 @@ ignore = [
   "B008",   # function call in default argument — required by FastAPI Depends()
   "E402",   # module import not at top of file — intentional lazy imports
 ]
+per-file-ignores = { "tests/test_entitlement_drift.py" = ["F401"] }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

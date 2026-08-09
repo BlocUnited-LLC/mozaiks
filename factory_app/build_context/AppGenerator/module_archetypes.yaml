@@ -144,11 +144,13 @@ drift_guard_test_guidance:
         not statically enforce. Only literal string arguments are checked;
         dynamic calls using variables are intentionally ignored (cannot be
         resolved statically). Import check_orphaned_emits from
-        mozaiksai.core.runtime.app.emit_drift — available in any app that
+        mozaiksai.
+        core.runtime.app.emit_drift — available in any app that
         has the mozaiksai package installed.
       template: |
         from pathlib import Path
-        from mozaiksai.core.runtime.app.emit_drift import check_orphaned_emits
+        from mozaiksai.
+        core.runtime.app.emit_drift import check_orphaned_emits
 
         def test_{module_id}_service_emits_match_declared_events():
             module_dir = (
@@ -170,14 +172,16 @@ drift_guard_test_guidance:
         to the contract during design but whose ctx.emit() call was never
         written, or an emit removed from service.py without cleaning up
         module.yaml and events.yaml. Import check_missing_emits from
-        mozaiksai.core.runtime.app.emit_drift — available in any app that
+        mozaiksai.
+        core.runtime.app.emit_drift — available in any app that
         has the mozaiksai package installed. Note: only literal string
         arguments are detected; a declared event emitted only via a dynamic
         variable will appear as missing — suppress with a skip marker or
         convert to a string literal.
       template: |
         from pathlib import Path
-        from mozaiksai.core.runtime.app.emit_drift import check_missing_emits
+        from mozaiksai.
+        core.runtime.app.emit_drift import check_missing_emits
 
         def test_{module_id}_declared_events_are_emitted():
             module_dir = (
@@ -226,10 +230,12 @@ drift_guard_test_guidance:
         non-trusted callers — the platform startup logs a soft warning, but
         this test makes it a hard CI failure so the misconfiguration is caught
         before deploy.  Import check_entitlement_gate_coverage from
-        mozaiksai.core.runtime.app.entitlement_drift.
+        mozaiksai.
+        core.runtime.app.entitlement_drift.
       template: |
         from pathlib import Path
-        from mozaiksai.core.runtime.app.entitlement_drift import check_entitlement_gate_coverage
+        from mozaiksai.
+        core.runtime.app.entitlement_drift import check_entitlement_gate_coverage
 
         def test_entitlement_gates_covered_by_subscription_plan():
             app_root = Path(__file__).resolve().parents[1] / "app"

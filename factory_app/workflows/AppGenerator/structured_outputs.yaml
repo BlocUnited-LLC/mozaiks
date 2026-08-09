@@ -867,6 +867,7 @@ models:
         - legal_docs
         - infra_scaffold
         - auth_adapter
+        - test_scaffold
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a

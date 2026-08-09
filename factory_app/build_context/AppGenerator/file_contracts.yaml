@@ -454,11 +454,12 @@ task_contracts:
         module action carries entitlement_gate. Use the entitlement_gate_coverage
         pattern from drift_guard_test_guidance. Do not duplicate it; check
         whether the file already exists before emitting.
-      - Import check_orphaned_emits and check_missing_emits from
-        mozaiksai.core.runtime.app.emit_drift.
-      - Import check_entitlement_gate_coverage from
-        mozaiksai.core.runtime.app.entitlement_drift.
-      - Import ModuleLoader from mozaiksai.core.runtime.app.loader.
+      - Import check_orphaned_emits and check_missing_emits from the shared
+        emit_drift helper.
+      - Import check_entitlement_gate_coverage from the shared
+        entitlement_drift helper.
+      - Import ModuleLoader from mozaiksai.
+        core.runtime.app.loader.
       - Generated tests must be lightweight — no mocking of business logic,
         no running handler methods, no database connections. Inspect module
         YAML and source only.
