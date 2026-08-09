@@ -40,6 +40,7 @@ import jsonschema
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
+from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
@@ -199,7 +200,7 @@ class ModuleExecutor:
     ) -> None:
         self._modules: dict[str, Any] = {}
         self._action_methods: dict[str, dict[str, str]] = {}
-        self._settings: dict[str, list[dict[str, Any]] | None] = {}
+        self._settings: dict[str, list[SettingDef]] = {}
         self._action_permissions: dict[str, dict[str, list[str]]] = {}
         self._action_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._action_entitlements: dict[str, dict[str, str | None]] = {}
@@ -217,7 +218,7 @@ class ModuleExecutor:
         handler: Any,
         *,
         action_method_map: dict[str, str] | None = None,
-        settings: list[dict[str, Any]] | None = None,
+        settings: list[SettingDef] | None = None,
         action_permissions: dict[str, list[str]] | None = None,
         action_schemas: dict[str, dict[str, Any]] | None = None,
         action_entitlements: dict[str, str | None] | None = None,
@@ -241,7 +242,7 @@ class ModuleExecutor:
         """
         self._modules[name] = handler
         self._action_methods[name] = dict(action_method_map or {})
-        self._settings[name] = settings
+        self._settings[name] = list(settings or [])
         self._action_permissions[name] = dict(action_permissions or {})
         self._action_schemas[name] = dict(action_schemas or {})
         self._action_entitlements[name] = dict(action_entitlements or {})
@@ -249,6 +250,23 @@ class ModuleExecutor:
 
     def registered_modules(self) -> list[str]:
         return list(self._modules.keys())
+
+    def setting_defs(self, module: str) -> list[SettingDef]:
+        """Return the declared setting definitions for a module (empty list if none)."""
+        return self._settings.get(module) or []
+
+    def resolve_settings(self, module: str) -> dict[str, Any]:
+        """Resolve settings to a concrete value dict for use in ModuleContext.
+
+        Resolution order (each layer overrides the previous):
+          1. Declared defaults from settings.yaml
+          (future) 2. App-scoped operator overrides from AppSettings collection
+          (future) 3. User-scoped overrides from UserSettings collection
+
+        Returns an empty dict when the module declares no settings.
+        """
+        defs = self._settings.get(module) or []
+        return {d.id: d.default for d in defs}
 
     # ------------------------------------------------------------------
     # Executor protocol
@@ -364,7 +382,7 @@ class ModuleExecutor:
                     else None
                 ),
                 correlation_id=request.correlation_id,
-                settings=self._settings.get(request.module),
+                settings=self.resolve_settings(request.module) or None,
                 persistence=self._build_persistence_context(request),
                 _emit=self._build_context_emitter(request),  # type: ignore[arg-type]
             )

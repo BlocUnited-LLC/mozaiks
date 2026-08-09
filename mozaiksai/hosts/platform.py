@@ -1535,6 +1535,116 @@ async def update_current_user_preferences(
     return await _load_account_preferences(app_id=resolved_app_id, user_id=user_id)
 
 
+@app.get("/api/me/settings/{module_id}")
+async def get_module_settings_for_user(
+    module_id: str,
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return the settings schema and resolved values for one module, scoped to the calling user.
+
+    Response shape:
+        {
+            "module_id": "commerce",
+            "settings": [
+                {"id": "commerce.checkout.default_provider", "type": "string",
+                 "scope": "user", "label": "...", "default": "mozaikspay", "value": "mozaikspay"}
+            ]
+        }
+
+    Values are resolved in priority order: default → (future) app override → (future) user override.
+    Only settings with scope="user" are intended to be user-editable from this endpoint.
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    module_executor = executor_registry.module_executor
+    if module_executor is None:
+        return {"module_id": module_id, "settings": []}
+
+    defs = module_executor.setting_defs(module_id)
+    resolved = module_executor.resolve_settings(module_id)
+
+    return {
+        "module_id": module_id,
+        "settings": [
+            {
+                "id": d.id,
+                "type": d.type,
+                "scope": d.scope,
+                "label": d.label,
+                "description": d.description,
+                "default": d.default,
+                **({"enum_values": d.enum_values} if d.enum_values is not None else {}),
+                "value": resolved.get(d.id, d.default),
+            }
+            for d in defs
+        ],
+    }
+
+
+@app.put("/api/me/settings/{module_id}")
+async def update_module_settings_for_user(
+    module_id: str,
+    body: dict[str, Any],
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Update user-scoped settings for one module.
+
+    Only fields whose declared scope is 'user' may be updated via this endpoint.
+    App-scoped settings are read-only from this surface (they belong in /api/admin/settings).
+    Values are validated against the declared type and enum_values before storage.
+
+    NOTE: Persistence layer (UserSettings collection) is not yet implemented.
+    This endpoint validates and acknowledges the payload but does not persist.
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    module_executor = executor_registry.module_executor
+    if module_executor is None:
+        raise HTTPException(status_code=503, detail="Module executor not ready")
+
+    defs = module_executor.setting_defs(module_id)
+    user_defs = {d.id: d for d in defs if d.scope == "user"}
+
+    errors: list[str] = []
+    validated: dict[str, Any] = {}
+    for key, value in body.items():
+        if key not in user_defs:
+            errors.append(f"{key!r}: not a user-scoped setting for module {module_id!r}")
+            continue
+        d = user_defs[key]
+        if d.type == "boolean" and not isinstance(value, bool):
+            errors.append(f"{key!r}: expected boolean")
+        elif d.type == "integer" and not isinstance(value, int):
+            errors.append(f"{key!r}: expected integer")
+        elif d.type == "enum" and d.enum_values and value not in d.enum_values:
+            errors.append(f"{key!r}: must be one of {d.enum_values}")
+        else:
+            validated[key] = value
+
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    # TODO: persist validated values to UserSettings collection
+    # For now return the resolved state with the validated overrides applied
+    resolved = {**module_executor.resolve_settings(module_id), **validated}
+    return {
+        "module_id": module_id,
+        "settings": [
+            {
+                "id": d.id,
+                "type": d.type,
+                "scope": d.scope,
+                "label": d.label,
+                "description": d.description,
+                "default": d.default,
+                **({"enum_values": d.enum_values} if d.enum_values is not None else {}),
+                "value": resolved.get(d.id, d.default),
+            }
+            for d in defs
+        ],
+    }
+
+
 def _relationship_result_rows(data: Any) -> list[Any]:
     if isinstance(data, list):
         return data

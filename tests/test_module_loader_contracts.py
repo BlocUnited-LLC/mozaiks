@@ -636,7 +636,8 @@ class TasksModule:
     )
 
     assert result.success is True
-    assert result.data["settings"] == [{"id": "max_items", "type": "integer", "default": 50, "label": "Maximum items per page"}]
+    # ctx.settings is now a resolved {id: value} dict, not a list of definition dicts
+    assert result.data["settings"] == {"max_items": 50}
 
 
 @pytest.mark.asyncio
