@@ -468,7 +468,7 @@ def _append_page_once(pages: list[dict], page: dict) -> None:
 
 def _normalize_shell_surface(surface: str | None) -> str:
     candidate = str(surface or "platform").strip().lower()
-    return candidate if candidate in {"platform", "studio"} else "platform"
+    return candidate if candidate in {"platform", "studio", "user"} else "platform"
 
 
 def _page_targets_surface(page: dict, *, surface: str) -> bool:
@@ -1130,7 +1130,11 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
 
     shell_surface = _normalize_shell_surface(surface)
     is_studio = shell_surface == "studio"
-    result: dict = {"chat_startup_mode": "ask", "landing_spot": "/apps" if is_studio else "/"}
+    is_user = shell_surface == "user"
+    result: dict = {
+        "chat_startup_mode": "ask",
+        "landing_spot": "/apps" if is_studio else "/me" if is_user else "/",
+    }
     app_manifest = _load_app_manifest()
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
@@ -1148,7 +1152,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 if isinstance(value, str) and value.strip():
                     result["appId"] = value.strip()
                     break
-            if not is_studio:
+            if not is_studio and not is_user:
                 startup = app_manifest.get("startup") if isinstance(app_manifest.get("startup"), dict) else {}
                 landing_spot = startup.get("landing_spot")
                 if isinstance(landing_spot, str) and landing_spot.startswith("/"):
@@ -1279,9 +1283,11 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     )
     result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
-    # Admin Portal is a Studio guarantee, not an app-shell guarantee.
+    # Admin Portal is a Studio guarantee — not injected into app or user surfaces.
     if is_studio:
         _inject_admin_portal(result)
+
+    result["surface"] = shell_surface
 
     return result
 
@@ -1309,8 +1315,8 @@ async def health_check(request: Request):
 
 
 @app.get("/api/shell-config")
-async def get_shell_config():
-    return await build_shell_config(surface="platform")
+async def get_shell_config(surface: str | None = None):
+    return await build_shell_config(surface=surface or "platform")
 
 
 @app.get("/api/me")
