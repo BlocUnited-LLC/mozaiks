@@ -282,6 +282,10 @@ class TestNavigationProviderUpdated:
     def test_fetches_shell_config_api(self, source):
         assert "/api/shell-config" in source
 
+    def test_exposes_shell_surface(self, source):
+        assert "surface: navigation.surface" in source
+        assert "surface: 'platform'" in source
+
     def test_no_routes_api(self, source):
         assert "/api/routes" not in source
 

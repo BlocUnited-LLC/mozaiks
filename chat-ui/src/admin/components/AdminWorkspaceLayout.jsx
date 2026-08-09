@@ -45,6 +45,20 @@ function resolveIcon(iconHint) {
   return ICON_MAP[iconHint] || RiDashboardFill
 }
 
+function resolveShellLabel(appName, surface) {
+  const trimmed = typeof appName === 'string' ? appName.trim() : ''
+  if (trimmed) return trimmed
+  if (surface === 'studio') return 'Studio'
+  if (surface === 'user') return 'Profile'
+  return 'App Admin'
+}
+
+function resolveShellSubtext(surface) {
+  if (surface === 'studio') return 'Manage all apps'
+  if (surface === 'user') return 'Your account'
+  return 'Configure this app'
+}
+
 function resolveAppId(pathname) {
   const match = /^\/apps\/([^/]+)/.exec(pathname)
   const appId = match?.[1] ? decodeURIComponent(match[1]) : null
@@ -132,12 +146,19 @@ function CloseGlyph() {
   )
 }
 
-function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: providedNavGroups = null, surface = 'sidebar' }) {
+function AdminSidebar({
+  adminPages = null,
+  onNavigate = null,
+  navGroups: providedNavGroups = null,
+  surface = 'sidebar',
+  shellLabel = 'App Admin',
+  shellSubtext = 'Configure this app',
+}) {
   const location = useLocation()
   const appId = resolveAppId(location.pathname)
   const derivedNavGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const navGroups = providedNavGroups || derivedNavGroups
-  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
+  const navigationLabel = `${shellLabel} navigation`
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -156,16 +177,15 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
             </svg>
             All Apps
           </Link>
-          <div className="mt-3 truncate text-sm font-semibold text-foreground">App Studio</div>
         </div>
       ) : (
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/26 bg-primary/8 text-sm font-bold text-primary">
-            M
+            {String(shellLabel || 'S').trim().charAt(0).toUpperCase() || 'S'}
           </div>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-foreground">Mozaiks Studio</div>
-            <div className="truncate text-xs text-muted-foreground/84">Manage your apps</div>
+            <div className="truncate text-sm font-semibold text-foreground">{shellLabel}</div>
+            <div className="truncate text-xs text-muted-foreground/84">{shellSubtext}</div>
           </div>
         </div>
       )}
@@ -207,14 +227,14 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
   )
 }
 
-function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio' }) {
+function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio' }) {
   return (
     <div className="sticky top-[calc(env(safe-area-inset-top,0px)+4.5rem)] z-30 mb-4 lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
         className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border/45 bg-background/92 px-4 py-3 text-left text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label="Open Studio navigation"
+        aria-label={`Open ${shellLabel} navigation`}
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/24 bg-primary/10 text-primary shadow-sm shadow-primary/10">
@@ -222,7 +242,7 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio' }) {
           </span>
           <span className="min-w-0">
             <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/84">
-              Studio navigation
+              {shellLabel} navigation
             </span>
             <span className="block truncate text-sm font-semibold text-foreground">
               {activeLabel}
@@ -240,7 +260,10 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio' }) {
 export function AdminWorkspaceLayout({ children, adminPages = null }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
+  const { appName, surface } = useNavigation()
   const appId = resolveAppId(location.pathname)
+  const shellLabel = resolveShellLabel(appName, surface)
+  const shellSubtext = resolveShellSubtext(surface)
   const navGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
@@ -250,7 +273,12 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
       <div className="mx-auto flex w-full max-w-[96rem] gap-6 px-4 py-7 md:px-6 lg:px-8">
         <div className="hidden w-72 shrink-0 lg:block">
           <div className="sticky top-24">
-            <AdminSidebar adminPages={adminPages} navGroups={navGroups} />
+            <AdminSidebar
+              adminPages={adminPages}
+              navGroups={navGroups}
+              shellLabel={shellLabel}
+              shellSubtext={shellSubtext}
+            />
           </div>
         </div>
 
@@ -295,13 +323,19 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
                 navGroups={navGroups}
                 onNavigate={() => setMobileOpen(false)}
                 surface="sheet"
+                shellLabel={shellLabel}
+                shellSubtext={shellSubtext}
               />
             </div>
           </div>
         ) : null}
 
         <div className="min-w-0 flex-1 space-y-5 pb-10 md:pb-10 lg:pb-0">
-          <AdminMobileNavTrigger onOpenMenu={() => setMobileOpen(true)} activeLabel={activeLabel} />
+          <AdminMobileNavTrigger
+            onOpenMenu={() => setMobileOpen(true)}
+            activeLabel={activeLabel}
+            shellLabel={shellLabel}
+          />
           {children}
         </div>
       </div>

@@ -201,7 +201,10 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "/api/modules/app_registry" not in create_hook_source
     assert "/api/studio/apps/{record_id}/status" in update_hook_source
     assert "/api/modules/app_registry" not in update_hook_source
-    assert "Mozaiks Studio" in layout_source
+    assert "shellLabel = 'App Workspace'" in layout_source
+    assert "resolveShellLabel(appName, surface)" in layout_source
+    assert "resolveShellSubtext(surface)" in layout_source
+    assert "Open ${shellLabel} navigation" in layout_source
     assert "Create App" in source
     assert "Import App" not in source
     assert "const CREATE_APP_PATH = '/create'" in source
@@ -234,12 +237,14 @@ def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert "Admin Dashboard" not in source
-    assert "Mozaiks Studio" in source
     assert "Developer" not in source
-    assert "Studio Navigation" not in source
+    assert "shellLabel = 'App Workspace'" in source
+    assert "resolveShellLabel(appName, surface)" in source
+    assert "resolveShellSubtext(surface)" in source
+    assert "Open ${shellLabel} navigation" in source
     assert "Browse sections" not in source
-    assert "Mozaiks Studio" in source
-    assert "App Studio" in source
+    assert "Mozaiks Studio" not in source
+    assert "App Studio" not in source
     assert '"label": "Users"' in manifest_source
     assert '"label": "Billing"' not in manifest_source
     assert '"label": "Health"' in manifest_source
@@ -265,8 +270,8 @@ def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     assert '"path": "/apps/:appId/operations"' not in manifest_source
     assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert "WorkspaceLayout" in source
-    assert "Open Studio navigation" in source
-    assert "Studio navigation" in source
+    assert "Open ${shellLabel} navigation" in source
+    assert "shellLabel={shellLabel}" in source
     assert "lg:hidden" in source
     assert "lg:block" in source
     assert "description:" not in source
