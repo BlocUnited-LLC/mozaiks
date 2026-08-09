@@ -236,7 +236,7 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel 
         type="button"
         onClick={onOpenMenu}
         className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border/45 bg-background/92 px-4 py-3 text-left text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label={`Open ${shellLabel} navigation`}
+        aria-label="Open Studio navigation"
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/24 bg-primary/10 text-primary shadow-sm shadow-primary/10">

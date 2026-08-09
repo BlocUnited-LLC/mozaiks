@@ -220,7 +220,7 @@ function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLa
         type="button"
         onClick={onOpenMenu}
         className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label={`Open ${shellLabel} navigation`}
+        aria-label="Open Studio navigation"
       >
         <MenuGlyph />
         <span className="text-sm font-semibold">{shellLabel}</span>

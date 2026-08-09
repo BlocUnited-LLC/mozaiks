@@ -10,6 +10,8 @@ Covers:
 """
 from __future__ import annotations
 
+# ruff: noqa: I001
+
 from copy import deepcopy
 from typing import Any
 
