@@ -189,6 +189,31 @@ drift_guard_test_guidance:
             assert callable(getattr(cls, "delete_user_data", None)), "delete_user_data must be implemented"
             assert callable(getattr(cls, "export_user_data", None)), "export_user_data must be implemented"
 
+    entitlement_gate_coverage:
+      description: >
+        Use the OSS entitlement_drift utility to check that every
+        entitlement_gate capability_id declared in module actions is granted
+        by at least one plan in config/subscriptions.yaml.  A gate that
+        references a capability not in any plan causes silent always-deny for
+        non-trusted callers — the platform startup logs a soft warning, but
+        this test makes it a hard CI failure so the misconfiguration is caught
+        before deploy.  Import check_entitlement_gate_coverage from
+        mozaiksai.core.runtime.app.entitlement_drift.
+      template: |
+        from pathlib import Path
+        from mozaiksai.core.runtime.app.entitlement_drift import check_entitlement_gate_coverage
+
+        def test_entitlement_gates_covered_by_subscription_plan():
+            app_root = Path(__file__).resolve().parents[1] / "app"
+            uncovered = check_entitlement_gate_coverage(app_root)
+            assert uncovered == [], (
+                "Actions gate on capabilities not granted by any plan in subscriptions.yaml:\n"
+                + "\n".join(
+                    f"  {mod}.{action}: '{cap}' not in subscriptions.yaml"
+                    for mod, action, cap in uncovered
+                )
+            )
+
 archetypes:
   standard:
     summary: Default deterministic module for CRUD and ordinary business logic.
