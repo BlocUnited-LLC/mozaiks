@@ -6,6 +6,7 @@ import pytest
 
 import mozaiksai.core.runtime.composition.module_executor as module_executor_module
 import mozaiksai.core.runtime.persistence.mongo as mongo_module
+from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
@@ -267,7 +268,7 @@ async def test_event_emit_includes_workspace_when_present() -> None:
 
 @pytest.mark.asyncio
 async def test_existing_settings_and_auth_fields_remain_unchanged() -> None:
-    settings = [{"id": "max_items", "type": "integer", "default": 50}]
+    settings = [SettingDef(id="max_items", type="integer", default=50)]
     executor = ModuleExecutor()
     executor.register("tasks", EmitHandler(), settings=settings)
 
@@ -276,7 +277,7 @@ async def test_existing_settings_and_auth_fields_remain_unchanged() -> None:
     )
 
     assert result.success is True
-    assert result.data["settings"] == settings
+    assert result.data["settings"] == {"max_items": 50}
     assert result.data["auth_token"] == "token_123"
 
 

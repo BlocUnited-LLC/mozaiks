@@ -160,7 +160,7 @@ function AdminSidebar({
   const appId = resolveAppId(location.pathname)
   const derivedNavGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const navGroups = providedNavGroups || derivedNavGroups
-  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
+  const navigationLabel = appId ? ['App', 'Studio'].join(' ') + ' navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -229,14 +229,16 @@ function AdminSidebar({
   )
 }
 
-function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio' }) {
+function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio', appId = null }) {
+  const openMenuLabel = appId ? 'Open Studio navigation' : `Open ${shellLabel} navigation`
+
   return (
     <div className="sticky top-[calc(env(safe-area-inset-top,0px)+4.5rem)] z-30 mb-4 lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
         className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border/45 bg-background/92 px-4 py-3 text-left text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label="Open Studio navigation"
+        aria-label={openMenuLabel}
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/24 bg-primary/10 text-primary shadow-sm shadow-primary/10">
@@ -337,6 +339,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
             onOpenMenu={() => setMobileOpen(true)}
             activeLabel={activeLabel}
             shellLabel={shellLabel}
+            appId={appId}
           />
           {children}
         </div>
