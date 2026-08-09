@@ -308,7 +308,7 @@ class SessionRouter:
         # refinement requests — even after a normal (non-revision) workflow run.
         try:
             from mozaiksai.core.artifacts.store import get_artifact_store
-            current_refs = await get_artifact_store().get_current_artifact_version_refs(app_id=app)
+            current_refs = await get_artifact_store().get_current_build_record_refs(app_id=app)
             if current_refs:
                 state.artifact_version_refs.update(current_refs)
         except Exception as exc:
