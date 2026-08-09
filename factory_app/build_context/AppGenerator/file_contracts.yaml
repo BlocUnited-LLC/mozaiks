@@ -416,6 +416,55 @@ task_contracts:
       - Do not emit cookie-policy.md unless the app plan explicitly uses browser
         cookies or fingerprinting beyond what the platform session requires.
 
+  test_scaffold:
+    owner_agent: ConfigMiddlewareAgent
+    summary: >
+      Per-module drift-guard test scaffold. Emitted once when a new module is
+      generated, alongside the module_contract task. Provides
+      tests/test_{module_id}_module_drift.py with lightweight CI-time checks
+      that enforce module.yaml ↔ handler.py alignment and event-emission
+      contract invariants. App-level drift-guard tests (entitlement gate
+      coverage) are scaffolded separately as a single shared test file.
+    trigger:
+      emit_when:
+        - A new module is generated with at least one action.
+        - A new module is generated that declares action.emits[] for any action.
+    required_outputs:
+      - tests/test_{module_id}_module_drift.py
+    optional_outputs:
+      - tests/test_entitlement_gate_coverage.py
+    hard_constraints:
+      - Scaffold tests/test_{module_id}_module_drift.py once at module generation
+        time. Do not overwrite on routine module refinement unless
+        --force-tests is passed.
+      - Do not emit tests/ files from module_contract or business_services tasks.
+        Test scaffolding is owned exclusively by test_scaffold tasks.
+      - Include the handler_method_alignment pattern from
+        drift_guard_test_guidance in every generated test file — it loads the
+        module via ModuleLoader so handler reflection failures surface in CI,
+        not only at app startup.
+      - Include the emits_service_alignment pattern (check_orphaned_emits) only
+        when the module declares at least one action.emits[] entry.
+      - Include the events_yaml_service_alignment pattern (check_missing_emits)
+        only when the module declares at least one action.emits[] entry.
+      - Include the user_data_scope_handler_completeness pattern only when
+        module.yaml declares module.user_data_scope=true.
+      - Scaffold tests/test_entitlement_gate_coverage.py once per app (not per
+        module) when the app declares config/subscriptions.yaml and at least one
+        module action carries entitlement_gate. Use the entitlement_gate_coverage
+        pattern from drift_guard_test_guidance. Do not duplicate it; check
+        whether the file already exists before emitting.
+      - Import check_orphaned_emits and check_missing_emits from
+        mozaiksai.core.runtime.app.emit_drift.
+      - Import check_entitlement_gate_coverage from
+        mozaiksai.core.runtime.app.entitlement_drift.
+      - Import ModuleLoader from mozaiksai.core.runtime.app.loader.
+      - Generated tests must be lightweight — no mocking of business logic,
+        no running handler methods, no database connections. Inspect module
+        YAML and source only.
+      - test_{module_id}_module_drift.py must not import from other module
+        backends. Module drift-guard tests are module-local.
+
 backend_helper_files:
   description: >
     Rules for backend/{helper_name}.py files generated under app/modules/{module_id}/backend/.
