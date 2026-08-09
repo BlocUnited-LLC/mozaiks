@@ -572,10 +572,26 @@ class ModuleNotificationsManifest(ModuleContractModel):
         return self
 
 
+class SettingDef(ModuleContractModel):
+    """A single setting declared in contracts/settings.yaml."""
+
+    id: str
+    type: Literal["string", "boolean", "integer", "enum"] = "string"
+    default: Any = None
+    scope: Literal["app", "user"] = "app"
+    label: str = ""
+    description: str | None = None
+    enum_values: list[str] | None = None
+
+
 class ModuleSettingsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.settings.v1"] = "mozaiks.settings.v1"
-    settings: list[dict[str, Any]] = Field(default_factory=list)
+    settings: list[SettingDef] = Field(default_factory=list)
     features: list[dict[str, Any]] = Field(default_factory=list)
+
+    def defaults(self) -> dict[str, Any]:
+        """Return a resolved dict of {setting_id: default_value} for all declared settings."""
+        return {s.id: s.default for s in self.settings}
 
 
 class ModuleAdminPanel(ModuleContractModel):

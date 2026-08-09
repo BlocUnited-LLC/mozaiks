@@ -74,7 +74,7 @@ required_outputs:
       Do not include admin-only or plan-gated steps that are invisible to new users.
 
   - path: modules/user_onboarding/module.yaml
-    owner: templates
+    owner: generator
     notes: >
       Three actions: get_onboarding_status, complete_step (step_id string),
       dismiss_onboarding. user_data_scope: true. Emits hosted.onboarding.step_completed
@@ -85,28 +85,28 @@ required_outputs:
     notes: Preserved across regeneration. Subclasses base_handler — add app-specific hooks here.
 
   - path: modules/user_onboarding/backend/base_handler.py
-    owner: templates
+    owner: generator
 
   - path: modules/user_onboarding/backend/account_data_handler.py
-    owner: templates
+    owner: generator
     notes: >
       Implements delete_user_data and export_user_data for per-user onboarding
       state. Required because module.yaml declares user_data_scope: true.
 
   - path: modules/user_onboarding/backend/service.py
-    owner: templates
+    owner: generator
 
   - path: modules/user_onboarding/backend/repo.py
-    owner: templates
+    owner: generator
 
   - path: modules/user_onboarding/backend/schemas.py
-    owner: templates
+    owner: generator
     notes: >
       Declares VALID_STEPS set (replace with config/onboarding.yaml step ids at
       generation time), compute_progress() helper, and timestamp_now().
 
   - path: modules/user_onboarding/contracts/events.yaml
-    owner: templates
+    owner: generator
 
 forbidden_outputs:
   - path: ui/pages/custom/WelcomePage.jsx

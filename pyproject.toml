@@ -103,6 +103,7 @@ line-length = 100
 target-version = "py311"
 exclude = [
   "factory_app/build_context/*/templates/**",
+  ".claude/worktrees/**",
 ]
 
 [tool.setuptools]
