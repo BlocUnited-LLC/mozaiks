@@ -21,7 +21,7 @@ DEFAULT_LITELLM_PRICES_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "model_prices_and_context_window.json"
 )
-DEFAULT_OUTPUT_PATH = Path("pricing") / "catalogs" / "usage-pricing.generated.json"
+DEFAULT_OUTPUT_PATH = Path("ai-pricing") / "catalogs" / "usage-pricing.generated.json"
 DEFAULT_PACKAGE_OUTPUT_PATH = (
     Path("mozaiksai") / "core" / "usage" / "catalogs" / "usage-pricing.generated.json"
 )
@@ -221,7 +221,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Optional packaged catalog copy. Defaults to the bundled runtime catalog "
-            "when --output is the default pricing/catalogs path."
+            "when --output is the default ai-pricing/catalogs path."
         ),
     )
     parser.add_argument(

@@ -90,7 +90,7 @@ mozaiks-platform/
 !.env.*.example
 
 # Private local provider-pricing overrides
-pricing/catalogs/usage-pricing.overrides.json
+ai-pricing/catalogs/usage-pricing.overrides.json
 
 # Docs build
 site/

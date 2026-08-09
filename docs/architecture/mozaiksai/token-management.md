@@ -264,7 +264,7 @@ Additional token endpoints:
 Estimates are informational only — not authoritative billing data.
 
 Production deployments should keep an operator-maintained JSON or YAML catalog.
-When `pricing/catalogs/usage-pricing.generated.json` exists, the runtime uses it
+When `ai-pricing/catalogs/usage-pricing.generated.json` exists, the runtime uses it
 automatically unless `MOZAIKS_USAGE_PRICING_CATALOG_PATH` points somewhere else.
 Installed wheels also include the same generated catalog under the runtime
 package so source checkouts and package installs get the same default coverage.
@@ -273,7 +273,7 @@ reference:
 
 ```powershell
 python scripts\update_usage_pricing_catalog.py `
-  --output pricing\catalogs\usage-pricing.generated.json
+  --output ai-pricing\catalogs\usage-pricing.generated.json
 ```
 
 The GitHub workflow `.github/workflows/update-usage-pricing-catalog.yml` runs
@@ -317,13 +317,13 @@ Precedence:
    `MOZAIKS_USAGE_OUTPUT_PER_1K_USD`
 4. `MOZAIKS_USAGE_PRICING_OVERRIDE_PATH` for negotiated/custom provider rates
 5. `MOZAIKS_USAGE_PRICING_CATALOG_PATH`, usually the generated LiteLLM catalog
-   or the repo default `pricing/catalogs/usage-pricing.generated.json`
+   or the repo default `ai-pricing/catalogs/usage-pricing.generated.json`
 6. Built-in non-authoritative fallback table for known historical models
 
 Operators that need negotiated rates, internal models, or temporary upstream
 patches should create a real override file and point
 `MOZAIKS_USAGE_PRICING_OVERRIDE_PATH` at it. The repo-local
-`pricing/catalogs/usage-pricing.overrides.json` path is ignored by Git and
+`ai-pricing/catalogs/usage-pricing.overrides.json` path is ignored by Git and
 excluded from package manifests so private rates do not get committed or
 published accidentally.
 
