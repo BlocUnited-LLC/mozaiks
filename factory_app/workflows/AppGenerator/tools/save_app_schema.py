@@ -443,7 +443,7 @@ VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
 VALID_CUSTOM_PAGE_EXTENSIONS = {".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
-VALID_SHELL_ACTION_SURFACES = {"studio", "app_studio", "workflow_session", "transition", "public", "page"}
+VALID_SHELL_ACTION_SURFACES = {"studio", "app", "user", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
     "surface",
     "surfaces",

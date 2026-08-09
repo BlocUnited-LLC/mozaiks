@@ -252,11 +252,26 @@ class TestValidateConfigUpdated:
     def test_validates_shell_config(self, source):
         assert "validateShellConfig" in source
 
+    def test_shell_action_surfaces_include_app_and_user(self, source):
+        assert "'studio', 'app', 'user'" in source
+        assert "app_studio" not in source
+
     def test_fetches_from_api(self, source):
         assert "/api/theme-config" in source
 
     def test_fetches_shell_config_api(self, source):
         assert "/api/shell-config" in source
+
+
+class TestShellActionsUpdated:
+    @pytest.fixture
+    def source(self):
+        return _framework_file("chat-ui/src/navigation/shellActions.js")
+
+    def test_app_and_user_surfaces_are_derived(self, source):
+        assert "return 'user';" in source
+        assert "return 'app';" in source
+        assert "return 'app_studio';" not in source
 
 
 class TestNavigationProviderUpdated:
