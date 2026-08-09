@@ -144,7 +144,7 @@ function WorkspaceSidebar({
   shellSubtext = 'Manage your apps',
 }) {
   const location = useLocation()
-  const navigationLabel = `${shellLabel} navigation`
+  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -214,13 +214,15 @@ function WorkspaceSidebar({
 }
 
 function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel = 'Studio' }) {
+  const openMenuLabel = 'Open Studio navigation'
+
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
         className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label={`Open ${shellLabel} navigation`}
+        aria-label={openMenuLabel}
       >
         <MenuGlyph />
         <span className="text-sm font-semibold">{shellLabel}</span>
