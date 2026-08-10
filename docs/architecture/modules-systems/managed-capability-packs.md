@@ -224,6 +224,25 @@ That default is modular:
 The generated app should see MozaiksPay-branded API handles, not raw payment
 provider details.
 
+This default is intentional and compatible with OSS portability. OSS may contain
+the public app-facing MozaiksPay capability contract, generated facade
+expectations, request/response shapes, client scaffolding, provider selection
+configuration, and default recommendation behavior. OSS does not need to expose
+BlocUnited-only operational internals such as provider credential topology,
+payment processor adapters, fee or markup implementation, merchant operations,
+wallet and payout internals, settlement logic, or private operational tooling.
+
+A self-hosted developer must be able to select or implement another compatible
+payment provider where the canonical capability contract supports it. The
+generated app depends on the capability/facade boundary, not on BlocUnited's
+hosted money-movement implementation.
+
+For the concrete MozaiksPay app-facing provider shape, see
+[MozaiksPay Provider Contract](mozaikspay-provider-contract.md). That contract
+documents the generated client, facade actions, provider API paths, replacement
+semantics, and credential handles without describing hosted payment, payout,
+settlement, or merchant-operation internals.
+
 ## Provider Replacement
 
 If a user explicitly wants another provider, do not fork the runtime. Generate
@@ -282,5 +301,6 @@ For `managed_capability`, verify:
 
 - [AppGenerator Capability Planning](appgenerator-capability-planning.md)
 - [Module System](module-system.md)
+- [MozaiksPay Provider Contract](mozaikspay-provider-contract.md)
 - [Build Context Packs](../workflows/build-context-packs.md)
 - [Monetization Contract](../mozaiksai/monetization-contract.md)
