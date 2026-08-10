@@ -52,6 +52,7 @@ GRANTED_PERMISSIONS_NONE_ALLOWLIST = {
     "CHANGELOG.md",
     "docs/architecture/app/tenant-auth-and-scope.md",
     "docs/guides/adding-modules/01-overview.md",
+    "mozaiksai/core/runtime/composition/module_authority.py",
     "mozaiksai/core/runtime/composition/module_dispatch.py",
     "mozaiksai/hosts/routers/modules.py",
     "scripts/governance_guardrails.py",

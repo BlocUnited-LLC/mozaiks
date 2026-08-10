@@ -16,6 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from mozaiksai.core.auth import UserPrincipal, optional_user
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import validate_path_app_id
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 
@@ -236,8 +240,23 @@ async def _execute_module_action(
     # explicit scopes, so granted_permissions remains a concrete list.
     if not is_auth_enabled():
         granted_permissions = None
+        authority = ModuleDispatchAuthority(
+            kind="local_development",
+            permission_mode="trusted_bypass",
+            reason="auth-disabled local HTTP module dispatch",
+            actor_id=str(user_id) if user_id else None,
+            legacy_granted_permissions_none=True,
+        )
     else:
         granted_permissions = list(dispatch_scope.get("permissions") or [])
+        authority_kind = "authenticated_user" if principal is not None else "public_http"
+        authority = ModuleDispatchAuthority(
+            kind=authority_kind,
+            permission_mode="enforce",
+            reason="HTTP module dispatch",
+            actor_id=str(user_id) if user_id else None,
+            permissions=tuple(granted_permissions),
+        )
 
     module_request = ModuleRequest(
         module=module_name,
@@ -255,6 +274,11 @@ async def _execute_module_action(
         # Internal trusted calls can also bypass by invoking ModuleExecutor directly
         # with granted_permissions=None.
         granted_permissions=granted_permissions,
+        authority=authority,
+        provenance=ModuleDispatchProvenance(
+            surface="http_module_dispatch",
+            correlation_id=str(correlation_id) if correlation_id else None,
+        ),
     )
 
     if module_name in _OBSERVED_MODULES:

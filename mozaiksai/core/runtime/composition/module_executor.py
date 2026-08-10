@@ -42,6 +42,10 @@ from mozaiksai.core.audit.audit_logger import get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
 from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
@@ -117,6 +121,8 @@ class ModuleRequest:
     # (trusted internal / AI workflow call). When set (even to []), the executor
     # checks that all action-declared permissions are present.
     granted_permissions: list[str] | None = None
+    authority: ModuleDispatchAuthority | None = None
+    provenance: ModuleDispatchProvenance | None = None
 
 
 @dataclass
@@ -277,6 +283,13 @@ class ModuleExecutor:
 
         Builds a ModuleContext from the request if one is not supplied.
         """
+        dispatch_authority = request.authority or ModuleDispatchAuthority.from_granted_permissions(
+            request.granted_permissions,
+            actor_id=request.user_id,
+        )
+        dispatch_provenance = request.provenance or ModuleDispatchProvenance(
+            correlation_id=request.correlation_id,
+        )
         handler = self._modules.get(request.module)
         if handler is None:
             return ModuleResult(
@@ -385,6 +398,8 @@ class ModuleExecutor:
                 settings=self.resolve_settings(request.module) or None,
                 persistence=self._build_persistence_context(request),
                 _emit=self._build_context_emitter(request),  # type: ignore[arg-type]
+                dispatch_authority=dispatch_authority,
+                dispatch_provenance=dispatch_provenance,
             )
 
         timeout = _action_timeout()

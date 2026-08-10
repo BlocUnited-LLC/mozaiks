@@ -7,6 +7,10 @@ from .extensions import (
     start_declared_services,
     stop_services,
 )
+from .module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from .module_context import ModuleContext
 from .module_dispatch import (
     ModuleActionDispatchRequest,
@@ -35,6 +39,8 @@ __all__ = [
     "ExecutorRegistry",
     "ExecutorType",
     "ModuleContext",
+    "ModuleDispatchAuthority",
+    "ModuleDispatchProvenance",
     "ModuleActionDispatchRequest",
     "ModuleDispatchMetadata",
     "ModuleDispatchScope",

@@ -25,6 +25,13 @@ class _OrdersModule:
             "permissions": ctx.permissions,
             "auth_token": ctx.auth_token,
             "correlation_id": ctx.correlation_id,
+            "authority_kind": ctx.dispatch_authority.kind if ctx.dispatch_authority else None,
+            "permission_mode": (
+                ctx.dispatch_authority.permission_mode if ctx.dispatch_authority else None
+            ),
+            "provenance_surface": (
+                ctx.dispatch_provenance.surface if ctx.dispatch_provenance else None
+            ),
         }
 
 
@@ -72,6 +79,9 @@ async def test_dispatch_module_action_preserves_scope_metadata_and_permissions()
         "permissions": ["orders.read"],
         "auth_token": "token-1",
         "correlation_id": "corr-1",
+        "authority_kind": "app_internal",
+        "permission_mode": "enforce",
+        "provenance_surface": "app_local_dispatch",
     }
 
 

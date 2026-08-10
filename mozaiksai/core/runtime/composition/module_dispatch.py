@@ -4,6 +4,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest, ModuleResult
 
 _MODULE_ACTION_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -91,5 +95,16 @@ async def dispatch_module_action(
         auth_token=request.metadata.auth_token,
         correlation_id=request.metadata.correlation_id,
         granted_permissions=list(request.granted_permissions),
+        authority=ModuleDispatchAuthority(
+            kind="app_internal",
+            permission_mode="enforce",
+            reason="public app-local module dispatch facade",
+            actor_id=request.scope.user_id,
+            permissions=tuple(request.granted_permissions),
+        ),
+        provenance=ModuleDispatchProvenance(
+            surface="app_local_dispatch",
+            correlation_id=request.metadata.correlation_id,
+        ),
     )
     return await executor.execute(module_request, context=None)

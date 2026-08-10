@@ -23,6 +23,7 @@ from .composition.extensions import (
     start_declared_services,
     stop_services,
 )
+from .composition.module_authority import ModuleDispatchAuthority, ModuleDispatchProvenance
 from .composition.module_context import ModuleContext
 from .composition.module_executor import ModuleExecutor, ModuleRequest, ModuleResult
 from .composition.platform_hooks import PlatformHookRegistry, get_platform_hooks
@@ -65,6 +66,8 @@ __all__ = [
     "ExecutorRegistry",
     "ExecutorType",
     "ModuleContext",
+    "ModuleDispatchAuthority",
+    "ModuleDispatchProvenance",
     "ModuleExecutor",
     "ModuleRequest",
     "ModuleResult",

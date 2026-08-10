@@ -30,6 +30,20 @@ class _OrdersHandler:
             "permissions": ctx.permissions,
         }
 
+    async def authority(self, ctx):
+        authority = ctx.dispatch_authority
+        provenance = ctx.dispatch_provenance
+        return {
+            "authority_kind": authority.kind if authority else None,
+            "permission_mode": authority.permission_mode if authority else None,
+            "legacy_granted_permissions_none": (
+                authority.legacy_granted_permissions_none if authority else None
+            ),
+            "actor_id": authority.actor_id if authority else None,
+            "permissions": list(authority.permissions) if authority else None,
+            "surface": provenance.surface if provenance else None,
+        }
+
     async def inspect_app_input(self, ctx, *, app_id: str):
         return {
             "ctx_app_id": ctx.app_id,
@@ -221,6 +235,32 @@ def test_auth_disabled_module_dispatch_bypasses_action_permissions_for_local_stu
     assert resp.json() == {"permissions": None}
 
 
+def test_auth_disabled_module_dispatch_uses_local_development_authority(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register(
+        "orders",
+        _OrdersHandler(),
+        action_permissions={"authority": ["orders.read"]},
+    )
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    client = _client(failed_module_names=[])
+    resp = client.get("/api/modules/orders/authority")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "authority_kind": "local_development",
+        "permission_mode": "trusted_bypass",
+        "legacy_granted_permissions_none": True,
+        "actor_id": "anonymous",
+        "permissions": [],
+        "surface": "http_module_dispatch",
+    }
+
+
 def test_auth_enabled_module_dispatch_requires_token_by_default(monkeypatch) -> None:
     executor = ModuleExecutor()
     executor.register("orders", _OrdersHandler())
@@ -329,6 +369,57 @@ def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> No
         "tenant_id": "tenant-resolved",
         "workspace_id": "workspace-resolved",
         "permissions": ["orders.scope"],
+    }
+
+
+def test_authenticated_module_dispatch_uses_authenticated_user_authority(monkeypatch) -> None:
+    from mozaiksai.core.auth.adapters.base import UserClaims
+
+    class _MockAdapter:
+        name = "mock"
+
+        async def validate_token(self, token: str):
+            return UserClaims(
+                user_id="u1",
+                email=None,
+                name=None,
+                roles=[],
+                scopes=["orders.read"],
+                raw_claims={},
+                provider="mock",
+                app_id="app-token",
+            )
+
+    executor = ModuleExecutor()
+    executor.register(
+        "orders",
+        _OrdersHandler(),
+        action_permissions={"authority": ["orders.read"]},
+    )
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setattr(
+        "mozaiksai.core.auth.dependencies.get_auth_adapter",
+        lambda: _MockAdapter(),
+    )
+
+    client = _client(failed_module_names=[])
+    resp = client.get(
+        "/api/modules/orders/authority",
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "authority_kind": "authenticated_user",
+        "permission_mode": "enforce",
+        "legacy_granted_permissions_none": False,
+        "actor_id": "u1",
+        "permissions": ["orders.read"],
+        "surface": "http_module_dispatch",
     }
 
 

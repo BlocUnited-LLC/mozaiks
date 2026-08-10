@@ -27,6 +27,19 @@ class _Handler:
     async def show_permissions(self, ctx, **kwargs):
         return {"permissions": ctx.permissions}
 
+    async def show_authority(self, ctx, **kwargs):
+        authority = ctx.dispatch_authority
+        provenance = ctx.dispatch_provenance
+        return {
+            "authority_kind": authority.kind if authority else None,
+            "permission_mode": authority.permission_mode if authority else None,
+            "legacy_granted_permissions_none": (
+                authority.legacy_granted_permissions_none if authority else None
+            ),
+            "authority_permissions": list(authority.permissions) if authority else None,
+            "provenance_correlation_id": provenance.correlation_id if provenance else None,
+        }
+
 
 def _executor_with_permissions(action_permissions: dict) -> ModuleExecutor:
     """Build an executor with a module registered with the given action_permissions."""
@@ -38,6 +51,7 @@ def _executor_with_permissions(action_permissions: dict) -> ModuleExecutor:
             "list": "do_list",
             "read": "do_read",
             "permissions": "show_permissions",
+            "authority": "show_authority",
         },
         action_permissions=action_permissions,
     )
@@ -68,6 +82,22 @@ async def test_granted_permissions_none_bypasses_enforcement():
 
 
 @pytest.mark.asyncio
+async def test_granted_permissions_none_becomes_observable_legacy_trusted_authority():
+    executor = _executor_with_permissions({"authority": ["orders:read"]})
+
+    result = await executor.execute(_request(action="authority", granted_permissions=None))
+
+    assert result.success is True
+    assert result.data == {
+        "authority_kind": "legacy_trusted",
+        "permission_mode": "trusted_bypass",
+        "legacy_granted_permissions_none": True,
+        "authority_permissions": [],
+        "provenance_correlation_id": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_granted_permissions_containing_required_scope_allows_action():
     """When the granted set includes the required permission, the action proceeds."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
@@ -77,6 +107,21 @@ async def test_granted_permissions_containing_required_scope_allows_action():
     )
 
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_concrete_granted_permissions_become_observable_enforced_authority():
+    executor = _executor_with_permissions({"authority": ["orders:read"]})
+
+    result = await executor.execute(
+        _request(action="authority", granted_permissions=["orders:read"])
+    )
+
+    assert result.success is True
+    assert result.data["authority_kind"] == "legacy_permissions"
+    assert result.data["permission_mode"] == "enforce"
+    assert result.data["legacy_granted_permissions_none"] is False
+    assert result.data["authority_permissions"] == ["orders:read"]
 
 
 @pytest.mark.asyncio
