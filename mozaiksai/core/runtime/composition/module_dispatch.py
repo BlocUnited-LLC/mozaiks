@@ -41,6 +41,8 @@ class ModuleActionDispatchRequest:
     scope: ModuleDispatchScope = field(default_factory=lambda: ModuleDispatchScope(app_id="default"))
     metadata: ModuleDispatchMetadata = field(default_factory=ModuleDispatchMetadata)
     granted_permissions: list[str] = field(default_factory=list)
+    authority: ModuleDispatchAuthority | None = None
+    provenance: ModuleDispatchProvenance | None = None
 
 
 def _resolve_module_executor(app: Any | None) -> Any:
@@ -68,6 +70,26 @@ def _validate_request(request: ModuleActionDispatchRequest) -> None:
             "granted_permissions must be a concrete list. Trusted/internal authority "
             "dispatch is intentionally not exposed by this public facade."
         )
+    if request.authority is not None:
+        _validate_public_authority(request.authority)
+
+
+def _validate_public_authority(authority: ModuleDispatchAuthority) -> None:
+    if authority.permission_mode != "enforce":
+        raise ValueError(
+            "Public module dispatch authority must use permission_mode='enforce'. "
+            "Trusted bypass is intentionally not exposed by this facade."
+        )
+    if authority.legacy_granted_permissions_none:
+        raise ValueError("legacy_trusted dispatch cannot be requested through the public facade.")
+    if authority.kind in {
+        "legacy_permissions",
+        "legacy_trusted",
+        "framework_internal",
+        "operator_internal",
+        "local_development",
+    }:
+        raise ValueError(f"Authority kind {authority.kind!r} is not valid for public module dispatch.")
 
 
 async def dispatch_module_action(
@@ -84,6 +106,38 @@ async def dispatch_module_action(
 
     _validate_request(request)
     executor = _resolve_module_executor(app)
+    granted_permissions = list(request.granted_permissions)
+    authority = request.authority or ModuleDispatchAuthority(
+        kind="app_internal",
+        permission_mode="enforce",
+        reason="public app-local module dispatch facade",
+        actor_id=request.scope.user_id,
+        permissions=tuple(granted_permissions),
+    )
+    authority = ModuleDispatchAuthority(
+        kind=authority.kind,
+        permission_mode=authority.permission_mode,
+        reason=authority.reason,
+        actor_id=authority.actor_id or request.scope.user_id,
+        permissions=tuple(granted_permissions),
+        legacy_granted_permissions_none=False,
+    )
+    provenance = request.provenance or ModuleDispatchProvenance(
+        surface="app_local_dispatch",
+        correlation_id=request.metadata.correlation_id,
+    )
+    if provenance.correlation_id is None and request.metadata.correlation_id:
+        provenance = ModuleDispatchProvenance(
+            surface=provenance.surface,
+            workflow_name=provenance.workflow_name,
+            workflow_run_id=provenance.workflow_run_id,
+            event_id=provenance.event_id,
+            event_type=provenance.event_type,
+            event_producer=provenance.event_producer,
+            correlation_id=request.metadata.correlation_id,
+            causation_id=provenance.causation_id,
+            metadata=provenance.metadata,
+        )
     module_request = ModuleRequest(
         module=request.module,
         action=request.action,
@@ -94,17 +148,8 @@ async def dispatch_module_action(
         workspace_id=request.scope.workspace_id,
         auth_token=request.metadata.auth_token,
         correlation_id=request.metadata.correlation_id,
-        granted_permissions=list(request.granted_permissions),
-        authority=ModuleDispatchAuthority(
-            kind="app_internal",
-            permission_mode="enforce",
-            reason="public app-local module dispatch facade",
-            actor_id=request.scope.user_id,
-            permissions=tuple(request.granted_permissions),
-        ),
-        provenance=ModuleDispatchProvenance(
-            surface="app_local_dispatch",
-            correlation_id=request.metadata.correlation_id,
-        ),
+        granted_permissions=granted_permissions,
+        authority=authority,
+        provenance=provenance,
     )
     return await executor.execute(module_request, context=None)
