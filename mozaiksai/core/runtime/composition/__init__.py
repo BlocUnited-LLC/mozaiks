@@ -17,6 +17,12 @@ from .module_authority import (
     ModulePermissionCheck,
 )
 from .module_context import ModuleContext
+from .module_dispatch import (
+    ModuleActionDispatchRequest,
+    ModuleDispatchMetadata,
+    ModuleDispatchScope,
+    dispatch_module_action,
+)
 from .module_event_provenance import (
     ModuleEventProvenance,
     ModuleReactionAudit,
@@ -24,12 +30,6 @@ from .module_event_provenance import (
     build_module_reaction_audit,
     normalize_module_event_provenance,
     normalize_module_reaction_provenance,
-)
-from .module_dispatch import (
-    ModuleActionDispatchRequest,
-    ModuleDispatchMetadata,
-    ModuleDispatchScope,
-    dispatch_module_action,
 )
 from .module_executor import ModuleExecutor, ModuleRequest, ModuleResult
 from .platform_hooks import (

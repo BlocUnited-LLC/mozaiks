@@ -27,16 +27,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mozaiksai.core.runtime.composition.module_event_provenance import (
+    normalize_module_event_provenance,
+    normalize_module_reaction_provenance,
+)
 from mozaiksai.core.runtime.composition.module_event_router import (
     ModuleEventRouter,
     _is_secret_context_key,
     _render_template,
 )
-from mozaiksai.core.runtime.composition.module_event_provenance import (
-    normalize_module_event_provenance,
-    normalize_module_reaction_provenance,
+from mozaiksai.core.runtime.composition.platform_hooks import (
+    PlatformExtensionBundle,
+    PlatformHookRegistry,
 )
-from mozaiksai.core.runtime.composition.platform_hooks import PlatformExtensionBundle, PlatformHookRegistry
 
 # ---------------------------------------------------------------------------
 # Helpers — build mock LoadedModule objects
