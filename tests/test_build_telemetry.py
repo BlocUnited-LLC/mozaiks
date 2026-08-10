@@ -55,6 +55,37 @@ def test_build_satisfaction_payload_anonymizes_build_id_and_clamps_rating() -> N
     assert payload["sequence_id"] == "build"
 
 
+def test_framework_telemetry_sanitizer_removes_identity_and_arbitrary_payloads() -> None:
+    payload = telemetry.sanitize_framework_telemetry_payload(
+        {
+            "schema_version": "mozaiks.telemetry.v1",
+            "workflow_name": "AppGenerator",
+            "final_status": "completed",
+            "build_id_hash": _hash_build_id("raw-build-registry-id"),
+            "build_registry_id": "raw-build-registry-id",
+            "app_id": "app_123",
+            "customer_id": "customer_123",
+            "operator_email": "operator@example.test",
+            "payload": {"repo_url": "https://example.test/private/repo"},
+            "domain_tags": ["crm", "owner@example.test", "https://example.test/acme"],
+        }
+    )
+
+    serialized = json.dumps(payload)
+    assert payload == {
+        "schema_version": "mozaiks.telemetry.v1",
+        "workflow_name": "AppGenerator",
+        "final_status": "completed",
+        "build_id_hash": _hash_build_id("raw-build-registry-id"),
+        "domain_tags": ["crm"],
+    }
+    assert "raw-build-registry-id" not in serialized
+    assert "app_123" not in serialized
+    assert "customer_123" not in serialized
+    assert "operator@example.test" not in serialized
+    assert "private/repo" not in serialized
+
+
 @pytest.mark.asyncio
 async def test_emit_build_telemetry_noops_when_endpoint_is_unset(monkeypatch) -> None:
     import httpx
@@ -94,10 +125,18 @@ async def test_emit_build_telemetry_posts_hmac_signed_payload(monkeypatch) -> No
     monkeypatch.setenv("MOZAIKS_TELEMETRY_SECRET", "shared-secret")
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
 
-    payload = {"schema_version": "mozaiks.telemetry.v1", "final_status": "completed"}
+    payload = {
+        "schema_version": "mozaiks.telemetry.v1",
+        "final_status": "completed",
+        "app_id": "app_123",
+    }
     await telemetry.emit_build_telemetry(payload)
 
-    expected_content = json.dumps(payload, separators=(",", ":")).encode()
+    expected_payload = {
+        "schema_version": "mozaiks.telemetry.v1",
+        "final_status": "completed",
+    }
+    expected_content = json.dumps(expected_payload, separators=(",", ":")).encode()
     expected_signature = hmac.new(b"shared-secret", expected_content, hashlib.sha256).hexdigest()
     assert calls == [
         {

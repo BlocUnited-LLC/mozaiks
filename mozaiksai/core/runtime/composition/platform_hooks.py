@@ -85,11 +85,33 @@ import importlib
 import inspect
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("platform_hooks")
+
+PLATFORM_EXTENSION_SCHEMA_VERSION = "mozaiks.platform_extensions.v1"
+
+
+@dataclass(frozen=True)
+class PlatformExtensionBundle:
+    """Typed public bundle for app/operator platform extension hooks.
+
+    The existing dict bundle shape is still supported. This typed form gives
+    hosted applications a stable contract without introducing a broader plugin
+    system.
+    """
+
+    schema_version: str = PLATFORM_EXTENSION_SCHEMA_VERSION
+    on_startup: Callable | None = None
+    chat_prereqs: Callable | None = None
+    chat_session_fields: Callable | None = None
+    module_permission_resolver: Callable | None = None
+    module_scope_resolver: Callable | None = None
+    workflow_ordering: Callable | None = None
+    workflow_name_resolver: Callable | None = None
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -98,6 +120,7 @@ def _clean_optional(value: Any) -> str | None:
 
 
 _BUNDLE_KEYS = (
+    "schema_version",
     "on_startup",
     "chat_prereqs",
     "chat_session_fields",
@@ -106,6 +129,50 @@ _BUNDLE_KEYS = (
     "workflow_ordering",
     "workflow_name_resolver",
 )
+
+
+def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
+    if isinstance(bundle, PlatformExtensionBundle):
+        if bundle.schema_version != PLATFORM_EXTENSION_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported platform extension schema_version: {bundle.schema_version!r}"
+            )
+        return bundle
+
+    if isinstance(bundle, dict):
+        schema_version = str(bundle.get("schema_version") or PLATFORM_EXTENSION_SCHEMA_VERSION)
+        if schema_version != PLATFORM_EXTENSION_SCHEMA_VERSION:
+            raise ValueError(f"Unsupported platform extension schema_version: {schema_version!r}")
+        return PlatformExtensionBundle(
+            schema_version=schema_version,
+            on_startup=bundle.get("on_startup"),
+            chat_prereqs=bundle.get("chat_prereqs"),
+            chat_session_fields=bundle.get("chat_session_fields"),
+            module_permission_resolver=bundle.get("module_permission_resolver"),
+            module_scope_resolver=bundle.get("module_scope_resolver"),
+            workflow_ordering=bundle.get("workflow_ordering"),
+            workflow_name_resolver=bundle.get("workflow_name_resolver"),
+        )
+
+    if bundle is None or isinstance(bundle, (str, bytes, int, float, bool)):
+        raise TypeError("Platform extension bundle must be a dict, object, or PlatformExtensionBundle")
+
+    schema_version = str(
+        getattr(bundle, "schema_version", PLATFORM_EXTENSION_SCHEMA_VERSION)
+        or PLATFORM_EXTENSION_SCHEMA_VERSION
+    )
+    if schema_version != PLATFORM_EXTENSION_SCHEMA_VERSION:
+        raise ValueError(f"Unsupported platform extension schema_version: {schema_version!r}")
+    return PlatformExtensionBundle(
+        schema_version=schema_version,
+        on_startup=getattr(bundle, "on_startup", None),
+        chat_prereqs=getattr(bundle, "chat_prereqs", None),
+        chat_session_fields=getattr(bundle, "chat_session_fields", None),
+        module_permission_resolver=getattr(bundle, "module_permission_resolver", None),
+        module_scope_resolver=getattr(bundle, "module_scope_resolver", None),
+        workflow_ordering=getattr(bundle, "workflow_ordering", None),
+        workflow_name_resolver=getattr(bundle, "workflow_name_resolver", None),
+    )
 
 
 def _resolve_entrypoint(entrypoint: str) -> Any:
@@ -185,9 +252,9 @@ class PlatformHookRegistry:
                 logger.warning("PLATFORM_HOOKS_LOAD_FAILED: %s — %s", entry, exc)
 
     def _register_bundle(self, bundle: Any, source: str = "") -> None:
+        bundle = _normalize_bundle(bundle)
+
         def _get(key: str) -> Any:
-            if isinstance(bundle, dict):
-                return bundle.get(key)
             return getattr(bundle, key, None)
 
         slot_map = {

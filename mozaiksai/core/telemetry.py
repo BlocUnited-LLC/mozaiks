@@ -1,7 +1,14 @@
-"""Opt-in build telemetry client.
+"""Opt-in framework build telemetry client.
 
 Sends anonymized build outcome payloads to a configured endpoint.
-No user content, generated code, or identifiable information is ever sent.
+No user content, generated code, or reversible app/operator/customer identity
+is sent by the generic OSS emitter.
+
+The OSS telemetry contract is intentionally narrow: it may describe one build
+workflow's framework-level outcome, but it must not become an Operator
+Intelligence channel. Cross-app learning, customer feedback analysis,
+production outcomes, and commercial optimization belong behind explicitly
+reviewed hosted receivers and schemas.
 
 Environment variables
 ---------------------
@@ -22,6 +29,37 @@ log = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = "mozaiks.telemetry.v1"
 _TIMEOUT_S = 3.0
+_ALLOWED_TELEMETRY_FIELDS = (
+    "schema_version",
+    "workflow_name",
+    "final_status",
+    "build_id_hash",
+    "refinement_cycles",
+    "quality_gate_blocks",
+    "duration_seconds",
+    "domain_tags",
+    "mozaiks_version",
+    "timestamp",
+    # Existing hosted Build Intelligence consumes this explicit reviewed shape.
+    "event",
+    "rating",
+    "sequence_id",
+)
+_IDENTITY_FIELD_FRAGMENTS = (
+    "app_id",
+    "build_id",
+    "build_registry_id",
+    "chat_id",
+    "customer",
+    "email",
+    "operator",
+    "organization",
+    "org_id",
+    "repo",
+    "tenant",
+    "user_id",
+    "workspace",
+)
 
 
 def _endpoint() -> str:
@@ -95,13 +133,41 @@ def build_satisfaction_payload(
     }
 
 
+def sanitize_framework_telemetry_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return the bounded OSS framework telemetry shape sent over the network."""
+    raw = payload if isinstance(payload, dict) else {}
+    out: dict[str, Any] = {"schema_version": str(raw.get("schema_version") or _SCHEMA_VERSION)}
+    for key in _ALLOWED_TELEMETRY_FIELDS:
+        if key == "schema_version" or key not in raw:
+            continue
+        if _looks_identity_field(key):
+            continue
+        value = raw.get(key)
+        if key == "domain_tags":
+            out[key] = _safe_domain_tags(value)
+        elif key in {"refinement_cycles", "quality_gate_blocks"}:
+            out[key] = max(0, int(value or 0))
+        elif key == "duration_seconds":
+            out[key] = max(0.0, float(value or 0.0))
+        elif key == "rating":
+            out[key] = max(1, min(5, int(value or 0)))
+        elif isinstance(value, str):
+            clean = value.strip()
+            if clean:
+                out[key] = clean[:160]
+        elif isinstance(value, (int, float, bool)) or value is None:
+            out[key] = value
+    return out
+
+
 async def emit_build_telemetry(payload: dict[str, Any]) -> None:
     """Fire-and-forget telemetry emit. Never raises. Never blocks the build."""
     if not _enabled():
         return
     try:
         import httpx
-        payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
+        safe_payload = sanitize_framework_telemetry_payload(payload)
+        payload_bytes = json.dumps(safe_payload, separators=(",", ":")).encode()
         headers = {"Content-Type": "application/json", "X-Mozaiks-Signature": _sign(payload_bytes)}
         async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
             await client.post(_endpoint(), content=payload_bytes, headers=headers)
@@ -115,7 +181,8 @@ def emit_build_telemetry_sync(payload: dict[str, Any]) -> None:
         return
     try:
         import httpx
-        payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
+        safe_payload = sanitize_framework_telemetry_payload(payload)
+        payload_bytes = json.dumps(safe_payload, separators=(",", ":")).encode()
         headers = {"Content-Type": "application/json", "X-Mozaiks-Signature": _sign(payload_bytes)}
         with httpx.Client(timeout=_TIMEOUT_S) as client:
             client.post(_endpoint(), content=payload_bytes, headers=headers)
@@ -134,3 +201,26 @@ def _get_mozaiks_version() -> str:
 def _iso_now() -> str:
     from datetime import UTC, datetime
     return datetime.now(UTC).isoformat()
+
+
+def _looks_identity_field(key: str) -> bool:
+    lowered = str(key or "").lower()
+    if lowered.endswith("_hash"):
+        return False
+    return any(fragment in lowered for fragment in _IDENTITY_FIELD_FRAGMENTS)
+
+
+def _safe_domain_tags(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    tags: list[str] = []
+    for item in value:
+        text = str(item or "").strip().lower()
+        if not text or "@" in text or "/" in text or "\\" in text:
+            continue
+        normalized = "".join(char for char in text if char.isalnum() or char in {"_", "-", "."}).strip("._-")
+        if normalized and normalized not in tags:
+            tags.append(normalized[:48])
+        if len(tags) >= 10:
+            break
+    return tags
