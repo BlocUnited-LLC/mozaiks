@@ -6,7 +6,7 @@ Verifies:
 3. The supplied store reaches Hub.open() — not a different store.
 4. Two runs with distinct store instances do not share AG2 workflow memory.
 5. A single store instance CAN be shared across runs when the caller supplies it.
-6. AG2NetworkRunnerRequest public contract is backward-compatible (no new required args).
+6. AG2NetworkRunnerRequest public contract stays compatible with existing callers (no new required args).
 7. run_workflow_orchestration accepts knowledge_store kwarg without error.
 8. The knowledge_store field is None by default on the request.
 """
@@ -106,7 +106,7 @@ class TestDefaultBehavior:
         assert req.initial_message == "hello"
 
     def test_request_constructable_without_knowledge_store(self) -> None:
-        # Proves backward compatibility — no new required arguments
+        # Proves existing callers keep working — no new required arguments
         req = AG2NetworkRunnerRequest(
             workflow_name="W",
             chat_id="c",
@@ -304,7 +304,7 @@ class TestOrchestrationPatternsSignature:
         )
         param = sig.parameters["knowledge_store"]
         assert param.default is None, (
-            "knowledge_store must default to None for backward compatibility."
+            "knowledge_store must default to None so existing callers are unaffected."
         )
 
     def test_run_ag2_network_phase_accepts_knowledge_store(self) -> None:
