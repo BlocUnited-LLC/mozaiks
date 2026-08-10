@@ -31,23 +31,6 @@ _MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PUBLIC_MODULE_API_SURFACES = {"public", "public_readonly"}
 _OBSERVED_MODULES = {"messages", "workspace_support"}
 _RESERVED_CONTEXT_KEYS = ("app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token")
-# Reserved keys that are safe to auto-promote from an action's own "params" into
-# the trusted execution "context" when the caller omits them from context. This
-# is intentional for resource-scoping identifiers such as app_id, which many
-# actions also declare as a business input for the same resource being scoped.
-#
-# "user_id" is deliberately excluded: action input schemas very commonly declare
-# their own "user_id" parameter that names a *target* subject (e.g. add_member's
-# user to add, update_member_role's user whose role changes) rather than the
-# calling actor's identity. Promoting it here would silently overwrite the
-# trusted execution context's user_id with that target's user_id, letting an
-# action's own business input hijack actor identity resolution downstream
-# (privilege confusion: authorization checks would then run as the target user
-# instead of the real caller). Context-level user_id overrides must be supplied
-# explicitly under the "context" envelope key, never inferred from "params".
-_PROMOTABLE_PARAM_CONTEXT_KEYS = tuple(
-    key for key in _RESERVED_CONTEXT_KEYS if key != "user_id"
-)
 # Actions with these surfaces are only reachable through the internal event bus
 # or direct ModuleExecutor calls.  HTTP dispatch is always rejected regardless
 # of authentication status so that event-pipeline internal handlers cannot be
@@ -92,43 +75,92 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     """Split a module POST body into action params and execution context.
 
     The canonical module API payload is {"params": {...}, "context": {...}}.
-    Values inside "params" are action inputs, so reserved resource-scoping words
-    such as app_id must remain available for resource-scoped actions and are
-    auto-promoted into context when the caller omits them there. "user_id" is
-    never auto-promoted this way (see _PROMOTABLE_PARAM_CONTEXT_KEYS) because
-    action inputs frequently name a target subject, not the caller. Raw-body
-    payloads still treat all reserved words (including user_id) as execution
-    context and remove them from action params to preserve the old dispatch
-    contract, since that legacy shape has no "params" input namespace to
-    collide with.
+    Callers may also POST a flat legacy body with no "params"/"context"
+    envelope, in which case the whole body (minus any stray "context"/"params"
+    keys) is treated as action params. This is purely a structural split:
+    reserved execution-context words that also appear in params (app_id,
+    user_id, tenant_id, workspace_id, correlation_id, auth_token) are
+    reconciled against the target action's declared input schema in
+    _reconcile_reserved_params, not here, since the schema is only known once
+    the module/action are resolved.
     """
     params_body = body.get("params")
     context_body = body.get("context")
     if isinstance(params_body, dict):
-        has_params_envelope = True
         params = dict(params_body)
     else:
-        has_params_envelope = False
         params = dict(body)
-    context_overrides: dict[str, Any] = dict(context_body) if isinstance(context_body, dict) else {}
-
-    # The legacy raw-body shape has no "params" input namespace, so every
-    # top-level reserved key (including user_id) has always unambiguously meant
-    # execution context there. The canonical enveloped shape does have a
-    # "params" input namespace, where "user_id" can legitimately be an action's
-    # own target-subject input, so it is excluded from promotion in that case.
-    promotable_keys = _RESERVED_CONTEXT_KEYS if not has_params_envelope else _PROMOTABLE_PARAM_CONTEXT_KEYS
-    for key in promotable_keys:
-        if key in params and key not in context_overrides:
-            context_overrides[key] = params[key]
-
-    if not has_params_envelope:
         params.pop("context", None)
         params.pop("params", None)
-        for key in _RESERVED_CONTEXT_KEYS:
-            params.pop(key, None)
-
+    context_overrides: dict[str, Any] = dict(context_body) if isinstance(context_body, dict) else {}
     return params, context_overrides
+
+
+def _module_action_input_properties(module_executor: Any, module_name: str, action_name: str) -> dict[str, Any]:
+    """Return the declared input schema properties for a module action, or {} if unknown."""
+    if module_executor is None:
+        return {}
+    action_schemas = getattr(module_executor, "_action_schemas", None)
+    if not isinstance(action_schemas, dict):
+        return {}
+    module_schemas = action_schemas.get(module_name)
+    if not isinstance(module_schemas, dict):
+        return {}
+    action_schema = module_schemas.get(action_name)
+    if not isinstance(action_schema, dict):
+        return {}
+    input_schema = action_schema.get("input")
+    if not isinstance(input_schema, dict):
+        return {}
+    properties = input_schema.get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _reconcile_reserved_params(
+    params: dict[str, Any],
+    context_overrides: dict[str, Any],
+    *,
+    action_input_properties: dict[str, Any],
+) -> None:
+    """Reconcile reserved execution-context words that also appear in action params.
+
+    Mutates params/context_overrides in place, regardless of whether the caller
+    used the enveloped {params, context} shape or a flat legacy body — both
+    shapes can collide with an action's own declared input properties the same
+    way, so both need the same schema-aware treatment. For each reserved word
+    present in params:
+
+      - If the target action's own input schema declares that word as a
+        business property, the value stays in params so schema validation and
+        the handler call see it (many actions scope by app_id, or take a
+        target-subject user_id such as add_member's invitee or
+        update_member_role's subject). "user_id" specifically is never
+        promoted into context in this case: doing so would let a target
+        subject's id silently override the authenticated actor's identity,
+        letting an action's own business input hijack actor identity
+        resolution downstream (authorization checks would then run as the
+        target user instead of the real caller).
+      - Otherwise, the value is promoted into context_overrides (when not
+        already set there) and removed from params, since the handler method
+        is invoked as handler.method(ctx, **params) and does not accept this
+        key as a keyword argument — leaving it in params would raise a
+        TypeError instead of reaching the handler. This also preserves the
+        legacy flat-body convention (a raw POST body's own reserved words,
+        such as a bare top-level "user_id", set the execution context) for
+        actions that do not declare that word as one of their own inputs.
+
+    This function only ever runs against POST body params (see
+    execute_module_action_get, which never promotes reserved GET query
+    params into context at all).
+    """
+    for key in _RESERVED_CONTEXT_KEYS:
+        if key not in params:
+            continue
+        declared_as_business_param = key in action_input_properties
+        if not (key == "user_id" and declared_as_business_param):
+            context_overrides.setdefault(key, params[key])
+        if not declared_as_business_param:
+            params.pop(key, None)
 
 
 async def _resolve_module_dispatch_scope(
@@ -181,6 +213,18 @@ async def _execute_module_action(
     if _is_internal_module_action(request, module_name, action_name):
         raise HTTPException(status_code=404, detail="Action not found")
 
+    # Reconcile reserved execution-context words (app_id, user_id, tenant_id,
+    # workspace_id, correlation_id, auth_token) that also appear in params
+    # against the target action's declared input schema. This must run before
+    # any of the context-derived values below are read, and before the
+    # executor-availability check further down, since it only needs read-only
+    # schema metadata already loaded at startup rather than a live executor.
+    context_overrides = context_overrides or {}
+    schema_executor_registry = getattr(request.app.state, "executor_registry", None)
+    schema_module_executor = schema_executor_registry.module_executor if schema_executor_registry is not None else None
+    action_input_properties = _module_action_input_properties(schema_module_executor, module_name, action_name)
+    _reconcile_reserved_params(params, context_overrides, action_input_properties=action_input_properties)
+
     if is_auth_enabled() and principal is None and not _is_public_module_action(request, module_name, action_name):
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
@@ -188,7 +232,6 @@ async def _execute_module_action(
     # verify it matches the authenticated principal's token claim. This prevents a
     # caller from executing actions scoped to a foreign app by passing ?app_id=other.
     # Must run before executor availability checks so auth errors take priority.
-    context_overrides = context_overrides or {}
     explicit_app_id = context_overrides.get("app_id") or request.query_params.get("app_id")
     if explicit_app_id and principal is not None:
         validate_path_app_id(principal, str(explicit_app_id))
@@ -390,8 +433,17 @@ async def execute_module_action_get(
     request: Request,
     principal: UserPrincipal | None = Depends(optional_user),
 ):
-    reserved_keys = set(_RESERVED_CONTEXT_KEYS)
-    params = {key: value for key, value in request.query_params.items() if key not in reserved_keys}
+    # Reserved execution-context words are query-string-only here and are
+    # never promoted into the trusted execution context from GET query
+    # params (that would let an unauthenticated caller set app_id/user_id/etc
+    # via a URL). app_id has its own explicit, IDOR-guarded query fallback in
+    # _execute_module_action; the rest are simply not meaningful as GET
+    # action inputs today, so they are stripped to avoid handler TypeErrors.
+    params = {
+        key: value
+        for key, value in request.query_params.items()
+        if key not in _RESERVED_CONTEXT_KEYS
+    }
     return await _execute_module_action(
         module_name=module_name,
         action_name=action_name,
