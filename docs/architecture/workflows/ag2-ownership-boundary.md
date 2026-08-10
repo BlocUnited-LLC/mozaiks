@@ -106,6 +106,44 @@ launching deterministically.
 This keeps AG2 responsible for agent execution mechanics while keeping Mozaiks
 responsible for app-specific artifact and lifecycle policy.
 
+## AG2 KnowledgeStore Injection Seam
+
+AG2's `KnowledgeStore` protocol (`ag2.knowledge.KnowledgeStore`) is the
+virtual path-based store for all agent workflow memory. AG2 owns this
+abstraction; Mozaiks must not create a parallel knowledge database layer.
+
+The `AG2NetworkRunnerRequest.knowledge_store` field is the narrow injection
+point. When `None` (the default), `AG2NetworkRunner` creates a fresh
+`MemoryKnowledgeStore()` per Hub — the safe isolated default for local
+development and test runs. An operator or hosted deployment may supply any
+AG2-compatible implementation (Memory, Sqlite, Disk, Redis, Locked, or a
+custom duck-typed store) without modifying OSS code.
+
+**Lifecycle contract:**
+- One Hub is opened per workflow run (or per live session kept alive for
+  paused runs).
+- `Hub.close()` does NOT close the store; store lifetime is owned by the
+  caller that constructs it.
+- Two runs that receive distinct store instances share no AG2 workflow
+  memory. A single shared store (e.g. Redis with a namespace prefix) may be
+  passed intentionally across runs — namespace/tenant isolation is the
+  operator's responsibility.
+
+**Security contract:**
+- An injected KnowledgeStore is trusted operator runtime configuration. It
+  can observe AG2 workflow/network memory for every run that uses it.
+- Production credentials must not flow into generated app bundles through
+  this seam.
+- This seam does not grant Mozaiks tenant or platform authority.
+
+**Threading path:**
+```
+run_workflow_orchestration(knowledge_store=...)
+  → _run_ag2_network_phase(knowledge_store=...)
+    → AG2NetworkRunnerRequest(knowledge_store=...)
+      → Hub.open(request.knowledge_store or MemoryKnowledgeStore(), ...)
+```
+
 ## Review Checklist
 
 Before adding or changing workflow runtime code, confirm:

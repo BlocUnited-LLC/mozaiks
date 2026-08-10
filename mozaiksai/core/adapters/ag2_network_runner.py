@@ -17,7 +17,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from ag2.knowledge import MemoryKnowledgeStore
+from ag2.knowledge import KnowledgeStore, MemoryKnowledgeStore
 from ag2.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
@@ -97,6 +97,33 @@ class AG2NetworkRunnerRequest:
     close_timeout_seconds: float = 120.0
     attach_network_plugin: bool = True
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
+    # ---------------------------------------------------------------------------
+    # AG2 KnowledgeStore injection seam
+    # ---------------------------------------------------------------------------
+    # Accepts an AG2-native KnowledgeStore instance (ag2.knowledge.KnowledgeStore
+    # protocol). When None the runner creates a fresh MemoryKnowledgeStore per
+    # Hub — the safe default for local development and test isolation.
+    #
+    # Lifecycle notes:
+    #   - One Hub is created per workflow run (or per live session, kept alive for
+    #     paused runs). Hub.close() does NOT close the store; store lifetime is
+    #     owned by the caller that constructs it.
+    #   - A durable operator-owned store (e.g. SqliteKnowledgeStore or
+    #     RedisKnowledgeStore) may be intentionally shared across runs. The caller
+    #     is responsible for namespace isolation and lifecycle management.
+    #   - Two runs that receive distinct store instances will not share AG2
+    #     workflow memory between them.
+    #
+    # Security notes:
+    #   - Injected KnowledgeStore code and storage are trusted operator runtime
+    #     configuration. The store can observe AG2 workflow/network memory for
+    #     every run that uses it.
+    #   - Production credentials (keys, tokens) must not flow into generated app
+    #     bundles through this seam; configure the store outside bundle artifacts.
+    #   - This seam does not grant production mutation authority over Mozaiks
+    #     tenant or platform data; AG2 memory/knowledge controls are engine-level,
+    #     not Mozaiks-level authority.
+    knowledge_store: KnowledgeStore | None = None
 
 
 @dataclass(slots=True)
@@ -143,7 +170,7 @@ class AG2NetworkRunner:
             )
 
         hub = await Hub.open(
-            MemoryKnowledgeStore(),
+            request.knowledge_store if request.knowledge_store is not None else MemoryKnowledgeStore(),
             ttl_sweep_interval=0,
             expectation_sweep_interval=0,
         )
