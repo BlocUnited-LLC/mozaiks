@@ -136,6 +136,17 @@ def test_mozaikspay_provider_api_contract_ships() -> None:
     assert content.get("contract_id") == "mozaikspay_provider_api"
 
 
+def test_mozaikspay_provider_api_contract_is_provider_compatible() -> None:
+    """The machine-readable contract must not imply only BlocUnited's hosted service can satisfy it."""
+    api_contract = MOZAIKSPAY / "provider_api_contract.yaml"
+    text = api_contract.read_text(encoding="utf-8")
+
+    assert "selected MozaiksPay-compatible provider" in text
+    assert "self-hosted or alternative" in text
+    assert "Served by the MozaiksPay hosted platform" not in text
+    assert "hosted billing webhook" not in text
+
+
 def test_mozaikspay_public_provider_contract_doc_ships() -> None:
     """The public docs must explain how a compatible provider replaces MozaiksPay."""
     doc = WORKSPACE / "docs" / "architecture" / "modules-systems" / "mozaikspay-provider-contract.md"

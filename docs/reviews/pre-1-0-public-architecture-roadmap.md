@@ -14,14 +14,18 @@ Status: approved for this documentation pass.
 
 ## Phase 1 — Managed Capability Boundary Review
 
-Status: approved for future review.
+Status: completed.
 
-- Review MozaiksPay public integration guidance.
-- Preserve MozaiksPay as the recommended/default monetization provider where
+- MozaiksPay remains the recommended/default monetization provider where
   currently intended.
-- Confirm the split between app-facing capability contracts and hosted
-  implementation details.
-- Confirm self-hosted replacement paths for compatible payment providers.
+- The public MozaiksPay-compatible provider contract is documented in
+  `docs/architecture/modules-systems/mozaikspay-provider-contract.md`.
+- Self-hosted and alternative provider replacement paths are documented through
+  the generated app facade/client, provider API, entitlement, and fulfillment
+  boundaries.
+- Hosted payment processor, wallet, payout, settlement, merchant operation,
+  production authority, and provider credential topology details remain outside
+  the OSS pack contract.
 
 ## Phase 2 — Strategy Seams
 
