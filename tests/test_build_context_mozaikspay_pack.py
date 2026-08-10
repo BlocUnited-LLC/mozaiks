@@ -136,6 +136,44 @@ def test_mozaikspay_provider_api_contract_ships() -> None:
     assert content.get("contract_id") == "mozaikspay_provider_api"
 
 
+def test_mozaikspay_public_provider_contract_doc_ships() -> None:
+    """The public docs must explain how a compatible provider replaces MozaiksPay."""
+    doc = WORKSPACE / "docs" / "architecture" / "modules-systems" / "mozaikspay-provider-contract.md"
+    assert doc.exists(), "MozaiksPay provider replacement contract doc must ship"
+
+    text = doc.read_text(encoding="utf-8")
+    assert "MozaiksPay is the default managed monetization provider" in text
+    assert "compatible provider can replace the hosted" in text
+    assert "provider_api_contract.yaml" in text
+    assert "GET /api/mozaikspay/v1/subscription/status" in text
+    assert "POST /api/mozaikspay/v1/billing-portal/session" in text
+    assert "POST /api/mozaikspay/v1/subscription/checkout-session" in text
+    assert "POST /api/mozaikspay/v1/tokens/top-up-session" in text
+    assert "wallet, payout, settlement" in text
+
+
+def test_mozaikspay_pack_contract_avoids_hosted_implementation_topology() -> None:
+    """The OSS pack can describe provider lifecycle needs without naming App Zero internals."""
+    text = (MOZAIKSPAY / "contract.yaml").read_text(encoding="utf-8")
+
+    forbidden_hosted_details = (
+        "hosted.hosting.app.deployed",
+        "hosted_billing",
+        "provision_app_billing_plans",
+        "Stripe products",
+        "Stripe prices",
+        "price_ids",
+        "hosted.billing.app_billing_plans",
+    )
+    for detail in forbidden_hosted_details:
+        assert detail not in text
+
+    contract = _read_yaml(MOZAIKSPAY / "contract.yaml")
+    boundary = contract.get("provider_lifecycle_boundary") or []
+    assert boundary
+    assert boundary[0]["provider_role"] == "mozaikspay_compatible_provider"
+
+
 def test_mozaikspay_provider_api_contract_declares_required_response_fields() -> None:
     contract = _read_yaml(MOZAIKSPAY / "contract.yaml")
     api = _read_yaml(MOZAIKSPAY / "provider_api_contract.yaml")

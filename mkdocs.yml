@@ -175,6 +175,7 @@ nav:
               - Internal Messaging: architecture/modules-systems/internal-messaging.md
               - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
               - Managed Capability Packs: architecture/modules-systems/managed-capability-packs.md
+              - MozaiksPay Provider Contract: architecture/modules-systems/mozaikspay-provider-contract.md
               - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
 
       # ── 3. AI Workflows ──────────────────────────────────────────────────────
