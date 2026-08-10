@@ -134,10 +134,10 @@ def normalize_module_event_provenance(
     """Normalize structured and flat historical event envelopes into provenance."""
 
     envelope = envelope if isinstance(envelope, dict) else {}
-    source = envelope.get("source") if isinstance(envelope.get("source"), dict) else {}
-    tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
-    actor = envelope.get("actor") if isinstance(envelope.get("actor"), dict) else {}
-    correlation = envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {}
+    source = _mapping(envelope.get("source"))
+    tenant = _mapping(envelope.get("tenant"))
+    actor = _mapping(envelope.get("actor"))
+    correlation = _mapping(envelope.get("correlation"))
 
     is_structured = any(
         isinstance(envelope.get(key), dict)
@@ -194,7 +194,7 @@ def normalize_module_event_provenance(
 def normalize_module_reaction_provenance(reaction: dict[str, Any]) -> ModuleReactionProvenance:
     """Normalize one reactions.yaml reaction dict into provenance."""
 
-    target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
+    target = _mapping(reaction.get("target"))
     target_kind = _clean(target.get("kind")) or "unknown"
     if target_kind not in {"handler", "capability", "notification", "service_adapter"}:
         target_kind = "unknown"
@@ -258,3 +258,7 @@ def build_module_reaction_audit(
 def _clean(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}

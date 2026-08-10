@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,6 +18,7 @@ from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import validate_path_app_id
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
+    ModuleDispatchAuthorityKind,
     ModuleDispatchProvenance,
 )
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
@@ -249,7 +250,10 @@ async def _execute_module_action(
         )
     else:
         granted_permissions = list(dispatch_scope.get("permissions") or [])
-        authority_kind = "authenticated_user" if principal is not None else "public_http"
+        authority_kind = cast(
+            ModuleDispatchAuthorityKind,
+            "authenticated_user" if principal is not None else "public_http",
+        )
         authority = ModuleDispatchAuthority(
             kind=authority_kind,
             permission_mode="enforce",

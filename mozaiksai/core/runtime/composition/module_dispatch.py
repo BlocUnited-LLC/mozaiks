@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
@@ -152,4 +152,4 @@ async def dispatch_module_action(
         authority=authority,
         provenance=provenance,
     )
-    return await executor.execute(module_request, context=None)
+    return cast(ModuleResult, await executor.execute(module_request, context=None))
