@@ -277,6 +277,14 @@ gh pr list --state open           # see what other agents have in flight
 git log origin/main --oneline -5  # see what recently landed
 ```
 
+Never branch off another open PR's still-unmerged branch, even as a "hard
+dependency" — you inherit its bugs and every later fix has to be re-propagated
+into your branch too. Wait for it to merge (green CI, actually in `main`) and
+branch from fresh `origin/main` instead. Always work in an isolated worktree
+(`git worktree add .local/worktrees/<task-name> origin/main -b cc/<desc>`),
+never directly in the shared main checkout — other agents run git commands
+there concurrently and will switch branches or sweep in unrelated edits.
+
 **Branch workflow — always use feature branches:**
 ```bash
 git checkout main && git reset --hard origin/main
@@ -284,8 +292,14 @@ git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
 # ... work, commit ...
 git push -u origin cc/<description>
 gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch --auto
+gh pr merge <number> --squash --delete-branch   # auto-merge is disabled repo-wide; merge manually once checks pass
 ```
+
+Before opening the PR, run `ruff check .` and `pytest -q --no-cov` locally in
+the worktree. If a check still fails, confirm via `git show origin/main:<path>`
+whether it's pre-existing on `main` before assuming it's your bug — and if a
+check fails identically across multiple unrelated PRs, it's a repo-wide `main`
+regression blocking everyone; fix it first with a small isolated hotfix PR.
 
 Primary repo ownership (avoids overlap by default):
 
