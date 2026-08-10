@@ -292,7 +292,7 @@ git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
 # ... work, commit ...
 git push -u origin cc/<description>
 gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch   # auto-merge is disabled repo-wide; merge manually once checks pass
+gh pr merge <number> --squash --delete-branch --auto   # auto-merge is enabled repo-wide; request it right away, don't wait on CI
 ```
 
 Before opening the PR, run `ruff check .` and `pytest -q --no-cov` locally in

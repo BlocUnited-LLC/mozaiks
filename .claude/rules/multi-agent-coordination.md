@@ -66,8 +66,14 @@ git checkout -b cc/<short-description>    # cc/ prefix = Claude Code
 # ... do work, commit ...
 git push -u origin cc/<short-description>
 gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch   # auto-merge is disabled repo-wide; merge manually once checks pass
+gh pr merge <number> --squash --delete-branch --auto
 ```
+
+Auto-merge is enabled repo-wide. Request it right when you open the PR — do
+not wait around watching CI yourself. GitHub merges automatically once every
+required check passes, so nobody has to remember to come back and click
+merge. If a check fails, auto-merge just never fires; fix the check and the
+same `--auto` request still applies once you push again.
 
 ## Branch Naming Convention
 
