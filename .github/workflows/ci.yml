@@ -167,6 +167,9 @@ jobs:
           print("Source hygiene scan passed.")
           PY
 
+      - name: Governance guardrails
+        run: python scripts/governance_guardrails.py --all --errors-only
+
       - name: Run ruff
         run: ruff check . --output-format=github
 

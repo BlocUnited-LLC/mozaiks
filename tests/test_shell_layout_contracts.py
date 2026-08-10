@@ -85,30 +85,19 @@ def test_platform_transitions_stay_declarative() -> None:
     assert not (workflows_root / "extended_orchestration" / "ui" / "index.js").exists()
 
 
-def test_build_satisfaction_transition_is_optional_and_registered() -> None:
+def test_default_build_sequence_does_not_collect_satisfaction() -> None:
     registry = json.loads(
         _read("factory_app/workflows/extended_orchestration/extension_registry.json")
     )
     transitions = {transition["id"]: transition for transition in registry["transitions"]}
-    transition = transitions["build_satisfaction_rating"]
-
-    assert transition["optional"] is True
-    assert transition["transition_type"] == "user_choice_context"
-    assert transition["ui"]["component"] == "BuildSatisfactionRating"
-    assert {option["id"] for option in transition["options"]} == {"rated", "skip"}
-    assert all(option["route_to"] == "workflow_complete" for option in transition["options"])
+    assert "build_satisfaction_rating" not in transitions
 
     build_sequence = next(sequence for sequence in registry["workflow_sequences"] if sequence["id"] == "build")
-    assert build_sequence["steps"][-1] == {"transition": "build_satisfaction_rating"}
+    assert build_sequence["steps"][-1] == {"transition": "app_review"}
+    assert {"transition": "build_satisfaction_rating"} not in build_sequence["steps"]
 
     transition_exports = _read("factory_app/workflows/extended_orchestration/ui/index.js")
-    transition_component = _read(
-        "factory_app/workflows/extended_orchestration/ui/transitions/BuildSatisfactionRating.js"
-    )
-    assert "BuildSatisfactionRating" in transition_exports
-    assert "/api/modules/build_intelligence/record_build_satisfaction" in transition_component
-    assert "onResolve('rated', { satisfaction_rating: selected })" in transition_component
-    assert "onResolve('skip', {})" in transition_component
+    assert "BuildSatisfactionRating" not in transition_exports
 
 
 def test_app_review_revision_event_preserves_refinement_provenance() -> None:

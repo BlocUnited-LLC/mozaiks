@@ -55,6 +55,10 @@ from mozaiksai.core.runtime.composition.extensions import (
     start_module_services,
     stop_services,
 )
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
@@ -1807,6 +1811,14 @@ async def get_profile_panels(
                     auth_token=None,
                     correlation_id=None,
                     granted_permissions=list(principal.scopes) if principal else None,
+                    authority=ModuleDispatchAuthority(
+                        kind="authenticated_user",
+                        permission_mode="enforce",
+                        reason="platform profile panel hydration",
+                        actor_id=viewer_user_id,
+                        permissions=tuple(principal.scopes) if principal else (),
+                    ),
+                    provenance=ModuleDispatchProvenance(surface="profile_panel"),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1909,6 +1921,14 @@ async def get_profile_tabs(
                     auth_token=None,
                     correlation_id=None,
                     granted_permissions=list(principal.scopes) if principal else None,
+                    authority=ModuleDispatchAuthority(
+                        kind="authenticated_user",
+                        permission_mode="enforce",
+                        reason="platform profile tab hydration",
+                        actor_id=viewer_user_id,
+                        permissions=tuple(principal.scopes) if principal else (),
+                    ),
+                    provenance=ModuleDispatchProvenance(surface="profile_tab"),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -2043,6 +2063,14 @@ async def get_profile_pages(
                     auth_token=None,
                     correlation_id=None,
                     granted_permissions=list(principal.scopes) if principal else None,
+                    authority=ModuleDispatchAuthority(
+                        kind="authenticated_user",
+                        permission_mode="enforce",
+                        reason="platform profile page hydration",
+                        actor_id=viewer_user_id,
+                        permissions=tuple(principal.scopes) if principal else (),
+                    ),
+                    provenance=ModuleDispatchProvenance(surface="profile_page"),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -2192,6 +2220,14 @@ async def get_current_user_relationships(
                 auth_token=None,
                 correlation_id=None,
                 granted_permissions=list(principal.scopes) if principal else None,
+                authority=ModuleDispatchAuthority(
+                    kind="authenticated_user",
+                    permission_mode="enforce",
+                    reason="platform relationship provider hydration",
+                    actor_id=user_id,
+                    permissions=tuple(principal.scopes) if principal else (),
+                ),
+                provenance=ModuleDispatchProvenance(surface="relationship_provider"),
             )
             result = await module_executor.execute(req, context=None)
             if result.success:

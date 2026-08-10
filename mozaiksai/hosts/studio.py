@@ -102,6 +102,7 @@ from mozaiksai.core.session.model import (
     TriggerInput,
 )
 from mozaiksai.core.session.router import configure_session_router, get_session_router
+from mozaiksai.core.studio.scope import resolve_studio_scope
 from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
@@ -115,7 +116,6 @@ from mozaiksai.hosts import platform as platform_app
 from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
-    resolve_scope_from_principal,
 )
 
 app = platform_app.app
@@ -600,12 +600,13 @@ def _resolve_studio_scope(
     user_id: str | None = None,
 ) -> tuple[str, str]:
     """Resolve app/user scope for Studio endpoints in both auth modes."""
-    return resolve_scope_from_principal(
+    scope = resolve_studio_scope(
         principal,
         app_id=app_id,
         user_id=user_id,
         default_user_id=platform_app._DEFAULT_PROFILE_USER_ID,
     )
+    return scope.app_id, scope.user_id
 
 
 @app.get("/api/shell-config")

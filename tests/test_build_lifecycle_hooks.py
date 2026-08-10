@@ -445,6 +445,9 @@ async def test_emit_build_completed_schedules_anonymized_telemetry_for_terminal_
     assert telemetry_payload["workflow_name"] == "AppGenerator"
     assert telemetry_payload["final_status"] == "completed"
     assert telemetry_payload["build_id_hash"]
+    assert "event" not in telemetry_payload
+    assert "rating" not in telemetry_payload
+    assert "sequence_id" not in telemetry_payload
     assert "build_reg_1" not in json.dumps(telemetry_payload)
 
 
@@ -497,6 +500,9 @@ async def test_emit_build_failed_schedules_anonymized_telemetry_for_journey_work
     assert telemetry_payload["workflow_name"] == "ValueEngine"
     assert telemetry_payload["final_status"] == "failed"
     assert telemetry_payload["build_id_hash"]
+    assert "event" not in telemetry_payload
+    assert "rating" not in telemetry_payload
+    assert "sequence_id" not in telemetry_payload
     assert "build_reg_1" not in json.dumps(telemetry_payload)
 
 

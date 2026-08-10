@@ -186,6 +186,7 @@ class AuditLogger:
         error: str | None = None,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         await self.log(AuditRecord(
             kind=AuditEventKind.MODULE_ACTION if outcome == "ok" else AuditEventKind.MODULE_ACTION_FAIL,
@@ -198,6 +199,7 @@ class AuditLogger:
             inputs_hash=_hash_inputs(params) if params is not None else None,
             outcome=outcome,
             error=error,
+            extra=dict(extra or {}),
         ))
 
     async def log_admin_access(
