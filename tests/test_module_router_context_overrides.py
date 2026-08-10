@@ -119,7 +119,7 @@ def test_reconcile_reserved_params_strips_undeclared_reserved_key():
 
 
 def test_split_post_body_raw_shape_preserves_reserved_keys_for_later_reconciliation():
-    """The legacy flat (non-enveloped) body shape used by the app's own
+    """The flat (non-enveloped) body shape used by the app's own
     frontend module API client must not strip reserved words up front, since
     whether a word like app_id belongs in params depends on the target
     action's schema, which _split_post_body does not have access to."""
@@ -201,7 +201,7 @@ async def test_module_action_own_user_id_param_does_not_hijack_actor_identity(mo
 
 @pytest.mark.asyncio
 async def test_module_action_own_user_id_param_does_not_hijack_actor_identity_raw_body(monkeypatch):
-    """Same regression as above, but through the legacy flat/raw body shape —
+    """Same regression as above, but through the flat/raw body shape —
     this is the exact shape the app's own frontend moduleApi.js client sends,
     so it must be protected the same way as the enveloped shape."""
     executor = _FakeModuleExecutor(
@@ -266,7 +266,7 @@ async def test_module_action_own_user_id_param_does_not_hijack_actor_identity_ra
 async def test_module_action_raw_body_keeps_declared_app_id_param(monkeypatch):
     """Regression test for the app_id counterpart of the same bug class: an
     action such as community_membership.get_app_community_summary declares
-    app_id as a required business input. Dispatched through the legacy flat
+    app_id as a required business input. Dispatched through the flat
     body shape, app_id must survive into params (not just context) or schema
     validation on the real executor would fail with
     "'app_id' is a required property"."""

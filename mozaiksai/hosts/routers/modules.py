@@ -75,7 +75,7 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     """Split a module POST body into action params and execution context.
 
     The canonical module API payload is {"params": {...}, "context": {...}}.
-    Callers may also POST a flat legacy body with no "params"/"context"
+    Callers may also POST a flat body with no "params"/"context"
     envelope, in which case the whole body (minus any stray "context"/"params"
     keys) is treated as action params. This is purely a structural split:
     reserved execution-context words that also appear in params (app_id,
@@ -125,7 +125,7 @@ def _reconcile_reserved_params(
     """Reconcile reserved execution-context words that also appear in action params.
 
     Mutates params/context_overrides in place, regardless of whether the caller
-    used the enveloped {params, context} shape or a flat legacy body — both
+    used the enveloped {params, context} shape or a flat body — both
     shapes can collide with an action's own declared input properties the same
     way, so both need the same schema-aware treatment. For each reserved word
     present in params:
@@ -145,7 +145,7 @@ def _reconcile_reserved_params(
         is invoked as handler.method(ctx, **params) and does not accept this
         key as a keyword argument — leaving it in params would raise a
         TypeError instead of reaching the handler. This also preserves the
-        legacy flat-body convention (a raw POST body's own reserved words,
+        original flat-body convention (a raw POST body's own reserved words,
         such as a bare top-level "user_id", set the execution context) for
         actions that do not declare that word as one of their own inputs.
 
