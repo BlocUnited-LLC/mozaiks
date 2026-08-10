@@ -34,3 +34,22 @@ Generic framework behavior needed by a hosted app should be exposed through a
 stable public Mozaiks contract. Proprietary provider execution, production
 credentials, money movement, hosted operations, and cross-customer intelligence
 remain app/operator-layer behavior.
+
+## Public Framework Contracts
+
+Canonical applications may depend on these public framework seams:
+
+- `mozaiksai.hosts.studio:app` for Studio host composition.
+- `mozaiksai.core.studio:resolve_studio_scope` for app/user Studio scope.
+- `mozaiksai.core.runtime.composition:PlatformExtensionBundle` for typed
+  platform extension hooks.
+- `mozaiksai.core.runtime.composition:dispatch_module_action` for app-local
+  module dispatch with concrete permissions.
+- `mozaiksai.core.validation:validate_generated_app_bundle` for generated app
+  bundle validation.
+
+Dispatch authority and event provenance are framework evidence only. They
+explain why the framework allowed dispatch or where an event/reaction came
+from; they do not authorize production infrastructure, DNS, payments, secrets,
+credentials, or other operator state. Ordinary public app-local dispatch must
+not expose trusted bypass through omitted permissions.
