@@ -30,7 +30,7 @@ import inspect
 import json
 import os
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -43,10 +43,15 @@ from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAda
 from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
 from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAudit,
     ModuleDispatchAuthority,
     ModuleDispatchProvenance,
+    ModuleEntitlementCheck,
+    ModuleExecutionPolicyInput,
+    ModulePermissionCheck,
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
@@ -290,6 +295,16 @@ class ModuleExecutor:
         dispatch_provenance = request.provenance or ModuleDispatchProvenance(
             correlation_id=request.correlation_id,
         )
+        permission_check = self._build_permission_check(request)
+        entitlement_check = ModuleEntitlementCheck(checked=False, status="skipped")
+        dispatch_audit = self._build_dispatch_audit(
+            request,
+            dispatch_authority,
+            dispatch_provenance,
+            permission_check,
+            entitlement_check,
+            outcome="allowed",
+        )
         handler = self._modules.get(request.module)
         if handler is None:
             return ModuleResult(
@@ -307,21 +322,29 @@ class ModuleExecutor:
                 error_code="ACTION_NOT_FOUND",
             )
 
-        # Permission enforcement — only when the caller supplies granted_permissions.
-        # None means a trusted internal/AI-workflow call; bypass silently.
-        if request.granted_permissions is not None:
-            required = self._action_permissions.get(request.module, {}).get(request.action, [])
-            granted = set(request.granted_permissions)
-            missing = [p for p in required if p not in granted]
-            if missing:
-                logger.warning(
-                    "MODULE_PERMISSION_DENIED: module=%s action=%s missing=%s user=%s",
-                    request.module, request.action, missing, request.user_id)
-                return ModuleResult(
-                    success=False,
-                    error=f"Permission denied for {request.module}.{request.action}: missing {missing}",
-                    error_code="PERMISSION_DENIED",
-                )
+        if not permission_check.allowed:
+            logger.warning(
+                "MODULE_PERMISSION_DENIED: module=%s action=%s missing=%s user=%s",
+                request.module,
+                request.action,
+                list(permission_check.missing_permissions),
+                request.user_id,
+            )
+            denied_audit = replace(
+                dispatch_audit,
+                outcome="denied",
+                reason="permission denied",
+                permission_check=permission_check,
+            )
+            asyncio.create_task(self._emit_dispatch_audit(denied_audit, error="PERMISSION_DENIED"))
+            return ModuleResult(
+                success=False,
+                error=(
+                    f"Permission denied for {request.module}.{request.action}: "
+                    f"missing {list(permission_check.missing_permissions)}"
+                ),
+                error_code="PERMISSION_DENIED",
+            )
 
         # Entitlement check — only when the action declares an entitlement_gate.
         # Trusted internal/AI-workflow calls (granted_permissions is None) bypass
@@ -336,15 +359,60 @@ class ModuleExecutor:
                     tenant_id=request.tenant_id,
                     workspace_id=request.workspace_id,
                 )
+                entitlement_check = ModuleEntitlementCheck(
+                    checked=True,
+                    status="granted" if ent_result.granted else "denied",
+                    capability_id=capability_id,
+                    reason=ent_result.reason,
+                )
                 if not ent_result.granted:
                     logger.warning(
                         "MODULE_ENTITLEMENT_DENIED: module=%s action=%s capability=%s reason=%s user=%s",
                         request.module, request.action, capability_id, ent_result.reason, request.user_id)
+                    denied_audit = replace(
+                        dispatch_audit,
+                        outcome="denied",
+                        reason="entitlement required",
+                        entitlement_check=entitlement_check,
+                    )
+                    asyncio.create_task(self._emit_dispatch_audit(denied_audit, error="ENTITLEMENT_REQUIRED"))
                     return ModuleResult(
                         success=False,
                         error=f"Entitlement required for {request.module}.{request.action}: {capability_id}",
                         error_code="ENTITLEMENT_REQUIRED",
                     )
+            else:
+                entitlement_check = ModuleEntitlementCheck(checked=False, status="not_applicable")
+        else:
+            entitlement_check = ModuleEntitlementCheck(checked=False, status="skipped")
+
+        dispatch_audit = replace(
+            dispatch_audit,
+            permission_check=permission_check,
+            entitlement_check=entitlement_check,
+        )
+        policy_input = ModuleExecutionPolicyInput(
+            request=request,
+            authority=dispatch_authority,
+            provenance=dispatch_provenance,
+            permission_check=permission_check,
+            entitlement_check=entitlement_check,
+        )
+        policy_decision = await get_platform_hooks().call_before_module_execution(policy_input)
+        if not policy_decision.allowed:
+            reason = policy_decision.reason or "module execution denied by application policy"
+            denied_audit = replace(
+                dispatch_audit,
+                outcome="denied",
+                reason=reason,
+                audit_tags=policy_decision.audit_tags,
+            )
+            asyncio.create_task(self._emit_dispatch_audit(denied_audit, error="MODULE_POLICY_DENIED"))
+            return ModuleResult(
+                success=False,
+                error=reason,
+                error_code="PERMISSION_DENIED",
+            )
 
         # Input schema validation — applied before dispatch when a schema is declared.
         schemas = self._action_schemas.get(request.module, {}).get(request.action, {})
@@ -400,6 +468,7 @@ class ModuleExecutor:
                 _emit=self._build_context_emitter(request),  # type: ignore[arg-type]
                 dispatch_authority=dispatch_authority,
                 dispatch_provenance=dispatch_provenance,
+                dispatch_audit=dispatch_audit,
             )
 
         timeout = _action_timeout()
@@ -447,15 +516,9 @@ class ModuleExecutor:
                 exc_info=True,
             )
             asyncio.create_task(
-                get_audit_logger().log_module_action(
-                    actor_id=request.user_id or "system",
-                    app_id=request.app_id or None,
-                    module_id=request.module,
-                    action_id=request.action,
-                    outcome="fail",
+                self._emit_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason=type(exc).__name__),
                     error=type(exc).__name__,
-                    tenant_id=request.tenant_id,
-                    workspace_id=request.workspace_id,
                 )
             )
             return ModuleResult(
@@ -496,16 +559,7 @@ class ModuleExecutor:
             request.module, request.action, request.app_id)
         # Audit trail — fire-and-forget; never blocks the action response.
         asyncio.create_task(
-            get_audit_logger().log_module_action(
-                actor_id=request.user_id or "system",
-                app_id=request.app_id or None,
-                module_id=request.module,
-                action_id=request.action,
-                params=None,  # Do not log params — may contain PII
-                outcome="ok",
-                tenant_id=request.tenant_id,
-                workspace_id=request.workspace_id,
-            )
+            self._emit_dispatch_audit(replace(dispatch_audit, outcome="ok"))
         )
         return ModuleResult(success=True, data=result)
 
@@ -518,6 +572,68 @@ class ModuleExecutor:
 
     def can_handle(self, target: str) -> bool:
         return target in self._modules
+
+    def _build_permission_check(self, request: ModuleRequest) -> ModulePermissionCheck:
+        if request.granted_permissions is None:
+            return ModulePermissionCheck(checked=False)
+        required = tuple(self._action_permissions.get(request.module, {}).get(request.action, []))
+        granted = tuple(request.granted_permissions)
+        granted_set = set(granted)
+        missing = tuple(permission for permission in required if permission not in granted_set)
+        return ModulePermissionCheck(
+            checked=True,
+            granted_permissions=granted,
+            required_permissions=required,
+            missing_permissions=missing,
+        )
+
+    def _build_dispatch_audit(
+        self,
+        request: ModuleRequest,
+        authority: ModuleDispatchAuthority,
+        provenance: ModuleDispatchProvenance,
+        permission_check: ModulePermissionCheck,
+        entitlement_check: ModuleEntitlementCheck,
+        *,
+        outcome: str,
+        reason: str | None = None,
+    ) -> ModuleDispatchAudit:
+        return ModuleDispatchAudit(
+            app_id=request.app_id or None,
+            tenant_id=request.tenant_id,
+            workspace_id=request.workspace_id,
+            actor_id=request.user_id,
+            module=request.module,
+            action=request.action,
+            authority_kind=authority.kind,
+            permission_mode=authority.permission_mode,
+            permission_check=permission_check,
+            entitlement_check=entitlement_check,
+            correlation_id=provenance.correlation_id or request.correlation_id,
+            causation_id=provenance.causation_id,
+            outcome=outcome,  # type: ignore[arg-type]
+            reason=reason,
+        )
+
+    async def _emit_dispatch_audit(
+        self,
+        audit: ModuleDispatchAudit,
+        *,
+        error: str | None = None,
+    ) -> None:
+        await get_audit_logger().log_module_action(
+            actor_id=audit.actor_id or "system",
+            app_id=audit.app_id,
+            module_id=audit.module,
+            action_id=audit.action,
+            params=None,
+            outcome="ok" if audit.outcome == "ok" else audit.outcome,
+            error=error or audit.reason,
+            tenant_id=audit.tenant_id,
+            workspace_id=audit.workspace_id,
+            extra={"dispatch": audit.to_dict()},
+        )
+        await get_platform_hooks().call_module_dispatch_audit(audit)
 
     def _build_context_emitter(
         self,

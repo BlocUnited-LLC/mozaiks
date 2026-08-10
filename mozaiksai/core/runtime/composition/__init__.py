@@ -8,8 +8,13 @@ from .extensions import (
     stop_services,
 )
 from .module_authority import (
+    ModuleDispatchAudit,
     ModuleDispatchAuthority,
     ModuleDispatchProvenance,
+    ModuleEntitlementCheck,
+    ModuleExecutionPolicyDecision,
+    ModuleExecutionPolicyInput,
+    ModulePermissionCheck,
 )
 from .module_context import ModuleContext
 from .module_dispatch import (
@@ -39,8 +44,13 @@ __all__ = [
     "ExecutorRegistry",
     "ExecutorType",
     "ModuleContext",
+    "ModuleDispatchAudit",
     "ModuleDispatchAuthority",
     "ModuleDispatchProvenance",
+    "ModuleEntitlementCheck",
+    "ModuleExecutionPolicyDecision",
+    "ModuleExecutionPolicyInput",
+    "ModulePermissionCheck",
     "ModuleActionDispatchRequest",
     "ModuleDispatchMetadata",
     "ModuleDispatchScope",

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAudit,
     ModuleDispatchAuthority,
     ModuleDispatchProvenance,
 )
@@ -51,6 +52,7 @@ class ModuleContext:
     permissions: list[str] | None = None
     dispatch_authority: ModuleDispatchAuthority | None = None
     dispatch_provenance: ModuleDispatchProvenance | None = None
+    dispatch_audit: ModuleDispatchAudit | None = None
 
     # Resolved setting values for this module, scoped to the calling user.
     # Dict of {setting_id: resolved_value} — already merged from defaults,

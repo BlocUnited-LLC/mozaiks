@@ -58,6 +58,7 @@ GRANTED_PERMISSIONS_NONE_ALLOWLIST = {
     "scripts/governance_guardrails.py",
     "tests/test_governance_guardrails.py",
     "tests/test_module_action_dispatch_public_api.py",
+    "tests/test_module_dispatch_authority_policy.py",
     "tests/test_module_executor_dispatch.py",
     "tests/test_module_executor_permission_enforcement.py",
     "tests/test_module_loader_contracts.py",

@@ -63,6 +63,17 @@ Bundle keys (all optional):
         -> Optional[str]
         Resolve stale or case-insensitive workflow names to a loaded workflow.
 
+    before_module_execution
+                          async (policy_input) -> ModuleExecutionPolicyDecision | bool | tuple
+        Application/operator policy hook called after framework permission and
+        entitlement checks pass, before the module handler runs. Failures fail
+        closed for that dispatch.
+
+    module_dispatch_audit
+                          async (audit_record) -> None
+        Best-effort structured dispatch audit callback. Exceptions are logged
+        and do not affect the dispatch result.
+
     on_account_delete_complete
                           async (*, app_id: str, user_id: str,
                                   deletion_results: Dict[str, Any]) -> None
@@ -89,6 +100,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.composition.module_authority import ModuleExecutionPolicyDecision
 
 logger = get_workflow_logger("platform_hooks")
 
@@ -112,6 +124,8 @@ class PlatformExtensionBundle:
     module_scope_resolver: Callable | None = None
     workflow_ordering: Callable | None = None
     workflow_name_resolver: Callable | None = None
+    before_module_execution: Callable | None = None
+    module_dispatch_audit: Callable | None = None
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -128,6 +142,8 @@ _BUNDLE_KEYS = (
     "module_scope_resolver",
     "workflow_ordering",
     "workflow_name_resolver",
+    "before_module_execution",
+    "module_dispatch_audit",
 )
 
 
@@ -152,6 +168,8 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             module_scope_resolver=bundle.get("module_scope_resolver"),
             workflow_ordering=bundle.get("workflow_ordering"),
             workflow_name_resolver=bundle.get("workflow_name_resolver"),
+            before_module_execution=bundle.get("before_module_execution"),
+            module_dispatch_audit=bundle.get("module_dispatch_audit"),
         )
 
     if bundle is None or isinstance(bundle, (str, bytes, int, float, bool)):
@@ -172,6 +190,8 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         module_scope_resolver=getattr(bundle, "module_scope_resolver", None),
         workflow_ordering=getattr(bundle, "workflow_ordering", None),
         workflow_name_resolver=getattr(bundle, "workflow_name_resolver", None),
+        before_module_execution=getattr(bundle, "before_module_execution", None),
+        module_dispatch_audit=getattr(bundle, "module_dispatch_audit", None),
     )
 
 
@@ -204,6 +224,8 @@ class PlatformHookRegistry:
         self._module_scope_resolver_hooks: list[Callable] = []
         self._workflow_ordering_hooks: list[Callable] = []
         self._workflow_name_resolver_hooks: list[Callable] = []
+        self._before_module_execution_hooks: list[Callable] = []
+        self._module_dispatch_audit_hooks: list[Callable] = []
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -265,6 +287,8 @@ class PlatformHookRegistry:
             "module_scope_resolver": self._module_scope_resolver_hooks,
             "workflow_ordering": self._workflow_ordering_hooks,
             "workflow_name_resolver": self._workflow_name_resolver_hooks,
+            "before_module_execution": self._before_module_execution_hooks,
+            "module_dispatch_audit": self._module_dispatch_audit_hooks,
         }
         for key, target in slot_map.items():
             val = _get(key)
@@ -456,6 +480,37 @@ class PlatformHookRegistry:
             "permissions": permissions,
         }
 
+    async def call_before_module_execution(self, policy_input: Any) -> ModuleExecutionPolicyDecision:
+        """Run fail-closed module execution policy hooks."""
+
+        for hook in self._before_module_execution_hooks:
+            try:
+                res = hook(policy_input)
+                if inspect.isawaitable(res):
+                    res = await res
+                decision = _normalize_policy_decision(res)
+                if not decision.allowed:
+                    return decision
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_BEFORE_MODULE_EXECUTION_ERROR: %s", exc)
+                return ModuleExecutionPolicyDecision(
+                    allowed=False,
+                    reason="module execution policy hook failed",
+                    audit_tags={"policy_hook_error": type(exc).__name__},
+                )
+        return ModuleExecutionPolicyDecision(allowed=True)
+
+    async def call_module_dispatch_audit(self, audit_record: Any) -> None:
+        """Send structured module dispatch audit metadata to optional hooks."""
+
+        for hook in self._module_dispatch_audit_hooks:
+            try:
+                res = hook(audit_record)
+                if inspect.isawaitable(res):
+                    await res
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_MODULE_DISPATCH_AUDIT_ERROR: %s", exc)
+
     def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
         """Reorder the workflow list for frontend display."""
         result = list(workflow_names)
@@ -515,6 +570,14 @@ class PlatformHookRegistry:
     def has_startup(self) -> bool:
         return bool(self._startup_hooks)
 
+    @property
+    def has_before_module_execution(self) -> bool:
+        return bool(self._before_module_execution_hooks)
+
+    @property
+    def has_module_dispatch_audit(self) -> bool:
+        return bool(self._module_dispatch_audit_hooks)
+
     def summary(self) -> dict[str, Any]:
         return {
             "startup_hooks": len(self._startup_hooks),
@@ -524,9 +587,34 @@ class PlatformHookRegistry:
             "module_scope_resolver_hooks": len(self._module_scope_resolver_hooks),
             "workflow_ordering_hooks": len(self._workflow_ordering_hooks),
             "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
+            "before_module_execution_hooks": len(self._before_module_execution_hooks),
+            "module_dispatch_audit_hooks": len(self._module_dispatch_audit_hooks),
         }
 
 
 def get_platform_hooks() -> PlatformHookRegistry:
     """Return the singleton PlatformHookRegistry, loading env extensions on first call."""
     return PlatformHookRegistry.get_instance()
+
+
+def _normalize_policy_decision(value: Any) -> ModuleExecutionPolicyDecision:
+    if isinstance(value, ModuleExecutionPolicyDecision):
+        return value
+    if isinstance(value, bool):
+        return ModuleExecutionPolicyDecision(allowed=value)
+    if isinstance(value, tuple) and value:
+        allowed = bool(value[0])
+        reason = str(value[1]) if len(value) > 1 and value[1] else None
+        return ModuleExecutionPolicyDecision(allowed=allowed, reason=reason)
+    if isinstance(value, dict):
+        tags = value.get("audit_tags")
+        return ModuleExecutionPolicyDecision(
+            allowed=bool(value.get("allowed")),
+            reason=str(value.get("reason")) if value.get("reason") else None,
+            audit_tags=(
+                {str(k): str(v) for k, v in tags.items()}
+                if isinstance(tags, dict)
+                else {}
+            ),
+        )
+    return ModuleExecutionPolicyDecision(allowed=False, reason="invalid module execution policy decision")

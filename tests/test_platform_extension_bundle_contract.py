@@ -6,6 +6,7 @@ import pytest
 
 from mozaiksai.core.runtime.composition import (
     PLATFORM_EXTENSION_SCHEMA_VERSION,
+    ModuleExecutionPolicyDecision,
     PlatformExtensionBundle,
     PlatformHookRegistry,
 )
@@ -36,6 +37,34 @@ def test_legacy_dict_platform_extension_bundle_remains_supported() -> None:
     reg._register_bundle({"module_permission_resolver": MagicMock(return_value=[])})
 
     assert reg.has_module_permission_resolver is True
+
+
+def test_before_module_execution_hook_registers_from_typed_bundle() -> None:
+    hook = MagicMock(return_value=True)
+
+    reg = _fresh()
+    reg._register_bundle(PlatformExtensionBundle(before_module_execution=hook))
+
+    assert reg.has_before_module_execution is True
+
+
+def test_module_dispatch_audit_hook_registers_from_dict_bundle() -> None:
+    hook = MagicMock()
+
+    reg = _fresh()
+    reg._register_bundle({"module_dispatch_audit": hook})
+
+    assert reg.has_module_dispatch_audit is True
+
+
+@pytest.mark.asyncio
+async def test_empty_registry_allows_module_execution_policy_by_default() -> None:
+    reg = _fresh()
+
+    decision = await reg.call_before_module_execution(object())
+
+    assert isinstance(decision, ModuleExecutionPolicyDecision)
+    assert decision.allowed is True
 
 
 def test_schema_version_is_public_and_versioned() -> None:
