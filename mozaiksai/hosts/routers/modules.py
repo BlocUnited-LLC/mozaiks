@@ -98,8 +98,8 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     never auto-promoted this way (see _PROMOTABLE_PARAM_CONTEXT_KEYS) because
     action inputs frequently name a target subject, not the caller. Raw-body
     payloads still treat all reserved words (including user_id) as execution
-    context and remove them from action params to preserve the old dispatch
-    contract, since that legacy shape has no "params" input namespace to
+    context and remove them from action params to preserve the original dispatch
+    contract, since that flat shape has no "params" input namespace to
     collide with.
     """
     params_body = body.get("params")
@@ -112,7 +112,7 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
         params = dict(body)
     context_overrides: dict[str, Any] = dict(context_body) if isinstance(context_body, dict) else {}
 
-    # The legacy raw-body shape has no "params" input namespace, so every
+    # The flat raw-body shape has no "params" input namespace, so every
     # top-level reserved key (including user_id) has always unambiguously meant
     # execution context there. The canonical enveloped shape does have a
     # "params" input namespace, where "user_id" can legitimately be an action's
