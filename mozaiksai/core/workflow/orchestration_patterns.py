@@ -616,6 +616,7 @@ async def _run_ag2_network_phase(
     structured_registry: dict[str, Any],
     max_turns: int,
     agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
+    knowledge_store: Any = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -630,6 +631,7 @@ async def _run_ag2_network_phase(
             structured_registry=structured_registry,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
+            knowledge_store=knowledge_store,
         )
     )
 
@@ -647,6 +649,7 @@ async def run_workflow_orchestration(
     initial_agent_name_override: str | None = None,
     agents_factory: Callable | None = None,
     context_factory: Callable | None = None,
+    knowledge_store: Any = None,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     start_time = perf_counter()
@@ -1027,6 +1030,7 @@ async def run_workflow_orchestration(
                 structured_registry=structured_registry,
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
+                knowledge_store=knowledge_store,
             )
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
@@ -1091,11 +1095,12 @@ async def run_workflow_orchestration(
                         transition_rules=transition_rules,
                         initial_agent_name=continuation_agent,
                         initial_message="Continue with the completed deterministic task batch outputs.",
-                    context_variables=ctx_dict,
-                    structured_registry=structured_registry,
-                    max_turns=max_turns,
-                    agent_text_context_deriver=agent_text_context_deriver,
-                )
+                        context_variables=ctx_dict,
+                        structured_registry=structured_registry,
+                        max_turns=max_turns,
+                        agent_text_context_deriver=agent_text_context_deriver,
+                        knowledge_store=knowledge_store,
+                    )
                 else:
                     runner_result = first_phase_result
                     project_final_runner_result = False
@@ -1112,6 +1117,7 @@ async def run_workflow_orchestration(
                 structured_registry=structured_registry,
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
+                knowledge_store=knowledge_store,
             )
 
         await _emit_structured_once(runner_result, projected_sequence)
