@@ -3,7 +3,9 @@ contract_id: mozaikspay_provider_api
 description: >
   Machine-readable interface spec for the MozaiksPay provider API.
   Consumed by generated SaaS apps via mozaikspay_client.py.
-  Served by the MozaiksPay hosted platform (proprietary, separate repo).
+  Served by the selected MozaiksPay-compatible provider. The hosted MozaiksPay
+  service is the default provider implementation, but self-hosted or alternative
+  providers may satisfy this same app-facing contract.
 
   This file defines ONLY the public interface — request shape, response shape,
   auth scheme, and which fields are forbidden from responses. No payment provider
@@ -14,7 +16,7 @@ auth:
   headers:
     - name: Authorization
       format: "Bearer {api_key}"
-      description: App-scoped MozaiksPay API key issued by the hosted platform (mzk_live_ or mzk_test_ prefix).
+      description: App-scoped MozaiksPay-compatible API key issued by the selected provider.
       required: true
       secret: true
   credential_prefixes:
@@ -25,12 +27,12 @@ auth:
     scheme: client_credentials
     headers:
       - name: X-MozaiksPay-Client-Id
-        description: App-scoped client ID issued by the hosted platform (mpc_ prefix).
+        description: App-scoped client ID issued by the selected provider.
         required: true
         secret: false
       - name: Authorization
         format: "Bearer {client_secret}"
-        description: App-scoped client secret issued by the hosted platform (mps_ prefix).
+        description: App-scoped client secret issued by the selected provider.
         required: true
         secret: true
     credential_prefixes:
@@ -123,8 +125,8 @@ endpoints:
     description: >
       Create a hosted subscription checkout redirect session for a paid plan.
       The caller redirects their end-user to checkout_url. No OSS runtime state
-      is mutated by this call; subscription fulfillment is driven by the hosted
-      billing webhook after the payment provider confirms the subscription.
+      is mutated by this call; subscription fulfillment is driven by the selected
+      provider after the payment provider confirms the subscription.
     request_body:
       plan_id: { type: string, required: true }
       success_url: { type: string, format: https_url, required: true }
@@ -214,19 +216,19 @@ error_handling:
   application_errors:
     SUBSCRIPTION_NOT_FOUND: "No subscription record for the given scope."
     BILLING_CUSTOMER_NOT_FOUND: "Subscription exists but billing provider customer not yet linked."
-    MOZAIKSPAY_BILLING_NOT_CONFIGURED: "Hosted platform billing provider is not configured."
+    MOZAIKSPAY_BILLING_NOT_CONFIGURED: "Selected MozaiksPay-compatible provider is not configured."
     MOZAIKSPAY_BILLING_API_ERROR: "Billing provider returned an error."
     INVALID_INPUT: "Required field missing or unsafe URL."
     PLAN_NOT_CHECKOUTABLE: "Free/default plan cannot be purchased through checkout."
     CUSTOM_PLAN_REQUIRES_SALES: "Plan requires operator setup before self-serve checkout."
     SUBSCRIPTION_ALREADY_EXISTS: "The requested billing scope already has an active paid subscription."
-    MOZAIKSPAY_PRICE_NOT_CONFIGURED: "Hosted platform has no provider price mapping for the plan."
+    MOZAIKSPAY_PRICE_NOT_CONFIGURED: "Selected provider has no price mapping for the plan."
     TOKEN_TOP_UP_PRODUCT_NOT_FOUND: "The requested token top-up product is not declared by the app."
 
 drift_guard:
   description: >
     Changes to this file must be reflected in:
-    - The hosted platform server implementation (proprietary repo, provider_api.py)
+    - The selected provider server implementation
     - The generated client template (templates/services/integrations/mozaikspay_client.py)
     - The generated billing_portal schemas (templates/modules/billing_portal/backend/schemas.py)
     If any of these diverge, generated SaaS apps will break silently at runtime.
