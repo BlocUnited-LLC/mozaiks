@@ -137,7 +137,6 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         "coding_journey_selector",
         "database_setup_selector",
         "app_review",
-        "build_satisfaction_rating",
     ]
     assert graph.artifact_dependency_graph["workflow_bundle"] == [
         "design_docs",

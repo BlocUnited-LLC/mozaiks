@@ -40,11 +40,12 @@ def test_build_workflow_payload_anonymizes_build_id_and_clamps_metrics() -> None
 
 
 def test_build_satisfaction_payload_anonymizes_build_id_and_clamps_rating() -> None:
-    payload = telemetry.build_satisfaction_payload(
-        rating=99,
-        build_registry_id="raw-build-registry-id",
-        sequence_id="build",
-    )
+    with pytest.warns(PendingDeprecationWarning):
+        payload = telemetry.build_satisfaction_payload(
+            rating=99,
+            build_registry_id="raw-build-registry-id",
+            sequence_id="build",
+        )
 
     serialized = json.dumps(payload)
     assert payload["schema_version"] == "mozaiks.telemetry.v1"
@@ -53,6 +54,27 @@ def test_build_satisfaction_payload_anonymizes_build_id_and_clamps_rating() -> N
     assert payload["build_id_hash"] == _hash_build_id("raw-build-registry-id")
     assert "raw-build-registry-id" not in serialized
     assert payload["sequence_id"] == "build"
+
+
+def test_satisfaction_payload_is_not_generic_framework_telemetry() -> None:
+    with pytest.warns(PendingDeprecationWarning):
+        payload = telemetry.build_satisfaction_payload(
+            rating=4,
+            build_registry_id="raw-build-registry-id",
+            sequence_id="build",
+        )
+
+    sanitized = telemetry.sanitize_framework_telemetry_payload(payload)
+
+    assert sanitized == {
+        "schema_version": "mozaiks.telemetry.v1",
+        "build_id_hash": _hash_build_id("raw-build-registry-id"),
+        "mozaiks_version": payload["mozaiks_version"],
+        "timestamp": payload["timestamp"],
+    }
+    assert "event" not in sanitized
+    assert "rating" not in sanitized
+    assert "sequence_id" not in sanitized
 
 
 def test_framework_telemetry_sanitizer_removes_identity_and_arbitrary_payloads() -> None:
@@ -84,6 +106,35 @@ def test_framework_telemetry_sanitizer_removes_identity_and_arbitrary_payloads()
     assert "customer_123" not in serialized
     assert "operator@example.test" not in serialized
     assert "private/repo" not in serialized
+
+
+def test_standard_workflow_payload_passes_framework_telemetry_sanitizer() -> None:
+    payload = telemetry.build_workflow_payload(
+        workflow_name="AppGenerator",
+        final_status="completed",
+        build_registry_id="raw-build-registry-id",
+        refinement_cycles=2,
+        quality_gate_blocks=1,
+        duration_seconds=12.5,
+        domain_tags=["crm", "support"],
+        mozaiks_version="test-version",
+    )
+
+    sanitized = telemetry.sanitize_framework_telemetry_payload(
+        {
+            **payload,
+            "app_id": "app_123",
+            "user_id": "user_123",
+            "operator_email": "operator@example.test",
+        }
+    )
+
+    assert sanitized == payload
+    serialized = json.dumps(sanitized)
+    assert "raw-build-registry-id" not in serialized
+    assert "app_123" not in serialized
+    assert "user_123" not in serialized
+    assert "operator@example.test" not in serialized
 
 
 @pytest.mark.asyncio

@@ -249,9 +249,6 @@
         },
         {
           "transition": "app_review"
-        },
-        {
-          "transition": "build_satisfaction_rating"
         }
       ]
     },
@@ -821,28 +818,6 @@
             "database_provider": "mongodb",
             "database_setup_mode": "skip"
           }
-        }
-      ]
-    },
-    {
-      "id": "build_satisfaction_rating",
-      "transition_type": "user_choice_context",
-      "optional": true,
-      "ui": {
-        "component": "BuildSatisfactionRating",
-        "mode": "screen",
-        "shell_mode": "focused"
-      },
-      "options": [
-        {
-          "id": "rated",
-          "route_to": "workflow_complete",
-          "context_variables": {}
-        },
-        {
-          "id": "skip",
-          "route_to": "workflow_complete",
-          "context_variables": {}
         }
       ]
     },

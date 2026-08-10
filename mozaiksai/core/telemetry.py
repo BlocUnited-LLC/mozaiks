@@ -23,6 +23,7 @@ import hmac
 import json
 import logging
 import os
+import warnings
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -40,10 +41,6 @@ _ALLOWED_TELEMETRY_FIELDS = (
     "domain_tags",
     "mozaiks_version",
     "timestamp",
-    # Existing hosted Build Intelligence consumes this explicit reviewed shape.
-    "event",
-    "rating",
-    "sequence_id",
 )
 _IDENTITY_FIELD_FRAGMENTS = (
     "app_id",
@@ -121,7 +118,19 @@ def build_satisfaction_payload(
     build_registry_id: str = "",
     sequence_id: str = "",
 ) -> dict[str, Any]:
-    """Assemble an anonymized user satisfaction payload."""
+    """Return the prior satisfaction payload shape for external caller migration.
+
+    Satisfaction and feedback are Operator Intelligence, not generic OSS
+    framework telemetry. New framework code should use ``build_workflow_payload``
+    for structural build outcomes and route feedback through an app/operator
+    owned endpoint.
+    """
+    warnings.warn(
+        "build_satisfaction_payload is retained for external caller migration; "
+        "route feedback through app/operator-owned telemetry instead.",
+        PendingDeprecationWarning,
+        stacklevel=2,
+    )
     return {
         "schema_version": _SCHEMA_VERSION,
         "event": "build_satisfaction",

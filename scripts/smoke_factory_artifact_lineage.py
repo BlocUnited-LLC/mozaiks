@@ -478,7 +478,6 @@ async def _run_lineage_smoke_with_store(
         "coding_journey_selector",
         "database_setup_selector",
         "app_review",
-        "build_satisfaction_rating",
     ]
     if workflow_steps != expected_workflow_steps:
         errors.append(f"Unexpected build workflow steps: {workflow_steps!r}.")
