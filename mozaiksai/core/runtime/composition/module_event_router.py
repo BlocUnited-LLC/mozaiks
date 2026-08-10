@@ -22,6 +22,15 @@ from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
+from mozaiksai.core.runtime.composition.module_event_provenance import (
+    ModuleEventProvenance,
+    ModuleReactionAudit,
+    ModuleReactionProvenance,
+    build_module_reaction_audit,
+    normalize_module_event_provenance,
+    normalize_module_reaction_provenance,
+)
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 
 logger = get_workflow_logger("module_event_router")
 
@@ -33,10 +42,23 @@ CapabilityInvoker = Callable[[str, dict[str, Any], dict[str, Any]], Awaitable[An
 class _ReactionCtx:
     """Minimal context passed to handler methods during reaction dispatch."""
 
-    def __init__(self, *, app_id: str, tenant_id: str, user_id: str, event_emitter: EventEmitter | None) -> None:
+    def __init__(
+        self,
+        *,
+        app_id: str,
+        tenant_id: str,
+        user_id: str,
+        event_emitter: EventEmitter | None,
+        event_provenance: ModuleEventProvenance | None = None,
+        reaction_provenance: ModuleReactionProvenance | None = None,
+    ) -> None:
         self.app_id = app_id
         self.tenant_id = tenant_id
         self.user_id = user_id
+        self.event_provenance = event_provenance
+        self.reaction_provenance = reaction_provenance
+        self.correlation_id = event_provenance.correlation_id if event_provenance is not None else None
+        self.causation_id = event_provenance.causation_id if event_provenance is not None else None
         self._event_emitter = event_emitter
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
@@ -81,8 +103,10 @@ class ModuleEventRouter:
     async def handle_event(self, event_type: str, envelope: dict[str, Any]) -> None:
         """Handle one canonical module event envelope."""
         emitted_notifications: set[tuple[str, str]] = set()
+        event_provenance = normalize_module_event_provenance(event_type, envelope)
 
         for reaction in self._reactions_by_event.get(event_type, []):
+            reaction_provenance = normalize_module_reaction_provenance(reaction)
             target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
             target_kind = str(target.get("kind") or "").strip()
             if target_kind == "notification":
@@ -94,22 +118,86 @@ class ModuleEventRouter:
                 )
                 if rule is not None:
                     if not _notification_rule_matches(rule, envelope):
+                        await self._emit_reaction_audit(
+                            build_module_reaction_audit(
+                                event=event_provenance,
+                                reaction=reaction_provenance,
+                                outcome="skipped",
+                                reason="notification condition did not match",
+                            )
+                        )
                         continue
                     key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
                     await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
+                    await self._emit_reaction_audit(
+                        build_module_reaction_audit(
+                            event=event_provenance,
+                            reaction=reaction_provenance,
+                            outcome="ok",
+                        )
+                    )
+                else:
+                    await self._emit_reaction_audit(
+                        build_module_reaction_audit(
+                            event=event_provenance,
+                            reaction=reaction_provenance,
+                            outcome="skipped",
+                            reason="notification rule not found",
+                        )
+                    )
             elif target_kind == "handler":
-                await self._dispatch_handler(reaction, event_type, envelope)
+                outcome, reason = await self._dispatch_handler(
+                    reaction,
+                    event_type,
+                    envelope,
+                    event_provenance=event_provenance,
+                    reaction_provenance=reaction_provenance,
+                )
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome=outcome,
+                        reason=reason,
+                    )
+                )
             elif target_kind == "service_adapter":
-                adapter_result = await self._dispatch_service_adapter(reaction, event_type, envelope)
+                adapter_result = await self._dispatch_service_adapter(
+                    reaction,
+                    event_type,
+                    envelope,
+                    event_provenance=event_provenance,
+                    reaction_provenance=reaction_provenance,
+                )
                 await self._emit_platform_reaction(
                     reaction,
                     event_type,
                     envelope,
                     reaction_result=adapter_result,
                 )
+                adapter_failed = isinstance(adapter_result, dict) and adapter_result.get("success") is False
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome="failed" if adapter_failed else "ok",
+                        reason=(
+                            str(adapter_result.get("error_code") or "service adapter failed")
+                            if adapter_failed
+                            else None
+                        ),
+                    )
+                )
             elif target_kind:
                 await self._emit_platform_reaction(reaction, event_type, envelope)
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome="ok",
+                    )
+                )
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
@@ -224,6 +312,9 @@ class ModuleEventRouter:
         reaction: dict,
         event_type: str,
         envelope: dict[str, Any],
+        *,
+        event_provenance: ModuleEventProvenance,
+        reaction_provenance: ModuleReactionProvenance,
     ) -> Any:
         target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         adapter_ref = str(target.get("adapter") or "").strip()
@@ -250,7 +341,17 @@ class ModuleEventRouter:
             adapter = adapter_type()
             method = getattr(adapter, adapter_method)
             payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
-            return await self._maybe_await(_call_service_adapter(method, payload, event_type, envelope, reaction))
+            return await self._maybe_await(
+                _call_service_adapter(
+                    method,
+                    payload,
+                    event_type,
+                    envelope,
+                    reaction,
+                    event_provenance=event_provenance,
+                    reaction_provenance=reaction_provenance,
+                )
+            )
         except Exception as exc:
             logger.error(
                 "SERVICE_ADAPTER_DISPATCH_ERROR: %r.%r raised %s",
@@ -266,7 +367,10 @@ class ModuleEventRouter:
         reaction: dict,
         event_type: str,
         envelope: dict[str, Any],
-    ) -> None:
+        *,
+        event_provenance: ModuleEventProvenance,
+        reaction_provenance: ModuleReactionProvenance,
+    ) -> tuple[str, str | None]:
         module_id = str(reaction.get("module_id") or "").strip()
         target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         handler_method = str(target.get("handler_method") or "").strip()
@@ -276,12 +380,12 @@ class ModuleEventRouter:
                 "HANDLER_TARGET_SKIPPED: reaction %r missing module_id or handler_method",
                 reaction.get("id"),
             )
-            return
+            return "skipped", "missing module_id or handler_method"
 
         handler = self._handlers_by_module.get(module_id)
         if handler is None:
             logger.warning("HANDLER_TARGET_SKIPPED: no handler registered for module %r", module_id)
-            return
+            return "skipped", "handler not registered"
 
         method = getattr(handler, handler_method, None)
         if not callable(method):
@@ -290,15 +394,17 @@ class ModuleEventRouter:
                 module_id,
                 handler_method,
             )
-            return
+            return "skipped", "handler method not callable"
 
         tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
         actor = envelope.get("actor") if isinstance(envelope.get("actor"), dict) else {}
         ctx = _ReactionCtx(
-            app_id=str(tenant.get("app_id") or ""),
-            tenant_id=str(tenant.get("tenant_id") or ""),
-            user_id=str(actor.get("id") or ""),
+            app_id=str(tenant.get("app_id") or event_provenance.app_id or ""),
+            tenant_id=str(tenant.get("tenant_id") or event_provenance.tenant_id or ""),
+            user_id=str(actor.get("id") or event_provenance.actor_id or ""),
             event_emitter=self._event_emitter,
+            event_provenance=event_provenance,
+            reaction_provenance=reaction_provenance,
         )
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
         try:
@@ -311,6 +417,22 @@ class ModuleEventRouter:
                 exc,
                 exc_info=True,
             )
+            return "failed", type(exc).__name__
+        return "ok", None
+
+    async def _emit_reaction_audit(self, audit: ModuleReactionAudit) -> None:
+        """Emit payload-free reaction audit metadata without affecting fan-out."""
+
+        record = audit.to_dict()
+        logger.info(
+            "MODULE_REACTION_AUDIT event=%s reaction=%s target=%s outcome=%s",
+            audit.event.event_type,
+            audit.reaction.reaction_id,
+            audit.reaction.target_kind,
+            audit.outcome,
+            extra={"module_reaction_audit": record},
+        )
+        await get_platform_hooks().call_module_reaction_audit(audit)
 
     async def _create_notification(
         self,
@@ -494,6 +616,9 @@ def _call_service_adapter(
     event_type: str,
     envelope: dict[str, Any],
     reaction: dict[str, Any],
+    *,
+    event_provenance: ModuleEventProvenance | None = None,
+    reaction_provenance: ModuleReactionProvenance | None = None,
 ) -> Any:
     """Call a contract-declared service adapter with the narrowest useful args."""
     try:
@@ -519,6 +644,10 @@ def _call_service_adapter(
         kwargs["envelope"] = envelope
     if "reaction" in params:
         kwargs["reaction"] = reaction
+    if "event_provenance" in params:
+        kwargs["event_provenance"] = event_provenance
+    if "reaction_provenance" in params:
+        kwargs["reaction_provenance"] = reaction_provenance
     if kwargs:
         return method(**kwargs)
     return method(payload)

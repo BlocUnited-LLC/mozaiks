@@ -74,6 +74,11 @@ Bundle keys (all optional):
         Best-effort structured dispatch audit callback. Exceptions are logged
         and do not affect the dispatch result.
 
+    module_reaction_audit
+                          async (audit_record) -> None
+        Best-effort structured event-reaction audit callback. Exceptions are
+        logged and do not affect event fan-out.
+
     on_account_delete_complete
                           async (*, app_id: str, user_id: str,
                                   deletion_results: Dict[str, Any]) -> None
@@ -126,6 +131,7 @@ class PlatformExtensionBundle:
     workflow_name_resolver: Callable | None = None
     before_module_execution: Callable | None = None
     module_dispatch_audit: Callable | None = None
+    module_reaction_audit: Callable | None = None
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -144,6 +150,7 @@ _BUNDLE_KEYS = (
     "workflow_name_resolver",
     "before_module_execution",
     "module_dispatch_audit",
+    "module_reaction_audit",
 )
 
 
@@ -170,6 +177,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             workflow_name_resolver=bundle.get("workflow_name_resolver"),
             before_module_execution=bundle.get("before_module_execution"),
             module_dispatch_audit=bundle.get("module_dispatch_audit"),
+            module_reaction_audit=bundle.get("module_reaction_audit"),
         )
 
     if bundle is None or isinstance(bundle, (str, bytes, int, float, bool)):
@@ -192,6 +200,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         workflow_name_resolver=getattr(bundle, "workflow_name_resolver", None),
         before_module_execution=getattr(bundle, "before_module_execution", None),
         module_dispatch_audit=getattr(bundle, "module_dispatch_audit", None),
+        module_reaction_audit=getattr(bundle, "module_reaction_audit", None),
     )
 
 
@@ -226,6 +235,7 @@ class PlatformHookRegistry:
         self._workflow_name_resolver_hooks: list[Callable] = []
         self._before_module_execution_hooks: list[Callable] = []
         self._module_dispatch_audit_hooks: list[Callable] = []
+        self._module_reaction_audit_hooks: list[Callable] = []
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -289,6 +299,7 @@ class PlatformHookRegistry:
             "workflow_name_resolver": self._workflow_name_resolver_hooks,
             "before_module_execution": self._before_module_execution_hooks,
             "module_dispatch_audit": self._module_dispatch_audit_hooks,
+            "module_reaction_audit": self._module_reaction_audit_hooks,
         }
         for key, target in slot_map.items():
             val = _get(key)
@@ -511,6 +522,17 @@ class PlatformHookRegistry:
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_MODULE_DISPATCH_AUDIT_ERROR: %s", exc)
 
+    async def call_module_reaction_audit(self, audit_record: Any) -> None:
+        """Send structured event-reaction audit metadata to optional hooks."""
+
+        for hook in self._module_reaction_audit_hooks:
+            try:
+                res = hook(audit_record)
+                if inspect.isawaitable(res):
+                    await res
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_MODULE_REACTION_AUDIT_ERROR: %s", exc)
+
     def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
         """Reorder the workflow list for frontend display."""
         result = list(workflow_names)
@@ -578,6 +600,10 @@ class PlatformHookRegistry:
     def has_module_dispatch_audit(self) -> bool:
         return bool(self._module_dispatch_audit_hooks)
 
+    @property
+    def has_module_reaction_audit(self) -> bool:
+        return bool(self._module_reaction_audit_hooks)
+
     def summary(self) -> dict[str, Any]:
         return {
             "startup_hooks": len(self._startup_hooks),
@@ -589,6 +615,7 @@ class PlatformHookRegistry:
             "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
             "before_module_execution_hooks": len(self._before_module_execution_hooks),
             "module_dispatch_audit_hooks": len(self._module_dispatch_audit_hooks),
+            "module_reaction_audit_hooks": len(self._module_reaction_audit_hooks),
         }
 
 

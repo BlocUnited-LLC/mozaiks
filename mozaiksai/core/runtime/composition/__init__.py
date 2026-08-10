@@ -17,6 +17,14 @@ from .module_authority import (
     ModulePermissionCheck,
 )
 from .module_context import ModuleContext
+from .module_event_provenance import (
+    ModuleEventProvenance,
+    ModuleReactionAudit,
+    ModuleReactionProvenance,
+    build_module_reaction_audit,
+    normalize_module_event_provenance,
+    normalize_module_reaction_provenance,
+)
 from .module_dispatch import (
     ModuleActionDispatchRequest,
     ModuleDispatchMetadata,
@@ -44,6 +52,12 @@ __all__ = [
     "ExecutorRegistry",
     "ExecutorType",
     "ModuleContext",
+    "ModuleEventProvenance",
+    "ModuleReactionAudit",
+    "ModuleReactionProvenance",
+    "build_module_reaction_audit",
+    "normalize_module_event_provenance",
+    "normalize_module_reaction_provenance",
     "ModuleDispatchAudit",
     "ModuleDispatchAuthority",
     "ModuleDispatchProvenance",

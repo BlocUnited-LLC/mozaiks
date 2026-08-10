@@ -33,6 +33,14 @@ from .composition.module_authority import (
     ModulePermissionCheck,
 )
 from .composition.module_context import ModuleContext
+from .composition.module_event_provenance import (
+    ModuleEventProvenance,
+    ModuleReactionAudit,
+    ModuleReactionProvenance,
+    build_module_reaction_audit,
+    normalize_module_event_provenance,
+    normalize_module_reaction_provenance,
+)
 from .composition.module_executor import ModuleExecutor, ModuleRequest, ModuleResult
 from .composition.platform_hooks import PlatformHookRegistry, get_platform_hooks
 from .readiness import (
@@ -74,6 +82,12 @@ __all__ = [
     "ExecutorRegistry",
     "ExecutorType",
     "ModuleContext",
+    "ModuleEventProvenance",
+    "ModuleReactionAudit",
+    "ModuleReactionProvenance",
+    "build_module_reaction_audit",
+    "normalize_module_event_provenance",
+    "normalize_module_reaction_provenance",
     "ModuleDispatchAudit",
     "ModuleDispatchAuthority",
     "ModuleDispatchProvenance",

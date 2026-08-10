@@ -57,6 +57,15 @@ def test_module_dispatch_audit_hook_registers_from_dict_bundle() -> None:
     assert reg.has_module_dispatch_audit is True
 
 
+def test_module_reaction_audit_hook_registers_from_typed_bundle() -> None:
+    hook = MagicMock()
+
+    reg = _fresh()
+    reg._register_bundle(PlatformExtensionBundle(module_reaction_audit=hook))
+
+    assert reg.has_module_reaction_audit is True
+
+
 @pytest.mark.asyncio
 async def test_empty_registry_allows_module_execution_policy_by_default() -> None:
     reg = _fresh()
