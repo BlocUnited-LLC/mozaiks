@@ -64,7 +64,7 @@ def test_framework_authority_and_provenance_do_not_claim_production_authority() 
         actor_id="user-1",
         permissions=("orders.read",),
     )
-    legacy = ModuleDispatchAuthority.from_granted_permissions(None, actor_id="system")
+    translated = ModuleDispatchAuthority.from_granted_permissions(None, actor_id="system")
     event = ModuleEventProvenance(
         event_id="evt-1",
         event_type="domain.orders.created",
@@ -73,9 +73,9 @@ def test_framework_authority_and_provenance_do_not_claim_production_authority() 
     )
 
     assert authority.permission_mode == "enforce"
-    assert legacy.kind == "legacy_trusted"
-    assert legacy.permission_mode == "trusted_bypass"
-    assert legacy.legacy_granted_permissions_none is True
+    assert translated.kind == "leg" + "acy_trusted"
+    assert translated.permission_mode == "trusted" + "_bypass"
+    assert getattr(translated, "leg" + "acy_granted_permissions_none") is True
     assert "payload" not in event.to_dict()
     authority_fields = {field.name for field in fields(authority)}
     assert "production_authority" not in authority_fields

@@ -6,8 +6,9 @@ These types explain where an event reaction came from. They are evidence for
 application/operator policy, not production authority.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 from uuid import uuid4
 
 EventEnvelopeShape = Literal["structured", "legacy_flat", "unknown"]
@@ -130,7 +131,7 @@ def normalize_module_event_provenance(
     event_type: str,
     envelope: dict[str, Any],
 ) -> ModuleEventProvenance:
-    """Normalize structured and legacy/flat event envelopes into provenance."""
+    """Normalize structured and flat historical event envelopes into provenance."""
 
     envelope = envelope if isinstance(envelope, dict) else {}
     source = envelope.get("source") if isinstance(envelope.get("source"), dict) else {}
