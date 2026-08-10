@@ -31,6 +31,23 @@ _MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PUBLIC_MODULE_API_SURFACES = {"public", "public_readonly"}
 _OBSERVED_MODULES = {"messages", "workspace_support"}
 _RESERVED_CONTEXT_KEYS = ("app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token")
+# Reserved keys that are safe to auto-promote from an action's own "params" into
+# the trusted execution "context" when the caller omits them from context. This
+# is intentional for resource-scoping identifiers such as app_id, which many
+# actions also declare as a business input for the same resource being scoped.
+#
+# "user_id" is deliberately excluded: action input schemas very commonly declare
+# their own "user_id" parameter that names a *target* subject (e.g. add_member's
+# user to add, update_member_role's user whose role changes) rather than the
+# calling actor's identity. Promoting it here would silently overwrite the
+# trusted execution context's user_id with that target's user_id, letting an
+# action's own business input hijack actor identity resolution downstream
+# (privilege confusion: authorization checks would then run as the target user
+# instead of the real caller). Context-level user_id overrides must be supplied
+# explicitly under the "context" envelope key, never inferred from "params".
+_PROMOTABLE_PARAM_CONTEXT_KEYS = tuple(
+    key for key in _RESERVED_CONTEXT_KEYS if key != "user_id"
+)
 # Actions with these surfaces are only reachable through the internal event bus
 # or direct ModuleExecutor calls.  HTTP dispatch is always rejected regardless
 # of authentication status so that event-pipeline internal handlers cannot be
@@ -75,10 +92,15 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     """Split a module POST body into action params and execution context.
 
     The canonical module API payload is {"params": {...}, "context": {...}}.
-    Values inside "params" are action inputs, so reserved words such as app_id
-    must remain available for resource-scoped actions. Raw-body payloads
-    still treat reserved words as execution context and remove them from action
-    params to preserve the old dispatch contract.
+    Values inside "params" are action inputs, so reserved resource-scoping words
+    such as app_id must remain available for resource-scoped actions and are
+    auto-promoted into context when the caller omits them there. "user_id" is
+    never auto-promoted this way (see _PROMOTABLE_PARAM_CONTEXT_KEYS) because
+    action inputs frequently name a target subject, not the caller. Raw-body
+    payloads still treat all reserved words (including user_id) as execution
+    context and remove them from action params to preserve the old dispatch
+    contract, since that legacy shape has no "params" input namespace to
+    collide with.
     """
     params_body = body.get("params")
     context_body = body.get("context")
@@ -90,7 +112,13 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
         params = dict(body)
     context_overrides: dict[str, Any] = dict(context_body) if isinstance(context_body, dict) else {}
 
-    for key in _RESERVED_CONTEXT_KEYS:
+    # The legacy raw-body shape has no "params" input namespace, so every
+    # top-level reserved key (including user_id) has always unambiguously meant
+    # execution context there. The canonical enveloped shape does have a
+    # "params" input namespace, where "user_id" can legitimately be an action's
+    # own target-subject input, so it is excluded from promotion in that case.
+    promotable_keys = _RESERVED_CONTEXT_KEYS if not has_params_envelope else _PROMOTABLE_PARAM_CONTEXT_KEYS
+    for key in promotable_keys:
         if key in params and key not in context_overrides:
             context_overrides[key] = params[key]
 
