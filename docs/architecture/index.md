@@ -42,6 +42,7 @@ Use this section as the web navigation layer for that architecture.
 ## App Contracts
 
 - [Generated App Lifecycle Model](app/generated-app-lifecycle-model.md)
+- [Generated App Functional Acceptance](app/generated-app-functional-acceptance.md)
 - [Canonical App Structure](app/canonical-app-structure.md)
 - [App Manifest and Platform Targets](app/app-manifest-and-platform-targets.md)
 - [App Bundle Declaratives](app/app-bundle-declaratives.md)

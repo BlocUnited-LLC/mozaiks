@@ -156,6 +156,7 @@ nav:
           - App Architecture:
               - architecture/app/index.md
               - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md
+              - Generated App Functional Acceptance: architecture/app/generated-app-functional-acceptance.md
               - Canonical App Structure: architecture/app/canonical-app-structure.md
               - App Manifest & Platform Targets: architecture/app/app-manifest-and-platform-targets.md
               - App Bundle Declaratives: architecture/app/app-bundle-declaratives.md
