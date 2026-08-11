@@ -802,6 +802,28 @@ def _apply_selected_pack_files(
     if not available_packs:
         return capability_packs, pages, build_tasks
 
+    def _merge_missing_page_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key in (
+            "page_type",
+            "page_type_hint",
+            "ui_layout",
+            "shell_mode",
+            "shell_mode_hint",
+            "ui_surface",
+            "design_intent",
+            "primary_entities",
+            "primary_actions",
+        ):
+            if key not in source:
+                continue
+            current = target.get(key)
+            if current not in (None, "", [], {}):
+                continue
+            value = source.get(key)
+            if value in (None, "", [], {}):
+                continue
+            target[key] = value
+
     selected_managed_capability_ids = {
         _pack_id_from_descriptor(pack)
         for pack in capability_packs
@@ -850,7 +872,22 @@ def _apply_selected_pack_files(
             for page in _normalize_object_list(facade.get("pages")):
                 route = str(page.get("route") or "").strip()
                 name = str(page.get("name") or page.get("page_id") or "").strip().lower()
-                if (route and route in existing_page_routes) or (name and name in existing_page_names):
+                matched_page: dict[str, Any] | None = None
+                if route and route in existing_page_routes:
+                    for existing_page in result_pages:
+                        if isinstance(existing_page, dict) and str(existing_page.get("route") or "").strip() == route:
+                            matched_page = existing_page
+                            break
+                elif name and name in existing_page_names:
+                    for existing_page in result_pages:
+                        if not isinstance(existing_page, dict):
+                            continue
+                        existing_name = str(existing_page.get("name") or existing_page.get("page_id") or "").strip().lower()
+                        if existing_name == name:
+                            matched_page = existing_page
+                            break
+                if matched_page is not None:
+                    _merge_missing_page_metadata(matched_page, page)
                     continue
                 result_pages.append(page)
                 if route:

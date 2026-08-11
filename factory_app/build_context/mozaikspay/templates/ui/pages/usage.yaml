@@ -2,7 +2,7 @@ schema_version: mozaiks.page.v1
 name: Usage
 route: /usage
 title: Usage
-page_type: dashboard
+page_type: analytics_dashboard
 layout: stack
 shell_mode: workspace
 navigation:

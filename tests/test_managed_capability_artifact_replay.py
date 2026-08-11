@@ -537,11 +537,33 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
             "code_files": [
                 {
                     "filename": "ui/pages/billing.yaml",
-                    "content": "sections:\n  - config:\n      api_endpoint: /api/modules/mozaikspay/get_subscription_status\n",
+                    "content": (
+                        "schema_version: mozaiks.page.v1\n"
+                        "name: Billing\n"
+                        "route: /billing\n"
+                        "title: Billing\n"
+                        "page_type: analytics_dashboard\n"
+                        "layout: stack\n"
+                        "shell_mode: workspace\n"
+                        "sections:\n"
+                        "  - config:\n"
+                        "      api_endpoint: /api/modules/mozaikspay/get_subscription_status\n"
+                    ),
                 },
                 {
                     "filename": "ui/pages/usage.yaml",
-                    "content": "sections:\n  - config:\n      api_endpoint: /api/modules/mozaikspay/get_usage_status\n",
+                    "content": (
+                        "schema_version: mozaiks.page.v1\n"
+                        "name: Usage\n"
+                        "route: /usage\n"
+                        "title: Usage\n"
+                        "page_type: analytics_dashboard\n"
+                        "layout: stack\n"
+                        "shell_mode: workspace\n"
+                        "sections:\n"
+                        "  - config:\n"
+                        "      api_endpoint: /api/modules/mozaikspay/get_usage_status\n"
+                    ),
                 },
             ]
         },
@@ -611,6 +633,8 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
 
     assert adapter_task["capability_pack_id"] == "mozaikspay"
     assert facade_task["capability_pack_id"] == "billing_portal"
+    assert cached_plan["pages"][0]["page_type_hint"] == "analytics_dashboard"
+    assert cached_plan["pages"][1]["page_type_hint"] == "analytics_dashboard"
     assert cached_plan["pages"][0]["sections_hint"][0]["config_hint"]["api_endpoint"] == (
         "/api/modules/billing_portal/get_subscription_status"
     )
@@ -650,6 +674,8 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert "/api/modules/billing_portal/list_plans" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/billing_portal/open_billing_portal" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/mozaikspay/" not in files["ui/pages/billing.yaml"]
+    assert "page_type: analytics_dashboard" in files["ui/pages/billing.yaml"]
+    assert "page_type: analytics_dashboard" in files["ui/pages/usage.yaml"]
     for name in (
         "MOZAIKS_APP_URL",
         "MOZAIKSPAY_API_BASE",

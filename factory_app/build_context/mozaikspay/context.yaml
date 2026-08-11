@@ -85,8 +85,10 @@ facades:
     pages:
       - name: Billing
         route: /billing
+        page_type_hint: analytics_dashboard
       - name: Usage
         route: /usage
+        page_type_hint: analytics_dashboard
 projections:
   context_variables:
     capability_packs:

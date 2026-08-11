@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -128,6 +129,28 @@ def _materialize_bundle(root: Path, files: dict[str, str]) -> None:
         path = root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+
+class _FakeMongoAdmin:
+    async def command(self, *_args: Any, **_kwargs: Any) -> dict[str, str]:
+        return {"ok": "1"}
+
+
+class _FakeMongoClient:
+    def __init__(self) -> None:
+        self.admin = _FakeMongoAdmin()
+
+    def __getitem__(self, name: str) -> _FakeMongoClient:  # noqa: ARG002
+        return self
+
+    def __getattr__(self, name: str) -> _FakeMongoClient:  # noqa: ARG002
+        return self
+
+    async def command(self, *_args: Any, **_kwargs: Any) -> dict[str, str]:
+        return {"ok": "1"}
+
+    async def close(self) -> None:
+        return None
 
 
 def _assert_not_missing_or_placeholder(response, *, surface: str) -> None:
@@ -280,10 +303,13 @@ async def test_app_generator_acceptance_gate_includes_functional_completeness() 
 def test_generated_crud_bundle_boots_and_serves_declared_http_surfaces(tmp_path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     _materialize_bundle(app_root, _basic_crud_files())
+    fake_mongo_client = _FakeMongoClient()
     monkeypatch.setenv("PLATFORM_PATH", str(app_root))
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    monkeypatch.setattr("mozaiksai.hosts.runtime.get_mongo_client", lambda: fake_mongo_client)
+    monkeypatch.setattr("mozaiksai.core.startup.validation.get_mongo_client", lambda: fake_mongo_client)
     reset_auth_adapter()
 
     from mozaiksai.hosts import platform

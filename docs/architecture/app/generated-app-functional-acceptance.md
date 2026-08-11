@@ -68,6 +68,8 @@ internally declared app route/action/facade must not be missing.
 | Managed capability facade completeness | `scan_functional_generated_app` | Static | Added |
 | 501/not-implemented generated surfaces | `scan_functional_generated_app` | Static | Added to public facade |
 | Generated app host boot and declared HTTP page/module surfaces | Platform `TestClient` over deterministic CRUD bundle | Runtime / HTTP | Added |
+| Monetized SaaS app host boot and declared billing/facade surfaces | Platform `TestClient` over deterministic SaaS bundle plus in-process MozaiksPay-compatible fake provider | Runtime / HTTP | Added |
+| Workflow/agent app catalog load and module-action surfaces | Workflow manager plus platform `TestClient` over deterministic workflow bundle | Runtime / HTTP | Added |
 
 ## Diagnostics
 
@@ -91,9 +93,12 @@ Current automated coverage includes:
 - Basic authenticated CRUD route/action/schema coherence.
 - Basic CRUD app runtime boot through the platform host plus declared
   `/api/pages/*` and `/api/modules/*` HTTP surfaces.
-- Monetized SaaS facade expectations for the public MozaiksPay-compatible
-  generated-app contract.
-- Workflow/agent module-action references through declarative workflow YAML.
+- Monetized SaaS facade expectations and runtime HTTP calls for the public
+  MozaiksPay-compatible generated-app contract using an in-process compatible
+  provider fake.
+- Workflow/agent module-action references through declarative workflow YAML,
+  workflow catalog loading, chat-session start, and the referenced module-action
+  target through the platform host.
 
 The first gate uses deterministic fixtures rather than live LLM calls. This
 tests the deterministic boundary after reasoning:
@@ -113,17 +118,38 @@ The gate is deliberately not a broad static analyzer for arbitrary Python or
 JavaScript. It validates canonical contracts and generated references where the
 framework has deterministic knowledge.
 
+## Post-Plan Deterministic Proof
+
+Mozaiks now has a deterministic post-plan replay path for representative
+generated apps:
+
+```text
+captured AppBuildPlan
+-> real AppGenerator planning/batch execution
+-> materialized canonical bundle
+-> validation
+-> runtime boot
+-> declared routes/actions/facades resolve
+```
+
+This proves the deterministic boundary after reasoning. The AppPlan may still
+be produced by dynamic intelligence, but once a canonical AppBuildPlan exists,
+the OSS materialization path can replay it into a working generated app without
+paid model calls.
+
+Current coverage includes a representative SaaS AppBuildPlan fixture that
+materializes, validates, and boots through the public platform host, then
+proves entitlement denial and entitlement allowance on the declared module
+surface.
+
 ## Remaining Gaps
 
 P0: none identified by this pass in the covered deterministic fixtures.
 
 P1:
 
-- Add a generated artifact fixture that exercises a full deterministic
-  AppPlan-to-materialized-app path for monetized SaaS once that fixture can be
-  run without paid LLM calls.
-- Add HTTP/runtime acceptance for monetized SaaS and workflow/agent archetypes
-  after deterministic no-network fixtures exist for those app shapes.
+- Broaden the deterministic post-plan replay to additional representative
+  captured AppPlan archetypes, especially richer workflow-heavy plans.
 - Add browser-level route rendering smoke for generated bundles if CI can run it
   without making ordinary unit feedback slow.
 

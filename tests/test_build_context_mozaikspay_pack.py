@@ -332,6 +332,7 @@ def test_mozaikspay_billing_page_template_ships() -> None:
     content = _read_yaml(billing)
     assert content.get("route") == "/billing"
     assert content.get("schema_version") == "mozaiks.page.v1"
+    assert content.get("page_type") == "analytics_dashboard"
 
 
 def test_mozaikspay_usage_page_template_ships() -> None:
@@ -340,6 +341,7 @@ def test_mozaikspay_usage_page_template_ships() -> None:
     content = _read_yaml(usage)
     assert content.get("route") == "/usage"
     assert content.get("schema_version") == "mozaiks.page.v1"
+    assert content.get("page_type") == "analytics_dashboard"
 
 
 def test_mozaikspay_pages_bind_through_billing_portal_facade() -> None:
