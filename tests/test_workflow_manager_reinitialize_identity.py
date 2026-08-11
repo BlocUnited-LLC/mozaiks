@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.import_utils import import_module_directly
 
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
+WORKFLOWS_ROOT = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+
+@pytest.fixture(autouse=True)
+def _restore_default_workflows() -> None:
+    yield
+    _workflow_manager_mod.initialize_workflows(base_path=str(WORKFLOWS_ROOT))
 
 
 def _write_yaml(path: Path, content: str) -> None:
