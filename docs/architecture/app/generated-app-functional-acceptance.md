@@ -29,8 +29,9 @@ Generated-app acceptance is tracked in three levels:
   end to end through the UI and backend.
 
 Normal OSS CI should enforce at least Level 2 for representative deterministic
-generated archetypes. Level 3 coverage should grow through golden journeys, but
-Mozaiks should not claim universal Level 3 coverage until tests prove it.
+generated archetypes: CRUD, monetized SaaS, and workflow/agent applications.
+Level 3 coverage should grow through golden journeys, but Mozaiks should not
+claim universal Level 3 coverage until tests prove it.
 
 A generated app is functionally complete when:
 
@@ -68,8 +69,8 @@ internally declared app route/action/facade must not be missing.
 | Managed capability facade completeness | `scan_functional_generated_app` | Static | Added |
 | 501/not-implemented generated surfaces | `scan_functional_generated_app` | Static | Added to public facade |
 | Generated app host boot and declared HTTP page/module surfaces | Platform `TestClient` over deterministic CRUD bundle | Runtime / HTTP | Added |
-| Monetized SaaS app host boot and declared billing/facade surfaces | Platform `TestClient` over deterministic SaaS bundle plus in-process MozaiksPay-compatible fake provider | Runtime / HTTP | Added |
-| Workflow/agent app catalog load and module-action surfaces | Workflow manager plus platform `TestClient` over deterministic workflow bundle | Runtime / HTTP | Added |
+| Monetized SaaS app host boot and declared MozaiksPay-compatible billing/facade surfaces | Platform `TestClient` over deterministic SaaS bundle plus in-process compatible provider fake | Runtime / HTTP | Added |
+| Workflow/agent app catalog load, start, and module-action surfaces | Workflow manager plus platform `TestClient` over deterministic workflow bundle | Runtime / HTTP | Added |
 
 ## Diagnostics
 
@@ -150,6 +151,9 @@ P1:
 
 - Broaden the deterministic post-plan replay to additional representative
   captured AppPlan archetypes, especially richer workflow-heavy plans.
+- Add deterministic fake AG2 turn completion for generated workflow/agent
+  bundles. Current Level 2 coverage proves registry/config/start/module-action
+  runtime wiring without executing a model-backed websocket turn.
 - Add browser-level route rendering smoke for generated bundles if CI can run it
   without making ordinary unit feedback slow.
 
