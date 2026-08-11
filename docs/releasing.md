@@ -132,7 +132,7 @@ git tag v<version>
 git push origin main --tags
 ```
 
-## What The Release Workflow Does
+## What The Future Release Workflow Does
 
 The GitHub Actions workflow at `.github/workflows/release.yml` runs when a tag
 matching `v*` is pushed.
@@ -145,25 +145,27 @@ It:
 4. runs `twine check`
 5. installs the built wheel into a clean virtualenv
 6. smoke-tests the installed CLI and packaged resources
-7. creates a GitHub release with attached artifacts
-8. publishes the distributions to PyPI
+7. creates a GitHub release with attached artifacts when releases are enabled
+8. publishes the distributions to PyPI when the public package is released
 
-## PyPI Setup Requirement
+## Future PyPI Setup Requirement
 
-The workflow is configured for GitHub-to-PyPI trusted publishing.
+The workflow is configured for GitHub-to-PyPI trusted publishing when public
+release publishing is enabled.
 
 The `mozaiks` PyPI project must trust this GitHub repository and the
-`release.yml` workflow.
+`release.yml` workflow before public publishing can turn on.
 
-Until that is configured on the PyPI side, the `publish-pypi` job will fail
-even if the build and GitHub release steps succeed.
+Until that is configured on the PyPI side, the `publish-pypi` job should stay
+disabled even if the build and GitHub release steps succeed.
 
 ## Documentation Impact
 
-Public install docs should present `pip install mozaiks` followed by
-`python -m mozaiks ...` so PATH mechanics stay out of the main onboarding flow.
-The `mozaiks` command can be mentioned as an optional shortcut only.
-Keep source-checkout setup separate as the framework/developer mode.
+Public install docs should present a local source checkout with
+`python -m pip install -e ".[dev]"` followed by `python -m mozaiks ...` so
+PATH mechanics stay out of the main onboarding flow. The `mozaiks` command can
+be mentioned as an optional shortcut only. Keep source-checkout setup separate
+as the framework/developer mode until public packaging is actually released.
 
 ## Notes
 

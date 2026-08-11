@@ -49,6 +49,7 @@ This project follows a practical pre-1.0 changelog format:
 
 - OSS framework telemetry now emits only structural build outcome payloads. Build satisfaction and other customer/operator feedback belongs to app/operator-owned endpoints rather than the generic `MOZAIKS_TELEMETRY_ENDPOINT` channel.
 - Tree-sitter parser packages are now installed with the core Mozaiks package so source-backed Context Graph indexing is part of the default code-context setup.
+- Public docs now describe Mozaiks as not yet published to PyPI or GitHub releases, and direct users to install from a local checkout with editable install instructions instead of a public package URL.
 
 ### Removed
 

@@ -7,7 +7,6 @@
   <img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/logo-light.png" alt="Mozaiks" width="260"/>
 </picture>
 
-[![Release](https://img.shields.io/github/v/release/BlocUnited-LLC/mozaiks)](https://github.com/BlocUnited-LLC/mozaiks/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
 [![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
@@ -31,16 +30,19 @@ The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
 artifacts, validates them against strict contracts, and keeps runtime concerns
 separate from builder workflows.
 
+Mozaiks is not published as a public PyPI package yet. Install it from a local
+checkout in editable mode.
+
 ## Quickstart
 
 Install Python 3.11+ and Node.js 18+. Studio also needs a reachable MongoDB
 database for workspace state. Docker Desktop is not required; use MongoDB Atlas,
 a local MongoDB install, or Docker only if that is how you prefer to run MongoDB.
 
-Install Mozaiks:
+Install from a local checkout:
 
 ```powershell
-pip install mozaiks
+python -m pip install -e ".[dev]"
 ```
 
 Configure MongoDB before opening Studio:
@@ -118,8 +120,8 @@ Main repo layout:
 
 - [Architecture Overview](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURE.md) — System design and component model
 - [Getting Started](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/getting-started.md) — Full setup guide
-- [Releasing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/releasing.md) — Tag-driven release and PyPI publish flow
-- [Mid-Flight Journeys](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/mozaiksai/mid-flight-journeys.md) — Flagship orchestration capability and runtime semantics
+- [Releasing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/releasing.md) — Release hold and future publish workflow
+- [Workflow Routing Transitions](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/workflows/workflow-routing-transitions.md) — Flagship orchestration capability and runtime semantics
 - [Workflow Authoring Contracts](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/workflows/workflow-authoring-contracts.md) — Canonical strict YAML contract
 - [Contributing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md) — Development workflow
 
