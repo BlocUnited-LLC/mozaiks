@@ -42,7 +42,7 @@ Open **http://127.0.0.1:8000** — the site rebuilds automatically when you save
 
 ## Release and Maintenance
 
-- **[Releasing](../releasing.md)** — tag-driven PyPI publish flow
+- **[Releasing](../releasing.md)** — release hold and future publish workflow
 - **[Verified Setup Guide](../architecture/verified/setup-guide.md)** — maintainer-verified local environment
 - **[Auth Setup](../architecture/verified/auth-setup.md)** — Keycloak and auth configuration
 - **[Trigger Mechanisms](../architecture/verified/trigger-mechanisms.md)** — workflow trigger reference

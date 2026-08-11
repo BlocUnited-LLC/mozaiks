@@ -352,7 +352,7 @@ def _create_standard_consumer_files(
     app_name: str,
     preset: str,
 ) -> None:
-    """Create root-level files that make a generated app runnable on the PyPI package."""
+    """Create root-level files that make a generated app runnable from a Mozaiks checkout."""
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
     _write_text(target_dir / "requirements.txt", _requirements_txt())
@@ -378,7 +378,7 @@ def _create_agent_guidance_scaffold(*, target_dir: Path, app_name: str, preset: 
 def _requirements_txt() -> str:
     return f"""\
 # Mozaiks framework — version pin for standalone installs and deploys.
-# If you already have mozaiks installed, pip will skip this line.
+# If you already have a compatible Mozaiks install available, pip will skip this line.
 mozaiks=={_current_mozaiks_version()}
 
 # App-specific dependencies — add packages your modules and integrations need.
