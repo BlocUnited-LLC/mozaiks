@@ -24,6 +24,7 @@ This project follows a practical pre-1.0 changelog format:
 
 - Fixed `validate_module_implementation_contract` to resolve handler methods through single-level base class inheritance within the same module's `backend/` directory. The `base_handler.py`/`handler.py` split pattern previously caused the acceptance gate to report every action as missing a handler method on the thin workspace subclass.
 - Fixed messaging and support pack `module.yaml` handler entrypoints: after the `base_handler.py`/`handler.py` split renamed workspace subclasses from `MessagesModule`/`SupportModule` to `MessagesHandler`/`SupportHandler`, `module.yaml` still declared the old class names, causing `ModuleLoadError` at runtime and in tests.
+- Fixed the MozaiksPay generated billing and usage page contract to emit canonical `analytics_dashboard` page types through both the build-context pack hints and the replayed page schema fixtures, removing stale `dashboard` page-type drift from the generated SaaS path.
 - Fixed `scripts/run-infra.ps1` to propagate the `docker compose up` exit code and print an actionable error message when Docker Desktop is not running. Previously the script silently continued on failure.
 - Fixed Vite 8 dev-server startup: added `optimizeDeps.rolldownOptions.moduleTypes: { '.js': 'jsx' }` so the Rolldown pre-scan can parse first-party JSX-in-.js UI files before the transform plugin runs.
 

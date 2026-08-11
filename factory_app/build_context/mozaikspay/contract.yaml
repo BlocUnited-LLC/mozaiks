@@ -136,6 +136,7 @@ facades:
     pages:
       - name: Billing
         route: /billing
+        page_type_hint: analytics_dashboard
         primary_entities:
           - subscription
         primary_actions:
@@ -145,6 +146,7 @@ facades:
           - open_billing_portal
       - name: Usage
         route: /usage
+        page_type_hint: analytics_dashboard
         primary_entities:
           - runtime_usage
           - token_wallet
