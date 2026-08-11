@@ -29,9 +29,10 @@ Generated-app acceptance is tracked in three levels:
   end to end through the UI and backend.
 
 Normal OSS CI should enforce at least Level 2 for representative deterministic
-generated archetypes: CRUD, monetized SaaS, and workflow/agent applications.
-Level 3 coverage should grow through golden journeys, but Mozaiks should not
-claim universal Level 3 coverage until tests prove it.
+generated archetypes: CRUD, monetized SaaS, workflow/agent, operations/admin,
+and multi-module content/community applications. Level 3 coverage should grow
+through golden journeys, but Mozaiks should not claim universal Level 3
+coverage until tests prove it.
 
 A generated app is functionally complete when:
 
@@ -71,6 +72,7 @@ internally declared app route/action/facade must not be missing.
 | Generated app host boot and declared HTTP page/module surfaces | Platform `TestClient` over deterministic CRUD bundle | Runtime / HTTP | Added |
 | Monetized SaaS app host boot and declared MozaiksPay-compatible billing/facade surfaces | Platform `TestClient` over deterministic SaaS bundle plus in-process compatible provider fake | Runtime / HTTP | Added |
 | Workflow/agent app catalog load, start, and module-action surfaces | Workflow manager plus platform `TestClient` over deterministic workflow bundle | Runtime / HTTP | Added |
+| Cross-archetype post-plan replay | Captured `AppBuildPlan` fixtures through the real deterministic AppGenerator task-batch/materialization path, bundle validation, functional scanner, `AppLoader`, and platform `TestClient` | Static / Runtime / HTTP | Added |
 
 ## Diagnostics
 
@@ -100,6 +102,8 @@ Current automated coverage includes:
 - Workflow/agent module-action references through declarative workflow YAML,
   workflow catalog loading, chat-session start, and the referenced module-action
   target through the platform host.
+- Cross-archetype post-plan replay for authenticated CRUD, monetized SaaS,
+  workflow/agent, admin/operations, and multi-module content/community apps.
 
 The first gate uses deterministic fixtures rather than live LLM calls. This
 tests the deterministic boundary after reasoning:
@@ -143,6 +147,51 @@ materializes, validates, and boots through the public platform host, then
 proves entitlement denial and entitlement allowance on the declared module
 surface.
 
+## Archetype Regression Matrix
+
+`tests/test_generated_app_archetype_matrix.py` keeps the breadth proof small and
+offline. Each row uses a captured structured `AppBuildPlan` and passes it
+through the same deterministic post-reasoning seam:
+
+```text
+AppBuildPlan
+-> AppGenerator app_build_plan normalization
+-> AppGenerator task-batch execution with deterministic AG2 runner output
+-> assemble_app_tasks materialization
+-> validate_generated_app_bundle
+-> scan_functional_generated_app
+-> run_app_bundle_acceptance_gate
+-> AppLoader
+-> platform TestClient
+-> declared HTTP/module/workflow/capability surfaces
+```
+
+The current matrix covers:
+
+- `authenticated_crud_projects`: auth plus persistent project/task CRUD pages
+  and module actions.
+- `monetized_saas_reports`: MozaiksPay-compatible billing facade, subscription
+  status, checkout/portal actions, and entitlement denial/allowance through a
+  local fake provider boundary.
+- `workflow_agent_research`: generated app page/module wiring plus canonical
+  workflow registry loading from deterministic workspace-level workflow files.
+- `admin_operations_dashboard`: user route, admin registry route, protected
+  operations action denial without auth, and successful dispatch with local
+  auth.
+- `community_content`: multi-module content/community pages with public page
+  reads and authenticated module dispatch.
+
+For every row, the test materializes the same plan twice and asserts exact
+generated app file-map equality. This is a deterministic materialization proof,
+not a prompt-to-app determinism claim. The model reasoning stage remains
+dynamic.
+
+The workflow/agent row intentionally keeps workflow files at the workspace
+workflow root because workflow bundles are AgentGenerator-owned artifacts, not
+files inside the generated app bundle. The matrix proves the AppGenerator app
+bundle and canonical workflow registry boundary load together. A deeper
+end-to-end AgentGenerator-to-AppGenerator replay remains a P1 extension.
+
 ## Remaining Gaps
 
 P0: none identified by this pass in the covered deterministic fixtures.
@@ -150,16 +199,20 @@ P0: none identified by this pass in the covered deterministic fixtures.
 P1:
 
 - Broaden the deterministic post-plan replay to additional representative
-  captured AppPlan archetypes, especially richer workflow-heavy plans.
+  captured AppPlan archetypes beyond the current small CI matrix when new
+  canonical product categories are added.
 - Add deterministic fake AG2 turn completion for generated workflow/agent
   bundles. Current Level 2 coverage proves registry/config/start/module-action
   runtime wiring without executing a model-backed websocket turn.
 - Add browser-level route rendering smoke for generated bundles if CI can run it
   without making ordinary unit feedback slow.
+- Add brownfield generated-app acceptance once ExistingAppDiscovery exposes a
+  stable deterministic post-discovery/adoption-plan to AppBuildPlan
+  materialization seam.
 
 P2:
 
 - Expand workflow reference checks as workflow packs add more declarative target
   shapes.
-- Add optional brownfield generated-app acceptance once existing-app discovery
-  has a stable deterministic adoption-plan fixture.
+- Add heavier archetype rows outside ordinary CI if they materially slow normal
+  test feedback.
