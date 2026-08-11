@@ -73,8 +73,11 @@ jobs:
 
       - name: Scan for secrets
         # --redact masks found secrets in CI output.
+        # --log-opts=HEAD restricts the scan to this ref's own history; without it,
+        # gitleaks defaults to `--all` and flags unrelated open branches' commits
+        # (e.g. other PRs' intentional fake-secret test fixtures), failing every PR.
         # To ignore a historical false positive, add its fingerprint to .gitleaksignore.
-        run: gitleaks detect --source . --log-level warn --redact
+        run: gitleaks detect --source . --log-level warn --log-opts="HEAD" --redact
 
   dependency-audit:
     runs-on: ubuntu-latest
