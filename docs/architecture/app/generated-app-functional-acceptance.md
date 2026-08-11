@@ -18,6 +18,20 @@ contract.
 
 ## Functional Completeness Definition
 
+Generated-app acceptance is tracked in three levels:
+
+- **Level 1 — Structural:** files, schemas, contracts, and cross-artifact
+  references are valid.
+- **Level 2 — Functional:** the app loads through the runtime, declared
+  routes/actions/workflows/facades resolve, and expected surfaces do not return
+  accidental 404, 501, missing-action, or placeholder responses.
+- **Level 3 — User Journey:** representative multi-step user journeys work
+  end to end through the UI and backend.
+
+Normal OSS CI should enforce at least Level 2 for representative deterministic
+generated archetypes. Level 3 coverage should grow through golden journeys, but
+Mozaiks should not claim universal Level 3 coverage until tests prove it.
+
 A generated app is functionally complete when:
 
 - `ui/route_manifest.json` routes resolve to a built-in page, registered custom
@@ -53,6 +67,7 @@ internally declared app route/action/facade must not be missing.
 | Workflow module-action target resolution | `scan_functional_generated_app` | Static | Added |
 | Managed capability facade completeness | `scan_functional_generated_app` | Static | Added |
 | 501/not-implemented generated surfaces | `scan_functional_generated_app` | Static | Added to public facade |
+| Generated app host boot and declared HTTP page/module surfaces | Platform `TestClient` over deterministic CRUD bundle | Runtime / HTTP | Added |
 
 ## Diagnostics
 
@@ -74,6 +89,8 @@ AppGenerator `functional_completeness` acceptance subgate.
 Current automated coverage includes:
 
 - Basic authenticated CRUD route/action/schema coherence.
+- Basic CRUD app runtime boot through the platform host plus declared
+  `/api/pages/*` and `/api/modules/*` HTTP surfaces.
 - Monetized SaaS facade expectations for the public MozaiksPay-compatible
   generated-app contract.
 - Workflow/agent module-action references through declarative workflow YAML.
@@ -105,6 +122,8 @@ P1:
 - Add a generated artifact fixture that exercises a full deterministic
   AppPlan-to-materialized-app path for monetized SaaS once that fixture can be
   run without paid LLM calls.
+- Add HTTP/runtime acceptance for monetized SaaS and workflow/agent archetypes
+  after deterministic no-network fixtures exist for those app shapes.
 - Add browser-level route rendering smoke for generated bundles if CI can run it
   without making ordinary unit feedback slow.
 

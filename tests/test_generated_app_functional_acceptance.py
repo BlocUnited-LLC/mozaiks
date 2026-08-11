@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
 )
+from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 from mozaiksai.core.validation import (
     GeneratedAppValidationRequest,
     scan_functional_generated_app,
@@ -118,6 +121,21 @@ class OrdersService:
 
 def _diagnostic_codes(files: dict[str, str], *, capability_packs: list[dict] | None = None) -> set[str]:
     return {item.code for item in scan_functional_generated_app(files, capability_packs=capability_packs)}
+
+
+def _materialize_bundle(root: Path, files: dict[str, str]) -> None:
+    for relative_path, content in files.items():
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def _assert_not_missing_or_placeholder(response, *, surface: str) -> None:
+    body = response.text.lower()
+    assert response.status_code != 404, f"DECLARED_SURFACE_404 surface={surface} body={response.text}"
+    assert response.status_code != 501, f"DECLARED_SURFACE_501 surface={surface} body={response.text}"
+    assert "not implemented" not in body, f"DECLARED_SURFACE_PLACEHOLDER surface={surface} body={response.text}"
+    assert "not_implemented" not in body, f"DECLARED_SURFACE_PLACEHOLDER surface={surface} body={response.text}"
 
 
 def test_functional_scanner_accepts_basic_authenticated_crud_bundle() -> None:
@@ -257,3 +275,44 @@ async def test_app_generator_acceptance_gate_includes_functional_completeness() 
     assert result["passed"] is True
     assert result["functional_completeness"]["passed"] is True
     assert "functional_completeness" in result["validation_evidence"]["completed"]
+
+
+def test_generated_crud_bundle_boots_and_serves_declared_http_surfaces(tmp_path, monkeypatch) -> None:
+    app_root = tmp_path / "app"
+    _materialize_bundle(app_root, _basic_crud_files())
+    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    reset_auth_adapter()
+
+    from mozaiksai.hosts import platform
+
+    with TestClient(platform.app, raise_server_exceptions=False) as client:
+        health = client.get("/health")
+        assert health.status_code == 200, health.text
+        assert health.json()["status"] == "ok"
+
+        shell_config = client.get("/api/shell-config")
+        _assert_not_missing_or_placeholder(shell_config, surface="/api/shell-config")
+        assert shell_config.status_code == 200, shell_config.text
+        pages = shell_config.json().get("pages", [])
+        assert any(page.get("path") == "/orders" for page in pages)
+
+        page_schema = client.get("/api/pages/orders")
+        _assert_not_missing_or_placeholder(page_schema, surface="/api/pages/orders")
+        assert page_schema.status_code == 200, page_schema.text
+        assert page_schema.json()["route"] == "/orders"
+
+        list_response = client.post("/api/modules/orders/list_orders", json={})
+        _assert_not_missing_or_placeholder(list_response, surface="/api/modules/orders/list_orders")
+        assert list_response.status_code == 200, list_response.text
+        assert list_response.json() == {"orders": []}
+
+        create_response = client.post(
+            "/api/modules/orders/create_order",
+            json={"params": {"customer_name": "Ada"}},
+        )
+        _assert_not_missing_or_placeholder(create_response, surface="/api/modules/orders/create_order")
+        assert create_response.status_code == 200, create_response.text
+        assert create_response.json() == {"order": {"customer_name": "Ada"}}
