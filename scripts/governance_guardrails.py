@@ -64,6 +64,42 @@ GRANTED_PERMISSIONS_NONE_ALLOWLIST = {
     "tests/test_module_loader_contracts.py",
 }
 
+# Directories that are private by default (OSS_PUBLICATION_POLICY.md §Learned-Artifact Quarantine).
+# Finding any data file under these paths in OSS source is an error; the
+# *mechanism* (e.g. an eval runner script) may be public, but BlocUnited eval
+# corpora, correction datasets, cross-customer patterns, and production outcomes
+# must stay out of this repository.
+LEARNED_ARTIFACT_DIRS: tuple[str, ...] = (
+    "evals/",
+    "eval/",
+    "corpora/",
+    "corpus/",
+    "corrections/",
+    "production_outcomes/",
+    "learned_rankings/",
+    "customer_patterns/",
+    "training_data/",
+    "eval_results/",
+    "cross_app_patterns/",
+)
+
+# File extensions that represent data payloads rather than code.
+# When found under LEARNED_ARTIFACT_DIRS they are always errors.
+# When found elsewhere they are notices (may be legitimate test fixtures).
+LEARNED_ARTIFACT_DATA_EXTENSIONS: frozenset[str] = frozenset(
+    {".jsonl", ".csv", ".parquet", ".pkl", ".pickle", ".npz", ".npy"}
+)
+
+# Repos-relative paths where data files with the above extensions are
+# legitimately allowed (test fixtures, pricing catalogs, etc.).
+LEARNED_ARTIFACT_DATA_EXEMPTIONS: frozenset[str] = frozenset(
+    {
+        "ai-pricing/catalogs/usage-pricing.generated.json",
+        "mozaiksai/core/usage/catalogs/usage-pricing.generated.json",
+        "tests/fixtures/",
+    }
+)
+
 PUBLIC_ARTIFACT_PREFIXES = (
     "factory_app/build_context/",
     "factory_app/workflows/",
@@ -213,6 +249,18 @@ def _has_review_marker(text: str) -> bool:
     return any(marker in lower for marker in REVIEW_MARKERS)
 
 
+def _is_learned_artifact_dir(relative: str) -> bool:
+    """Return True if the path sits inside a learned-artifact quarantine directory."""
+    return any(f"/{d}" in f"/{relative}" for d in LEARNED_ARTIFACT_DIRS)
+
+
+def _is_learned_artifact_data_exempt(relative: str) -> bool:
+    return any(
+        relative == exemption or relative.startswith(exemption)
+        for exemption in LEARNED_ARTIFACT_DATA_EXEMPTIONS
+    )
+
+
 def _scan_file(path: Path, repo_root: Path) -> tuple[list[GovernanceFinding], list[GovernanceFinding]]:
     text = _read_text(path)
     if text is None:
@@ -300,6 +348,44 @@ def _scan_file(path: Path, repo_root: Path) -> tuple[list[GovernanceFinding], li
                 message="workflow, prompt, build-context, or intelligence surface should be classified in PR review",
             )
         )
+
+    # Learned-artifact quarantine check (OSS_PUBLICATION_POLICY.md).
+    # Any data-payload file inside a quarantine directory is an immediate error.
+    # Data-payload files in non-quarantine paths produce a notice so contributors
+    # can confirm they are OSS-appropriate (e.g. test fixtures).
+    if not _is_learned_artifact_data_exempt(relative):
+        is_in_quarantine_dir = _is_learned_artifact_dir(relative)
+        is_data_payload = path.suffix.lower() in LEARNED_ARTIFACT_DATA_EXTENSIONS
+        if is_in_quarantine_dir and is_data_payload:
+            errors.append(
+                GovernanceFinding(
+                    severity="error",
+                    code="learned_artifact_in_oss",
+                    path=relative,
+                    line=1,
+                    message=(
+                        f"data file in learned-artifact directory '{path.parent.name}/' — "
+                        "BlocUnited eval corpora, correction datasets, cross-customer patterns, "
+                        "and production outcomes are private by default per OSS_PUBLICATION_POLICY.md"
+                    ),
+                )
+            )
+        elif is_in_quarantine_dir and not is_data_payload:
+            # Code/scripts in quarantine dirs (e.g. eval runners) are notices only —
+            # the mechanism may be public; the data must not be.
+            notices.append(
+                GovernanceFinding(
+                    severity="notice",
+                    code="code_in_learned_artifact_dir",
+                    path=relative,
+                    line=1,
+                    message=(
+                        f"code file inside '{path.parent.name}/' — "
+                        "eval/corpus mechanisms may be OSS, but data artifacts in the same "
+                        "directory require deliberate publication review"
+                    ),
+                )
+            )
 
     return errors, notices
 

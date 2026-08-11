@@ -1,3 +1,10 @@
+# Agent guidance split policy:
+#   mozaiks_cli/agent_guidance/ — USER-FACING skills (add-module, add-page,
+#     create-workflow, setup, etc.) and app-workspace rules.  Ships in the wheel
+#     so installed packages include guidance for app developers.
+#   .claude/skills/ — CONTRIBUTOR-ONLY framework-change skills (appgenerator-change,
+#     control-plane-refinement-change, oss-contribution-review, etc.).  Git-only;
+#     NOT in MANIFEST.in and NOT shipped in the wheel.
 recursive-include mozaiks_cli/agent_guidance *.md
 recursive-include factory_app/app *
 recursive-include factory_app/build_context *
