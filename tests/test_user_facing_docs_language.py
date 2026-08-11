@@ -17,6 +17,8 @@ def test_readme_uses_plain_tool_framing() -> None:
     assert 'python -m pip install -e ".[dev]"' in readme
     assert "python -m mozaiks quickstart --dir .\\mozaiks-workspace" in readme
     assert "Docker Desktop is not required" in readme
+    assert "workflow-routing-transitions.md" in readme
+    assert "mid-flight-journeys.md" not in readme
     assert "pipx" not in readme
     assert "python -m venv .venv" not in readme
     assert "python -m pip install mozaiks" not in readme

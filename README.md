@@ -121,7 +121,7 @@ Main repo layout:
 - [Architecture Overview](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURE.md) — System design and component model
 - [Getting Started](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/getting-started.md) — Full setup guide
 - [Releasing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/releasing.md) — Release hold and future publish workflow
-- [Mid-Flight Journeys](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/mozaiksai/mid-flight-journeys.md) — Flagship orchestration capability and runtime semantics
+- [Workflow Routing Transitions](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/workflows/workflow-routing-transitions.md) — Flagship orchestration capability and runtime semantics
 - [Workflow Authoring Contracts](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/workflows/workflow-authoring-contracts.md) — Canonical strict YAML contract
 - [Contributing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md) — Development workflow
 
