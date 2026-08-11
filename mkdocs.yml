@@ -145,6 +145,7 @@ nav:
           - Context Graph & Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
           - App Context & Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
+          - OSS Boundary Families: architecture/foundations/oss-boundary-families.md
           - Profile Panel Contract: architecture/foundations/profile-panel-contract.md
           - Event System: architecture/foundations/events-and-data/event-system.md
           - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
@@ -275,3 +276,8 @@ nav:
           - Verified Setup Guide: architecture/verified/setup-guide.md
           - Auth Setup: architecture/verified/auth-setup.md
           - Trigger Mechanisms: architecture/verified/trigger-mechanisms.md
+
+  - Decisions:
+      - adr/0001-public-architecture-and-oss-strategy-boundary.md
+      - adr/0002-appgenerator-baseline-strategy-oss.md
+      - adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md
