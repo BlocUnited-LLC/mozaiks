@@ -13,6 +13,11 @@ No separate parser setup is required.
 
 ## 1. Install
 
+!!! note "PyPI package temporarily under construction"
+    The `mozaiks` package on PyPI is temporarily under construction while we
+    finish preparing it for public release. Install from source in the
+    meantime — see [Contributing](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md).
+
 === "Windows"
 
     ```powershell
