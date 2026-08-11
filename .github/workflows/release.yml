@@ -1,9 +1,39 @@
 name: Release
 
+# RELEASES ARE CURRENTLY DISABLED.
+#
+# Tag-triggered publication has been turned off because the 'release' GitHub
+# environment does NOT have required reviewers configured (protection_rules=[]).
+# Without reviewers, any v* tag push would proceed through the approval gate
+# automatically and publish to PyPI.
+#
+# To re-enable:
+#   1. Configure required reviewers:
+#      GitHub Settings → Environments → release → Required reviewers
+#   2. Verify: gh api repos/BlocUnited-LLC/mozaiks/environments/release
+#      The response must show protection_rules with at least one reviewer.
+#   3. Complete all P0 items in docs/releasing.md.
+#   4. Uncomment the push/tags trigger below.
+#   5. Remove or keep the workflow_dispatch trigger as a second entry point.
+#
+# Only a manual workflow_dispatch with the confirmation string proceeds.
+# This provides defense-in-depth against accidental tag-triggered publication.
+
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      confirm_release:
+        description: >
+          Safety gate — type "release-confirmed" to proceed.
+          All P0 items in docs/releasing.md must be verified before running.
+          The 'release' GitHub environment must have required reviewers set.
+        required: true
+        type: string
+  # push:
+  #   tags:
+  #     - "v*"
+  # NOTE: Uncomment only after the 'release' environment has required reviewers.
+  # See docs/releasing.md and the comment block at the top of this file.
 
 permissions:
   contents: read
@@ -29,6 +59,15 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
     steps:
+      - name: Verify release gate
+        run: |
+          if [ "${{ inputs.confirm_release }}" != "release-confirmed" ]; then
+            echo "::error::Release gate: confirm_release must be exactly 'release-confirmed' to proceed." >&2
+            echo "::error::See docs/releasing.md for the full pre-release checklist." >&2
+            exit 1
+          fi
+          echo "Release gate confirmed — proceeding with build."
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -67,13 +106,19 @@ jobs:
           raise SystemExit("__version__ not found in mozaiksai/version.py")
           PY
           )"
-          TAG="${GITHUB_REF_NAME#v}"
-          if [ "$VERSION" != "$TAG" ]; then
-            echo "Tag version $TAG does not match package version $VERSION" >&2
-            exit 1
+          # For tag-triggered runs, validate the tag matches the package version.
+          # For workflow_dispatch runs, synthesise the tag from the package version.
+          if [ "${GITHUB_EVENT_NAME}" == "push" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$VERSION" != "$TAG" ]; then
+              echo "Tag version $TAG does not match package version $VERSION" >&2
+              exit 1
+            fi
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Install release dependencies
         run: |
@@ -104,6 +149,14 @@ jobs:
 
       - name: Check distributions
         run: python -m twine check dist/*
+
+      - name: Package content guard
+        # Inspect built artifacts for prohibited content before publication.
+        # Fails on: learned-artifact directories, private keys, raw provider
+        # credentials, .env files (non-example), private key file extensions.
+        # Warns on: large data files and review-pattern paths.
+        # See scripts/package_content_guard.py for the full policy table.
+        run: python scripts/package_content_guard.py dist/*.whl dist/*.tar.gz
 
       - name: Install wheel in clean venv
         shell: bash

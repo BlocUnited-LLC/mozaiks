@@ -14,6 +14,23 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Added `scripts/package_content_guard.py`: artifact-level content guard that inspects built wheels and sdists before publication. Fails on learned-artifact directories (`evals/`, `corpora/`, `corrections/`, `production_outcomes/`, `learned_rankings/`, `customer_patterns/`, etc.), raw private keys, raw provider credentials (`sk_live_`, `sk_test_`, etc.), `.env` files (non-example), private-key file extensions (`.pem`, `.key`), and unapproved top-level package families or `factory_app/` sub-families. Warns on large data files and review-pattern paths.
+- Added `scripts/run_release_audit.py`: local pre-release audit script that chains governance guardrails, build, package content guard, twine check, smoke install into a clean venv, Factory resource resolution verification, and offline functional acceptance tests. Run with `python scripts/run_release_audit.py` before tagging any release.
+- Added `docs/adr/0002-appgenerator-baseline-strategy-oss.md`: records the intentional decision to publish the AppGenerator baseline strategy as OSS. Establishes that future learned or operator-derived additions require a new publication review ADR before entering this repository.
+
+### Security
+
+- Extended `scripts/governance_guardrails.py` with learned-artifact quarantine enforcement at the source level: data files (`.jsonl`, `.csv`, `.parquet`, `.pkl`, etc.) inside quarantine directories are now a governance ERROR; code files inside those directories are a NOTICE. Complements the artifact-level guard in `package_content_guard.py`.
+- Added package content guard step to `.github/workflows/release.yml` between `twine check` and wheel install smoke test. Inspects all built artifacts for prohibited content before any publication step.
+- Disabled tag-triggered releases in `.github/workflows/release.yml`: the `release` GitHub environment has no required reviewers (`protection_rules: []`), meaning any `v*` tag push would have auto-published. The tag trigger is now commented out; only a manual `workflow_dispatch` with `confirm_release: "release-confirmed"` can proceed. Add environment reviewers and uncomment the tag trigger when ready to ship.
+
+### Changed
+
+- Updated `docs/releasing.md` with an explicit "RELEASES ARE CURRENTLY DISABLED" banner, verified NOT PROTECTED release gate status (with remediation steps), a full Pre-Release Checklist (P0/P1), and a Release-Candidate Audit Command section documenting `scripts/run_release_audit.py`.
+- Updated `MANIFEST.in` with a comment block documenting the agent-guidance split policy: `mozaiks_cli/agent_guidance/` (user-facing skills, ships in wheel) vs `.claude/skills/` (contributor-only framework skills, git-only, not shipped).
+
+### Added
+
 - Added the App Intelligence Plane: source-backed indexing now produces an `app_intelligence_snapshot` artifact alongside `source_context_bundle` and `app_context_graph`, with discovery and refinement tools exposing compact architecture, capability, ownership, integration, data, and risk context before agents read exact files.
 - Added a provider-neutral generated app auth contract (`app/config/auth.yaml`) and hardened OIDC PKCE adapter output so authenticated apps keep auth behavior deterministic while leaving provider setup to operators or hosted services.
 - Added workspace handler extension system: `workspace_extensions_contract.yaml` declares the schema for `app/build_context/{pack_id}/extensions.yaml` files that workspace apps use to express extra params, param overrides, and extra actions on top of OSS-generated base handlers without editing generated files.
