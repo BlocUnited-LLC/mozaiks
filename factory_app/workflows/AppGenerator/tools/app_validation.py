@@ -2116,6 +2116,10 @@ async def run_app_bundle_acceptance_gate(
     if generated_files:
         _context_set(context_variables, "generated_files", generated_files)
 
+    from mozaiksai.core.validation.functional_generated_app import (
+        scan_functional_generated_app,
+    )
+
     from .generated_bundle_scanner import scan_generated_bundle
     from .validate_wiring import validate_wiring
 
@@ -2159,6 +2163,64 @@ async def run_app_bundle_acceptance_gate(
     wiring_result = await validate_wiring(context_variables=context_variables)
     module_implementation_result = validate_module_implementation_contract(generated_files)
     runtime_quality_result = _runtime_quality_result(generated_files)
+    functional_diagnostics = scan_functional_generated_app(
+        generated_files,
+        capability_packs=selected_capability_packs,
+    )
+    functional_errors = [item for item in functional_diagnostics if item.severity == "error"]
+    functional_result = {
+        "contract_version": "1.0",
+        "passed": not functional_errors,
+        "checks": [
+            _check_result(
+                check_id="generated_app_functional_completeness",
+                passed=not functional_errors,
+                message=(
+                    "Generated app routes, module references, capability facades, and expected handlers are functionally coherent."
+                    if not functional_errors
+                    else f"{len(functional_errors)} generated app functional completeness issue(s) found."
+                ),
+                details={
+                    "diagnostic_count": len(functional_diagnostics),
+                    "error_count": len(functional_errors),
+                    "diagnostics": [
+                        {
+                            "code": item.code,
+                            "message": item.message,
+                            "path": item.path,
+                            "severity": item.severity,
+                        }
+                        for item in functional_diagnostics
+                    ],
+                },
+            )
+        ],
+        "failed_tests": [
+            {
+                "test": item.code,
+                "path": item.path,
+                "error": item.message,
+                "fix_suggestion": (
+                    "Regenerate or repair the canonical app artifact so declared "
+                    "routes, module actions, workflow/tool references, capability "
+                    "facades, and implementation files resolve before export."
+                ),
+            }
+            for item in functional_errors
+        ],
+        "warnings": [
+            item.message for item in functional_diagnostics if item.severity == "warning"
+        ],
+        "diagnostics": [
+            {
+                "code": item.code,
+                "message": item.message,
+                "path": item.path,
+                "severity": item.severity,
+            }
+            for item in functional_diagnostics
+        ],
+    }
     workflow_integration_result = validate_workflow_integration_contract(
         generated_files,
         context_variables,
@@ -2171,6 +2233,7 @@ async def run_app_bundle_acceptance_gate(
         "module_wiring": wiring_result,
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
+        "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
     }
@@ -2214,6 +2277,7 @@ async def run_app_bundle_acceptance_gate(
             _result_check(wiring_result, default_id="module_wiring", default_message="Module wiring check completed."),
             _result_check(module_implementation_result, default_id="module_implementation", default_message="Module implementation check completed."),
             _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
+            _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
             _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
         ],
@@ -2245,6 +2309,8 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "module_runtime_quality_status", "passed" if runtime_quality_result["passed"] else "blocked")
     _context_set(context_variables, "module_runtime_quality_warnings", runtime_quality_result.get("warnings") or [])
     _context_set(context_variables, "module_runtime_quality_result", runtime_quality_result)
+    _context_set(context_variables, "generated_app_functional_completeness_passed", functional_result.get("passed"))
+    _context_set(context_variables, "generated_app_functional_completeness_result", functional_result)
     _context_set(context_variables, "workflow_integration_validation_passed", workflow_integration_result.get("passed"))
     _context_set(context_variables, "workflow_integration_validation_result", workflow_integration_result)
     _context_set(context_variables, "app_runtime_load_passed", app_runtime_load_result.get("passed"))
@@ -2410,6 +2476,7 @@ async def validate_app_bundle_from_request(
     wiring_result = acceptance_result["module_wiring"]
     module_implementation_result = acceptance_result["module_implementation"]
     runtime_quality_result = acceptance_result["module_runtime_quality"]
+    functional_result = acceptance_result["functional_completeness"]
     workflow_integration_result = acceptance_result["workflow_integration"]
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     workflow_integration_repair = acceptance_result.get("workflow_integration_repair")
@@ -2423,6 +2490,7 @@ async def validate_app_bundle_from_request(
         "module_wiring": wiring_result,
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
+        "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,
@@ -2441,6 +2509,7 @@ async def validate_app_bundle_from_request(
         "wiring_validation_result": wiring_result,
         "module_implementation_validation_result": module_implementation_result,
         "module_runtime_quality_result": runtime_quality_result,
+        "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,

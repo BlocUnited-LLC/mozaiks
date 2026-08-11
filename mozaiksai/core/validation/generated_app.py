@@ -112,6 +112,9 @@ def validate_generated_app_bundle(
     from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
         scan_generated_bundle,
     )
+    from mozaiksai.core.validation.functional_generated_app import (
+        scan_functional_generated_app,
+    )
 
     scanner_errors = scan_generated_bundle(
         request.files,
@@ -138,6 +141,19 @@ def validate_generated_app_bundle(
     )
 
     diagnostics.extend(_validate_build_task_dependencies(list(request.build_tasks)))
+
+    diagnostics.extend(
+        GeneratedAppValidationDiagnostic(
+            code=diagnostic.code,
+            message=diagnostic.message,
+            path=diagnostic.path,
+            severity=diagnostic.severity,
+        )
+        for diagnostic in scan_functional_generated_app(
+            request.files,
+            capability_packs=list(request.capability_packs),
+        )
+    )
 
     return GeneratedAppValidationResult(
         passed=not any(item.severity == "error" for item in diagnostics),
