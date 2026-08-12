@@ -14,6 +14,8 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 Before editing Mozaiks OSS:
 
 - read [docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md](docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md)
+- for generator, structured-output, YAML contract, taxonomy, route/action/component binding, or materialization work, also read
+  [docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md](docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md)
 - if the task changes, extends, replaces, or challenges architecture, also read
   [docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md](docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md)
 - current source remains final authority
@@ -27,6 +29,22 @@ Before editing Mozaiks OSS:
   cannot satisfy the requirement
 - architectural changes that contradict the frozen north star require an ADR or
   explicit architecture decision
+
+## Deterministic Generation Rule
+
+Generated-app reliability takes precedence over maximum schema expressiveness.
+
+- Prefer small finite taxonomies, shallow typed schemas, and explicit canonical references.
+- One runtime concept gets one canonical name. Do not preserve overlapping aliases for pages, actions, modules, workflows, capabilities, routes, events, or UI concepts.
+- Every runtime-affecting structured-output value must resolve to a known canonical contract before promotion. Unknown taxonomy values and unresolved route/component/module/action/workflow/capability references fail early rather than becoming runtime `404`, `501`, missing-action, or fallback behavior.
+- YAML and structured outputs own architecture, topology, identity, and contracts. Python and JS/React are bounded customization escape hatches behind those contracts; do not expand canonical YAML into an unbounded programming language.
+- When a schema/taxonomy changes, update the structured-output model, Factory prompts/hooks, deterministic materializer/templates, runtime loader/consumer, validation, docs, fixtures, and acceptance tests together.
+- `factory_app` and/or generated-app acceptance must dogfood generic schema/taxonomy changes where applicable.
+
+This repo is pre-1.0 and not in production. **Replace obsolete internal contracts directly by default.** Remove stale shapes, aliases, shims, fallback branches, dual-read/dual-write behavior, normalization of retired names, obsolete prompt guidance, and retired tests in the same migration. Preserve an older shape only when an explicit current external contract or user-approved migration requirement proves it is necessary.
+
+The detailed implementation policy is
+[Canonical Schema Generation Policy](docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md).
 
 This repo uses layered FastAPI hosts as the canonical OSS server composition:
 - `mozaiksai.hosts.runtime`
