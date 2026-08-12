@@ -266,6 +266,18 @@ def _module_contract(module_id: str, actions: list[tuple[str, str]], *, entitlem
     )
 
 
+def _plan_actions(spec: _ArchetypeSpec, module_id: str) -> list[str]:
+    for pack in spec.plan.get("capability_packs") or []:
+        if not isinstance(pack, Mapping):
+            continue
+        if str(pack.get("capability_pack_id") or pack.get("surface_id") or "") != module_id:
+            continue
+        actions = [str(action) for action in pack.get("operations") or [] if str(action).strip()]
+        if actions:
+            return actions
+    return []
+
+
 def _simple_backend(module_id: str, actions: list[str]) -> dict[str, str]:
     methods = []
     for action in actions:
@@ -543,7 +555,9 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             "incidents": [("create_incident", "Create incident."), ("list_incidents", "List incidents.")],
             "posts": [("create_post", "Create post."), ("list_posts", "List posts.")],
             "comments": [("create_comment", "Create comment."), ("list_comments", "List comments.")],
-        }[module_id]
+        }.get(module_id)
+        if actions is None:
+            actions = [(action, f"{action.replace('_', ' ').title()}.") for action in _plan_actions(spec, module_id)]
         files = [{"filename": f"modules/{module_id}/module.yaml", "content": _module_contract(module_id, actions)}]
         files.extend(
             {"filename": path, "content": "schema_version: mozaiks.events.v1\nevents: []\n"}
@@ -575,7 +589,9 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
             "incidents": ["create_incident", "list_incidents"],
             "posts": ["create_post", "list_posts"],
             "comments": ["create_comment", "list_comments"],
-        }[module_id]
+        }.get(module_id)
+        if actions is None:
+            actions = _plan_actions(spec, module_id)
         backend_files = _simple_backend(module_id, actions)
         return {
             "code_files": [

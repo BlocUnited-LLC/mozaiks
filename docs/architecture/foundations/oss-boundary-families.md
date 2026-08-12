@@ -116,4 +116,4 @@ When `mozaiks-app` needs new generic framework behavior, it opens a PR against
 3. Moving any DO-NOT-MOVE family to a private repo: requires ADR review and
    would be a breaking change after 1.0 publication.
 4. Adding a new public mechanism or interface: follow the
-   [One-Way Door Standard](../../../OSS_PUBLICATION_POLICY.md).
+   One-Way Door Standard in `OSS_PUBLICATION_POLICY.md`.
