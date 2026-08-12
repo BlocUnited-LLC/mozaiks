@@ -68,7 +68,8 @@ class PackIntegrityError(ManagedCapabilityTemplateError):
 
 
 def _normalized_source(pack: dict[str, Any], context: dict[str, Any]) -> str:
-    pack_block = context.get("pack") if isinstance(context.get("pack"), dict) else {}
+    pack_value = context.get("pack")
+    pack_block = pack_value if isinstance(pack_value, dict) else {}
     return str(pack.get("source") or pack_block.get("source") or "local").strip()
 
 
@@ -226,7 +227,8 @@ def _validate_pack_dependencies(
         if raw_path and pid and _is_safe_identifier(pid):
             try:
                 context_data = _read_pack_context(Path(raw_path).resolve(), pid)
-                pack_block = context_data.get("pack") if isinstance(context_data.get("pack"), dict) else {}
+                pack_value = context_data.get("pack")
+                pack_block = pack_value if isinstance(pack_value, dict) else {}
                 available_pack_versions[pid] = str(pack_block.get("version") or "").strip()
                 for cid in _capabilities_from_context(context_data):
                     available_capability_ids.add(cid)
