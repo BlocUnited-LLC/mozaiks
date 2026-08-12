@@ -5,6 +5,7 @@ contract_type: build_pack_instructions
 requires:
   packs:
     - pack_id: greetings
+      version: "0.1.0"
       reason: "farewell module uses the greetings session context when saying goodbye"
   capabilities:
     - capability_id: greetings.say_hello

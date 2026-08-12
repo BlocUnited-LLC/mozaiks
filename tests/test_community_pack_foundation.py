@@ -8,7 +8,7 @@ without creating a parallel runtime.  Covers:
   - Dependency validation: satisfied/missing requirements
   - Catalog schema validation: structural allowlisting before AG2 injection
   - Deterministic materialization: fixture community pack renders expected files
-  - Provenance manifest: emitted with correct pack metadata and file ownership
+  - Provenance manifest: emitted with correct pack metadata, digest, source, and file ownership
   - Two-pack no-collision: greetings + farewell materialise without file conflicts
   - Existing first-party packs remain compatible: social, messaging, mozaikspay contexts
   - Bundle scanner validates provenance manifest schema when present
@@ -90,7 +90,7 @@ def test_valid_pack_identity_passes_schema() -> None:
     assert result.pack_id == "greetings"
 
 
-def test_pack_version_is_optional_and_still_valid() -> None:
+def test_pack_version_is_required_for_pack_blocks() -> None:
     from factory_app.workflows.AppGenerator.tools.pack_context_schema import validate_pack_context
 
     context: dict[str, Any] = {
@@ -104,7 +104,8 @@ def test_pack_version_is_optional_and_still_valid() -> None:
         },
     }
     result = validate_pack_context(context)
-    assert result.valid, [d.message for d in result.errors]
+    assert not result.valid
+    assert any(d.field == "pack.version" for d in result.errors)
 
 
 def test_pack_without_pack_block_is_valid() -> None:
@@ -209,6 +210,25 @@ def test_version_must_be_string() -> None:
     assert not result.valid
 
 
+def test_unknown_capability_source_rejected() -> None:
+    from factory_app.workflows.AppGenerator.tools.pack_context_schema import validate_pack_context
+
+    context: dict[str, Any] = {
+        "context_id": "typed_wrong",
+        "applies_to_workflows": ["AppGenerator"],
+        "assets": [],
+        "pack": {
+            "id": "typed_wrong",
+            "status": "active",
+            "version": "0.1.0",
+            "capability_source": "invented_source",
+        },
+    }
+    result = validate_pack_context(context)
+    assert not result.valid
+    assert any(d.field == "pack.capability_source" for d in result.errors)
+
+
 # ---------------------------------------------------------------------------
 # 3. Dependency validation: satisfied requirement passes
 # ---------------------------------------------------------------------------
@@ -245,6 +265,28 @@ def test_dependency_missing_raises_pack_dependency_error() -> None:
     assert "greetings" in err.missing_packs
     # The capability from greetings is also declared as required
     assert any("greetings" in c for c in err.missing_capabilities)
+
+
+def test_dependency_version_mismatch_rejected(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackDependencyError,
+    )
+
+    wrong_greetings = tmp_path / "greetings"
+    wrong_greetings.mkdir()
+    (wrong_greetings / "context.yaml").write_text(
+        (GREETINGS_PACK / "context.yaml").read_text(encoding="utf-8").replace('"0.1.0"', '"9.9.9"'),
+        encoding="utf-8",
+    )
+    (wrong_greetings / "contract.yaml").write_text((GREETINGS_PACK / "contract.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    templates = wrong_greetings / "templates"
+    templates.mkdir()
+    (templates / "stub.txt").write_text("stub\n", encoding="utf-8")
+
+    with pytest.raises(PackDependencyError) as exc_info:
+        _materialize(_pack_descriptor(wrong_greetings, "greetings"), _pack_descriptor(FAREWELL_PACK, "farewell"))
+
+    assert "greetings expected 0.1.0, installed 9.9.9" in exc_info.value.version_mismatches
 
 
 def test_dependency_error_message_is_human_readable() -> None:
@@ -291,6 +333,46 @@ def test_catalog_schema_validation_rejects_untrusted_keys_at_materialization(
     desc = _pack_descriptor(pack_dir, "adversarial")
     with pytest.raises(ManagedCapabilityTemplateError, match="schema validation"):
         _materialize(desc)
+
+
+def test_missing_declared_asset_rejected_before_materialization(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    pack_dir = tmp_path / "missing_asset"
+    pack_dir.mkdir()
+    (pack_dir / "context.yaml").write_text(
+        "context_id: missing_asset\n"
+        "applies_to_workflows:\n  - AppGenerator\n"
+        "assets:\n  - path: missing_contract.yaml\n    kind: contract\n"
+        "pack:\n  id: missing_asset\n  version: '0.1.0'\n  status: active\n  capability_source: generated_module\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(PackIntegrityError, match="Declared pack asset not found"):
+        _materialize(_pack_descriptor(pack_dir, "missing_asset"))
+
+
+def test_contract_unknown_runtime_affecting_field_rejected(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    pack_dir = tmp_path / "bad_contract"
+    pack_dir.mkdir()
+    (pack_dir / "context.yaml").write_text(
+        "context_id: bad_contract\n"
+        "applies_to_workflows:\n  - AppGenerator\n"
+        "assets:\n  - path: contract.yaml\n    kind: contract\n"
+        "pack:\n  id: bad_contract\n  version: '0.1.0'\n  status: active\n  capability_source: generated_module\n",
+        encoding="utf-8",
+    )
+    (pack_dir / "contract.yaml").write_text(
+        "contract_id: bad_contract\ncontract_type: build_pack_instructions\nalternate_runtime_schema: true\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(PackIntegrityError, match="unsupported fields"):
+        _materialize(_pack_descriptor(pack_dir, "bad_contract"))
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +454,19 @@ def test_provenance_contains_pack_version_from_context_yaml() -> None:
 
     manifest = json.loads(files[".mozaiks/pack_provenance.json"])
     greetings_entry = next(p for p in manifest["packs"] if p["pack_id"] == "greetings")
-    assert greetings_entry["pack_version"] == "0.1.0"
+    assert greetings_entry["version"] == "0.1.0"
+
+
+def test_provenance_contains_source_and_digest() -> None:
+    greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
+    files = _files_map(greetings)
+
+    manifest = json.loads(files[".mozaiks/pack_provenance.json"])
+    greetings_entry = next(p for p in manifest["packs"] if p["pack_id"] == "greetings")
+    assert greetings_entry["source"] == "https://example.com/community-packs/greetings"
+    assert isinstance(greetings_entry["digest"], str)
+    assert greetings_entry["digest"].startswith("sha256:")
+    assert len(greetings_entry["digest"]) == len("sha256:") + 64
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +480,7 @@ def test_provenance_maps_files_to_greetings_pack() -> None:
 
     manifest = json.loads(files[".mozaiks/pack_provenance.json"])
     greetings_entry = next(p for p in manifest["packs"] if p["pack_id"] == "greetings")
-    provenance_paths = {f["path"] for f in greetings_entry["files"]}
+    provenance_paths = {f["path"] for f in greetings_entry["materialized_owned_files"]}
 
     assert "modules/greetings/module.yaml" in provenance_paths
     assert "modules/greetings/backend/service.py" in provenance_paths
@@ -398,7 +492,7 @@ def test_provenance_records_owner_from_contract_required_outputs() -> None:
 
     manifest = json.loads(files[".mozaiks/pack_provenance.json"])
     greetings_entry = next(p for p in manifest["packs"] if p["pack_id"] == "greetings")
-    file_by_path = {f["path"]: f for f in greetings_entry["files"]}
+    file_by_path = {f["path"]: f for f in greetings_entry["materialized_owned_files"]}
 
     # handler.py is declared as owner=workspace in contract.yaml
     handler = file_by_path.get("modules/greetings/backend/handler.py")
@@ -445,7 +539,7 @@ def test_greetings_files_not_present_in_farewell_provenance() -> None:
 
     manifest = json.loads(files[".mozaiks/pack_provenance.json"])
     farewell_entry = next(p for p in manifest["packs"] if p["pack_id"] == "farewell")
-    farewell_paths = {f["path"] for f in farewell_entry["files"]}
+    farewell_paths = {f["path"] for f in farewell_entry["materialized_owned_files"]}
     # greetings files must not appear in farewell's provenance entry
     assert "modules/greetings/module.yaml" not in farewell_paths
 
@@ -551,6 +645,55 @@ def test_bundle_scanner_rejects_invalid_provenance_schema(tmp_path: Path) -> Non
     assert prov_errors, "Expected provenance schema error but got none"
 
 
+def test_bundle_scanner_rejects_invalid_provenance_digest() -> None:
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+
+    files = {
+        ".mozaiks/pack_provenance.json": json.dumps({
+            "schema_version": "mozaiks.pack_provenance.v1",
+            "framework_version": "test",
+            "generated_at": "2026-08-12T00:00:00+00:00",
+            "packs": [
+                {
+                    "pack_id": "greetings",
+                    "version": "0.1.0",
+                    "source": "local",
+                    "digest": "md5:not-canonical",
+                    "materialized_owned_files": [],
+                }
+            ],
+        }),
+    }
+    errors = scan_generated_bundle(files)
+    assert any("digest must be a canonical sha256 digest" in e for e in errors)
+
+
+def test_bundle_scanner_rejects_legacy_provenance_fields() -> None:
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+
+    files = {
+        ".mozaiks/pack_provenance.json": json.dumps({
+            "schema_version": "mozaiks.pack_provenance.v1",
+            "framework_version": "test",
+            "generated_at": "2026-08-12T00:00:00+00:00",
+            "packs": [
+                {
+                    "pack_id": "greetings",
+                    "pack_version": "0.1.0",
+                    "files": [],
+                }
+            ],
+        }),
+    }
+    errors = scan_generated_bundle(files)
+    assert any("unsupported field 'pack_version'" in e for e in errors)
+    assert any("unsupported field 'files'" in e for e in errors)
+
+
 def test_bundle_scanner_skips_provenance_check_when_absent() -> None:
     from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
         scan_generated_bundle,
@@ -591,6 +734,41 @@ def test_fixture_pack_selected_deterministically_via_descriptor() -> None:
     files2 = {k: v for k, v in _files_map(greetings).items() if k != _PROV}
 
     assert files == files2
+
+
+def test_same_pack_contents_produce_same_digest() -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        compute_pack_digest,
+    )
+
+    assert compute_pack_digest(GREETINGS_PACK, "greetings") == compute_pack_digest(GREETINGS_PACK, "greetings")
+
+
+def test_different_pack_contents_produce_different_digest(tmp_path: Path) -> None:
+    from shutil import copytree
+
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        compute_pack_digest,
+    )
+
+    pack_copy = tmp_path / "greetings"
+    copytree(GREETINGS_PACK, pack_copy)
+    before = compute_pack_digest(pack_copy, "greetings")
+    service = pack_copy / "templates" / "modules" / "greetings" / "backend" / "service.py"
+    service.write_text(service.read_text(encoding="utf-8") + "\n# material mutation\n", encoding="utf-8")
+
+    assert compute_pack_digest(pack_copy, "greetings") != before
+
+
+def test_valid_local_pack_verifies_before_materialization() -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+
+    metadata = verify_pack_integrity(GREETINGS_PACK, "greetings")
+    assert metadata["pack_id"] == "greetings"
+    assert metadata["version"] == "0.1.0"
+    assert metadata["digest"].startswith("sha256:")
 
 
 def test_fixture_pack_passes_generated_bundle_validation() -> None:

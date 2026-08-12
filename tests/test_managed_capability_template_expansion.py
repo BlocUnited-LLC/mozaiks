@@ -53,6 +53,7 @@ def _write_pack(root: Path, pack_id: str, files: dict[str, str], *, status: str 
                 ],
                 "pack": {
                     "id": pack_id,
+                    "version": "0.1.0",
                     "status": status,
                     "capability_source": "managed_capability",
                 },

@@ -74,6 +74,7 @@ assets:
     kind: templates
 pack:
   id: mozaikspay
+  version: "0.1.11"
   status: active
   capability_source: managed_capability
   required_integrations:
@@ -114,6 +115,7 @@ Required fields:
 Optional fields:
 
 - `pack`: marks the context as a selectable build pack.
+- `pack.version`: required version string for selectable packs.
 - `pack.required_integrations`: connector requirements that selected packs add
   to AppGenerator integration readiness. Declare each requirement as a
   structured object with `service`, `provider`, `kind`, `purpose`,
@@ -215,6 +217,9 @@ Current canonical asset kinds:
 - `contract`: typed agent-facing rule contract.
 - `templates`: directory of deterministic generated app files.
 
+Unknown asset kinds fail pack validation before prompt projection or
+materialization.
+
 Catalog prompt projection is declared on the catalog asset:
 
 ```yaml
@@ -281,10 +286,27 @@ facades:
     provider_module: mozaikspay
 ```
 
-Use bounded fields such as `selection_rules`, `required_outputs`,
-`required_integrations`, `forbidden_outputs`, `runtime_boundaries`, `facades`, and
-`inactive_surfaces`. Do not use top-level narrative fields such as `purpose`,
-`description`, `generation_rules`, or `recommended_facades`.
+Use bounded fields such as `selection_rules`, `required_outputs`, `requires`,
+`provides_capabilities`, `forbidden_outputs`, `runtime_boundaries`, and
+`facades`. Do not use top-level narrative fields such as `purpose`,
+`description`, `generation_rules`, `recommended_facades`, or alternate schema
+languages.
+
+Pack dependencies use one canonical contract:
+
+```yaml
+requires:
+  packs:
+    - pack_id: messaging
+      version: "0.1.11"
+      reason: Support tickets reuse messaging threads.
+  capabilities:
+    - capability_id: messaging.threads.create
+      reason: Support needs a canonical thread creation capability.
+```
+
+`requires.packs[].version` is exact when present. Mozaiks does not solve semver
+ranges for build-context packs.
 
 ## Templates
 
@@ -309,6 +331,48 @@ Examples:
 YAML files inside `templates/` are generated app declaratives, not build-context
 contracts. A selected pack copies every file under each declared `templates`
 asset to the same relative path in the generated app bundle.
+
+## Trust And Integrity
+
+Community Components are verified local `CapabilityPack` directories. Discovery
+of a descriptor does not install it, installation does not verify it, and
+verification does not grant production authority.
+
+Before materialization, a selected local pack must pass deterministic checks for:
+
+- identity and version;
+- declared asset closure;
+- catalog and contract schema shape;
+- dependency declarations and exact dependency versions when declared;
+- canonical content digest.
+
+The digest is one `sha256:` value computed from `context.yaml` and every
+declared asset file. It excludes timestamps, absolute paths, worktree location,
+and transient generated metadata. The same pack content produces the same
+digest; material pack-content changes produce a different digest.
+
+Generated bundles retain pack metadata in the existing
+`.mozaiks/pack_provenance.json` manifest:
+
+```json
+{
+  "schema_version": "mozaiks.pack_provenance.v1",
+  "packs": [
+    {
+      "pack_id": "greetings",
+      "version": "0.1.0",
+      "source": "https://example.com/community-packs/greetings",
+      "digest": "sha256:...",
+      "materialized_owned_files": [
+        { "path": "modules/greetings/module.yaml", "owner": "templates" }
+      ]
+    }
+  ]
+}
+```
+
+Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
+trust scoring, or cryptographic signing for this v1 layer.
 
 ## Resolution
 
