@@ -6,6 +6,8 @@
 
 **Authority:** This is the authoritative OSS north-star software-design document. Do not create or maintain a second competing OSS north-star document under `docs/architecture/foundations/`.
 
+**Architecture freeze:** After this reconciliation, future north-star changes should require either a concrete contradiction between this document and current source/runtime behavior or an accepted ADR.
+
 ---
 
 # 1. Executive Goal
@@ -131,6 +133,67 @@ It is:
 
 > Establish a deterministic boundary after reasoning so that a valid structured plan reliably becomes a functioning canonical application.
 
+## Structured Boundary Principle
+
+Mozaiks should:
+
+> Reason dynamically; cross important workflow boundaries structurally.
+
+AG2 reasoning may be dynamic.
+
+Important handoffs should be represented as typed, inspectable artifacts that Mozaiks can validate, persist, replay, refine, and materialize.
+
+Representative structured artifacts already present in the source include:
+
+* `ExperienceSpec`;
+* `SurfaceMap`;
+* `DataContractBundle`;
+* workflow bundles;
+* `AppSchemaOutput`;
+* `AppPlan` / `AppBuildPlan`;
+* module manifests;
+* event and reaction contracts;
+* page schemas;
+* data contracts.
+
+This principle constrains dynamic agent reasoning without claiming deterministic LLM output.
+
+## Mozaiks Control Loop
+
+The complete architectural lifecycle is:
+
+```text
+INTENT
+→ CONTEXT
+→ REASON
+→ STRUCTURE
+→ COMPOSE / MATERIALIZE
+→ VALIDATE
+→ EVALUATE
+→ REFINE / PROMOTE
+→ OPERATE
+→ OBSERVE
+→ LEARN
+→ IMPROVE STRATEGY
+```
+
+Ownership:
+
+| Phase | Owner |
+| --- | --- |
+| Intent | Product or application owner. |
+| Context | OSS `build_context` plus operator extensions. |
+| Reason | AG2. |
+| Structure | Mozaiks OSS structured outputs and canonical contracts. |
+| Compose / materialize | Mozaiks OSS deterministic materialization. |
+| Validate | Mozaiks OSS deterministic contracts and runtime acceptance. |
+| Evaluate | Deterministic OSS checks, AG2 semantic evaluation when adopted, and human/operator evidence where appropriate. |
+| Refine | Mozaiks OSS refinement harness. |
+| Operate | Self-hoster or hosted operator. |
+| Observe | Operator. |
+| Learn | Operator/private by default for cross-app evidence. |
+| Improve strategy | Operator strategy through public OSS seams. |
+
 ---
 
 # 4. Canonical Application Model
@@ -197,6 +260,38 @@ Canonical contracts include:
 
 The canonical model is the interoperability layer for the ecosystem.
 
+## Build Context Architecture
+
+`build_context` is Mozaiks's versioned context and reusable-asset projection layer between application intent and AG2 reasoning/materialization.
+
+It is not merely prompt storage.
+
+It has two architectural roles:
+
+### Reasoning Projection
+
+`build_context/{context_name}/context.yaml` and its declared assets project reusable knowledge into AG2 reasoning.
+
+Examples:
+
+* catalogs;
+* contracts;
+* capability directory entries;
+* module archetypes;
+* workflow patterns;
+* shell presets;
+* domain knowledge.
+
+### Deterministic Materialization
+
+Capability-pack contracts, templates, and assets project deterministic generated artifacts into canonical app bundles.
+
+The materializer consumes the declared assets and writes bundle files through the existing Factory materialization path.
+
+Future approved operator strategy may influence context or pack selection through public seams.
+
+It must not silently change canonical app contracts.
+
 ---
 
 # 5. Event-Driven Composition
@@ -226,6 +321,22 @@ module action
 `contracts/notifications.yaml` defines notification records derived from events.
 
 Generated customer apps, `factory_app`, and hosted product workspaces use the same event/reaction contract shape.
+
+This makes events/reactions part of the modularity model, not just a runtime notification feature.
+
+Reusable modules and packs can compose by emitting and reacting to namespaced facts instead of importing each other's implementation.
+
+Example:
+
+```text
+orders component
+  → domain order-completed event
+  → notification component reaction
+  → analytics component reaction
+  → AG2 workflow capability reaction
+```
+
+Actual event names remain contract-defined by the app, module, or pack.
 
 Reaction targets have specific ownership boundaries:
 
@@ -282,10 +393,40 @@ It is how Mozaiks currently collects reusable build context, contracts, template
 
 Do not introduce a parallel `Component` framework.
 
-A future community component model should evolve capability packs by adding distribution semantics:
+A Community Component is a distributed, versioned `CapabilityPack`, not a new runtime primitive.
 
-* identity and version provenance;
+Conceptually:
+
+```text
+CapabilityPack
++ provenance
++ dependencies
++ trust / integrity
++ distribution
++ upgrade metadata
+= Community Component
+```
+
+Community Component Foundation v1 currently provides:
+
+* pack identity and version metadata;
 * dependency declarations;
+* pack provenance manifest emission;
+* catalog structural validation before pack context becomes generation input;
+* dependency validation before template materialization;
+* offline local community-pack proof.
+
+It does not yet provide:
+
+* remote registry discovery;
+* cryptographic signing;
+* trust scoring;
+* automatic remote installation;
+* upgrade planning or migration execution.
+
+Future community component work should evolve capability packs by adding distribution semantics:
+
+* stronger identity and version provenance;
 * trust and integrity metadata;
 * local/self-host installability;
 * upgradeability and migration semantics;
@@ -307,6 +448,20 @@ Factory should increasingly discover existing packs/components, select the best 
 
 This is a directional rule, not an implementation-percentage target.
 
+Third-party trust principle:
+
+```text
+Discovery != installation.
+Installation != trust.
+Trust != production authority.
+```
+
+Third-party reusable code must not become trusted merely because Factory can discover or materialize it.
+
+OSS owns component contracts, local/self-host installation, validation, provenance, dependency semantics, and trust primitives.
+
+App Zero or another hosted operator may privately own hosted discovery, ranking, reputation, commercial marketplace behavior, and private quality intelligence.
+
 ---
 
 # 7. UI Portability Model
@@ -324,6 +479,10 @@ Schema-native UI is inherently portable because it composes through canonical pa
 Semantic-token React can be portable when it avoids app-specific imports, hardcoded styling, and private runtime assumptions.
 
 Arbitrary custom React remains supported for product-specific experiences and workflow-local UI, but it should not become the default community component surface.
+
+Reusable community UI should prefer schema-native surfaces first, semantic-token React second, and arbitrary React only when needed.
+
+Schema-native UI is not mandatory for every application.
 
 ---
 
@@ -387,6 +546,36 @@ Dynamic reasoning may occur before structured artifacts such as AppPlan.
 
 Once a canonical structured plan exists, downstream behavior should be as deterministic as practical.
 
+## Refinement Lifecycle
+
+Generation and refinement are phases of the same canonical application lifecycle.
+
+The current conceptual refinement flow is:
+
+```text
+AppReview / user revision
+  ↓
+classify affected change
+  ↓
+route patch / design / feature / core changes
+  ↓
+plan affected surfaces
+  ↓
+repair or re-enter AppGenerator where required
+  ↓
+validate
+  ↓
+review again
+```
+
+Current source supports the major change classes `patch`, `design`, `feature`, and `core` in refinement routing and Studio workflow launch paths.
+
+The Mozaiks refinement harness owns application lifecycle semantics: artifact families, affected-surface selection, re-entry decisions, validation, review package creation, and promotion readiness.
+
+Do not replace the Mozaiks refinement harness with AG2 Agent Harness merely because both use the word "harness".
+
+AG2 Agent Harness may later be used inside agent execution if a concrete requirement proves it is the right primitive.
+
 ---
 
 # 10. Functional Acceptance
@@ -440,6 +629,54 @@ This does **not** claim:
 prompt
 → identical generated app
 ```
+
+## Evaluation Architecture
+
+Evaluation complements validation.
+
+It does not replace validation.
+
+### Deterministic Mozaiks Validation
+
+Mozaiks owns deterministic validation for:
+
+* schemas;
+* routes;
+* actions;
+* handlers;
+* events and reactions;
+* security invariants;
+* bundle correctness;
+* runtime correctness.
+
+These gates must not be replaced by LLM judges.
+
+### AG2 / Semantic Evaluation
+
+AG2 Evaluation may later provide generic execution/scoring primitives for:
+
+* intent fidelity;
+* planning quality;
+* workflow effectiveness;
+* refinement quality;
+* strategy comparison.
+
+Adoption should happen only when source requirements justify it.
+
+### Human Evaluation
+
+Human evaluation includes:
+
+* AppReview acceptance;
+* user-requested refinement;
+* future structured build satisfaction;
+* UX judgment.
+
+### Operator Outcome Evaluation
+
+Operator outcome evaluation includes build, deployment, refinement, runtime, and business-result evidence observed by a self-hoster or hosted operator.
+
+Cross-app outcome learning is private by default unless deliberately published through OSS review.
 
 ---
 
@@ -534,6 +771,20 @@ Mozaiks public injection seam
 The mechanism is public.
 
 The proprietary contents of a BlocUnited KnowledgeStore are not.
+
+## Knowledge Boundary Clarification
+
+AG2 KnowledgeStore is the canonical mechanism for agent/workflow memory.
+
+Mozaiks should expose injection and configuration for AG2-owned knowledge primitives.
+
+App Intelligence remains separate.
+
+It describes the current app, source, contracts, context graph, build artifacts, and validation evidence.
+
+Cross-app Build Intelligence remains an operator concern.
+
+Operator knowledge may use AG2 knowledge primitives where appropriate, but tenant/workflow memory must not be conflated with cross-app Build Intelligence.
 
 ---
 
@@ -891,16 +1142,18 @@ The OSS pre-1.0 priorities are now primarily stabilization rather than endless f
 
 Priorities:
 
-1. preserve representative Level-2 functional acceptance;
-2. preserve deterministic post-reasoning materialization;
-3. protect brownfield and AgentGenerator handoffs;
-4. freeze intentional public API seams;
-5. improve versioning of serialized contracts where needed;
-6. keep self-host clean-install acceptance green;
-7. maintain package-content/IP governance;
-8. improve documentation and developer experience;
-9. avoid accidental private/operator artifacts;
-10. keep releases intentionally controlled until release infrastructure is ready.
+1. preserve Level-2 functional acceptance and deterministic materialization;
+2. stabilize Community Component Foundation v1;
+3. harden event/reaction runtime payload-schema enforcement, idempotency, reaction authority/permissions, and cycle detection;
+4. strengthen component trust/integrity before remote installation;
+5. preserve and improve UI/theme portability contracts;
+6. strengthen ThemeCapture/design fidelity validation;
+7. preserve refinement lifecycle and diagnostics;
+8. strengthen brownfield deterministic adoption;
+9. add AG2-native evaluation/composition seams only when demonstrated requirements exist;
+10. finish self-host, package, and release readiness without weakening IP/distribution guardrails.
+
+This list is not a claim that every item must be complete before 1.0 unless a separate release policy says so.
 
 ---
 
