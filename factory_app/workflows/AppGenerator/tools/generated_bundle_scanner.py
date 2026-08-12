@@ -125,6 +125,53 @@ _AUTH_LOGIN_METHOD_KINDS = frozenset(
     }
 )
 
+# Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
+# These components are always available in the Mozaiks shell without a custom JSX file.
+# Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
+_SHELL_CORE_COMPONENTS = frozenset({
+    "ChatPage",
+    "SchemaPage",
+    "LauncherScreen",
+    "ConfirmScreen",
+    "ProfilePage",
+    "WorkflowCompletion",
+    "TokenStatusTab",
+    "AdminMyUsagePanel",
+    "AdminAppUsagePanel",
+})
+
+# Canonical section primitive names — must match PrimitiveSectionHint.primitive in
+# structured_outputs.yaml and the live PrimitiveRegistry.js shipped with chat-ui.
+# Unknown values fail before promotion so they cannot become runtime 404/blank surfaces.
+_CANONICAL_SECTION_PRIMITIVES = frozenset({
+    "DataTable",
+    "Form",
+    "Grid",
+    "Button",
+    "Modal",
+    "Alert",
+    "Skeleton",
+    "Empty",
+    "PageHeader",
+    "ResourceTable",
+    "SummaryStrip",
+    "InlineEmptyState",
+    "LoadingState",
+    "ErrorState",
+    "Panel",
+    "SurfaceCard",
+    "StatusPill",
+    "Metric",
+    "SegmentedBar",
+    "Timeline",
+    "CodeBlock",
+    "ProgressTracker",
+    "AlertBanner",
+    "ActionButton",
+    "FileList",
+    "PricingCatalog",
+})
+
 
 def _is_scannable(path: str) -> bool:
     """Return True if this file path should be scanned for forbidden patterns."""
@@ -1381,6 +1428,14 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
                     errors.append(f"{path}: sections[{i}] missing 'id'")
                 if "primitive" not in section:
                     errors.append(f"{path}: sections[{i}] missing 'primitive'")
+                else:
+                    primitive = str(section.get("primitive") or "").strip()
+                    if primitive and primitive not in _CANONICAL_SECTION_PRIMITIVES:
+                        errors.append(
+                            f"{path}: sections[{i}] primitive '{primitive}' is not a "
+                            f"canonical section primitive. Must be one of: "
+                            f"{', '.join(sorted(_CANONICAL_SECTION_PRIMITIVES))}."
+                        )
         elif sections is not None:
             errors.append(f"{path}: 'sections' must be a list")
 
@@ -1444,6 +1499,131 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
+    """Validate that api_endpoint values in schema-native page sections reference
+    modules and actions declared in the same bundle.
+
+    Only fires when module.yaml files are present — bundles without modules are
+    either page-only bundles or capability-only bundles, both of which may
+    legitimately call external modules.
+
+    Endpoints that do not match /api/modules/{module_id}/{action_id} exactly are
+    already flagged by the ui_quality gate; this check only verifies that
+    well-formed endpoints resolve to declared bundle artifacts.
+    """
+    normalized_files = _normalized_files_map(files_map)
+
+    # Build module_id → set[action_id] from all module.yaml files in the bundle.
+    module_actions: dict[str, set[str]] = {}
+    for path, content in normalized_files.items():
+        if not (path.startswith("modules/") and path.endswith("/module.yaml")):
+            continue
+        parts = PurePosixPath(path).parts
+        if len(parts) != 3:
+            continue
+        module_id = parts[1]
+        actions = _module_actions_from_yaml(path, content)
+        module_actions[module_id] = actions
+
+    if not module_actions:
+        return []  # No modules in bundle — skip reference closure.
+
+    errors: list[str] = []
+    for path, content in sorted(normalized_files.items()):
+        if not path.startswith("ui/pages/") or not path.endswith(".yaml") or "/custom/" in path:
+            continue
+        try:
+            schema = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(schema, dict):
+            continue
+        sections = schema.get("sections")
+        if not isinstance(sections, list):
+            continue
+        for i, section in enumerate(sections):
+            if not isinstance(section, dict):
+                continue
+            for ep in (
+                section.get("api_endpoint"),
+                (section.get("config") or {}).get("api_endpoint"),
+            ):
+                if not isinstance(ep, str):
+                    continue
+                ep = ep.strip()
+                if not ep.startswith("/api/modules/"):
+                    continue
+                ep_parts = ep.split("/")
+                # Expected: ['', 'api', 'modules', module_id, action_id]
+                if len(ep_parts) != 5:
+                    continue
+                ref_module, ref_action = ep_parts[3], ep_parts[4]
+                if not ref_module or not ref_action:
+                    continue
+                if ref_module not in module_actions:
+                    errors.append(
+                        f"{path}: sections[{i}] api_endpoint '{ep}' references "
+                        f"module '{ref_module}' which is not declared in this bundle."
+                    )
+                elif ref_action not in module_actions[ref_module]:
+                    errors.append(
+                        f"{path}: sections[{i}] api_endpoint '{ep}' references "
+                        f"action '{ref_action}' which is not declared in "
+                        f"modules/{ref_module}/module.yaml."
+                    )
+    return errors
+
+
+def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]:
+    """Validate that every component declared in ui/route_manifest.json has a
+    matching custom page file under ui/pages/custom/.
+
+    This catches the common generation failure where route_manifest.json is
+    written correctly but the corresponding JSX file is missing, which produces
+    a runtime 404 for every missing component.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+    manifest_raw = normalized.get("ui/route_manifest.json")
+    if not manifest_raw:
+        return errors
+
+    try:
+        manifest = json.loads(manifest_raw)
+    except Exception:
+        return errors  # Already caught by _scan_route_manifest_consistency.
+
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    if not isinstance(pages, list):
+        return errors
+
+    # Collect custom page file stems that are actually present.
+    custom_page_stems: set[str] = set()
+    for path in normalized:
+        if path.startswith("ui/pages/custom/") and path.endswith(".jsx"):
+            stem = PurePosixPath(path).stem
+            if stem:
+                custom_page_stems.add(stem)
+
+    for i, page in enumerate(pages):
+        if not isinstance(page, dict):
+            continue
+        component = str(page.get("component") or "").strip()
+        if not component:
+            continue
+        # Shell-built-in components are always available — no custom JSX file required.
+        if component in _SHELL_CORE_COMPONENTS:
+            continue
+        if component not in custom_page_stems:
+            route_path = str(page.get("path") or "<unknown>").strip()
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] route '{route_path}' declares "
+                f"component '{component}' but ui/pages/custom/{component}.jsx is missing. "
+                f"The route will 404 at runtime."
+            )
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -1458,15 +1638,17 @@ def scan_generated_bundle(
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
     - .mozaiks/pack_provenance.json: schema validation when present.
-    - ui/route_manifest.json: required path/component fields when present.
-    - ui/pages/*.yaml (schema-native): required name/route/sections fields when present.
+    - ui/route_manifest.json: required path/component fields; component file existence.
+    - ui/pages/*.yaml (schema-native): required fields, canonical primitives, api_endpoint closure.
     """
     errors: list[str] = []
     errors.extend(_scan_canonical_app_paths(files_map))
     errors.extend(_scan_security_secret_contract(files_map))
     errors.extend(_scan_pack_provenance_manifest(files_map))
     errors.extend(_scan_route_manifest_consistency(files_map))
+    errors.extend(_scan_route_manifest_component_files(files_map))
     errors.extend(_scan_page_schema_structure(files_map))
+    errors.extend(_scan_page_api_endpoint_alignment(files_map))
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(

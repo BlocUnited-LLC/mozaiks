@@ -25,7 +25,7 @@ sections:
         - starts_at
         - expires_at
   - id: billing-catalog
-    primitive: DataPanel
+    primitive: PricingCatalog
     title: Plans and Token Packs
     config:
       api_endpoint: /api/modules/billing_portal/list_plans

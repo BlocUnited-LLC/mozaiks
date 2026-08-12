@@ -321,9 +321,23 @@ models:
         type: optional_str
         description: Human-readable connector label shown in inline credential prompts and the app-scoped integrations surface.
       kind:
-        type: str
-        description: Integration type such as payments, email, analytics, agent-backend,
-          storage, or external-api.
+        type: literal
+        values:
+        - payments
+        - email
+        - analytics
+        - agent-backend
+        - storage
+        - external-api
+        - auth
+        - messaging
+        - database
+        description: >
+          Canonical integration category. payments = billing/subscription provider;
+          email = transactional or marketing email; analytics = event tracking/reporting;
+          agent-backend = LLM/AI API; storage = blob/file/object store; external-api =
+          third-party REST/GraphQL API; auth = identity/SSO provider; messaging =
+          SMS/push/real-time channel; database = external data store.
       purpose:
         type: str
         description: Why the integration exists in the product.
