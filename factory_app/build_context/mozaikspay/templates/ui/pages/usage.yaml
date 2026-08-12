@@ -14,7 +14,7 @@ navigation:
   visible: true
 sections:
   - id: usage-status
-    primitive: DataPanel
+    primitive: SummaryStrip
     title: Usage
     config:
       api_endpoint: /api/modules/billing_portal/get_usage_status
@@ -25,7 +25,7 @@ sections:
         - runtime_ai_usage.totals.completion_tokens
         - runtime_ai_usage.totals.llm_calls
   - id: token-status
-    primitive: DataPanel
+    primitive: SummaryStrip
     title: Token Balance
     config:
       api_endpoint: /api/modules/billing_portal/get_token_status

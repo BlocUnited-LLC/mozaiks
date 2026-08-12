@@ -354,7 +354,7 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
                 "sections_hint": [
                     {
                         "section_id_hint": "usage-status",
-                        "primitive": "DataPanel",
+                        "primitive": "SummaryStrip",
                         "config_hint": {
                             "api_endpoint": "/api/modules/mozaikspay/get_usage_status",
                             "method": "POST",

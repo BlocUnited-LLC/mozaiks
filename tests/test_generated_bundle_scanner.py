@@ -1027,3 +1027,266 @@ def test_scan_generated_bundle_does_not_skip_entitlement_dispatch_for_non_manage
 
     assert any("entitlement_dispatch" in error for error in errors)
     assert any("assignment_store" in error for error in errors)
+
+
+# ---------------------------------------------------------------------------
+# Schema-native page structure validation (_scan_page_schema_structure)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_page_schema_structure_rejects_unknown_primitive() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/orders.yaml": """
+name: Orders
+route: /orders
+sections:
+  - id: orders-table
+    primitive: LegacyGridWidget
+""",
+        }
+    )
+
+    assert any("primitive 'LegacyGridWidget' is not a canonical section primitive" in e for e in errors)
+
+
+def test_scan_page_schema_structure_accepts_canonical_primitives() -> None:
+    # Spot-check a representative subset — DataTable, Form, PageHeader, SummaryStrip.
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/dashboard.yaml": """
+name: Dashboard
+route: /dashboard
+sections:
+  - id: header
+    primitive: PageHeader
+  - id: summary
+    primitive: SummaryStrip
+  - id: table
+    primitive: DataTable
+  - id: form
+    primitive: Form
+""",
+        }
+    )
+
+    assert not any("canonical section primitive" in e for e in errors)
+
+
+def test_scan_page_schema_structure_rejects_missing_required_fields() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/broken.yaml": """
+title: Missing name and route
+sections: []
+""",
+        }
+    )
+
+    assert any("missing required field 'name'" in e for e in errors)
+    assert any("missing required field 'route'" in e for e in errors)
+
+
+def test_scan_page_schema_structure_skips_custom_pages() -> None:
+    # Custom pages under ui/pages/custom/ are React escape-hatch files — not schema-native.
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/custom/SpecialDashboard.yaml": """
+primitive: NotCanonicalAtAll
+""",
+        }
+    )
+
+    # Must NOT raise an error for the custom page.
+    assert not any("SpecialDashboard" in e for e in errors)
+    assert not any("canonical section primitive" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# API endpoint → module/action reference closure (_scan_page_api_endpoint_alignment)
+# ---------------------------------------------------------------------------
+
+
+def _simple_module_yaml(module_id: str, *action_ids: str) -> str:
+    actions_yaml = "\n".join(
+        f"  - id: {action_id}\n    handler_method: {action_id}" for action_id in action_ids
+    )
+    return f"""schema_version: mozaiks.module.v1
+module:
+  id: {module_id}
+  handler: backend.handler:Handler
+actions:
+{actions_yaml if actions_yaml else "  []"}
+"""
+
+
+def test_scan_page_api_endpoint_alignment_skips_when_no_modules() -> None:
+    # Bundle with no module.yaml files — api_endpoint closure check must not fire.
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/landing.yaml": """
+name: Landing
+route: /landing
+sections:
+  - id: cta
+    primitive: Button
+    api_endpoint: /api/modules/some_module/some_action
+""",
+        }
+    )
+
+    # The missing-module check fires on a different path; this check must stay silent.
+    assert not any("not declared in this bundle" in e for e in errors)
+
+
+def test_scan_page_api_endpoint_alignment_accepts_valid_endpoint() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "list_orders", "create_order"),
+            "modules/orders/backend/handler.py": "class Handler: pass\n",
+            "ui/pages/orders.yaml": """
+name: Orders
+route: /orders
+sections:
+  - id: orders-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/orders/list_orders
+""",
+        }
+    )
+
+    assert not any("api_endpoint" in e and "not declared" in e for e in errors)
+
+
+def test_scan_page_api_endpoint_alignment_rejects_undeclared_module() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "list_orders"),
+            "modules/orders/backend/handler.py": "class Handler: pass\n",
+            "ui/pages/invoices.yaml": """
+name: Invoices
+route: /invoices
+sections:
+  - id: invoices-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/invoices/list_invoices
+""",
+        }
+    )
+
+    assert any(
+        "module 'invoices' which is not declared in this bundle" in e for e in errors
+    )
+
+
+def test_scan_page_api_endpoint_alignment_rejects_undeclared_action() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "list_orders"),
+            "modules/orders/backend/handler.py": "class Handler: pass\n",
+            "ui/pages/orders.yaml": """
+name: Orders
+route: /orders
+sections:
+  - id: orders-table
+    primitive: DataTable
+    api_endpoint: /api/modules/orders/delete_order
+""",
+        }
+    )
+
+    assert any(
+        "action 'delete_order' which is not declared in modules/orders/module.yaml" in e
+        for e in errors
+    )
+
+
+def test_scan_page_api_endpoint_alignment_checks_both_section_and_config_endpoints() -> None:
+    # The scanner checks both section.api_endpoint and section.config.api_endpoint.
+    errors = scan_generated_bundle(
+        {
+            "modules/users/module.yaml": _simple_module_yaml("users", "list_users"),
+            "modules/users/backend/handler.py": "class Handler: pass\n",
+            "ui/pages/admin.yaml": """
+name: Admin
+route: /admin
+sections:
+  - id: direct-ep
+    primitive: DataTable
+    api_endpoint: /api/modules/users/ghost_action
+  - id: config-ep
+    primitive: Form
+    config:
+      api_endpoint: /api/modules/users/another_ghost
+""",
+        }
+    )
+
+    assert any("ghost_action" in e for e in errors)
+    assert any("another_ghost" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Route manifest → custom page file closure (_scan_route_manifest_component_files)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_route_manifest_component_files_passes_when_no_manifest() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/dashboard.yaml": """
+name: Dashboard
+route: /dashboard
+sections:
+  - id: header
+    primitive: PageHeader
+""",
+        }
+    )
+
+    assert not any("route_manifest" in e and "404" in e for e in errors)
+
+
+def test_scan_route_manifest_component_files_accepts_present_jsx() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/route_manifest.json": '{"pages": [{"path": "/custom", "component": "CustomDashboard"}]}',
+            "ui/pages/custom/CustomDashboard.jsx": "export default function CustomDashboard() { return null; }\n",
+        }
+    )
+
+    assert not any("CustomDashboard" in e and "404" in e for e in errors)
+
+
+def test_scan_route_manifest_component_files_rejects_missing_jsx() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/route_manifest.json": '{"pages": [{"path": "/dashboard", "component": "MissingPage"}]}',
+        }
+    )
+
+    assert any("MissingPage" in e and "404 at runtime" in e for e in errors)
+    assert any("ui/pages/custom/MissingPage.jsx is missing" in e for e in errors)
+
+
+def test_scan_route_manifest_component_files_rejects_multiple_missing_jsx() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/route_manifest.json": """
+{
+  "pages": [
+    {"path": "/alpha", "component": "AlphaPage"},
+    {"path": "/beta", "component": "BetaPage"}
+  ]
+}
+""",
+            "ui/pages/custom/AlphaPage.jsx": "export default function AlphaPage() { return null; }\n",
+        }
+    )
+
+    # AlphaPage present → no error for it.
+    assert not any("AlphaPage" in e and "404" in e for e in errors)
+    # BetaPage missing → error.
+    assert any("BetaPage" in e and "404 at runtime" in e for e in errors)

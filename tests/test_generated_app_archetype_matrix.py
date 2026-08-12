@@ -1096,7 +1096,7 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
                 "page_type_hint": "activity_feed",
                 "sections_hint": [
                     {
-                        "primitive": "ResourceList",
+                        "primitive": "ResourceTable",
                         "section_id_hint": "posts",
                         "title_hint": "Posts",
                         "config_hint": json.dumps({"api_endpoint": "/api/modules/posts/list_posts"}),

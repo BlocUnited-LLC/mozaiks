@@ -90,7 +90,7 @@ def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
         "name": str(page.get("name") or title).strip(),
         "route": route,
         "title": title,
-        "page_type": str(page.get("page_type") or page.get("page_type_hint") or page.get("ui_layout") or "standard").strip(),
+        "page_type": str(page.get("page_type_hint") or page.get("page_type") or "record_list").strip(),
         "layout": str(page.get("layout") or "stack").strip(),
         "shell_mode": str(page.get("shell_mode") or page.get("shell_mode_hint") or "workspace").strip(),
         "roles": page.get("roles"),
