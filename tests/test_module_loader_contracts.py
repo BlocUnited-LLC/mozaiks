@@ -59,6 +59,11 @@ capabilities:
     permissions: [tasks.write]
     input_schema:
       type: object
+  - capability_id: tasks.review
+    kind: workflow
+    target: ReviewWorkflow
+    title: Review Task
+    permissions: [tasks.write]
 """.lstrip(),
         encoding="utf-8",
     )
@@ -486,6 +491,8 @@ async def test_module_executor_dispatches_public_action_id_to_handler_method(tmp
         loaded.name,
         loaded.handler,
         action_method_map=loaded.action_method_map,
+        action_emits=loaded.action_emits_map,
+        event_payload_schemas=loaded.event_payload_schemas_map,
     )
 
     result = await executor.execute(
@@ -538,12 +545,58 @@ async def test_module_executor_wraps_handler_events_in_canonical_envelope(tmp_pa
         "layer": "module",
         "app_id": "app_1",
         "module_id": "tasks",
+        "action_id": "create",
         "capability_id": "tasks.create",
     }
     assert envelope["tenant"] == {"app_id": "app_1", "tenant_id": "tenant_1"}
     assert envelope["actor"] == {"type": "user", "id": "user_1"}
     assert envelope["correlation"] == {"correlation_id": "corr_1"}
     assert envelope["payload"] == {"task_id": "task_1", "title": "Draft"}
+
+
+@pytest.mark.asyncio
+async def test_module_executor_rejects_invalid_emitted_event_payload(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("backend", "handler.py").write_text(
+        """
+class TasksModule:
+    async def create_task(self, ctx, *, title):
+        await ctx.emit("domain.tasks.task_created", {"task_id": "task_1"})
+        return {"task_id": "task_1", "title": title}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+    emitted: list[tuple[str, dict]] = []
+
+    async def capture(event_type: str, payload: dict) -> None:
+        emitted.append((event_type, payload))
+
+    executor = ModuleExecutor(event_emitter=capture)
+    executor.register(
+        loaded.name,
+        loaded.handler,
+        action_method_map=loaded.action_method_map,
+        action_emits=loaded.action_emits_map,
+        event_payload_schemas=loaded.event_payload_schemas_map,
+    )
+
+    result = await executor.execute(
+        ModuleRequest(
+            module="tasks",
+            action="create",
+            params={"title": "Draft"},
+            app_id="app_1",
+            user_id="user_1",
+        )
+    )
+
+    assert result.success is False
+    assert result.error_code == "INVALID_EVENT_PAYLOAD"
+    assert "domain.tasks.task_created" in (result.error or "")
+    assert "module=tasks" in (result.error or "")
+    assert "action=create" in (result.error or "")
+    assert emitted == []
 
 
 @pytest.mark.asyncio
@@ -572,6 +625,26 @@ def test_module_loader_rejects_undeclared_emitted_event(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ModuleLoadError, match="emits undeclared event"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_loader_rejects_reaction_undeclared_permission(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "reactions.yaml").write_text(
+        """
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: task_created_notify
+    event_type: domain.tasks.task_created
+    permissions: [tasks.missing]
+    target:
+      kind: notification
+      notification_id: task_created
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="references undeclared permission"):
         ModuleLoader(str(tmp_path)).load("tasks")
 
 

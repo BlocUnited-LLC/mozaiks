@@ -1,0 +1,29 @@
+name: greetings
+route: /greetings
+title: Greetings
+layout: full-width
+roles: []
+sections:
+  - id: greetings_header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Hello Messages
+      subtitle: Community greetings from the greetings pack.
+  - id: greetings_list
+    primitive: DataTable
+    title: null
+    config:
+      api_endpoint: /api/modules/greetings/list_greetings
+      data_key: greetings
+      columns:
+        - key: greeting_id
+          label: ID
+        - key: message
+          label: Message
+        - key: created_at
+          label: Created
+          type: date
+      empty:
+        title: No greetings yet
+        message: Say hello to get started.

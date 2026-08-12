@@ -212,15 +212,27 @@ class SubscriptionStatus:
     pass
 """,
         "ui/pages/billing.yaml": """
+name: billing
+route: /billing
+title: Billing
 sections:
-  - config:
+  - id: subscription-status
+    primitive: DataTable
+    config:
       api_endpoint: /api/modules/billing_portal/get_subscription_status
-  - config:
+  - id: billing-portal
+    primitive: DataTable
+    config:
       api_endpoint: /api/modules/billing_portal/open_billing_portal
 """,
         "ui/pages/usage.yaml": """
+name: usage
+route: /usage
+title: Usage
 sections:
-  - config:
+  - id: usage-status
+    primitive: DataTable
+    config:
       api_endpoint: /api/modules/billing_portal/get_usage_status
 """,
     }

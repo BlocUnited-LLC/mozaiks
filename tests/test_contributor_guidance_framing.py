@@ -55,6 +55,21 @@ def test_top_level_guidance_documents_shared_workflow_ui_lane() -> None:
     assert "Do not import UI from a sibling workflow folder" in agents
 
 
+def test_agent_guidance_requires_architecture_first_review() -> None:
+    agents = _read("AGENTS.md")
+    quick_reference = _read("docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md")
+
+    for text in (agents, quick_reference):
+        assert "Required Pre-Edit Architecture Check" in text
+        assert "ARCHITECTURE_QUICK_REFERENCE.md" in text or "read this quick reference" in text
+        assert "MOZAIKS_OSS_SOFTWARE_DESIGN.md" in text
+        assert "current source" in text.lower()
+        assert "final authority" in text.lower()
+        assert "parallel subsystem" in text
+
+    assert "architectural changes that contradict the frozen north star require an ADR" in agents
+
+
 def test_refinement_guidance_states_checkpoint_reentry_truth() -> None:
     architecture = _read("ARCHITECTURE.md")
     refinement_harness = _read("docs/architecture/workflows/refinement-harness-architecture.md")

@@ -136,6 +136,7 @@ nav:
       # Authoritative OSS software-design document. All other architecture docs
       # are elaborations of the decisions made here.
       - OSS Software Design: architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md
+      - Architecture Quick Reference: architecture/ARCHITECTURE_QUICK_REFERENCE.md
 
       # ── 1. Foundations ───────────────────────────────────────────────────────
       # Core mental models and cross-cutting contracts. Start here.

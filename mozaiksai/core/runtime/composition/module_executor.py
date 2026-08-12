@@ -35,8 +35,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-import jsonschema
-
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
@@ -52,6 +50,11 @@ from mozaiksai.core.runtime.composition.module_authority import (
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.schema_validation import (
+    SchemaValidationDiagnostic,
+    normalize_nullable_schema,
+    validate_json_schema,
+)
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
@@ -145,24 +148,7 @@ class ModuleResult:
 
 def _normalize_nullable_schema(schema: Any) -> Any:
     """Translate OpenAPI-style nullable fields into JSON Schema."""
-    if isinstance(schema, list):
-        return [_normalize_nullable_schema(item) for item in schema]
-    if not isinstance(schema, dict):
-        return schema
-
-    normalized = {key: _normalize_nullable_schema(value) for key, value in schema.items()}
-    if normalized.get("nullable") is True:
-        schema_type = normalized.get("type")
-        if isinstance(schema_type, str):
-            normalized["type"] = [schema_type, "null"] if schema_type != "null" else schema_type
-        elif isinstance(schema_type, list) and "null" not in schema_type:
-            normalized["type"] = [*schema_type, "null"]
-
-        enum_values = normalized.get("enum")
-        if isinstance(enum_values, list) and None not in enum_values:
-            normalized["enum"] = [*enum_values, None]
-
-    return normalized
+    return normalize_nullable_schema(schema)
 
 
 def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
@@ -173,14 +159,39 @@ def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
     """
     if not schema or not isinstance(schema, dict):
         return None
-    try:
-        jsonschema.validate(instance=value, schema=_normalize_nullable_schema(schema))
-        return None
-    except jsonschema.ValidationError as exc:
-        return exc.message  # type: ignore[no-any-return]
-    except Exception as exc:  # malformed schema — don't crash the executor
-        logger.warning("MODULE_SCHEMA_ERROR: could not validate schema: %s", exc)
-        return None
+    diagnostic = validate_json_schema(value, schema)
+    return diagnostic.message if diagnostic is not None else None
+
+
+class ModuleEventPayloadValidationError(ValueError):
+    """Raised when a module emits an event payload that violates its contract."""
+
+    def __init__(
+        self,
+        *,
+        event_type: str,
+        source_module: str | None,
+        source_action: str | None,
+        diagnostic: SchemaValidationDiagnostic,
+    ) -> None:
+        self.event_type = event_type
+        self.source_module = source_module
+        self.source_action = source_action
+        self.diagnostic = diagnostic
+        super().__init__(
+            "MODULE_EVENT_PAYLOAD_INVALID: "
+            f"event={event_type} module={source_module or ''} action={source_action or ''} "
+            f"path={diagnostic.path} error={diagnostic.message}"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": "MODULE_EVENT_PAYLOAD_INVALID",
+            "event_type": self.event_type,
+            "source_module": self.source_module,
+            "source_action": self.source_action,
+            "schema_error": self.diagnostic.to_dict(),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +226,8 @@ class ModuleExecutor:
         self._action_permissions: dict[str, dict[str, list[str]]] = {}
         self._action_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._action_entitlements: dict[str, dict[str, str | None]] = {}
+        self._action_emits: dict[str, dict[str, list[str]]] = {}
+        self._event_payload_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_emitter = event_emitter
         # When None, use the no-op adapter — grants everything without a DB check.
         self._entitlement_checker: EntitlementPort = entitlement_checker or NoOpEntitlementAdapter()
@@ -233,6 +246,8 @@ class ModuleExecutor:
         action_permissions: dict[str, list[str]] | None = None,
         action_schemas: dict[str, dict[str, Any]] | None = None,
         action_entitlements: dict[str, str | None] | None = None,
+        action_emits: dict[str, list[str]] | None = None,
+        event_payload_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Register a module handler instance under a name.
 
@@ -250,6 +265,8 @@ class ModuleExecutor:
                                  When a capability_id is set, the executor calls
                                  EntitlementPort.check() before dispatch and returns
                                  ENTITLEMENT_REQUIRED on denial.
+            action_emits:        Maps action id -> event types declared in module.yaml.
+            event_payload_schemas: Maps event type -> payload_schema from contracts/events.yaml.
         """
         self._modules[name] = handler
         self._action_methods[name] = dict(action_method_map or {})
@@ -257,6 +274,8 @@ class ModuleExecutor:
         self._action_permissions[name] = dict(action_permissions or {})
         self._action_schemas[name] = dict(action_schemas or {})
         self._action_entitlements[name] = dict(action_entitlements or {})
+        self._action_emits[name] = {k: list(v) for k, v in (action_emits or {}).items()}
+        self._event_payload_schemas[name] = dict(event_payload_schemas or {})
         logger.info("MODULE_REGISTERED: %s (%s)", name, type(handler).__name__)
 
     def registered_modules(self) -> list[str]:
@@ -510,6 +529,27 @@ class ModuleExecutor:
                 error="Permission denied.",
                 error_code="PERMISSION_DENIED",
             )
+        except ModuleEventPayloadValidationError as exc:
+            logger.warning(
+                "MODULE_EVENT_PAYLOAD_INVALID: module=%s action=%s event=%s path=%s error=%s",
+                request.module,
+                request.action,
+                exc.event_type,
+                exc.diagnostic.path,
+                exc.diagnostic.message,
+                extra={"module_event_payload_validation": exc.to_dict()},
+            )
+            asyncio.create_task(
+                self._emit_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason="MODULE_EVENT_PAYLOAD_INVALID"),
+                    error="MODULE_EVENT_PAYLOAD_INVALID",
+                )
+            )
+            return ModuleResult(
+                success=False,
+                error=str(exc),
+                error_code="INVALID_EVENT_PAYLOAD",
+            )
         except Exception as exc:
             logger.error(
                 "MODULE_ACTION_ERROR: module=%s action=%s error=%s", request.module, request.action, exc,
@@ -643,6 +683,32 @@ class ModuleExecutor:
             return None
 
         async def emit_module_event(event_type: str, payload: dict[str, Any]) -> None:
+            event_type_text = str(event_type or "").strip()
+            declared_emits = self._action_emits.get(request.module, {}).get(request.action)
+            if declared_emits is not None and event_type_text not in declared_emits:
+                diagnostic = SchemaValidationDiagnostic(
+                    message=f"action {request.module}.{request.action} did not declare emitted event",
+                    path="$",
+                    schema_path="$",
+                    validator="emits",
+                )
+                raise ModuleEventPayloadValidationError(
+                    event_type=event_type_text,
+                    source_module=request.module,
+                    source_action=request.action,
+                    diagnostic=diagnostic,
+                )
+            payload_schema = self._event_payload_schemas.get(request.module, {}).get(event_type_text)
+            if payload_schema:
+                validation_diagnostic = validate_json_schema(payload, payload_schema)
+                if validation_diagnostic is not None:
+                    raise ModuleEventPayloadValidationError(
+                        event_type=event_type_text,
+                        source_module=request.module,
+                        source_action=request.action,
+                        diagnostic=validation_diagnostic,
+                    )
+
             tenant_scope = {
                 "app_id": request.app_id,
                 "tenant_id": request.tenant_id,
@@ -652,13 +718,14 @@ class ModuleExecutor:
 
             envelope: dict[str, Any] = {
                 "id": f"evt_{uuid4().hex}",
-                "type": event_type,
+                "type": event_type_text,
                 "version": 1,
                 "occurred_at": datetime.now(UTC).isoformat(),
                 "source": {
                     "layer": "module",
                     "app_id": request.app_id,
                     "module_id": request.module,
+                    "action_id": request.action,
                     "capability_id": f"{request.module}.{request.action}",
                 },
                 "tenant": tenant_scope,
@@ -668,10 +735,20 @@ class ModuleExecutor:
                 "payload": payload,
                 "visibility": "internal",
             }
+            if request.granted_permissions is not None:
+                authority = request.authority or ModuleDispatchAuthority.from_granted_permissions(
+                    request.granted_permissions,
+                    actor_id=request.user_id,
+                )
+                envelope["authority"] = {
+                    "kind": authority.kind,
+                    "permission_mode": authority.permission_mode,
+                    "granted_permissions": list(request.granted_permissions),
+                }
             if request.user_id:
                 envelope["actor"] = {"type": "user", "id": request.user_id}
 
-            result = self._event_emitter(event_type, envelope)  # type: ignore[misc]
+            result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
             if inspect.isawaitable(result):
                 await result
 
