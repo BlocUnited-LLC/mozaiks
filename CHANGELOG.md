@@ -14,6 +14,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Community Component Foundation v1**: Extended capability packs to carry versioned identity and machine-readable dependency declarations without introducing a parallel component runtime.
+  - `context.yaml` pack block now accepts optional `version`, `author`, `license`, and `source` fields; existing packs without these fields remain valid.
+  - `contract.yaml` now supports a canonical `requires.packs` / `requires.capabilities` block for machine-readable dependency declarations; `PackDependencyError` (a `ManagedCapabilityTemplateError` subclass) is raised with structured diagnostics when a required pack is absent from the selected list.
+  - `resolve_managed_capability_templates()` emits a `.mozaiks/pack_provenance.json` manifest on every materialization; the manifest records `pack_id`, `pack_version`, per-file paths, and `owner` classification (`templates` vs `workspace`).
+  - Structural allowlisting of `context.yaml` pack blocks via `validate_pack_context()` in `factory_app/workflows/AppGenerator/tools/pack_context_schema.py`: unexpected root or pack-block keys raise `ManagedCapabilityTemplateError` before any pack data reaches AG2.
+  - `scan_generated_bundle()` now validates the provenance manifest schema when `.mozaiks/pack_provenance.json` is present in a generated bundle.
+  - `.mozaiks` added to `CANONICAL_APP_ROOT_DIRS` so the provenance directory is a first-class part of the canonical app surface.
+  - First-party packs (`messaging`, `support`, `social`, `commerce`, `notifications`, `files`, `entitlement_dispatch`, `mozaikspay`, `operator_readiness`) updated to `version: "0.1.11"`.
+  - `support/contract.yaml` migrated from informal `required_packs` to canonical `requires.packs` format.
+  - Fixture community packs in `tests/fixtures/community_packs/` prove dependency validation and provenance work locally without App Zero, network, or a paid LLM.
+  - 39 tests in `tests/test_community_pack_foundation.py` cover schema validation, dependency checking, provenance emission, bundle scanner integration, and first-party pack backward compatibility.
+
+- Published `docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md` as the authoritative OSS north-star software-design document; added to mkdocs.yml navigation as the primary architecture reference. No competing document exists under `docs/architecture/foundations/`.
+
 - Proved clean-room self-host experience end-to-end: a fresh `pip install -e ".[dev]"` on a clean clone boots Studio, loads all 14 factory workflows, and passes the clean-room self-host acceptance suite without private config or BlocUnited infrastructure. Added `tests/test_selfhost_clean_install.py` with 15 deterministic CI smoke tests covering install, CLI entry, factory resources, startup warning quality, no-fork guard, and self-host docs presence.
 - Fixed startup validator to route by `LLM_PRIMARY_API_TYPE`: the provider-specific API-key check now names the correct env var per provider (`GEMINI_API_KEY / GOOGLE_API_KEY` for google, `ANTHROPIC_API_KEY` for anthropic, `OPENAI_API_KEY` for openai). Previously always warned about `OPENAI_API_KEY` even when `.env.example` defaults to Gemini free tier.
 - Enforced pre-1.0 OSS/proprietary boundary as an architecture contract: added `docs/adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md` ("DIFFERENT INTELLIGENCE, SAME CANONICAL APP"), `docs/architecture/foundations/oss-boundary-families.md` (authoritative DO-NOT-MOVE family registry), and `tests/test_oss_boundary_policy.py` (governance guard).

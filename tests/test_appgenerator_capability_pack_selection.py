@@ -265,7 +265,13 @@ def test_support_pack_requires_messaging_and_stores_only_ticket_metadata() -> No
     action_ids = {action["id"] for action in module["actions"]}
     paths = _output_paths(contract["required_outputs"])
 
-    assert contract["required_packs"] == ["messaging"]
+    # Machine-readable dependency is now under requires.packs (canonical format)
+    requires = contract.get("requires") or {}
+    pack_ids = [
+        (entry.get("pack_id") if isinstance(entry, dict) else entry)
+        for entry in (requires.get("packs") or [])
+    ]
+    assert "messaging" in pack_ids
     assert {"create_support_request", "list_support_requests", "link_message_thread", "update_support_status"} <= action_ids
     assert "message_thread_id" in module["actions"][0]["input_schema"]["properties"]
     assert any("modules/support/module.yaml" in path for path in paths)

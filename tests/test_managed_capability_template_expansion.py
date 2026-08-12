@@ -87,7 +87,8 @@ def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> N
         [{"id": "wallet", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
     )
 
-    files = {item["filename"]: item["content"] for item in result}
+    files = {item["filename"]: item["content"] for item in result
+             if item["filename"] != ".mozaiks/pack_provenance.json"}
     assert files == {
         "modules/billing/module.yaml": "module:\n  id: billing\n",
         "services/integrations/wallet_client.py": "# wallet client\n",
@@ -117,7 +118,8 @@ def test_selected_pack_renders_jinja_templates_and_strips_suffix(resolver, tmp_p
         },
     )
 
-    files = {item["filename"]: item["content"] for item in result}
+    files = {item["filename"]: item["content"] for item in result
+             if item["filename"] != ".mozaiks/pack_provenance.json"}
     assert files == {
         "config/operator_readiness.yaml": (
             "profile: host_operator_platform\n"
@@ -149,7 +151,8 @@ def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path
         [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
     )
 
-    assert result == [
+    template_files = [f for f in result if f["filename"] != ".mozaiks/pack_provenance.json"]
+    assert template_files == [
         {"filename": "services/integrations/mozaikspay_client.py", "content": "# client\n"}
     ]
 

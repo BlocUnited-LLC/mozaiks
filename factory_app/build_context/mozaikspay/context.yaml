@@ -10,6 +10,7 @@ assets:
     kind: templates
 pack:
   id: mozaikspay
+  version: "0.1.11"
   status: active
   capability_source: managed_capability
   required_integrations:

@@ -132,6 +132,11 @@ nav:
   - Architecture:
       - architecture/index.md
 
+      # ── 0. North Star ────────────────────────────────────────────────────────
+      # Authoritative OSS software-design document. All other architecture docs
+      # are elaborations of the decisions made here.
+      - OSS Software Design: architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md
+
       # ── 1. Foundations ───────────────────────────────────────────────────────
       # Core mental models and cross-cutting contracts. Start here.
       - Foundations:

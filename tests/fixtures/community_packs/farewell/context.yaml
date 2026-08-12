@@ -1,4 +1,4 @@
-context_id: entitlement_dispatch
+context_id: farewell
 applies_to_workflows:
   - AppGenerator
 assets:
@@ -7,13 +7,16 @@ assets:
   - path: templates/
     kind: templates
 pack:
-  id: entitlement_dispatch
-  version: "0.1.11"
+  id: farewell
+  version: "0.1.0"
+  author: "Community Test Author"
+  license: "MIT"
   status: active
   capability_source: generated_module
+capabilities:
+  - capability_id: farewell.say_goodbye
+    facade_recommended: farewell
 projections:
   context_variables:
     capability_packs:
       from: capability_packs
-    operator_contracts:
-      from: operator_contracts

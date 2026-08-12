@@ -57,6 +57,7 @@ CANONICAL_APP_ROOT_DIRS = frozenset(
         "backend",
         "brand",
         ".github",
+        ".mozaiks",  # pack provenance and framework metadata directory
         "config",
         "data",
         "dashboard",
