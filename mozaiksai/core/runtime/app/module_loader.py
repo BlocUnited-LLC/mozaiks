@@ -288,6 +288,11 @@ class ModuleDefinition(ModuleContractModel):
         """Maps each action id to its entitlement_gate capability_id (or None)."""
         return {action.id: action.entitlement_gate for action in self.actions}
 
+    @property
+    def action_emits_map(self) -> dict[str, list[str]]:
+        """Maps each action id to event types declared in module.yaml actions[].emits."""
+        return {action.id: list(action.emits) for action in self.actions}
+
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> ModuleDefinition:
         action_ids = [action.id for action in self.actions]
@@ -1069,6 +1074,20 @@ class LoadedModule:
     def action_entitlement_map(self) -> dict[str, str | None]:
         return self.definition.action_entitlement_map
 
+    @property
+    def action_emits_map(self) -> dict[str, list[str]]:
+        return self.definition.action_emits_map
+
+    @property
+    def event_payload_schemas_map(self) -> dict[str, dict[str, Any]]:
+        if self.manifests.events is None:
+            return {}
+        return {
+            event.type: dict(event.payload_schema)
+            for event in self.manifests.events.events
+            if event.payload_schema
+        }
+
     def __repr__(self) -> str:
         return f"<LoadedModule name={self.name!r} handler={type(self.handler).__name__}>"
 
@@ -1351,12 +1370,19 @@ class ModuleLoader:
         declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
 
         if manifests.reactions is not None:
+            declared_permission_ids = {permission.id for permission in definition.permissions}
             for reaction in manifests.reactions.reactions:
                 event_type = str(reaction.event_type or "").strip()
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"reactions.yaml references non-canonical event {event_type!r}"
                     )
+                for permission_id in reaction.permissions:
+                    if permission_id not in declared_permission_ids:
+                        raise ModuleLoadError(
+                            f"reactions.yaml reaction {reaction.id!r} references undeclared "
+                            f"permission {permission_id!r}; add it to the module-level permissions block"
+                        )
 
         if manifests.notifications is not None:
             for notification in manifests.notifications.notifications:

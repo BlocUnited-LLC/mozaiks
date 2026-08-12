@@ -366,6 +366,8 @@ async def _platform_startup() -> None:
                     action_permissions=loaded_module.action_permissions_map,
                     action_schemas=loaded_module.action_schemas_map,
                     action_entitlements=loaded_module.action_entitlement_map,
+                    action_emits=loaded_module.action_emits_map,
+                    event_payload_schemas=loaded_module.event_payload_schemas_map,
                 )
             executor_registry.register(module_executor)
             app.state.module_action_surfaces = module_action_surfaces
