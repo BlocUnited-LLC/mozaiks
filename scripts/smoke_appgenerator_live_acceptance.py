@@ -245,16 +245,16 @@ route: /support-tickets
 title: Support Tickets
 sections:
   - id: ticket-list
-    type: record_list
+    primitive: DataTable
     config:
       api_endpoint: /api/modules/support_tickets/list_tickets
   - id: ticket-create
-    type: form
+    primitive: Form
     config:
       submit_action:
         api_endpoint: /api/modules/support_tickets/create_ticket
   - id: batch-triage
-    type: form
+    primitive: Form
     config:
       submit_action:
         api_endpoint: /api/modules/support_tickets/request_batch_triage

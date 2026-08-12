@@ -23,6 +23,10 @@ required_outputs:
     owner: workspace
   - path: modules/greetings/backend/service.py
     owner: templates
+  - path: ui/pages/greetings.yaml
+    owner: templates
+  - path: ui/route_manifest.json
+    owner: templates
 
 forbidden_outputs:
   - path_prefix: modules/hello/

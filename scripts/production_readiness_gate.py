@@ -203,7 +203,7 @@ def _base_env() -> dict[str, str]:
 
 def _source_hygiene_excluded(path: Path) -> bool:
     relative = path.relative_to(REPO_ROOT).as_posix()
-    if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in path.parts):
+    if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in Path(relative).parts):
         return True
     return any(
         relative == prefix or relative.startswith(f"{prefix}/")

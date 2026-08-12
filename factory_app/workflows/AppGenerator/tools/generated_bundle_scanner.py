@@ -1295,6 +1295,98 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _scan_route_manifest_consistency(files_map: dict[str, str]) -> list[str]:
+    """Validate ui/route_manifest.json structure when present.
+
+    Checks that each page entry has a path starting with '/' and a non-empty
+    component name. These are the minimum fields required for the runtime to
+    resolve a page route.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+    manifest_raw = normalized.get("ui/route_manifest.json")
+    if not manifest_raw:
+        return errors
+
+    try:
+        manifest = json.loads(manifest_raw)
+    except Exception:
+        errors.append("ui/route_manifest.json: invalid JSON — cannot parse route manifest")
+        return errors
+
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    if not isinstance(pages, list):
+        errors.append("ui/route_manifest.json: 'pages' must be a list")
+        return errors
+
+    for i, page in enumerate(pages):
+        if not isinstance(page, dict):
+            errors.append(f"ui/route_manifest.json: pages[{i}] must be a dict")
+            continue
+        path = page.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] 'path' must be a string starting with '/'"
+            )
+        component = page.get("component")
+        if not isinstance(component, str) or not component.strip():
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] 'component' must be a non-empty string"
+            )
+
+    return errors
+
+
+def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
+    """Validate schema-native page YAML files when present in ui/pages/.
+
+    Checks that each schema-native page (files under ui/pages/ that are not under
+    ui/pages/custom/) has the required structural fields: name, route, and sections.
+    Custom React pages under ui/pages/custom/ are excluded — those are not
+    schema-native and carry weaker portability guarantees by design.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+
+    for path, content in normalized.items():
+        if not path.startswith("ui/pages/"):
+            continue
+        if not path.endswith(".yaml"):
+            continue
+        if "/custom/" in path:
+            # Custom React escape-hatch pages — skip schema validation.
+            continue
+
+        try:
+            schema = yaml.safe_load(content)
+        except Exception:
+            errors.append(f"{path}: invalid YAML in schema-native page")
+            continue
+
+        if not isinstance(schema, dict):
+            errors.append(f"{path}: page schema must be a YAML mapping")
+            continue
+
+        for required_field in ("name", "route", "sections"):
+            if required_field not in schema:
+                errors.append(f"{path}: schema-native page missing required field '{required_field}'")
+
+        sections = schema.get("sections")
+        if isinstance(sections, list):
+            for i, section in enumerate(sections):
+                if not isinstance(section, dict):
+                    errors.append(f"{path}: sections[{i}] must be a dict")
+                    continue
+                if "id" not in section:
+                    errors.append(f"{path}: sections[{i}] missing 'id'")
+                if "primitive" not in section:
+                    errors.append(f"{path}: sections[{i}] missing 'primitive'")
+        elif sections is not None:
+            errors.append(f"{path}: 'sections' must be a list")
+
+    return errors
+
+
 _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 _PACK_PROVENANCE_SCHEMA_VERSION = "mozaiks.pack_provenance.v1"
 
@@ -1366,11 +1458,15 @@ def scan_generated_bundle(
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
     - .mozaiks/pack_provenance.json: schema validation when present.
+    - ui/route_manifest.json: required path/component fields when present.
+    - ui/pages/*.yaml (schema-native): required name/route/sections fields when present.
     """
     errors: list[str] = []
     errors.extend(_scan_canonical_app_paths(files_map))
     errors.extend(_scan_security_secret_contract(files_map))
     errors.extend(_scan_pack_provenance_manifest(files_map))
+    errors.extend(_scan_route_manifest_consistency(files_map))
+    errors.extend(_scan_page_schema_structure(files_map))
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(

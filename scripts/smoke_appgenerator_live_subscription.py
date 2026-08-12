@@ -843,11 +843,11 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
             title: Reports
             sections:
               - id: report-list
-                type: record_list
+                primitive: DataTable
                 config:
                   api_endpoint: /api/modules/reports/list_reports
               - id: report-generate
-                type: form
+                primitive: Form
                 config:
                   submit_action:
                     api_endpoint: /api/modules/reports/generate_report
@@ -860,15 +860,15 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
             title: Usage
             sections:
               - id: usage-summary
-                type: summary_strip
+                primitive: SummaryStrip
                 config:
                   api_endpoint: /api/me/usage
               - id: token-balances
-                type: record_list
+                primitive: DataTable
                 config:
                   api_endpoint: /api/me/tokens
               - id: token-ledger
-                type: record_list
+                primitive: DataTable
                 config:
                   api_endpoint: /api/me/tokens/ledger
             """
