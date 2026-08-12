@@ -17,6 +17,7 @@ This project follows a practical pre-1.0 changelog format:
 - Added `scripts/package_content_guard.py`: artifact-level content guard that inspects built wheels and sdists before publication. Fails on learned-artifact directories (`evals/`, `corpora/`, `corrections/`, `production_outcomes/`, `learned_rankings/`, `customer_patterns/`, etc.), raw private keys, raw provider credentials (`sk_live_`, `sk_test_`, etc.), `.env` files (non-example), private-key file extensions (`.pem`, `.key`), and unapproved top-level package families or `factory_app/` sub-families. Warns on large data files and review-pattern paths.
 - Added `scripts/run_release_audit.py`: local pre-release audit script that chains governance guardrails, build, package content guard, twine check, smoke install into a clean venv, Factory resource resolution verification, and offline functional acceptance tests. Run with `python scripts/run_release_audit.py` before tagging any release.
 - Added `docs/adr/0002-appgenerator-baseline-strategy-oss.md`: records the intentional decision to publish the AppGenerator baseline strategy as OSS. Establishes that future learned or operator-derived additions require a new publication review ADR before entering this repository.
+- Added deterministic brownfield and AgentGenerator handoff acceptance coverage proving captured post-reasoning artifacts can flow through AppGenerator materialization and Level-2 generated-app runtime acceptance offline.
 
 ### Security
 

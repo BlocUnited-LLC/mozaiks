@@ -73,6 +73,8 @@ internally declared app route/action/facade must not be missing.
 | Monetized SaaS app host boot and declared MozaiksPay-compatible billing/facade surfaces | Platform `TestClient` over deterministic SaaS bundle plus in-process compatible provider fake | Runtime / HTTP | Added |
 | Workflow/agent app catalog load, start, and module-action surfaces | Workflow manager plus platform `TestClient` over deterministic workflow bundle | Runtime / HTTP | Added |
 | Cross-archetype post-plan replay | Captured `AppBuildPlan` fixtures through the real deterministic AppGenerator task-batch/materialization path, bundle validation, functional scanner, `AppLoader`, and platform `TestClient` | Static / Runtime / HTTP | Added |
+| Brownfield post-discovery handoff | Captured `ExistingAppDiscovery` artifact plus module decomposition through deterministic AppBuildPlan projection, real AppGenerator materialization, validation, `AppLoader`, and platform `TestClient` | Static / Runtime / HTTP | Added |
+| AgentGenerator-to-AppGenerator handoff | Captured `WorkflowBundleBuilderOutput` through AgentGenerator bundle materialization/promotion, workflow integration metadata, AppGenerator AppBuildPlan consumption, workflow registry loading, and platform `TestClient` | Static / Runtime / HTTP | Added |
 
 ## Diagnostics
 
@@ -189,8 +191,62 @@ dynamic.
 The workflow/agent row intentionally keeps workflow files at the workspace
 workflow root because workflow bundles are AgentGenerator-owned artifacts, not
 files inside the generated app bundle. The matrix proves the AppGenerator app
-bundle and canonical workflow registry boundary load together. A deeper
-end-to-end AgentGenerator-to-AppGenerator replay remains a P1 extension.
+bundle and canonical workflow registry boundary load together.
+
+## Brownfield Post-Discovery Proof
+
+`tests/test_brownfield_agentgenerator_acceptance.py` covers the deterministic
+boundary after ExistingAppDiscovery reasoning:
+
+```text
+local brownfield source fixture
+-> ExistingAppDiscovery source preload evidence
+-> captured ExistingAppDiscovery structured artifact
+-> captured module_decomposition_plan
+-> canonical AppContext adoption artifacts
+-> deterministic AppBuildPlan handoff
+-> AppGenerator app_build_plan normalization
+-> AppGenerator task-batch materialization
+-> validate_generated_app_bundle
+-> scan_functional_generated_app
+-> run_app_bundle_acceptance_gate
+-> AppLoader
+-> platform TestClient
+```
+
+This proves post-discovery correctness for a representative authenticated
+FastAPI/React CRUD adoption fixture. It asserts source intent survival such as
+`/projects`, `Project`, and `update_project` reaching generated page, module,
+persistence, and handler surfaces. It also mutates the generated handler to
+prove a dropped discovery-required action fails functional acceptance.
+
+This is not a raw source plus LLM determinism claim. Source discovery and
+reasoning can still be dynamic. The deterministic proof begins at the captured
+structured discovery/adoption boundary.
+
+## AgentGenerator Handoff Proof
+
+The same acceptance file covers the deterministic boundary after AgentGenerator
+reasoning:
+
+```text
+captured WorkflowBundleBuilderOutput
+-> AgentGenerator bundle file materialization
+-> workflow promotion into workspace workflow root
+-> workflow_integration_metadata extraction
+-> AppBuildPlan workflow touchpoint/module action alignment
+-> AppGenerator app materialization
+-> validation and functional scanner
+-> AppLoader
+-> workflow manager registry load
+-> platform TestClient
+```
+
+This proves that a representative AgentGenerator workflow bundle and the
+AppGenerator-produced app harness load together without paid model calls. The
+test asserts that the declared workflow, agents, context variables, structured
+outputs, tool function, page route, and referenced generated module action all
+survive the handoff.
 
 ## Remaining Gaps
 
@@ -206,9 +262,6 @@ P1:
   runtime wiring without executing a model-backed websocket turn.
 - Add browser-level route rendering smoke for generated bundles if CI can run it
   without making ordinary unit feedback slow.
-- Add brownfield generated-app acceptance once ExistingAppDiscovery exposes a
-  stable deterministic post-discovery/adoption-plan to AppBuildPlan
-  materialization seam.
 
 P2:
 

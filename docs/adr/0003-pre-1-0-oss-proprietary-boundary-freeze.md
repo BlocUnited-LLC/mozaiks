@@ -26,7 +26,7 @@ The boundary is not about features — it is about the source of intelligence:
 
 A full pre-1.0 audit found zero candidate families ready or appropriate for
 extraction. The current repository boundary is correct. See
-[`docs/architecture/foundations/oss-boundary-families.md`](../foundations/oss-boundary-families.md)
+[`docs/architecture/foundations/oss-boundary-families.md`](../architecture/foundations/oss-boundary-families.md)
 for the DO-NOT-MOVE family registry and private-by-default category list.
 
 ## Reason
