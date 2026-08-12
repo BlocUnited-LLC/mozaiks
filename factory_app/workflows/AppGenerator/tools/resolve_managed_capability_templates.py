@@ -233,12 +233,12 @@ def _file_owner_map(pack_source_path: Path) -> dict[str, str]:
 
 
 def _build_provenance_manifest(
-    pack_file_map: list[tuple[str, str, list[str]]],
+    pack_file_map: list[tuple[str, str, list[dict[str, str]]]],
 ) -> str:
     """Build a provenance manifest JSON string.
 
     Args:
-        pack_file_map: List of (pack_id, pack_version, [file_paths]) tuples.
+        pack_file_map: List of (pack_id, pack_version, [file_entries]) tuples.
 
     Returns:
         JSON string for ``.mozaiks/pack_provenance.json``.
