@@ -66,6 +66,11 @@ PYTEST_GATE_TARGETS = [
     "tests/test_platform_module_dispatch.py",
     "tests/test_module_executor_dispatch.py",
     "tests/test_app_validation_strategy.py",
+    # Governance and self-host acceptance
+    "tests/test_package_content_guard.py",
+    "tests/test_governance_guardrails.py",
+    "tests/test_oss_boundary_policy.py",
+    "tests/test_selfhost_clean_install.py",
 ]
 
 QUICK_PYTEST_TARGETS = [
