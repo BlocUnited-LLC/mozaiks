@@ -33,10 +33,10 @@ Mozaiks is not yet a production compatibility platform. When simplifying a canon
 
 - replace the old shape;
 - update all generators, structured-output models, templates, loaders, validators, fixtures, docs, and tests in the same change or coordinated change set;
-- delete stale aliases, normalization branches, fallback names, compatibility shims, and legacy tests;
+- delete stale aliases, normalization branches, fallback names, compatibility shims, and retired tests;
 - do not add dual-read or dual-write behavior merely to preserve an obsolete pre-1.0 contract;
 - do not keep both old and new taxonomies active;
-- do not preserve backward compatibility unless an explicit current external contract or user-approved migration requirement proves it is necessary.
+- do not preserve an older shape unless an explicit current external contract or user-approved migration requirement proves it is necessary.
 
 The default pre-1.0 decision is **one canonical shape, not compatibility layers**.
 

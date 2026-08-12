@@ -41,7 +41,7 @@ Generated-app reliability takes precedence over maximum schema expressiveness.
 - When a schema/taxonomy changes, update the structured-output model, Factory prompts/hooks, deterministic materializer/templates, runtime loader/consumer, validation, docs, fixtures, and acceptance tests together.
 - `factory_app` and/or generated-app acceptance must dogfood generic schema/taxonomy changes where applicable.
 
-This repo is pre-1.0 and not in production. **Do not add backward-compatibility logic for obsolete internal contracts by default.** Replace stale shapes and remove aliases, shims, fallback branches, dual-read/dual-write behavior, normalization of retired names, obsolete prompt guidance, and legacy tests in the same migration. Preserve compatibility only when an explicit current external contract or user-approved migration requirement proves it is necessary.
+This repo is pre-1.0 and not in production. **Replace obsolete internal contracts directly by default.** Remove stale shapes, aliases, shims, fallback branches, dual-read/dual-write behavior, normalization of retired names, obsolete prompt guidance, and retired tests in the same migration. Preserve an older shape only when an explicit current external contract or user-approved migration requirement proves it is necessary.
 
 The detailed implementation policy is
 [Canonical Schema Generation Policy](docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md).
@@ -317,4 +317,370 @@ git log origin/main --oneline -5  # see what recently landed
 Never branch off another open PR's still-unmerged branch, even as a "hard
 dependency" — you inherit its bugs and every later fix has to be re-propagated
 into your branch too. Wait for it to merge (green CI, actually in `main`) and
-branch from
+branch from fresh `origin/main` instead. Always work in an isolated worktree
+(`git worktree add .local/worktrees/<task-name> origin/main -b cc/<desc>`),
+never directly in the shared main checkout — other agents run git commands
+there concurrently and will switch branches or sweep in unrelated edits.
+
+**Branch workflow — always use feature branches:**
+```bash
+git checkout main && git reset --hard origin/main
+git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
+# ... work, commit ...
+git push -u origin cc/<description>
+gh pr create --title "..." --body "..."
+gh pr merge <number> --squash --delete-branch --auto   # auto-merge is enabled repo-wide; request it right away, don't wait on CI
+```
+
+Before opening the PR, run `ruff check .` and `pytest -q --no-cov` locally in
+the worktree. If a check still fails, confirm via `git show origin/main:<path>`
+whether it's pre-existing on `main` before assuming it's your bug — and if a
+check fails identically across multiple unrelated PRs, it's a repo-wide `main`
+regression blocking everyone; fix it first with a small isolated hotfix PR.
+
+Primary repo ownership (avoids overlap by default):
+
+| Repo | Primary agent |
+|------|--------------|
+| `mozaiks` (OSS) | Claude Code |
+| `mozaiks-app` (hosted product) | Codex |
+
+See `.claude/rules/multi-agent-coordination.md` for full rules.
+
+## Contributor Guidance Operating System
+
+For nontrivial OSS changes:
+
+- choose the closest active task skill before editing. Codex-facing skills live
+  under `.agents/skills/`; Claude Code-facing skills live under
+  `.claude/skills/`.
+- use `oss-contribution-review` when scope spans layers or the right skill is
+  unclear
+- include the appropriate impact section from `.claude/rules/testing.md` in the
+  final report and always list tests run
+
+## Module Contract Rule
+
+When working in or generating modules:
+
+- Only `module.yaml` and `backend/handler.py` are required. All companion manifests
+  live under `contracts/` and are optional — include only what the module needs.
+- Canonical module shape:
+  ```
+  modules/{module_id}/
+  ├── module.yaml                     ← required: identity, actions, capabilities
+  ├── contracts/                      ← optional companion manifests
+  │   ├── events.yaml                 ← domain events this module may publish
+  │   ├── reactions.yaml              ← event reactions owned by this module
+  │   ├── notifications.yaml          ← notification rules per event
+  │   ├── settings.yaml               ← user/app settings schema
+  │   ├── admin.yaml                  ← admin panels mounted into /admin/*
+  │   └── profile.yaml                ← user profile page panels (optional)
+  ├── runtime_extensions.yaml         ← optional: api_router / startup_service
+  └── backend/
+      ├── handler.py                  ← required: thin dispatch, one method per action
+      ├── service.py                  ← recommended: business logic and event emission
+      ├── repo.py                     ← recommended: MongoDB access layer, no logic
+      ├── policy.py                   ← recommended: query scoping for multi-tenancy
+      ├── schemas.py                  ← recommended: typed request/response + document shapes
+      ├── {helper_files}.py           ← optional: declared, justified, module-local support
+      ├── settings.py                 ← optional: settings hooks
+      └── admin.py                    ← optional: admin panel hooks
+  ```
+- `backend/handler.py` is thin dispatch only — one method per declared action, no
+  business logic, no `ctx.db`, no `ctx.emit`.
+- `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and
+  `backend/schemas.py` are the canonical support files for any module with database access.
+- Backend helper files are allowed only when declared before generation, kept
+  module-local, justified by a specific purpose, and imported by a canonical
+  layer or referenced by `runtime_extensions.yaml`.
+- `runtime_extensions.yaml` is optional. Use `api_router` only for module-local
+  external callback routes, and `startup_service` only for process-lifetime
+  module services such as audit/event subscribers or background pollers.
+  Two `startup_service` patterns: (1) persistent connection workers (WebSocket,
+  broker); (2) background pollers for the `event_pipeline` archetype — use when
+  the module needs to detect external state changes (DNS propagation, certificate
+  issuance, payment confirmation) and advance a multi-step pipeline automatically.
+  Pollers must use `AsyncIOMotorClient` directly (not `app_data_from_context`),
+  resolve adapters lazily, and be accompanied by a stub adapter so the pipeline
+  runs locally without external infrastructure.
+  Internal actions that are only triggered by event reactions must use
+  `api_surface: internal` and `permissions: []` — the event bus is the
+  authorization boundary.
+  Do not use runtime extensions for generic business logic, persistence,
+  auth/scope helpers, transport infrastructure, or workflow orchestration.
+- App modules publish `domain.*` events. Hosted product modules use `hosted.*`.
+  Workflow starts/resumes are resolved by runtime/platform trigger contracts, not by
+  hardcoded workflow names in module code.
+- Factory workflows such as `AppGenerator` produce these files through
+  structured output models, and contributors may author them directly. Keep the
+  canonical shapes aligned with runtime loaders, docs, and tests.
+
+## Service Contract Rule
+
+When working in or generating app services:
+
+- `app/services/` is optional app-owned support code. It is not a module system,
+  product service layer, persistence plane, security plane, or entitlement
+  authority.
+- Canonical service shape:
+  ```
+  services/
+  ├── __init__.py                         ← optional Python package marker
+  ├── config.py                           ← optional app-owned support config, no secrets
+  ├── integrations/                       ← thin clients for external or hosted APIs
+  │   ├── __init__.py
+  │   └── {service}_client.py
+  ├── adapters/                           ← provider-specific implementation mechanics
+  │   ├── __init__.py
+  │   └── {area}/
+  │       ├── __init__.py
+  │       └── {provider}.py
+  └── routes/                             ← explicit app-level routes only when required
+      ├── __init__.py
+      └── {route}.py
+  ```
+- Common adapter areas are `auth/`, `source_control/`, `deployment/`, `dns/`,
+  `registrar/`, `cloud/`, `storage/`, `search/`, `email/`, `database/`,
+  `secrets/`, and `payments/` when the app itself directly owns that provider
+  integration.
+- `services/integrations/{pack_id}_client.py` is the lane for managed-capability API
+  clients. Pages and app actions should bind to app-owned facade modules, not
+  directly to managed-capability internals.
+- Authenticated apps declare provider-neutral auth behavior in
+  `app/config/auth.yaml`. App identity and coarse `authRequired` stay in
+  `app/app.json`; visual login styling stays in `app/brand/theme_config.json`;
+  provider mechanics stay in `app/services/adapters/auth/` only when the app
+  directly owns that provider integration.
+- `services/adapters/{area}/{provider}.py` owns provider mechanics such as SDK
+  calls, protocol translation, signing, retries, and response normalization.
+  It must not own durable app facts, lifecycle transitions, user-facing actions,
+  permissions, emitted events, or persistence authority.
+- Do not generate hosted platform provider adapters into customer app bundles.
+  Mozaiks-hosted deployment, DNS/domain, billing, wallet, and platform
+  operations are consumed through hosted API clients/facade modules and
+  host-owned records; provider adapters stay in the hosted product.
+- `services/routes/` is only for app-level routes required by a host contract or
+  explicit integration boundary. Module-local callback routes should normally
+  be declared through that module's `runtime_extensions.yaml`.
+- Modules may call service files as implementation details. Service files should
+  not import `app.modules`, use `ctx.persistence`, emit events, or dispatch
+  module actions.
+- Do not generate `app/services/data/` or `app/services/security/`. Data
+  contracts live under `app/data/`; secret policy lives at
+  `app/security/secrets.yaml`; provider-neutral secret resolution belongs in the
+  OSS `mozaiksai.core.secrets` runtime primitive.
+- Do not create entitlement grant adapters under services. SaaS plans live in
+  `app/config/subscriptions.yaml`, assignment state lives in the configured app
+  data alias, and runtime enforcement is handled by the OSS
+  `ConfiguredEntitlementAdapter`.
+
+## Generated Deployment Artifact Contract
+
+Generated deployment artifacts are provider-neutral app-bundle root files:
+
+- `Dockerfile`
+- `docker-compose.yml`
+- `env.example`
+- `deployment.manifest.json`
+- `.github/workflows/deploy.yml`
+
+These files describe how the app runs and which env/CI secret names are
+expected. They must never contain raw secrets, cloud tenant ids, hosted product
+policy defaults, or provider execution code.
+
+AppBuildPlan build tasks must not own these paths. They are emitted by the
+DownloadAgent through the `generate_and_download` deployment contract renderer
+using `deployment_profile`, `include_dockerfiles`, `include_workflow`, and
+`include_compose`. Hosted products consume the manifest and apply provider
+policy, secret delivery, DNS, and deployment adapters outside the generated app
+bundle.
+
+## Generated Secret Contract
+
+App-owned runtime secret output is names-first, not value-first:
+
+- `security/secrets.yaml` is the optional canonical generated contract for
+  app-owned secret provider/vault policy, env handles, and secret names.
+- It must never contain raw API keys, tokens, passwords, connection strings,
+  private keys, webhook secrets, or other credential values.
+- Secret policy belongs in `app/security/`; provider-neutral resolution and
+  supported secret manager mechanics belong in the OSS `mozaiksai.core.secrets`
+  runtime primitive.
+- Connector/API-key collection during workflows must store raw credential values
+  only through the configured secret backend. App artifacts should carry safe
+  metadata and secret references, not raw values.
+
+## Generated Persistence Contract
+
+AppGenerator persistence output is data-contract-first, not runtime-DB-first:
+
+- `data_contract` is the canonical generated data planning object.
+- Generated app bundles write it to `data/contract.json`.
+- Additive refinement plans belong under
+  `data/migrations/{migration_id}.json`.
+- Persistent modules use `backend/repo.py`, `backend/policy.py`, and
+  `backend/schemas.py`; do not generate `backend/models.py` or
+  `backend/models/*.py`.
+- Do not generate `backend/database/schema.json` or
+  `backend/database/seed.json`.
+- Do not put database access in `handler.py`, and do not put raw persistence
+  operations in `service.py`.
+- Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
+  Generated `backend/repo.py` must use
+  `ctx.persistence.collection(module_id, entity_name)`.
+- `data/contract.json` also covers cross-module aggregate ownership and explicit
+  existing database integration when needed.
+- External database provider mechanics, when explicitly required, belong under
+  `app/services/adapters/database/`. Do not generate `app/services/data/` for
+  customer apps.
+- Do not generate Python helper files under `data/` or `security/`. Those app
+  planes are declarative: data contracts/migrations and names-only secret
+  policy.
+- `ctx.db` remains absent and non-canonical; generated code must not require or
+  emit it.
+
+## Structured-Output-First Contract Rule
+
+When introducing or changing YAML contracts:
+
+- Treat canonical YAML files as structured-output-first contracts, not loose
+  configuration blobs.
+- Every canonical YAML shape must map cleanly to a strict structured output
+  model that agents can produce repeatably and runtime code can validate
+  deterministically.
+- If a taxonomy is used by agents or loaders, define it explicitly as reusable
+  typed fields/enums. Do not rely on prompt prose or naming conventions alone.
+- Prefer shared submodels and finite namespaces over freeform nested objects.
+- When a contract changes, update prompts, structured outputs, runtime
+  validators/loaders, docs, and tests together so generators do not drift from
+  execution.
+
+This applies to `module.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`,
+`contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`,
+`contracts/profile.yaml`, workflow YAMLs, and page schemas.
+
+## Contract-Declared Customization Rule
+
+Customization is allowed, but only as a bounded extension of a strict
+contract.
+
+- YAML may reference helper/customization stubs only through explicit
+  contract-defined fields.
+- Python stubs are for backend/runtime-side extensions. JS/TS stubs are for
+  frontend/admin/workflow UI extensions.
+- Stubs must remain contract-bound: they implement declared hooks or entry
+  points, not alternate schemas or undeclared behavior paths.
+- Generator prompts must understand both the declarative contract and the stub
+  shape they are allowed to emit.
+- If a stub reference is optional, the contract must say when it is omitted and
+  what the canonical no-customization behavior is.
+
+## Platform Shell Constraints
+
+Do not generate or suggest entries for the following — these are injected by the
+platform runtime and must not be declared manually:
+
+- `admin-portal` shortcuts or navigation items in `shell.json` or `route_manifest.json`
+- `admin-portal` entries in `extension_registry.json` entrypoints
+- Manual `appShell: true` on route manifest entries that already declare `navigation.group`
+  (the runtime auto-infers it; explicit repetition is not wrong but is redundant)
+
+These constraints exist because `build_shell_config()` guarantees Admin Portal injection
+after the full shell pipeline (`_inject_admin_portal`), and `appShell` is auto-set when
+`navigation.group` is present. Generators that emit these fields create duplicates or
+override the runtime guarantee.
+
+## Generator Output Rule
+
+Shared factory workflows live in `factory_app/workflows/`. Generator output must
+not land directly in active runtime paths.
+
+Workflow resolution is single-root by contract. A running host binds to one
+workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
+factory roots. Studio defaults to `factory_app/workflows/`; product/app hosts
+prefer the workspace root's `workflows/`. The first-party
+`factory_app/app` bundle should not check in a nested workflows directory.
+External hosted product workspaces define app-local workflows under
+`workflows/`, beside `app/`.
+
+Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
+
+```text
+generated/
+```
+
+Canonical generated paths:
+
+```text
+generated/apps/{app_id}/{build_id}/app/
+generated/workflows/{app_id}/{build_id}/{workflow_name}/
+```
+
+Only explicit promotion may copy validated artifacts into an active app root.
+
+## Workflow Contract Rule
+
+When working in or generating workflows:
+
+- Canonical workflow shape:
+  ```
+  workflows/{workflow_name}/
+  ├── orchestrator.yaml           ← required: bootstrap, entry point, constraints
+  ├── agents.yaml                 ← required: agent roster and prompts
+  ├── transition_graph.yaml               ← required: agent routing and transitions
+  ├── context_variables.yaml      ← required: initial/default shared state schema
+  ├── structured_outputs.yaml     ← required: output models + agent→model registry
+  ├── tools.yaml                  ← required: tool bindings + UI metadata
+  ├── ui_config.yaml              ← required: `visual_agents` contract for websocket-visible agents
+  ├── middleware.yaml                  ← optional: lifecycle hooks
+  ├── extended_orchestration/
+  │   └── task_batches.yaml       ← optional: workflow-local AG2 task batch config
+  ├── tools/
+  │   ├── __init__.py
+  │   └── *.py
+  └── ui/{workflow_name}/         ← optional: React UI components for artifacts
+      └── components/
+  ```
+- `ui_config.yaml` must declare `visual_agents`. Only agents listed there have messages and UI-bearing outputs streamed through the websocket to the user-facing UI.
+- `middleware.yaml` and `extended_orchestration/task_batches.yaml` are canonical workflow surfaces when lifecycle hooks or workflow-local task batches are needed.
+- `workflows/extended_orchestration/extension_registry.json` is single-root by
+  default. App/product overlays can explicitly extend
+  `mozaiks.default_workflow_registry`; only then may the runtime inherit default
+  registry entries and resolve inherited factory workflow folders from
+  `factory_app/workflows/`.
+- Treat workflow YAMLs as structured-output-first contracts. They should map cleanly to strict models that generators can emit and runtime code can validate deterministically.
+- Tools stay dumb. Reasoning belongs in prompts and structured outputs, not in Python tool code.
+
+## UI System Rule
+
+Treat the UI system as separate surface contracts sharing one primitive/design foundation:
+
+1. `App UI` — schema-driven page primitives rendered by `SchemaPage`
+2. `Agent UI tools` — event-driven React surfaces that compose shipped primitives
+3. `Transition UI` — router/session components with routing-specific props
+4. `Core shell pages` — first-class framework pages registered in `coreComponents.js`
+
+Do not collapse these into one generic contract.
+
+## Validation Rule
+
+For runtime, generator, orchestration, or contract changes:
+
+- run targeted tests
+- update docs
+- prefer at least one real runtime smoke when practical
+
+## Decision Rules
+
+When adding code, decide placement in this order:
+
+1. Is this required for every runtime instance and independent of app semantics? → **Runtime**.
+2. Is this generic Refinement Engine behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
+3. Is this app hosting, routing, sessions, pages, modules, shell config, or app workspace composition? → **Platform**.
+4. Is this workspace management, build lifecycle, artifact review, run history, or configuration UI? → **Studio**.
+5. Is this first-party builder behavior, app generation logic, or builder-specific harness configuration? → **`factory_app`**.
+6. Is this hosted-only capability such as collaboration, billing, marketplace, deployment, or org management? → **Mozaiks App**.
+7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
+
+Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.

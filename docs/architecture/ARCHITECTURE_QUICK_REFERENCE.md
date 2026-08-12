@@ -17,7 +17,7 @@ The implementation policy for deterministic generated contracts is
 * Prefer small finite taxonomies, shallow typed contracts, and explicit canonical references over free-form or deeply nested schema shapes.
 * One runtime concept gets one canonical name. Unknown runtime-affecting taxonomy values or unresolved references fail before promotion.
 * YAML/structured outputs declare architecture and contracts; bounded Python/JS/React escape hatches implement customization behind those contracts.
-* This project is pre-1.0: replace obsolete schema shapes instead of preserving aliases, shims, dual-read paths, or legacy compatibility unless an explicit current external contract requires them.
+* This project is pre-1.0: replace obsolete schema shapes instead of preserving aliases, shims, dual-read paths, or retired contract behavior unless an explicit current external contract requires them.
 * `build_context` projects reusable knowledge, contracts, catalogs, and assets into reasoning and deterministic materialization.
 * `CapabilityPack` is the reusable generation-time unit.
 * A Community Component extends `CapabilityPack` with versioned distribution, provenance, dependencies, trust/integrity, installability, and upgrade metadata.
