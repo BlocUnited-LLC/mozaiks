@@ -1,0 +1,21 @@
+{
+  "pages": [
+    {
+      "id": "greetings",
+      "label": "Greetings",
+      "path": "/greetings",
+      "component": "SchemaPage",
+      "order": 10,
+      "navigation": {
+        "include": true,
+        "icon": "MessageSquare",
+        "group": "main"
+      },
+      "meta": {
+        "title": "Greetings",
+        "requiresAuth": false,
+        "shellMode": "standard"
+      }
+    }
+  ]
+}

@@ -90,11 +90,11 @@ route: /orders
 title: Orders
 sections:
   - id: orders-list
-    type: record_list
+    primitive: DataTable
     config:
       api_endpoint: /api/modules/orders/list_orders
   - id: create-order
-    type: form
+    primitive: Form
     config:
       submit_action:
         api_endpoint: /api/modules/orders/create_order
@@ -258,7 +258,7 @@ route: /reports
 title: Reports
 sections:
   - id: reports-list
-    type: record_list
+    primitive: DataTable
     config:
       api_endpoint: /api/modules/reports/list_reports
 """,
