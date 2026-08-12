@@ -119,6 +119,7 @@ nav:
           - Refinement: guides/platform-intelligence/03-refinement.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Self-Hosting: guides/self-hosting.md
+      - Stability & Compatibility: guides/stability-and-compatibility.md
 
   - Studio:
       - studio/index.md
