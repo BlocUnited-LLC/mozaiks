@@ -34,6 +34,15 @@ The authoritative OSS software-design document is
 | One-app App Intelligence and brownfield adoption | Mozaiks OSS |
 | Cross-app Build Intelligence, learned routing, operator evidence | Operator/private by default |
 
+## Required Pre-Edit Architecture Check
+
+Before editing Mozaiks OSS:
+
+1. read this quick reference;
+2. if the task changes, extends, replaces, or challenges architecture, read [Mozaiks OSS Software Design](MOZAIKS_OSS_SOFTWARE_DESIGN.md);
+3. treat current source as final authority;
+4. if current source contradicts the frozen north star, stop and report the contradiction.
+
 ## Agent Development Rule
 
 Before introducing a subsystem:
@@ -42,4 +51,4 @@ Before introducing a subsystem:
 2. inspect whether AG2 already owns the primitive;
 3. inspect whether Mozaiks already has the canonical implementation;
 4. extend or connect existing architecture first;
-5. do not introduce a parallel implementation without an ADR.
+5. do not introduce a parallel subsystem without an ADR.
