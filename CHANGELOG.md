@@ -24,7 +24,7 @@ This project follows a practical pre-1.0 changelog format:
   - First-party packs (`messaging`, `support`, `social`, `commerce`, `notifications`, `files`, `entitlement_dispatch`, `mozaikspay`, `operator_readiness`) updated to `version: "0.1.11"`.
   - `support/contract.yaml` migrated from informal `required_packs` to canonical `requires.packs` format.
   - Fixture community packs in `tests/fixtures/community_packs/` prove dependency validation and provenance work locally without App Zero, network, or a paid LLM.
-  - 39 tests in `tests/test_community_pack_foundation.py` cover schema validation, dependency checking, provenance emission, bundle scanner integration, and first-party pack backward compatibility.
+  - 39 tests in `tests/test_community_pack_foundation.py` cover schema validation, dependency checking, provenance emission, bundle scanner integration, and unchanged first-party pack behavior.
 
 - Published `docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md` as the authoritative OSS north-star software-design document; added to mkdocs.yml navigation as the primary architecture reference. No competing document exists under `docs/architecture/foundations/`.
 

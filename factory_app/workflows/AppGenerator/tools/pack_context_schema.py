@@ -41,7 +41,7 @@ _ALLOWED_PACK_KEYS: frozenset[str] = frozenset({
     "display_name",
 })
 
-_VALID_STATUS: frozenset[str] = frozenset({"active", "inactive", "deprecated"})
+_VALID_STATUS: frozenset[str] = frozenset({"active", "inactive", "archived"})
 
 _VALID_CAPABILITY_SOURCES: frozenset[str] = frozenset({
     "managed_capability",

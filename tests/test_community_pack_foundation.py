@@ -94,11 +94,11 @@ def test_pack_version_is_optional_and_still_valid() -> None:
     from factory_app.workflows.AppGenerator.tools.pack_context_schema import validate_pack_context
 
     context: dict[str, Any] = {
-        "context_id": "legacy",
+        "context_id": "unversioned",
         "applies_to_workflows": ["AppGenerator"],
         "assets": [],
         "pack": {
-            "id": "legacy",
+            "id": "unversioned",
             "status": "active",
             "capability_source": "generated_module",
         },
