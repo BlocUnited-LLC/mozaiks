@@ -9,6 +9,25 @@ Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those 
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 
+## Required Pre-Edit Architecture Check
+
+Before editing Mozaiks OSS:
+
+- read [docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md](docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md)
+- if the task changes, extends, replaces, or challenges architecture, also read
+  [docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md](docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md)
+- current source remains final authority
+- if current source contradicts the frozen north star, stop and report the
+  contradiction before editing
+- before introducing a subsystem, identify the current canonical owner,
+  determine whether AG2 already owns the primitive, determine whether Mozaiks
+  already has the canonical implementation, and prefer extending or connecting
+  the existing owner
+- do not introduce a parallel subsystem without proving the canonical owner
+  cannot satisfy the requirement
+- architectural changes that contradict the frozen north star require an ADR or
+  explicit architecture decision
+
 This repo uses layered FastAPI hosts as the canonical OSS server composition:
 - `mozaiksai.hosts.runtime`
 - `mozaiksai.hosts.platform`
