@@ -62,6 +62,9 @@ from mozaiksai.core.runtime.composition.module_authority import (
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
+    ReactionIdempotencyStore,
+)
 from mozaiksai.core.runtime.persistence import (
     DatabaseStartupPolicyError,
     apply_data_migrations,
@@ -333,10 +336,14 @@ async def _platform_startup() -> None:
                     event_emitter=dispatcher.emit,
                 )
 
+            _reaction_idempotency_store: ReactionIdempotencyStore | None = None
+            if os.getenv("MONGO_URI") or os.getenv("MONGODB_URI"):
+                _reaction_idempotency_store = ReactionIdempotencyStore()
             module_event_router = ModuleEventRouter(
                 load_result.modules,
                 event_emitter=dispatcher.emit,
                 capability_invoker=invoke_capability,
+                idempotency_store=_reaction_idempotency_store,
             )
             module_event_router.register(dispatcher)
             app.state.module_event_router = module_event_router
