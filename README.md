@@ -139,4 +139,4 @@ This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
