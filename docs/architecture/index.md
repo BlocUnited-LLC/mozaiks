@@ -9,19 +9,22 @@ workspace contract, module system, workflow authoring model, event/data model,
 and frontend surfaces. It is reference material for contributors working on the
 framework itself.
 
-The authoritative repository-level reference is
-[ARCHITECTURE.md](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURE.md).
-Use this section as the web navigation layer for that architecture.
+The authoritative OSS north-star software-design document is
+[Mozaiks OSS Software Design](MOZAIKS_OSS_SOFTWARE_DESIGN.md).
+Use [Architecture Quick Reference](ARCHITECTURE_QUICK_REFERENCE.md) as the
+short contributor summary, not as a competing source of authority.
 
 ## Start Here
 
-1. [Architecture Foundations](foundations/overview.md)
-2. [App Architecture](app/index.md)
-3. [Module Systems](modules-systems/index.md)
-4. [Workflows](workflows/index.md)
-5. [MozaiksAI Runtime](mozaiksai/index.md)
-6. [Frontend Architecture](frontend/index.md)
-7. [Builder and Generation](builder/app-builder-architecture.md)
+1. [Mozaiks OSS Software Design](MOZAIKS_OSS_SOFTWARE_DESIGN.md)
+2. [Architecture Quick Reference](ARCHITECTURE_QUICK_REFERENCE.md)
+3. [Architecture Foundations](foundations/overview.md)
+4. [App Architecture](app/index.md)
+5. [Module Systems](modules-systems/index.md)
+6. [Workflows](workflows/index.md)
+7. [MozaiksAI Runtime](mozaiksai/index.md)
+8. [Frontend Architecture](frontend/index.md)
+9. [Builder and Generation](builder/app-builder-architecture.md)
 
 ## Foundational Contracts
 
