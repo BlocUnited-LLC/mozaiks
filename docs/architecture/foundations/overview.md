@@ -17,6 +17,7 @@ the peer architecture sections for details:
 
 | Doc | Scope |
 | --- | --- |
+| [Mozaiks OSS Software Design](oss-software-design.md) | North-star ownership model for AG2, Mozaiks OSS, deterministic app contracts, and proprietary operator-intelligence boundaries |
 | [Distribution and Workspace Model](distribution-and-workspace-model.md) | Package/source/runtime workspace boundaries |
 | [Platform Terminology and Brand Language](platform-terminology-and-brand-language.md) | Customer-facing and internal vocabulary |
 | [Platform Information Architecture](platform-information-architecture.md) | Studio and app-level IA contracts |

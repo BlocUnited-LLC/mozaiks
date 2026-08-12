@@ -136,6 +136,7 @@ nav:
       # Core mental models and cross-cutting contracts. Start here.
       - Foundations:
           - Overview: architecture/foundations/overview.md
+          - OSS Software Design: architecture/foundations/oss-software-design.md
           - Distribution & Workspace Model: architecture/foundations/distribution-and-workspace-model.md
           - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md

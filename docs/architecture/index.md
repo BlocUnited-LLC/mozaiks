@@ -25,6 +25,7 @@ Use this section as the web navigation layer for that architecture.
 
 ## Foundational Contracts
 
+- [Mozaiks OSS Software Design](foundations/oss-software-design.md)
 - [Distribution and Workspace Model](foundations/distribution-and-workspace-model.md)
 - [Platform Terminology and Brand Language](foundations/platform-terminology-and-brand-language.md)
 - [Platform Information Architecture](foundations/platform-information-architecture.md)
