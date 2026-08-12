@@ -17,6 +17,23 @@ from mozaiksai.core.startup.validation import (
 )
 
 # ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_llm_provider_env(monkeypatch):
+    """Clear LLM_PRIMARY_API_TYPE before each test.
+
+    core_config.load_dotenv() runs at import time and may load a .env that sets
+    LLM_PRIMARY_API_TYPE=google. Tests that verify OPENAI_API_KEY resolution
+    must start with an unset provider type so the default (openai) applies.
+    Tests that need a specific provider set it explicitly via monkeypatch.setenv.
+    """
+    monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+
+
+# ---------------------------------------------------------------------------
 # Shared test helpers
 # ---------------------------------------------------------------------------
 
@@ -44,41 +61,78 @@ class _FailingPingClient:
 class TestCanResolveApiKey:
     def test_returns_true_when_env_set(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-1234")
-        assert _can_resolve_api_key() is True
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        resolvable, _ = _can_resolve_api_key()
+        assert resolvable is True
 
     def test_returns_false_when_env_empty(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "")
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch(
             "mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")
         ):
-            assert _can_resolve_api_key() is False
+            resolvable, _ = _can_resolve_api_key()
+            assert resolvable is False
 
     def test_returns_false_when_env_missing(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch(
             "mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")
         ):
-            assert _can_resolve_api_key() is False
+            resolvable, _ = _can_resolve_api_key()
+            assert resolvable is False
 
     def test_returns_true_when_key_vault_resolves(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         # Patch the name in validation's namespace (imported by reference at module load)
         with patch(
             "mozaiksai.core.startup.validation.get_secret", return_value="sk-from-kv"
         ):
-            assert _can_resolve_api_key() is True
+            resolvable, _ = _can_resolve_api_key()
+            assert resolvable is True
 
     def test_returns_false_when_key_vault_returns_empty(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch("mozaiksai.core.startup.validation.get_secret", return_value=""):
-            assert _can_resolve_api_key() is False
+            resolvable, _ = _can_resolve_api_key()
+            assert resolvable is False
 
     def test_env_whitespace_only_treated_as_absent(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "   ")
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch(
             "mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")
         ):
-            assert _can_resolve_api_key() is False
+            resolvable, _ = _can_resolve_api_key()
+            assert resolvable is False
+
+    def test_returns_true_for_gemini_key(self, monkeypatch):
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "google")
+        monkeypatch.setenv("GEMINI_API_KEY", "AIza-test-1234")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        resolvable, key_name = _can_resolve_api_key()
+        assert resolvable is True
+        assert "GEMINI_API_KEY" in key_name
+
+    def test_returns_false_when_gemini_key_missing(self, monkeypatch):
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "google")
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        resolvable, key_name = _can_resolve_api_key()
+        assert resolvable is False
+        assert "GEMINI_API_KEY" in key_name
+
+    def test_returns_true_for_anthropic_key(self, monkeypatch):
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-1234")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        resolvable, key_name = _can_resolve_api_key()
+        assert resolvable is True
+        assert "ANTHROPIC_API_KEY" in key_name
 
 
 # ---------------------------------------------------------------------------
