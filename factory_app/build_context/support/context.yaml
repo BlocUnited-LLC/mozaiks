@@ -8,10 +8,9 @@ assets:
     kind: templates
 pack:
   id: support
+  version: "0.1.11"
   status: active
   capability_source: generated_module
-  requires:
-    - messaging
 capabilities:
   - capability_id: support.requests.create
     facade_recommended: support

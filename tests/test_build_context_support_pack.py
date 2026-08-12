@@ -71,8 +71,13 @@ def test_support_context_registers_active_appgenerator_pack() -> None:
 
 def test_support_contract_requires_messaging_pack() -> None:
     contract = _read_yaml(SUPPORT / "contract.yaml")
-    required_packs = contract.get("required_packs") or []
-    assert "messaging" in required_packs, (
+    # Machine-readable dependency is declared under requires.packs (canonical format)
+    requires = contract.get("requires") or {}
+    pack_ids = [
+        (entry.get("pack_id") if isinstance(entry, dict) else entry)
+        for entry in (requires.get("packs") or [])
+    ]
+    assert "messaging" in pack_ids, (
         "support pack must declare messaging as a required pack — "
         "conversations are persisted through the messages pack"
     )

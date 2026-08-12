@@ -1,0 +1,25 @@
+context_id: greetings
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: greetings
+  version: "0.1.0"
+  author: "Community Test Author"
+  license: "MIT"
+  source: "https://example.com/community-packs/greetings"
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: greetings.say_hello
+    facade_recommended: greetings
+  - capability_id: greetings.list_greetings
+    facade_recommended: greetings
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

@@ -646,7 +646,8 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_managed_capability_templates(pack_sources)
+        all_files = resolver.resolve_managed_capability_templates(pack_sources)
+        template_files = [f for f in all_files if f["filename"] != ".mozaiks/pack_provenance.json"]
         assert len(template_files) == 1
         assert template_files[0]["filename"] == "services/integrations/wallet_client.py"
 

@@ -39,11 +39,9 @@ def test_commerce_context_registers_active_appgenerator_pack() -> None:
 
     assert context["context_id"] == "commerce"
     assert "AppGenerator" in context["applies_to_workflows"]
-    assert context["pack"] == {
-        "id": "commerce",
-        "status": "active",
-        "capability_source": "generated_module",
-    }
+    assert context["pack"]["id"] == "commerce"
+    assert context["pack"]["status"] == "active"
+    assert context["pack"]["capability_source"] == "generated_module"
     assert {asset["kind"] for asset in context["assets"]} == {"contract", "templates"}
 
     capability_ids = {capability["capability_id"] for capability in context["capabilities"]}

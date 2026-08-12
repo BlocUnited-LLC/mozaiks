@@ -1295,6 +1295,63 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+_PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
+_PACK_PROVENANCE_SCHEMA_VERSION = "mozaiks.pack_provenance.v1"
+
+_PROVENANCE_REQUIRED_KEYS = frozenset({"schema_version", "framework_version", "generated_at", "packs"})
+_PROVENANCE_PACK_REQUIRED_KEYS = frozenset({"pack_id", "pack_version", "files"})
+
+
+def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
+    """Validate .mozaiks/pack_provenance.json schema when present.
+
+    The file is optional — emitted only when packs were selected.  When present
+    it must conform to the ``mozaiks.pack_provenance.v1`` schema so future tooling
+    can rely on the structure for upgrade/diff decisions.
+    """
+    raw = files_map.get(_PACK_PROVENANCE_PATH)
+    if raw is None:
+        return []
+
+    errors: list[str] = []
+    try:
+        manifest = json.loads(raw)
+    except Exception as exc:
+        return [f"{_PACK_PROVENANCE_PATH}: invalid JSON — {exc}"]
+
+    if not isinstance(manifest, dict):
+        return [f"{_PACK_PROVENANCE_PATH}: pack_provenance.json must be a JSON object"]
+
+    # Check required top-level keys
+    missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
+    for key in sorted(missing_keys):
+        errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
+
+    # Check schema_version value
+    sv = manifest.get("schema_version")
+    if sv and sv != _PACK_PROVENANCE_SCHEMA_VERSION:
+        errors.append(
+            f"{_PACK_PROVENANCE_PATH}: schema_version must be "
+            f"'{_PACK_PROVENANCE_SCHEMA_VERSION}', got '{sv}'"
+        )
+
+    # Validate packs entries
+    packs = manifest.get("packs")
+    if packs is not None:
+        if not isinstance(packs, list):
+            errors.append(f"{_PACK_PROVENANCE_PATH}: 'packs' must be a JSON array")
+        else:
+            for i, entry in enumerate(packs):
+                if not isinstance(entry, dict):
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] must be a JSON object")
+                    continue
+                missing_pack_keys = _PROVENANCE_PACK_REQUIRED_KEYS - set(entry.keys())
+                for key in sorted(missing_pack_keys):
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] missing required field '{key}'")
+
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -1308,10 +1365,12 @@ def scan_generated_bundle(
 
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
+    - .mozaiks/pack_provenance.json: schema validation when present.
     """
     errors: list[str] = []
     errors.extend(_scan_canonical_app_paths(files_map))
     errors.extend(_scan_security_secret_contract(files_map))
+    errors.extend(_scan_pack_provenance_manifest(files_map))
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
