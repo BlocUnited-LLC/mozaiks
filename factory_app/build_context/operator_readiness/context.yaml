@@ -8,6 +8,7 @@ assets:
     kind: templates
 pack:
   id: operator_readiness
+  version: "0.1.11"
   status: active
   capability_source: config_file
   description: >

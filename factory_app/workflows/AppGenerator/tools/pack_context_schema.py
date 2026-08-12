@@ -44,12 +44,16 @@ _ALLOWED_PACK_KEYS: frozenset[str] = frozenset({
 _VALID_STATUS: frozenset[str] = frozenset({"active", "inactive", "archived"})
 
 _VALID_CAPABILITY_SOURCES: frozenset[str] = frozenset({
+    "config_file",
     "managed_capability",
     "generated_module",
     "operator_extension",
     "external_adapter",
     "framework_pack",
 })
+
+_ALLOWED_ASSET_KEYS: frozenset[str] = frozenset({"path", "kind", "description", "projections"})
+_VALID_ASSET_KINDS: frozenset[str] = frozenset({"catalog", "contract", "templates"})
 
 
 @dataclass
@@ -107,6 +111,32 @@ def validate_pack_context(context: dict[str, Any]) -> PackContextValidationResul
             ),
         ))
 
+    assets = context.get("assets")
+    if assets is not None:
+        if not isinstance(assets, list):
+            diagnostics.append(PackContextDiagnostic("assets", "assets must be a list"))
+        else:
+            for index, asset in enumerate(assets):
+                field = f"assets[{index}]"
+                if not isinstance(asset, dict):
+                    diagnostics.append(PackContextDiagnostic(field, "asset must be a mapping"))
+                    continue
+                unknown_asset_keys = sorted(set(asset) - _ALLOWED_ASSET_KEYS)
+                if unknown_asset_keys:
+                    diagnostics.append(PackContextDiagnostic(
+                        field,
+                        f"asset has unsupported fields: {unknown_asset_keys}",
+                    ))
+                asset_path = str(asset.get("path") or "").strip()
+                asset_kind = str(asset.get("kind") or "").strip()
+                if not asset_path:
+                    diagnostics.append(PackContextDiagnostic(f"{field}.path", "asset.path is required"))
+                if asset_kind not in _VALID_ASSET_KINDS:
+                    diagnostics.append(PackContextDiagnostic(
+                        f"{field}.kind",
+                        f"asset.kind must be one of: {sorted(_VALID_ASSET_KINDS)}",
+                    ))
+
     # --- pack: block ---
     pack = context.get("pack")
     if pack is None:
@@ -145,7 +175,11 @@ def validate_pack_context(context: dict[str, Any]) -> PackContextValidationResul
             f"pack.status '{status}' must be one of: {sorted(_VALID_STATUS)}",
         ))
 
-    # --- pack.capability_source (warn, not error, for forward compatibility) ---
+    version = pack.get("version")
+    if version is None or not isinstance(version, str) or not version.strip():
+        diagnostics.append(PackContextDiagnostic("pack.version", "pack.version is required and must be a string"))
+
+    # --- pack.capability_source ---
     cap_source = pack.get("capability_source")
     if cap_source is not None:
         cap_source_str = str(cap_source).strip()
@@ -154,11 +188,10 @@ def validate_pack_context(context: dict[str, Any]) -> PackContextValidationResul
                 "pack.capability_source",
                 f"pack.capability_source '{cap_source_str}' is not a known value; "
                 f"expected one of: {sorted(_VALID_CAPABILITY_SOURCES)}",
-                severity="warning",
             ))
 
     # --- Optional string identity fields ---
-    for str_field in ("version", "author", "license", "source", "description", "display_name"):
+    for str_field in ("author", "license", "source", "description", "display_name"):
         val = pack.get(str_field)
         if val is not None and not isinstance(val, str):
             diagnostics.append(PackContextDiagnostic(

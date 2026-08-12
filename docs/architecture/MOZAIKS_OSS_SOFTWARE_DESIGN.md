@@ -411,9 +411,10 @@ Community Component Foundation v1 currently provides:
 
 * pack identity and version metadata;
 * dependency declarations;
+* deterministic pack-content digests over declared assets;
 * pack provenance manifest emission;
 * catalog structural validation before pack context becomes generation input;
-* dependency validation before template materialization;
+* dependency and exact declared-version validation before template materialization;
 * offline local community-pack proof.
 
 It does not yet provide:
@@ -422,6 +423,8 @@ It does not yet provide:
 * cryptographic signing;
 * trust scoring;
 * automatic remote installation;
+* remote fetching;
+* marketplace behavior;
 * upgrade planning or migration execution.
 
 Future community component work should evolve capability packs by adding distribution semantics:

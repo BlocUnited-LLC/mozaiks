@@ -597,6 +597,7 @@ def wallet_pack_root(tmp_path: Path) -> Path:
         ],
         "pack": {
             "id": "wallet",
+            "version": "0.1.0",
             "status": "active",
             "capability_source": "managed_capability",
         },

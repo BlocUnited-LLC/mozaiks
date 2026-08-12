@@ -6,6 +6,7 @@ assets:
     kind: contract
 pack:
   id: onboarding
+  version: "0.1.11"
   status: active
   capability_source: config_file
   description: >

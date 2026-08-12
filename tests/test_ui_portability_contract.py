@@ -144,7 +144,7 @@ def test_greetings_pack_ui_files_appear_in_provenance() -> None:
     )
     assert pack_entry is not None
 
-    pack_file_paths = {f["path"] for f in pack_entry.get("files", [])}
+    pack_file_paths = {f["path"] for f in pack_entry.get("materialized_owned_files", [])}
     assert "ui/pages/greetings.yaml" in pack_file_paths, (
         "provenance does not record ui/pages/greetings.yaml"
     )
@@ -169,7 +169,7 @@ def test_greetings_pack_ui_files_have_templates_owner_in_provenance() -> None:
     )
     assert pack_entry is not None
 
-    owner_by_path = {f["path"]: f.get("owner") for f in pack_entry.get("files", [])}
+    owner_by_path = {f["path"]: f.get("owner") for f in pack_entry.get("materialized_owned_files", [])}
     assert owner_by_path.get("ui/pages/greetings.yaml") == "templates"
     assert owner_by_path.get("ui/route_manifest.json") == "templates"
 

@@ -1446,7 +1446,13 @@ _PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
 _PACK_PROVENANCE_SCHEMA_VERSION = "mozaiks.pack_provenance.v1"
 
 _PROVENANCE_REQUIRED_KEYS = frozenset({"schema_version", "framework_version", "generated_at", "packs"})
-_PROVENANCE_PACK_REQUIRED_KEYS = frozenset({"pack_id", "pack_version", "files"})
+_PROVENANCE_PACK_REQUIRED_KEYS = frozenset({
+    "pack_id",
+    "version",
+    "source",
+    "digest",
+    "materialized_owned_files",
+})
 
 
 def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
@@ -1473,6 +1479,9 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
     missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
     for key in sorted(missing_keys):
         errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
+    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS)
+    for key in unknown_keys:
+        errors.append(f"{_PACK_PROVENANCE_PATH}: unsupported field '{key}'")
 
     # Check schema_version value
     sv = manifest.get("schema_version")
@@ -1495,6 +1504,17 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                 missing_pack_keys = _PROVENANCE_PACK_REQUIRED_KEYS - set(entry.keys())
                 for key in sorted(missing_pack_keys):
                     errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] missing required field '{key}'")
+                unknown_pack_keys = sorted(set(entry.keys()) - _PROVENANCE_PACK_REQUIRED_KEYS)
+                for key in unknown_pack_keys:
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] unsupported field '{key}'")
+                digest = str(entry.get("digest") or "")
+                if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}].digest must be a canonical sha256 digest")
+                files = entry.get("materialized_owned_files")
+                if files is not None and not isinstance(files, list):
+                    errors.append(
+                        f"{_PACK_PROVENANCE_PATH}: packs[{i}].materialized_owned_files must be a JSON array"
+                    )
 
     return errors
 

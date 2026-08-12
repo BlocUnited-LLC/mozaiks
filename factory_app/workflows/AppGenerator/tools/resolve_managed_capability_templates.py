@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -43,19 +44,33 @@ class PackDependencyError(ManagedCapabilityTemplateError):
         *,
         missing_packs: list[str] | None = None,
         missing_capabilities: list[str] | None = None,
+        version_mismatches: list[str] | None = None,
     ) -> None:
         self.pack_id = pack_id
         self.missing_packs: list[str] = missing_packs or []
         self.missing_capabilities: list[str] = missing_capabilities or []
+        self.version_mismatches: list[str] = version_mismatches or []
         parts: list[str] = []
         if self.missing_packs:
             parts.append(f"missing required packs: {self.missing_packs}")
         if self.missing_capabilities:
             parts.append(f"missing required capabilities: {self.missing_capabilities}")
+        if self.version_mismatches:
+            parts.append(f"dependency version mismatches: {self.version_mismatches}")
         super().__init__(
             f"Pack '{pack_id}' dependency check failed — {'; '.join(parts)}. "
             "Ensure all required packs are included in the selected capability_packs list."
         )
+
+
+class PackIntegrityError(ManagedCapabilityTemplateError):
+    """Raised when a local pack fails deterministic trust/integrity verification."""
+
+
+def _normalized_source(pack: dict[str, Any], context: dict[str, Any]) -> str:
+    pack_value = context.get("pack")
+    pack_block = pack_value if isinstance(pack_value, dict) else {}
+    return str(pack.get("source") or pack_block.get("source") or "local").strip()
 
 
 def _is_safe_identifier(name: str) -> bool:
@@ -103,21 +118,41 @@ def _read_pack_contract(pack_source_path: Path) -> dict[str, Any]:
     try:
         data = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
     except Exception as exc:
-        logger.warning("Cannot read pack contract at %s: %s", contract_path, exc)
-        return {}
-    return data if isinstance(data, dict) else {}
+        raise ManagedCapabilityTemplateError(f"Cannot read pack contract at {contract_path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ManagedCapabilityTemplateError(f"Pack contract at {contract_path} is not a YAML mapping")
+    return data
 
 
-def _extract_requires(contract: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Return (required_pack_ids, required_capability_ids) from a contract dict.
+def _extract_requires(contract: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
+    """Return (required_packs, required_capability_ids) from a contract dict.
 
     Supports two declaration forms:
       packs: [pack_id, ...]                      # simple list of strings
-      packs: [{pack_id: name, reason: ...}, ...] # list of dicts with pack_id key
+      packs: [{pack_id: name, version: ..., reason: ...}]
     """
     requires = contract.get("requires")
     if not isinstance(requires, dict):
         return [], []
+
+    def _extract_pack_entries(entries: Any) -> list[dict[str, str]]:
+        if not isinstance(entries, list):
+            return []
+        packs: list[dict[str, str]] = []
+        for entry in entries:
+            if isinstance(entry, str):
+                pack_id = entry.strip()
+                if pack_id:
+                    packs.append({"pack_id": pack_id})
+            elif isinstance(entry, dict):
+                pack_id = str(entry.get("pack_id") or "").strip()
+                version = str(entry.get("version") or "").strip()
+                if pack_id:
+                    item = {"pack_id": pack_id}
+                    if version:
+                        item["version"] = version
+                    packs.append(item)
+        return packs
 
     def _extract_ids(entries: Any, id_key: str) -> list[str]:
         if not isinstance(entries, list):
@@ -132,7 +167,7 @@ def _extract_requires(contract: dict[str, Any]) -> tuple[list[str], list[str]]:
                     ids.append(val)
         return ids
 
-    pack_ids = _extract_ids(requires.get("packs"), "pack_id")
+    pack_ids = _extract_pack_entries(requires.get("packs"))
     cap_ids = _extract_ids(requires.get("capabilities"), "capability_id")
     return pack_ids, cap_ids
 
@@ -166,6 +201,7 @@ def _validate_pack_dependencies(
     # to reading context.yaml — the descriptor may not carry the capabilities list
     # when built programmatically (e.g. in tests or lightweight integrations).
     available_pack_ids: set[str] = set()
+    available_pack_versions: dict[str, str] = {}
     available_capability_ids: set[str] = set()
 
     for pack in capability_packs:
@@ -188,13 +224,17 @@ def _validate_pack_dependencies(
         # Only attempt when pack_id is safe — unsafe IDs will be caught later
         # by resolve_templates_for_pack's _is_safe_identifier check.
         raw_path = pack.get("pack_source_path")
-        if raw_path and not pack.get("capabilities") and pid and _is_safe_identifier(pid):
+        if raw_path and pid and _is_safe_identifier(pid):
             try:
                 context_data = _read_pack_context(Path(raw_path).resolve(), pid)
+                pack_value = context_data.get("pack")
+                pack_block = pack_value if isinstance(pack_value, dict) else {}
+                available_pack_versions[pid] = str(pack_block.get("version") or "").strip()
                 for cid in _capabilities_from_context(context_data):
                     available_capability_ids.add(cid)
             except Exception:
-                pass
+                if not pack.get("capabilities"):
+                    pass
 
     # Validate each pack's declared requires
     for pack in capability_packs:
@@ -208,15 +248,215 @@ def _validate_pack_dependencies(
         contract = _read_pack_contract(Path(raw_path))
         required_packs, required_caps = _extract_requires(contract)
 
-        missing_packs = [p for p in required_packs if p not in available_pack_ids]
+        missing_packs = [p["pack_id"] for p in required_packs if p["pack_id"] not in available_pack_ids]
         missing_caps = [c for c in required_caps if c not in available_capability_ids]
+        version_mismatches: list[str] = []
+        for required in required_packs:
+            required_version = required.get("version")
+            if not required_version or required["pack_id"] not in available_pack_ids:
+                continue
+            installed_version = available_pack_versions.get(required["pack_id"], "")
+            if installed_version != required_version:
+                version_mismatches.append(
+                    f"{required['pack_id']} expected {required_version}, installed {installed_version or '<missing>'}"
+                )
 
-        if missing_packs or missing_caps:
+        if missing_packs or missing_caps or version_mismatches:
             raise PackDependencyError(
                 pack_id,
                 missing_packs=missing_packs,
                 missing_capabilities=missing_caps,
+                version_mismatches=version_mismatches,
             )
+
+
+def _safe_asset_files(context_root: Path, context: dict[str, Any]) -> list[Path]:
+    files: list[Path] = [context_root / "context.yaml"]
+    seen: set[Path] = {files[0].resolve()}
+    for asset in iter_context_assets(context):
+        try:
+            asset_path = resolve_context_asset_path(context_root, asset)
+        except BuildContextError as exc:
+            raise PackIntegrityError(str(exc)) from exc
+        if not asset_path.exists():
+            raise PackIntegrityError(f"Declared pack asset not found: {asset_path}")
+        if asset_path.is_file():
+            resolved = asset_path.resolve()
+            if resolved not in seen:
+                files.append(asset_path)
+                seen.add(resolved)
+            continue
+        if not asset_path.is_dir():
+            raise PackIntegrityError(f"Declared pack asset must be a file or directory: {asset_path}")
+        for path in sorted(item for item in asset_path.rglob("*") if item.is_file()):
+            relative = path.relative_to(asset_path)
+            if any(part == "__pycache__" or part.startswith(".") for part in relative.parts):
+                continue
+            if path.suffix in {".pyc", ".pyo"}:
+                continue
+            resolved = path.resolve()
+            if resolved not in seen:
+                files.append(path)
+                seen.add(resolved)
+    return files
+
+
+def compute_pack_digest(pack_source_path: Path, pack_id: str) -> str:
+    """Return the canonical SHA-256 digest for declared pack-owned content."""
+
+    context_root = pack_source_path.resolve()
+    context = _read_pack_context(context_root, pack_id)
+    entries: list[dict[str, str]] = []
+    for path in _safe_asset_files(context_root, context):
+        try:
+            relative = path.resolve().relative_to(context_root).as_posix()
+        except ValueError as exc:
+            raise PackIntegrityError(f"Pack digest path escapes context root: {path}") from exc
+        entries.append({
+            "path": relative,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+    payload = {
+        "schema_version": "mozaiks.pack_digest.v1",
+        "pack_id": pack_id,
+        "files": sorted(entries, key=lambda item: item["path"]),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+
+
+def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, Any]) -> None:
+    schema_version = str(contract.get("schema_version") or "").strip()
+    contract_type = str(contract.get("contract_type") or "").strip()
+    if schema_version == "mozaiks.provider_api_contract.v1":
+        allowed_provider_root = {
+            "schema_version",
+            "contract_id",
+            "description",
+            "auth",
+            "endpoints",
+            "error_handling",
+            "drift_guard",
+        }
+        unknown_provider = sorted(set(contract) - allowed_provider_root)
+        if unknown_provider:
+            raise PackIntegrityError(
+                f"{pack_source_path / 'provider_api_contract.yaml'} has unsupported fields: {unknown_provider}"
+            )
+        if not isinstance(contract.get("endpoints"), list):
+            raise PackIntegrityError("provider_api_contract.yaml endpoints must be a list")
+        return
+
+    if contract_type != "build_pack_instructions":
+        raise PackIntegrityError(
+            f"{pack_source_path / 'contract.yaml'} contract_type must be build_pack_instructions"
+        )
+
+    allowed_root = {
+        "contract_id",
+        "contract_type",
+        "requires",
+        "cross_pack_integrations",
+        "selection_rules",
+        "recommended_domains",
+        "required_integrations",
+        "required_outputs",
+        "forbidden_outputs",
+        "runtime_boundaries",
+        "facades",
+        "provides_capabilities",
+        "inactive_surfaces",
+        "managed_assignment_writer_contract",
+        "provider_api_response_contract",
+        "provider_lifecycle_boundary",
+    }
+    unknown = sorted(set(contract) - allowed_root)
+    if unknown:
+        raise PackIntegrityError(f"{pack_source_path / 'contract.yaml'} has unsupported fields: {unknown}")
+
+    requires = contract.get("requires")
+    if requires is not None:
+        if not isinstance(requires, dict):
+            raise PackIntegrityError("contract.yaml requires must be a mapping")
+        unknown_requires = sorted(set(requires) - {"packs", "capabilities"})
+        if unknown_requires:
+            raise PackIntegrityError(f"contract.yaml requires has unsupported fields: {unknown_requires}")
+        packs = requires.get("packs")
+        if packs is not None:
+            if not isinstance(packs, list):
+                raise PackIntegrityError("contract.yaml requires.packs must be a list")
+            for index, item in enumerate(packs):
+                if isinstance(item, str):
+                    continue
+                if not isinstance(item, dict):
+                    raise PackIntegrityError(f"contract.yaml requires.packs[{index}] must be a string or mapping")
+                unknown = sorted(set(item) - {"pack_id", "version", "reason"})
+                if unknown:
+                    raise PackIntegrityError(
+                        f"contract.yaml requires.packs[{index}] has unsupported fields: {unknown}"
+                    )
+                if not str(item.get("pack_id") or "").strip():
+                    raise PackIntegrityError(f"contract.yaml requires.packs[{index}].pack_id is required")
+        capabilities = requires.get("capabilities")
+        if capabilities is not None:
+            if not isinstance(capabilities, list):
+                raise PackIntegrityError("contract.yaml requires.capabilities must be a list")
+            for index, item in enumerate(capabilities):
+                if isinstance(item, str):
+                    continue
+                if not isinstance(item, dict):
+                    raise PackIntegrityError(
+                        f"contract.yaml requires.capabilities[{index}] must be a string or mapping"
+                    )
+                unknown = sorted(set(item) - {"capability_id", "reason"})
+                if unknown:
+                    raise PackIntegrityError(
+                        f"contract.yaml requires.capabilities[{index}] has unsupported fields: {unknown}"
+                    )
+                if not str(item.get("capability_id") or "").strip():
+                    raise PackIntegrityError(
+                        f"contract.yaml requires.capabilities[{index}].capability_id is required"
+                    )
+
+    for field in ("selection_rules", "recommended_domains", "required_outputs", "forbidden_outputs", "runtime_boundaries", "facades", "provides_capabilities"):
+        value = contract.get(field)
+        if value is not None and not isinstance(value, list):
+            raise PackIntegrityError(f"contract.yaml {field} must be a list")
+
+
+def verify_pack_integrity(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
+    """Verify a local pack before materialization and return canonical metadata."""
+
+    if not _is_safe_identifier(pack_id):
+        raise PackIntegrityError(
+            f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
+        )
+    context_root = pack_source_path.resolve()
+    context = _read_pack_context(context_root, pack_id)
+    pack_block = context.get("pack") if isinstance(context.get("pack"), dict) else {}
+    if not isinstance(pack_block, dict):
+        raise PackIntegrityError(f"Pack '{pack_id}' must declare a pack block before materialization")
+    version = str(pack_block.get("version") or "").strip()
+    if not version:
+        raise PackIntegrityError(f"Pack '{pack_id}' must declare pack.version before materialization")
+    _safe_asset_files(context_root, context)
+    for asset in iter_context_assets(context, kind="catalog"):
+        path = resolve_context_asset_path(context_root, asset)
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            raise PackIntegrityError(f"Catalog asset must be a YAML mapping: {path}")
+    for asset in iter_context_assets(context, kind="contract"):
+        path = resolve_context_asset_path(context_root, asset)
+        contract_data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(contract_data, dict):
+            raise PackIntegrityError(f"Contract asset must be a YAML mapping: {path}")
+        _validate_pack_contract_schema(context_root, contract_data)
+    return {
+        "pack_id": pack_id,
+        "version": version,
+        "source": _normalized_source(pack_block, context),
+        "digest": compute_pack_digest(context_root, pack_id),
+    }
 
 
 def _file_owner_map(pack_source_path: Path) -> dict[str, str]:
@@ -233,12 +473,12 @@ def _file_owner_map(pack_source_path: Path) -> dict[str, str]:
 
 
 def _build_provenance_manifest(
-    pack_file_map: list[tuple[str, str, list[dict[str, str]]]],
+    pack_file_map: list[tuple[dict[str, Any], list[dict[str, str]]]],
 ) -> str:
     """Build a provenance manifest JSON string.
 
     Args:
-        pack_file_map: List of (pack_id, pack_version, [file_entries]) tuples.
+        pack_file_map: List of (pack_metadata, [file_entries]) tuples.
 
     Returns:
         JSON string for ``.mozaiks/pack_provenance.json``.
@@ -249,11 +489,13 @@ def _build_provenance_manifest(
         framework_version = "unknown"
 
     packs_list = []
-    for pack_id, pack_version, file_entries in pack_file_map:
+    for metadata, file_entries in pack_file_map:
         packs_list.append({
-            "pack_id": pack_id,
-            "pack_version": pack_version or "",
-            "files": file_entries,
+            "pack_id": metadata["pack_id"],
+            "version": metadata["version"],
+            "source": metadata["source"],
+            "digest": metadata["digest"],
+            "materialized_owned_files": file_entries,
         })
 
     manifest = {
@@ -426,8 +668,8 @@ def resolve_managed_capability_templates(
 
     # --- Step 2: render templates, tracking per-pack output for provenance ---
     results_by_filename: dict[str, str] = {}
-    # (pack_id, pack_version, owner_map, [produced filenames])
-    provenance_entries: list[tuple[str, str, dict[str, str], list[str]]] = []
+    # (metadata, owner_map, [produced filenames])
+    provenance_entries: list[tuple[dict[str, Any], dict[str, str], list[str]]] = []
 
     for pack in capability_packs:
         if not isinstance(pack, dict):
@@ -442,10 +684,7 @@ def resolve_managed_capability_templates(
                 f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
             )
         pack_source_path = Path(raw_path)
-        # Read pack version from context.yaml pack block (optional field)
-        context_data = _read_pack_context(pack_source_path.resolve(), pack_id)
-        pack_block = context_data.get("pack") or {}
-        pack_version = str(pack_block.get("version") or "").strip()
+        metadata = verify_pack_integrity(pack_source_path, pack_id)
 
         # Ownership map: output_path → owner (from contract.yaml required_outputs)
         owner_map = _file_owner_map(pack_source_path)
@@ -467,20 +706,19 @@ def resolve_managed_capability_templates(
             pack_files.append(filename)
 
         if pack_files:
-            provenance_entries.append((pack_id, pack_version, owner_map, pack_files))
+            provenance_entries.append((metadata, owner_map, pack_files))
 
     # --- Step 3: emit provenance manifest ---
     if provenance_entries:
         pack_file_map = [
             (
-                pid,
-                pver,
+                metadata,
                 [
                     {"path": f, "owner": omap.get(f, "templates")}
                     for f in sorted(files)
                 ],
             )
-            for pid, pver, omap, files in provenance_entries
+            for metadata, omap, files in provenance_entries
         ]
         provenance_json = _build_provenance_manifest(pack_file_map)
         existing_prov = results_by_filename.get(_PROVENANCE_PATH)
@@ -494,8 +732,11 @@ def resolve_managed_capability_templates(
 
 
 __all__ = [
+    "compute_pack_digest",
     "ManagedCapabilityTemplateError",
     "PackDependencyError",
+    "PackIntegrityError",
     "resolve_managed_capability_templates",
     "resolve_templates_for_pack",
+    "verify_pack_integrity",
 ]

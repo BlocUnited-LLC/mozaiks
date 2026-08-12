@@ -74,7 +74,12 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
             {
                 "context_id": "wallet",
                 "assets": [{"path": "templates/", "kind": "templates"}],
-                "pack": {"id": "wallet", "status": "active", "capability_source": "managed_capability"},
+                "pack": {
+                    "id": "wallet",
+                    "version": "0.1.0",
+                    "status": "active",
+                    "capability_source": "managed_capability",
+                },
             },
             sort_keys=False,
         ),
