@@ -50,6 +50,9 @@ The current OSS implementation already has these canonical paths:
 - strict structured output contracts;
 - App Intelligence for one-app source and context understanding;
 - build-context packs for deterministic build-time context;
+- module event/reaction contracts as the canonical generated-app loose-coupling
+  mechanism;
+- capability packs as the current reusable generation-time unit;
 - refinement harness and control-plane routing;
 - deterministic `AppBuildPlan` materialization;
 - functional generated-app acceptance.
@@ -217,6 +220,151 @@ AG2 Evaluation may later help score traces, compare strategies, or capture
 execution evidence. It must not replace deterministic acceptance gates for
 canonical application correctness.
 
+## Event-Driven Composition
+
+Mozaiks applications have two complementary composition surfaces:
+
+- modules and actions are synchronous public capability surfaces;
+- events and reactions are the canonical loose-coupling mechanism between
+  generated app modules, workflows, notifications, and app-owned adapters.
+
+The generated app contract is:
+
+```text
+module action
+  -> handler/service
+  -> ctx.emit(event_type, payload)
+  -> canonical event envelope
+  -> ModuleEventRouter
+  -> reaction target
+```
+
+`module.yaml.actions[].emits` declares which facts an action may publish.
+`contracts/events.yaml` defines the module-owned event contracts.
+`contracts/reactions.yaml` defines how a module reacts to events.
+`contracts/notifications.yaml` defines notification records derived from
+events. Generated customer apps, the first-party Studio app bundle, and hosted
+product workspaces all use the same contract shape.
+
+Reaction targets have specific ownership boundaries:
+
+| Target | Rule |
+| --- | --- |
+| `handler` | Invoke a method on the reacting module's handler. This is for deterministic module-owned reaction behavior. |
+| `capability` | Invoke a declared capability. Workflow execution connects through this target; reactions route to capability ids, not raw workflow names. |
+| `notification` | Create a notification from the module's notification contract. |
+| `service_adapter` | Call an app-owned service adapter for provider or integration mechanics. It remains an implementation hook, not a durable app-fact authority. |
+
+Events transport facts. They do not grant authority by themselves. Public
+authority remains in module permissions, auth, entitlement gates, provider
+verification, production-authority checks, and trusted runtime boundaries.
+Event payload claims must not authorize provider mutation or durable state
+changes unless the receiving module/adapter verifies the source and applies its
+own authority rules.
+
+The current implementation enforces important pieces:
+
+- event namespace prefixes are validated;
+- `module.yaml.actions[].emits` must reference declared events;
+- reaction targets must use canonical target kinds and required fields;
+- notification reactions must reference declared notification ids;
+- generated-app validation checks event, reaction, workflow, capability, and
+  handler wiring;
+- runtime platform startup wires `ModuleExecutor`, `UnifiedEventDispatcher`,
+  and `ModuleEventRouter` for loaded app modules.
+
+Current gaps are intentionally recorded rather than hidden:
+
+| Gap | Current Status |
+| --- | --- |
+| Runtime event payload-schema enforcement | Event `payload_schema` is declared and validated as metadata, but runtime emit-time JSON Schema enforcement is not yet a hard guarantee. |
+| Reaction idempotency | `idempotency_key` is part of the reaction contract, but the router does not yet enforce idempotency. |
+| Reaction permissions | Reaction `permissions` are declared/provenanced, but reaction dispatch does not re-enter public module permission checks. |
+| Cycle detection | No hard deterministic reaction-cycle detector is currently part of runtime validation. |
+| Persistent `EventBus` bridging | `NoOpEventBus`, `MongoEventBus`, and `RedisEventBus` exist as ports/adapters, but the canonical in-process module reaction path is `UnifiedEventDispatcher` plus `ModuleEventRouter`; cross-instance bridging is not yet the proven core path. |
+
+These gaps are pre-1.0 hardening items. They are not a reason to introduce a
+parallel event system.
+
+## Modular Composition
+
+`CapabilityPack` is the existing reusable generation-time unit. It is already
+how Mozaiks collects reusable build context, contracts, templates, facades,
+provider boundaries, and generated app artifacts.
+
+Mozaiks should not introduce a parallel `Component` framework. A future
+community component model should evolve capability packs by adding the missing
+distribution semantics:
+
+- identity and version provenance;
+- dependency declarations;
+- trust and integrity metadata;
+- installability into local/self-hosted workspaces;
+- upgradeability and migration semantics;
+- validation against canonical app, module, page, workflow, service, event, and
+  capability contracts.
+
+The component model should preserve current materialization architecture:
+
+```text
+discover
+  -> select
+  -> compose
+  -> adapt
+  -> generate only missing pieces
+```
+
+The long-term Factory direction is reuse-first, not regeneration-first. The
+Factory should increasingly discover existing packs/components, select the best
+fit, compose them through canonical contracts, adapt only where the app plan
+requires variation, and generate new code only for missing surfaces. This is a
+directional rule, not a quantitative implementation target.
+
+## UI Portability Model
+
+Generated and reusable UI has three portability levels:
+
+| Level | Meaning | Reuse Rule |
+| --- | --- | --- |
+| `SCHEMA_NATIVE` | Declarative page schemas rendered by canonical primitives such as `SchemaPage`. | Preferred for reusable community UI and generated app surfaces. |
+| `SEMANTIC_TOKEN_REACT` | React components that use Mozaiks primitives, semantic tokens, and stable shell/runtime contracts. | Portable when the target app supports the same primitive and token contract. |
+| `ARBITRARY_CUSTOM_REACT` | App-specific React escape hatch for experiences that cannot be represented declaratively. | Supported, but not the preferred reusable component format. |
+
+Schema-native UI is inherently portable because it composes through canonical
+page primitives and declarative backend/module bindings. Semantic-token React
+can be portable when it avoids app-specific imports, hardcoded styling, and
+private runtime assumptions. Arbitrary custom React remains supported for
+product-specific experiences and workflow-local UI, but it should not become
+the default community component surface.
+
+## Community and Hosted Boundary
+
+Mozaiks OSS should own the public mechanics needed for a community component
+ecosystem:
+
+- component and capability-pack contracts;
+- local and self-hosted installation semantics;
+- deterministic validation and functional acceptance;
+- provenance metadata;
+- dependency semantics;
+- trust and integrity primitives;
+- generated app contract compatibility.
+
+App Zero and other hosted products may privately own hosted/operator layers:
+
+- hosted discovery;
+- ranking and recommendations;
+- reputation signals;
+- commercial marketplace operations;
+- private quality intelligence;
+- production outcomes;
+- private correction and eval corpora.
+
+Hosted intelligence may choose or prioritize public components, but it must not
+silently change canonical contracts. The same component installed locally,
+self-hosted, or through a hosted product must resolve to the same Mozaiks app
+contracts before runtime.
+
 ## Extension Rule
 
 Before adding any new framework abstraction:
@@ -240,6 +388,8 @@ Disallowed seams include:
 - vendor-neutral agent wrappers with no semantic value;
 - alternate workflow runners;
 - alternate module dispatch paths;
+- a second event/reaction framework;
+- a parallel component framework beside capability packs;
 - parallel knowledge frameworks for workflow memory;
 - parallel evaluation frameworks that duplicate deterministic acceptance;
 - speculative MCP or A2A layers with no concrete app requirement.
@@ -263,6 +413,14 @@ compose different intelligence without forking canonical app behavior:
 Private products should use those seams. They should not duplicate Factory,
 runtime, AppLoader, module dispatch, or generated-app acceptance behavior.
 
+`build_context` remains the reasoning and materialization projection layer. It
+is where public OSS packs, operator-provided context, and private product
+strategy can be projected into AG2 workflows and deterministic materializers.
+Private App Zero strategy may influence which public components are visible,
+ranked, selected, or adapted through these seams. It must not mutate the
+canonical app contract silently or create a second product-only materialization
+path.
+
 ## Pre-1.0 Consolidation Items
 
 These are documentation-level consolidation targets. They are not implemented
@@ -284,6 +442,8 @@ This north star does not call for:
 - a vendor-neutral agent runtime wrapper;
 - a second workflow runner;
 - a second module dispatch path;
+- a second event/reaction framework;
+- a parallel component framework beside capability packs;
 - a Mozaiks workflow-memory database parallel to AG2 KnowledgeStore;
 - a model-scored substitute for deterministic app validation;
 - AG2 Harness adoption without concrete consolidation evidence;
@@ -299,6 +459,10 @@ Mozaiks OSS is on track when:
 - a captured canonical plan can materialize deterministically into a runnable app;
 - generated apps pass representative Level 2 functional runtime acceptance;
 - brownfield and AgentGenerator handoffs preserve upstream structured intent;
+- generated modules compose through declared events and reactions rather than
+  hidden imports or bespoke dispatch;
+- reusable capability packs can evolve into installable community components
+  without replacing the materializer;
 - App Zero can consume OSS public seams without framework forks;
 - private operator intelligence can improve strategy without changing canonical
   app contracts;
