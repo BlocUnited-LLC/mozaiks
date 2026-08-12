@@ -34,6 +34,9 @@ from mozaiksai.core.runtime.composition.module_event_provenance import (
     normalize_module_reaction_provenance,
 )
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
+    ReactionIdempotencyStore,
+)
 from mozaiksai.core.runtime.composition.schema_validation import (
     SchemaValidationDiagnostic,
     validate_json_schema,
@@ -116,10 +119,12 @@ class ModuleEventRouter:
         event_emitter: EventEmitter | None = None,
         notification_store: NotificationStore | None = None,
         capability_invoker: CapabilityInvoker | None = None,
+        idempotency_store: ReactionIdempotencyStore | None = None,
     ) -> None:
         self._event_emitter = event_emitter
         self._notification_store = notification_store
         self._capability_invoker = capability_invoker
+        self._idempotency_store = idempotency_store
         self._reactions_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_key: dict[tuple[str, str], dict] = {}
@@ -192,7 +197,11 @@ class ModuleEventRouter:
                 )
                 continue
             idempotency_key = self._idempotency_key(reaction, event_type, envelope, event_provenance)
+            # durable_key_str is set when the durable store is active and the
+            # slot was successfully claimed; used to mark complete/fail after dispatch.
+            durable_key_str: str | None = None
             if idempotency_key is not None:
+                # Fast path: in-memory check (same process, established by PR #256).
                 if idempotency_key in self._processed_reaction_keys:
                     await self._emit_reaction_audit(
                         build_module_reaction_audit(
@@ -203,6 +212,26 @@ class ModuleEventRouter:
                         )
                     )
                     continue
+                # Durable path: restart-safe check via persistent ledger.
+                if self._idempotency_store is not None:
+                    durable_key_str = "|".join(idempotency_key)
+                    claimed = await self._idempotency_store.claim(
+                        app_id=event_provenance.app_id or "",
+                        tenant_id=event_provenance.tenant_id,
+                        workspace_id=event_provenance.workspace_id,
+                        idempotency_key_str=durable_key_str,
+                    )
+                    if not claimed:
+                        durable_key_str = None  # not our claim; do not mark complete/fail
+                        await self._emit_reaction_audit(
+                            build_module_reaction_audit(
+                                event=event_provenance,
+                                reaction=reaction_provenance,
+                                outcome="skipped",
+                                reason="idempotent reaction suppressed by durable ledger",
+                            )
+                        )
+                        continue
                 self._processed_reaction_keys.add(idempotency_key)
             target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
             target_kind = str(target.get("kind") or "").strip()
@@ -234,6 +263,7 @@ class ModuleEventRouter:
                             outcome="ok",
                         )
                     )
+                    await self._durable_complete(durable_key_str, event_provenance)
                 else:
                     await self._emit_reaction_audit(
                         build_module_reaction_audit(
@@ -260,6 +290,10 @@ class ModuleEventRouter:
                         reason=reason,
                     )
                 )
+                if outcome == "ok":
+                    await self._durable_complete(durable_key_str, event_provenance)
+                else:
+                    await self._durable_mark_failed(durable_key_str, event_provenance)
             elif target_kind == "service_adapter":
                 adapter_result = await self._dispatch_service_adapter(
                     reaction,
@@ -287,6 +321,10 @@ class ModuleEventRouter:
                         ),
                     )
                 )
+                if adapter_failed:
+                    await self._durable_mark_failed(durable_key_str, event_provenance)
+                else:
+                    await self._durable_complete(durable_key_str, event_provenance)
             elif target_kind:
                 await self._emit_platform_reaction(reaction, event_type, envelope)
                 await self._emit_reaction_audit(
@@ -296,6 +334,7 @@ class ModuleEventRouter:
                         outcome="ok",
                     )
                 )
+                await self._durable_complete(durable_key_str, event_provenance)
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
@@ -523,6 +562,52 @@ class ModuleEventRouter:
                 ).encode("utf-8")
             ).hexdigest()
         return (module_id, reaction_id, event_type, declared, event_identity)
+
+    async def _durable_complete(
+        self,
+        durable_key_str: str | None,
+        event_provenance: ModuleEventProvenance,
+    ) -> None:
+        """Mark the durable ledger slot as completed if active."""
+        if durable_key_str is None or self._idempotency_store is None:
+            return
+        try:
+            await self._idempotency_store.complete(
+                app_id=event_provenance.app_id or "",
+                tenant_id=event_provenance.tenant_id,
+                workspace_id=event_provenance.workspace_id,
+                idempotency_key_str=durable_key_str,
+            )
+        except Exception:
+            logger.warning(
+                "REACTION_IDEMPOTENCY_COMPLETE_FAILED: key=%s app=%s",
+                durable_key_str,
+                event_provenance.app_id,
+                exc_info=True,
+            )
+
+    async def _durable_mark_failed(
+        self,
+        durable_key_str: str | None,
+        event_provenance: ModuleEventProvenance,
+    ) -> None:
+        """Release the durable ledger slot on failure (retry-eligible)."""
+        if durable_key_str is None or self._idempotency_store is None:
+            return
+        try:
+            await self._idempotency_store.mark_failed(
+                app_id=event_provenance.app_id or "",
+                tenant_id=event_provenance.tenant_id,
+                workspace_id=event_provenance.workspace_id,
+                idempotency_key_str=durable_key_str,
+            )
+        except Exception:
+            logger.warning(
+                "REACTION_IDEMPOTENCY_FAIL_RELEASE_FAILED: key=%s app=%s",
+                durable_key_str,
+                event_provenance.app_id,
+                exc_info=True,
+            )
 
     def _handler_for(self, event_type: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
         async def handle(envelope: dict[str, Any]) -> None:
