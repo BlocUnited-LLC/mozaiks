@@ -404,6 +404,7 @@ def test_provenance_records_owner_from_contract_required_outputs() -> None:
     handler = file_by_path.get("modules/greetings/backend/handler.py")
     # The handler.py is listed as owner=workspace in the contract, but it is NOT
     # in the templates directory (workspace-owned files are not templated).
+    assert handler is None
     # module.yaml IS in templates — its owner should be "templates".
     module_yaml = file_by_path["modules/greetings/module.yaml"]
     assert module_yaml["owner"] == "templates"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -259,7 +259,7 @@ def _build_provenance_manifest(
     manifest = {
         "schema_version": _PROVENANCE_SCHEMA_VERSION,
         "framework_version": framework_version,
-        "generated_at": datetime.now(tz=timezone.utc).isoformat(),
+        "generated_at": datetime.now(tz=UTC).isoformat(),
         "packs": packs_list,
     }
     return json.dumps(manifest, indent=2)
