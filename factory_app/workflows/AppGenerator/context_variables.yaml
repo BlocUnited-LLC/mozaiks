@@ -1,4 +1,13 @@
 definitions:
+  build_timestamp:
+    type: string
+    description: >
+      Canonical timezone-aware ISO-8601 timestamp shared by every provenance
+      artifact in one deterministic app materialization. The launcher may seed
+      it for replay; otherwise provenance producers resolve current UTC.
+    source:
+      type: state
+      default: null
   platform_user_email:
     type: string
     description: >

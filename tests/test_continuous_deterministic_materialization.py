@@ -6,19 +6,34 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_declared_pack_output_paths,
+)
+from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.validation import GeneratedAppValidationRequest, validate_generated_app_bundle
 from tests.import_utils import import_module_directly
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"
 PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "operator_readiness"
-NONDETERMINISTIC_METADATA = frozenset({"provenance.yaml", ".mozaiks/pack_provenance.json"})
+BUILD_TIMESTAMP = "2026-08-13T20:00:00+00:00"
+LATER_BUILD_TIMESTAMP = "2026-08-13T21:00:00+00:00"
+PACK_OUTPUT_PATHS = frozenset(
+    {
+        "config/operator_readiness.yaml",
+        "docs/operations/operator-readiness.md",
+        "scripts/check_operator_readiness_local.ps1",
+    }
+)
 
 
 class _Context:
@@ -30,6 +45,38 @@ class _Context:
 
     def set(self, key: str, value: Any) -> None:
         self.data[key] = value
+
+
+class _FakeMongoAdmin:
+    async def command(self, *_args: Any, **_kwargs: Any) -> dict[str, int]:
+        return {"ok": 1}
+
+
+class _FakeMongoClient:
+    def __init__(self) -> None:
+        self.admin = _FakeMongoAdmin()
+
+    def __getitem__(self, _name: str) -> _FakeMongoClient:
+        return self
+
+    def __getattr__(self, _name: str) -> _FakeMongoClient:
+        return self
+
+    async def command(self, *_args: Any, **_kwargs: Any) -> dict[str, int]:
+        return {"ok": 1}
+
+    def close(self) -> None:
+        return None
+
+
+def _selected_packs() -> list[dict[str, str]]:
+    return [
+        {
+            "id": "operator_readiness",
+            "capability_source": "config_file",
+            "pack_source_path": str(PACK_ROOT),
+        }
+    ]
 
 
 def _load_models() -> dict[str, type]:
@@ -346,22 +393,21 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
     }
 
 
-async def _materialize(models: dict[str, type]) -> tuple[dict[str, str], _Context]:
+async def _materialize(
+    models: dict[str, type],
+    *,
+    build_timestamp: str = BUILD_TIMESTAMP,
+) -> tuple[dict[str, str], _Context]:
     typed_plan = models["AppBuildPlanOutput"].model_validate(_plan_payload())
     context = _Context(
         {
             "app_id": "deterministic-reports",
             "app_name": "Deterministic Reports",
             "app_slug": "deterministic-reports",
+            "build_timestamp": build_timestamp,
             "readiness_profile": "host_operator_platform",
             "evidence_mode": "local_no_spend",
-            "capability_packs": [
-                {
-                    "id": "operator_readiness",
-                    "capability_source": "config_file",
-                    "pack_source_path": str(PACK_ROOT),
-                }
-            ],
+            "capability_packs": _selected_packs(),
         }
     )
     plan = typed_plan.AppBuildPlan.model_dump(mode="json")
@@ -372,12 +418,11 @@ async def _materialize(models: dict[str, type]) -> tuple[dict[str, str], _Contex
     return files, context
 
 
-def _deterministic_files(files: dict[str, str]) -> dict[str, bytes]:
-    return {
-        path: content.encode("utf-8")
-        for path, content in files.items()
-        if path not in NONDETERMINISTIC_METADATA
-    }
+def _write_bundle(root: Path, files: dict[str, str]) -> None:
+    for relative_path, content in files.items():
+        path = root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
 
 def test_typed_plan_rejects_unknown_taxonomy() -> None:
@@ -419,11 +464,32 @@ async def test_materializer_rejects_path_traversal() -> None:
     assert files
 
 
+def test_operator_readiness_registers_only_declared_safe_pack_outputs() -> None:
+    assert resolve_declared_pack_output_paths(_selected_packs()) == PACK_OUTPUT_PATHS
+
+    base_files = {"app.json": "{}"}
+    for unsafe_path in (
+        "docs/operations/undeclared.md",
+        "config/operator_readiness.yml",
+        "/config/operator_readiness.yaml",
+        "../config/operator_readiness.yaml",
+    ):
+        errors = scan_generated_bundle(
+            {**base_files, unsafe_path: "unexpected"},
+            capability_packs=_selected_packs(),
+        )
+        assert errors, f"Pack path guard accepted undeclared or unsafe path: {unsafe_path}"
+
+
 @pytest.mark.asyncio
-async def test_typed_plan_materializes_through_jinja_and_passes_production_validation() -> None:
+async def test_typed_plan_materializes_validates_loads_and_serves_same_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     models = _load_models()
-    files_one, context_one = await _materialize(models)
-    files_two, _ = await _materialize(models)
+    files_one, context_one = await _materialize(models, build_timestamp=BUILD_TIMESTAMP)
+    files_two, _ = await _materialize(models, build_timestamp=BUILD_TIMESTAMP)
+    files_later, _ = await _materialize(models, build_timestamp=LATER_BUILD_TIMESTAMP)
 
     required = {
         "app.json",
@@ -443,24 +509,85 @@ async def test_typed_plan_materializes_through_jinja_and_passes_production_valid
     assert list(files_one) == sorted(files_one)
     assert "readiness_profile: host_operator_platform" in files_one["config/operator_readiness.yaml"]
     assert "{{ readiness_profile }}" not in files_one["config/operator_readiness.yaml"]
-    assert _deterministic_files(files_one) == _deterministic_files(files_two)
-    assert set(files_one) - set(_deterministic_files(files_one)) == NONDETERMINISTIC_METADATA
+    page = yaml.safe_load(files_one["ui/pages/reports.yaml"])
+    assert page["sections"][0]["primitive"] == "DataTable"
+    assert page["sections"][0]["config"]["api_endpoint"] == "/api/modules/reports/list_reports"
+    assert files_one == files_two
+
+    changed_paths = {
+        path
+        for path in files_one
+        if files_one[path] != files_later[path]
+    }
+    assert changed_paths == {"provenance.yaml", ".mozaiks/pack_provenance.json"}
+    app_provenance = yaml.safe_load(files_one["provenance.yaml"])
+    later_app_provenance = yaml.safe_load(files_later["provenance.yaml"])
+    assert app_provenance["created_with"].pop("timestamp") == BUILD_TIMESTAMP
+    assert later_app_provenance["created_with"].pop("timestamp") == LATER_BUILD_TIMESTAMP
+    assert app_provenance == later_app_provenance
+    pack_provenance = json.loads(files_one[".mozaiks/pack_provenance.json"])
+    later_pack_provenance = json.loads(files_later[".mozaiks/pack_provenance.json"])
+    assert pack_provenance.pop("generated_at") == BUILD_TIMESTAMP
+    assert later_pack_provenance.pop("generated_at") == LATER_BUILD_TIMESTAMP
+    assert pack_provenance == later_pack_provenance
 
     plan = context_one.get("app_build_plan")
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(
             files=files_one,
             build_tasks=plan["build_tasks"],
-            capability_packs=plan["capability_packs"],
+            capability_packs=_selected_packs(),
         )
     )
-    assert scan_generated_bundle(files_one) == []
+    assert scan_generated_bundle(files_one, capability_packs=_selected_packs()) == []
     assert validation.passed is True, validation.diagnostics
 
     acceptance = await run_app_bundle_acceptance_gate(
         files=files_one,
         context_variables=context_one,
-        capability_packs=plan["capability_packs"],
+        capability_packs=_selected_packs(),
     )
     assert acceptance["passed"] is True, acceptance
     assert context_one.get("generated_files") == files_one
+
+    app_root = tmp_path / "app"
+    _write_bundle(app_root, files_one)
+
+    loaded = await AppLoader.load(str(app_root))
+    assert loaded.definition.name == "Deterministic Reports"
+    assert [module.name for module in loaded.modules] == ["reports"]
+    assert [page.name for page in loaded.definition.pages] == ["reports"]
+
+    fake_mongo_client = _FakeMongoClient()
+    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    monkeypatch.setattr("mozaiksai.hosts.runtime.get_mongo_client", lambda: fake_mongo_client)
+    monkeypatch.setattr("mozaiksai.core.startup.validation.get_mongo_client", lambda: fake_mongo_client)
+    reset_auth_adapter()
+
+    from mozaiksai.hosts import platform
+
+    monkeypatch.setattr(platform.runtime_app, "mongo_client", fake_mongo_client)
+    with TestClient(platform.app, raise_server_exceptions=False) as client:
+        health = client.get("/health")
+        assert health.status_code == 200, health.text
+        assert health.json()["status"] == "ok"
+
+        page_response = client.get("/api/pages/reports")
+        assert page_response.status_code == 200, page_response.text
+        assert page_response.json()["sections"][0]["config"]["api_endpoint"] == (
+            "/api/modules/reports/list_reports"
+        )
+
+        action_response = client.post(
+            "/api/modules/reports/list_reports",
+            json={"params": {}},
+        )
+        assert action_response.status_code == 200, action_response.text
+        assert action_response.json() == {
+            "reports": [
+                {"id": "report-1", "title": "Readiness", "status": "ready"}
+            ]
+        }

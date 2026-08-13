@@ -27,6 +27,10 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
+    resolve_declared_pack_output_paths,
+)
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
     APP_DATA_CONTRACT_PATH,
@@ -34,6 +38,7 @@ from mozaiksai.core.runtime.app.paths import (
     disallowed_legacy_app_paths,
     noncanonical_app_config_paths,
     noncanonical_app_root_paths,
+    unsafe_app_paths,
 )
 
 # ---------------------------------------------------------------------------
@@ -352,9 +357,23 @@ def _scan_data_contract_module_alignment(files_map: dict[str, str]) -> list[str]
     return errors
 
 
-def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
+def _scan_canonical_app_paths(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> list[str]:
     errors: list[str] = []
+    unsafe_paths = unsafe_app_paths(files_map)
+    if unsafe_paths:
+        errors.append(
+            "Generated app bundle contains absolute or traversal paths outside the app root: "
+            f"{unsafe_paths}. Every generated path must be app-root-relative."
+        )
     normalized_paths = sorted(_normalized_files_map(files_map))
+    try:
+        declared_pack_paths = resolve_declared_pack_output_paths(capability_packs)
+    except ManagedCapabilityTemplateError as exc:
+        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
     legacy_paths = disallowed_legacy_app_paths(normalized_paths)
     if legacy_paths:
         errors.append(
@@ -363,7 +382,9 @@ def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
             f"and {APP_SECURITY_SECRETS_PATH}."
         )
 
-    invalid_config_paths = noncanonical_app_config_paths(normalized_paths)
+    invalid_config_paths = sorted(
+        set(noncanonical_app_config_paths(normalized_paths)) - declared_pack_paths
+    )
     if invalid_config_paths:
         errors.append(
             "Generated app bundle contains noncanonical app config files: "
@@ -374,7 +395,9 @@ def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
             "not belong under app/config/."
         )
 
-    invalid_root_paths = noncanonical_app_root_paths(normalized_paths)
+    invalid_root_paths = sorted(
+        set(noncanonical_app_root_paths(normalized_paths)) - declared_pack_paths
+    )
     if invalid_root_paths:
         errors.append(
             "Generated app bundle contains files outside the canonical app planes: "
@@ -1875,7 +1898,12 @@ def scan_generated_bundle(
       target-kind-specific required fields.
     """
     errors: list[str] = []
-    errors.extend(_scan_canonical_app_paths(files_map))
+    errors.extend(
+        _scan_canonical_app_paths(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
     errors.extend(_scan_security_secret_contract(files_map))
     errors.extend(_scan_pack_provenance_manifest(files_map))
     errors.extend(_scan_route_manifest_consistency(files_map))

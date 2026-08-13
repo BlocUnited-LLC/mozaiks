@@ -13,9 +13,6 @@ APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
 APP_PROVENANCE_PATH = "provenance.yaml"
-APP_OPERATOR_READINESS_CONFIG_PATH = "config/operator_readiness.yaml"
-APP_OPERATOR_READINESS_GUIDE_PATH = "docs/operations/operator-readiness.md"
-APP_OPERATOR_READINESS_SCRIPT_PATH = "scripts/check_operator_readiness_local.ps1"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
     {
@@ -25,7 +22,6 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         "config/integrations.json",
         "config/integrations.yaml",
         "config/integrations.yml",
-        APP_OPERATOR_READINESS_CONFIG_PATH,
         APP_REFINEMENT_POLICY_CONFIG_PATH,
         "config/shell.json",
         "config/subscriptions.yaml",
@@ -41,8 +37,6 @@ CANONICAL_APP_ROOT_FILES = frozenset(
         "__init__.py",
         "app.json",
         APP_PROVENANCE_PATH,
-        APP_OPERATOR_READINESS_GUIDE_PATH,
-        APP_OPERATOR_READINESS_SCRIPT_PATH,
         "deployment.manifest.json",
         "docker-compose.yml",
         "index.html",
@@ -103,6 +97,22 @@ def normalize_app_path(raw_path: object) -> str:
     while s.startswith("./") or s.startswith("../"):
         s = s[3:] if s.startswith("../") else s[2:]
     return s
+
+
+def is_safe_app_path(raw_path: object) -> bool:
+    """Return whether a raw path is relative and contained by the app root."""
+
+    path = str(raw_path or "").replace("\\", "/").strip()
+    if not path or path.startswith("/") or "://" in path:
+        return False
+    pure = PurePosixPath(path)
+    if pure.is_absolute() or any(part == ".." for part in pure.parts):
+        return False
+    return not (pure.parts and ":" in pure.parts[0])
+
+
+def unsafe_app_paths(paths: Iterable[object]) -> list[str]:
+    return sorted({str(path) for path in paths if not is_safe_app_path(path)})
 
 
 def is_data_migration_path(path: str) -> bool:
@@ -179,9 +189,6 @@ __all__ = [
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",
     "APP_AUTH_CONFIG_PATH",
-    "APP_OPERATOR_READINESS_CONFIG_PATH",
-    "APP_OPERATOR_READINESS_GUIDE_PATH",
-    "APP_OPERATOR_READINESS_SCRIPT_PATH",
     "APP_PROVENANCE_PATH",
     "APP_REFINEMENT_POLICY_CONFIG_PATH",
     "APP_SECURITY_SECRETS_PATH",
@@ -194,8 +201,10 @@ __all__ = [
     "is_canonical_app_config_path",
     "is_data_migration_path",
     "is_disallowed_legacy_app_path",
+    "is_safe_app_path",
     "is_sensitive_app_config_path",
     "noncanonical_app_config_paths",
     "noncanonical_app_root_paths",
     "normalize_app_path",
+    "unsafe_app_paths",
 ]

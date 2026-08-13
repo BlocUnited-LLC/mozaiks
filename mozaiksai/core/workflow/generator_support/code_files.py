@@ -69,7 +69,11 @@ def _page_file_stem(page: dict[str, Any]) -> str:
     return normalized or "page"
 
 
-def _materialize_app_schema_file_map(payload: dict[str, Any]) -> dict[str, str]:
+def _materialize_app_schema_file_map(
+    payload: dict[str, Any],
+    *,
+    build_timestamp: str | None = None,
+) -> dict[str, str]:
     manifest = payload.get("manifest")
     pages = payload.get("pages")
     if not isinstance(manifest, dict) or not isinstance(pages, list):
@@ -91,6 +95,7 @@ def _materialize_app_schema_file_map(payload: dict[str, Any]) -> dict[str, str]:
             app_kind="generated",
             created_mode="factory",
             workflow="AppGenerator",
+            timestamp=build_timestamp,
         )
     )
 
@@ -210,7 +215,11 @@ def _normalize_code_file_entries(raw_entries: Any) -> dict[str, str]:
     return file_map
 
 
-def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
+def extract_code_file_map_from_payload(
+    payload: Any,
+    *,
+    build_timestamp: str | None = None,
+) -> dict[str, str]:
     """Resolve deterministic code files from a structured agent payload.
 
     Handles the generic file lanes used across all generator workflows.
@@ -223,7 +232,12 @@ def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
         return {}
 
     file_map = _normalize_code_file_entries(payload.get("code_files"))
-    file_map.update(_materialize_app_schema_file_map(payload))
+    file_map.update(
+        _materialize_app_schema_file_map(
+            payload,
+            build_timestamp=build_timestamp,
+        )
+    )
     file_map.update(_materialize_module_contract_file_map(payload))
 
     raw_python_files = payload.get("python_files")
@@ -292,8 +306,15 @@ def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
     return file_map
 
 
-def extract_code_file_entries_from_payload(payload: Any) -> list[dict[str, str]]:
-    file_map = extract_code_file_map_from_payload(payload)
+def extract_code_file_entries_from_payload(
+    payload: Any,
+    *,
+    build_timestamp: str | None = None,
+) -> list[dict[str, str]]:
+    file_map = extract_code_file_map_from_payload(
+        payload,
+        build_timestamp=build_timestamp,
+    )
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
