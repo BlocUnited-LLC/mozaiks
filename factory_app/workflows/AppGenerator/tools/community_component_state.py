@@ -163,7 +163,10 @@ def load_installed_components(build_context_root: Path) -> dict[str, Any]:
     components = raw.get("components")
     if not isinstance(components, list):
         raise InstalledComponentStateError(f"{path} components must be an array")
-    return canonical_installed_state([item for item in components if isinstance(item, dict)])
+    for index, item in enumerate(components):
+        if not isinstance(item, dict):
+            raise InstalledComponentStateError(f"{path} components[{index}] must be an object")
+    return canonical_installed_state(components)
 
 
 def write_installed_components(build_context_root: Path, state: dict[str, Any]) -> Path:
