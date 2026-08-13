@@ -146,6 +146,8 @@ nav:
           - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
+          - Public Architecture & OSS Boundary: architecture/foundations/public-architecture-and-oss-boundary.md
+          - Framework & Operator Intelligence Boundary: architecture/foundations/framework-operator-intelligence-boundary.md
           - App Intelligence Plane: architecture/foundations/app-intelligence-plane.md
           - App Intelligence User Journey: architecture/foundations/app-intelligence-user-journey.md
           - Framework Detection: architecture/foundations/framework-detection.md
@@ -202,6 +204,7 @@ nav:
           - Session Router: architecture/workflows/session-router.md
           - Build Context Packs: architecture/workflows/build-context-packs.md
           - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
+          - Strategy Extension Contract: architecture/workflows/strategy-extension-contract.md
           - AG2 Integration:
               - AG2 Ownership Boundary: architecture/workflows/ag2-ownership-boundary.md
               - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
