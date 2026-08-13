@@ -1290,3 +1290,431 @@ def test_scan_route_manifest_component_files_rejects_multiple_missing_jsx() -> N
     assert not any("AlphaPage" in e and "404" in e for e in errors)
     # BetaPage missing → error.
     assert any("BetaPage" in e and "404 at runtime" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Page_type taxonomy (_scan_page_schema_structure — page_type branch)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_page_schema_structure_rejects_unknown_page_type() -> None:
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/dashboard.yaml": """
+name: Dashboard
+route: /dashboard
+page_type: magic_dashboard
+sections:
+  - id: header
+    primitive: PageHeader
+""",
+        }
+    )
+
+    assert any("page_type 'magic_dashboard' is not a canonical page type" in e for e in errors)
+
+
+def test_scan_page_schema_structure_accepts_canonical_page_types() -> None:
+    # Spot-check several canonical page_type values.
+    for page_type in ("record_list", "analytics_dashboard", "activity_feed", "settings"):
+        errors = scan_generated_bundle(
+            {
+                f"ui/pages/{page_type}.yaml": f"""
+name: Page
+route: /{page_type}
+page_type: {page_type}
+sections:
+  - id: s1
+    primitive: DataTable
+""",
+            }
+        )
+        assert not any("page_type" in e and "canonical" in e for e in errors), (
+            f"page_type='{page_type}' should be accepted but got: {errors}"
+        )
+
+
+def test_scan_page_schema_structure_accepts_missing_page_type() -> None:
+    # page_type is optional — absence must not be an error.
+    errors = scan_generated_bundle(
+        {
+            "ui/pages/orders.yaml": """
+name: Orders
+route: /orders
+sections:
+  - id: table
+    primitive: DataTable
+""",
+        }
+    )
+
+    assert not any("page_type" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Action api_surface taxonomy (_scan_action_api_surface)
+# ---------------------------------------------------------------------------
+
+
+def _module_yaml_with_api_surface(module_id: str, action_id: str, api_surface: str | None) -> str:
+    surface_line = f"\n    api_surface: {api_surface}" if api_surface is not None else ""
+    return f"""schema_version: mozaiks.module.v1
+module:
+  id: {module_id}
+  handler: backend.handler:Handler
+actions:
+  - id: {action_id}
+    handler_method: {action_id}{surface_line}
+"""
+
+
+def test_scan_action_api_surface_rejects_unknown_value() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _module_yaml_with_api_surface(
+                "orders", "list_orders", "external"
+            ),
+            "modules/orders/backend/handler.py": "class Handler: pass\n",
+        }
+    )
+
+    assert any("api_surface 'external' is not a canonical value" in e for e in errors)
+
+
+def test_scan_action_api_surface_accepts_all_canonical_values() -> None:
+    for surface in ("public", "public_readonly", "internal", "admin_internal"):
+        errors = scan_generated_bundle(
+            {
+                "modules/orders/module.yaml": _module_yaml_with_api_surface(
+                    "orders", "list_orders", surface
+                ),
+                "modules/orders/backend/handler.py": "class Handler: pass\n",
+            }
+        )
+        assert not any("api_surface" in e and "canonical" in e for e in errors), (
+            f"api_surface='{surface}' should be accepted but got: {errors}"
+        )
+
+
+def test_scan_action_api_surface_accepts_null_and_absent() -> None:
+    # Absent api_surface → no error.
+    errors_absent = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _module_yaml_with_api_surface("orders", "op", None),
+            "modules/orders/backend/handler.py": "class Handler: pass\n",
+        }
+    )
+    assert not any("api_surface" in e for e in errors_absent)
+
+
+# ---------------------------------------------------------------------------
+# Event/reaction closure (_scan_event_reaction_closure)
+# ---------------------------------------------------------------------------
+
+
+def _events_yaml(module_id: str, *event_types: str) -> str:
+    events_block = "\n".join(
+        f"  - type: {et}\n    version: 1\n    description: test\n    producer: {module_id}"
+        for et in event_types
+    )
+    return f"schema_version: mozaiks.events.v1\nevents:\n{events_block}\n"
+
+
+def _reactions_yaml(reactions: list[dict]) -> str:
+    lines = ["schema_version: mozaiks.reactions.v1", "reactions:"]
+    for r in reactions:
+        lines.append(f"  - id: {r['id']}")
+        lines.append(f"    event_type: {r['event_type']}")
+        lines.append("    target:")
+        lines.append(f"      kind: {r['target']['kind']}")
+        for k, v in r["target"].items():
+            if k != "kind":
+                lines.append(f"      {k}: {v}")
+    return "\n".join(lines) + "\n"
+
+
+def test_scan_event_reaction_closure_accepts_valid_bundle() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "create_order"),
+            "modules/orders/contracts/events.yaml": _events_yaml(
+                "orders", "domain.orders.order_created"
+            ),
+            "modules/orders/contracts/reactions.yaml": _reactions_yaml(
+                [
+                    {
+                        "id": "on_order_created",
+                        "event_type": "domain.orders.order_created",
+                        "target": {"kind": "handler", "handler_method": "handle_order_created"},
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert not any("reaction" in e.lower() for e in errors)
+
+
+def test_scan_event_reaction_closure_rejects_undeclared_event_type() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "create_order"),
+            "modules/orders/contracts/events.yaml": _events_yaml(
+                "orders", "domain.orders.order_created"
+            ),
+            "modules/orders/contracts/reactions.yaml": _reactions_yaml(
+                [
+                    {
+                        "id": "on_ghost_event",
+                        "event_type": "domain.orders.ghost_event",
+                        "target": {"kind": "handler", "handler_method": "handle_ghost"},
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert any("ghost_event" in e and "not declared" in e for e in errors)
+
+
+def test_scan_event_reaction_closure_passes_platform_namespace_events() -> None:
+    # hosted.* events are platform-provided — not in bundle events.yaml.
+    errors = scan_generated_bundle(
+        {
+            "modules/billing/module.yaml": _simple_module_yaml("billing", "refresh_status"),
+            "modules/billing/contracts/reactions.yaml": _reactions_yaml(
+                [
+                    {
+                        "id": "on_subscription_activated",
+                        "event_type": "hosted.billing.subscription.activated",
+                        "target": {"kind": "handler", "handler_method": "on_activated"},
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert not any("not declared" in e for e in errors)
+
+
+def test_scan_event_reaction_closure_rejects_unknown_target_kind() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "create_order"),
+            "modules/orders/contracts/events.yaml": _events_yaml(
+                "orders", "domain.orders.order_created"
+            ),
+            "modules/orders/contracts/reactions.yaml": _reactions_yaml(
+                [
+                    {
+                        "id": "on_order_created",
+                        "event_type": "domain.orders.order_created",
+                        "target": {"kind": "webhook"},
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert any("target.kind 'webhook' is not canonical" in e for e in errors)
+
+
+def test_scan_event_reaction_closure_rejects_handler_without_method() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "create_order"),
+            "modules/orders/contracts/events.yaml": _events_yaml(
+                "orders", "domain.orders.order_created"
+            ),
+        }
+    )
+    # Build a reactions.yaml with handler kind but no handler_method via raw YAML.
+    bundle = {
+        "modules/orders/module.yaml": _simple_module_yaml("orders", "create_order"),
+        "modules/orders/contracts/events.yaml": _events_yaml(
+            "orders", "domain.orders.order_created"
+        ),
+        "modules/orders/contracts/reactions.yaml": (
+            "schema_version: mozaiks.reactions.v1\n"
+            "reactions:\n"
+            "  - id: missing_method\n"
+            "    event_type: domain.orders.order_created\n"
+            "    target:\n"
+            "      kind: handler\n"
+        ),
+    }
+    errors = scan_generated_bundle(bundle)
+
+    assert any("handler_method" in e for e in errors)
+
+
+def test_scan_event_reaction_closure_accepts_capability_reaction() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/commerce/module.yaml": _simple_module_yaml("commerce", "request_checkout"),
+            "modules/commerce/contracts/events.yaml": _events_yaml(
+                "commerce", "domain.commerce.checkout.requested"
+            ),
+            "modules/commerce/contracts/reactions.yaml": _reactions_yaml(
+                [
+                    {
+                        "id": "checkout_payment_bridge",
+                        "event_type": "domain.commerce.checkout.requested",
+                        "target": {
+                            "kind": "capability",
+                            "capability_id": "mozaikspay.checkout.create_session",
+                        },
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert not any("reaction" in e.lower() for e in errors)
+
+
+def test_scan_event_reaction_closure_accepts_notification_reaction() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/commerce/module.yaml": _simple_module_yaml("commerce", "pay_order"),
+            "modules/commerce/contracts/events.yaml": _events_yaml(
+                "commerce", "domain.commerce.order.paid"
+            ),
+            "modules/commerce/contracts/reactions.yaml": _reactions_yaml(
+                [
+                    {
+                        "id": "order_receipt",
+                        "event_type": "domain.commerce.order.paid",
+                        "target": {
+                            "kind": "notification",
+                            "notification_id": "commerce_order_receipt",
+                        },
+                    }
+                ]
+            ),
+        }
+    )
+
+    assert not any("reaction" in e.lower() for e in errors)
+
+
+def test_scan_event_reaction_closure_passes_when_no_reactions_present() -> None:
+    # Bundle with no reactions.yaml at all — check must not fire.
+    errors = scan_generated_bundle(
+        {
+            "modules/orders/module.yaml": _simple_module_yaml("orders", "list_orders"),
+            "modules/orders/contracts/events.yaml": _events_yaml(
+                "orders", "domain.orders.order_created"
+            ),
+        }
+    )
+
+    assert not any("reaction" in e.lower() for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Mutation tests — each breaks one reference and verifies early detection
+# ---------------------------------------------------------------------------
+
+
+def _full_crud_bundle() -> dict[str, str]:
+    """A representative CRUD bundle with module, events, and reactions wired."""
+    return {
+        "app.json": '{"name":"Orders"}',
+        "modules/orders/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: orders
+  handler: backend.handler:OrdersHandler
+actions:
+  - id: list_orders
+    handler_method: list_orders
+    api_surface: public_readonly
+  - id: create_order
+    handler_method: create_order
+    emits:
+      - domain.orders.order_created
+""",
+        "modules/orders/backend/handler.py": "class OrdersHandler: pass\n",
+        "modules/orders/contracts/events.yaml": """
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.orders.order_created
+    version: 1
+    description: Emitted after an order is created.
+    producer: orders
+    payload_schema:
+      type: object
+      properties:
+        order_id: {type: string}
+""",
+        "modules/orders/contracts/reactions.yaml": """
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: on_order_created_notify
+    event_type: domain.orders.order_created
+    target:
+      kind: notification
+      notification_id: order_receipt
+""",
+        "ui/pages/orders.yaml": """
+name: Orders
+route: /orders
+page_type: record_list
+sections:
+  - id: orders-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/orders/list_orders
+""",
+    }
+
+
+def test_full_crud_bundle_passes_all_checks() -> None:
+    errors = scan_generated_bundle(_full_crud_bundle())
+    assert errors == [], f"Clean CRUD bundle should pass all checks: {errors}"
+
+
+def test_mutation_unknown_api_surface_caught_early() -> None:
+    bundle = _full_crud_bundle()
+    bundle["modules/orders/module.yaml"] = bundle["modules/orders/module.yaml"].replace(
+        "api_surface: public_readonly", "api_surface: semi_public"
+    )
+    errors = scan_generated_bundle(bundle)
+    assert any("api_surface 'semi_public' is not a canonical value" in e for e in errors)
+
+
+def test_mutation_unknown_page_type_caught_early() -> None:
+    bundle = _full_crud_bundle()
+    bundle["ui/pages/orders.yaml"] = bundle["ui/pages/orders.yaml"].replace(
+        "page_type: record_list", "page_type: unknown_layout"
+    )
+    errors = scan_generated_bundle(bundle)
+    assert any("page_type 'unknown_layout' is not a canonical page type" in e for e in errors)
+
+
+def test_mutation_orphaned_reaction_event_caught_early() -> None:
+    bundle = _full_crud_bundle()
+    bundle["modules/orders/contracts/reactions.yaml"] = bundle[
+        "modules/orders/contracts/reactions.yaml"
+    ].replace("domain.orders.order_created", "domain.orders.ghost_event")
+    errors = scan_generated_bundle(bundle)
+    assert any("ghost_event" in e and "not declared" in e for e in errors)
+
+
+def test_mutation_bad_reaction_target_kind_caught_early() -> None:
+    bundle = _full_crud_bundle()
+    bundle["modules/orders/contracts/reactions.yaml"] = bundle[
+        "modules/orders/contracts/reactions.yaml"
+    ].replace("kind: notification", "kind: webhook")
+    errors = scan_generated_bundle(bundle)
+    assert any("target.kind 'webhook' is not canonical" in e for e in errors)
+
+
+def test_mutation_missing_api_endpoint_module_caught_early() -> None:
+    bundle = _full_crud_bundle()
+    bundle["ui/pages/orders.yaml"] = bundle["ui/pages/orders.yaml"].replace(
+        "/api/modules/orders/list_orders", "/api/modules/ghost_module/list_orders"
+    )
+    errors = scan_generated_bundle(bundle)
+    assert any("module 'ghost_module' which is not declared" in e for e in errors)
