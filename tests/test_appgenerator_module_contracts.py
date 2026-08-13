@@ -183,7 +183,10 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppBuildPlan"]["fields"]["shell_preset_hint"]["variants"] == ["str", "null"]
     module_action_fields = models["ModuleAction"]["fields"]
     assert "api_surface" in module_action_fields
-    assert module_action_fields["api_surface"]["type"] == "optional_str"
+    assert module_action_fields["api_surface"]["type"] == "literal"
+    assert set(module_action_fields["api_surface"]["values"]) >= {
+        "public", "public_readonly", "internal", "admin_internal", "null"
+    }
     assert "public_readonly" in module_action_fields["api_surface"]["description"]
     assert "AUTH_ENABLED=true" in module_action_fields["api_surface"]["description"]
     assert models["AppShellMode"]["values"] == [
@@ -395,7 +398,10 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     structured_outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
     module_action = structured_outputs["models"]["ModuleAction"]["fields"]
-    assert module_action["api_surface"]["type"] == "optional_str"
+    assert module_action["api_surface"]["type"] == "literal"
+    assert set(module_action["api_surface"]["values"]) >= {
+        "public", "public_readonly", "internal", "admin_internal", "null"
+    }
     assert "public_readonly" in module_action["api_surface"]["description"]
     assert "entitlement_gate" in module_action["api_surface"]["description"]
 

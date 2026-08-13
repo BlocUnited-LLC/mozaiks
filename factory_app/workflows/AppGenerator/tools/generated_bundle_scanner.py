@@ -125,6 +125,46 @@ _AUTH_LOGIN_METHOD_KINDS = frozenset(
     }
 )
 
+# Canonical page_type values — must match VALID_PAGE_TYPES in generated_ui_contract.py
+# and the literal enum in structured_outputs.yaml AppBuildPage.page_type_hint.
+# Unknown values fail before promotion so they cannot produce blank/unrendered page surfaces.
+_CANONICAL_PAGE_TYPES = frozenset({
+    "record_list",
+    "record_detail",
+    "analytics_dashboard",
+    "workflow_board",
+    "activity_feed",
+    "gallery",
+    "wizard",
+    "split_view",
+    "settings",
+    "landing",
+    "checkout_success",
+})
+
+# Canonical action api_surface values — controls HTTP exposure posture.
+# Must match the typed literal in structured_outputs.yaml ModuleAction.api_surface
+# and the runtime ActionDef.api_surface field.
+_CANONICAL_API_SURFACE_VALUES = frozenset({
+    "public",
+    "public_readonly",
+    "internal",
+    "admin_internal",
+})
+
+# Canonical reaction target kinds — must match file_contracts.yaml and the
+# mozaiks.reactions.v1 schema.
+_CANONICAL_REACTION_TARGET_KINDS = frozenset({
+    "handler",
+    "capability",
+    "notification",
+    "service_adapter",
+})
+
+# Platform-provided event namespaces — events in these namespaces are NOT
+# declared in the bundle's events.yaml and must be skipped during closure checks.
+_PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
+
 # Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
 # These components are always available in the Mozaiks shell without a custom JSX file.
 # Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
@@ -1418,6 +1458,13 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
             if required_field not in schema:
                 errors.append(f"{path}: schema-native page missing required field '{required_field}'")
 
+        page_type = str(schema.get("page_type") or "").strip()
+        if page_type and page_type not in _CANONICAL_PAGE_TYPES:
+            errors.append(
+                f"{path}: page_type '{page_type}' is not a canonical page type. "
+                f"Must be one of: {', '.join(sorted(_CANONICAL_PAGE_TYPES))}."
+            )
+
         sections = schema.get("sections")
         if isinstance(sections, list):
             for i, section in enumerate(sections):
@@ -1644,6 +1691,168 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
     return errors
 
 
+def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
+    """Validate that action api_surface values in module.yaml use the canonical vocabulary.
+
+    api_surface controls HTTP exposure posture.  Unknown values are silently ignored
+    by the runtime and could produce unintended public exposure.  Only the four
+    declared values are canonical; any other string is a generation error.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+
+    for path, content in normalized.items():
+        if not (path.startswith("modules/") and path.endswith("/module.yaml")):
+            continue
+        parts = PurePosixPath(path).parts
+        if len(parts) != 3:
+            continue
+        module_id = parts[1]
+
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        actions = parsed.get("actions")
+        if not isinstance(actions, list):
+            continue
+
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_id = str(action.get("id") or "").strip()
+            api_surface = action.get("api_surface")
+            if api_surface is None:
+                continue
+            api_surface_str = str(api_surface).strip()
+            if not api_surface_str or api_surface_str == "null":
+                continue
+            if api_surface_str not in _CANONICAL_API_SURFACE_VALUES:
+                errors.append(
+                    f"modules/{module_id}/module.yaml: action '{action_id}' "
+                    f"api_surface '{api_surface_str}' is not a canonical value. "
+                    f"Must be one of: {', '.join(sorted(_CANONICAL_API_SURFACE_VALUES))}."
+                )
+
+    return errors
+
+
+def _scan_event_reaction_closure(files_map: dict[str, str]) -> list[str]:
+    """Validate event/reaction reference closure within a generated bundle.
+
+    Checks:
+    1. Every reaction's event_type resolves to a declared event in the bundle's
+       events.yaml files (platform-namespace events are exempt and always pass).
+    2. Every reaction target.kind is a canonical value.
+    3. Target-kind-specific required fields are present and non-empty.
+
+    Only fires when at least one reactions.yaml is present in the bundle.
+    Platform events (hosted.*, platform.*, mozaiks.*) are not bundle-declared
+    and are always treated as resolvable.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+
+    # Collect all declared event_types from modules/*/contracts/events.yaml.
+    declared_event_types: set[str] = set()
+    for path, content in normalized.items():
+        if not re.match(r"modules/[^/]+/contracts/events\.yaml", path):
+            continue
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        events = parsed.get("events")
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if isinstance(event, dict):
+                event_type = str(event.get("type") or "").strip()
+                if event_type:
+                    declared_event_types.add(event_type)
+
+    # Validate each reaction in modules/*/contracts/reactions.yaml.
+    for path, content in sorted(normalized.items()):
+        if not re.match(r"modules/[^/]+/contracts/reactions\.yaml", path):
+            continue
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        reactions = parsed.get("reactions")
+        if not isinstance(reactions, list):
+            continue
+
+        for i, reaction in enumerate(reactions):
+            if not isinstance(reaction, dict):
+                continue
+            reaction_id = str(reaction.get("id") or f"[{i}]").strip()
+            label = f"{path}: reaction '{reaction_id}'"
+
+            # 1. event_type closure.
+            event_type = str(reaction.get("event_type") or "").strip()
+            if not event_type:
+                errors.append(f"{label} missing required 'event_type'.")
+            elif not any(event_type.startswith(ns) for ns in _PLATFORM_EVENT_NAMESPACES):
+                # Only validate domain events that must be bundle-declared.
+                if declared_event_types and event_type not in declared_event_types:
+                    errors.append(
+                        f"{label} event_type '{event_type}' is not declared in any "
+                        f"modules/*/contracts/events.yaml in this bundle."
+                    )
+
+            # 2. target.kind validation.
+            target = reaction.get("target")
+            if not isinstance(target, dict):
+                errors.append(f"{label} missing required 'target' mapping.")
+                continue
+
+            kind = str(target.get("kind") or "").strip()
+            if not kind:
+                errors.append(f"{label} target missing required 'kind'.")
+            elif kind not in _CANONICAL_REACTION_TARGET_KINDS:
+                errors.append(
+                    f"{label} target.kind '{kind}' is not canonical. "
+                    f"Must be one of: {', '.join(sorted(_CANONICAL_REACTION_TARGET_KINDS))}."
+                )
+            else:
+                # 3. Target-kind-specific required fields.
+                if kind == "handler":
+                    method = str(target.get("handler_method") or "").strip()
+                    if not method:
+                        errors.append(
+                            f"{label} target.kind='handler' requires non-empty 'handler_method'."
+                        )
+                elif kind == "capability":
+                    cap_id = str(target.get("capability_id") or "").strip()
+                    if not cap_id:
+                        errors.append(
+                            f"{label} target.kind='capability' requires non-empty 'capability_id'."
+                        )
+                elif kind == "notification":
+                    notif_id = str(target.get("notification_id") or "").strip()
+                    if not notif_id:
+                        errors.append(
+                            f"{label} target.kind='notification' requires non-empty 'notification_id'."
+                        )
+                elif kind == "service_adapter":
+                    adapter = str(target.get("adapter") or "").strip()
+                    if not adapter:
+                        errors.append(
+                            f"{label} target.kind='service_adapter' requires non-empty 'adapter'."
+                        )
+
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -1659,7 +1868,11 @@ def scan_generated_bundle(
     - All scannable files: raw provider secret key literals.
     - .mozaiks/pack_provenance.json: schema validation when present.
     - ui/route_manifest.json: required path/component fields; component file existence.
-    - ui/pages/*.yaml (schema-native): required fields, canonical primitives, api_endpoint closure.
+    - ui/pages/*.yaml (schema-native): required fields, canonical page_type, canonical primitives,
+      api_endpoint → module/action closure.
+    - modules/*/module.yaml: action api_surface canonical vocabulary.
+    - modules/*/contracts/reactions.yaml: event_type closure, target.kind taxonomy,
+      target-kind-specific required fields.
     """
     errors: list[str] = []
     errors.extend(_scan_canonical_app_paths(files_map))
@@ -1669,6 +1882,8 @@ def scan_generated_bundle(
     errors.extend(_scan_route_manifest_component_files(files_map))
     errors.extend(_scan_page_schema_structure(files_map))
     errors.extend(_scan_page_api_endpoint_alignment(files_map))
+    errors.extend(_scan_action_api_surface(files_map))
+    errors.extend(_scan_event_reaction_closure(files_map))
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
