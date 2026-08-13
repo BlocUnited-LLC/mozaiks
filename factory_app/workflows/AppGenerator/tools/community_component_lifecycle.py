@@ -240,6 +240,17 @@ def _provenance_pack_entries(app_root: Path) -> list[dict[str, Any]]:
     return [item for item in packs or [] if isinstance(item, dict)]
 
 
+def _pack_owned_paths(app_root: Path, pack_id: str) -> set[str]:
+    paths: set[str] = set()
+    for pack in _provenance_pack_entries(app_root):
+        if str(pack.get("pack_id") or "").strip() != pack_id:
+            continue
+        for file_entry in pack.get("materialized_owned_files") or []:
+            if isinstance(file_entry, dict) and file_entry.get("path"):
+                paths.add(str(file_entry["path"]))
+    return paths
+
+
 def _current_owner_by_path(app_root: Path) -> dict[str, str]:
     owner_by_path: dict[str, str] = {}
     for pack in _provenance_pack_entries(app_root):
@@ -294,9 +305,13 @@ def plan_component_upgrade(
             target = app_root / path
             if target.exists() and not owner:
                 potential_conflicts.append({"path": path, "kind": "workspace_owned_file"})
+        owned_by_candidate = _pack_owned_paths(app_root, pack_id)
         for path in sorted(changed + removed):
             target = app_root / path
             if not target.exists():
+                continue
+            if owned_by_candidate and path not in owned_by_candidate:
+                potential_conflicts.append({"path": path, "kind": "not_owned_by_installed_pack"})
                 continue
             current_content = target.read_text(encoding="utf-8")
             if current_content != old_files[path]:
@@ -366,9 +381,15 @@ def apply_component_upgrade(
         if target.exists():
             target.unlink()
 
-    provenance = _files_by_name(resolve_managed_capability_templates(descriptors))[_PROVENANCE_PATH]
+    provenance = json.loads(_files_by_name(resolve_managed_capability_templates(descriptors))[_PROVENANCE_PATH])
+    existing_entries = [
+        pack
+        for pack in _provenance_pack_entries(app_root)
+        if str(pack.get("pack_id") or "").strip() != pack_id
+    ]
+    provenance["packs"] = existing_entries + list(provenance.get("packs") or [])
     (app_root / _PROVENANCE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    (app_root / _PROVENANCE_PATH).write_text(provenance, encoding="utf-8")
+    (app_root / _PROVENANCE_PATH).write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     state = load_installed_components(root)
     installed = component_by_id(state)

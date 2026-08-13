@@ -116,6 +116,26 @@ def test_same_exact_pack_reinstall_is_idempotent(tmp_path: Path) -> None:
     assert before == after
 
 
+def test_malformed_installed_state_fails_instead_of_dropping_entry(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_state import (
+        InstalledComponentStateError,
+        load_installed_components,
+    )
+
+    state_path = tmp_path / "build_context" / ".mozaiks" / "installed_components.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps({
+            "schema_version": "mozaiks.installed_components.v1",
+            "components": ["not-an-object"],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(InstalledComponentStateError, match="components\\[0\\] must be an object"):
+        load_installed_components(tmp_path / "build_context")
+
+
 def test_two_compatible_packs_install_when_dependency_is_present(tmp_path: Path) -> None:
     build_context_root = tmp_path / "build_context"
 
@@ -247,6 +267,33 @@ def test_upgrade_plan_detects_local_modification_conflict(tmp_path: Path) -> Non
     assert any(conflict["kind"] == "locally_modified_owned_file" for conflict in plan.potential_conflicts)
 
 
+def test_upgrade_plan_blocks_removed_file_when_provenance_does_not_own_it(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        plan_component_upgrade,
+    )
+
+    build_context_root = tmp_path / "build_context"
+    app_root = tmp_path / "app"
+    _install(GREETINGS, build_context_root)
+    _write_app_root_from_pack(app_root, GREETINGS, "greetings")
+    provenance_path = app_root / ".mozaiks" / "pack_provenance.json"
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["packs"][0]["materialized_owned_files"] = [
+        file_entry
+        for file_entry in provenance["packs"][0]["materialized_owned_files"]
+        if file_entry["path"] != "modules/greetings/backend/__init__.py"
+    ]
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    plan = plan_component_upgrade(
+        build_context_root=build_context_root,
+        candidate_pack_source_path=_greetings_v2(tmp_path, remove_init=True),
+        workspace_app_root=app_root,
+    )
+
+    assert {"path": "modules/greetings/backend/__init__.py", "kind": "not_owned_by_installed_pack"} in plan.potential_conflicts
+
+
 def test_safe_upgrade_apply_updates_state_and_provenance(tmp_path: Path) -> None:
     from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
         apply_component_upgrade,
@@ -270,3 +317,36 @@ def test_safe_upgrade_apply_updates_state_and_provenance(tmp_path: Path) -> None
     assert state["components"][0]["version"] == "0.2.0"
     provenance = json.loads((app_root / ".mozaiks" / "pack_provenance.json").read_text(encoding="utf-8"))
     assert provenance["packs"][0]["version"] == "0.2.0"
+
+
+def test_safe_upgrade_apply_preserves_other_pack_provenance(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        apply_component_upgrade,
+    )
+
+    build_context_root = tmp_path / "build_context"
+    app_root = tmp_path / "app"
+    _install(GREETINGS, build_context_root)
+    _write_app_root_from_pack(app_root, GREETINGS, "greetings")
+    provenance_path = app_root / ".mozaiks" / "pack_provenance.json"
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["packs"].append({
+        "pack_id": "other_pack",
+        "version": "1.0.0",
+        "source": "local",
+        "digest": "sha256:" + "a" * 64,
+        "materialized_owned_files": [
+            {"path": "modules/other/module.yaml", "owner": "templates"}
+        ],
+    })
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    apply_component_upgrade(
+        build_context_root=build_context_root,
+        candidate_pack_source_path=_greetings_v2(tmp_path),
+        workspace_app_root=app_root,
+    )
+
+    updated = json.loads(provenance_path.read_text(encoding="utf-8"))
+    assert {pack["pack_id"] for pack in updated["packs"]} == {"greetings", "other_pack"}
+    assert next(pack for pack in updated["packs"] if pack["pack_id"] == "greetings")["version"] == "0.2.0"
