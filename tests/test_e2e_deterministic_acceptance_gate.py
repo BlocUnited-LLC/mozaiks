@@ -1,21 +1,33 @@
-"""Deterministic offline E2E acceptance gate for canonical app generation.
+"""Deterministic offline generated-bundle functional acceptance gate.
 
-This test exercises the deterministic portion of the Mozaiks pipeline from
-a fixed structured app fixture through validation, closure checking, and
-runtime boot -- without making LLM calls or requiring external services.
+This gate exercises every deterministic validation, loading, and runtime
+stage that sits below the AG2/Factory reasoning boundary.  It starts from a
+fixed, hand-authored canonical bundle fixture -- NOT from a production
+materializer or AG2 reasoning run -- and drives that fixture through
+production scanners, validators, the AppLoader, module dispatch, entitlement
+enforcement, and a fully-offline platform host boot.
 
-The gate starts at the post-reasoning structured boundary: a fixed canonical
-app fixture representing what AG2 would produce.  It exercises every
-deterministic stage through to boot:
+Proof boundary (what IS exercised):
 
-    fixed fixture
+    hand-authored canonical bundle fixture
     -> production bundle scanner (scan_generated_bundle)
     -> production functional scanner (scan_functional_generated_app)
     -> production validation facade (validate_generated_app_bundle)
     -> production acceptance gate (run_app_bundle_acceptance_gate)
     -> AppLoader.load (production bundle loader)
     -> ModuleExecutor + ExecutorRegistry (production dispatch)
-    -> TestClient(platform.app) boot + HTTP surface proof
+    -> ConfiguredEntitlementAdapter (production entitlement gate)
+    -> TestClient(platform.app) boot + representative HTTP requests
+
+Explicitly outside scope (NOT exercised by this gate):
+
+    - AG2 reasoning (fixture is static, no LLM is called)
+    - AppPlan / AppBuildPlan processing
+    - Production Jinja template materialization (fixture is hand-authored)
+    - CapabilityPack selection or composition
+    - Real databases (MongoDB faked via in-memory stub)
+    - Paid Factory execution
+    - Deployment, CI/CD, or provider integration
 
 Negative tests prove the gate catches each class of reference-closure failure
 through targeted mutations of the same fixture.
@@ -115,7 +127,12 @@ class _FakeCollection:
 # ---------------------------------------------------------------------------
 
 def _canonical_fixture() -> dict[str, str]:
-    """Return a representative canonical app fixture.
+    """Return a hand-authored canonical app bundle fixture.
+
+    This fixture is NOT produced by Jinja materialization, AppBuildPlan
+    processing, or any CapabilityPack engine.  It is a hand-written
+    dictionary representing the file tree that the full Factory pipeline
+    would produce for a small but meaningful app.
 
     Surfaces exercised:
       - app.json (identity + auth declaration + landing spot)
@@ -563,6 +580,11 @@ def _save_platform_state() -> dict[str, Any]:
         "startup_degraded": getattr(platform.app.state, "startup_degraded", False),
         "startup_degraded_reason": getattr(platform.app.state, "startup_degraded_reason", None),
         "module_action_surfaces": deepcopy(getattr(platform.app.state, "module_action_surfaces", {})),
+        # Snapshot the auth adapter registry so we can restore it exactly,
+        # rather than clearing it (which would lose builtins registered by
+        # prior tests or by _register_builtin_adapters).
+        "auth_adapter_registry": dict(auth_registry._adapter_registry),
+        "auth_adapter_instance": auth_registry._adapter_instance,
     }
 
 
@@ -575,17 +597,28 @@ def _restore_platform_state(state: dict[str, Any]) -> None:
     platform.app.state.startup_degraded = state["startup_degraded"]
     platform.app.state.startup_degraded_reason = state["startup_degraded_reason"]
     platform.app.state.module_action_surfaces = state["module_action_surfaces"]
+    # Restore auth adapter registry to its pre-test snapshot instead of
+    # clearing it unconditionally.
     auth_registry._adapter_registry.clear()
-    reset_auth_adapter()
+    auth_registry._adapter_registry.update(state["auth_adapter_registry"])
+    auth_registry._adapter_instance = state["auth_adapter_instance"]
 
 
 # ===========================================================================
-# POSITIVE GATE: fixture -> scanner -> validator -> loader -> boot -> health
+# POSITIVE GATE: hand-authored fixture -> production scanners/validators
+#                -> AppLoader -> dispatch -> platform boot -> HTTP surfaces
 # ===========================================================================
 
 
 class TestPositiveE2EAcceptanceGate:
-    """The canonical fixture passes every deterministic gate and boots."""
+    """The hand-authored canonical fixture passes every production validation
+    and runtime stage from bundle scanning through platform boot.
+
+    All validation is delegated to production systems -- no test-only
+    validators are used.  The fixture is static and hand-authored; AG2
+    reasoning, Jinja materialization, and CapabilityPack composition are
+    not exercised.
+    """
 
     def test_fixture_passes_bundle_scanner(self) -> None:
         """Production scan_generated_bundle returns zero errors."""
@@ -728,8 +761,12 @@ class TestPositiveE2EAcceptanceGate:
             _restore_platform_state(saved)
 
     @pytest.mark.asyncio
-    async def test_fixture_is_deterministic_across_runs(self, tmp_path: Path) -> None:
-        """Two independent materializations produce identical loaded definitions."""
+    async def test_fixture_loads_identically_across_independent_writes(self, tmp_path: Path) -> None:
+        """Two independent writes of the same fixture to disk produce
+        identical AppLoader results, proving the fixture and loader are
+        deterministic.  This does NOT prove Jinja materialization
+        determinism -- the fixture is hand-authored, not materialized.
+        """
         for run in ("run1", "run2"):
             root = tmp_path / run / "app"
             _write_bundle(root, _canonical_fixture())
@@ -746,12 +783,14 @@ class TestPositiveE2EAcceptanceGate:
 
 
 # ===========================================================================
-# NEGATIVE GATE: targeted mutations that must be caught
+# NEGATIVE GATE: targeted fixture mutations that production scanners,
+#                validators, and the AppLoader must catch
 # ===========================================================================
 
 
 class TestNegativeRouteClosure:
-    """Route references that point to missing components are caught."""
+    """Route references that point to missing components are caught by
+    production scan_functional_generated_app."""
 
     def test_route_to_missing_schema_page(self) -> None:
         files = _canonical_fixture()
@@ -773,7 +812,8 @@ class TestNegativeRouteClosure:
 
 
 class TestNegativePageToModuleClosure:
-    """Page api_endpoint references that point to missing module actions are caught."""
+    """Page api_endpoint references that point to missing module actions are
+    caught by production scanners."""
 
     def test_page_endpoint_references_undeclared_action(self) -> None:
         files = _canonical_fixture()
@@ -796,7 +836,8 @@ class TestNegativePageToModuleClosure:
 
 
 class TestNegativeActionHandlerClosure:
-    """Declared actions without matching handler implementations are caught."""
+    """Declared actions without matching handler implementations are caught
+    by production scan_functional_generated_app."""
 
     def test_missing_handler_method_on_handler_class(self) -> None:
         files = _canonical_fixture()
@@ -835,7 +876,8 @@ class TestNegativeActionHandlerClosure:
 
 
 class TestNegativeEventReactionClosure:
-    """Event/reaction schema closure failures are caught."""
+    """Event/reaction schema closure failures are caught by production
+    scan_generated_bundle and AppLoader."""
 
     def test_reaction_references_undeclared_event(self) -> None:
         files = _canonical_fixture()
@@ -897,7 +939,8 @@ class TestNegativeEventReactionClosure:
 
 
 class TestNegativePlaceholderDetection:
-    """Placeholder/NotImplementedError on required surfaces is caught."""
+    """Placeholder/NotImplementedError on required surfaces is caught by
+    production scan_functional_generated_app."""
 
     def test_not_implemented_error_in_service(self) -> None:
         files = _canonical_fixture()
@@ -919,7 +962,8 @@ class TestNegativePlaceholderDetection:
 
 
 class TestNegativeBundleStructure:
-    """Bundle-level structural violations are caught."""
+    """Bundle-level structural violations are caught by production
+    scan_generated_bundle."""
 
     def test_unknown_page_type_rejected(self) -> None:
         files = _canonical_fixture()
@@ -951,7 +995,8 @@ class TestNegativeBundleStructure:
 
 
 class TestNegativeValidationFacade:
-    """The unified validation facade catches mutations."""
+    """The production validation facade (validate_generated_app_bundle) and
+    acceptance gate (run_app_bundle_acceptance_gate) catch mutations."""
 
     def test_validation_facade_fails_on_missing_handler(self) -> None:
         files = _canonical_fixture()
@@ -972,7 +1017,8 @@ class TestNegativeValidationFacade:
 
 
 class TestNegativeBootFailure:
-    """App boot fails when bundle is structurally broken."""
+    """Production AppLoader.load gracefully degrades when a module's handler
+    cannot be imported."""
 
     @pytest.mark.asyncio
     async def test_boot_rejects_module_with_broken_handler_import(
@@ -1006,10 +1052,10 @@ class TestNegativeBootFailure:
 
 
 class TestNegativeMissingHealthEndpoint:
-    """Health endpoint availability is proven by the positive gate.
+    """Health endpoint availability through the production platform host.
 
-    This test confirms the positive gate actually tested /health and that
-    a non-200 from /health would have been caught by assertion.
+    This independently confirms /health returns 200 as a standalone boot
+    proof, complementing the positive gate's inline health check.
     """
 
     @pytest.mark.asyncio
