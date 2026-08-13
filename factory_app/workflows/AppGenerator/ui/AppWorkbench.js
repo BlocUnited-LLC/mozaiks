@@ -16,6 +16,7 @@ import E2BPreviewArtifact from './E2BPreviewArtifact';
 import ExportActions from './ExportActions';
 import FileTreeArtifact from './FileTreeArtifact';
 import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.jsx';
+import { studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 // Known locations where AppGenerator may write the theme config file.
 const _THEME_FILE_CANDIDATES = [
@@ -160,7 +161,7 @@ const AppWorkbench = ({
       setArtifactReviewBusy(true);
       setArtifactReviewError(null);
       try {
-        const response = await fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`);
+        const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`);
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) {
           throw new Error(body.detail || 'Artifact review could not be loaded.');
@@ -314,7 +315,7 @@ const AppWorkbench = ({
     setArtifactReviewBusy(true);
     setArtifactReviewError(null);
     try {
-      const response = await fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`, {
+      const response = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`, {
         method: 'POST',
       });
       const body = await response.json().catch(() => ({ detail: response.statusText }));

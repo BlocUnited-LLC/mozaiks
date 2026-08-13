@@ -19,7 +19,7 @@ import {
 import CarryForwardReportSummary from './CarryForwardReportSummary.jsx'
 import AppStudioHero, { formatDateTimeLabel } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
@@ -69,8 +69,8 @@ async function postReviewAction({ appId, artifactVersionId, actionId }) {
   }
   const endpoint = endpointByAction[actionId]
   if (!endpoint) throw new Error(`${actionId} is not available yet.`)
-  const response = await fetch(
-    `${API_BASE}/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?app_id=${encodeURIComponent(appId)}`,
+  const response = await studioFetch(
+    `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${endpoint}?app_id=${encodeURIComponent(appId)}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -103,8 +103,8 @@ function ReviewPackagePanel({ appId, artifactVersionId, dataMode, onRefresh }) {
       setLoading(true)
       setError(null)
       try {
-        const response = await fetch(
-          `${API_BASE}/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?app_id=${encodeURIComponent(appId)}`,
+        const response = await studioFetch(
+          `/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review?app_id=${encodeURIComponent(appId)}`,
         )
         if (!response.ok) {
           const body = await response.json().catch(() => null)

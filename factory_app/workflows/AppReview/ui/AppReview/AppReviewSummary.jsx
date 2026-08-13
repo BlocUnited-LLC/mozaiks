@@ -11,6 +11,7 @@
 
 import { useState, useCallback } from 'react';
 import { Panel, StatusPill, Button, Metric } from '@mozaiks/chat-ui/ui';
+import { studioFetch } from '../../../../app/admin/pages/studioApi.js';
 
 const STATUS_TONE = {
   passed: 'success',
@@ -48,16 +49,10 @@ export default function AppReviewSummary({ payload = {} }) {
     setPromoting(true);
     setError(null);
     try {
-      const apiBase =
-        typeof window !== 'undefined' ? window.__MOZAIKS_API_BASE__ || '' : '';
-      const token =
-        typeof window !== 'undefined' ? window.__MOZAIKS_ACCESS_TOKEN__ || '' : '';
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
       const appIdQuery = payload?.app_id ? `?app_id=${encodeURIComponent(payload.app_id)}` : '';
-      const res = await fetch(`${apiBase}/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}`, {
+      const res = await studioFetch(`/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}`, {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ build_registry_id: payload.build_registry_id || null }),
       });
       if (!res.ok) {
