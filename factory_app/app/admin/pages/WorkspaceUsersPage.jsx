@@ -24,7 +24,7 @@ import {
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
 import { getAppDisplayName } from './appStudioModel.js'
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 
 function useWorkspaceUserSummary() {
@@ -33,7 +33,7 @@ function useWorkspaceUserSummary() {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch(`${API_BASE}/api/admin/users`, { signal: controller.signal })
+    studioFetch('/api/admin/users', { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : null))
       .then((payload) => {
         if (!controller.signal.aborted) setData(payload)

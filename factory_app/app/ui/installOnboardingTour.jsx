@@ -1,27 +1,12 @@
 import { createRoot } from 'react-dom/client'
 import onboardingConfigSource from '../config/onboarding.yaml?raw'
+import { studioModuleAction } from '../admin/pages/studioApi.js'
 import { OnboardingTour, parseOnboardingConfigSource } from '@mozaiks/chat-ui/ui'
 
 let installed = false
 
 async function moduleAction(moduleName, actionName, input = {}) {
-  const token =
-    window.mozaiksAuth?.getAccessToken?.() ||
-    sessionStorage.getItem('mozaiks_access_token') ||
-    localStorage.getItem('mozaiks_access_token') ||
-    localStorage.getItem('chatui_token') ||
-    localStorage.getItem('access_token')
-
-  const headers = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-
-  const res = await fetch(`/api/modules/${moduleName}/${actionName}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(input),
-  })
-  if (!res.ok) throw new Error(`${moduleName}.${actionName} ${res.status}`)
-  return res.json()
+  return studioModuleAction(moduleName, actionName, input)
 }
 
 export function installOnboardingTour() {

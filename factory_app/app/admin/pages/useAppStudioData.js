@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 import {
   buildStudioDemoAppSummary,
   getStudioDemoActivity,
@@ -143,16 +143,16 @@ export function useAppStudioData(appId) {
           contextRes,
           runtimeMetricsRes,
         ] = await Promise.allSettled([
-          fetch(`${API_BASE}/api/studio/overview?app_id=${encodeURIComponent(appId)}`),
-          fetch(`${API_BASE}/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
-          fetch(`${API_BASE}/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`),
-          fetch(`${API_BASE}/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`),
-          fetch(`${API_BASE}/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`),
-          fetch(`${API_BASE}/api/studio/build?app_id=${encodeURIComponent(appId)}`),
-          fetch(`${API_BASE}/api/studio/build/history?app_id=${encodeURIComponent(appId)}&limit=8`),
-          fetch(`${API_BASE}/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
-          fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(appId)}/context`),
-          fetch(`${API_BASE}/api/admin/metrics/runtime`),
+          studioFetch(`/api/studio/overview?app_id=${encodeURIComponent(appId)}`),
+          studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
+          studioFetch(`/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`),
+          studioFetch(`/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`),
+          studioFetch(`/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`),
+          studioFetch(`/api/studio/build?app_id=${encodeURIComponent(appId)}`),
+          studioFetch(`/api/studio/build/history?app_id=${encodeURIComponent(appId)}&limit=8`),
+          studioFetch(`/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
+          studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`),
+          studioFetch('/api/admin/metrics/runtime'),
         ])
 
         const overview = overviewRes.status === 'fulfilled' && overviewRes.value.ok ? await overviewRes.value.json() : null

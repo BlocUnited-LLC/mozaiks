@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 
 export function useWorkspaceApps(errorFallback = 'Workspace apps could not be loaded.') {
   const [apps, setApps] = useState([])
@@ -14,7 +14,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
 
     async function load() {
       try {
-        const res = await fetch(`${API_BASE}/api/studio/apps`)
+        const res = await studioFetch('/api/studio/apps')
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         const payload = await res.json()
         if (!cancelled) {
@@ -39,7 +39,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
 
   const deleteApp = useCallback(async (buildRegistryId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(buildRegistryId)}`, {
+      const res = await studioFetch(`/api/studio/apps/${encodeURIComponent(buildRegistryId)}`, {
         method: 'DELETE',
       })
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)

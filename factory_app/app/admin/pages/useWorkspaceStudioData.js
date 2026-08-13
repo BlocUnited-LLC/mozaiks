@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 import {
   buildStudioDemoApps,
   getStudioDemoWorkspaceUsage,
@@ -28,10 +28,10 @@ export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data co
     async function load() {
       try {
         const [appsRes, statsRes, runsRes, usageRes] = await Promise.allSettled([
-          fetch(`${API_BASE}/api/studio/apps`),
-          fetch(`${API_BASE}/api/admin/stats`),
-          fetch(`${API_BASE}/api/admin/runs?limit=48`),
-          fetch(`${API_BASE}/api/admin/usage?limit=1000`),
+          studioFetch('/api/studio/apps'),
+          studioFetch('/api/admin/stats'),
+          studioFetch('/api/admin/runs?limit=48'),
+          studioFetch('/api/admin/usage?limit=1000'),
         ])
 
         const appsPayload = appsRes.status === 'fulfilled' && appsRes.value.ok ? await appsRes.value.json() : null
