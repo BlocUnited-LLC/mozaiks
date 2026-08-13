@@ -1115,6 +1115,9 @@ models:
       agent_message:
         type: str
         description: Short planning summary for the build plan.
+      app_kind:
+        type: str
+        description: Canonical application kind used by deterministic AppBuildPlan validation and materialization.
       pages:
         type: optional_list
         items: AppBuildPage

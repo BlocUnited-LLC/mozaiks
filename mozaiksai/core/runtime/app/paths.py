@@ -13,6 +13,9 @@ APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
 APP_PROVENANCE_PATH = "provenance.yaml"
+APP_OPERATOR_READINESS_CONFIG_PATH = "config/operator_readiness.yaml"
+APP_OPERATOR_READINESS_GUIDE_PATH = "docs/operations/operator-readiness.md"
+APP_OPERATOR_READINESS_SCRIPT_PATH = "scripts/check_operator_readiness_local.ps1"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
     {
@@ -22,6 +25,7 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         "config/integrations.json",
         "config/integrations.yaml",
         "config/integrations.yml",
+        APP_OPERATOR_READINESS_CONFIG_PATH,
         APP_REFINEMENT_POLICY_CONFIG_PATH,
         "config/shell.json",
         "config/subscriptions.yaml",
@@ -37,6 +41,8 @@ CANONICAL_APP_ROOT_FILES = frozenset(
         "__init__.py",
         "app.json",
         APP_PROVENANCE_PATH,
+        APP_OPERATOR_READINESS_GUIDE_PATH,
+        APP_OPERATOR_READINESS_SCRIPT_PATH,
         "deployment.manifest.json",
         "docker-compose.yml",
         "index.html",
@@ -173,6 +179,9 @@ __all__ = [
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",
     "APP_AUTH_CONFIG_PATH",
+    "APP_OPERATOR_READINESS_CONFIG_PATH",
+    "APP_OPERATOR_READINESS_GUIDE_PATH",
+    "APP_OPERATOR_READINESS_SCRIPT_PATH",
     "APP_PROVENANCE_PATH",
     "APP_REFINEMENT_POLICY_CONFIG_PATH",
     "APP_SECURITY_SECRETS_PATH",
