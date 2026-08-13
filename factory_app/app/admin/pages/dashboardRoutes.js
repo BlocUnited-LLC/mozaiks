@@ -1,4 +1,4 @@
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 
 export function getDashboardSurface(payload, scope = 'app') {
   if (payload?.surface?.scope === scope) return payload.surface
@@ -35,7 +35,7 @@ export async function fetchDashboardConfig({ scope = null, appId = null, signal 
   if (scope) params.set('scope', scope)
   if (appId) params.set('app_id', appId)
   const suffix = params.toString() ? `?${params.toString()}` : ''
-  const response = await fetch(`${API_BASE}/api/studio/dashboard${suffix}`, {
+  const response = await studioFetch(`/api/studio/dashboard${suffix}`, {
     headers: {
       Accept: 'application/json',
     },
