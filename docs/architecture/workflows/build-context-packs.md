@@ -371,8 +371,64 @@ Generated bundles retain pack metadata in the existing
 }
 ```
 
+Local installation pins a verified Community Component in workspace
+build-context metadata:
+
+```text
+build_context/
+└── .mozaiks/
+    ├── installed_components.json
+    └── installed_component_sources.json
+```
+
+`installed_components.json` is the canonical deterministic state:
+
+```json
+{
+  "schema_version": "mozaiks.installed_components.v1",
+  "components": [
+    {
+      "pack_id": "greetings",
+      "version": "0.1.0",
+      "digest": "sha256:...",
+      "source": "https://example.com/community-packs/greetings",
+      "dependencies": {
+        "packs": [],
+        "capabilities": []
+      },
+      "capabilities": [
+        { "capability_id": "greetings.say_hello" }
+      ]
+    }
+  ]
+}
+```
+
+It does not store absolute developer-machine paths. The non-portable
+`installed_component_sources.json` sidecar maps installed `pack_id` values to
+local source paths so deterministic verification and materialization can be
+re-run in that workspace checkout.
+
+Installation verifies the local pack, validates dependencies against already
+installed components, and writes pinned version/digest state. It does not
+materialize files and does not select the pack for a build.
+
+Upgrade planning is a dry run:
+
+```text
+installed A@v1 + verified local candidate A@v2 -> UpgradePlan
+```
+
+The plan reports exact version/digest movement, dependency changes, added,
+removed, and changed owned files, and potential conflicts. Applying an upgrade
+is allowed only when the operation can compare the workspace files against the
+old pack's rendered content. It refuses to overwrite locally modified owned
+files, files owned by another installed pack, or workspace-owned/custom files.
+It does not execute migration scripts.
+
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
-trust scoring, or cryptographic signing for this v1 layer.
+trust scoring, cryptographic signing, or automatic semver range upgrades for
+this local lifecycle layer.
 
 ## Resolution
 
@@ -392,6 +448,13 @@ For each context that applies to the target workflow:
 6. `templates` assets are materialized only for selected packs.
 
 Explicit launch context values take precedence over projected values.
+
+Installed Community Components are consumed only through explicit selection.
+An `AppBuildPlan` may select an installed `capability_pack_id`; the existing
+materializer then resolves the pinned local source through
+`build_context/.mozaiks` when launch context includes `build_context_root`.
+Installed state alone is not a selected pack list, and selected pack
+materialization still grants no provider or production authority.
 
 ## Build Context vs. Context Variables
 

@@ -187,6 +187,8 @@ def _capabilities_from_context(context: dict[str, Any]) -> list[str]:
 
 def _validate_pack_dependencies(
     capability_packs: list[dict[str, Any]],
+    *,
+    context_variables: Any | None = None,
 ) -> None:
     """Check that every pack's declared ``requires`` is satisfied by the selection.
 
@@ -223,7 +225,7 @@ def _validate_pack_dependencies(
         # Capabilities from context.yaml (fallback when descriptor lacks them).
         # Only attempt when pack_id is safe — unsafe IDs will be caught later
         # by resolve_templates_for_pack's _is_safe_identifier check.
-        raw_path = pack.get("pack_source_path")
+        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if raw_path and pid and _is_safe_identifier(pid):
             try:
                 context_data = _read_pack_context(Path(raw_path).resolve(), pid)
@@ -240,8 +242,8 @@ def _validate_pack_dependencies(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        raw_path = pack.get("pack_source_path")
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if not raw_path or not pack_id:
             continue
 
@@ -571,6 +573,7 @@ def _context_to_dict(context_variables: Any | None) -> dict[str, Any]:
     if hasattr(context_variables, "get"):
         try:
             keys = [
+                "build_context_root",
                 "readiness_profile",
                 "evidence_mode",
                 "evidence_ledger_path",
@@ -587,6 +590,44 @@ def _context_to_dict(context_variables: Any | None) -> dict[str, Any]:
         except Exception:
             return {}
     return {}
+
+
+def _context_build_context_root(context_variables: Any | None) -> Path | None:
+    context = _context_to_dict(context_variables)
+    raw = context.get("build_context_root")
+    if raw:
+        return Path(str(raw)).expanduser().resolve()
+    return None
+
+
+def _resolve_pack_source_from_installed_state(
+    pack: dict[str, Any],
+    *,
+    context_variables: Any | None,
+) -> str | None:
+    """Resolve an explicitly selected installed pack without copying local paths into AppBuildPlan."""
+
+    raw_path = pack.get("pack_source_path")
+    if raw_path:
+        return str(raw_path)
+    pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+    build_context_root = _context_build_context_root(context_variables)
+    if not pack_id or build_context_root is None:
+        return None
+    try:
+        from .community_component_lifecycle import resolve_installed_component_descriptors
+
+        descriptors = resolve_installed_component_descriptors(
+            build_context_root=build_context_root,
+            selected_pack_ids=[pack_id],
+        )
+    except Exception as exc:
+        raise ManagedCapabilityTemplateError(
+            f"Selected installed pack '{pack_id}' could not be resolved from workspace state: {exc}"
+        ) from exc
+    if not descriptors:
+        return None
+    return str(descriptors[0].get("pack_source_path") or "")
 
 
 def resolve_templates_for_pack(
@@ -664,7 +705,7 @@ def resolve_managed_capability_templates(
         return []
 
     # --- Step 1: dependency validation (fast fail before rendering) ---
-    _validate_pack_dependencies(capability_packs)
+    _validate_pack_dependencies(capability_packs, context_variables=context_variables)
 
     # --- Step 2: render templates, tracking per-pack output for provenance ---
     results_by_filename: dict[str, str] = {}
@@ -674,8 +715,8 @@ def resolve_managed_capability_templates(
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
-        raw_path = pack.get("pack_source_path")
         pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        raw_path = _resolve_pack_source_from_installed_state(pack, context_variables=context_variables)
         if not raw_path or not pack_id:
             continue
 
