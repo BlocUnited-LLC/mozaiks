@@ -194,83 +194,11 @@ def test_cron_tick_template_errors_key_from_tick_result() -> None:
 # 2. State machine archetype contract — module_archetypes.yaml
 # ---------------------------------------------------------------------------
 
-
-def test_state_machine_archetype_key_exists() -> None:
-    """module_archetypes.yaml must define a 'state_machine' archetype entry."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    assert "state_machine" in archetypes.get("archetypes", {}), (
-        "module_archetypes.yaml must declare a 'state_machine' archetype key"
-    )
-
-
-def test_state_machine_archetype_mentions_external_cron_script() -> None:
-    """Archetype spec must describe the external cron script pattern."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "external cron script" in spec_text or "external cron" in spec_text, (
-        "state_machine archetype must mention 'external cron script' delivery mechanism"
-    )
-
-
-def test_state_machine_archetype_mandates_minimal_ctx_pattern() -> None:
-    """Archetype spec must require the _MinimalCtx pattern for external cron scripts."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "_MinimalCtx" in spec_text, (
-        "state_machine archetype must require the _MinimalCtx pattern for external cron entry points"
-    )
-
-
-def test_state_machine_archetype_requires_errors_key_in_tick_result() -> None:
-    """Archetype must specify that the tick method returns a dict with an 'errors' key."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "errors" in spec_text, (
-        "state_machine archetype must mention 'errors' as a key in the tick result dict"
-    )
-
-
-def test_state_machine_archetype_describes_azure_container_apps_job() -> None:
-    """Archetype must describe Azure Container Apps job resource requirement."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "azure_container_apps" in spec_text or "Microsoft.App/jobs" in spec_text, (
-        "state_machine archetype must mention azure_container_apps job resource requirement"
-    )
-
-
-def test_state_machine_archetype_mandates_env_vars_in_docstring() -> None:
-    """Archetype must require required env vars to be documented in the script docstring."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "docstring" in spec_text, (
-        "state_machine archetype must mandate that required env vars are documented in the script docstring"
-    )
-
-
-def test_state_machine_archetype_requires_get_mongo_client_usage() -> None:
-    """Archetype must require the script to connect via get_mongo_client()."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "get_mongo_client" in spec_text, (
-        "state_machine archetype must specify that cron scripts connect via get_mongo_client()"
-    )
-
-
-def test_state_machine_archetype_requires_nonzero_exit_on_errors() -> None:
-    """Archetype must require the script to exit non-zero when errors are present."""
-    archetypes = _read_yaml(MODULE_ARCHETYPES)
-    sm = archetypes["archetypes"]["state_machine"]
-    spec_text = yaml.dump(sm)
-    assert "non-zero" in spec_text or "exits with a non-zero" in spec_text, (
-        "state_machine archetype must require non-zero exit code on errors"
-    )
+# NOTE: state_machine archetype tests were removed when the state_machine module
+# type was dropped from structured_outputs.yaml and module_archetypes.yaml.
+# The runtime ModuleIdentity.type Literal never accepted state_machine, so the
+# archetype was a false promise.  The cron tick template and infra pack tests
+# below remain — they test infrastructure that other archetypes may use.
 
 
 # ---------------------------------------------------------------------------

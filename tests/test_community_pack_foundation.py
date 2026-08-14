@@ -784,3 +784,119 @@ def test_fixture_pack_passes_generated_bundle_validation() -> None:
     # full app; we only care that no pack-provenance or schema errors appear)
     prov_errors = [e for e in errors if "pack_provenance" in e]
     assert not prov_errors
+
+
+# ---------------------------------------------------------------------------
+# Cross-pack collision and version-mismatch tests
+# ---------------------------------------------------------------------------
+
+
+def test_cross_pack_collision_raises_on_conflicting_output(tmp_path: Path) -> None:
+    """Two packs that produce different content for the same output path must
+    raise ManagedCapabilityTemplateError at materialization time."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+    )
+
+    # Build a second pack that writes a conflicting modules/greetings/module.yaml
+    collider = tmp_path / "collider"
+    collider.mkdir()
+    (collider / "context.yaml").write_text(
+        yaml.dump({
+            "context_id": "collider",
+            "applies_to_workflows": ["AppGenerator"],
+            "assets": [{"path": "templates/", "kind": "templates"}],
+            "pack": {
+                "id": "collider",
+                "version": "0.1.0",
+                "author": "Test",
+                "license": "MIT",
+                "source": "local",
+                "status": "active",
+                "capability_source": "generated_module",
+            },
+        }),
+        encoding="utf-8",
+    )
+    (collider / "contract.yaml").write_text(
+        yaml.dump({"schema_version": "mozaiks.pack_contract.v1"}),
+        encoding="utf-8",
+    )
+    tmpl = collider / "templates" / "modules" / "greetings"
+    tmpl.mkdir(parents=True)
+    (tmpl / "module.yaml").write_text(
+        "# CONFLICTING content\nschema_version: mozaiks.module.v1\n",
+        encoding="utf-8",
+    )
+
+    greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
+    collider_desc = _pack_descriptor(collider, "collider")
+
+    with pytest.raises(ManagedCapabilityTemplateError, match="Multiple selected pack"):
+        _materialize(greetings, collider_desc)
+
+
+def test_cross_pack_identical_output_does_not_collide(tmp_path: Path) -> None:
+    """Two packs that produce identical content for the same output path should
+    not raise — only differing content is a conflict."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+
+    # Read the actual greetings module.yaml content so we can duplicate it
+    greetings_module = (
+        GREETINGS_PACK / "templates" / "modules" / "greetings" / "module.yaml"
+    ).read_text(encoding="utf-8")
+
+    # Build a second pack that writes identical modules/greetings/module.yaml
+    twin = tmp_path / "twin"
+    twin.mkdir()
+    (twin / "context.yaml").write_text(
+        yaml.dump({
+            "context_id": "twin",
+            "applies_to_workflows": ["AppGenerator"],
+            "assets": [{"path": "templates/", "kind": "templates"}],
+            "pack": {
+                "id": "twin",
+                "version": "0.1.0",
+                "author": "Test",
+                "license": "MIT",
+                "source": "local",
+                "status": "active",
+                "capability_source": "generated_module",
+            },
+        }),
+        encoding="utf-8",
+    )
+    (twin / "contract.yaml").write_text(
+        yaml.dump({"schema_version": "mozaiks.pack_contract.v1"}),
+        encoding="utf-8",
+    )
+    tmpl = twin / "templates" / "modules" / "greetings"
+    tmpl.mkdir(parents=True)
+    (tmpl / "module.yaml").write_text(greetings_module, encoding="utf-8")
+
+    greetings = _pack_descriptor(GREETINGS_PACK, "greetings")
+    twin_desc = _pack_descriptor(twin, "twin")
+
+    # Should not raise — identical content is not a collision
+    result = resolve_managed_capability_templates([greetings, twin_desc])
+    filenames = [f["filename"] for f in result]
+    assert "modules/greetings/module.yaml" in filenames
+
+
+def test_version_mismatch_carries_structured_diagnostics() -> None:
+    """PackDependencyError raised for version mismatch must carry structured
+    version_mismatches list with human-readable diagnostics."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackDependencyError,
+    )
+
+    err = PackDependencyError(
+        "test_pack",
+        version_mismatches=["dep_pack expected 1.0.0, installed 2.0.0"],
+    )
+    assert err.pack_id == "test_pack"
+    assert len(err.version_mismatches) == 1
+    assert "dep_pack expected 1.0.0, installed 2.0.0" in err.version_mismatches[0]
+    assert "version mismatches" in str(err)
