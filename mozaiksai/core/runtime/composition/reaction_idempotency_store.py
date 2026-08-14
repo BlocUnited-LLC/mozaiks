@@ -307,7 +307,7 @@ class ReactionIdempotencyStore:
             },
             {"$set": {"status": "completed", "completed_at": self._now_fn()}},
         )
-        return result.modified_count == 1
+        return bool(result.modified_count == 1)
 
     async def mark_failed(
         self,
