@@ -422,6 +422,13 @@ class ModuleReaction(ModuleContractModel):
     filters: dict[str, Any] | None = None
     idempotency_key: str | None = None
     permissions: list[str] = Field(default_factory=list)
+    # Lease and retry configuration — only meaningful when idempotency_key is set.
+    # lease_seconds: how long a claim is held before it becomes reclaimable (crash recovery).
+    # max_attempts: total attempts allowed; None = unlimited retries.
+    # retry_delay_seconds: minimum wait after a failure before the slot is reclaimable.
+    lease_seconds: int = 300
+    max_attempts: int | None = None
+    retry_delay_seconds: int = 0
 
     @field_validator("id", "event_type", mode="before")
     @classmethod
@@ -445,6 +452,39 @@ class ModuleReaction(ModuleContractModel):
             raise ValueError(
                 f"module reactions must use {CANONICAL_EVENT_PREFIX_LABEL} event_type values"
             )
+        return value
+
+    @field_validator("lease_seconds", "max_attempts", "retry_delay_seconds", mode="before")
+    @classmethod
+    def _int_not_bool(cls, value: Any, info) -> Any:
+        """Reject booleans and non-integers; accept None only for max_attempts."""
+        if value is None:
+            return value
+        if isinstance(value, bool):
+            raise ValueError(f"{info.field_name} must be an integer, not a boolean")
+        if not isinstance(value, int):
+            raise ValueError(f"{info.field_name} must be an integer")
+        return value
+
+    @field_validator("lease_seconds")
+    @classmethod
+    def _lease_seconds_bounds(cls, value: int) -> int:
+        if value < 10 or value > 3600:
+            raise ValueError("lease_seconds must be between 10 and 3600")
+        return value
+
+    @field_validator("max_attempts")
+    @classmethod
+    def _max_attempts_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("max_attempts must be at least 1")
+        return value
+
+    @field_validator("retry_delay_seconds")
+    @classmethod
+    def _retry_delay_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("retry_delay_seconds must be >= 0")
         return value
 
 
