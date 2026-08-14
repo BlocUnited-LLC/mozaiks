@@ -35,6 +35,7 @@ from mozaiksai.core.runtime.composition.module_event_provenance import (
 )
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
+    LeaseClaim,
     ReactionIdempotencyStore,
 )
 from mozaiksai.core.runtime.composition.schema_validation import (
@@ -197,9 +198,10 @@ class ModuleEventRouter:
                 )
                 continue
             idempotency_key = self._idempotency_key(reaction, event_type, envelope, event_provenance)
-            # durable_key_str is set when the durable store is active and the
-            # slot was successfully claimed; used to mark complete/fail after dispatch.
+            # durable_key_str and claim_token are set when the durable store is active and
+            # the slot was successfully claimed; used to mark complete/fail after dispatch.
             durable_key_str: str | None = None
+            claim_token: str | None = None
             if idempotency_key is not None:
                 # Fast path: in-memory check (same process, established by PR #256).
                 if idempotency_key in self._processed_reaction_keys:
@@ -215,13 +217,15 @@ class ModuleEventRouter:
                 # Durable path: restart-safe check via persistent ledger.
                 if self._idempotency_store is not None:
                     durable_key_str = "|".join(idempotency_key)
-                    claimed = await self._idempotency_store.claim(
+                    lease_claim: LeaseClaim = await self._idempotency_store.claim(
                         app_id=event_provenance.app_id or "",
                         tenant_id=event_provenance.tenant_id,
                         workspace_id=event_provenance.workspace_id,
                         idempotency_key_str=durable_key_str,
+                        lease_seconds=int(reaction.get("lease_seconds") or 300),
+                        max_attempts=reaction.get("max_attempts"),
                     )
-                    if not claimed:
+                    if not lease_claim.claimed:
                         durable_key_str = None  # not our claim; do not mark complete/fail
                         await self._emit_reaction_audit(
                             build_module_reaction_audit(
@@ -232,6 +236,7 @@ class ModuleEventRouter:
                             )
                         )
                         continue
+                    claim_token = lease_claim.claim_token
                 self._processed_reaction_keys.add(idempotency_key)
             target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
             target_kind = str(target.get("kind") or "").strip()
@@ -263,7 +268,7 @@ class ModuleEventRouter:
                             outcome="ok",
                         )
                     )
-                    await self._durable_complete(durable_key_str, event_provenance)
+                    await self._durable_complete(durable_key_str, claim_token, event_provenance)
                 else:
                     await self._emit_reaction_audit(
                         build_module_reaction_audit(
@@ -291,9 +296,9 @@ class ModuleEventRouter:
                     )
                 )
                 if outcome == "ok":
-                    await self._durable_complete(durable_key_str, event_provenance)
+                    await self._durable_complete(durable_key_str, claim_token, event_provenance)
                 else:
-                    await self._durable_mark_failed(durable_key_str, event_provenance)
+                    await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
             elif target_kind == "service_adapter":
                 adapter_result = await self._dispatch_service_adapter(
                     reaction,
@@ -322,9 +327,9 @@ class ModuleEventRouter:
                     )
                 )
                 if adapter_failed:
-                    await self._durable_mark_failed(durable_key_str, event_provenance)
+                    await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
                 else:
-                    await self._durable_complete(durable_key_str, event_provenance)
+                    await self._durable_complete(durable_key_str, claim_token, event_provenance)
             elif target_kind:
                 await self._emit_platform_reaction(reaction, event_type, envelope)
                 await self._emit_reaction_audit(
@@ -334,7 +339,7 @@ class ModuleEventRouter:
                         outcome="ok",
                     )
                 )
-                await self._durable_complete(durable_key_str, event_provenance)
+                await self._durable_complete(durable_key_str, claim_token, event_provenance)
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
@@ -566,10 +571,11 @@ class ModuleEventRouter:
     async def _durable_complete(
         self,
         durable_key_str: str | None,
+        claim_token: str | None,
         event_provenance: ModuleEventProvenance,
     ) -> None:
         """Mark the durable ledger slot as completed if active."""
-        if durable_key_str is None or self._idempotency_store is None:
+        if durable_key_str is None or claim_token is None or self._idempotency_store is None:
             return
         try:
             await self._idempotency_store.complete(
@@ -577,6 +583,7 @@ class ModuleEventRouter:
                 tenant_id=event_provenance.tenant_id,
                 workspace_id=event_provenance.workspace_id,
                 idempotency_key_str=durable_key_str,
+                claim_token=claim_token,
             )
         except Exception:
             logger.warning(
@@ -589,17 +596,26 @@ class ModuleEventRouter:
     async def _durable_mark_failed(
         self,
         durable_key_str: str | None,
+        claim_token: str | None,
+        reaction: dict[str, Any],
         event_provenance: ModuleEventProvenance,
     ) -> None:
-        """Release the durable ledger slot on failure (retry-eligible)."""
-        if durable_key_str is None or self._idempotency_store is None:
+        """Transition the durable ledger slot to retryable or dead_letter on failure.
+
+        Emits ``runtime.reaction.dead_lettered`` when the retry budget is exhausted.
+        Module reactions cannot subscribe to ``runtime.*`` events, so this emission
+        is safe from recursive dead-lettering.
+        """
+        if durable_key_str is None or claim_token is None or self._idempotency_store is None:
             return
         try:
-            await self._idempotency_store.mark_failed(
+            new_status = await self._idempotency_store.mark_failed(
                 app_id=event_provenance.app_id or "",
                 tenant_id=event_provenance.tenant_id,
                 workspace_id=event_provenance.workspace_id,
                 idempotency_key_str=durable_key_str,
+                claim_token=claim_token,
+                retry_delay_seconds=int(reaction.get("retry_delay_seconds") or 0),
             )
         except Exception:
             logger.warning(
@@ -608,6 +624,48 @@ class ModuleEventRouter:
                 event_provenance.app_id,
                 exc_info=True,
             )
+            return
+        if new_status == "dead_letter":
+            logger.warning(
+                "REACTION_DEAD_LETTERED: key=%s module=%s reaction=%s app=%s attempts=%s",
+                durable_key_str,
+                reaction.get("module_id"),
+                reaction.get("id"),
+                event_provenance.app_id,
+                reaction.get("max_attempts"),
+            )
+            if self._event_emitter is not None:
+                dead_letter_event = {
+                    "id": f"evt_{uuid4().hex}",
+                    "type": "runtime.reaction.dead_lettered",
+                    "version": 1,
+                    "occurred_at": _utc_now(),
+                    "source": {
+                        "layer": "runtime",
+                        "module_id": reaction.get("module_id"),
+                        "reaction_id": reaction.get("id"),
+                    },
+                    "app_id": event_provenance.app_id,
+                    "tenant_id": event_provenance.tenant_id,
+                    "workspace_id": event_provenance.workspace_id,
+                    "payload": {
+                        "idempotency_key_str": durable_key_str,
+                        "reaction_id": reaction.get("id"),
+                        "module_id": reaction.get("module_id"),
+                        "max_attempts": reaction.get("max_attempts"),
+                    },
+                    "visibility": "internal",
+                }
+                try:
+                    await self._maybe_await(
+                        self._event_emitter("runtime.reaction.dead_lettered", dead_letter_event)
+                    )
+                except Exception:
+                    logger.warning(
+                        "REACTION_DEAD_LETTER_EVENT_FAILED: key=%s",
+                        durable_key_str,
+                        exc_info=True,
+                    )
 
     def _handler_for(self, event_type: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
         async def handle(envelope: dict[str, Any]) -> None:
