@@ -45,7 +45,7 @@ Important AG2 facts:
 | `mozaiksai/core/workflow/orchestration_patterns.py` | Loads workflow config, persistence, context, agents, lifecycle, transport, then invokes `AG2NetworkRunner` | Keep as Mozaiks run setup/teardown. Generic turn execution belongs to AG2 Hub/AgentClient. |
 | `mozaiksai/core/workflow/outputs/runtime_validation.py` and `runtime_events.py` | Validate AG2 reply bodies against Mozaiks structured-output contracts and emit runtime validation events | Keep. These are Mozaiks contract observers around AG2 envelopes, not an execution loop. |
 | `mozaiksai/core/workflow/execution/network_graph.py` | Compiles `transition_graph.yaml` to AG2 `TransitionGraph`; resolves next speaker through `WorkflowAdapter.fold` manually | Keep compile logic. Remove manual fold as primary runtime routing once Hub workflow channels drive progression. |
-| `mozaiksai/core/workflow/task_batches.py` | Validates batch/conveyor config, extracts typed task lists, dependency-sorts tasks, runs workers through AG2 task channels, merges outputs into context | Keep typed DAG contract, dependency scheduler, ownership validation, and result merge. Worker invocation belongs to AG2 Network channels. |
+| `mozaiksai/core/workflow/task_batches.py` | Validates batch/conveyor config, extracts typed task lists, dependency-sorts tasks, runs workers through AG2 Task lifecycle-wrapped turns, merges outputs into context | Keep typed DAG contract, dependency scheduler, ownership validation, and result merge. Current worker invocation uses standalone AG2 Task stream evidence; future Hub-backed worker channels should use real AG2 channel ids and TaskMirror. |
 | `mozaiksai/core/workflow/execution/stream_bridge.py` | Bridges AG2 stream events to Mozaiks transport | Keep, but attach to AG2 channel/task streams rather than only a local per-turn stream. |
 
 ## Target Execution Shape
@@ -290,17 +290,18 @@ runtime `Agent.ask(...)` calls.
 Current checkpoint:
 
 - `mozaiksai/core/adapters/ag2_task_batch_runner.py` executes one deterministic
-  task-batch work item through an AG2 workflow channel and reads the worker
-  output from AG2 WAL / structured output results.
+  task-batch work item as an AG2 Task lifecycle-wrapped worker turn and records
+  normalized Task stream evidence.
 - `mozaiksai/core/workflow/task_batches.py` still owns task extraction,
   dependency readiness, concurrency, failure policy, output ownership, and
   result merge, but no longer calls worker agents directly.
-- Worker task context is passed through AG2 workflow channel `context_vars`, so
-  downstream worker prompts/tools consume AG2 channel state instead of a
-  Mozaiks-only `variables` kwarg.
+- Worker task context is passed through the scoped worker turn variables and
+  dependencies; this standalone path does not create a per-task AG2 Network
+  channel or WAL.
 - `run_workflow_orchestration(...)` supports task-batch workflows through
   phased AG2 Network execution: trigger-agent phase, deterministic task
-  channels, then downstream continuation phase with batch result context.
+  lifecycle-wrapped worker turns, then downstream continuation phase with batch
+  result context.
 - `tests/test_ag2_network_execution_alignment.py` verifies planner -> task
   batch -> synthesis execution across AG2 phases.
 

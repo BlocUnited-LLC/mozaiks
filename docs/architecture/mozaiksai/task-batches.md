@@ -127,20 +127,20 @@ phased AG2 Network execution:
 parent AG2 workflow phase
   -> decomposition/trigger agent emits structured task list
   -> Mozaiks extracts tasks and dependency graph
-  -> each ready task runs in its own AG2 workflow channel
+  -> each ready task runs as an AG2 Task lifecycle-wrapped worker turn
   -> Mozaiks validates and merges task outputs
   -> downstream AG2 workflow phase starts with result context keys populated
 ```
 
-For a matching batch, each task item is executed through AG2 Network:
+For a matching batch, each task item is executed through the task-batch runner:
 
 ```text
 task.initial_agent
   -> create/select that AG2 agent
-  -> open one-task AG2 workflow channel
-  -> pass task_context through workflow channel context_vars
-  -> AG2 default handler invokes the worker
-  -> read worker output from AG2 WAL / structured output result
+  -> create an AG2 Task with a standalone stream
+  -> pass task_context through the worker turn variables/dependencies
+  -> AG2 Agent.ask invokes the worker
+  -> record AG2 Task lifecycle events from the task stream
   -> normalize returned structured/code output
   -> validate output stays within task-owned paths
 ```
@@ -257,7 +257,7 @@ Use task batches when work is:
 
 - a typed list of similar items;
 - bounded to one workflow's context;
-- safe to execute as bounded AG2 task channels;
+- safe to execute as bounded AG2 Task lifecycle-wrapped worker turns;
 - mergeable through one declared result key;
 - short enough that independent child sessions are unnecessary.
 

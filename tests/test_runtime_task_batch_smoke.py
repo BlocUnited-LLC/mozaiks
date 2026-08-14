@@ -492,13 +492,18 @@ async def test_runtime_task_batch_smoke_runs_parallel_task_chats() -> None:
         "integration_adapter",
         "analytics_page",
     }
-    channel_ids = [
-        results[task_id]["_ag2_task_channel"]["channel_id"]
+    lifecycle_records = [
+        results[task_id]["_ag2_task_lifecycle"]
         for task_id in results["_meta"]["completed_tasks"]
     ]
-    assert len(channel_ids) == 4
-    assert len(set(channel_ids)) == 4
-    assert all(channel_id.startswith("runtime_smoke_tasks:") for channel_id in channel_ids)
+    assert len(lifecycle_records) == 4
+    assert all(record["channel_id"] is None for record in lifecycle_records)
+    assert all(record["status"] == "completed" for record in lifecycle_records)
+    assert all(
+        [event["event"] for event in record["events"]] == ["TaskStarted", "TaskCompleted"]
+        for record in lifecycle_records
+    )
+    assert len({record["task_id"] for record in lifecycle_records}) == 4
 
 
 @pytest.mark.asyncio

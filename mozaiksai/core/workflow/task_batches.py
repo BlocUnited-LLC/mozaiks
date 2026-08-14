@@ -339,9 +339,9 @@ async def execute_task_batches_for_trigger(
 ) -> dict[str, Any]:
     """Execute workflow-local task batches triggered by an agent turn.
 
-    Each task item runs through its own AG2 workflow channel. Normalized outputs
-    are written back to context, then the parent AG2 Network channel continues
-    from the next declared transition.
+    Each task item runs as a Mozaiks-scheduled worker turn wrapped in AG2 Task
+    lifecycle evidence. Normalized outputs are written back to context, then the
+    parent AG2 Network channel continues from the next declared transition.
     """
 
     if not batches_config or not batches_config.batches:
@@ -671,7 +671,7 @@ async def _run_one_task(
             last_error = runner_result.error or runner_result.status.value
         if runner_result is None or runner_result.status is not RunStatus.COMPLETED:
             raise RuntimeError(
-                f"AG2 task channel failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
+        f"AG2 task lifecycle failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
             )
 
     output = _normalize_agent_reply(runner_result.output)
@@ -699,8 +699,14 @@ async def _run_one_task(
     output.setdefault("_worker_agent", agent_name)
     output.setdefault("_owned_paths", list(task.get("owned_paths") or []))
     output.setdefault(
-        "_ag2_task_channel",
+        "_ag2_task_lifecycle",
         {
+            "task_id": runner_result.task_id,
+            "capability": runner_result.capability,
+            "status": runner_result.lifecycle_status,
+            "events": list(runner_result.lifecycle_events),
+            "started_at": runner_result.started_at,
+            "completed_at": runner_result.completed_at,
             "channel_id": runner_result.channel_id,
             "close_reason": runner_result.close_reason,
         },
