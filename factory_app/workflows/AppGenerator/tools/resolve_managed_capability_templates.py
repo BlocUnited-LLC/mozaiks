@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -15,6 +14,7 @@ from jinja2 import Template
 from factory_app.workflows.AppGenerator.tools.pack_context_schema import (
     validate_pack_context,
 )
+from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
     iter_context_assets,
@@ -476,6 +476,8 @@ def _file_owner_map(pack_source_path: Path) -> dict[str, str]:
 
 def _build_provenance_manifest(
     pack_file_map: list[tuple[dict[str, Any], list[dict[str, str]]]],
+    *,
+    build_timestamp: str | None = None,
 ) -> str:
     """Build a provenance manifest JSON string.
 
@@ -503,7 +505,7 @@ def _build_provenance_manifest(
     manifest = {
         "schema_version": _PROVENANCE_SCHEMA_VERSION,
         "framework_version": framework_version,
-        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "generated_at": resolve_build_timestamp(build_timestamp),
         "packs": packs_list,
     }
     return json.dumps(manifest, indent=2)
@@ -580,6 +582,7 @@ def _context_to_dict(context_variables: Any | None) -> dict[str, Any]:
                 "launch_check_command",
                 "monetization_check_command",
                 "pack_source_path",
+                "build_timestamp",
             ]
             result: dict[str, Any] = {}
             for key in keys:
@@ -628,6 +631,54 @@ def _resolve_pack_source_from_installed_state(
     if not descriptors:
         return None
     return str(descriptors[0].get("pack_source_path") or "")
+
+
+def _safe_declared_output_path(raw_path: Any, *, pack_id: str) -> str:
+    if not isinstance(raw_path, str):
+        raise PackIntegrityError(f"Pack '{pack_id}' required_outputs path must be a string")
+    path = raw_path.replace("\\", "/").strip()
+    pure = PurePosixPath(path)
+    if (
+        not path
+        or path.startswith("/")
+        or pure.is_absolute()
+        or any(part == ".." for part in pure.parts)
+        or (pure.parts and ":" in pure.parts[0])
+    ):
+        raise PackIntegrityError(
+            f"Pack '{pack_id}' required_outputs path must stay inside the app bundle: {raw_path!r}"
+        )
+    return str(pure)
+
+
+def resolve_declared_pack_output_paths(
+    capability_packs: list[dict[str, Any]] | None,
+    *,
+    context_variables: Any | None = None,
+) -> frozenset[str]:
+    """Return exact safe required_outputs paths from selected verified packs."""
+
+    paths: set[str] = set()
+    for pack in capability_packs or []:
+        if not isinstance(pack, dict):
+            continue
+        pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+        raw_path = _resolve_pack_source_from_installed_state(
+            pack,
+            context_variables=context_variables,
+        )
+        if not pack_id or not raw_path:
+            continue
+        pack_source_path = Path(raw_path)
+        verify_pack_integrity(pack_source_path, pack_id)
+        contract = _read_pack_contract(pack_source_path)
+        for index, output in enumerate(contract.get("required_outputs") or []):
+            if not isinstance(output, dict) or not str(output.get("path") or "").strip():
+                raise PackIntegrityError(
+                    f"Pack '{pack_id}' contract required_outputs[{index}].path is required"
+                )
+            paths.add(_safe_declared_output_path(output["path"], pack_id=pack_id))
+    return frozenset(paths)
 
 
 def resolve_templates_for_pack(
@@ -761,7 +812,10 @@ def resolve_managed_capability_templates(
             )
             for metadata, omap, files in provenance_entries
         ]
-        provenance_json = _build_provenance_manifest(pack_file_map)
+        provenance_json = _build_provenance_manifest(
+            pack_file_map,
+            build_timestamp=_context_to_dict(context_variables).get("build_timestamp"),
+        )
         existing_prov = results_by_filename.get(_PROVENANCE_PATH)
         if existing_prov is None:
             results_by_filename[_PROVENANCE_PATH] = provenance_json
@@ -778,6 +832,7 @@ __all__ = [
     "PackDependencyError",
     "PackIntegrityError",
     "resolve_managed_capability_templates",
+    "resolve_declared_pack_output_paths",
     "resolve_templates_for_pack",
     "verify_pack_integrity",
 ]

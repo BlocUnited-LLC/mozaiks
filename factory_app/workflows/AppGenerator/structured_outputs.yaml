@@ -1115,6 +1115,12 @@ models:
       agent_message:
         type: str
         description: Short planning summary for the build plan.
+      app_kind:
+        type: str
+        description: >
+          Product/domain classification used by planning and readiness inference,
+          such as saas, marketplace, or a brownfield build-path kind. This is
+          intentionally open-ended and is not the closed AppProvenanceKind taxonomy.
       pages:
         type: optional_list
         items: AppBuildPage

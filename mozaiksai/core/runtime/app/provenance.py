@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
@@ -217,6 +218,28 @@ def current_mozaiks_package_ref() -> str:
     return f"package:{__version__}"
 
 
+def resolve_build_timestamp(value: str | datetime | None = None) -> str:
+    """Return one canonical UTC timestamp for generated build provenance."""
+
+    if value is None:
+        resolved = datetime.now(tz=UTC)
+    elif isinstance(value, datetime):
+        resolved = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("build_timestamp must be a non-empty ISO-8601 timestamp")
+        try:
+            resolved = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("build_timestamp must be a valid ISO-8601 timestamp") from exc
+    else:
+        raise ValueError("build_timestamp must be an ISO-8601 string or datetime")
+    if resolved.tzinfo is None or resolved.utcoffset() is None:
+        raise ValueError("build_timestamp must include a timezone offset")
+    return resolved.astimezone(UTC).isoformat()
+
+
 def build_default_app_provenance(
     *,
     app_kind: AppProvenanceKind = "hand_authored",
@@ -227,6 +250,7 @@ def build_default_app_provenance(
     build_id: str | None = None,
     artifact_version_id: str | None = None,
     app_context_version_id: str | None = None,
+    timestamp: str | datetime | None = None,
     contracts: Mapping[str, str] | None = None,
     overlays: Mapping[str, str] | None = None,
     artifact_refs: Mapping[str, Any] | None = None,
@@ -252,6 +276,7 @@ def build_default_app_provenance(
                     "build_id": build_id,
                     "artifact_version_id": artifact_version_id,
                     "app_context_version_id": app_context_version_id,
+                    "timestamp": resolve_build_timestamp(timestamp),
                 },
                 "contracts": merged_contracts,
                 "overlays": dict(overlays or {}),
