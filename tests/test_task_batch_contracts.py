@@ -6,8 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from ag2 import Agent
 from ag2.network.policies import CHANNEL_STATE_DEP
+from pydantic import BaseModel
 
+from mozaiksai.core.adapters.ag2_task_batch_runner import (
+    AG2TaskBatchRunner,
+    AG2TaskBatchRunnerRequest,
+)
+from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
@@ -50,6 +57,80 @@ def _valid_payload() -> dict:
             }
         ],
     }
+
+
+class _Reply:
+    def __init__(self, body: str) -> None:
+        self.body = body
+
+
+class _RunnerAgent(Agent):
+    def __init__(
+        self,
+        body: str,
+        *,
+        fail: bool = False,
+        cancel: bool = False,
+        delay_seconds: float = 0.0,
+    ) -> None:
+        super().__init__("WorkerAgent", prompt="deterministic test worker")
+        self.body = body
+        self.fail = fail
+        self.cancel = cancel
+        self.delay_seconds = delay_seconds
+        self.ask_calls: list[dict] = []
+
+    async def ask(self, message, **kwargs):  # type: ignore[override]
+        self.ask_calls.append({"message": message, "kwargs": kwargs})
+        if self.delay_seconds:
+            import asyncio
+
+            await asyncio.sleep(self.delay_seconds)
+        if self.cancel:
+            import asyncio
+
+            raise asyncio.CancelledError()
+        if self.fail:
+            raise RuntimeError("planned worker failure")
+        return _Reply(self.body)
+
+
+class _RequiredWorkerOutput(BaseModel):
+    ok: bool
+
+
+def _runner_request(agent: Agent, **overrides) -> AG2TaskBatchRunnerRequest:
+    payload = {
+        "workflow_name": "TaskBatchWorkflow",
+        "batch_id": "document_reviews",
+        "task_id": "review_a",
+        "chat_id": "chat-1",
+        "app_id": "app-1",
+        "agent_name": "WorkerAgent",
+        "agent": agent,
+        "prompt": "Review document A.",
+        "context_variables": {"current_task_id": "review_a"},
+        "structured_registry": {},
+        "timeout_seconds": 5,
+    }
+    payload.update(overrides)
+    return AG2TaskBatchRunnerRequest(**payload)
+
+
+def _event_names(result) -> list[str]:
+    return [event["event"] for event in result.lifecycle_events]
+
+
+def _stable_lifecycle_shape(result) -> list[dict]:
+    shape: list[dict] = []
+    for event in result.lifecycle_events:
+        stable = {
+            key: value
+            for key, value in event.items()
+            if key not in {"task_id", "created_at", "expires_at", "task_stream_id"}
+        }
+        shape.append(stable)
+    return shape
 
 
 def test_parse_task_batches_config_accepts_canonical_payload() -> None:
@@ -112,6 +193,114 @@ def test_parse_task_batches_config_rejects_duplicate_conveyor_and_batch_ids() ->
 
     with pytest.raises(ValueError, match="duplicate task batch id"):
         parse_task_batches_config(payload)
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_emits_authentic_start_and_completion_evidence() -> None:
+    agent = _RunnerAgent('{"ok": true}')
+
+    result = await AG2TaskBatchRunner().run(_runner_request(agent))
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.output == {"ok": True}
+    assert result.task_id
+    assert result.capability == "mozaiks.task_batch.TaskBatchWorkflow.document_reviews.WorkerAgent"
+    assert result.lifecycle_status == "completed"
+    assert result.channel_id is None
+    assert result.close_reason == "agent_ask_completed"
+    assert _event_names(result) == ["TaskStarted", "TaskCompleted"]
+    started = result.lifecycle_events[0]
+    assert started["task_id"] == result.task_id
+    assert started["capability"] == result.capability
+    assert started["payload"]["mozaiks_task_id"] == "review_a"
+    completed = result.lifecycle_events[1]
+    assert completed["task_id"] == result.task_id
+    assert completed["result"] == {"ok": True}
+    assert result.started_at
+    assert result.completed_at
+
+    ask_kwargs = agent.ask_calls[0]["kwargs"]
+    assert "TaskConfig" not in repr(ask_kwargs)
+    assert not ask_kwargs.get("tools")
+    assert "run_subtask" not in repr(ask_kwargs)
+    assert "run_subtasks" not in repr(ask_kwargs)
+    assert "background_agent_tool" not in repr(ask_kwargs)
+    assert "dynamic_agent" not in repr(ask_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_emits_failure_evidence_for_worker_exception() -> None:
+    agent = _RunnerAgent("{}", fail=True)
+
+    result = await AG2TaskBatchRunner().run(_runner_request(agent))
+
+    assert result.status is RunStatus.FAILED
+    assert result.lifecycle_status == "failed"
+    assert result.close_reason == "worker_failed"
+    assert result.channel_id is None
+    assert _event_names(result) == ["TaskStarted", "TaskFailed"]
+    assert result.lifecycle_events[-1]["error"] == "planned worker failure"
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_represents_timeout_as_task_expiry() -> None:
+    agent = _RunnerAgent("{}", delay_seconds=2.0)
+
+    result = await AG2TaskBatchRunner().run(
+        _runner_request(agent, timeout_seconds=1)
+    )
+
+    assert result.status is RunStatus.PAUSED
+    assert result.lifecycle_status == "expired"
+    assert result.close_reason == "expired"
+    assert result.channel_id is None
+    assert _event_names(result) == ["TaskStarted", "TaskExpired"]
+    assert "did not complete within 1 seconds" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_represents_worker_cancellation_truthfully() -> None:
+    agent = _RunnerAgent("{}", cancel=True)
+
+    result = await AG2TaskBatchRunner().run(_runner_request(agent))
+
+    assert result.status is RunStatus.PAUSED
+    assert result.lifecycle_status == "cancelled"
+    assert result.close_reason == "cancelled"
+    assert result.channel_id is None
+    assert _event_names(result) == ["TaskStarted", "TaskCancelled"]
+    assert result.lifecycle_events[-1]["reason"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_fails_lifecycle_on_structured_output_validation_error() -> None:
+    agent = _RunnerAgent('{"unexpected": true}')
+
+    result = await AG2TaskBatchRunner().run(
+        _runner_request(
+            agent,
+            structured_registry={"WorkerAgent": _RequiredWorkerOutput},
+        )
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.lifecycle_status == "failed"
+    assert result.close_reason == "structured_output_validation_failed"
+    assert result.channel_id is None
+    assert _event_names(result) == ["TaskStarted", "TaskFailed"]
+    assert "structured output validation failed" in str(result.error)
+    assert "structured output validation failed" in result.lifecycle_events[-1]["error"]
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_lifecycle_evidence_shape_is_repeatable_offline() -> None:
+    first = await AG2TaskBatchRunner().run(_runner_request(_RunnerAgent('{"ok": true}')))
+    second = await AG2TaskBatchRunner().run(_runner_request(_RunnerAgent('{"ok": true}')))
+
+    assert _stable_lifecycle_shape(first) == _stable_lifecycle_shape(second)
+    assert first.task_id != second.task_id
+    assert first.channel_id is None
+    assert second.channel_id is None
 
 
 def test_load_task_batches_config_resolves_workflow_local_file(tmp_path: Path) -> None:
@@ -238,6 +427,13 @@ async def test_execute_task_batches_for_trigger_collects_worker_outputs() -> Non
     assert context["app_task_batch_results"]["profiles"]["code_files"][0]["filename"] == (
         "modules/profiles/module.yaml"
     )
+    lifecycle = context["app_task_batch_results"]["profiles"]["_ag2_task_lifecycle"]
+    assert lifecycle["channel_id"] is None
+    assert lifecycle["status"] == "completed"
+    assert [event["event"] for event in lifecycle["events"]] == [
+        "TaskStarted",
+        "TaskCompleted",
+    ]
     assert seen_variables[0]["task_run_mode"] is True
     assert seen_variables[0]["current_build_task_type"] == "module_contract"
     assert seen_variables[0]["dependency_task_outputs"] == {}
@@ -383,6 +579,55 @@ async def test_conveyor_rejects_task_for_agent_outside_allowed_execution_agents(
                             "execution_agent": "ToolsAgent",
                             "task_prompt": "Create tools.",
                         }
+                    ]
+                }
+            },
+            fresh_agents_per_task=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_task_batches_rejects_cyclic_dependencies_before_worker_execution() -> None:
+    config = parse_task_batches_config(
+        {
+            "version": 1,
+            "conveyors": [
+                {
+                    "id": "workflow_generation",
+                    "decomposition_agent": "DecompositionAgent",
+                    "execution_agents": ["AgentRosterAgent"],
+                    "concurrency": 1,
+                }
+            ],
+        }
+    )
+
+    class _UnexpectedAgent:
+        async def ask(self, message, **kwargs):  # noqa: ARG002
+            raise AssertionError("cyclic dependencies must fail before worker execution")
+
+    with pytest.raises(ValueError, match="unresolved or cyclic dependencies"):
+        await execute_task_batches_for_trigger(
+            workflow_name="AgentGenerator",
+            trigger_agent="DecompositionAgent",
+            batches_config=config,
+            agents={"AgentRosterAgent": _UnexpectedAgent()},
+            context_variables={},
+            structured_output={
+                "DecompositionPlan": {
+                    "tasks": [
+                        {
+                            "task_id": "agent_roster",
+                            "execution_agent": "AgentRosterAgent",
+                            "task_prompt": "Create the agent roster.",
+                            "depends_on": ["transition_graph"],
+                        },
+                        {
+                            "task_id": "transition_graph",
+                            "execution_agent": "AgentRosterAgent",
+                            "task_prompt": "Create the transition graph.",
+                            "depends_on": ["agent_roster"],
+                        },
                     ]
                 }
             },

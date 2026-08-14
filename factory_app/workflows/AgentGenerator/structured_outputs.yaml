@@ -940,7 +940,7 @@ models:
           name is semantic drift.
       concurrency:
         type: int
-        description: Maximum concurrent AG2 task channels for ready tasks.
+        description: Maximum concurrent AG2 task lifecycle-wrapped worker turns for ready tasks.
       failure_policy:
         type: literal
         values:

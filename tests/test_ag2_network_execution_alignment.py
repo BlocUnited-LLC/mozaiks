@@ -1227,7 +1227,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         "WorkerAgent",
         lambda context: {
             "task_id": context["current_task_id"],
-            "summary": "Worker used AG2 task channel context.",
+            "summary": "Worker used AG2 task lifecycle context.",
             "owned_paths": context["current_task"]["owned_paths"],
             "agent_message": "Worker done.",
         },
@@ -1313,7 +1313,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
     assert worker_agent.context_seen[0]["current_task_id"] == "module_contract"
     assert synthesis_agent.context_seen[0]["runtime_tasks_status"] == "completed"
     assert synthesis_agent.context_seen[0]["runtime_tasks_results"]["module_contract"]["summary"] == (
-        "Worker used AG2 task channel context."
+        "Worker used AG2 task lifecycle context."
     )
     assert [message["agent_name"] for message in persistence.assistant_messages] == [
         "PlannerAgent",
