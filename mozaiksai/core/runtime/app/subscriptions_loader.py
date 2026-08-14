@@ -546,6 +546,8 @@ class PlanDef(BaseModel):
         if not isinstance(value, list):
             raise ValueError("capabilities must be a list")
         result: list[str] = []
+        seen: set[str] = set()
+        duplicates: list[str] = []
         for raw in value:
             cap = str(raw).strip()
             if not cap:
@@ -554,7 +556,16 @@ class PlanDef(BaseModel):
                 raise ValueError(
                     f"capability_id must match [a-z0-9_.]+, got {cap!r}"
                 )
-            result.append(cap)
+            if cap in seen:
+                duplicates.append(cap)
+            else:
+                seen.add(cap)
+                result.append(cap)
+        if duplicates:
+            raise ValueError(
+                f"plan capabilities must be unique; duplicate capability_ids: "
+                f"{sorted(set(duplicates))}"
+            )
         return result
 
 

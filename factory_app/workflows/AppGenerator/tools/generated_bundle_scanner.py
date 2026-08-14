@@ -991,19 +991,83 @@ def _entitlement_gates_from_module_yaml(path: str, content: str) -> set[str]:
     return gates
 
 
+def _entitlement_gate_map_from_module_yaml(path: str, content: str) -> dict[str, str]:
+    """Return {action_id: entitlement_gate} for every gated action in module.yaml."""
+    parsed, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error or not isinstance(parsed, dict):
+        return {}
+    result: dict[str, str] = {}
+    for action in (parsed.get("actions") or []):
+        if not isinstance(action, dict):
+            continue
+        gate = str(action.get("entitlement_gate") or "").strip()
+        action_id = str(action.get("id") or "").strip()
+        if gate and action_id:
+            result[action_id] = gate
+    return result
+
+
 def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
+    """Extract all capability_ids granted by any plan in subscriptions.yaml.
+
+    Handles both v1 (flat plans[]) and v2 (products[].plans[]) schema shapes.
+    Raw YAML parsing is intentional — the Pydantic model is not available here
+    without a full import chain; callers that need strict validation should use
+    SubscriptionsConfig.model_validate() directly.
+    """
     try:
         config = yaml.safe_load(content) or {}
     except Exception:
         return set()
     capability_ids: set[str] = set()
+    # v1: root-level plans[]
     for plan in (config.get("plans") or []):
         if not isinstance(plan, dict):
             continue
         for cap in (plan.get("capabilities") or []):
             if isinstance(cap, str) and cap.strip():
                 capability_ids.add(cap.strip())
+    # v2: products[].plans[]
+    for product in (config.get("products") or []):
+        if not isinstance(product, dict):
+            continue
+        for plan in (product.get("plans") or []):
+            if not isinstance(plan, dict):
+                continue
+            for cap in (plan.get("capabilities") or []):
+                if isinstance(cap, str) and cap.strip():
+                    capability_ids.add(cap.strip())
     return capability_ids
+
+
+def _has_entitlement_assignment_store(subs_content: str) -> bool:
+    """Return True when subscriptions.yaml declares an assignment_store.
+
+    An assignment_store signals the app uses ConfiguredEntitlementAdapter with
+    a static plan catalog for runtime entitlement resolution. Only these apps
+    are subject to compile-time entitlement_gate ↔ subscriptions.yaml closure
+    validation.
+
+    Apps whose subscriptions.yaml has no assignment_store are either using a
+    custom/dynamic adapter whose capability grants are not statically declared
+    in the plan catalog, or they carry the subscriptions.yaml only as a pricing
+    display catalog. Their entitlement_gate values are not statically resolvable
+    from the plan capabilities list and must not be rejected by bundle validation.
+    """
+    try:
+        config = yaml.safe_load(subs_content) or {}
+    except Exception:
+        return False
+    if not isinstance(config, dict):
+        return False
+    # v1: root-level assignment_store
+    if isinstance(config.get("assignment_store"), dict):
+        return True
+    # v2: any product-level assignment_store also signals static adapter use
+    for product in (config.get("products") or []):
+        if isinstance(product, dict) and isinstance(product.get("assignment_store"), dict):
+            return True
+    return False
 
 
 def _scan_self_hosted_entitlement_dispatch_contract(
@@ -1072,32 +1136,80 @@ def _scan_self_hosted_entitlement_dispatch_contract(
 
 
 def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> list[str]:
-    """Validate that all entitlement_gate values in module.yaml files reference
-    capability_ids that appear in at least one plan in config/subscriptions.yaml.
+    """Validate entitlement_gate ↔ subscriptions.yaml compile-time closure.
+
+    For every module action that declares an entitlement_gate capability_id,
+    that capability_id must appear in at least one plan's capabilities list in
+    config/subscriptions.yaml. An unresolvable gate causes permanent runtime
+    denial for all callers regardless of their subscription tier.
+
+    Skips apps without config/subscriptions.yaml (ungated apps, NoOp adapter).
+    Skips apps whose subscriptions.yaml has no assignment_store (custom/dynamic
+    adapter — their grants are not statically declared in the plan catalog).
+
+    Diagnostics include:
+    - module path and action id of the gated action
+    - the unresolvable capability_id
+    - typo near-matches found in the declared plan capabilities
+    - confirmation location (config/subscriptions.yaml plans[].capabilities[])
+    - whether no plan grants any capabilities at all
+
+    Errors are returned in deterministic sorted order.
     """
+    import difflib
+
     normalized_files = _normalized_files_map(files_map)
     subs_content = normalized_files.get("config/subscriptions.yaml")
     if not subs_content:
+        # No subscriptions.yaml → ungated (NoOp adapter) or purely custom.
+        return []
+
+    if not _has_entitlement_assignment_store(subs_content):
+        # subscriptions.yaml present but no assignment_store → custom/dynamic
+        # adapter.  Gates are not statically resolvable from the plan catalog.
         return []
 
     plan_capabilities = _capability_ids_from_subscriptions_yaml(subs_content)
-    if not plan_capabilities:
+
+    # Collect (module_path, action_id, gate) for every gated action.
+    gate_contexts: list[tuple[str, str, str]] = []
+    for path, content in sorted(normalized_files.items()):
+        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+            continue
+        gate_map = _entitlement_gate_map_from_module_yaml(path, content)
+        for action_id, gate in sorted(gate_map.items()):
+            gate_contexts.append((path, action_id, gate))
+
+    if not gate_contexts:
+        # No gated actions in any module — nothing to validate.
         return []
 
     errors: list[str] = []
-    for path, content in normalized_files.items():
-        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+    for module_path, action_id, gate in gate_contexts:
+        if gate in plan_capabilities:
             continue
-        gates = _entitlement_gates_from_module_yaml(path, content)
-        unknown = sorted(gate for gate in gates if gate not in plan_capabilities)
-        if unknown:
-            errors.append(
-                f"{path}: entitlement_gate values {unknown} do not appear in any "
-                "plan's capabilities in config/subscriptions.yaml. Each gated capability "
-                "must be listed under at least one plan."
-            )
 
-    return errors
+        msg = (
+            f"{module_path}: action '{action_id}' declares "
+            f"entitlement_gate '{gate}' which is not granted by any plan in "
+            f"config/subscriptions.yaml. "
+            f"Actions with an unresolvable gate permanently deny all callers "
+            f"regardless of subscription tier. "
+            f"Add '{gate}' to at least one plan's capabilities[], or correct "
+            f"the capability_id. "
+            f"Expected location: config/subscriptions.yaml → "
+            f"plans[].capabilities[] (v1) or "
+            f"products[].plans[].capabilities[] (v2)."
+        )
+        if plan_capabilities:
+            close = difflib.get_close_matches(gate, sorted(plan_capabilities), n=3, cutoff=0.7)
+            if close:
+                msg += f" Near-matches in declared plan capabilities: {close}."
+        else:
+            msg += " No plan currently grants any capabilities."
+        errors.append(msg)
+
+    return sorted(errors)
 
 
 def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:

@@ -14,6 +14,27 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Entitlement gate compile-time closure**: Generated app bundles that use
+  `ConfiguredEntitlementAdapter` (i.e. declare `assignment_store` in
+  `config/subscriptions.yaml`) now fail deterministic bundle validation if any
+  `module.yaml` action declares an `entitlement_gate` capability_id that is not
+  granted by at least one subscription plan. Previously such bundles passed
+  validation but permanently denied the gated action at runtime for every user.
+  - Per-action diagnostics name the module path, action id, and unresolvable
+    capability_id, and suggest typo near-matches from the declared plan catalog.
+  - Apps without `subscriptions.yaml` (ungated, `NoOpEntitlementAdapter`) and
+    apps whose `subscriptions.yaml` has no `assignment_store` (custom/dynamic
+    adapter) are unaffected.
+  - `PlanDef` in `subscriptions_loader` now rejects plans that list the same
+    `capability_id` more than once (duplicate conflicting declarations).
+  - `_capability_ids_from_subscriptions_yaml` in the bundle scanner now handles
+    both v1 (flat `plans[]`) and v2 (`products[].plans[]`) subscriptions schema.
+  - 33 tests in `tests/test_entitlement_gate_closure.py` cover all scenarios:
+    positive (valid gated actions, multi-plan grants, custom adapter exemption,
+    ungated app, no-action bundle) and negative (unknown gate, near-match typo,
+    ungranted capability, all-plans-empty, malformed YAML, multi-module multi-
+    failure deterministic ordering, duplicate capabilities).
+
 - **Community Component Foundation v1**: Extended capability packs to carry versioned identity and machine-readable dependency declarations without introducing a parallel component runtime.
   - `context.yaml` pack blocks now require `version`; `author`, `license`, and `source` remain optional metadata.
   - `contract.yaml` supports the canonical `requires.packs` / `requires.capabilities` block for machine-readable dependency declarations; exact `requires.packs[].version` values are enforced when present.
