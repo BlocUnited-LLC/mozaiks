@@ -1007,67 +1007,35 @@ def _entitlement_gate_map_from_module_yaml(path: str, content: str) -> dict[str,
     return result
 
 
-def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
-    """Extract all capability_ids granted by any plan in subscriptions.yaml.
-
-    Handles both v1 (flat plans[]) and v2 (products[].plans[]) schema shapes.
-    Raw YAML parsing is intentional — the Pydantic model is not available here
-    without a full import chain; callers that need strict validation should use
-    SubscriptionsConfig.model_validate() directly.
-    """
+def _subscriptions_config_from_yaml(path: str, content: str) -> tuple[Any | None, str | None]:
+    raw, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error:
+        return None, error
     try:
-        config = yaml.safe_load(content) or {}
-    except Exception:
-        return set()
+        from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+
+        return SubscriptionsConfig.model_validate(raw), None
+    except Exception as exc:
+        return None, f"{path}: invalid subscriptions contract: {exc}"
+
+
+def _capability_ids_from_subscriptions_config(config: Any) -> set[str]:
+    """Extract capability_ids using the canonical subscriptions loader output."""
     capability_ids: set[str] = set()
-    # v1: root-level plans[]
-    for plan in (config.get("plans") or []):
-        if not isinstance(plan, dict):
-            continue
-        for cap in (plan.get("capabilities") or []):
-            if isinstance(cap, str) and cap.strip():
-                capability_ids.add(cap.strip())
-    # v2: products[].plans[]
-    for product in (config.get("products") or []):
-        if not isinstance(product, dict):
-            continue
-        for plan in (product.get("plans") or []):
-            if not isinstance(plan, dict):
-                continue
-            for cap in (plan.get("capabilities") or []):
-                if isinstance(cap, str) and cap.strip():
-                    capability_ids.add(cap.strip())
+    for plan in (getattr(config, "plans", None) or []):
+        capability_ids.update(str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip())
+    for product in (getattr(config, "products", None) or []):
+        for plan in (getattr(product, "plans", None) or []):
+            capability_ids.update(str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip())
     return capability_ids
 
 
-def _has_entitlement_assignment_store(subs_content: str) -> bool:
-    """Return True when subscriptions.yaml declares an assignment_store.
-
-    An assignment_store signals the app uses ConfiguredEntitlementAdapter with
-    a static plan catalog for runtime entitlement resolution. Only these apps
-    are subject to compile-time entitlement_gate ↔ subscriptions.yaml closure
-    validation.
-
-    Apps whose subscriptions.yaml has no assignment_store are either using a
-    custom/dynamic adapter whose capability grants are not statically declared
-    in the plan catalog, or they carry the subscriptions.yaml only as a pricing
-    display catalog. Their entitlement_gate values are not statically resolvable
-    from the plan capabilities list and must not be rejected by bundle validation.
-    """
-    try:
-        config = yaml.safe_load(subs_content) or {}
-    except Exception:
-        return False
-    if not isinstance(config, dict):
-        return False
-    # v1: root-level assignment_store
-    if isinstance(config.get("assignment_store"), dict):
-        return True
-    # v2: any product-level assignment_store also signals static adapter use
-    for product in (config.get("products") or []):
-        if isinstance(product, dict) and isinstance(product.get("assignment_store"), dict):
-            return True
-    return False
+def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
+    """Extract plan-granted capability_ids from canonical subscriptions parsing."""
+    config, error = _subscriptions_config_from_yaml("config/subscriptions.yaml", content)
+    if error or config is None:
+        return set()
+    return _capability_ids_from_subscriptions_config(config)
 
 
 def _scan_self_hosted_entitlement_dispatch_contract(
@@ -1144,8 +1112,9 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
     denial for all callers regardless of their subscription tier.
 
     Skips apps without config/subscriptions.yaml (ungated apps, NoOp adapter).
-    Skips apps whose subscriptions.yaml has no assignment_store (custom/dynamic
-    adapter — their grants are not statically declared in the plan catalog).
+    Apps with config/subscriptions.yaml use ConfiguredEntitlementAdapter at
+    platform startup; assignment_store controls persisted assignment lookup, not
+    adapter selection.
 
     Diagnostics include:
     - module path and action id of the gated action
@@ -1161,15 +1130,16 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
     normalized_files = _normalized_files_map(files_map)
     subs_content = normalized_files.get("config/subscriptions.yaml")
     if not subs_content:
-        # No subscriptions.yaml → ungated (NoOp adapter) or purely custom.
+        # No subscriptions.yaml -> ungated app, so ModuleExecutor uses NoOp.
         return []
 
-    if not _has_entitlement_assignment_store(subs_content):
-        # subscriptions.yaml present but no assignment_store → custom/dynamic
-        # adapter.  Gates are not statically resolvable from the plan catalog.
-        return []
-
-    plan_capabilities = _capability_ids_from_subscriptions_yaml(subs_content)
+    subscriptions_config, subscriptions_error = _subscriptions_config_from_yaml(
+        "config/subscriptions.yaml",
+        subs_content,
+    )
+    if subscriptions_error:
+        return [subscriptions_error]
+    plan_capabilities = _capability_ids_from_subscriptions_config(subscriptions_config)
 
     # Collect (module_path, action_id, gate) for every gated action.
     gate_contexts: list[tuple[str, str, str]] = []

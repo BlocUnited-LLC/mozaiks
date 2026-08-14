@@ -7,26 +7,21 @@ capability_id that no subscription plan grants.
 Validation boundary
 -------------------
 ``_scan_entitlement_gate_capability_alignment`` in ``generated_bundle_scanner``
-is the canonical cross-file validation owner.  It consumes:
+is the cross-file validation owner.  It consumes:
 
-- ``config/subscriptions.yaml``  — parsed via ``_capability_ids_from_subscriptions_yaml``
-  (raw YAML; handles both v1 flat ``plans[]`` and v2 ``products[].plans[]``)
+- ``config/subscriptions.yaml``  — parsed through the canonical
+  ``SubscriptionsConfig`` loader model, then inspected for plan capabilities
 - ``modules/*/module.yaml``      — parsed via ``_entitlement_gate_map_from_module_yaml``
   ({action_id → capability_id} for gated actions)
 
-Static vs. dynamic adapter distinction
----------------------------------------
-The scanner only validates entitlement_gate closure when ``subscriptions.yaml``
-declares an ``assignment_store`` (v1 root-level or v2 product-level).  An
-``assignment_store`` signals that the app intends to use
-``ConfiguredEntitlementAdapter`` with a static plan catalog at runtime.
+Configured adapter selection
+----------------------------
+The platform wires ``ConfiguredEntitlementAdapter`` whenever
+``config/subscriptions.yaml`` loads successfully.  ``assignment_store`` controls
+persisted subscription assignment lookup; it is not the adapter-selection signal.
 
-Apps with ``subscriptions.yaml`` but **no** ``assignment_store`` may be using a
-custom or dynamic entitlement adapter whose grants are not declared in the plan
-catalog.  The scanner skips gate-capability closure for those apps.
-
-Apps without ``subscriptions.yaml`` at all (ungated, ``NoOpEntitlementAdapter``)
-are also skipped.
+Apps without ``subscriptions.yaml`` at all use ``NoOpEntitlementAdapter`` and
+are skipped.
 
 Duplicate capability detection
 --------------------------------
@@ -40,8 +35,6 @@ These tests do NOT exercise:
 - AG2 reasoning, AppBuildPlan construction, or Jinja materialization
 - CapabilityPack template selection or injection
 - Real MongoDB or network calls
-- The ConfiguredEntitlementAdapter runtime check path (covered in
-  test_configured_entitlement_adapter.py and test_entitlement_drift.py)
 """
 
 from __future__ import annotations
@@ -54,9 +47,10 @@ from pydantic import ValidationError
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _capability_ids_from_subscriptions_yaml,
     _entitlement_gate_map_from_module_yaml,
-    _has_entitlement_assignment_store,
     _scan_entitlement_gate_capability_alignment,
+    scan_generated_bundle,
 )
+from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.subscriptions_loader import (
     PlanDef,
     SubscriptionsConfig,
@@ -198,33 +192,6 @@ class TestCapabilityIdsFromSubscriptionsYaml:
 
     def test_empty_string_returns_empty_set(self) -> None:
         assert _capability_ids_from_subscriptions_yaml("") == set()
-
-
-# ---------------------------------------------------------------------------
-# Unit: _has_entitlement_assignment_store
-# ---------------------------------------------------------------------------
-
-
-class TestHasEntitlementAssignmentStore:
-    def test_v1_with_assignment_store_returns_true(self) -> None:
-        assert _has_entitlement_assignment_store(_SUBS_V1_WITH_STORE) is True
-
-    def test_v1_without_assignment_store_returns_false(self) -> None:
-        assert _has_entitlement_assignment_store(_SUBS_V1_NO_STORE) is False
-
-    def test_v2_with_product_assignment_store_returns_true(self) -> None:
-        assert _has_entitlement_assignment_store(_SUBS_V2_WITH_STORE) is True
-
-    def test_v2_without_assignment_store_returns_false(self) -> None:
-        assert _has_entitlement_assignment_store(_SUBS_V2_NO_STORE) is False
-
-    def test_invalid_yaml_returns_false(self) -> None:
-        assert _has_entitlement_assignment_store(": }{bad yaml") is False
-
-
-# ---------------------------------------------------------------------------
-# Unit: _entitlement_gate_map_from_module_yaml
-# ---------------------------------------------------------------------------
 
 
 class TestEntitlementGateMapFromModuleYaml:
@@ -369,31 +336,26 @@ class TestEntitlementGateClosurePositive:
         )
         assert _scan_entitlement_gate_capability_alignment(bundle) == []
 
-    def test_custom_dynamic_adapter_v1_no_store_skips_validation(self) -> None:
-        """App with subscriptions.yaml but no assignment_store uses a custom adapter."""
+    def test_v1_without_assignment_store_still_validates_granted_gate(self) -> None:
+        """assignment_store is not the runtime adapter-selection signal."""
         bundle = _bundle(
             subs=_SUBS_V1_NO_STORE,
             modules={
                 "modules/tasks/module.yaml": _module_yaml(
                     "tasks",
-                    actions=[
-                        # This gate does NOT appear in the subscriptions plan capabilities.
-                        # But since there is no assignment_store, it's a custom/dynamic
-                        # adapter and bundle validation must not reject it.
-                        {"id": "create_task", "entitlement_gate": "custom.dynamic.cap"}
-                    ],
+                    actions=[{"id": "create_task", "entitlement_gate": "tasks.create"}],
                 )
             },
         )
         assert _scan_entitlement_gate_capability_alignment(bundle) == []
 
-    def test_custom_dynamic_adapter_v2_no_store_skips_validation(self) -> None:
+    def test_v2_without_assignment_store_still_validates_granted_gate(self) -> None:
         bundle = _bundle(
             subs=_SUBS_V2_NO_STORE,
             modules={
                 "modules/tasks/module.yaml": _module_yaml(
                     "tasks",
-                    actions=[{"id": "create_task", "entitlement_gate": "dynamic.runtime.cap"}],
+                    actions=[{"id": "create_task", "entitlement_gate": "tasks.create"}],
                 )
             },
         )
@@ -483,8 +445,38 @@ class TestEntitlementGateClosureNegative:
         assert "tasks.create" in errors[0]
         assert "No plan currently grants any capabilities" in errors[0]
 
-    def test_malformed_subscriptions_yaml_skips_gate_validation(self) -> None:
-        """Malformed YAML cannot be parsed — scanner must not crash, returns no gate errors."""
+    def test_v1_without_assignment_store_unknown_gate_fails(self) -> None:
+        """A configured adapter cannot evade validation by omitting assignment_store."""
+        bundle = _bundle(
+            subs=_SUBS_V1_NO_STORE,
+            modules={
+                "modules/tasks/module.yaml": _module_yaml(
+                    "tasks",
+                    actions=[{"id": "create_task", "entitlement_gate": "custom.dynamic.cap"}],
+                )
+            },
+        )
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "custom.dynamic.cap" in errors[0]
+        assert "create_task" in errors[0]
+
+    def test_v2_without_assignment_store_unknown_gate_fails(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_V2_NO_STORE,
+            modules={
+                "modules/tasks/module.yaml": _module_yaml(
+                    "tasks",
+                    actions=[{"id": "create_task", "entitlement_gate": "dynamic.runtime.cap"}],
+                )
+            },
+        )
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "dynamic.runtime.cap" in errors[0]
+
+    def test_malformed_subscriptions_yaml_fails_gate_validation(self) -> None:
+        """Malformed YAML is not a dynamic-adapter exemption."""
         bundle = _bundle(
             subs=": }{not valid yaml",
             modules={
@@ -494,9 +486,10 @@ class TestEntitlementGateClosureNegative:
                 )
             },
         )
-        # No assignment_store detectable from broken YAML → skips gate validation
         errors = _scan_entitlement_gate_capability_alignment(bundle)
-        assert errors == []
+        assert len(errors) == 1
+        assert "config/subscriptions.yaml" in errors[0]
+        assert "must be valid YAML" in errors[0]
 
     def test_deterministic_diagnostic_ordering_across_multiple_failures(self) -> None:
         """Multiple gate failures are returned in deterministic sorted order."""
@@ -556,6 +549,72 @@ class TestEntitlementGateClosureNegative:
         errors = _scan_entitlement_gate_capability_alignment(bundle)
         assert len(errors) == 1
         assert "tasks.export" in errors[0]
+
+
+class TestEntitlementGateClosurePublicScanner:
+    """Prove the public generated-bundle scanner sees the same closure errors."""
+
+    def test_scan_generated_bundle_blocks_unknown_gate_without_assignment_store(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_V1_NO_STORE,
+            modules={
+                "modules/tasks/module.yaml": _module_yaml(
+                    "tasks",
+                    actions=[{"id": "create_task", "entitlement_gate": "custom.dynamic.cap"}],
+                )
+            },
+        )
+
+        errors = scan_generated_bundle(bundle)
+
+        assert any("custom.dynamic.cap" in error for error in errors)
+        assert any("modules/tasks/module.yaml" in error for error in errors)
+
+    def test_scan_generated_bundle_blocks_malformed_subscriptions(self) -> None:
+        bundle = _bundle(
+            subs=": }{not valid yaml",
+            modules={
+                "modules/tasks/module.yaml": _module_yaml(
+                    "tasks",
+                    actions=[{"id": "create_task", "entitlement_gate": "tasks.create"}],
+                )
+            },
+        )
+
+        errors = scan_generated_bundle(bundle)
+
+        assert any("config/subscriptions.yaml" in error for error in errors)
+        assert any("must be valid YAML" in error for error in errors)
+
+
+class TestConfiguredEntitlementRuntimeAlignment:
+    """Prove scanner classification matches ConfiguredEntitlementAdapter behavior."""
+
+    @pytest.mark.asyncio
+    async def test_configured_adapter_without_assignment_store_uses_default_plan(self) -> None:
+        config = SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Task App",
+                "default_plan_id": "free",
+                "plans": [
+                    {
+                        "plan_id": "free",
+                        "label": "Free",
+                        "capabilities": ["tasks.create"],
+                    }
+                ],
+            }
+        )
+        adapter = ConfiguredEntitlementAdapter(config=config)
+
+        granted = await adapter.check("tasks.create", app_id="app-1")
+        denied = await adapter.check("custom.dynamic.cap", app_id="app-1")
+
+        assert granted.granted is True
+        assert granted.reason == "default_plan"
+        assert denied.granted is False
+        assert denied.reason == "no_grant"
 
 
 # ---------------------------------------------------------------------------
