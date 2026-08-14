@@ -27,6 +27,9 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.generated_ui_contract import (
+    VALID_PAGE_TYPES as _CANONICAL_PAGE_TYPES,
+)
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
@@ -130,22 +133,10 @@ _AUTH_LOGIN_METHOD_KINDS = frozenset(
     }
 )
 
-# Canonical page_type values — must match VALID_PAGE_TYPES in generated_ui_contract.py
-# and the literal enum in structured_outputs.yaml AppBuildPage.page_type_hint.
-# Unknown values fail before promotion so they cannot produce blank/unrendered page surfaces.
-_CANONICAL_PAGE_TYPES = frozenset({
-    "record_list",
-    "record_detail",
-    "analytics_dashboard",
-    "workflow_board",
-    "activity_feed",
-    "gallery",
-    "wizard",
-    "split_view",
-    "settings",
-    "landing",
-    "checkout_success",
-})
+# Canonical page_type values — imported from the shared quality-gate module so
+# there is exactly one source of truth.  Unknown values fail before promotion
+# so they cannot produce blank/unrendered page surfaces.
+# (Imported at module top as _CANONICAL_PAGE_TYPES from generated_ui_contract.)
 
 # Canonical action api_surface values — controls HTTP exposure posture.
 # Must match the typed literal in structured_outputs.yaml ModuleAction.api_surface
@@ -158,7 +149,10 @@ _CANONICAL_API_SURFACE_VALUES = frozenset({
 })
 
 # Canonical reaction target kinds — must match file_contracts.yaml and the
-# mozaiks.reactions.v1 schema.
+# mozaiks.reactions.v1 schema.  service_adapter is intentionally present here
+# and in the runtime loader but absent from structured_outputs.yaml: it is a
+# pack-only extension (capability packs can generate service_adapter reactions
+# via templates, but the AppGenerator LLM should not produce them directly).
 _CANONICAL_REACTION_TARGET_KINDS = frozenset({
     "handler",
     "capability",

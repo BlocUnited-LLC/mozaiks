@@ -205,12 +205,26 @@ def _build_archetype_block(name: str, archetype: dict[str, Any]) -> str:
     summary = str(archetype.get("summary") or "").strip()
     if summary:
         lines.append(f"  summary: {summary}")
+    canonical_module_type = str(archetype.get("canonical_module_type") or "").strip()
+    if canonical_module_type:
+        lines.append(f"  canonical_module_type: {canonical_module_type}")
+    source_pack = str(archetype.get("source_pack") or "").strip()
+    if source_pack:
+        lines.append(f"  source_pack: {source_pack}")
 
     select_when = [str(item) for item in archetype.get("select_when") or [] if str(item).strip()]
     yaml_family = archetype.get("canonical_yaml_family") if isinstance(archetype.get("canonical_yaml_family"), dict) else {}
     always = [str(item) for item in yaml_family.get("always") or [] if str(item).strip()]  # type: ignore[union-attr]
     optional = [str(item) for item in yaml_family.get("optional") or [] if str(item).strip()]  # type: ignore[union-attr]
-    python_defaults = [str(item) for item in archetype.get("python_stub_defaults") or [] if str(item).strip()]
+    python_defaults = [
+        str(item)
+        for item in (
+            archetype.get("python_stub_defaults")
+            or archetype.get("backend_stub_defaults")
+            or []
+        )
+        if str(item).strip()
+    ]
     hard_constraints = [str(item) for item in archetype.get("hard_constraints") or [] if str(item).strip()]
 
     lines.extend(_format_list_block("  select_when:", select_when[:3]))
@@ -227,6 +241,11 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: dict[str, Any])
         return ""
 
     archetypes = module_archetypes.get("archetypes") if isinstance(module_archetypes.get("archetypes"), dict) else {}
+    behavior_patterns = (
+        module_archetypes.get("behavior_patterns")
+        if isinstance(module_archetypes.get("behavior_patterns"), dict)
+        else {}
+    )
     if not archetypes:
         return ""
 
@@ -244,6 +263,12 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: dict[str, Any])
         if other_names:
             lines.append("")
             lines.append("Other available backend archetypes: " + ", ".join(other_names))
+        if behavior_patterns:
+            lines.append("")
+            lines.append(
+                "Available behavior patterns (map to canonical module types; do not serialize pattern names as module.type): "
+                + ", ".join(str(name) for name in behavior_patterns)
+            )
         return "\n\n".join(lines)
 
     for name, archetype in archetypes.items():
@@ -251,6 +276,18 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: dict[str, Any])
             continue
         lines.append("")
         lines.append(_build_archetype_block(name, archetype))
+
+    if behavior_patterns:
+        lines.append("")
+        lines.append(
+            "Behavior patterns map to supported module.type values; never serialize "
+            "the behavior pattern key as module.type."
+        )
+        for name, pattern in behavior_patterns.items():
+            if not isinstance(pattern, dict):
+                continue
+            lines.append("")
+            lines.append(_build_archetype_block(str(name), pattern))
 
     return "\n\n".join(lines)
 

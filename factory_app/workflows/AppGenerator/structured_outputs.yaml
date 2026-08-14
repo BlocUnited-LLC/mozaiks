@@ -877,11 +877,6 @@ models:
         - page_bundle
         - agent_backend_integration
         - refinement_harness
-        - ai_disclosure_docs
-        - legal_docs
-        - infra_scaffold
-        - auth_adapter
-        - test_scaffold
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -924,15 +919,6 @@ models:
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
-          `infra_scaffold` emits Dockerfile, .github/workflows/readiness.yml,
-          .github/workflows/deploy.yml, and scripts/provision.sh from infra
-          templates. Emitted once at generation time; InfraScaffoldAgent owns
-          these files and skips regeneration if Dockerfile already exists unless
-          --force-infra is set.
-          `auth_adapter` emits config/auth.yaml and ui/auth/authAdapter.js from
-          the webapp_builder auth templates when an authenticated generated app
-          needs a real OIDC provider. Re-emitted on auth config changes.
-          AppSchemaAgent owns this task.
       capability_pack_id:
         type: union
         variants:
@@ -2113,11 +2099,10 @@ models:
         - billing
         - membership
         - entitlement_dispatch
-        - file_storage
-        - notification_preferences
-        - state_machine
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
+          Must stay aligned with the runtime ModuleIdentity.type Literal in
+          mozaiksai/core/runtime/app/module_loader.py.
           standard = request/response CRUD (default).
           messaging = stateful communication with read/unread tracking using canonical module contracts only.
           workflow = named lifecycle/state behavior implemented through canonical module contracts and backend policy helpers.
@@ -2126,9 +2111,6 @@ models:
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
           membership = resource-scoped user classes, collaborators, invitations, access summaries, and deterministic policy inputs for app-owned participation flows; consuming modules own any decision records or freeze semantics.
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
-          file_storage = metadata-only file record module; blobs are stored externally via services/adapters/storage/{provider}.py; emits file_uploaded and file_deleted events; always user_data_scope=true.
-          notification_preferences = user notification opt-in preferences module; external delivery via services/adapters/notifications/; triggered by reactions.yaml observing domain events; always user_data_scope=true.
-          state_machine = timestamp-gated status transition module (pending→active→expired patterns); owns a run_<entity>_lifecycle_tick(ctx) internal action; uses indexed find_pending_<transition>(now) repo queries; tick is idempotent and testable without a scheduler.
       description:
         type: str
         description: Short module summary.
