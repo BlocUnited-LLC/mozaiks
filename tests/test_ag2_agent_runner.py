@@ -382,6 +382,41 @@ async def test_schema_validation_retries_passed_correctly_with_default_retry_cou
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "bad_value", "error_type"),
+    [
+        ("retry_count", -1, ValueError),
+        ("retry_count", True, TypeError),
+        ("retry_count", 11, ValueError),
+        ("schema_validation_retries", -1, ValueError),
+        ("schema_validation_retries", False, TypeError),
+        ("schema_validation_retries", 11, ValueError),
+    ],
+)
+async def test_retry_limits_reject_invalid_values(
+    field_name: str,
+    bad_value: Any,
+    error_type: type[Exception],
+) -> None:
+    """Retry knobs reject negative, boolean, and excessive values before AG2 calls."""
+    reply = _FakeReply(_RunnerResponse(status="ok"))
+    runner, created = _make_runner(reply)
+    kwargs = {
+        "agent_name": "Agent",
+        "system_prompt": "s",
+        "user_prompt": "u",
+        "llm_config": {},
+        "response_schema": _RunnerResponse,
+        field_name: bad_value,
+    }
+
+    with pytest.raises(error_type):
+        await runner.run(**kwargs)
+
+    assert created == []
+
+
+@pytest.mark.asyncio
 async def test_no_retry_becomes_unbounded() -> None:
     """Retries are bounded: schema_validation_retries=N yields at most N+1 total attempts."""
     n = 2

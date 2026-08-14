@@ -12,6 +12,8 @@ from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 
+_MAX_STRUCTURED_AGENT_RETRIES = 10
+
 
 class AG2StructuredAgentRunner:
     """Small AG2 adapter for one-agent structured-output calls.
@@ -74,6 +76,14 @@ class AG2StructuredAgentRunner:
             controlled; the LLM cannot influence this value. Zero means one
             attempt only — no correction turns.
         """
+        retry_count = _validate_retry_limit(
+            name="retry_count",
+            value=retry_count,
+        )
+        schema_validation_retries = _validate_retry_limit(
+            name="schema_validation_retries",
+            value=schema_validation_retries,
+        )
         agent = self._make_agent(
             agent_name=agent_name,
             system_prompt=system_prompt,
@@ -114,6 +124,14 @@ class AG2StructuredAgentRunner:
             "temperature": llm_config.get("temperature"),
         }
         return Agent(agent_name, system_prompt, config=llm_config_to_ag2_config(config_list_llm))
+
+
+def _validate_retry_limit(*, name: str, value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer between 0 and {_MAX_STRUCTURED_AGENT_RETRIES}")
+    if value < 0 or value > _MAX_STRUCTURED_AGENT_RETRIES:
+        raise ValueError(f"{name} must be between 0 and {_MAX_STRUCTURED_AGENT_RETRIES}")
+    return value
 
 
 __all__ = ["AG2StructuredAgentRunner"]
