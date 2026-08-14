@@ -985,6 +985,40 @@ class TestTaxonomyAlignment:
             f"  Only in runtime Literal:          {runtime_module_types - so_module_types}"
         )
 
+    def test_module_archetypes_match_runtime_module_types(self) -> None:
+        """Runtime archetypes are exactly module.type values; advisory behavior
+        patterns live separately so useful generator guidance does not become a
+        false runtime promise.
+        """
+        from typing import get_args, get_type_hints
+
+        from mozaiksai.core.runtime.app.module_loader import ModuleIdentity
+
+        module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
+        runtime_module_types = set(get_args(get_type_hints(ModuleIdentity)["type"]))
+        archetype_keys = set(module_archetypes["archetypes"])
+        assert archetype_keys == runtime_module_types
+
+    def test_behavior_patterns_do_not_expand_module_type_taxonomy(self) -> None:
+        """State-machine, file-storage, and notification-preference guidance are
+        supported behavior/capability patterns, not accepted module.type literals.
+        """
+        from typing import get_args, get_type_hints
+
+        from mozaiksai.core.runtime.app.module_loader import ModuleIdentity
+
+        module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
+        patterns = module_archetypes["behavior_patterns"]
+        runtime_module_types = set(get_args(get_type_hints(ModuleIdentity)["type"]))
+        assert {"state_machine", "file_storage", "notification_preferences"} <= set(patterns)
+        assert set(patterns).isdisjoint(runtime_module_types)
+        for name, pattern in patterns.items():
+            canonical_type = pattern.get("canonical_module_type")
+            assert canonical_type in runtime_module_types, (
+                f"behavior pattern {name!r} maps to unsupported module type {canonical_type!r}"
+            )
+            assert f"`{name}` as module.type" in "\n".join(pattern.get("hard_constraints", []))
+
     # -- reaction target kind alignment -------------------------------------
 
     def test_reaction_target_kind_runtime_is_superset_of_structured_outputs(self) -> None:

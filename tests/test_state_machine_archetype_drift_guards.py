@@ -194,11 +194,69 @@ def test_cron_tick_template_errors_key_from_tick_result() -> None:
 # 2. State machine archetype contract — module_archetypes.yaml
 # ---------------------------------------------------------------------------
 
-# NOTE: state_machine archetype tests were removed when the state_machine module
-# type was dropped from structured_outputs.yaml and module_archetypes.yaml.
-# The runtime ModuleIdentity.type Literal never accepted state_machine, so the
-# archetype was a false promise.  The cron tick template and infra pack tests
-# below remain — they test infrastructure that other archetypes may use.
+def _state_machine_pattern() -> dict:
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    return archetypes["behavior_patterns"]["state_machine"]
+
+
+def test_state_machine_behavior_pattern_key_exists() -> None:
+    """module_archetypes.yaml must preserve state_machine as behavior guidance,
+    not as a runtime module.type value.
+    """
+    archetypes = _read_yaml(MODULE_ARCHETYPES)
+    assert "state_machine" in archetypes.get("behavior_patterns", {})
+    assert "state_machine" not in archetypes.get("archetypes", {})
+
+
+def test_state_machine_behavior_pattern_maps_to_supported_module_type() -> None:
+    """state_machine guidance must map to a runtime-supported module.type."""
+    sm = _state_machine_pattern()
+    assert sm["canonical_module_type"] == "workflow"
+    constraints = " ".join(str(item) for item in sm["hard_constraints"])
+    assert "state_machine" in constraints
+    assert "module.type" in constraints
+
+
+def test_state_machine_behavior_pattern_mentions_external_cron_script() -> None:
+    """State-machine behavior guidance must describe the external cron script pattern."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "external cron script" in spec_text or "external cron" in spec_text
+
+
+def test_state_machine_behavior_pattern_mandates_minimal_ctx_pattern() -> None:
+    """State-machine behavior guidance must require the _MinimalCtx pattern."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "_MinimalCtx" in spec_text
+
+
+def test_state_machine_behavior_pattern_requires_errors_key_in_tick_result() -> None:
+    """State-machine tick guidance must require an errors key in the result dict."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "errors" in spec_text
+
+
+def test_state_machine_behavior_pattern_describes_azure_container_apps_job() -> None:
+    """State-machine guidance must describe Azure Container Apps job resources."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "azure_container_apps" in spec_text or "Microsoft.App/jobs" in spec_text
+
+
+def test_state_machine_behavior_pattern_mandates_env_vars_in_docstring() -> None:
+    """State-machine cron scripts must document required env vars in the docstring."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "docstring" in spec_text
+
+
+def test_state_machine_behavior_pattern_requires_get_mongo_client_usage() -> None:
+    """State-machine cron scripts must connect via get_mongo_client()."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "get_mongo_client" in spec_text
+
+
+def test_state_machine_behavior_pattern_requires_nonzero_exit_on_errors() -> None:
+    """State-machine cron scripts must exit non-zero when errors are present."""
+    spec_text = yaml.dump(_state_machine_pattern())
+    assert "non-zero" in spec_text or "exits with a non-zero" in spec_text
 
 
 # ---------------------------------------------------------------------------
