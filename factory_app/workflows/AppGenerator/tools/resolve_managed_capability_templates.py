@@ -334,10 +334,21 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
         allowed_provider_root = {
             "schema_version",
             "contract_id",
+            "provider_id",
             "description",
+            "base_path",
+            "api_version",
             "auth",
             "endpoints",
             "error_handling",
+            "error_envelope",
+            "idempotency",
+            "operation_status_model",
+            "operations",
+            "request_models",
+            "response_models",
+            "unsupported_operations",
+            "callbacks",
             "drift_guard",
         }
         unknown_provider = sorted(set(contract) - allowed_provider_root)
@@ -345,8 +356,10 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
             raise PackIntegrityError(
                 f"{pack_source_path / 'provider_api_contract.yaml'} has unsupported fields: {unknown_provider}"
             )
-        if not isinstance(contract.get("endpoints"), list):
-            raise PackIntegrityError("provider_api_contract.yaml endpoints must be a list")
+        has_operations = isinstance(contract.get("operations"), list)
+        has_endpoints = isinstance(contract.get("endpoints"), list)
+        if not has_operations and not has_endpoints:
+            raise PackIntegrityError("provider_api_contract.yaml operations or endpoints must be a list")
         return
 
     if contract_type != "build_pack_instructions":

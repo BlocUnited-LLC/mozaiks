@@ -36,6 +36,10 @@ EXPECTED_MOZAIKSPAY_CONTRACTS = {
     "provider_api_contract.yaml",
 }
 
+EXPECTED_MOZAIKS_CLOUD_CONTRACTS = {
+    "provider_api_contract.yaml",
+}
+
 LEGACY_WORKFLOW_ROOT_CATALOGS = [
     *(f"factory_app/workflows/AppGenerator/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
     *(f"factory_app/workflows/AppGenerator/tools/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
@@ -82,6 +86,8 @@ def test_factory_build_context_uses_named_context_roots() -> None:
             allowed |= EXPECTED_INTEGRATIONS_CATALOGS
         if context_root.name == "mozaikspay":
             allowed |= EXPECTED_MOZAIKSPAY_CONTRACTS
+        if context_root.name == "mozaiks_cloud":
+            allowed |= EXPECTED_MOZAIKS_CLOUD_CONTRACTS
         actual = {item.name for item in context_root.iterdir()}
         assert actual <= allowed, f"{context_root} has non-canonical build-context entries: {sorted(actual - allowed)}"
 

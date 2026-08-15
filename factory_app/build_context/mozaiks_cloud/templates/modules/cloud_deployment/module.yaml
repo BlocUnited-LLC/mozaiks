@@ -1,0 +1,70 @@
+schema_version: mozaiks.module.v1
+module:
+  id: cloud_deployment
+  label: Cloud Deployment
+  description: >
+    Facade module for Mozaiks Cloud deployment and environment operations.
+    Submits, monitors, and manages app deployment lifecycle through the Mozaiks
+    Cloud managed platform. All operations are app-owned; provider internals
+    (Azure resource IDs, pipeline configuration, credential material) are never
+    exposed to the generated app.
+  capability_source: managed_capability
+  provider: mozaiks_cloud
+
+permissions:
+  - id: cloud_deployment.read
+    label: View deployment status and environment endpoints
+  - id: cloud_deployment.write
+    label: Submit deployments and request rollbacks
+
+actions:
+  - id: submit_deployment
+    label: Submit Deployment
+    handler_method: submit_deployment
+    api_surface: internal
+    permissions:
+      - cloud_deployment.write
+    description: >
+      Submit an authorized deployment/release request to Mozaiks Cloud.
+      Requires cloud_deployment.write permission.
+
+  - id: get_deployment_status
+    label: Get Deployment Status
+    handler_method: get_deployment_status
+    api_surface: public_readonly
+    permissions:
+      - cloud_deployment.read
+    description: >
+      Retrieve normalized deployment operation status by operation_id.
+      Status values: pending, running, succeeded, failed, cancelled, rolling_back.
+
+  - id: get_environment_endpoints
+    label: Get Environment Endpoints
+    handler_method: get_environment_endpoints
+    api_surface: public_readonly
+    permissions:
+      - cloud_deployment.read
+    description: >
+      Retrieve normalized environment endpoints for the app.
+      Each endpoint has url, kind, and optional region.
+      Provider-internal resource IDs are never returned.
+
+  - id: get_deployment_health
+    label: Get Deployment Health
+    handler_method: get_deployment_health
+    api_surface: public_readonly
+    permissions:
+      - cloud_deployment.read
+    description: >
+      Retrieve sanitized deployment health for a provider-owned deployment.
+      Provider-internal resource IDs and raw build logs are never returned.
+
+  - id: request_rollback
+    label: Request Rollback
+    handler_method: request_rollback
+    api_surface: internal
+    permissions:
+      - cloud_deployment.write
+    description: >
+      Request rollback of a deployment to a previous release through
+      an explicitly authorized operation. Requires cloud_deployment.write permission.

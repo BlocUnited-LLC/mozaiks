@@ -363,6 +363,36 @@ layers:
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).
 
+  cloud_hosting:
+    description: >
+      Optional Mozaiks Cloud managed deployment and domain management. Requires
+      explicit user selection; never auto-selected. Self-hosted and portable apps
+      work without this layer.
+    capabilities:
+      - Mozaiks Cloud managed deployment submission, status, rollback
+      - Mozaiks Cloud normalized environment endpoints
+      - Mozaiks Cloud custom domain connection, verification, activation, DNS instructions
+    rule: >
+      When the mozaiks_cloud pack is explicitly selected:
+        1. Generate app-owned facade modules (cloud_deployment, cloud_domain) with
+           bounded actions: submit_deployment, get_deployment_status,
+           get_environment_endpoints, request_rollback, connect_domain,
+           get_domain_verification, get_dns_instructions, request_domain_activation,
+           get_domain_status, disconnect_domain.
+        2. Generate the four thin client files:
+           services/integrations/mozaiks_cloud_client.py (transport + auth)
+           services/integrations/mozaiks_cloud_deployment_client.py
+           services/integrations/mozaiks_cloud_environment_client.py
+           services/integrations/mozaiks_cloud_domain_client.py
+        3. Declare MOZAIKS_CLOUD_API_BASE (optional) and MOZAIKS_CLOUD_API_KEY (secret)
+           in the deployment env; never include raw credential values.
+        4. Pages must bind through app-owned facade module actions, not directly to
+           Mozaiks Cloud API endpoints.
+        5. Never generate Azure SDK, Cloudflare SDK, or GitHub SDK imports.
+        6. When the mozaiks_cloud pack is NOT selected, produce zero cloud connector
+           artifacts, imports, API URLs, secret declarations, callback routes, or
+           Mozaiks Cloud-branded events.
+
   custom_owned:
     description: >
       Advanced, custom, or bring-your-own capabilities the user owns entirely.
