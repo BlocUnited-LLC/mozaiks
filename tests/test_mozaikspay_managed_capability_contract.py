@@ -211,7 +211,7 @@ class TestContextYaml:
         mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
         assert mozaikspay is not None
         assert mozaikspay["kind"] == "api_key"
-        assert mozaikspay["provider"] == "mozaikspay"
+        assert mozaikspay["provider"] == "mozaiks_pay"
         assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
         secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "api_key")
         assert secret_field["frontend_safe"] is False
@@ -229,6 +229,17 @@ class TestContractYaml:
         c = _read_yaml(_CONTRACT_YAML)
         assert c["contract_id"] == "mozaikspay"
         assert c["contract_type"] == "build_pack_instructions"
+
+    def test_contract_declares_canonical_provider_identity(self):
+        c = _read_yaml(_CONTRACT_YAML)
+        provider = c["canonical_provider"]
+
+        assert provider["provider_id"] == "mozaiks_pay"
+        assert provider["provider_pack_id"] == "mozaikspay"
+        assert provider["api_contract_version"] == "mozaiks.provider_api_contract.v1"
+        assert provider["fulfillment_boundary"] == "BillingFulfillmentCommand"
+        assert provider["entitlement_boundary"] == "EntitlementPort"
+        assert provider["activation_requires_explicit_selection"] is True
 
     def test_required_outputs_declared(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -261,7 +272,21 @@ class TestContractYaml:
         requirements = c.get("required_integrations") or []
         mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
         assert mozaikspay is not None
+        assert mozaikspay["provider"] == "mozaiks_pay"
         assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
+
+    def test_runtime_connector_contract_names_selection_and_fulfillment_boundaries(self):
+        c = _read_yaml(_CONTRACT_YAML)
+        connector = c["runtime_connector_contract"]
+
+        assert connector["canonical_provider_id"] == "mozaiks_pay"
+        assert connector["selection_field"] == "AppBuildPlan.monetization_provider"
+        assert connector["selection_value"] == "mozaiks_pay"
+        assert connector["required_selected_pack_id"] == "mozaikspay"
+        assert "entitlement_dispatch" in connector["mutually_exclusive_with"]
+        assert connector["idempotency"]["replay_boundary"] == "BillingFulfillmentService"
+        assert connector["callback_verification"]["fail_closed"] is True
+        assert connector["entitlement_sync"]["normalized_command"] == "BillingFulfillmentCommand"
 
     def test_provider_api_contract_forbids_provider_neutral_internal_ids(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -368,7 +393,12 @@ class TestMozaiksPayClientTemplate:
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
         assert "_CONNECTOR_SERVICE = \"mozaikspay\"" in content
         assert "_PROVIDER_API_PREFIX = \"/api/mozaikspay/v1\"" in content
+        assert "_CONTRACT_VERSION = \"mozaiks.provider_api_contract.v1\"" in content
+        assert "X-MozaiksPay-Contract-Version" in content
+        assert "def readiness(" in content
+        assert "_MAX_RETRIES = 2" in content
         assert "/subscription/status" in content
+        assert "/health" in content
         assert "/billing-portal/session" in content
         assert "settings.api_key" in content
         assert "X-MozaiksPay-Client-Id" in content

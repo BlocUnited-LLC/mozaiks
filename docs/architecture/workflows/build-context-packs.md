@@ -79,7 +79,7 @@ pack:
   capability_source: managed_capability
   required_integrations:
     - service: mozaikspay
-      provider: mozaikspay
+      provider: mozaiks_pay
       kind: api_key
       required_fields:
         - name: api_base
@@ -261,7 +261,7 @@ selection_rules:
     action: select_pack
 required_integrations:
   - service: mozaikspay
-    provider: mozaikspay
+    provider: mozaiks_pay
     kind: api_key
     required_fields:
       - name: api_base

@@ -16,8 +16,8 @@ Status: approved for this documentation pass.
 
 Status: completed.
 
-- MozaiksPay remains the recommended/default monetization provider where
-  currently intended.
+- MozaiksPay remains the recommended monetization provider where currently
+  intended, but SaaS builds must select it explicitly.
 - The public MozaiksPay-compatible provider contract is documented in
   `docs/architecture/modules-systems/mozaikspay-provider-contract.md`.
 - Self-hosted and alternative provider replacement paths are documented through

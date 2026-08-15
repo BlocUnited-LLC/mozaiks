@@ -39,7 +39,30 @@ auth:
       client_id: "mpc_"
       client_secret: "mps_"
 
+contract_version:
+  header: X-MozaiksPay-Contract-Version
+  current: mozaiks.provider_api_contract.v1
+  mismatch_error_code: contract_version_mismatch
+
 endpoints:
+  - id: provider_readiness
+    method: GET
+    path: /api/mozaikspay/v1/health
+    description: >
+      Return whether the selected MozaiksPay-compatible provider is reachable
+      and serving this public contract. This endpoint is a readiness check only;
+      it must not create accounts, activate billing, mutate subscription state,
+      transmit source code, or incur charges.
+    response:
+      success_shape:
+        success: { type: boolean, value: true }
+        ready: { type: boolean }
+        contract_version: { type: string }
+      error_shape:
+        success: { type: boolean, value: false }
+        ready: { type: boolean, value: false }
+        error_code: { type: string }
+
   - id: subscription_status
     method: GET
     path: /api/mozaikspay/v1/subscription/status
@@ -224,6 +247,48 @@ error_handling:
     SUBSCRIPTION_ALREADY_EXISTS: "The requested billing scope already has an active paid subscription."
     MOZAIKSPAY_PRICE_NOT_CONFIGURED: "Selected provider has no price mapping for the plan."
     TOKEN_TOP_UP_PRODUCT_NOT_FOUND: "The requested token top-up product is not declared by the app."
+    CONTRACT_VERSION_MISMATCH: "Provider and generated client do not agree on the MozaiksPay public contract version."
+
+callbacks:
+  verification:
+    required: true
+    fail_closed: true
+    unsigned_callbacks: reject
+    malformed_callbacks: reject
+    signature_header: X-MozaiksPay-Signature
+    timestamp_header: X-MozaiksPay-Timestamp
+  idempotency:
+    event_id_field: event_id
+    normalized_command_id: event_id
+    replay_boundary: BillingFulfillmentService
+  fulfillment_events:
+    - event_type: subscription_activated
+      normalized_command: BillingFulfillmentCommand
+      required_fields:
+        - event_id
+        - app_id
+        - plan_id
+        - status
+    - event_type: subscription_updated
+      normalized_command: BillingFulfillmentCommand
+      required_fields:
+        - event_id
+        - app_id
+        - plan_id
+        - status
+    - event_type: subscription_cancelled
+      normalized_command: BillingFulfillmentCommand
+      required_fields:
+        - event_id
+        - app_id
+        - status
+    - event_type: token_top_up_paid
+      normalized_command: BillingFulfillmentCommand
+      required_fields:
+        - event_id
+        - app_id
+        - wallet_id
+        - token_amount
 
 drift_guard:
   description: >

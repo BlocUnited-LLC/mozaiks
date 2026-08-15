@@ -1,5 +1,22 @@
 contract_id: mozaikspay
 contract_type: build_pack_instructions
+canonical_provider:
+  provider_id: mozaiks_pay
+  provider_pack_id: mozaikspay
+  display_name: MozaiksPay
+  api_contract_version: mozaiks.provider_api_contract.v1
+  provider_api_contract_id: mozaikspay_provider_api
+  connector_file: services/integrations/mozaikspay_client.py
+  callback_event_namespace: mozaikspay.billing
+  fulfillment_boundary: BillingFulfillmentCommand
+  entitlement_boundary: EntitlementPort
+  secret_references:
+    - MOZAIKSPAY_API_BASE
+    - MOZAIKSPAY_API_KEY
+    - MOZAIKSPAY_CLIENT_ID
+    - MOZAIKSPAY_CLIENT_SECRET
+  activation_requires_explicit_selection: true
+  self_managed_replacement_provider_id: entitlement_dispatch
 
 # Declares capabilities this pack provides to the OSS planning system.
 # subscription_write_path: this managed pack owns the subscription assignment
@@ -14,7 +31,7 @@ selection_rules:
       app_declares:
         - token_wallets
         - top_up_products
-    action: select_pack
+    action: require_explicit_user_confirmation
   - id: select_for_saas_billing
     when:
       intent_any:
@@ -22,7 +39,7 @@ selection_rules:
         - subscriptions
         - billing portal
         - runtime usage display
-    action: select_pack
+    action: require_explicit_user_confirmation
   - id: do_not_select_for_generic_payments
     when:
       intent_any:
@@ -40,7 +57,7 @@ recommended_domains:
 
 required_integrations:
   - service: mozaikspay
-    provider: mozaikspay
+    provider: mozaiks_pay
     display_name: MozaiksPay
     kind: api_key
     purpose: Connect this generated SaaS app to the managed MozaiksPay subscription provider.
@@ -198,6 +215,65 @@ provider_api_response_contract:
     - secret_salt
     - client_secret_hash
     - session_id
+
+runtime_connector_contract:
+  connector_id: mozaikspay
+  canonical_provider_id: mozaiks_pay
+  selection_field: AppBuildPlan.monetization_provider
+  selection_value: mozaiks_pay
+  required_selected_pack_id: mozaikspay
+  mutually_exclusive_with:
+    - entitlement_dispatch
+  operations:
+    - subscription_status
+    - billing_portal_session
+    - subscription_checkout_session
+    - token_top_up_session
+  auth_secret_refs:
+    primary:
+      - MOZAIKSPAY_API_KEY
+    compatibility:
+      - MOZAIKSPAY_CLIENT_ID
+      - MOZAIKSPAY_CLIENT_SECRET
+    public:
+      - MOZAIKSPAY_API_BASE
+      - MOZAIKS_APP_URL
+  idempotency:
+    required_for_provider_fulfillment: true
+    command_id_source: provider_event_id
+    replay_boundary: BillingFulfillmentService
+  callback_verification:
+    required: true
+    fail_closed: true
+    unsigned_callbacks: reject
+    malformed_callbacks: reject
+    accepted_event_shapes:
+      - subscription_activated
+      - subscription_updated
+      - subscription_cancelled
+      - token_top_up_paid
+  retry_policy:
+    retryable_errors:
+      - timeout
+      - rate_limited
+      - service_unavailable
+    terminal_errors:
+      - invalid_credentials
+      - invalid_scope
+      - contract_version_mismatch
+      - malformed_callback
+      - unsigned_callback
+  readiness:
+    health_operation: provider_readiness
+    required_config:
+      - api_base
+      - api_key
+    offline_behavior: not_ready
+  entitlement_sync:
+    source: verified_provider_fulfillment
+    normalized_command: BillingFulfillmentCommand
+    assignment_store_authority: config/subscriptions.yaml
+    enforcement_adapter: ConfiguredEntitlementAdapter
 
 inactive_surfaces:
   - checkout

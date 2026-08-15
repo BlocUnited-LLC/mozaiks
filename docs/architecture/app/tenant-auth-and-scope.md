@@ -133,8 +133,8 @@ HTTP user traffic.
 - product plan assignment records in `hosted_billing.subscriptions`
 
 Hosted launch should be preset for tenant workspaces: Mozaiks-hosted auth,
-hosted AI, MozaiksPay, and managed hosting are available by default so builders
-can create apps without provider setup. The hosted product may also choose which
+hosted AI, MozaiksPay, and managed hosting may be available as selected managed
+providers so builders can create apps without provider setup. The hosted product may also choose which
 provider areas can carry bring-your-own metadata. For example, `mozaiks-app`
 hosted v1 presets Mozaiks-hosted auth and MozaiksPay, allows secret-free
 external auth/payment metadata, and keeps hosted AI plus managed hosting

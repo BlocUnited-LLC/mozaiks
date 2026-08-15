@@ -5,9 +5,9 @@ does not implement payment processing. The OSS contract defines how an app
 declares what is paid, what is gated, what usage is measured, and what runtime
 state changes after a trusted billing fact is verified.
 
-MozaiksPay is the default managed adapter when the `mozaikspay` capability pack
-is available and the user has not explicitly requested another provider. That
-default is still modular: generated apps receive app-owned facades and thin
+MozaiksPay is the recommended managed adapter when the `mozaikspay` capability
+pack is explicitly selected with `monetization_provider: mozaiks_pay`. That
+selection is still modular: generated apps receive app-owned facades and thin
 MozaiksPay clients, while payment-provider mechanics remain outside the
 generated bundle.
 
@@ -42,8 +42,10 @@ A monetized generated app should fit this sequence:
 2. If the model needs paid access, quotas, credits, or token allowances,
    `SubscriptionContractDesigner` emits `app/config/subscriptions.yaml`.
 3. AppGenerator adds plan-gated `entitlement_gate` values to module actions.
-4. AppGenerator selects a managed provider pack when one is available. For SaaS
-   billing and AI token top-ups, the default managed pack is `mozaikspay`.
+4. AppGenerator materializes a monetization provider only when explicitly
+   selected. For SaaS billing and AI token top-ups, `mozaiks_pay` selects the
+   `mozaikspay` managed pack; `entitlement_dispatch` selects the self-managed
+   OSS assignment path.
 5. Generated UI calls app-owned facade actions such as `billing_portal.*`.
 6. The facade calls a thin integration client under
    `app/services/integrations/`.
@@ -55,10 +57,11 @@ A monetized generated app should fit this sequence:
 This keeps the generated app deterministic without forcing a single payment
 provider into OSS.
 
-## MozaiksPay Default, Not Provider SDK Default
+## MozaiksPay Recommendation, Not Provider SDK Default
 
-OSS generator guidance should prefer MozaiksPay by name for supported managed
-monetization surfaces:
+OSS generator guidance may recommend MozaiksPay by name for supported managed
+monetization surfaces, but generated bundles must not contain MozaiksPay files
+unless `monetization_provider: mozaiks_pay` is selected:
 
 - subscriptions
 - billing portal
@@ -92,7 +95,7 @@ Public OSS docs and prompts may describe:
 - top-up product declarations
 - fulfillment command shape
 - managed-capability facade rules
-- MozaiksPay as the default managed adapter
+- MozaiksPay as the recommended managed adapter
 - how to swap to an explicitly selected external adapter
 - custom money-flow boundaries as app-owned or hosted-product policy hooks
 
@@ -220,7 +223,7 @@ Self-hosters can use Mozaiks in three ways:
    fulfillment command boundary.
 3. Use manual/test fulfillment for local or enterprise invoice workflows.
 
-OSS should make all three routes possible, but MozaiksPay remains the default
+OSS should make all three routes possible, but MozaiksPay remains the recommended
 managed route because it gives generated apps the least custom billing work.
 
 ## Related Architecture

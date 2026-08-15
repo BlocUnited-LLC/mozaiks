@@ -96,7 +96,6 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _context_get,
     _context_managed_capability_ids,
     _facade_pack_descriptor,
-    _inject_default_mozaikspay_if_applicable,
     _iter_page_api_endpoints,
     _managed_capability_backing_module_ids,
     _managed_facade_route_rules,
@@ -104,6 +103,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _pack_facades,
     _pack_id_from_descriptor,
     _selected_managed_capability_descriptors,
+    _validate_monetization_provider_selection,
     _validate_page_bindings,
     _validate_user_facing_managed_capability_tasks,
 )
@@ -774,87 +774,78 @@ def test_empty_provider_actions_produces_no_rules():
 
 
 # ---------------------------------------------------------------------------
-# 14. _inject_default_mozaikspay_if_applicable
+# 14. _validate_monetization_provider_selection
 # ---------------------------------------------------------------------------
 
 _SUBSCRIPTION_CONFIG_TASK = {"task_type": "subscription_config", "task_id": "sub_cfg"}
 _MOZAIKSPAY_DESCRIPTOR = {
-    "id": "mozaikspay",
+    "capability_pack_id": "mozaikspay",
     "capability_source": "managed_capability",
     "display_name": "MozaiksPay",
+    "provides_capabilities": ["subscription_write_path"],
+}
+_ENTITLEMENT_DISPATCH_DESCRIPTOR = {
+    "capability_pack_id": "entitlement_dispatch",
+    "capability_source": "generated_module",
 }
 
 
-class TestInjectDefaultMozaikspay:
-    def test_no_subscription_config_task_returns_unchanged(self):
-        packs = []
-        tasks = [{"task_type": "module_contract"}]
-        result = _inject_default_mozaikspay_if_applicable(packs, tasks, context_variables=None)
-        assert result == []
+class TestValidateMonetizationProviderSelection:
+    def test_no_subscription_config_rejects_provider_value(self):
+        with pytest.raises(ValueError, match="only valid when build_tasks include"):
+            _validate_monetization_provider_selection(
+                [],
+                [{"task_type": "module_contract"}],
+                monetization_provider="mozaiks_pay",
+            )
 
-    def test_mozaikspay_already_in_packs_returns_unchanged(self):
-        packs = [{"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"}]
-        result = _inject_default_mozaikspay_if_applicable(
-            packs, [_SUBSCRIPTION_CONFIG_TASK], context_variables=None
+    def test_subscription_config_requires_provider(self):
+        with pytest.raises(ValueError, match="monetization_provider is required"):
+            _validate_monetization_provider_selection(
+                [_MOZAIKSPAY_DESCRIPTOR],
+                [_SUBSCRIPTION_CONFIG_TASK],
+                monetization_provider=None,
+            )
+
+    def test_mozaiks_pay_with_selected_pack_passes(self):
+        _validate_monetization_provider_selection(
+            [_MOZAIKSPAY_DESCRIPTOR],
+            [_SUBSCRIPTION_CONFIG_TASK],
+            monetization_provider="mozaiks_pay",
         )
-        assert len(result) == 1
-        assert result[0]["capability_pack_id"] == "mozaikspay"
 
-    def test_another_managed_pack_provides_subscription_write_path_skips_injection(self):
-        packs = [{
+    def test_mozaiks_pay_requires_mozaikspay_pack(self):
+        with pytest.raises(ValueError, match="requires the mozaikspay managed capability pack"):
+            _validate_monetization_provider_selection(
+                [],
+                [_SUBSCRIPTION_CONFIG_TASK],
+                monetization_provider="mozaiks_pay",
+            )
+
+    def test_entitlement_dispatch_with_selected_pack_passes(self):
+        _validate_monetization_provider_selection(
+            [_ENTITLEMENT_DISPATCH_DESCRIPTOR],
+            [_SUBSCRIPTION_CONFIG_TASK],
+            monetization_provider="entitlement_dispatch",
+        )
+
+    def test_entitlement_dispatch_rejects_managed_write_path_owner(self):
+        with pytest.raises(ValueError, match="must not both be selected"):
+            _validate_monetization_provider_selection(
+                [_ENTITLEMENT_DISPATCH_DESCRIPTOR, _MOZAIKSPAY_DESCRIPTOR],
+                [_SUBSCRIPTION_CONFIG_TASK],
+                monetization_provider="entitlement_dispatch",
+            )
+
+    def test_multiple_managed_write_path_owners_rejected(self):
+        custom = {
             "capability_pack_id": "custom_billing",
             "capability_source": "managed_capability",
             "provides_capabilities": ["subscription_write_path"],
-        }]
-        result = _inject_default_mozaikspay_if_applicable(
-            packs, [_SUBSCRIPTION_CONFIG_TASK], context_variables=None
-        )
-        assert len(result) == 1
-        assert result[0]["capability_pack_id"] == "custom_billing"
-
-    def test_injects_from_context_when_available(self):
-        ctx = _ctx({"available_managed_capabilities": [_MOZAIKSPAY_DESCRIPTOR]})
-        result = _inject_default_mozaikspay_if_applicable(
-            [], [_SUBSCRIPTION_CONFIG_TASK], context_variables=ctx
-        )
-        assert len(result) == 1
-        assert result[0]["capability_pack_id"] == "mozaikspay"
-        assert result[0]["capability_source"] == "managed_capability"
-        assert result[0]["surface_kind"] == "external_integration"
-
-    def test_injects_from_contract_yaml_when_not_in_context(self):
-        """Falls back to factory pack contract.yaml for vanilla OSS installs."""
-        result = _inject_default_mozaikspay_if_applicable(
-            [], [_SUBSCRIPTION_CONFIG_TASK], context_variables=None
-        )
-        assert len(result) == 1
-        assert result[0]["capability_pack_id"] == "mozaikspay"
-        assert result[0]["capability_source"] == "managed_capability"
-
-    def test_context_descriptor_takes_priority_over_contract_yaml(self):
-        ctx = _ctx({"available_managed_capabilities": [{
-            **_MOZAIKSPAY_DESCRIPTOR,
-            "api_base": "https://pay.example.com",
-        }]})
-        result = _inject_default_mozaikspay_if_applicable(
-            [], [_SUBSCRIPTION_CONFIG_TASK], context_variables=ctx
-        )
-        assert result[0].get("api_base") == "https://pay.example.com"
-
-    def test_non_managed_capability_providing_sub_write_path_does_not_block_injection(self):
-        """provides_capabilities on a generated_module pack should NOT block injection."""
-        packs = [{
-            "capability_pack_id": "my_module",
-            "capability_source": "generated_module",
-            "provides_capabilities": ["subscription_write_path"],
-        }]
-        ctx = _ctx({"available_managed_capabilities": [_MOZAIKSPAY_DESCRIPTOR]})
-        result = _inject_default_mozaikspay_if_applicable(
-            packs, [_SUBSCRIPTION_CONFIG_TASK], context_variables=ctx
-        )
-        pack_ids = [p["capability_pack_id"] for p in result]
-        assert "mozaikspay" in pack_ids
-
-    def test_empty_build_tasks_list_returns_unchanged(self):
-        result = _inject_default_mozaikspay_if_applicable([], [], context_variables=None)
-        assert result == []
+        }
+        with pytest.raises(ValueError, match="Multiple managed capability packs"):
+            _validate_monetization_provider_selection(
+                [_MOZAIKSPAY_DESCRIPTOR, custom],
+                [_SUBSCRIPTION_CONFIG_TASK],
+                monetization_provider="mozaiks_pay",
+            )

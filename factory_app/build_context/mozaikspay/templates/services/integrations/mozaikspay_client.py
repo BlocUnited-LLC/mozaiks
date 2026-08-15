@@ -17,8 +17,10 @@ from typing import Any
 import httpx
 
 _DEFAULT_TIMEOUT = 20.0
+_MAX_RETRIES = 2
 _CONNECTOR_SERVICE = "mozaikspay"
 _PROVIDER_API_PREFIX = "/api/mozaikspay/v1"
+_CONTRACT_VERSION = "mozaiks.provider_api_contract.v1"
 
 
 class MozaiksPayError(Exception):
@@ -155,6 +157,20 @@ class MozaiksPayClient:
     async def get_subscription_status(self) -> dict[str, Any]:
         """Return safe plan display fields from MozaiksPay."""
         return await self.get_subscription_status_for_scope()
+
+    async def readiness(self) -> dict[str, Any]:
+        """Return provider readiness without activating billing or mutating state."""
+        settings = await self._settings()
+        self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
+        return await self._request(
+            "GET",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/health",
+            settings=settings,
+            provider_auth=True,
+        )
 
     async def get_subscription_status_for_scope(
         self,
@@ -335,7 +351,10 @@ class MozaiksPayClient:
         settings: MozaiksPayConnectorSettings,
         provider_auth: bool,
     ) -> dict[str, Any]:
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "X-MozaiksPay-Contract-Version": _CONTRACT_VERSION,
+        }
         provider_credential = settings.api_key or settings.client_secret
         if provider_auth and provider_credential:
             if not settings.api_key and settings.client_id:
@@ -344,13 +363,23 @@ class MozaiksPayClient:
         elif self._auth_token:
             headers["Authorization"] = _authorization_header(self._auth_token)
 
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.request(method, url, json=json, params=params, headers=headers)
-        except httpx.TimeoutException as exc:
-            raise MozaiksPayHTTPError(0, f"Request timed out: {exc}") from exc
-        except httpx.RequestError as exc:
-            raise MozaiksPayHTTPError(0, f"Network error: {exc}") from exc
+        response: httpx.Response | None = None
+        last_error: Exception | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    response = await client.request(method, url, json=json, params=params, headers=headers)
+                if response.status_code not in {408, 429, 500, 502, 503, 504}:
+                    break
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                last_error = exc
+                if attempt >= _MAX_RETRIES:
+                    detail = "Request timed out" if isinstance(exc, httpx.TimeoutException) else "Network error"
+                    raise MozaiksPayHTTPError(0, f"{detail}: {exc}") from exc
+                continue
+
+        if response is None:
+            raise MozaiksPayHTTPError(0, f"Network error: {last_error}")
 
         if not response.is_success:
             detail = ""

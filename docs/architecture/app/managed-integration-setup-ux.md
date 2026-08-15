@@ -118,7 +118,7 @@ OSS framework must not depend on proprietary hosted logic.
 | Runtime effects | Entitlement gates, token guards, provider-neutral fulfillment commands | Payment/provider verification and hosted fulfillment source facts |
 | UI extension | Studio setup slots and safe status rendering | Managed-service onboarding flows and hosted-account UI |
 
-MozaiksPay can be the default managed payment option. It must remain a selected
+MozaiksPay is the recommended managed payment option. It must remain a selected
 managed adapter, not a hardcoded OSS payment runtime.
 
 ## UI Model
@@ -204,8 +204,8 @@ Use this policy whenever a generated app needs an external capability:
 - [x] Validate those fields in the workspace integrations module.
 - [x] Update AppGenerator structured outputs and prompts to emit capability-first
   integration needs.
-- [x] Keep MozaiksPay as the default managed payment capability for monetizable
-  apps.
+- [x] Keep MozaiksPay as the recommended managed payment capability for
+  monetizable apps while requiring explicit provider selection.
 - [x] Add scanner rules that reject direct provider leakage when a managed lane is
   selected.
 

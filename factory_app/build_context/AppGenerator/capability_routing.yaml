@@ -263,15 +263,16 @@ layers:
           - event: hosted.billing.subscription.cancelled
             reaction: revoke gated capabilities
         operator_pack_note: >
-          When the managed mozaikspay pack is available in capability_packs, use it
-          as the default SaaS monetization provider. Generate only the app-owned
+          When the user explicitly selects monetization_provider=mozaiks_pay and
+          the managed mozaikspay pack is available in capability_packs, use it
+          as the recommended SaaS monetization provider. Generate only the app-owned
           billing_portal facade, MozaiksPay client, subscriptions.yaml plan contract,
           pricing/billing/usage pages, and entitlement gates. The generated app calls
           the hosted MozaiksPay API for subscription status and billing portal sessions.
           Do not regenerate checkout, webhook handlers, invoice logic, customer/payment
           provider mapping, refunds, wallet, payout, or provider credential handling.
-          If the user explicitly names another provider or the mozaikspay pack is not
-          available, fall back to a provider-neutral external_adapter facade.
+          If the user selects the self-managed OSS path, use entitlement_dispatch.
+          Do not emit decorative custom provider ids for subscription assignment.
 
       - revenue_model: usage_based
         capability_pack: usage_metering
@@ -356,9 +357,9 @@ layers:
            declare the app-specific module as custom_owned with the same
            interface contract instead of inventing provider internals.
         7. For SaaS subscriptions, paid tiers, seats, credits, usage limits, or
-           billing portal requests, prioritize the managed mozaikspay capability pack
-           when it is available and the user has not explicitly requested a different
-           billing provider.
+           billing portal requests, recommend the managed mozaikspay capability
+           pack, but select it only when AppBuildPlan.monetization_provider is
+           mozaiks_pay. Use entitlement_dispatch for the self-managed OSS path.
       Never generate payment provider, payment provider internals, or raw payment credentials
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).

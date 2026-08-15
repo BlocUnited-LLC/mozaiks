@@ -22,32 +22,6 @@ from factory_app.app.modules.workspace_integrations.backend.service import (
 logger = logging.getLogger(__name__)
 
 _VALID_CONNECTOR_STATUSES = frozenset({"ready", "not_configured", "partial"})
-_CORE_MOZAIKSPAY_REVENUE_MODELS = frozenset(
-    {"subscriptions", "subscription", "usage_based", "usage", "metered", "pay_per_use"}
-)
-_MOZAIKSPAY_REQUIRED_FIELDS = [
-    {
-        "name": "api_base",
-        "label": "Mozaiks Pay API Base URL",
-        "type": "url",
-        "required": True,
-        "frontend_safe": True,
-    },
-    {
-        "name": "client_id",
-        "label": "Client ID",
-        "type": "text",
-        "required": True,
-        "frontend_safe": True,
-    },
-    {
-        "name": "client_secret",
-        "label": "Client Secret",
-        "type": "secret",
-        "required": True,
-        "frontend_safe": False,
-    },
-]
 
 
 def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
@@ -64,85 +38,6 @@ def _connector_status_from_inventory(service: str, connector_inventory: dict[str
     if service in ready:
         return "ready"
     return "not_configured"
-
-
-def _is_truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
-
-
-def _requires_default_mozaikspay_context(context_variables: Any) -> bool:
-    """Return true when upstream state requires first-class subscription/usage billing."""
-    subscription_contract = _context_get(context_variables, "subscription_contract")
-    if isinstance(subscription_contract, dict) and bool(subscription_contract.get("contract_required")):
-        return True
-
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    if isinstance(app_build_plan, dict):
-        revenue_model = str(app_build_plan.get("revenue_model") or "").strip().lower()
-        if revenue_model in _CORE_MOZAIKSPAY_REVENUE_MODELS:
-            return True
-        monetization_plan = app_build_plan.get("monetization_plan")
-        if isinstance(monetization_plan, dict):
-            plan_revenue_model = str(monetization_plan.get("revenue_model") or "").strip().lower()
-            if plan_revenue_model in _CORE_MOZAIKSPAY_REVENUE_MODELS:
-                return True
-            requirement = str(monetization_plan.get("subscription_contract_requirement") or "").strip().lower()
-            if requirement == "required":
-                return True
-
-    subscription_requirement = str(
-        _context_get(context_variables, "subscription_contract_requirement") or ""
-    ).strip().lower()
-    if subscription_requirement == "required":
-        return True
-
-    if _is_truthy(_context_get(context_variables, "subscription_contract_required")):
-        return True
-
-    if _is_truthy(_context_get(context_variables, "token_wallet_required")):
-        return True
-
-    if _is_truthy(_context_get(context_variables, "usage_billing_required")):
-        return True
-
-    return False
-
-
-def _with_default_mozaikspay_need(
-    integration_needs: list[dict[str, Any]],
-    *,
-    context_variables: Any,
-) -> list[dict[str, Any]]:
-    """Add a removable Mozaiks Pay declaration for first-class billing unless explicit."""
-    normalized_services = {
-        str(need.get("service") or need.get("integration_id") or "").strip().lower()
-        for need in integration_needs
-        if isinstance(need, dict)
-    }
-    if "mozaikspay" in normalized_services or not _requires_default_mozaikspay_context(context_variables):
-        return integration_needs
-    return [
-        *integration_needs,
-        {
-            "service": "mozaikspay",
-            "catalog_id": "mozaikspay",
-            "provider": "mozaikspay",
-            "display_name": "Mozaiks Pay",
-            "kind": "api_key",
-            "purpose": (
-                "Default connector for subscription, usage, and token billing. Remove it from "
-                "app integrations if this app should use a different billing path."
-            ),
-            "required_at": "runtime",
-            "optional": True,
-            "defaulted": True,
-            "removable": True,
-            "source": "monetization_default",
-            "required_fields": _MOZAIKSPAY_REQUIRED_FIELDS,
-        },
-    ]
 
 
 async def save_integration_manifest(
@@ -164,11 +59,9 @@ async def save_integration_manifest(
         logger.debug("save_integration_manifest: no app_id in context, skipping")
         return {"saved": 0, "skipped": True, "reason": "no_app_id"}
 
-    integration_needs: list[dict[str, Any]] = _context_get(context_variables, "integration_needs") or []
-    integration_needs = _with_default_mozaikspay_need(
-        [need for need in integration_needs if isinstance(need, dict)],
-        context_variables=context_variables,
-    )
+    integration_needs: list[dict[str, Any]] = [
+        need for need in (_context_get(context_variables, "integration_needs") or []) if isinstance(need, dict)
+    ]
     connector_inventory: dict[str, Any] = _context_get(context_variables, "connector_inventory") or {}
     declared_at = datetime.now(UTC).isoformat()
 

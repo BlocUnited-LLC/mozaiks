@@ -1,8 +1,9 @@
 # MozaiksPay Provider Contract
 
-MozaiksPay is the default managed monetization provider for generated SaaS
-applications. It is not mandatory. A compatible provider can replace the hosted
-MozaiksPay service when it satisfies the same app-facing contract.
+MozaiksPay is the recommended managed monetization provider for generated SaaS
+applications. It is not mandatory and must be selected explicitly with the
+canonical provider id `mozaiks_pay`. A compatible provider can replace the
+hosted MozaiksPay service when it satisfies the same app-facing contract.
 
 This contract describes the public boundary a canonical app depends on. It does
 not describe BlocUnited's hosted payment processor, wallet, payout, settlement,
@@ -10,7 +11,8 @@ merchant operations, fee policy, credentials, or production authority internals.
 
 ## Generated App Boundary
 
-When Factory selects the MozaiksPay capability pack, the generated app receives:
+When Factory explicitly selects `monetization_provider: mozaiks_pay` and the
+`mozaikspay` capability pack, the generated app receives:
 
 - `app/services/integrations/mozaikspay_client.py`
 - `app/modules/billing_portal/`
@@ -30,11 +32,22 @@ generated page
   -> MozaiksPay-compatible provider API
 ```
 
-## Default And Replacement Semantics
+## Selection And Replacement Semantics
 
-Factory should prefer MozaiksPay for monetizable apps when the app needs SaaS
+Factory may recommend MozaiksPay for monetizable apps when the app needs SaaS
 subscriptions, billing portal redirects, token top-ups, usage status, or paid
-feature gates and the user has not explicitly selected another provider.
+feature gates. Recommendation is not activation: generated bundles must contain
+no MozaiksPay client, imports, endpoints, secret declarations, callbacks,
+configuration, or telemetry unless `AppBuildPlan.monetization_provider` is
+`mozaiks_pay` and the `mozaikspay` managed capability pack is selected.
+
+The executable provider choices for subscription assignment are:
+
+- `mozaiks_pay` — the managed MozaiksPay-compatible provider path.
+- `entitlement_dispatch` — the self-managed OSS subscription assignment writer.
+
+These choices are mutually exclusive because only one path may own subscription
+assignment writes for `config/subscriptions.yaml`.
 
 Replacement is supported at the provider boundary. A self-hosted or alternative
 provider must preserve the generated app contract:
@@ -83,6 +96,7 @@ The current public endpoints consumed by generated apps are:
 - `POST /api/mozaikspay/v1/billing-portal/session`
 - `POST /api/mozaikspay/v1/subscription/checkout-session`
 - `POST /api/mozaikspay/v1/tokens/top-up-session`
+- `GET /api/mozaikspay/v1/health`
 
 The generated client authenticates with a MozaiksPay API key when configured, or
 with the compatibility client-credentials headers described in
@@ -116,6 +130,10 @@ provider verifies a checkout, subscription change, or top-up, effects must cross
 into the app/runtime through provider-neutral fulfillment and entitlement
 boundaries such as `BillingFulfillmentCommand`, `EntitlementPort`, subscription
 assignment records, and the OSS token wallet ledger.
+
+Provider callbacks must fail closed when malformed or unsigned. Replayed events
+must reuse the same idempotency key so `BillingFulfillmentService` can replay or
+reject duplicate fulfillment commands deterministically.
 
 The generated app should not embed provider product IDs, provider customer IDs,
 payment processor IDs, wallet ledgers, payout ledgers, webhook handlers, or

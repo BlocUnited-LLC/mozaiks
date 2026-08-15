@@ -134,6 +134,9 @@ def test_mozaikspay_provider_api_contract_ships() -> None:
     content = _read_yaml(api_contract)
     assert content.get("schema_version") == "mozaiks.provider_api_contract.v1"
     assert content.get("contract_id") == "mozaikspay_provider_api"
+    assert content.get("contract_version", {}).get("current") == "mozaiks.provider_api_contract.v1"
+    assert any(endpoint.get("id") == "provider_readiness" for endpoint in content["endpoints"])
+    assert content.get("callbacks", {}).get("verification", {}).get("fail_closed") is True
 
 
 def test_mozaikspay_provider_api_contract_is_provider_compatible() -> None:
@@ -153,13 +156,14 @@ def test_mozaikspay_public_provider_contract_doc_ships() -> None:
     assert doc.exists(), "MozaiksPay provider replacement contract doc must ship"
 
     text = doc.read_text(encoding="utf-8")
-    assert "MozaiksPay is the default managed monetization provider" in text
-    assert "compatible provider can replace the hosted" in text
+    assert "MozaiksPay is the recommended managed monetization provider" in text
+    assert "compatible provider can replace" in text
     assert "provider_api_contract.yaml" in text
     assert "GET /api/mozaikspay/v1/subscription/status" in text
     assert "POST /api/mozaikspay/v1/billing-portal/session" in text
     assert "POST /api/mozaikspay/v1/subscription/checkout-session" in text
     assert "POST /api/mozaikspay/v1/tokens/top-up-session" in text
+    assert "GET /api/mozaikspay/v1/health" in text
     assert "wallet, payout, settlement" in text
 
 
