@@ -114,3 +114,16 @@ def test_explicit_self_managed_selection_uses_entitlement_dispatch_only() -> Non
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "entitlement_dispatch"
     assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"entitlement_dispatch"}
+
+
+def test_monetization_provider_in_nested_monetization_plan_is_accepted_as_fallback() -> None:
+    """If LLM sets monetization_provider inside monetization_plan instead of at the top
+    level, the tool must still accept it rather than raising 'required' prematurely."""
+    plan = _base_plan(
+        capability_packs=[_mozaikspay_pack()],
+        monetization_plan={"monetization_provider": "mozaiks_pay"},
+    )
+    context = _run_plan(plan)
+    normalized = context.values["app_build_plan"]
+    assert isinstance(normalized, dict)
+    assert normalized["monetization_provider"] == "mozaiks_pay"

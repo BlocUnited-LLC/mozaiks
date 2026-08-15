@@ -31,7 +31,7 @@ selection_rules:
       app_declares:
         - token_wallets
         - top_up_products
-    action: select_pack
+    action: require_explicit_user_confirmation
   - id: select_for_saas_billing
     when:
       intent_any:
@@ -39,7 +39,7 @@ selection_rules:
         - subscriptions
         - billing portal
         - runtime usage display
-    action: select_pack
+    action: require_explicit_user_confirmation
   - id: do_not_select_for_generic_payments
     when:
       intent_any:

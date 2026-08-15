@@ -1821,7 +1821,10 @@ def app_build_plan(
     if profile_layout and profile_layout not in _valid_profile_layouts:
         profile_layout = None
     readiness_profile = _infer_readiness_profile(AppBuildPlan, context_variables=context_variables)
-    monetization_provider = normalize_monetization_provider(AppBuildPlan.get("monetization_provider"))
+    _raw_monetization_provider = AppBuildPlan.get("monetization_provider") or (
+        (AppBuildPlan.get("monetization_plan") or {}).get("monetization_provider")
+    )
+    monetization_provider = normalize_monetization_provider(_raw_monetization_provider)
     capability_packs = _ensure_context_selected_capability_packs(
         _normalize_object_list(AppBuildPlan.get("capability_packs")),
         context_variables=context_variables,
