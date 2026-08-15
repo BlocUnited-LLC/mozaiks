@@ -339,6 +339,7 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
             "base_path",
             "api_version",
             "auth",
+            "contract_version",
             "endpoints",
             "error_handling",
             "error_envelope",
@@ -370,6 +371,7 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
     allowed_root = {
         "contract_id",
         "contract_type",
+        "canonical_provider",
         "requires",
         "cross_pack_integrations",
         "selection_rules",
@@ -383,6 +385,7 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
         "inactive_surfaces",
         "managed_assignment_writer_contract",
         "provider_api_response_contract",
+        "runtime_connector_contract",
         "provider_lifecycle_boundary",
     }
     unknown = sorted(set(contract) - allowed_root)

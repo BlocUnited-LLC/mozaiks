@@ -131,7 +131,13 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
     }
 
 
-def _base_plan(*, pages: list[dict[str, Any]], capability_packs: list[dict[str, Any]], build_tasks: list[dict[str, Any]]) -> dict[str, Any]:
+def _base_plan(
+    *,
+    pages: list[dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
+    monetization_provider: str | None = None,
+) -> dict[str, Any]:
     return {
         "agent_message": "Plan generated app artifacts.",
         "app_kind": "saas",
@@ -143,6 +149,7 @@ def _base_plan(*, pages: list[dict[str, Any]], capability_packs: list[dict[str, 
         "frontend_scope": [],
         "theme_preferences": None,
         "brand_intent": None,
+        "monetization_provider": monetization_provider,
         "capability_packs": capability_packs,
         "external_integrations": [],
         "agent_backend_required": False,
@@ -336,6 +343,7 @@ def _subscriptions_yaml() -> str:
 
 def _mozaikspay_replay_plan() -> dict[str, Any]:
     return _base_plan(
+        monetization_provider="mozaiks_pay",
         pages=[
             {
                 "name": "Billing",

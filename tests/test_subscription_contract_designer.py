@@ -461,10 +461,16 @@ def test_app_build_plan_accepts_subscription_config_task() -> None:
             "entities": [],
             "roles": ["user"],
             "auth_strategy": "basic",
-            "service_scope": [],
-            "frontend_scope": [],
-            "capability_packs": [],
-            "external_integrations": [],
+                "service_scope": [],
+                "frontend_scope": [],
+                "monetization_provider": "entitlement_dispatch",
+                "capability_packs": [
+                    {
+                        "capability_pack_id": "entitlement_dispatch",
+                        "capability_source": "generated_module",
+                    }
+                ],
+                "external_integrations": [],
             "agent_backend_required": False,
             "build_tasks": [
                 {

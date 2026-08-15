@@ -112,8 +112,9 @@ plans, usage allowances, and markup policy.
 - Generated pages should render groups when present and fall back to a single
   plan-card group when absent.
 
-MozaiksPay Checkout is the default hosted checkout surface for generated SaaS
-subscription and token top-up flows. Generated apps call the MozaiksPay hosted
+MozaiksPay Checkout is the recommended hosted checkout surface for generated SaaS
+subscription and token top-up flows when `monetization_provider=mozaiks_pay` is
+selected. Generated apps call the MozaiksPay hosted
 billing API at `/api/mozaikspay/v1/...` through the app-owned MozaiksPay client
 and billing facade using `MOZAIKSPAY_API_BASE` plus an app-scoped
 `MOZAIKSPAY_API_KEY`. The separate merchant payments API at

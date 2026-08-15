@@ -31,7 +31,7 @@ workflow decides whether `config/subscriptions.yaml` should exist, what
 declarations. It does not create payment-provider resources or mutate token
 balances.
 
-MozaiksPay is the default managed adapter path for hosted checkout and token
+MozaiksPay is the recommended managed adapter path for hosted checkout and token
 top-ups. It is not the canonical owner of subscription state, entitlement
 state, token balances, usage records, or wallet ledgers. After MozaiksPay or
 another adapter verifies a payment/subscription fact, it submits a provider-

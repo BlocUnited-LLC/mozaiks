@@ -1024,6 +1024,18 @@ models:
           quotas, credits, token allowances, or token wallets. Custom money-flow
           apps set this to not_required unless they also sell app access tiers,
           quotas, credits, or token allowances.
+      monetization_provider:
+        type: literal
+        values:
+        - mozaiks_pay
+        - entitlement_dispatch
+        - 'null'
+        description: >
+          Explicit subscription assignment owner when subscription_contract_requirement
+          is required. Use mozaiks_pay only when the user explicitly selects the
+          managed MozaiksPay provider. Use entitlement_dispatch for the self-managed
+          OSS path. Null when subscription_contract_requirement is not_required.
+          Do not emit custom or decorative provider ids.
       primary_payer:
         type: union
         variants:
@@ -1239,6 +1251,20 @@ models:
           not free. It records whether config/subscriptions.yaml is required or
           whether the app should route to custom app/operator capabilities
           without a subscription contract.
+      monetization_provider:
+        type: literal
+        values:
+        - mozaiks_pay
+        - entitlement_dispatch
+        - 'null'
+        default: null
+        description: >
+          Explicit subscription assignment owner. Required when build_tasks include
+          task_type='subscription_config'. mozaiks_pay materializes the selected
+          mozaikspay managed capability pack and app-owned billing_portal facade;
+          entitlement_dispatch materializes the self-managed OSS assignment writer.
+          Unknown values fail before materialization, and the two providers must
+          never be selected together.
       external_integrations:
         type: optional_list
         items: AppBuildIntegration

@@ -56,7 +56,8 @@ def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> 
     assert mozaikspay["recommendation_rank"] == 1
     assert mozaikspay["capability_kind"] == "operator_pack"
     assert {"billing", "subscriptions", "usage", "saas"} <= set(mozaikspay["domains"])
-    assert "Prioritize the mozaikspay capability pack" in notes
+    assert "Recommend the mozaikspay capability pack" in notes
+    assert "monetization_provider=mozaiks_pay" in notes
     assert "billing_portal facade" in notes
     assert "mozaikspay_client.py" in notes
     assert "Do not generate checkout, webhook handlers" in notes
@@ -80,7 +81,7 @@ def test_mozaikspay_declares_replaceable_adapter_boundary() -> None:
     adapter_contract = mozaikspay["adapter_contract"]
     alternatives = mozaikspay.get("alternatives", [])
 
-    assert adapter_contract["role"] == "default_managed_adapter"
+    assert adapter_contract["role"] == "recommended_managed_adapter"
     assert adapter_contract["replacement_kind"] == "external_adapter"
     assert adapter_contract["runtime_effect_boundary"] == "BillingFulfillmentCommand"
     assert adapter_contract["runtime_read_boundary"] == "EntitlementPort"
@@ -99,8 +100,8 @@ def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     assert subscriptions["subscription_contract"] == "required"
     assert "managed mozaikspay pack" in subscriptions["operator_pack_note"]
     assert "hosted MozaiksPay API" in subscriptions["operator_pack_note"]
-    assert "prioritize the managed mozaikspay capability pack" in rule
-    assert "billing provider" in rule
+    assert "monetization_provider=mozaiks_pay" in subscriptions["operator_pack_note"]
+    assert "entitlement_dispatch" in rule
 
 
 def test_capability_routing_includes_operator_readiness_pack() -> None:
@@ -177,7 +178,7 @@ def test_mozaikspay_contract_declares_subscription_write_path_capability() -> No
     contract = _read_yaml("factory_app/build_context/mozaikspay/contract.yaml")
 
     assert "subscription_write_path" in contract.get("provides_capabilities", []), (
-        "The default MozaiksPay managed pack must declare the generic "
+        "The recommended MozaiksPay managed pack must declare the generic "
         "subscription_write_path capability instead of relying on pack-name "
         "special casing."
     )

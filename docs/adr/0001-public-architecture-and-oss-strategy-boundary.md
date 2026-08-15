@@ -20,7 +20,7 @@ from many applications, evals, production outcomes, or commercial operations is
 publication-review/private-by-default.
 
 Managed capabilities use public replaceable contracts. MozaiksPay may be the
-recommended/default payment capability, but it is not mandatory and does not
+recommended payment capability, but it is not mandatory and does not
 make BlocUnited payment internals part of OSS.
 
 ## Reason

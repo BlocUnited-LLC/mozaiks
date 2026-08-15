@@ -207,13 +207,14 @@ trusted external fact
 The runtime should not care whether the trusted fact came from MozaiksPay, an
 enterprise invoice system, a test fixture, or a custom provider adapter.
 
-## MozaiksPay As Default Managed Adapter
+## MozaiksPay As Recommended Managed Adapter
 
-MozaiksPay is the default managed monetization pack when the app needs
+MozaiksPay is the recommended managed monetization pack when the app needs
 subscriptions, billing portal redirects, token top-ups, usage status, or paid
-feature gates and the user has not explicitly selected another provider.
+feature gates. It is materialized only when the structured plan explicitly sets
+`monetization_provider: mozaiks_pay`.
 
-That default is modular:
+That selection is modular:
 
 - generated apps get a MozaiksPay client/facade
 - runtime entitlements and token guards remain provider-neutral
