@@ -14,6 +14,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Crash-safe workflow-queue leases**: `MongoWorkflowQueue` now issues a
+  unique `claim_token` (fencing token) on each claim, enforces bounded lease
+  durations, and supports bounded retries with dead-letter terminal state.
+  - Fenced `complete()` and `fail()`: only the current claim_token holder can
+    transition a claimed item. Stale workers whose lease expired are rejected.
+  - `renew_lease()` extends an active lease without reclaiming.
+  - Configurable `max_attempts` and `retry_delay_seconds` per enqueued item.
+  - Expired leases are atomically reclaimed by the next `claim_next()` call
+    (crash recovery without a background sweeper).
+  - Pre-upgrade records (no `claim_token`) are immediately reclaimable.
+  - `ClaimResult` returned from `claim_next()` carries `claimed`, `item`,
+    `claim_token`, and `attempt_count`.
+  - No TTL index on lease fields; completed and dead-letter records remain
+    available for audit.
+
 - **Entitlement gate compile-time closure**: Generated app bundles with
   `config/subscriptions.yaml` now fail deterministic bundle validation if any
   `module.yaml` action declares an `entitlement_gate` capability_id that is not
