@@ -1011,7 +1011,6 @@ def _scan_mozaiks_cloud_connector_contract(
     required_paths = {
         "services/integrations/mozaiks_cloud_client.py",
         "services/integrations/mozaiks_cloud_deployment_client.py",
-        "services/integrations/mozaiks_cloud_environment_client.py",
         "services/integrations/mozaiks_cloud_domain_client.py",
         "modules/cloud_deployment/module.yaml",
         "modules/cloud_domain/module.yaml",

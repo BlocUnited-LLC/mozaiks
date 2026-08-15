@@ -1,96 +1,62 @@
-"""Cloud deployment module service.
-
-This module is a managed-capability facade. The actual deployment operations
-are performed by the Mozaiks Cloud provider. This service layer:
-
-- Records deployment operations initiated via the facade actions
-- Emits normalized domain events so downstream modules can react
-- Provides read access to cached deployment status from the provider
-
-Event types emitted by this module (declared in contracts/events.yaml):
-  cloud.deployment.submitted
-  cloud.deployment.status_updated
-  cloud.deployment.rollback_requested
-"""
-
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
-
-_MODULE_ID = "cloud_deployment"
-
-
-async def record_deployment_submitted(
-    ctx: Any,
-    *,
-    app_id: str,
-    environment: str,
-    release_ref: str,
-    operation_id: str,
-) -> dict[str, Any]:
-    """Persist a submitted deployment record and emit cloud.deployment.submitted."""
-    record = {
-        "operation_id": operation_id,
-        "app_id": app_id,
-        "environment": environment,
-        "release_ref": release_ref,
-        "status": "pending",
-    }
-    col = ctx.persistence.collection(_MODULE_ID, "deployments")
-    await col.insert_one({**record, "_id": operation_id})
-    await _emit(ctx, "cloud.deployment.submitted", record)
-    return record
+from services.integrations.mozaiks_cloud_client import MozaiksCloudTransport
+from services.integrations.mozaiks_cloud_deployment_client import (
+    MozaiksCloudDeploymentClient,
+)
 
 
-async def record_deployment_status_updated(
-    ctx: Any,
-    *,
-    operation_id: str,
-    status: str,
-    message: str | None = None,
-) -> dict[str, Any]:
-    """Persist a provider status update and emit cloud.deployment.status_updated."""
-    update = {"status": status, "message": message}
-    col = ctx.persistence.collection(_MODULE_ID, "deployments")
-    await col.update_one({"_id": operation_id}, {"$set": update})
-    payload = {"operation_id": operation_id, **update}
-    await _emit(ctx, "cloud.deployment.status_updated", payload)
-    return payload
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
 
 
-async def record_rollback_requested(
-    ctx: Any,
-    *,
-    operation_id: str,
-    target_release_ref: str,
-) -> dict[str, Any]:
-    """Persist a rollback request and emit cloud.deployment.rollback_requested."""
-    payload = {
-        "operation_id": operation_id,
-        "target_release_ref": target_release_ref,
-        "status": "rolling_back",
-    }
-    col = ctx.persistence.collection(_MODULE_ID, "deployments")
-    await col.update_one({"_id": operation_id}, {"$set": {"status": "rolling_back"}})
-    await _emit(ctx, "cloud.deployment.rollback_requested", payload)
-    return payload
+def _require(value: Any, field: str) -> str:
+    cleaned = _clean(value)
+    if not cleaned:
+        raise ValueError(f"{field} is required")
+    return cleaned
 
 
-async def get_deployment(ctx: Any, *, operation_id: str) -> dict[str, Any] | None:
-    """Retrieve a cached deployment record."""
-    col = ctx.persistence.collection(_MODULE_ID, "deployments")
-    return await col.find_one({"_id": operation_id})
+class CloudDeploymentService:
+    def _client(self, *, app_id: str | None = None) -> MozaiksCloudDeploymentClient:
+        return MozaiksCloudDeploymentClient(MozaiksCloudTransport(app_id=app_id))
 
+    async def submit_deployment(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        app_id = _require(params.get("app_id"), "app_id")
+        return await self._client(app_id=app_id).submit_deployment_request(
+            app_id=app_id,
+            target_environment=_clean(params.get("target_environment")) or "production",
+            release_ref=_clean(params.get("release_ref")) or None,
+            idempotency_key=_require(params.get("idempotency_key"), "idempotency_key"),
+        )
 
-async def _emit(ctx: Any, event_type: str, payload: dict[str, Any]) -> None:
-    bus = getattr(ctx, "event_bus", None)
-    if bus is None:
-        return
-    await bus.emit(
-        event_type=event_type,
-        payload=payload,
-        source_module=_MODULE_ID,
-        correlation_id=str(uuid.uuid4()),
-    )
+    async def get_deployment_status(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).get_operation_status(
+            operation_id=_require(params.get("operation_id"), "operation_id"),
+        )
+
+    async def get_environment_endpoints(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        app_id = _require(params.get("app_id"), "app_id")
+        return await self._client(app_id=app_id).get_environment_endpoints(app_id=app_id)
+
+    async def get_deployment_health(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).get_deployment_health(
+            deployment_id=_require(params.get("deployment_id"), "deployment_id"),
+        )
+
+    async def request_rollback(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).request_rollback(
+            target_release_id=_require(params.get("target_release_id"), "target_release_id"),
+            expected_current_deployment_id=_clean(params.get("expected_current_deployment_id")) or None,
+            target_environment=_clean(params.get("target_environment")) or "production",
+            reason=_clean(params.get("reason")) or None,
+            approval_reference=_require(params.get("approval_reference"), "approval_reference"),
+            idempotency_key=_require(params.get("idempotency_key"), "idempotency_key"),
+        )

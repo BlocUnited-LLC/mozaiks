@@ -7,7 +7,7 @@ Verifies that:
 - cloud_deployment module declares expected actions with correct permissions
 - cloud_domain module declares expected actions with correct permissions
 - Capabilities declared in context.yaml match facade modules
-- Reactions contracts cover expected hosted.cloud.* events and are read-only
+- Callback/reaction contracts remain absent; generated apps poll operation status
 - Client files compile without errors
 - Client reads credentials from env/connector; no hardcoded secrets
 - No Azure, Cloudflare, or GitHub SDK imports in any generated template
@@ -63,13 +63,14 @@ def test_mozaiks_cloud_context_registers_active_appgenerator_managed_pack() -> N
     assert "templates" in asset_kinds
 
 
-def test_mozaiks_cloud_context_declares_seven_capabilities() -> None:
+def test_mozaiks_cloud_context_declares_capabilities() -> None:
     context = _read_yaml(PACK_ROOT / "context.yaml")
     capability_ids = {cap["capability_id"] for cap in context["capabilities"]}
 
     assert capability_ids == {
         "cloud.deployment.submit",
         "cloud.deployment.status",
+        "cloud.deployment.health",
         "cloud.deployment.rollback",
         "cloud.environment.endpoints",
         "cloud.domain.connect",
@@ -147,7 +148,9 @@ def test_mozaiks_cloud_provider_api_contract_ships() -> None:
     content = _read_yaml(api_contract)
     assert content.get("schema_version") == "mozaiks.provider_api_contract.v1"
     assert content.get("contract_id") == "mozaiks_cloud_provider_api"
-    assert content.get("error_handling", {}).get("api_version") == "v1"
+    assert content.get("base_path") == "/api/mozaiks-cloud/v1"
+    assert content.get("api_version", {}).get("header") == "X-MozaiksCloud-Api-Version"
+    assert content.get("api_version", {}).get("current") == "mozaiks.cloud.v1"
 
 
 def test_mozaiks_cloud_provider_api_contract_is_provider_compatible() -> None:
@@ -156,31 +159,98 @@ def test_mozaiks_cloud_provider_api_contract_is_provider_compatible() -> None:
     text = api_contract.read_text(encoding="utf-8")
 
     assert "mozaiks_cloud_compatible_provider" in (PACK_ROOT / "contract.yaml").read_text(encoding="utf-8")
-    assert "self-hosted or alternative implementation" in text
+    assert "managed_service_bearer" in text
 
 
 def test_mozaiks_cloud_provider_api_contract_declares_deployment_endpoints() -> None:
     api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
-    endpoint_ids = {ep["id"] for ep in (api.get("endpoints") or [])}
+    endpoint_ids = {ep["id"] for ep in (api.get("operations") or [])}
 
     assert "submit_deployment" in endpoint_ids
-    assert "get_deployment_status" in endpoint_ids
+    assert "get_deployment_operation_status" in endpoint_ids
     assert "get_environment_endpoints" in endpoint_ids
     assert "request_rollback" in endpoint_ids
-    assert "deployment_health" in endpoint_ids
+    assert "get_deployment_health" in endpoint_ids
 
 
 def test_mozaiks_cloud_provider_api_contract_declares_domain_endpoints() -> None:
     api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
-    endpoint_ids = {ep["id"] for ep in (api.get("endpoints") or [])}
+    endpoint_ids = {ep["id"] for ep in (api.get("operations") or [])}
 
     assert "connect_domain" in endpoint_ids
     assert "get_domain_verification" in endpoint_ids
     assert "get_dns_instructions" in endpoint_ids
+    assert "check_domain_verification" in endpoint_ids
     assert "request_domain_activation" in endpoint_ids
     assert "get_domain_status" in endpoint_ids
     assert "disconnect_domain" in endpoint_ids
-    assert "domain_health" in endpoint_ids
+
+
+def test_mozaiks_cloud_provider_api_contract_has_exact_operation_set() -> None:
+    api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
+    endpoint_ids = {ep["id"] for ep in (api.get("operations") or [])}
+
+    assert endpoint_ids == {
+        "submit_deployment",
+        "get_deployment_operation_status",
+        "get_environment_endpoints",
+        "get_deployment_health",
+        "request_rollback",
+        "connect_domain",
+        "get_domain_verification",
+        "get_dns_instructions",
+        "check_domain_verification",
+        "request_domain_activation",
+        "get_domain_status",
+        "disconnect_domain",
+    }
+
+
+def test_mozaiks_cloud_provider_api_contract_model_references_are_closed() -> None:
+    api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
+    request_models = set(api["request_models"])
+    response_models = set(api["response_models"]) | {"OperationStatus"}
+
+    missing_requests = {
+        op["request_model"]
+        for op in api["operations"]
+        if op["request_model"] not in request_models
+    }
+    missing_responses = {
+        op["response_model"]
+        for op in api["operations"]
+        if op["response_model"] not in response_models
+    }
+
+    assert missing_requests == set()
+    assert missing_responses == set()
+
+
+def test_mozaiks_cloud_provider_api_contract_auth_version_and_errors_are_canonical() -> None:
+    api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
+
+    assert api["provider_id"] == "mozaiks_cloud"
+    assert api["base_path"] == "/api/mozaiks-cloud/v1"
+    assert api["api_version"] == {
+        "header": "X-MozaiksCloud-Api-Version",
+        "current": "mozaiks.cloud.v1",
+    }
+    assert api["auth"]["kind"] == "managed_service_bearer"
+    assert api["auth"]["service"] == "mozaiks_cloud"
+    assert api["auth"]["credential_reference"] == "MOZAIKS_CLOUD_API_KEY"
+    assert api["error_envelope"]["success_shape"] == {"success": True}
+    assert api["error_envelope"]["error_shape"]["success"] is False
+
+
+def test_mozaiks_cloud_provider_api_contract_idempotency_rules_are_complete() -> None:
+    api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
+
+    assert api["idempotency"]["header"] == "Idempotency-Key"
+    assert set(api["idempotency"]["required_for_methods"]) == {"POST", "DELETE"}
+    mutating = [op for op in api["operations"] if op["method"] in {"POST", "DELETE"}]
+    assert mutating
+    assert all(op["idempotency"] == "required" for op in mutating)
+    assert all(op["idempotency"] == "not_allowed" for op in api["operations"] if op["method"] == "GET")
 
 
 def test_mozaiks_cloud_provider_api_contract_declares_globally_forbidden_fields() -> None:
@@ -201,54 +271,30 @@ def test_mozaiks_cloud_provider_api_contract_required_fields_covered() -> None:
     contract = _read_yaml(PACK_ROOT / "contract.yaml")
     api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
 
-    # Check deployment status required fields
-    deployment_required = set(
-        contract["provider_api_response_contract"]["deployment_status_required_fields"]
-    )
-    deployment_ep = next(
-        ep for ep in api["endpoints"] if ep["id"] == "get_deployment_status"
-    )
-    spec_fields = set(deployment_ep["response"]["success_shape"].keys())
-    missing = deployment_required - spec_fields
-    assert not missing, f"deployment_status missing required fields: {missing}"
-
-    # Check domain status required fields
-    domain_required = set(
-        contract["provider_api_response_contract"]["domain_status_required_fields"]
-    )
-    domain_ep = next(ep for ep in api["endpoints"] if ep["id"] == "get_domain_status")
-    spec_fields = set(domain_ep["response"]["success_shape"].keys())
-    missing = domain_required - spec_fields
-    assert not missing, f"domain_status missing required fields: {missing}"
+    operation_fields = set(api["operation_status_model"]["fields"])
+    missing = set(contract["provider_api_response_contract"]["operation_required_fields"]) - operation_fields
+    assert not missing, f"operation_status_model missing required fields: {missing}"
+    assert "DomainStatus" in api["response_models"]
+    assert "DeploymentHealth" in api["response_models"]
 
 
 def test_mozaiks_cloud_provider_api_contract_declares_closed_status_enums() -> None:
     api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
-    status = api.get("error_handling", {}).get("status_enum", {})
-
-    deployment_statuses = set(status.get("deployment", []))
-    assert deployment_statuses == {
-        "pending", "running", "succeeded", "failed", "cancelled", "rolling_back"
-    }
-
-    domain_statuses = set(status.get("domain", []))
-    assert domain_statuses == {
-        "pending_verification", "verified", "activating", "active", "failed", "disconnected"
-    }
-
-    tls_statuses = set(status.get("tls", []))
-    assert tls_statuses == {"pending", "provisioning", "active", "failed"}
+    status_type = api["operation_status_model"]["fields"]["status"]
+    for value in ("pending", "running", "succeeded", "failed", "cancelled", "rolling_back", "activating"):
+        assert value in status_type
+    assert "unknown" not in status_type
 
 
 def test_mozaiks_cloud_provider_api_contract_declares_error_taxonomy() -> None:
     api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
-    error_kinds = {e["kind"] for e in api.get("error_handling", {}).get("error_taxonomy", [])}
+    error_kind_type = api["error_envelope"]["error_shape"]["error"]["kind"]
 
     required_kinds = {
         "auth_error", "rate_limited", "validation_error", "not_found",
         "conflict", "provider_error", "timeout", "unknown",
     }
-    assert required_kinds <= error_kinds
+    assert required_kinds <= set(error_kind_type.split(" | "))
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +310,7 @@ def test_cloud_deployment_module_declares_expected_actions() -> None:
         "submit_deployment",
         "get_deployment_status",
         "get_environment_endpoints",
+        "get_deployment_health",
         "request_rollback",
     }
 
@@ -388,76 +435,26 @@ def test_cloud_domain_module_has_no_user_data_scope() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Reactions contracts
+# Callback/reaction boundary
 # ---------------------------------------------------------------------------
 
 
-def test_cloud_deployment_reactions_cover_hosted_cloud_events() -> None:
-    reactions = _read_yaml(
-        TEMPLATES / "modules" / "cloud_deployment" / "contracts" / "reactions.yaml"
-    )
-    assert reactions.get("schema_version") == "mozaiks.reactions.v1"
-
-    event_types = {r["event_type"] for r in (reactions.get("reactions") or [])}
-    assert "hosted.cloud.deployment.completed" in event_types
-    assert "hosted.cloud.deployment.failed" in event_types
-
-
-def test_cloud_deployment_reactions_are_read_only() -> None:
-    text = _read_text(
-        TEMPLATES / "modules" / "cloud_deployment" / "contracts" / "reactions.yaml"
-    )
-    assert "Read-only" in text or "read-only" in text or "never mutates" in text, (
-        "deployment reactions.yaml must document read-only constraint"
-    )
-
-
-def test_cloud_domain_reactions_cover_hosted_cloud_events() -> None:
-    reactions = _read_yaml(
-        TEMPLATES / "modules" / "cloud_domain" / "contracts" / "reactions.yaml"
-    )
-    assert reactions.get("schema_version") == "mozaiks.reactions.v1"
-
-    event_types = {r["event_type"] for r in (reactions.get("reactions") or [])}
-    assert "hosted.cloud.domain.activated" in event_types
-    assert "hosted.cloud.domain.verification_updated" in event_types
-    assert "hosted.cloud.domain.failed" in event_types
-
-
-def test_cloud_domain_reactions_are_read_only() -> None:
-    text = _read_text(
-        TEMPLATES / "modules" / "cloud_domain" / "contracts" / "reactions.yaml"
-    )
-    assert "Read-only" in text or "read-only" in text or "never mutates" in text, (
-        "domain reactions.yaml must document read-only constraint"
-    )
+def test_mozaiks_cloud_pack_does_not_generate_callback_or_reaction_routes() -> None:
+    assert not (TEMPLATES / "modules" / "cloud_deployment" / "contracts" / "reactions.yaml").exists()
+    assert not (TEMPLATES / "modules" / "cloud_domain" / "contracts" / "reactions.yaml").exists()
+    api = _read_yaml(PACK_ROOT / "provider_api_contract.yaml")
+    assert api["callbacks"]["generated_app_callback_routes"] == "unsupported"
+    assert api["callbacks"]["polling_contract"] == "use_operations_endpoint"
 
 
 # ---------------------------------------------------------------------------
-# Events contracts
+# Event boundary
 # ---------------------------------------------------------------------------
 
 
-def test_cloud_deployment_events_use_canonical_schema() -> None:
-    events = _read_yaml(
-        TEMPLATES / "modules" / "cloud_deployment" / "contracts" / "events.yaml"
-    )
-    assert events.get("schema_version") == "mozaiks.events.v1"
-    event_types = {e["type"] for e in (events.get("events") or [])}
-    assert "cloud.deployment.submitted" in event_types
-    assert "cloud.deployment.status_updated" in event_types
-    assert "cloud.deployment.rollback_requested" in event_types
-
-
-def test_cloud_domain_events_use_canonical_schema() -> None:
-    events = _read_yaml(
-        TEMPLATES / "modules" / "cloud_domain" / "contracts" / "events.yaml"
-    )
-    assert events.get("schema_version") == "mozaiks.events.v1"
-    event_types = {e["type"] for e in (events.get("events") or [])}
-    assert "cloud.domain.connected" in event_types
-    assert "cloud.domain.status_updated" in event_types
-    assert "cloud.domain.disconnected" in event_types
+def test_mozaiks_cloud_pack_does_not_generate_event_manifests_without_emitters() -> None:
+    assert not (TEMPLATES / "modules" / "cloud_deployment" / "contracts" / "events.yaml").exists()
+    assert not (TEMPLATES / "modules" / "cloud_domain" / "contracts" / "events.yaml").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -469,11 +466,44 @@ def test_mozaiks_cloud_client_templates_compile() -> None:
     for name in (
         "mozaiks_cloud_client.py",
         "mozaiks_cloud_deployment_client.py",
-        "mozaiks_cloud_environment_client.py",
         "mozaiks_cloud_domain_client.py",
     ):
         path = TEMPLATES / "services" / "integrations" / name
         compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_mozaiks_cloud_templates_contain_no_placeholder_or_fake_success_code() -> None:
+    forbidden_patterns = {
+        "NotImplementedError": "not implemented placeholder",
+        "TODO": "todo placeholder",
+        "placeholder": "placeholder",
+        "return {\"success\": True}": "silent fake success",
+        "return {'success': True}": "silent fake success",
+    }
+    violations: list[tuple[str, str]] = []
+    for path in TEMPLATES.rglob("*"):
+        if not path.is_file() or path.suffix not in {".py", ".yaml", ".yml"}:
+            continue
+        content = path.read_text(encoding="utf-8")
+        for needle, reason in forbidden_patterns.items():
+            if needle in content:
+                violations.append((str(path.relative_to(TEMPLATES)), reason))
+        if path.suffix == ".py" and "\n    pass\n" in content:
+            violations.append((str(path.relative_to(TEMPLATES)), "empty pass body"))
+
+    assert violations == []
+
+
+def test_mozaiks_cloud_facade_actions_have_handler_methods() -> None:
+    for module_id in ("cloud_deployment", "cloud_domain"):
+        module_yaml = _read_yaml(TEMPLATES / "modules" / module_id / "module.yaml")
+        handler_source = _read_text(TEMPLATES / "modules" / module_id / "backend" / "handler.py")
+        missing = [
+            action["handler_method"]
+            for action in module_yaml["actions"]
+            if f"async def {action['handler_method']}(" not in handler_source
+        ]
+        assert missing == []
 
 
 def test_mozaiks_cloud_transport_client_reads_credentials_from_env_or_connector() -> None:
@@ -498,7 +528,6 @@ def test_mozaiks_cloud_client_no_hardcoded_credentials() -> None:
     for name in (
         "mozaiks_cloud_client.py",
         "mozaiks_cloud_deployment_client.py",
-        "mozaiks_cloud_environment_client.py",
         "mozaiks_cloud_domain_client.py",
     ):
         text = _read_text(TEMPLATES / "services" / "integrations" / name)
@@ -533,9 +562,10 @@ def test_mozaiks_cloud_deployment_client_has_bounded_operations() -> None:
         TEMPLATES / "services" / "integrations" / "mozaiks_cloud_deployment_client.py"
     )
     assert "submit_deployment_request" in text
-    assert "get_deployment_status" in text
+    assert "get_operation_status" in text
+    assert "get_environment_endpoints" in text
     assert "request_rollback" in text
-    assert "health" in text
+    assert "get_deployment_health" in text
     # Must not contain domain operations
     assert "connect_domain" not in text
     assert "get_dns_instructions" not in text
@@ -551,22 +581,17 @@ def test_mozaiks_cloud_domain_client_has_bounded_operations() -> None:
     assert "request_domain_activation" in text
     assert "get_domain_status" in text
     assert "disconnect_domain" in text
-    assert "health" in text
     # Must not contain deployment operations
     assert "submit_deployment" not in text
     assert "request_rollback" not in text
 
 
-def test_mozaiks_cloud_environment_client_is_bounded() -> None:
+def test_environment_endpoint_operation_stays_in_deployment_subclient() -> None:
     text = _read_text(
-        TEMPLATES / "services" / "integrations" / "mozaiks_cloud_environment_client.py"
+        TEMPLATES / "services" / "integrations" / "mozaiks_cloud_deployment_client.py"
     )
     assert "get_environment_endpoints" in text
-    # Must not contain deployment or domain mutation operations
-    assert "submit_deployment" not in text
-    assert "request_rollback" not in text
-    assert "connect_domain" not in text
-    assert "disconnect_domain" not in text
+    assert not (TEMPLATES / "services" / "integrations" / "mozaiks_cloud_environment_client.py").exists()
 
 
 def test_mozaiks_cloud_transport_has_bounded_retries() -> None:
@@ -593,13 +618,12 @@ def test_mozaiks_cloud_transport_uses_idempotency_key() -> None:
     )
 
 
-def test_mozaiks_cloud_transport_classifies_error_kinds() -> None:
+def test_mozaiks_cloud_transport_normalizes_error_envelope() -> None:
     text = _read_text(
         TEMPLATES / "services" / "integrations" / "mozaiks_cloud_client.py"
     )
-    assert "_classify_error_kind" in text, (
-        "Transport must implement normalized error taxonomy classification"
-    )
+    assert "_error_from_response" in text
+    assert "error_envelope" not in text
     assert "auth_error" in text
     assert "rate_limited" in text
     assert "not_found" in text

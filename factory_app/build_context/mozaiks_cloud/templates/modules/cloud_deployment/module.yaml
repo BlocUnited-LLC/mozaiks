@@ -49,6 +49,16 @@ actions:
       Each endpoint has url, kind, and optional region.
       Provider-internal resource IDs are never returned.
 
+  - id: get_deployment_health
+    label: Get Deployment Health
+    handler_method: get_deployment_health
+    api_surface: public_readonly
+    permissions:
+      - cloud_deployment.read
+    description: >
+      Retrieve sanitized deployment health for a provider-owned deployment.
+      Provider-internal resource IDs and raw build logs are never returned.
+
   - id: request_rollback
     label: Request Rollback
     handler_method: request_rollback

@@ -14,14 +14,22 @@ pack:
   status: active
   capability_source: managed_capability
   required_integrations:
-    - service: mozaiks_cloud_deployment
+    - service: mozaiks_cloud
       provider: mozaiks_cloud
-      display_name: Mozaiks Cloud Deployment
+      display_name: Mozaiks Cloud
       kind: api_key
       purpose: >
-        Submit, monitor, roll back, and inspect app deployments and environment
-        endpoints through the Mozaiks Cloud managed deployment platform.
+        Submit deployments, inspect hosting/environment state, request rollbacks,
+        and manage domain DNS/TLS lifecycle through one Mozaiks Cloud-compatible
+        managed-service credential.
       required_at: runtime
+      service_scopes:
+        - cloud:read
+        - cloud:deploy
+        - cloud:rollback
+        - domains:read
+        - domains:write
+        - domains:manage
       required_fields:
         - name: api_base
           label: Mozaiks Cloud API Base URL
@@ -39,25 +47,6 @@ pack:
           type: text
           required: false
           frontend_safe: true
-    - service: mozaiks_cloud_domain
-      provider: mozaiks_cloud
-      display_name: Mozaiks Cloud Domain Management
-      kind: api_key
-      purpose: >
-        Connect, verify, activate, and disconnect custom domains with normalized
-        DNS and TLS management through the Mozaiks Cloud domain platform.
-      required_at: runtime
-      required_fields:
-        - name: api_base
-          label: Mozaiks Cloud API Base URL
-          type: url
-          required: true
-          frontend_safe: true
-        - name: api_key
-          label: Mozaiks Cloud API Key
-          type: secret
-          required: true
-          frontend_safe: false
   deployment_env:
     optional:
       - MOZAIKS_CLOUD_API_BASE
@@ -72,6 +61,8 @@ capabilities:
   - capability_id: cloud.deployment.rollback
     facade_recommended: cloud_deployment
   - capability_id: cloud.environment.endpoints
+    facade_recommended: cloud_deployment
+  - capability_id: cloud.deployment.health
     facade_recommended: cloud_deployment
   - capability_id: cloud.domain.connect
     facade_recommended: cloud_domain

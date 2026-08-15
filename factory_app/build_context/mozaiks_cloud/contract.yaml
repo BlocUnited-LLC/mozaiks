@@ -35,14 +35,22 @@ recommended_domains:
   - environments
 
 required_integrations:
-  - service: mozaiks_cloud_deployment
+  - service: mozaiks_cloud
     provider: mozaiks_cloud
-    display_name: Mozaiks Cloud Deployment
+    display_name: Mozaiks Cloud
     kind: api_key
     purpose: >
-      Submit, monitor, roll back, and inspect app deployments and environment
-      endpoints through the Mozaiks Cloud managed deployment platform.
+      Submit deployments, inspect hosting/environment state, request rollbacks,
+      and manage domain DNS/TLS lifecycle through one Mozaiks Cloud-compatible
+      managed-service credential.
     required_at: runtime
+    service_scopes:
+      - cloud:read
+      - cloud:deploy
+      - cloud:rollback
+      - domains:read
+      - domains:write
+      - domains:manage
     required_fields:
       - name: api_base
         label: Mozaiks Cloud API Base URL
@@ -60,46 +68,25 @@ required_integrations:
         type: text
         required: false
         frontend_safe: true
-  - service: mozaiks_cloud_domain
-    provider: mozaiks_cloud
-    display_name: Mozaiks Cloud Domain Management
-    kind: api_key
-    purpose: >
-      Connect, verify, activate, and disconnect custom domains with normalized
-      DNS and TLS management through the Mozaiks Cloud domain platform.
-    required_at: runtime
-    required_fields:
-      - name: api_base
-        label: Mozaiks Cloud API Base URL
-        type: url
-        required: true
-        frontend_safe: true
-      - name: api_key
-        label: Mozaiks Cloud API Key
-        type: secret
-        required: true
-        frontend_safe: false
 
 required_outputs:
   - path: services/integrations/mozaiks_cloud_client.py
     owner: templates
   - path: services/integrations/mozaiks_cloud_deployment_client.py
     owner: templates
-  - path: services/integrations/mozaiks_cloud_environment_client.py
-    owner: templates
   - path: services/integrations/mozaiks_cloud_domain_client.py
     owner: templates
   - path: modules/cloud_deployment/module.yaml
     owner: templates
+  - path: modules/cloud_deployment/backend/handler.py
+    owner: templates
+  - path: modules/cloud_deployment/backend/service.py
+    owner: templates
   - path: modules/cloud_domain/module.yaml
     owner: templates
-  - path: modules/cloud_deployment/contracts/events.yaml
+  - path: modules/cloud_domain/backend/handler.py
     owner: templates
-  - path: modules/cloud_deployment/contracts/reactions.yaml
-    owner: templates
-  - path: modules/cloud_domain/contracts/events.yaml
-    owner: templates
-  - path: modules/cloud_domain/contracts/reactions.yaml
+  - path: modules/cloud_domain/backend/service.py
     owner: templates
 
 forbidden_outputs:
@@ -155,6 +142,7 @@ facades:
       - submit_deployment
       - get_deployment_status
       - get_environment_endpoints
+      - get_deployment_health
       - request_rollback
     pages:
       - name: Deployments
@@ -192,7 +180,8 @@ provider_api_response_contract:
     A Mozaiks Cloud-compatible provider serves the deployment and domain API
     endpoints consumed by generated apps. Response shapes are pinned in
     provider_api_contract.yaml. Any change to field names or types on either
-    side is a breaking change requiring coordinated release.
+    side is a breaking change requiring coordinated release. Generated apps use
+    polling-only operation status and do not expose provider callback routes.
   operation_required_fields:
     - operation_id
     - status
@@ -235,6 +224,9 @@ inactive_surfaces:
   - domain_purchasing
   - registrar_transfer
   - domain_renewal
+  - generated_callback_routes
+  - provider_account_creation
+  - source_upload
 
 # ---------------------------------------------------------------------------
 # Provider lifecycle boundary — responsibilities owned by the Mozaiks Cloud-

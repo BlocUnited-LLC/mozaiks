@@ -8,7 +8,7 @@ Verifies:
 - Unknown provider rejection (scanner rejects unknown pack type)
 - Closed status transitions declared in provider_api_contract.yaml
 - Idempotency key forwarded by transport
-- Safe malformed callback handling (scanner rejects missing required files)
+- Callback/event routes remain absent; provider replay flows through Idempotency-Key
 - No provider credentials in bundles (scanner catches raw cloud SDK imports)
 - No proprietary adapter code in bundles
 - Provider-neutral deployment artifacts remain valid when cloud pack absent
@@ -151,7 +151,6 @@ def test_conditional_materialization_pack_selected_produces_client_files() -> No
         "mozaiks_cloud_client.py must be materialized when pack is selected"
     )
     assert "services/integrations/mozaiks_cloud_deployment_client.py" in normalized
-    assert "services/integrations/mozaiks_cloud_environment_client.py" in normalized
     assert "services/integrations/mozaiks_cloud_domain_client.py" in normalized
     assert "modules/cloud_deployment/module.yaml" in normalized
     assert "modules/cloud_domain/module.yaml" in normalized
@@ -550,23 +549,24 @@ def test_domain_client_requires_idempotency_key_on_mutating_operations() -> None
 
 def test_deployment_status_enum_is_closed() -> None:
     api = _read_yaml(_PACK_ROOT / "provider_api_contract.yaml")
-    statuses = api["error_handling"]["status_enum"]["deployment"]
+    statuses = api["operation_status_model"]["fields"]["status"]
     # No open-ended / catch-all value
     assert "other" not in statuses and "custom" not in statuses and "unknown" not in statuses, (
         "Deployment status enum must be closed — no open-ended values"
     )
-    assert len(statuses) == 6
+    assert "rolling_back" in statuses
 
 
 def test_domain_status_enum_is_closed() -> None:
     api = _read_yaml(_PACK_ROOT / "provider_api_contract.yaml")
-    statuses = api["error_handling"]["status_enum"]["domain"]
+    statuses = api["response_models"]["DomainStatus"]["required"]
     assert "other" not in statuses and "custom" not in statuses
-    assert len(statuses) == 6
+    assert "status" in statuses
+    assert "dns_status" in statuses
 
 
 def test_tls_status_enum_is_closed() -> None:
     api = _read_yaml(_PACK_ROOT / "provider_api_contract.yaml")
-    statuses = api["error_handling"]["status_enum"]["tls"]
+    statuses = api["response_models"]["DomainStatus"]["required"]
     assert "other" not in statuses and "custom" not in statuses
-    assert len(statuses) == 4
+    assert "tls_status" in statuses

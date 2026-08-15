@@ -1,90 +1,74 @@
-"""Cloud domain module service.
-
-This module is a managed-capability facade. The actual domain operations
-are performed by the Mozaiks Cloud provider. This service layer:
-
-- Records domain operations initiated via the facade actions
-- Emits normalized domain events so downstream modules can react
-- Provides read access to cached domain status from the provider
-
-Event types emitted by this module (declared in contracts/events.yaml):
-  cloud.domain.connected
-  cloud.domain.status_updated
-  cloud.domain.disconnected
-"""
-
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
-
-_MODULE_ID = "cloud_domain"
-
-
-async def record_domain_connected(
-    ctx: Any,
-    *,
-    operation_id: str,
-    domain: str,
-    app_id: str,
-) -> dict[str, Any]:
-    """Persist a domain connection record and emit cloud.domain.connected."""
-    record = {
-        "operation_id": operation_id,
-        "domain": domain,
-        "app_id": app_id,
-        "status": "pending_verification",
-    }
-    col = ctx.persistence.collection(_MODULE_ID, "domains")
-    await col.insert_one({**record, "_id": domain})
-    await _emit(ctx, "cloud.domain.connected", record)
-    return record
+from services.integrations.mozaiks_cloud_client import MozaiksCloudTransport
+from services.integrations.mozaiks_cloud_domain_client import MozaiksCloudDomainClient
 
 
-async def record_domain_status_updated(
-    ctx: Any,
-    *,
-    domain: str,
-    status: str,
-    dns_verified: bool = False,
-    tls_status: str = "pending",
-) -> dict[str, Any]:
-    """Persist a provider domain status update and emit cloud.domain.status_updated."""
-    update = {"status": status, "dns_verified": dns_verified, "tls_status": tls_status}
-    col = ctx.persistence.collection(_MODULE_ID, "domains")
-    await col.update_one({"_id": domain}, {"$set": update})
-    payload = {"domain": domain, **update}
-    await _emit(ctx, "cloud.domain.status_updated", payload)
-    return payload
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
 
 
-async def record_domain_disconnected(
-    ctx: Any,
-    *,
-    domain: str,
-) -> dict[str, Any]:
-    """Persist a domain disconnection and emit cloud.domain.disconnected."""
-    col = ctx.persistence.collection(_MODULE_ID, "domains")
-    await col.update_one({"_id": domain}, {"$set": {"status": "disconnected"}})
-    payload = {"domain": domain, "status": "disconnected"}
-    await _emit(ctx, "cloud.domain.disconnected", payload)
-    return payload
+def _require(value: Any, field: str) -> str:
+    cleaned = _clean(value)
+    if not cleaned:
+        raise ValueError(f"{field} is required")
+    return cleaned
 
 
-async def get_domain(ctx: Any, *, domain: str) -> dict[str, Any] | None:
-    """Retrieve a cached domain record."""
-    col = ctx.persistence.collection(_MODULE_ID, "domains")
-    return await col.find_one({"_id": domain})
+class CloudDomainService:
+    def _client(self, *, app_id: str | None = None) -> MozaiksCloudDomainClient:
+        return MozaiksCloudDomainClient(MozaiksCloudTransport(app_id=app_id))
 
+    async def connect_domain(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        app_id = _require(params.get("app_id"), "app_id")
+        return await self._client(app_id=app_id).connect_domain(
+            app_id=app_id,
+            domain=_require(params.get("domain"), "domain"),
+            target_environment=_clean(params.get("target_environment")) or "production",
+            idempotency_key=_require(params.get("idempotency_key"), "idempotency_key"),
+        )
 
-async def _emit(ctx: Any, event_type: str, payload: dict[str, Any]) -> None:
-    bus = getattr(ctx, "event_bus", None)
-    if bus is None:
-        return
-    await bus.emit(
-        event_type=event_type,
-        payload=payload,
-        source_module=_MODULE_ID,
-        correlation_id=str(uuid.uuid4()),
-    )
+    async def get_domain_verification(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).get_domain_verification(
+            binding_id=_require(params.get("binding_id"), "binding_id"),
+            tenant_id=_clean(params.get("tenant_id")) or None,
+            app_id=_clean(params.get("app_id")) or None,
+        )
+
+    async def get_dns_instructions(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).get_dns_instructions(
+            binding_id=_require(params.get("binding_id"), "binding_id"),
+            tenant_id=_clean(params.get("tenant_id")) or None,
+            app_id=_clean(params.get("app_id")) or None,
+        )
+
+    async def request_domain_activation(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).request_domain_activation(
+            binding_id=_require(params.get("binding_id"), "binding_id"),
+            tenant_id=_require(params.get("tenant_id"), "tenant_id"),
+            app_id=_require(params.get("app_id"), "app_id"),
+            idempotency_key=_require(params.get("idempotency_key"), "idempotency_key"),
+        )
+
+    async def get_domain_status(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).get_domain_status(
+            binding_id=_require(params.get("binding_id"), "binding_id"),
+            tenant_id=_clean(params.get("tenant_id")) or None,
+            app_id=_clean(params.get("app_id")) or None,
+        )
+
+    async def disconnect_domain(self, ctx: Any, **params: Any) -> dict[str, Any]:
+        del ctx
+        return await self._client(app_id=_clean(params.get("app_id")) or None).disconnect_domain(
+            binding_id=_require(params.get("binding_id"), "binding_id"),
+            tenant_id=_require(params.get("tenant_id"), "tenant_id"),
+            app_id=_require(params.get("app_id"), "app_id"),
+            idempotency_key=_require(params.get("idempotency_key"), "idempotency_key"),
+        )
