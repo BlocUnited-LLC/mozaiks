@@ -57,6 +57,15 @@ _RAW_PAYMENT_PROVIDER_IMPORT_RE = re.compile(
     r"from\s+(stripe|paddle|paypal|braintree|square)\s+import\b)",
     re.IGNORECASE,
 )
+# Cloud provider SDK imports are forbidden in generated app bundles.
+# Generated apps must route all cloud operations through the bounded MozaiksCloud
+# sub-clients; they must not import Azure, Cloudflare, or GitHub SDKs directly.
+_RAW_CLOUD_PROVIDER_IMPORT_RE = re.compile(
+    r"(?m)^\s*(?:import\s+(azure(?:\.[a-zA-Z0-9_.]+)?|cloudflare)\b|"
+    r"from\s+(azure(?:\.[a-zA-Z0-9_.]+)?|cloudflare)\s+import\b)",
+    re.IGNORECASE,
+)
+
 _MANAGED_SETUP_RAW_PROVIDER_ENV_RE = re.compile(
     r"\b(?:STRIPE|PADDLE|PAYPAL|BRAINTREE|SQUARE)_[A-Z0-9_]*"
     r"(?:SECRET|KEY|TOKEN|PRIVATE|WEBHOOK|CLIENT_ID|PUBLISHABLE)[A-Z0-9_]*\b"
@@ -972,6 +981,113 @@ def _scan_mozaikspay_saas_contract(
             errors.append(
                 f"{page_path}: generated SaaS page must not bind directly to managed/provider modules: "
                 f"{sorted(direct_forbidden)}."
+            )
+
+    return errors
+
+
+def _scan_mozaiks_cloud_connector_contract(
+    files_map: dict[str, Any],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Validate Mozaiks Cloud connector contract when the pack is selected.
+
+    When mozaiks_cloud is selected as managed_capability:
+    - All four client files must be present.
+    - The transport client must resolve credentials from ConnectorStore/env.
+    - Both facade module YAMLs must declare expected actions.
+    - No Azure SDK or Cloudflare SDK imports may appear anywhere in the bundle.
+    When the pack is NOT selected, this check is a no-op — absence is proven
+    by the fact that the templates were never materialized.
+    """
+    pack = _selected_pack_descriptor(capability_packs, "mozaiks_cloud")
+    if not pack or str(pack.get("capability_source") or "").strip() != "managed_capability":
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    errors: list[str] = []
+
+    required_paths = {
+        "services/integrations/mozaiks_cloud_client.py",
+        "services/integrations/mozaiks_cloud_deployment_client.py",
+        "services/integrations/mozaiks_cloud_environment_client.py",
+        "services/integrations/mozaiks_cloud_domain_client.py",
+        "modules/cloud_deployment/module.yaml",
+        "modules/cloud_domain/module.yaml",
+    }
+    missing = sorted(path for path in required_paths if path not in normalized_files)
+    if missing:
+        errors.append(
+            "Selected mozaiks_cloud connector capability requires deterministic generated app "
+            f"files: {missing}."
+        )
+
+    client_content = normalized_files.get("services/integrations/mozaiks_cloud_client.py", "")
+    if client_content:
+        required_markers = {
+            "_CONNECTOR_SERVICE": "_CONNECTOR_SERVICE",
+            "mozaiks_cloud": "mozaiks_cloud",
+            "ConnectorStore": "ConnectorStore",
+            "get_connector_vault_backend": "get_connector_vault_backend",
+            "MOZAIKS_CLOUD_API_BASE": "MOZAIKS_CLOUD_API_BASE",
+            "MOZAIKS_CLOUD_API_KEY": "MOZAIKS_CLOUD_API_KEY",
+        }
+        missing_markers = [
+            label for label, marker in required_markers.items() if marker not in client_content
+        ]
+        if missing_markers:
+            errors.append(
+                "services/integrations/mozaiks_cloud_client.py must resolve the app-scoped "
+                f"mozaiks_cloud connector and env fallback; missing markers: {missing_markers}."
+            )
+
+    deployment_module = normalized_files.get("modules/cloud_deployment/module.yaml", "")
+    if deployment_module:
+        actions = _module_actions_from_yaml("modules/cloud_deployment/module.yaml", deployment_module)
+        required_actions = {
+            "submit_deployment",
+            "get_deployment_status",
+            "get_environment_endpoints",
+            "request_rollback",
+        }
+        missing_actions = sorted(required_actions - actions)
+        if missing_actions:
+            errors.append(
+                "modules/cloud_deployment/module.yaml must expose cloud_deployment facade "
+                f"actions: {missing_actions}."
+            )
+        declared_id = _declared_module_id_from_yaml(
+            "modules/cloud_deployment/module.yaml", deployment_module
+        )
+        if declared_id != "cloud_deployment":
+            errors.append(
+                "modules/cloud_deployment/module.yaml must declare module.id 'cloud_deployment'."
+            )
+
+    domain_module = normalized_files.get("modules/cloud_domain/module.yaml", "")
+    if domain_module:
+        actions = _module_actions_from_yaml("modules/cloud_domain/module.yaml", domain_module)
+        required_actions = {
+            "connect_domain",
+            "get_domain_verification",
+            "get_dns_instructions",
+            "request_domain_activation",
+            "get_domain_status",
+            "disconnect_domain",
+        }
+        missing_actions = sorted(required_actions - actions)
+        if missing_actions:
+            errors.append(
+                "modules/cloud_domain/module.yaml must expose cloud_domain facade "
+                f"actions: {missing_actions}."
+            )
+        declared_id = _declared_module_id_from_yaml(
+            "modules/cloud_domain/module.yaml", domain_module
+        )
+        if declared_id != "cloud_domain":
+            errors.append(
+                "modules/cloud_domain/module.yaml must declare module.id 'cloud_domain'."
             )
 
     return errors
@@ -2014,6 +2130,12 @@ def scan_generated_bundle(
         )
     )
     errors.extend(
+        _scan_mozaiks_cloud_connector_contract(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(
         _scan_self_hosted_entitlement_dispatch_contract(
             files_map,
             capability_packs=capability_packs,
@@ -2082,6 +2204,14 @@ def scan_generated_bundle(
                 errors.append(
                     f"{path}: imports raw payment provider SDK {provider_name!r}. Generated apps must "
                     "use app-owned facade modules and managed/provider-neutral adapter clients."
+                )
+
+            for raw_cloud_import in _RAW_CLOUD_PROVIDER_IMPORT_RE.finditer(content):
+                provider_name = raw_cloud_import.group(1) or raw_cloud_import.group(2) or ""
+                errors.append(
+                    f"{path}: imports raw cloud provider SDK {provider_name!r}. Generated apps must "
+                    "route cloud operations through the bounded MozaiksCloud sub-clients, not "
+                    "provider SDKs (azure, cloudflare, etc.) directly."
                 )
 
     return errors

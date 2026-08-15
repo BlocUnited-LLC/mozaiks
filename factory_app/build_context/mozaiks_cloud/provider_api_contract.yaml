@@ -1,0 +1,218 @@
+schema_version: mozaiks.provider_api_contract.v1
+contract_id: mozaiks_cloud_provider_api
+description: >
+  Machine-readable API interface specification for a Mozaiks Cloud-compatible
+  provider (api_version: v1, provider_api_prefix: /api/mozaiks-cloud/v1).
+  A compatible provider serves these endpoints consumed by generated apps.
+  The selected Mozaiks Cloud-compatible provider may be the hosted Mozaiks Cloud
+  platform or a self-hosted or alternative implementation that satisfies this
+  contract.
+
+auth:
+  kind: bearer_token
+  credential_reference: MOZAIKS_CLOUD_API_KEY
+
+endpoints:
+  - id: submit_deployment
+    method: POST
+    path: /deployments
+    description: Submit an authorized deployment/release request.
+    request_shape:
+      app_id: str
+      environment: str
+      release_ref: str
+      idempotency_key: str
+    response:
+      success_shape:
+        operation_id: str
+        status: str
+        environment: str
+        release_ref: str
+        created_at: str
+        message: "str | null"
+
+  - id: get_deployment_status
+    method: GET
+    path: /deployments/{operation_id}
+    description: Retrieve normalized deployment operation status.
+    response:
+      success_shape:
+        operation_id: str
+        status: str
+        environment: str
+        release_ref: str
+        created_at: str
+        updated_at: str
+        message: "str | null"
+
+  - id: get_environment_endpoints
+    method: GET
+    path: /environments/{app_id}/{environment}/endpoints
+    description: Retrieve normalized environment endpoints.
+    response:
+      success_shape:
+        environment: str
+        endpoints: "list[EnvironmentEndpoint]"
+
+  - id: request_rollback
+    method: POST
+    path: /deployments/{operation_id}/rollback
+    description: Request an authorized rollback to a previous release.
+    request_shape:
+      target_release_ref: str
+      idempotency_key: str
+    response:
+      success_shape:
+        operation_id: str
+        status: str
+        environment: str
+        release_ref: str
+        created_at: str
+
+  - id: deployment_health
+    method: GET
+    path: /health
+    description: Health/readiness probe for the deployment service.
+    response:
+      success_shape:
+        status: str
+        api_version: str
+
+  - id: connect_domain
+    method: POST
+    path: /domains
+    description: Connect an existing domain to the app.
+    request_shape:
+      app_id: str
+      domain: str
+      idempotency_key: str
+    response:
+      success_shape:
+        operation_id: str
+        status: str
+        domain: str
+        created_at: str
+
+  - id: get_domain_verification
+    method: GET
+    path: /domains/{operation_id}/verification
+    description: Request ownership verification status and instructions.
+    response:
+      success_shape:
+        operation_id: str
+        domain: str
+        status: str
+        verification_records: "list[DnsRecord]"
+
+  - id: get_dns_instructions
+    method: GET
+    path: /domains/{operation_id}/dns-instructions
+    description: Retrieve DNS configuration instructions.
+    response:
+      success_shape:
+        domain: str
+        records: "list[DnsRecord]"
+
+  - id: request_domain_activation
+    method: POST
+    path: /domains/{operation_id}/activate
+    description: Request domain activation after ownership verification.
+    request_shape:
+      idempotency_key: str
+    response:
+      success_shape:
+        operation_id: str
+        status: str
+        domain: str
+        created_at: str
+
+  - id: get_domain_status
+    method: GET
+    path: /domains/by-name/{domain}/status
+    description: Retrieve DNS and TLS status for a connected domain.
+    response:
+      success_shape:
+        domain: str
+        status: str
+        dns_verified: bool
+        tls_status: str
+        created_at: str
+        updated_at: str
+
+  - id: disconnect_domain
+    method: DELETE
+    path: /domains/by-name/{domain}
+    description: Disconnect a domain from the app.
+    request_shape:
+      idempotency_key: str
+    response:
+      success_shape:
+        domain: str
+        status: str
+
+  - id: domain_health
+    method: GET
+    path: /domains/health
+    description: Health/readiness probe for the domain service.
+    response:
+      success_shape:
+        status: str
+        api_version: str
+
+error_handling:
+  api_version: "v1"
+  provider_api_prefix: /api/mozaiks-cloud/v1
+
+  # Status enumerations — closed sets. Providers must not invent additional status values.
+  status_enum:
+    deployment:
+      - pending
+      - running
+      - succeeded
+      - failed
+      - cancelled
+      - rolling_back
+    domain:
+      - pending_verification
+      - verified
+      - activating
+      - active
+      - failed
+      - disconnected
+    tls:
+      - pending
+      - provisioning
+      - active
+      - failed
+
+  # Normalized error taxonomy — providers must classify errors into one of these kinds.
+  error_taxonomy:
+    - kind: auth_error
+      description: Authentication or authorization failure.
+    - kind: rate_limited
+      description: Request rate limit exceeded.
+    - kind: validation_error
+      description: Invalid request parameters.
+    - kind: not_found
+      description: Requested resource does not exist.
+    - kind: conflict
+      description: Operation conflicts with existing state.
+    - kind: provider_error
+      description: Internal provider infrastructure error.
+    - kind: timeout
+      description: Operation timed out.
+    - kind: unknown
+      description: Unclassified error.
+
+drift_guard:
+  # Shared type definitions referenced in endpoint response shapes.
+  shared_types:
+    EnvironmentEndpoint:
+      url: str
+      kind: str
+      region: "str | null"
+    DnsRecord:
+      type: str
+      name: str
+      value: str
+      ttl: "int | null"

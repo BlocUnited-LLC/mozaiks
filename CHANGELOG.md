@@ -14,6 +14,23 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Mozaiks Cloud OSS connector contracts** (`factory_app/build_context/mozaiks_cloud/`):
+  versioned, optional capability pack wiring generated apps to the Mozaiks Cloud
+  managed platform for deployment, environment endpoints, and domain management.
+  - `MozaiksCloudTransport` shared auth/retry/idempotency base; bounded sub-clients
+    `MozaiksCloudDeploymentClient`, `MozaiksCloudEnvironmentClient`, and
+    `MozaiksCloudDomainClient` in generated app bundles.
+  - Provider API contract (`provider_api_contract.yaml`) with closed deployment/domain/TLS
+    status enums, normalized error taxonomy, and globally forbidden response fields.
+  - App-owned facade modules `cloud_deployment` and `cloud_domain` with bounded actions,
+    declared events, and read-only reactions on `hosted.cloud.*` events.
+  - Explicit-selection-only contract — pack never auto-selects; provider-neutral bundles
+    contain zero cloud connector artifacts when the pack is not chosen.
+  - `generated_bundle_scanner` extended with `_scan_mozaiks_cloud_connector_contract`
+    and `_RAW_CLOUD_PROVIDER_IMPORT_RE` (Azure/Cloudflare SDK import guard).
+  - `capability_directory.yaml` and `capability_routing.yaml` wired with `mozaiks_cloud`
+    operator pack entry and `cloud_hosting` routing layer.
+
 - **Crash-safe workflow-queue leases**: `MongoWorkflowQueue` now issues a
   unique `claim_token` (fencing token) on each claim, enforces bounded lease
   durations, and supports bounded retries with dead-letter terminal state.

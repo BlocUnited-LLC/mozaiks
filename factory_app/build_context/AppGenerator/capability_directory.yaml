@@ -62,6 +62,47 @@ capabilities:
           - Generate strict app-owned facade contracts and adapter stubs only.
           - Keep provider-specific mechanics under app/services/adapters/payments/.
 
+  - id: mozaiks_cloud
+    label: Mozaiks Cloud Deployment and Domain Management
+    capability_kind: operator_pack
+    recommendation_rank: 10
+    adapter_contract:
+      role: optional_managed_adapter
+      app_facing_facades:
+        - cloud_deployment
+        - cloud_domain
+      replacement_kind: external_adapter
+      runtime_effect_boundary: CloudDeploymentOperation
+      runtime_read_boundary: CloudDomainStatus
+    domains:
+      - deployments
+      - hosting
+      - domains
+      - environments
+    intent_signals:
+      - App needs managed deployment to Mozaiks Cloud.
+      - App needs custom domain management with DNS and TLS through Mozaiks Cloud.
+      - User explicitly asks for Mozaiks Cloud hosting.
+    selection_rule: require_explicit_user_confirmation
+    generator_notes:
+      - Never auto-select this pack from generic deployment intent.
+        Mozaiks Cloud is opt-in; self-hosted apps work without it.
+      - When selected, generate app-owned facade modules (cloud_deployment,
+        cloud_domain) and thin services/integrations/mozaiks_cloud_*_client.py clients.
+      - Do not generate Azure SDK, Cloudflare SDK, GitHub SDK, or any provider
+        SDK imports in the app bundle.
+      - Pages must bind through app-owned facade module actions, not directly
+        to Mozaiks Cloud API endpoints.
+      - Secret env handles only (MOZAIKS_CLOUD_API_KEY, MOZAIKS_CLOUD_API_BASE);
+        never generate raw credential values.
+    alternatives:
+      - id: custom_hosting_provider
+        capability_kind: external_adapter
+        use_when: User brings their own hosting platform or deployment target.
+        generator_notes:
+          - Generate provider-neutral Dockerfile and deployment manifest only.
+          - Keep provider-specific mechanics under app/services/adapters/deployment/.
+
   - id: messaging_pack
     label: Messaging
     capability_kind: operator_pack

@@ -1,0 +1,56 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: cloud.deployment.submitted
+    version: 1
+    description: Emitted when a deployment request is submitted to Mozaiks Cloud.
+    producer: cloud_deployment
+    payload_schema:
+      type: object
+      required:
+        - operation_id
+        - environment
+        - release_ref
+      properties:
+        operation_id:
+          type: string
+        environment:
+          type: string
+        release_ref:
+          type: string
+
+  - type: cloud.deployment.status_updated
+    version: 1
+    description: Emitted when a deployment operation status changes locally.
+    producer: cloud_deployment
+    payload_schema:
+      type: object
+      required:
+        - operation_id
+        - status
+      properties:
+        operation_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - running
+            - succeeded
+            - failed
+            - cancelled
+            - rolling_back
+
+  - type: cloud.deployment.rollback_requested
+    version: 1
+    description: Emitted when a rollback is requested through an authorized operation.
+    producer: cloud_deployment
+    payload_schema:
+      type: object
+      required:
+        - operation_id
+        - target_release_ref
+      properties:
+        operation_id:
+          type: string
+        target_release_ref:
+          type: string

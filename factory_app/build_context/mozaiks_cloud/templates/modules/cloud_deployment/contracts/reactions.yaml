@@ -1,0 +1,23 @@
+schema_version: mozaiks.reactions.v1
+# Read-only reactions. This module never mutates deployment state, provider
+# pipeline state, or cloud infrastructure in reaction handlers. Handlers only
+# cache normalized status received from the hosted.cloud.* event namespace.
+reactions:
+  - id: deployment_completed
+    event_type: hosted.cloud.deployment.completed
+    target:
+      kind: handler
+      handler_method: handle_deployment_completed
+    description: >
+      Receives normalized completion notification from Mozaiks Cloud.
+      Updates local deployment status cache. Read-only; never mutates
+      provider deployment state or cloud infrastructure.
+
+  - id: deployment_failed
+    event_type: hosted.cloud.deployment.failed
+    target:
+      kind: handler
+      handler_method: handle_deployment_failed
+    description: >
+      Receives normalized failure notification from Mozaiks Cloud.
+      Updates local deployment status cache. Read-only.
