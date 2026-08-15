@@ -16,12 +16,15 @@ Proves:
   - retryable item with elapsed next_attempt_at is claimable
   - max_attempts=1: failure -> dead_letter immediately
   - max_attempts=3: 2 failures -> retryable, 3rd failure -> dead_letter
-  - max_attempts=None: unlimited retries always produce retryable
+  - finite default max_attempts: 3 failures with default -> dead_letter
+  - max_attempts validation: reject bool, 0, negative, >25
   - new queue instance with same storage can reclaim expired work
   - cross-tenant items remain isolated
-  - old records without new fields load safely
+  - from_document rejects malformed documents
   - no raw exception stored in error_category
   - ClaimResult contract
+  - expires_at set only at terminal transitions (retention TTL safety)
+  - NoOp behavior explicitly tested and documented as non-durable
 
 All tests use an in-memory mock store -- no MongoDB required.
 """
@@ -34,9 +37,13 @@ from uuid import uuid4
 import pytest
 
 from mozaiksai.core.workflow.queue import (
+    _DEFAULT_MAX_ATTEMPTS,
+    _MAX_MAX_ATTEMPTS,
+    _MIN_MAX_ATTEMPTS,
     ClaimResult,
     QueueItem,
     QueueItemStatus,
+    _validated_max_attempts,
 )
 
 # ---------------------------------------------------------------------------
@@ -60,6 +67,9 @@ class InMemoryWorkflowQueue:
 
     Uses string ISO timestamps for consistency with the production
     MongoWorkflowQueue (which stores ISO strings, not datetime objects).
+
+    Validates ``max_attempts`` via ``_validated_max_attempts()`` at enqueue,
+    matching production behavior.
     """
 
     def __init__(self, *, now_fn: Any = None) -> None:
@@ -76,7 +86,7 @@ class InMemoryWorkflowQueue:
         max_attempts: int | None = None,
         retry_delay_seconds: int = 0,
     ) -> str:
-        item.max_attempts = max_attempts
+        item.max_attempts = _validated_max_attempts(max_attempts)
         item.retry_delay_seconds = max(0, int(retry_delay_seconds))
         doc = item.to_document()
         self._records[item.item_id] = _Record(doc)
@@ -107,13 +117,9 @@ class InMemoryWorkflowQueue:
                 elif na is None:
                     eligible.append(rec)
             elif status == "claimed":
-                ct = rec.doc.get("claim_token")
                 lea = rec.doc.get("lease_expires_at")
-                # Pre-upgrade records (no claim_token).
-                if ct is None:
-                    eligible.append(rec)
-                # Lease expired.
-                elif lea is not None and lea <= now_iso:
+                # Lease expired -- crash recovery.
+                if lea is not None and lea <= now_iso:
                     eligible.append(rec)
 
         if not eligible:
@@ -147,8 +153,11 @@ class InMemoryWorkflowQueue:
             return False
         if rec.doc.get("status") != "claimed" or rec.doc.get("claim_token") != claim_token:
             return False
+        now = self._now()
         rec.doc["status"] = "completed"
-        rec.doc["completed_at"] = self._now().isoformat()
+        rec.doc["completed_at"] = now.isoformat()
+        # Set expires_at at terminal transition for TTL retention.
+        rec.doc["expires_at"] = (now + timedelta(seconds=3600)).isoformat()
         return True
 
     async def fail(
@@ -167,17 +176,20 @@ class InMemoryWorkflowQueue:
         now = self._now()
         now_iso = now.isoformat()
         attempt_count = int(rec.doc.get("attempt_count") or 0)
-        max_attempts_val = rec.doc.get("max_attempts")
+        max_attempts_val = int(rec.doc.get("max_attempts") or _DEFAULT_MAX_ATTEMPTS)
         retry_delay = max(0, int(rec.doc.get("retry_delay_seconds") or 0))
 
-        if max_attempts_val is not None and attempt_count >= int(max_attempts_val):
+        if attempt_count >= max_attempts_val:
             new_status = "dead_letter"
             rec.doc["dead_lettered_at"] = now_iso
             rec.doc["next_attempt_at"] = None
+            # Set expires_at at terminal transition for TTL retention.
+            rec.doc["expires_at"] = (now + timedelta(seconds=3600)).isoformat()
         else:
             new_status = "retryable"
             rec.doc["next_attempt_at"] = (now + timedelta(seconds=retry_delay)).isoformat()
             rec.doc["dead_lettered_at"] = None
+            rec.doc["expires_at"] = None  # Not terminal; no TTL.
 
         rec.doc["status"] = new_status
         rec.doc["last_failed_at"] = now_iso
@@ -214,6 +226,10 @@ class InMemoryWorkflowQueue:
     def item_status(self, item_id: str) -> str | None:
         rec = self._records.get(item_id)
         return rec.doc.get("status") if rec else None
+
+    def item_expires_at(self, item_id: str) -> str | None:
+        rec = self._records.get(item_id)
+        return rec.doc.get("expires_at") if rec else None
 
 
 # ---------------------------------------------------------------------------
@@ -742,21 +758,28 @@ async def test_max_attempts_3_lifecycle() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 25. max_attempts=None: unlimited retries
+# 25. Finite default: 3 failures with default max_attempts -> dead_letter
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_max_attempts_none_unlimited() -> None:
+async def test_finite_default_max_attempts_produces_dead_letter() -> None:
+    """max_attempts defaults to _DEFAULT_MAX_ATTEMPTS (3).
+    After 3 claim+fail cycles, status must be dead_letter."""
     q = InMemoryWorkflowQueue()
     item = _item()
-    await q.enqueue(item, max_attempts=None)
+    await q.enqueue(item)  # No explicit max_attempts -> default 3
 
-    for i in range(10):
+    for i in range(_DEFAULT_MAX_ATTEMPTS):
         c = await q.claim_next("w-1")
-        assert c.claimed
+        assert c.claimed, f"Attempt {i + 1} must be claimable"
         s = await q.fail(item.item_id, claim_token=c.claim_token)
-        assert s == "retryable", f"Attempt {i + 1}: unlimited must always produce retryable"
+        if i < _DEFAULT_MAX_ATTEMPTS - 1:
+            assert s == "retryable", f"Attempt {i + 1}: budget remaining -> retryable"
+        else:
+            assert s == "dead_letter", f"Attempt {i + 1}: budget exhausted -> dead_letter"
+
+    assert q.item_status(item.item_id) == "dead_letter"
 
 
 # ---------------------------------------------------------------------------
@@ -834,71 +857,49 @@ async def test_cross_tenant_isolation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 29. Old records without new fields load safely
+# 29. from_document rejects malformed documents (strict schema)
 # ---------------------------------------------------------------------------
 
 
-def test_old_document_without_new_fields() -> None:
-    """QueueItem.from_document handles pre-upgrade documents that lack
-    claim_token, lease_expires_at, attempt_count, etc."""
-    old_doc = {
-        "_id": "old-item-1",
-        "workflow_name": "wf",
-        "chat_id": "chat",
-        "app_id": "app",
-        "status": "claimed",
-        "claimed_by": "worker-old",
-        "claimed_at": "2024-01-01T00:00:00+00:00",
-        "enqueued_at": "2024-01-01T00:00:00+00:00",
-        "expires_at": "2024-01-02T00:00:00+00:00",
-    }
-    item = QueueItem.from_document(old_doc)
-    assert item.item_id == "old-item-1"
-    assert item.claim_token is None
-    assert item.lease_expires_at is None
-    assert item.attempt_count == 0
-    assert item.max_attempts is None
-    assert item.error_category is None
+def test_from_document_rejects_missing_id() -> None:
+    """QueueItem.from_document raises ValueError when _id is missing."""
+    with pytest.raises(ValueError, match="missing required '_id'"):
+        QueueItem.from_document({"workflow_name": "wf", "chat_id": "c", "app_id": "a"})
+
+
+def test_from_document_rejects_missing_workflow_name() -> None:
+    with pytest.raises(ValueError, match="missing required 'workflow_name'"):
+        QueueItem.from_document({"_id": "x", "chat_id": "c", "app_id": "a"})
+
+
+def test_from_document_rejects_missing_chat_id() -> None:
+    with pytest.raises(ValueError, match="missing required 'chat_id'"):
+        QueueItem.from_document({"_id": "x", "workflow_name": "wf", "app_id": "a"})
+
+
+def test_from_document_rejects_missing_app_id() -> None:
+    with pytest.raises(ValueError, match="missing required 'app_id'"):
+        QueueItem.from_document({"_id": "x", "workflow_name": "wf", "chat_id": "c"})
+
+
+def test_from_document_rejects_invalid_status() -> None:
+    with pytest.raises(ValueError):
+        QueueItem.from_document({
+            "_id": "x", "workflow_name": "wf", "chat_id": "c",
+            "app_id": "a", "status": "invalid_status_xyz",
+        })
+
+
+def test_from_document_defaults_max_attempts_when_missing() -> None:
+    """Documents without max_attempts get the canonical default."""
+    item = QueueItem.from_document({
+        "_id": "x", "workflow_name": "wf", "chat_id": "c", "app_id": "a",
+    })
+    assert item.max_attempts == _DEFAULT_MAX_ATTEMPTS
 
 
 # ---------------------------------------------------------------------------
-# 30. Old CLAIMED records without claim_token are reclaimable
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_old_claimed_records_reclaimable() -> None:
-    """Pre-upgrade CLAIMED records (no claim_token) are immediately reclaimable."""
-    q = InMemoryWorkflowQueue()
-
-    # Manually inject an old-style claimed record.
-    old_doc = {
-        "_id": "old-item",
-        "workflow_name": "wf",
-        "chat_id": "chat",
-        "app_id": "app",
-        "tenant_id": "t",
-        "status": "claimed",
-        "claimed_by": "old-worker",
-        "claim_token": None,
-        "lease_expires_at": None,
-        "attempt_count": 0,
-        "priority": 0,
-        "enqueued_at": "2024-01-01T00:00:00+00:00",
-        "expires_at": "2025-01-01T00:00:00+00:00",
-        "payload": {},
-    }
-    q._records["old-item"] = _Record(old_doc)
-
-    c = await q.claim_next("w-new")
-    assert c.claimed is True
-    assert c.item.item_id == "old-item"
-    assert c.claim_token is not None
-    assert c.attempt_count == 1
-
-
-# ---------------------------------------------------------------------------
-# 31. No raw exception stored in error_category
+# 30. No raw exception stored in error_category
 # ---------------------------------------------------------------------------
 
 
@@ -932,7 +933,7 @@ async def test_error_category_default() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 32. ClaimResult dataclass contract
+# 31. ClaimResult dataclass contract
 # ---------------------------------------------------------------------------
 
 
@@ -951,20 +952,24 @@ def test_claim_result_values() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 33. QueueItemStatus enum includes new states
+# 32. QueueItemStatus enum values (no FAILED or EXPIRED)
 # ---------------------------------------------------------------------------
 
 
 def test_queue_item_status_values() -> None:
-    assert "retryable" in [s.value for s in QueueItemStatus]
-    assert "dead_letter" in [s.value for s in QueueItemStatus]
-    assert "pending" in [s.value for s in QueueItemStatus]
-    assert "claimed" in [s.value for s in QueueItemStatus]
-    assert "completed" in [s.value for s in QueueItemStatus]
+    values = [s.value for s in QueueItemStatus]
+    assert "retryable" in values
+    assert "dead_letter" in values
+    assert "pending" in values
+    assert "claimed" in values
+    assert "completed" in values
+    # Removed pre-production speculative statuses
+    assert "failed" not in values, "FAILED removed; DEAD_LETTER is the only terminal failure state"
+    assert "expired" not in values, "EXPIRED removed; no legitimate use"
 
 
 # ---------------------------------------------------------------------------
-# 34. Renew lease: expired lease cannot be renewed
+# 33. Renew lease: expired lease cannot be renewed
 # ---------------------------------------------------------------------------
 
 
@@ -983,7 +988,7 @@ async def test_expired_lease_cannot_be_renewed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 35. Active count and queue depth
+# 34. Active count and queue depth
 # ---------------------------------------------------------------------------
 
 
@@ -1010,7 +1015,7 @@ async def test_active_count_and_queue_depth() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 36. max_attempts=3 but attempt 3 succeeds -> completed
+# 35. max_attempts=3 but attempt 3 succeeds -> completed
 # ---------------------------------------------------------------------------
 
 
@@ -1034,14 +1039,14 @@ async def test_max_attempts_3_third_attempt_succeeds() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 37. NoOpWorkflowQueue behavior
+# 36. NoOpWorkflowQueue behavior (explicitly non-durable)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_noop_queue_behavior() -> None:
-    """NoOpWorkflowQueue preserves per-instance semaphore behavior --
-    no durability, no lease lifecycle."""
+    """NoOpWorkflowQueue is explicitly non-durable.  Suitable for
+    development and testing only.  Does not implement lifecycle guarantees."""
     from mozaiksai.core.workflow.queue import NoOpWorkflowQueue
 
     q = NoOpWorkflowQueue()
@@ -1066,8 +1071,23 @@ async def test_noop_queue_behavior() -> None:
     assert await q.queue_depth() == 0
 
 
+@pytest.mark.asyncio
+async def test_noop_queue_validates_max_attempts() -> None:
+    """NoOpWorkflowQueue still validates max_attempts at enqueue time."""
+    from mozaiksai.core.workflow.queue import NoOpWorkflowQueue
+
+    q = NoOpWorkflowQueue()
+    item = _item()
+
+    with pytest.raises(ValueError, match="bool"):
+        await q.enqueue(item, max_attempts=True)
+
+    with pytest.raises(ValueError, match=">= 1"):
+        await q.enqueue(item, max_attempts=0)
+
+
 # ---------------------------------------------------------------------------
-# 38. Stale worker: old token rejected after reclaim
+# 37. Stale worker: old token rejected after reclaim
 # ---------------------------------------------------------------------------
 
 
@@ -1096,6 +1116,33 @@ async def test_stale_worker_after_reclaim() -> None:
 
     # New worker can complete.
     ok2 = await q.complete(item.item_id, claim_token=c2.claim_token)
+    assert ok2 is True
+
+
+# ---------------------------------------------------------------------------
+# 38. Stale worker: old token cannot renew after reclaim
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stale_worker_cannot_renew_after_reclaim() -> None:
+    clock = _Clock()
+    q = InMemoryWorkflowQueue(now_fn=clock)
+    item = _item()
+    await q.enqueue(item)
+
+    c1 = await q.claim_next("w-old", lease_seconds=30)
+    clock.advance(31)
+
+    c2 = await q.claim_next("w-new", lease_seconds=300)
+    assert c2.claimed
+
+    # Old worker tries to renew -- rejected (wrong token).
+    ok = await q.renew_lease(item.item_id, claim_token=c1.claim_token)
+    assert ok is False
+
+    # New worker can renew.
+    ok2 = await q.renew_lease(item.item_id, claim_token=c2.claim_token)
     assert ok2 is True
 
 
@@ -1162,3 +1209,194 @@ async def test_enqueue_sets_retry_config() -> None:
     rec = q._records[item.item_id]
     assert rec.doc["max_attempts"] == 5
     assert rec.doc["retry_delay_seconds"] == 30
+
+
+# ---------------------------------------------------------------------------
+# 42. max_attempts validation: reject bool
+# ---------------------------------------------------------------------------
+
+
+def test_validated_max_attempts_rejects_bool_true() -> None:
+    with pytest.raises(ValueError, match="bool"):
+        _validated_max_attempts(True)
+
+
+def test_validated_max_attempts_rejects_bool_false() -> None:
+    with pytest.raises(ValueError, match="bool"):
+        _validated_max_attempts(False)
+
+
+# ---------------------------------------------------------------------------
+# 43. max_attempts validation: reject zero
+# ---------------------------------------------------------------------------
+
+
+def test_validated_max_attempts_rejects_zero() -> None:
+    with pytest.raises(ValueError, match=f">= {_MIN_MAX_ATTEMPTS}"):
+        _validated_max_attempts(0)
+
+
+# ---------------------------------------------------------------------------
+# 44. max_attempts validation: reject negative
+# ---------------------------------------------------------------------------
+
+
+def test_validated_max_attempts_rejects_negative() -> None:
+    with pytest.raises(ValueError, match=f">= {_MIN_MAX_ATTEMPTS}"):
+        _validated_max_attempts(-5)
+
+
+# ---------------------------------------------------------------------------
+# 45. max_attempts validation: reject above maximum
+# ---------------------------------------------------------------------------
+
+
+def test_validated_max_attempts_rejects_above_max() -> None:
+    with pytest.raises(ValueError, match=f"<= {_MAX_MAX_ATTEMPTS}"):
+        _validated_max_attempts(_MAX_MAX_ATTEMPTS + 1)
+
+
+# ---------------------------------------------------------------------------
+# 46. max_attempts validation: None -> default
+# ---------------------------------------------------------------------------
+
+
+def test_validated_max_attempts_none_returns_default() -> None:
+    assert _validated_max_attempts(None) == _DEFAULT_MAX_ATTEMPTS
+
+
+# ---------------------------------------------------------------------------
+# 47. max_attempts validation: valid values accepted
+# ---------------------------------------------------------------------------
+
+
+def test_validated_max_attempts_valid_values() -> None:
+    assert _validated_max_attempts(1) == 1
+    assert _validated_max_attempts(3) == 3
+    assert _validated_max_attempts(25) == 25
+
+
+# ---------------------------------------------------------------------------
+# 48. Retention TTL safety: PENDING item has no expires_at
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pending_item_has_no_expires_at() -> None:
+    """PENDING items must have expires_at=None so the TTL index
+    cannot delete active work."""
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item)
+    assert q.item_expires_at(item.item_id) is None
+
+
+# ---------------------------------------------------------------------------
+# 49. Retention TTL safety: CLAIMED item has no expires_at
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claimed_item_has_no_expires_at() -> None:
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item)
+    await q.claim_next("w-1")
+    assert q.item_expires_at(item.item_id) is None
+
+
+# ---------------------------------------------------------------------------
+# 50. Retention TTL safety: RETRYABLE item has no expires_at
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_retryable_item_has_no_expires_at() -> None:
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item)
+    c = await q.claim_next("w-1")
+    await q.fail(item.item_id, claim_token=c.claim_token)
+    assert q.item_status(item.item_id) == "retryable"
+    assert q.item_expires_at(item.item_id) is None
+
+
+# ---------------------------------------------------------------------------
+# 51. Retention TTL: COMPLETED item gets expires_at set
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_completed_item_gets_expires_at() -> None:
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item)
+    c = await q.claim_next("w-1")
+    await q.complete(item.item_id, claim_token=c.claim_token)
+    assert q.item_status(item.item_id) == "completed"
+    assert q.item_expires_at(item.item_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# 52. Retention TTL: DEAD_LETTER item gets expires_at set
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_item_gets_expires_at() -> None:
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item, max_attempts=1)
+    c = await q.claim_next("w-1")
+    await q.fail(item.item_id, claim_token=c.claim_token)
+    assert q.item_status(item.item_id) == "dead_letter"
+    assert q.item_expires_at(item.item_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# 53. Replacement worker can complete after reclaim
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_replacement_worker_completes_after_reclaim() -> None:
+    clock = _Clock()
+    q = InMemoryWorkflowQueue(now_fn=clock)
+    item = _item()
+    await q.enqueue(item)
+
+    _c1 = await q.claim_next("w-old", lease_seconds=30)  # noqa: F841
+    clock.advance(31)
+
+    c2 = await q.claim_next("w-new", lease_seconds=300)
+    assert c2.claimed
+    assert c2.attempt_count == 2
+
+    ok = await q.complete(item.item_id, claim_token=c2.claim_token)
+    assert ok is True
+    assert q.item_status(item.item_id) == "completed"
+
+
+# ---------------------------------------------------------------------------
+# 54. Enqueue with max_attempts=None uses default
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enqueue_max_attempts_none_uses_default() -> None:
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item, max_attempts=None)
+
+    rec = q._records[item.item_id]
+    assert rec.doc["max_attempts"] == _DEFAULT_MAX_ATTEMPTS
+
+
+# ---------------------------------------------------------------------------
+# 55. QueueItem dataclass default max_attempts
+# ---------------------------------------------------------------------------
+
+
+def test_queue_item_default_max_attempts() -> None:
+    item = QueueItem(workflow_name="wf", chat_id="c", app_id="a")
+    assert item.max_attempts == _DEFAULT_MAX_ATTEMPTS

@@ -33,16 +33,18 @@
 # ``attempt_count`` is incremented at **claim time** -- each successful claim
 # (including reclaims after crash or retry) counts as one attempt.
 #
-# ``max_attempts`` is the total number of attempts permitted.  When
-# ``attempt_count >= max_attempts`` and a failure is recorded, status becomes
-# ``dead_letter``.  When ``max_attempts`` is ``None``, retries are unlimited.
+# ``max_attempts`` is the total number of attempts permitted (finite, default 3,
+# range [1, 25]).  When ``attempt_count >= max_attempts`` and a failure is
+# recorded, status becomes ``dead_letter``.
 #
-# No TTL Index on Lease Fields
-# ----------------------------
-# ``lease_expires_at`` does NOT carry a MongoDB TTL index.  Completed and
-# dead-letter records must remain available for audit.  Lease expiry affects
-# claimability only -- not record existence.  The existing ``expires_at`` TTL
-# index governs overall item retention and is unrelated to leases.
+# Retention vs Lease
+# ------------------
+# ``lease_expires_at`` does NOT carry a MongoDB TTL index.  Lease expiry
+# affects claimability only -- not record existence.
+#
+# ``expires_at`` is set only at terminal transitions (COMPLETED, DEAD_LETTER)
+# to enable TTL-based retention cleanup.  Active work (PENDING, CLAIMED,
+# RETRYABLE) has ``expires_at=None`` and is never deleted by the TTL sweeper.
 #
 # Backends:
 #   MongoWorkflowQueue  -- MongoDB collection (default, no extra infra)
@@ -80,6 +82,10 @@ _DEFAULT_LEASE_SECONDS = int(
 _MIN_LEASE_SECONDS: int = 10
 _MAX_LEASE_SECONDS: int = 3600
 
+_DEFAULT_MAX_ATTEMPTS: int = 3
+_MIN_MAX_ATTEMPTS: int = 1
+_MAX_MAX_ATTEMPTS: int = 25
+
 _QUEUE_DB = os.getenv("MOZAIKS_APP_DATABASE_NAME", "mozaiks_apps")
 _QUEUE_COLLECTION = "workflow_queue"
 
@@ -88,8 +94,6 @@ class QueueItemStatus(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
     COMPLETED = "completed"
-    FAILED = "failed"          # pre-upgrade status; old records may have this
-    EXPIRED = "expired"        # pre-upgrade status; old records may have this
     RETRYABLE = "retryable"
     DEAD_LETTER = "dead_letter"
 
@@ -123,18 +127,16 @@ class QueueItem:
     priority: int = 0                    # Higher = executed first
     item_id: str = field(default_factory=lambda: str(uuid4()))
     enqueued_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    expires_at: str = field(default_factory=lambda: (
-        datetime.now(UTC) + timedelta(seconds=_ITEM_TTL)
-    ).isoformat())
+    expires_at: str | None = None  # Set only at terminal transition; TTL index deletes after this
     status: QueueItemStatus = QueueItemStatus.PENDING
     claimed_by: str | None = None
     claimed_at: str | None = None
 
-    # Lease and retry fields (new)
+    # Lease and retry fields
     claim_token: str | None = None
     lease_expires_at: str | None = None
     attempt_count: int = 0
-    max_attempts: int | None = None
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS
     retry_delay_seconds: int = 0
     next_attempt_at: str | None = None
     last_failed_at: str | None = None
@@ -169,11 +171,31 @@ class QueueItem:
 
     @classmethod
     def from_document(cls, doc: dict[str, Any]) -> QueueItem:
+        """Reconstruct a ``QueueItem`` from a MongoDB document.
+
+        Raises ``ValueError`` if required identity fields (``_id``,
+        ``workflow_name``, ``chat_id``, ``app_id``) are missing or empty,
+        or if the ``status`` value is not a recognised ``QueueItemStatus``.
+        """
+        _id = doc.get("_id")
+        if not _id:
+            raise ValueError("QueueItem document missing required '_id'")
+        for field_name in ("workflow_name", "chat_id", "app_id"):
+            if not doc.get(field_name):
+                raise ValueError(
+                    f"QueueItem document missing required '{field_name}'"
+                )
+
+        raw_max = doc.get("max_attempts")
+        max_attempts = (
+            _DEFAULT_MAX_ATTEMPTS if raw_max is None else int(raw_max)
+        )
+
         return cls(
-            item_id=str(doc.get("_id", uuid4())),
-            workflow_name=doc.get("workflow_name", ""),
-            chat_id=doc.get("chat_id", ""),
-            app_id=doc.get("app_id", ""),
+            item_id=str(_id),
+            workflow_name=doc["workflow_name"],
+            chat_id=doc["chat_id"],
+            app_id=doc["app_id"],
             user_id=doc.get("user_id"),
             tenant_id=doc.get("tenant_id"),
             payload=doc.get("payload", {}),
@@ -186,7 +208,7 @@ class QueueItem:
             claim_token=doc.get("claim_token"),
             lease_expires_at=doc.get("lease_expires_at"),
             attempt_count=int(doc.get("attempt_count", 0)),
-            max_attempts=doc.get("max_attempts"),
+            max_attempts=max_attempts,
             retry_delay_seconds=int(doc.get("retry_delay_seconds", 0)),
             next_attempt_at=doc.get("next_attempt_at"),
             last_failed_at=doc.get("last_failed_at"),
@@ -200,6 +222,30 @@ def _bounded_lease(lease_seconds: int) -> int:
     return max(_MIN_LEASE_SECONDS, min(_MAX_LEASE_SECONDS, int(lease_seconds)))
 
 
+def _validated_max_attempts(value: int | None) -> int:
+    """Validate and normalize ``max_attempts`` to a finite bounded integer.
+
+    Returns ``_DEFAULT_MAX_ATTEMPTS`` when *value* is ``None``.
+    Rejects booleans, non-positive values, and values above ``_MAX_MAX_ATTEMPTS``.
+    """
+    if value is None:
+        return _DEFAULT_MAX_ATTEMPTS
+    if isinstance(value, bool):
+        raise ValueError(
+            f"max_attempts must be an integer, not bool ({value!r})"
+        )
+    value = int(value)
+    if value < _MIN_MAX_ATTEMPTS:
+        raise ValueError(
+            f"max_attempts must be >= {_MIN_MAX_ATTEMPTS}, got {value}"
+        )
+    if value > _MAX_MAX_ATTEMPTS:
+        raise ValueError(
+            f"max_attempts must be <= {_MAX_MAX_ATTEMPTS}, got {value}"
+        )
+    return value
+
+
 @runtime_checkable
 class WorkflowQueue(Protocol):
     """Port for global workflow queue operations."""
@@ -211,7 +257,11 @@ class WorkflowQueue(Protocol):
         max_attempts: int | None = None,
         retry_delay_seconds: int = 0,
     ) -> str:
-        """Enqueue a workflow run. Returns the item_id."""
+        """Enqueue a workflow run. Returns the item_id.
+
+        ``max_attempts`` defaults to ``_DEFAULT_MAX_ATTEMPTS`` (3) when
+        ``None``.  Validated by ``_validated_max_attempts()`` before storage.
+        """
         ...
 
     async def claim_next(
@@ -278,11 +328,11 @@ class WorkflowQueue(Protocol):
 # ---------------------------------------------------------------------------
 
 class NoOpWorkflowQueue:
-    """Preserves existing per-instance semaphore behaviour.
+    """Non-durable single-instance queue stub.
 
     No cross-instance coordination, no durability guarantees, and no
-    implementation of the lease/fencing/retry lifecycle.  Use when running
-    a single instance without the need for crash-safe queue semantics.
+    implementation of the lease/fencing/retry lifecycle.  Suitable for
+    development and testing only.
     """
 
     def __init__(self) -> None:
@@ -296,6 +346,7 @@ class NoOpWorkflowQueue:
         max_attempts: int | None = None,
         retry_delay_seconds: int = 0,
     ) -> str:
+        _validated_max_attempts(max_attempts)  # validate even in NoOp
         return item.item_id
 
     async def claim_next(
@@ -372,10 +423,9 @@ class MongoWorkflowQueue:
     async def ensure_indexes(self) -> None:
         """Create required indexes.  Safe to call on every startup.
 
-        Does NOT create a TTL index on any lease or time field.  The existing
-        ``expires_at`` TTL index governs overall item retention and is
-        unrelated to leases.  Completed and dead-letter records must remain
-        available for audit until the retention TTL removes them.
+        ``expires_at`` TTL index fires only for terminal records (COMPLETED,
+        DEAD_LETTER) where the field is non-null.  Active work has
+        ``expires_at=None`` and is never touched by the TTL sweeper.
         """
         col = self._col()
         if col is None:
@@ -399,7 +449,7 @@ class MongoWorkflowQueue:
                 name="wq_retry_idx",
                 background=True,
             )
-            # Retention TTL on expires_at (item-level, not lease-level).
+            # Retention TTL on expires_at (terminal records only; null = skip).
             await col.create_index(
                 [("expires_at", 1)],
                 expireAfterSeconds=0,
@@ -416,7 +466,7 @@ class MongoWorkflowQueue:
         max_attempts: int | None = None,
         retry_delay_seconds: int = 0,
     ) -> str:
-        item.max_attempts = max_attempts
+        item.max_attempts = _validated_max_attempts(max_attempts)
         item.retry_delay_seconds = max(0, int(retry_delay_seconds))
         col = self._col()
         if col is None:
@@ -444,7 +494,6 @@ class MongoWorkflowQueue:
           - ``PENDING``
           - ``RETRYABLE`` with ``next_attempt_at <= now``
           - ``CLAIMED`` with ``lease_expires_at <= now`` (crash recovery)
-          - Pre-upgrade ``CLAIMED`` without ``claim_token``
 
         Returns ``ClaimResult(claimed=True, ...)`` on success.
         """
@@ -473,17 +522,6 @@ class MongoWorkflowQueue:
                         {
                             "status": QueueItemStatus.CLAIMED.value,
                             "lease_expires_at": {"$lte": now_iso},
-                        },
-                        # Pre-upgrade compat: old CLAIMED records without
-                        # claim_token (pre-upgrade) are immediately
-                        # reclaimable since they have no lease.
-                        {
-                            "status": QueueItemStatus.CLAIMED.value,
-                            "claim_token": None,
-                        },
-                        {
-                            "status": QueueItemStatus.CLAIMED.value,
-                            "claim_token": {"$exists": False},
                         },
                     ],
                 },
@@ -523,19 +561,28 @@ class MongoWorkflowQueue:
         """Mark a claimed item as completed.
 
         Only succeeds for the current ``claim_token`` holder.
+        Sets ``expires_at`` to enable TTL-based retention cleanup.
         """
         col = self._col()
         if col is None:
             return False
         try:
-            now_iso = self._now().isoformat()
+            now = self._now()
+            now_iso = now.isoformat()
+            retain_until = (now + timedelta(seconds=_ITEM_TTL)).isoformat()
             result = await col.update_one(
                 {
                     "_id": item_id,
                     "status": QueueItemStatus.CLAIMED.value,
                     "claim_token": claim_token,
                 },
-                {"$set": {"status": QueueItemStatus.COMPLETED.value, "completed_at": now_iso}},
+                {
+                    "$set": {
+                        "status": QueueItemStatus.COMPLETED.value,
+                        "completed_at": now_iso,
+                        "expires_at": retain_until,
+                    },
+                },
             )
             return bool(result.modified_count == 1)
         except Exception as exc:
@@ -553,9 +600,10 @@ class MongoWorkflowQueue:
 
         Status determination uses values stored in the document at claim time:
 
-        - ``DEAD_LETTER``: ``max_attempts`` is set and
-          ``attempt_count >= max_attempts``.
-        - ``RETRYABLE``: all other cases (``max_attempts=None`` -> unlimited).
+        - ``DEAD_LETTER``: ``attempt_count >= max_attempts``.
+        - ``RETRYABLE``: ``attempt_count < max_attempts``.
+
+        ``max_attempts`` is always a finite integer (validated at enqueue time).
 
         ``RETRYABLE`` records become re-claimable after ``next_attempt_at``
         (``now + retry_delay_seconds``; default 0 -> immediately reclaimable).
@@ -589,18 +637,24 @@ class MongoWorkflowQueue:
                 return None  # Stale worker or already transitioned.
 
             attempt_count = int(doc.get("attempt_count") or 0)
-            max_attempts_val = doc.get("max_attempts")
+            max_attempts_val = int(
+                doc.get("max_attempts") or _DEFAULT_MAX_ATTEMPTS
+            )
             retry_delay = max(0, int(doc.get("retry_delay_seconds") or 0))
             next_attempt_iso = (now + timedelta(seconds=retry_delay)).isoformat()
 
-            if max_attempts_val is not None and attempt_count >= int(max_attempts_val):
+            if attempt_count >= max_attempts_val:
                 new_status = QueueItemStatus.DEAD_LETTER.value
                 dead_lettered_at: str | None = now_iso
                 na_value: str | None = None
+                retain_until: str | None = (
+                    now + timedelta(seconds=_ITEM_TTL)
+                ).isoformat()
             else:
                 new_status = QueueItemStatus.RETRYABLE.value
                 dead_lettered_at = None
                 na_value = next_attempt_iso
+                retain_until = None  # Not terminal; no TTL yet.
 
             # Fenced transition.
             result = await col.update_one(
@@ -616,6 +670,7 @@ class MongoWorkflowQueue:
                         "next_attempt_at": na_value,
                         "dead_lettered_at": dead_lettered_at,
                         "error_category": (error_category or "execution_error")[:128],
+                        "expires_at": retain_until,
                     }
                 },
             )
@@ -727,4 +782,7 @@ __all__ = [
     "QueueItemStatus",
     "WorkflowQueue",
     "get_workflow_queue",
+    "_DEFAULT_MAX_ATTEMPTS",
+    "_MIN_MAX_ATTEMPTS",
+    "_MAX_MAX_ATTEMPTS",
 ]
