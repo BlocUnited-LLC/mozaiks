@@ -117,3 +117,8 @@ tmpdist/
 web_shell/test-results/
 web_shell/playwright-report/
 web_shell/.mozaiks-tailwind-sources/
+
+# Agent-local permission/config files
+.agents/settings.local.json
+.claude/settings.local.json
+.codex/settings.local.json
