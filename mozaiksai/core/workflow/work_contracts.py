@@ -296,6 +296,36 @@ def make_work_result(
     )
 
 
+def validate_work_result_for_assignment(
+    *,
+    assignment: WorkAssignment,
+    result: WorkResult,
+) -> WorkResult:
+    """Validate an executor-supplied result against assignment authority."""
+    result = WorkResult.model_validate(result.model_dump(mode="json"))
+    if result.assignment_id != assignment.assignment_id:
+        raise ValueError(f"WorkResult assignment_id {result.assignment_id!r} does not match assignment")
+    if result.assignment_digest != assignment.assignment_digest:
+        raise ValueError(f"WorkResult for {assignment.assignment_id!r} has mismatched assignment_digest")
+    if result.baseline_sha != assignment.baseline_sha:
+        raise ValueError(f"WorkResult for {assignment.assignment_id!r} has mismatched baseline_sha")
+
+    owned = set(assignment.owned_paths)
+    seen_paths: set[str] = set()
+    for artifact in result.changed_artifacts:
+        if artifact.path in seen_paths:
+            raise ValueError(f"duplicate changed artifact path: {artifact.path!r}")
+        seen_paths.add(artifact.path)
+        if not path_is_within_owned(artifact.path, owned):
+            raise ValueError(f"WorkResult changed artifact {artifact.path!r} is outside assignment owned_paths")
+
+    if result.status == "completed":
+        _validate_required_artifacts(assignment, result.changed_artifacts)
+        evidence_payload = [item.model_dump(mode="json") for item in result.validation_evidence]
+        _validate_required_validators(assignment, evidence_payload)
+    return result
+
+
 def validate_assignment_dag(assignments: list[WorkAssignment]) -> None:
     _topological_sort(assignments)
 
@@ -700,5 +730,6 @@ __all__ = [
     "make_work_assignment",
     "make_work_result",
     "stable_digest",
+    "validate_work_result_for_assignment",
     "validate_assignment_dag",
 ]

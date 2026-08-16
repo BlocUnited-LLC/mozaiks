@@ -196,6 +196,29 @@ class InMemoryWorkflowQueue:
         rec.doc["error_category"] = (error_category or "execution_error")[:128]
         return new_status
 
+    async def dead_letter(
+        self,
+        item_id: str,
+        *,
+        claim_token: str,
+        error_category: str | None = None,
+    ) -> bool:
+        rec = self._records.get(item_id)
+        if rec is None:
+            return False
+        if rec.doc.get("status") != "claimed" or rec.doc.get("claim_token") != claim_token:
+            return False
+
+        now = self._now()
+        now_iso = now.isoformat()
+        rec.doc["status"] = "dead_letter"
+        rec.doc["last_failed_at"] = now_iso
+        rec.doc["dead_lettered_at"] = now_iso
+        rec.doc["next_attempt_at"] = None
+        rec.doc["error_category"] = (error_category or "permanent_failure")[:128]
+        rec.doc["expires_at"] = (now + timedelta(seconds=3600)).isoformat()
+        return True
+
     async def renew_lease(
         self,
         item_id: str,
@@ -1378,7 +1401,54 @@ async def test_replacement_worker_completes_after_reclaim() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 54. Enqueue with max_attempts=None uses default
+# 54. Fenced immediate dead-letter for deterministic permanent failures
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_uses_current_fencing_token() -> None:
+    q = InMemoryWorkflowQueue()
+    item = _item()
+    await q.enqueue(item, max_attempts=3)
+    claim = await q.claim_next("worker")
+    assert claim.claimed
+
+    assert await q.dead_letter(item.item_id, claim_token="stale-token") is False
+    assert q.item_status(item.item_id) == "claimed"
+
+    assert await q.dead_letter(
+        item.item_id,
+        claim_token=claim.claim_token,
+        error_category="invalid_payload",
+    ) is True
+    assert q.item_status(item.item_id) == "dead_letter"
+    assert q.item_expires_at(item.item_id) is not None
+    doc = q._records[item.item_id].doc
+    assert doc["error_category"] == "invalid_payload"
+    assert doc["next_attempt_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_stale_dead_letter_rejected_after_reclaim() -> None:
+    clock = _Clock()
+    q = InMemoryWorkflowQueue(now_fn=clock)
+    item = _item()
+    await q.enqueue(item, max_attempts=3)
+    old = await q.claim_next("w-old", lease_seconds=30)
+    assert old.claimed
+    clock.advance(31)
+    new = await q.claim_next("w-new", lease_seconds=30)
+    assert new.claimed
+
+    assert await q.dead_letter(item.item_id, claim_token=old.claim_token) is False
+    assert q.item_status(item.item_id) == "claimed"
+
+    assert await q.dead_letter(item.item_id, claim_token=new.claim_token) is True
+    assert q.item_status(item.item_id) == "dead_letter"
+
+
+# ---------------------------------------------------------------------------
+# 55. Enqueue with max_attempts=None uses default
 # ---------------------------------------------------------------------------
 
 
@@ -1393,7 +1463,7 @@ async def test_enqueue_max_attempts_none_uses_default() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 55. QueueItem dataclass default max_attempts
+# 56. QueueItem dataclass default max_attempts
 # ---------------------------------------------------------------------------
 
 
