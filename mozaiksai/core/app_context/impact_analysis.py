@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import deque
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -513,7 +513,7 @@ def _graph_content_payload(graph: AppContextGraph) -> dict[str, Any]:
 
 
 def _safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    return _without_timestamps(metadata)
+    return cast(dict[str, Any], _without_timestamps(metadata))
 
 
 def _without_timestamps(value: Any) -> Any:

@@ -1466,7 +1466,8 @@ def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     contract_path = _contract_path(path)
     if path.endswith("module.yaml"):
-        module_block = data.get("module") if isinstance(data.get("module"), dict) else {}
+        _raw_module = data.get("module")
+        module_block: dict[str, Any] = _raw_module if isinstance(_raw_module, dict) else {}
         metadata["module_id"] = _first_text(data, "id", "module_id", "name") or _first_text(
             module_block,
             "id",
@@ -1625,7 +1626,7 @@ def _extract_pack_outputs(data: dict[str, Any]) -> list[dict[str, str]]:
             pack_id = default_pack_id
             owner = default_pack_id
         elif isinstance(item, dict):
-            path = _first_text(item, "path", "file", "output_path")
+            path = _first_text(item, "path", "file", "output_path") or ""
             pack_id = _first_text(item, "pack_id", "capability_id", "owner") or default_pack_id
             owner = _first_text(item, "owner", "pack_id", "capability_id") or pack_id
         else:
