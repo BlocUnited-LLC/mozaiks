@@ -47,6 +47,15 @@ EXCLUDED_PREFIXES = {
     ".claude/worktrees",
 }
 
+# Agent-local permission files, which must never be tracked. Exact paths rather
+# than .claude/**, so shared guidance under .claude/rules/ and .claude/skills/
+# stays tracked.
+AGENT_LOCAL_CONFIG_PATHS = {
+    ".agents/settings.local.json",
+    ".claude/settings.local.json",
+    ".codex/settings.local.json",
+}
+
 GRANTED_PERMISSIONS_NONE_ALLOWLIST = {
     "ARCHITECTURAL_INVARIANTS.md",
     "CHANGELOG.md",
@@ -269,6 +278,20 @@ def _scan_file(path: Path, repo_root: Path) -> tuple[list[GovernanceFinding], li
     relative = _relative(path, repo_root)
     errors: list[GovernanceFinding] = []
     notices: list[GovernanceFinding] = []
+
+    if relative in AGENT_LOCAL_CONFIG_PATHS:
+        errors.append(
+            GovernanceFinding(
+                severity="error",
+                code="agent_local_config_committed",
+                path=relative,
+                line=0,
+                message=(
+                    "agent-local permission/config files must stay untracked; "
+                    "remove from git tracking and add the path to .gitignore"
+                ),
+            )
+        )
 
     if GRANTED_PERMISSIONS_NONE_RE.search(text) and relative not in GRANTED_PERMISSIONS_NONE_ALLOWLIST:
         match = GRANTED_PERMISSIONS_NONE_RE.search(text)

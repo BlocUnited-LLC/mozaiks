@@ -107,6 +107,33 @@ def test_governance_guardrail_marks_unversioned_public_contracts_without_blockin
     assert [notice.code for notice in notices] == ["public_schema_needs_classification"]
 
 
+def test_governance_guardrail_rejects_committed_agent_local_config(tmp_path: Path) -> None:
+    guardrails = _load_guardrails_module()
+    path = _write(
+        tmp_path,
+        ".claude/settings.local.json",
+        '{"permissions": {"allow": ["Bash(curl:*)"]}}\n',
+    )
+
+    errors, _notices = guardrails.scan_paths([path], repo_root=tmp_path)
+
+    assert [error.code for error in errors] == ["agent_local_config_committed"]
+
+
+def test_governance_guardrail_keeps_shared_agent_guidance_tracked(tmp_path: Path) -> None:
+    guardrails = _load_guardrails_module()
+    paths = [
+        _write(tmp_path, ".claude/rules/runtime.md", "# Runtime Rules\n"),
+        _write(tmp_path, ".claude/skills/add-module/SKILL.md", "# Add Module\n"),
+        _write(tmp_path, ".claude/settings.json", '{"model": "opus"}\n'),
+    ]
+
+    errors, notices = guardrails.scan_paths(paths, repo_root=tmp_path)
+
+    findings = [finding.code for finding in [*errors, *notices]]
+    assert "agent_local_config_committed" not in findings
+
+
 def test_governance_guardrail_passes_current_repo_all_scan() -> None:
     guardrails = _load_guardrails_module()
 
