@@ -14,6 +14,7 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     normalize_app_path,
 )
+from mozaiksai.core.workflow.assignment_kinds import app_build_assignment_kind_values
 
 try:
     from .managed_monetization_contract import (
@@ -74,19 +75,7 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
-_ALLOWED_TASK_TYPES = {
-    "subscription_config",
-    "service_foundation",
-    "module_contract",
-    "persistence_contract",
-    "data_migrations",
-    "data_models",
-    "business_services",
-    "api_surface",
-    "page_bundle",
-    "agent_backend_integration",
-    "refinement_harness",
-}
+_ALLOWED_TASK_TYPES = app_build_assignment_kind_values()
 _CANONICAL_INITIAL_AGENTS = {
     "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",

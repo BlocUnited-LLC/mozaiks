@@ -15,6 +15,7 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 
+from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
@@ -25,6 +26,7 @@ from .generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
 )
+from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
 
 
@@ -453,6 +455,14 @@ async def _execute_one_batch(
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
 ) -> dict[str, Any]:
     pending = {str(item["task_id"]): item for item in task_items}
+    try:
+        deterministic_topological_order(
+            pending.values(),
+            item_id=lambda item: str(item.get("task_id") or ""),
+            dependencies=lambda item: _task_dependencies(item, batch.execution.dependency_field),
+        )
+    except ValueError as exc:
+        raise ValueError(f"task batch {batch.id!r} has unresolved or cyclic dependencies: {exc}") from exc
     completed: dict[str, dict[str, Any]] = {}
     failed: dict[str, dict[str, Any]] = {}
 
@@ -831,22 +841,14 @@ def _normalize_owned_page_files_from_plan(
 
 
 def _normalize_owned_paths(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    paths: list[str] = []
-    for item in value:
-        safe = safe_relpath(str(item or ""))
-        if safe and safe not in paths:
-            paths.append(safe)
-    return paths
+    return list(normalize_owned_paths(value))
 
 
 def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: list[dict[str, Any]]) -> None:
     if not batch.result.require_owned_paths:
         return
 
-    owner_by_path: dict[str, str] = {}
-    duplicate_paths: dict[str, list[str]] = {}
+    owner_paths: dict[str, tuple[str, ...]] = {}
     for task in task_items:
         task_id = str(task.get("task_id") or "").strip()
         owned_paths = _normalize_owned_paths(task.get("owned_paths"))
@@ -854,17 +856,13 @@ def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: list[dict[str,
             raise ValueError(
                 f"task batch {batch.id!r} requires owned_paths, but task {task_id!r} declares none"
             )
-        for path in owned_paths:
-            previous_owner = owner_by_path.get(path)
-            if previous_owner and previous_owner != task_id:
-                duplicate_paths.setdefault(path, [previous_owner]).append(task_id)
-            else:
-                owner_by_path[path] = task_id
+        owner_paths[task_id] = tuple(owned_paths)
 
-    if duplicate_paths:
+    collision_report = detect_owned_path_collisions(owner_paths)
+    if collision_report.has_collisions:
         details = {
-            path: sorted(set(owners))
-            for path, owners in sorted(duplicate_paths.items())
+            collision.path: list(collision.owner_ids)
+            for collision in collision_report.collisions
         }
         raise ValueError(
             f"task batch {batch.id!r} has owned_paths declared by multiple tasks: {details}"
