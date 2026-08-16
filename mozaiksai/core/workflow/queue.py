@@ -300,6 +300,22 @@ class WorkflowQueue(Protocol):
         """
         ...
 
+    async def dead_letter(
+        self,
+        item_id: str,
+        *,
+        claim_token: str,
+        error_category: str | None = None,
+    ) -> bool:
+        """Terminally dead-letter a claimed item.
+
+        Only succeeds for the current ``claim_token`` holder. This is for
+        deterministic permanent failures where retrying the same payload cannot
+        produce a valid execution, such as malformed contracts or unknown
+        registered executors.
+        """
+        ...
+
     async def renew_lease(
         self,
         item_id: str,
@@ -368,6 +384,15 @@ class NoOpWorkflowQueue:
         error_category: str | None = None,
     ) -> str | None:
         return None
+
+    async def dead_letter(
+        self,
+        item_id: str,
+        *,
+        claim_token: str,
+        error_category: str | None = None,
+    ) -> bool:
+        return False
 
     async def renew_lease(
         self,
@@ -687,6 +712,44 @@ class MongoWorkflowQueue:
         except Exception as exc:
             logger.error("QUEUE_FAIL_FAIL item_id=%s: %s", item_id, exc)
             return None
+
+    async def dead_letter(
+        self,
+        item_id: str,
+        *,
+        claim_token: str,
+        error_category: str | None = None,
+    ) -> bool:
+        """Terminally dead-letter a CLAIMED item using the fencing token."""
+        col = self._col()
+        if col is None:
+            return False
+
+        now = self._now()
+        now_iso = now.isoformat()
+        retain_until = (now + timedelta(seconds=_ITEM_TTL)).isoformat()
+        try:
+            result = await col.update_one(
+                {
+                    "_id": item_id,
+                    "status": QueueItemStatus.CLAIMED.value,
+                    "claim_token": claim_token,
+                },
+                {
+                    "$set": {
+                        "status": QueueItemStatus.DEAD_LETTER.value,
+                        "last_failed_at": now_iso,
+                        "next_attempt_at": None,
+                        "dead_lettered_at": now_iso,
+                        "error_category": (error_category or "permanent_failure")[:128],
+                        "expires_at": retain_until,
+                    }
+                },
+            )
+            return bool(result.modified_count == 1)
+        except Exception as exc:
+            logger.error("QUEUE_DEAD_LETTER_FAIL item_id=%s: %s", item_id, exc)
+            return False
 
     async def renew_lease(
         self,
