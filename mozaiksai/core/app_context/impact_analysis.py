@@ -78,8 +78,8 @@ def analyze_impact(
     query: ImpactQuery,
 ) -> ImpactReport:
     """Run a deterministic bounded graph traversal without mutating the graph."""
-    if query.snapshot_digest != snapshot_identity.graph_content_digest:
-        raise ValueError("ImpactQuery snapshot_digest does not match GraphSnapshotIdentity graph_content_digest")
+    if query.snapshot_digest != snapshot_identity.identity_digest:
+        raise ValueError("ImpactQuery snapshot_digest does not match GraphSnapshotIdentity identity_digest")
     nodes_by_id = {node.node_id: node for node in graph.nodes}
     missing = sorted(seed for seed in query.seed_node_ids if seed not in nodes_by_id)
     if missing:
@@ -223,7 +223,7 @@ def _report_payload(
     return {
         "snapshot_identity": snapshot_identity,
         "query": query,
-        "snapshot_digest": snapshot_identity.graph_content_digest,
+        "snapshot_digest": snapshot_identity.identity_digest,
         "query_digest": impact_query_digest(query),
         "affected_node_ids": affected_node_ids,
         "affected_files": affected_files,
@@ -290,13 +290,14 @@ def _adjacency(
             adjacency.setdefault(edge.source_node_id, []).append((edge.target_node_id, edge_id))
         if direction in {ImpactDirection.INBOUND, ImpactDirection.BOTH}:
             adjacency.setdefault(edge.target_node_id, []).append((edge.source_node_id, edge_id))
+    edge_lookup: dict[str, AppContextGraphEdge] = {_edge_key(edge): edge for edge in graph.edges}
     for node_id in adjacency:
-        adjacency[node_id].sort(key=lambda item: (edge_by_sort_key(graph, item[1]), item[0]))
+        adjacency[node_id].sort(key=lambda item: (edge_by_sort_key(edge_lookup, item[1]), item[0]))
     return adjacency
 
 
-def edge_by_sort_key(graph: AppContextGraph, edge_id: str) -> tuple[str, str, str]:
-    edge = next((item for item in graph.edges if _edge_key(item) == edge_id), None)
+def edge_by_sort_key(edge_lookup: dict[str, AppContextGraphEdge], edge_id: str) -> tuple[str, str, str]:
+    edge = edge_lookup.get(edge_id)
     if edge is None:
         return ("", "", edge_id)
     return (edge.edge_type.value, edge.source_node_id, edge.target_node_id)
@@ -315,8 +316,11 @@ def _symbol_authority_failures(
     nodes_by_id: dict[str, AppContextGraphNode],
 ) -> list[str]:
     failures: list[str] = []
+    allowed = set(query.allowed_edge_types)
     candidate_ids = set(query.seed_node_ids)
     for edge in graph.edges:
+        if edge.edge_type not in allowed:
+            continue
         if edge.source_node_id in candidate_ids:
             candidate_ids.add(edge.target_node_id)
         if edge.target_node_id in candidate_ids:
