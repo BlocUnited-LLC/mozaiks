@@ -203,14 +203,15 @@ class WorkAssignmentWorker:
 
         max_executor_attempts = assignment.assignment_retry_limit + 1
         last_transient_category = WorkAssignmentFailureCategory.EXECUTOR_TRANSIENT
-        for executor_attempt in range(1, max_executor_attempts + 1):
-            async def _renew_lease(extend_seconds: int | None = None) -> bool:
-                return await self.queue.renew_lease(
-                    item.item_id,
-                    claim_token=token,
-                    extend_seconds=extend_seconds,
-                )
 
+        async def _renew_lease(extend_seconds: int | None = None) -> bool:
+            return await self.queue.renew_lease(
+                item.item_id,
+                claim_token=token,
+                extend_seconds=extend_seconds,
+            )
+
+        for executor_attempt in range(1, max_executor_attempts + 1):
             context = WorkAssignmentExecutionContext(
                 assignment=assignment,
                 item=item,

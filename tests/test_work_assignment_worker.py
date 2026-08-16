@@ -561,3 +561,204 @@ async def test_identical_delivery_cannot_bypass_fencing() -> None:
     assert first.status is WorkAssignmentRunStatus.COMPLETED
     assert second.status is WorkAssignmentRunStatus.STALE_CLAIM
     assert queue.status(item_id) == "completed"
+
+
+@pytest.mark.asyncio
+async def test_executor_result_failed_uses_queue_retry_budget() -> None:
+    """result.status=='failed' routes through _fail_claim, not dead_letter."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    assignment = _assignment()
+    executor = RecordingExecutor([_result(assignment, status="failed")])
+    item_id, worker = await _enqueue_worker(
+        queue=queue, assignment=assignment, executor=executor, max_attempts=2,
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.RETRYABLE
+    assert outcome.error_category is WorkAssignmentFailureCategory.EXECUTOR_RESULT_FAILED
+    assert queue.status(item_id) == "retryable"
+
+
+@pytest.mark.asyncio
+async def test_executor_result_skipped_dead_letters() -> None:
+    """result.status=='skipped' is a deterministic permanent failure."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    assignment = _assignment()
+    executor = RecordingExecutor([_result(assignment, status="skipped")])
+    item_id, worker = await _enqueue_worker(
+        queue=queue, assignment=assignment, executor=executor, max_attempts=5,
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.DEAD_LETTER
+    assert outcome.error_category is WorkAssignmentFailureCategory.EXECUTOR_RESULT_SKIPPED
+    assert queue.status(item_id) == "dead_letter"
+
+
+def test_registry_rejects_duplicate_registration() -> None:
+    registry = WorkAssignmentExecutorRegistry()
+    executor = RecordingExecutor([])
+    registry.register("module_contract", executor)
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register("module_contract", executor)
+
+
+def test_registry_rejects_missing_execute_method() -> None:
+    registry = WorkAssignmentExecutorRegistry()
+    with pytest.raises(ValueError, match="must expose"):
+        registry.register("module_contract", object())  # type: ignore[arg-type]
+
+
+def test_worker_rejects_empty_worker_id() -> None:
+    from mozaiksai.core.workflow.queue import NoOpWorkflowQueue
+
+    with pytest.raises(ValueError, match="worker_id must be non-empty"):
+        WorkAssignmentWorker(
+            queue=NoOpWorkflowQueue(),
+            executor_registry=WorkAssignmentExecutorRegistry(),
+            worker_id="",
+        )
+
+
+def test_worker_rejects_whitespace_only_worker_id() -> None:
+    from mozaiksai.core.workflow.queue import NoOpWorkflowQueue
+
+    with pytest.raises(ValueError, match="worker_id must be non-empty"):
+        WorkAssignmentWorker(
+            queue=NoOpWorkflowQueue(),
+            executor_registry=WorkAssignmentExecutorRegistry(),
+            worker_id="   ",
+        )
+
+
+@pytest.mark.asyncio
+async def test_stale_dead_letter_rejected_after_replacement_claim() -> None:
+    """Dead-letter by a stale worker must be rejected by fencing."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    assignment = _assignment()
+    item_id = await queue.enqueue(_item(assignment))
+    old_claim = await queue.claim_next("old", lease_seconds=30)
+    clock.advance(31)
+    new_claim = await queue.claim_next("new", lease_seconds=30)
+    assert old_claim.claim_token != new_claim.claim_token
+
+    # Old worker tries to dead_letter with stale token
+    assert await queue.dead_letter(item_id, claim_token=old_claim.claim_token or "") is False
+    assert queue.status(item_id) == "claimed"
+    assert queue.document(item_id)["claim_token"] == new_claim.claim_token
+
+
+@pytest.mark.asyncio
+async def test_event_emission_failure_after_retryable_fail_does_not_revert_transition() -> None:
+    """Event sink failure after fail() must not revert the queue transition."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    assignment = _assignment(assignment_retry_limit=0)
+    item_id = await queue.enqueue(_item(assignment), max_attempts=2)
+
+    async def _bad_sink(event: WorkAssignmentLifecycleEvent) -> None:
+        raise RuntimeError("event sink down")
+
+    worker = WorkAssignmentWorker(
+        queue=queue,
+        executor_registry=_registry(RecordingExecutor([WorkAssignmentTransientError("temp")])),
+        worker_id="worker",
+        lifecycle_event_sink=_bad_sink,
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.RETRYABLE_EVENT_FAILED
+    assert queue.status(item_id) == "retryable"
+    assert outcome.lifecycle_event_emitted is False
+
+
+@pytest.mark.asyncio
+async def test_event_emission_failure_after_dead_letter_does_not_revert_transition() -> None:
+    """Event sink failure after dead_letter() must not revert the queue transition."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    assignment = _assignment()
+    item_id = await queue.enqueue(_item(assignment))
+
+    async def _bad_sink(event: WorkAssignmentLifecycleEvent) -> None:
+        raise RuntimeError("event sink down")
+
+    worker = WorkAssignmentWorker(
+        queue=queue,
+        executor_registry=_registry(RecordingExecutor([WorkAssignmentPermanentError("bad")])),
+        worker_id="worker",
+        lifecycle_event_sink=_bad_sink,
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.DEAD_LETTER_EVENT_FAILED
+    assert queue.status(item_id) == "dead_letter"
+    assert outcome.lifecycle_event_emitted is False
+
+
+@pytest.mark.asyncio
+async def test_no_lifecycle_event_when_assignment_is_none_on_dead_letter() -> None:
+    """Malformed payload (assignment=None) dead-letters without emitting lifecycle event."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    events: list[WorkAssignmentLifecycleEvent] = []
+    item_id = await queue.enqueue(QueueItem(
+        workflow_name="WorkAssignmentWorker", chat_id="chat", app_id="app",
+        payload={"work_assignment": "not_a_dict"},
+    ))
+    worker = WorkAssignmentWorker(
+        queue=queue,
+        executor_registry=_registry(RecordingExecutor([])),
+        worker_id="worker",
+        lifecycle_event_sink=events.append,
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.DEAD_LETTER
+    assert queue.status(item_id) == "dead_letter"
+    assert events == []
+    assert outcome.lifecycle_event_emitted is False
+
+
+@pytest.mark.asyncio
+async def test_run_once_no_item_returns_no_item() -> None:
+    """run_once on empty queue returns NO_ITEM without side effects."""
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    worker = WorkAssignmentWorker(
+        queue=queue,
+        executor_registry=WorkAssignmentExecutorRegistry(),
+        worker_id="worker",
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.NO_ITEM
+    assert outcome.item_id is None
+    assert outcome.assignment_id is None
+
+
+@pytest.mark.asyncio
+async def test_registry_resolve_unknown_kind_returns_none() -> None:
+    """Resolving an unregistered kind returns None, not an error."""
+    registry = WorkAssignmentExecutorRegistry()
+    assert registry.resolve("module_contract") is None
+
+
+def test_registered_kinds_returns_sorted_tuple() -> None:
+    registry = WorkAssignmentExecutorRegistry()
+    e1 = RecordingExecutor([])
+    e2 = RecordingExecutor([])
+    registry.register("page_bundle", e1)
+    registry.register("module_contract", e2)
+    kinds = registry.registered_kinds()
+    assert isinstance(kinds, tuple)
+    assert list(kinds) == sorted(kinds, key=lambda k: k.value)
