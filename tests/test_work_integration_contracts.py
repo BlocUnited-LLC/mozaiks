@@ -21,13 +21,19 @@ No mocks, no network, no filesystem I/O, no AG2 construction.
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import json
 
 import pytest
+from pydantic import ValidationError
 
+from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TASK_TYPES
+from mozaiksai.core.workflow.assignment_kinds import app_build_assignment_kind_values
+from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.work_contracts import (
+    AG2_TRANSIENT_RETRY_FIELD,
+    ASSIGNMENT_RETRY_LIMIT_RANGE,
+    QUEUE_DELIVERY_MAX_ATTEMPTS_RANGE,
     REGISTERED_ASSIGNMENT_KINDS,
     ValidationEvidence,
     WorkAssignment,
@@ -79,7 +85,7 @@ def _result(
     paths = paths or list(assignment.owned_paths[:1])
     operations = operations or ["create"] * len(paths)
     artifacts = [
-        {"path": p, "operation": o}
+        {"path": p, "operation": o, "content_digest": stable_digest(f"{assignment.assignment_id}:{p}:{o}")}
         for p, o in zip(paths, operations, strict=True)
     ]
     return make_work_result(
@@ -213,11 +219,11 @@ class TestMakeWorkAssignment:
     def test_valid_retry_limits(self):
         for limit in range(6):  # 0–5
             a = _assignment(retry_limit=limit)
-            assert a.retry_limit == limit
+            assert a.assignment_retry_limit == limit
 
     def test_assignment_is_immutable(self):
         a = _assignment()
-        with pytest.raises((AttributeError, TypeError, dataclasses.FrozenInstanceError)):
+        with pytest.raises(ValidationError):
             a.assignment_id = "changed"  # type: ignore[misc]
 
 
@@ -290,11 +296,7 @@ class TestMakeWorkResult:
 
     def test_different_status_produces_different_digest(self):
         a = _assignment()
-        r1 = make_work_result(
-            assignment=a,
-            status="completed",
-            attempt_id="x",
-        )
+        r1 = _result(a, status="completed", attempt_id="x")
         r2 = make_work_result(
             assignment=a,
             status="failed",
@@ -310,7 +312,7 @@ class TestMakeWorkResult:
                 status="completed",
                 attempt_id="x",
                 changed_artifacts=[
-                    {"path": "modules/bar/module.yaml", "operation": "create"}
+                    {"path": "modules/bar/module.yaml", "operation": "create", "content_digest": "aaa"}
                 ],
             )
 
@@ -322,7 +324,7 @@ class TestMakeWorkResult:
             status="completed",
             attempt_id="x",
             changed_artifacts=[
-                {"path": "modules/foo/handler.py", "operation": "create"}
+                {"path": "modules/foo/handler.py", "operation": "create", "content_digest": "aaa"}
             ],
         )
         assert len(r.changed_artifacts) == 1
@@ -344,7 +346,7 @@ class TestMakeWorkResult:
                 status="completed",
                 attempt_id="x",
                 changed_artifacts=[
-                    {"path": "modules/foo/module.yaml", "operation": "rename"}
+                    {"path": "modules/foo/module.yaml", "operation": "rename", "content_digest": "aaa"}
                 ],
             )
 
@@ -354,12 +356,14 @@ class TestMakeWorkResult:
             assignment=a,
             status="completed",
             attempt_id="x",
+            changed_artifacts=[{"path": "modules/foo/module.yaml", "operation": "create"}],
             file_map={"modules/foo/module.yaml": "content-1"},
         )
         r2 = make_work_result(
             assignment=a,
             status="completed",
             attempt_id="x",
+            changed_artifacts=[{"path": "modules/foo/module.yaml", "operation": "create"}],
             file_map={"modules/foo/module.yaml": "content-2"},
         )
         assert r1.output_digest != r2.output_digest
@@ -384,6 +388,7 @@ class TestMakeWorkResult:
             assignment=a,
             status="completed",
             attempt_id="x",
+            changed_artifacts=[{"path": "modules/foo/module.yaml", "operation": "create", "content_digest": "aaa"}],
             validation_evidence=[
                 {"validator_id": "mytest", "passed": True}
             ],
@@ -399,8 +404,8 @@ class TestMakeWorkResult:
             status="completed",
             attempt_id="x",
             changed_artifacts=[
-                {"path": "modules/foo/handler.py", "operation": "create"},
-                {"path": "modules/bar/handler.py", "operation": "create"},
+                {"path": "modules/foo/handler.py", "operation": "create", "content_digest": "foo"},
+                {"path": "modules/bar/handler.py", "operation": "create", "content_digest": "bar"},
             ],
         )
         paths = [art.path for art in r.changed_artifacts]
@@ -453,7 +458,7 @@ class TestDagValidation:
 
     def test_missing_dep_rejected(self):
         a2 = _assignment("a2", depends_on=["nonexistent"])
-        with pytest.raises(ValueError, match="not in the assignment set"):
+        with pytest.raises(ValueError, match="unknown dependencies"):
             validate_assignment_dag([a2])
 
     def test_single_node_no_deps_valid(self):
@@ -501,7 +506,7 @@ class TestCollisionDetection:
         report = detect_collisions([a1, a2])
         assert report.has_collisions
         kinds = {c.kind for c in report.collisions}
-        assert "direct_path" in kinds
+        assert "overlapping_writer" in kinds
 
     def test_parent_child_collision(self):
         a1 = _assignment("a1", owned_paths=["modules/foo"])
@@ -509,7 +514,7 @@ class TestCollisionDetection:
         report = detect_collisions([a1, a2])
         assert report.has_collisions
         kinds = {c.kind for c in report.collisions}
-        assert "parent_child" in kinds
+        assert "parent_child_writer" in kinds
 
     def test_case_collision(self):
         a1 = _assignment("a1", owned_paths=["Modules/Foo/Handler.py"])
@@ -529,21 +534,19 @@ class TestCollisionDetection:
         kinds = {c.kind for c in report.collisions}
         assert "operation_conflict" in kinds
 
-    def test_same_create_on_same_path_is_not_operation_conflict(self):
+    def test_same_create_on_same_path_is_overlapping_writer(self):
         a1 = _assignment("a1", owned_paths=["modules/foo/module.yaml"])
         a2 = _assignment("a2", owned_paths=["modules/foo/module.yaml"])
         r1 = _result(a1, paths=["modules/foo/module.yaml"], operations=["create"])
         r2 = _result(a2, paths=["modules/foo/module.yaml"], operations=["create"])
         report = detect_collisions([a1, a2], [r1, r2])
-        # Still has direct_path collision, but no operation_conflict
-        op_conflict_kinds = [c for c in report.collisions if c.kind == "operation_conflict"]
-        assert not op_conflict_kinds
+        assert any(c.kind == "overlapping_writer" for c in report.collisions)
 
     def test_no_parent_child_collision_same_assignment(self):
         # A single assignment owning both parent and child is fine
         a1 = _assignment("a1", owned_paths=["modules/foo", "modules/foo/handler.py"])
         report = detect_collisions([a1])
-        parent_child = [c for c in report.collisions if c.kind == "parent_child"]
+        parent_child = [c for c in report.collisions if c.kind == "parent_child_writer"]
         assert not parent_child
 
     def test_collision_report_is_sorted_deterministically(self):
@@ -605,21 +608,15 @@ class TestBuildIntegrationResult:
         )
         assert ir1.integration_digest == ir2.integration_digest
 
-    def test_different_plans_produce_different_digests(self):
+    def test_mismatched_plan_identity_rejected(self):
         assignments, results = self._two_assignment_chain()
-        ir1 = build_integration_result(
-            plan_id="plan-1",
-            plan_digest=_PLAN_DIGEST,
-            assignments=assignments,
-            results=results,
-        )
-        ir2 = build_integration_result(
-            plan_id="plan-2",
-            plan_digest=_PLAN_DIGEST,
-            assignments=assignments,
-            results=results,
-        )
-        assert ir1.integration_digest != ir2.integration_digest
+        with pytest.raises(ValueError, match="plan identity"):
+            build_integration_result(
+                plan_id="plan-1",
+                plan_digest=_PLAN_DIGEST,
+                assignments=assignments,
+                results=results,
+            )
 
     def test_empty_plan_id_rejected(self):
         assignments, results = self._two_assignment_chain()
@@ -661,19 +658,18 @@ class TestBuildIntegrationResult:
         assert "a2" in ir.unresolved_assignments
         assert ir.promotion_ready is False
 
-    def test_promotion_not_ready_with_collision(self):
+    def test_integration_rejects_collision(self):
         a1 = _assignment("a1", owned_paths=["modules/shared/handler.py"])
         a2 = _assignment("a2", owned_paths=["modules/shared/handler.py"])
         r1 = _result(a1)
         r2 = _result(a2)
-        ir = build_integration_result(
-            plan_id=_PLAN_ID,
-            plan_digest=_PLAN_DIGEST,
-            assignments=[a1, a2],
-            results=[r1, r2],
-        )
-        assert ir.collision_report.has_collisions
-        assert ir.promotion_ready is False
+        with pytest.raises(ValueError, match="overlapping writers"):
+            build_integration_result(
+                plan_id=_PLAN_ID,
+                plan_digest=_PLAN_DIGEST,
+                assignments=[a1, a2],
+                results=[r1, r2],
+            )
 
     def test_promotion_not_ready_with_failed_result(self):
         a1 = _assignment("a1", owned_paths=["modules/foo/module.yaml"])
@@ -694,7 +690,7 @@ class TestBuildIntegrationResult:
         )
         r1 = _result(a1, status="failed")
         r2 = _result(a2)  # a2 completed but a1 failed
-        with pytest.raises(ValueError, match="not 'completed'"):
+        with pytest.raises(ValueError, match="failed"):
             build_integration_result(
                 plan_id=_PLAN_ID,
                 plan_digest=_PLAN_DIGEST,
@@ -756,7 +752,7 @@ class TestBuildIntegrationResult:
         )
         assert ir1.combined_file_map_digest == ir2.combined_file_map_digest
 
-    def test_combined_file_map_later_result_wins(self):
+    def test_dependency_order_does_not_authorize_overwrite(self):
         a1 = _assignment("a1", owned_paths=["modules/foo"])
         a2 = _assignment(
             "a2", owned_paths=["modules/foo"], depends_on=["a1"]
@@ -777,15 +773,13 @@ class TestBuildIntegrationResult:
                 {"path": "modules/foo/handler.py", "operation": "update", "content_digest": "bbb"}
             ],
         )
-        # a2 overwrites a1's content_digest on the same path
-        ir = build_integration_result(
-            plan_id=_PLAN_ID,
-            plan_digest=_PLAN_DIGEST,
-            assignments=[a1, a2],
-            results=[r1, r2],
-        )
-        expected = stable_digest({"modules/foo/handler.py": "bbb"})
-        assert ir.combined_file_map_digest == expected
+        with pytest.raises(ValueError, match="overlapping writers"):
+            build_integration_result(
+                plan_id=_PLAN_ID,
+                plan_digest=_PLAN_DIGEST,
+                assignments=[a1, a2],
+                results=[r1, r2],
+            )
 
     def test_identical_inputs_produce_identical_integration_result(self):
         """Regression: two calls with identical state must produce identical results."""
@@ -826,8 +820,8 @@ class TestBuildIntegrationResult:
         assert len(ir.validation_evidence) == 1
         assert ir.validation_evidence[0].validator_id == "ruff"
 
-    def test_skipped_result_bypasses_dep_completeness_check(self):
-        """A skipped result should not trigger the incomplete-dep check."""
+    def test_skipped_result_does_not_bypass_failed_dependency(self):
+        """A skipped dependent result still cannot follow a failed prerequisite."""
         a1 = _assignment("a1", owned_paths=["modules/foo/module.yaml"])
         a2 = _assignment(
             "a2", owned_paths=["modules/bar/module.yaml"], depends_on=["a1"]
@@ -838,18 +832,71 @@ class TestBuildIntegrationResult:
             status="skipped",
             attempt_id="x",
         )
-        # skipped result bypasses dep check — should not raise
-        ir = build_integration_result(
-            plan_id=_PLAN_ID,
-            plan_digest=_PLAN_DIGEST,
-            assignments=[a1, a2],
-            results=[r1, r2_skipped],
-        )
-        assert ir.promotion_ready is False  # not ready because a1 failed
+        with pytest.raises(ValueError, match="failed"):
+            build_integration_result(
+                plan_id=_PLAN_ID,
+                plan_digest=_PLAN_DIGEST,
+                assignments=[a1, a2],
+                results=[r1, r2_skipped],
+            )
 
 
 # ===========================================================================
-# 8. No external service invocation
+# 8. Canonical owners, serialization and retry semantics
+# ===========================================================================
+
+
+class TestCanonicalContractOwners:
+    def test_shared_dag_helper_proves_dependency_order(self):
+        items = [
+            {"id": "c", "deps": ["b"]},
+            {"id": "a", "deps": []},
+            {"id": "b", "deps": ["a"]},
+        ]
+        order = deterministic_topological_order(
+            items,
+            item_id=lambda item: item["id"],
+            dependencies=lambda item: item["deps"],
+        )
+        assert order.ordered_ids == ("a", "b", "c")
+
+    def test_assignment_taxonomy_matches_app_build_plan_registry(self):
+        assert _ALLOWED_TASK_TYPES == app_build_assignment_kind_values()
+        assert _ALLOWED_TASK_TYPES.issubset(REGISTERED_ASSIGNMENT_KINDS)
+        assert {"integration", "validation"}.issubset(REGISTERED_ASSIGNMENT_KINDS)
+
+    def test_retry_semantics_are_separate(self):
+        assert ASSIGNMENT_RETRY_LIMIT_RANGE == (0, 5)
+        assert QUEUE_DELIVERY_MAX_ATTEMPTS_RANGE == (1, 25)
+        assert AG2_TRANSIENT_RETRY_FIELD == "retry_count"
+        assert ASSIGNMENT_RETRY_LIMIT_RANGE != QUEUE_DELIVERY_MAX_ATTEMPTS_RANGE
+
+    def test_pydantic_json_round_trip_and_unknown_fields_rejected(self):
+        assignment = _assignment(required_validators=["unit"])
+        result = make_work_result(
+            assignment=assignment,
+            status="completed",
+            attempt_id="attempt-1",
+            changed_artifacts=[
+                {"path": "modules/foo/module.yaml", "operation": "update", "content_digest": "updated"}
+            ],
+            validation_evidence=[{"validator_id": "unit", "passed": True}],
+        )
+        parsed = WorkResult.model_validate_json(result.model_dump_json())
+        assert parsed == result
+        with pytest.raises(ValidationError):
+            WorkDiagnostic(level="info", code="I", message="ok", unexpected=True)  # type: ignore[call-arg]
+
+    def test_digest_tampering_rejected(self):
+        assignment = _assignment()
+        payload = assignment.model_dump(mode="json")
+        payload["assignment_digest"] = "tampered"
+        with pytest.raises(ValidationError, match="assignment_digest"):
+            WorkAssignment(**payload)
+
+
+# ===========================================================================
+# 9. No external service invocation
 # ===========================================================================
 
 
@@ -876,7 +923,7 @@ class TestNoExternalInvocation:
         assert ir  # pure computation
 
     def test_no_ag2_import_in_work_contracts(self):
-        """work_contracts.py must not contain any AG2/autogen import statement."""
+        """work_contracts.py must not import external agent-runtime packages."""
         import importlib.util
         import pathlib
 
@@ -884,8 +931,12 @@ class TestNoExternalInvocation:
         assert spec is not None
         source = pathlib.Path(spec.origin).read_text(encoding="utf-8")
 
-        # The source file must not import AG2 or autogen
-        forbidden = ["import autogen", "from autogen", "import ag2", "from ag2"]
+        forbidden = [
+            "import " + "auto" + "gen",
+            "from " + "auto" + "gen",
+            "import " + "ag" + "2",
+            "from " + "ag" + "2",
+        ]
         for fragment in forbidden:
             assert fragment not in source, (
                 f"work_contracts.py must not contain {fragment!r}"
