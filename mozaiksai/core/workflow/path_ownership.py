@@ -121,18 +121,18 @@ def detect_owned_path_collisions(owner_paths: dict[str, tuple[str, ...]]) -> Pat
     lower_paths: dict[str, list[str]] = {}
     for path in path_owners:
         lower_paths.setdefault(path.lower(), []).append(path)
-    for paths in lower_paths.values():
-        if len(paths) <= 1:
+    for colliding_paths in lower_paths.values():
+        if len(colliding_paths) <= 1:
             continue
-        owners: set[str] = set()
-        for path in paths:
-            owners.update(path_owners[path])
+        case_owner_ids: set[str] = set()
+        for path in colliding_paths:
+            case_owner_ids.update(path_owners[path])
         collisions.append(
             PathCollision(
                 kind=PathCollisionKind.CASE_COLLISION,
-                path=sorted(paths)[0],
-                owner_ids=tuple(sorted(owners)),
-                detail=f"case-normalization collision: {sorted(paths)}",
+                path=sorted(colliding_paths)[0],
+                owner_ids=tuple(sorted(case_owner_ids)),
+                detail=f"case-normalization collision: {sorted(colliding_paths)}",
             )
         )
 

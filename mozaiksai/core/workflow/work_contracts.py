@@ -205,28 +205,49 @@ def make_work_assignment(
     resolved_retry_limit = assignment_retry_limit if assignment_retry_limit is not None else (retry_limit or 0)
     if isinstance(resolved_retry_limit, bool):
         raise ValueError("assignment_retry_limit/retry_limit must be an int, not bool")
-    if str(assignment_kind) not in REGISTERED_ASSIGNMENT_KINDS:
+    assignment_kind_value = assignment_kind.value if isinstance(assignment_kind, AssignmentKind) else str(assignment_kind)
+    if assignment_kind_value not in REGISTERED_ASSIGNMENT_KINDS:
         raise ValueError(
             f"assignment_kind {assignment_kind!r} is not registered. "
             f"Allowed: {sorted(REGISTERED_ASSIGNMENT_KINDS)}"
         )
-    payload = {
+    normalized_owned_paths = tuple(sorted(normalize_owned_paths(owned_paths, reject_duplicates=True)))
+    normalized_dependency_context_refs = _normalized_text_tuple(dependency_context_refs or [])
+    normalized_allowed_agent_ids = _normalized_text_tuple(allowed_agent_ids or [])
+    normalized_depends_on = _normalized_text_tuple(depends_on or [])
+    normalized_required_validators = _normalized_text_tuple(required_validators or [])
+    payload: dict[str, Any] = {
         "assignment_id": assignment_id,
         "plan_id": plan_id,
         "plan_digest": plan_digest,
         "baseline_sha": baseline_sha,
-        "assignment_kind": assignment_kind,
-        "owned_paths": owned_paths,
-        "dependency_context_refs": dependency_context_refs or [],
-        "allowed_agent_ids": allowed_agent_ids or [],
+        "assignment_kind": assignment_kind_value,
+        "owned_paths": normalized_owned_paths,
+        "dependency_context_refs": normalized_dependency_context_refs,
+        "allowed_agent_ids": normalized_allowed_agent_ids,
         "required_structured_output_id": required_structured_output_id,
-        "depends_on": depends_on or [],
-        "required_validators": required_validators or [],
-        "assignment_retry_limit": resolved_retry_limit,
+        "depends_on": normalized_depends_on,
+        "required_validators": normalized_required_validators,
+        "assignment_retry_limit": int(resolved_retry_limit),
         "retry_policy_ref": retry_policy_ref,
     }
     digest = stable_digest(_assignment_digest_payload(payload))
-    return WorkAssignment(**payload, assignment_digest=digest)
+    return WorkAssignment(
+        assignment_id=assignment_id,
+        plan_id=plan_id,
+        plan_digest=plan_digest,
+        baseline_sha=baseline_sha,
+        assignment_kind=AssignmentKind(assignment_kind_value),
+        owned_paths=normalized_owned_paths,
+        dependency_context_refs=normalized_dependency_context_refs,
+        allowed_agent_ids=normalized_allowed_agent_ids,
+        required_structured_output_id=required_structured_output_id,
+        depends_on=normalized_depends_on,
+        required_validators=normalized_required_validators,
+        assignment_retry_limit=int(resolved_retry_limit),
+        retry_policy_ref=retry_policy_ref,
+        assignment_digest=digest,
+    )
 
 
 def make_work_result(
@@ -248,18 +269,31 @@ def make_work_result(
         _validate_required_artifacts(assignment, artifacts)
         _validate_required_validators(assignment, validation_evidence or [])
     output_digest = stable_digest(normalized_file_map)
-    payload = {
+    diagnostic_entries = tuple(WorkDiagnostic(**item) for item in diagnostics or [])
+    evidence_entries = tuple(ValidationEvidence(**item) for item in validation_evidence or [])
+    payload: dict[str, Any] = {
         "assignment_id": assignment.assignment_id,
         "assignment_digest": assignment.assignment_digest,
         "baseline_sha": assignment.baseline_sha,
         "status": status,
         "changed_artifacts": artifacts,
-        "diagnostics": tuple(WorkDiagnostic(**item) for item in diagnostics or []),
-        "validation_evidence": tuple(ValidationEvidence(**item) for item in validation_evidence or []),
+        "diagnostics": diagnostic_entries,
+        "validation_evidence": evidence_entries,
         "output_digest": output_digest,
         "attempt_id": attempt_id,
     }
-    return WorkResult(**payload, result_digest=stable_digest(_result_digest_payload(payload)))
+    return WorkResult(
+        assignment_id=assignment.assignment_id,
+        assignment_digest=assignment.assignment_digest,
+        baseline_sha=assignment.baseline_sha,
+        status=status,
+        changed_artifacts=artifacts,
+        diagnostics=diagnostic_entries,
+        validation_evidence=evidence_entries,
+        output_digest=output_digest,
+        attempt_id=attempt_id,
+        result_digest=stable_digest(_result_digest_payload(payload)),
+    )
 
 
 def validate_assignment_dag(assignments: list[WorkAssignment]) -> None:
@@ -345,7 +379,7 @@ def build_integration_result(
         for assignment in assignments
     )
     baseline_sha = assignments[0].baseline_sha
-    payload = {
+    payload: dict[str, Any] = {
         "plan_id": plan_id,
         "plan_digest": plan_digest,
         "baseline_sha": baseline_sha,
@@ -358,7 +392,20 @@ def build_integration_result(
         "unresolved_assignments": unresolved,
         "promotion_ready": promotion_ready,
     }
-    return IntegrationResult(**payload, integration_digest=stable_digest(_integration_digest_payload(payload)))
+    return IntegrationResult(
+        plan_id=plan_id,
+        plan_digest=plan_digest,
+        baseline_sha=baseline_sha,
+        ordered_assignment_ids=ordered_assignment_ids,
+        ordered_result_digests=ordered_result_digests,
+        combined_file_map_digest=combined_file_map_digest,
+        dependency_order=ordered_assignment_ids,
+        collision_report=collision_report,
+        validation_evidence=evidence,
+        unresolved_assignments=unresolved,
+        promotion_ready=promotion_ready,
+        integration_digest=stable_digest(_integration_digest_payload(payload)),
+    )
 
 
 def _assignment_digest(assignment: WorkAssignment) -> str:
@@ -384,6 +431,10 @@ def _assignment_digest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "assignment_retry_limit": int(retry_limit or 0),
         "retry_policy_ref": payload.get("retry_policy_ref"),
     }
+
+
+def _normalized_text_tuple(value: list[str]) -> tuple[str, ...]:
+    return tuple(sorted({str(item or "").strip() for item in value if str(item or "").strip()}))
 
 
 def _result_digest(result: WorkResult) -> str:
@@ -449,9 +500,15 @@ def _artifact_identities(
         seen_paths.add(path)
         if not path_is_within_owned(path, owned):
             raise ValueError(f"WorkResult changed artifact {path!r} is outside assignment owned_paths")
-        operation = str(item.get("operation") or "")
-        if operation not in {"create", "update", "delete"}:
-            raise ValueError(f"WorkResult: unknown operation {operation!r}; must be create, update, or delete")
+        operation_text = str(item.get("operation") or "")
+        if operation_text == "create":
+            operation: OperationKind = "create"
+        elif operation_text == "update":
+            operation = "update"
+        elif operation_text == "delete":
+            operation = "delete"
+        else:
+            raise ValueError(f"WorkResult: unknown operation {operation_text!r}; must be create, update, or delete")
         content_digest = item.get("content_digest") or (stable_digest(file_map[path]) if path in file_map else None)
         if not content_digest:
             raise ValueError(f"changed artifact {path!r} must provide content_digest or matching file_map content")
