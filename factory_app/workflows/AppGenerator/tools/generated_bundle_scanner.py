@@ -26,6 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from pydantic import ValidationError as PydanticValidationError
 
 from factory_app.workflows._shared.generated_ui_contract import (
     VALID_PAGE_TYPES as _CANONICAL_PAGE_TYPES,
@@ -33,6 +34,18 @@ from factory_app.workflows._shared.generated_ui_contract import (
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
+)
+from mozaiksai.core.runtime.app.layout_registry import (
+    ExtensionSlot,
+    LayoutExtension,
+    PathScope,
+    build_app_layout_registry,
+)
+from mozaiksai.core.runtime.app.layout_validation import (
+    filter_layout_scannable_file_map,
+    layout_extensions_from_selected_packs,
+    layout_validation_errors,
+    validate_file_map_layout,
 )
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
@@ -108,6 +121,9 @@ _SCANNABLE_SUFFIXES = (
     ".py", ".js", ".jsx", ".ts", ".tsx",
     ".yaml", ".yml", ".env.example", ".env.staging.example",
     ".env.production.example", ".env",
+    # Pack-declared workspace scripts ship to customers and must never carry
+    # raw credentials or provider leaks.
+    ".ps1", ".sh",
 )
 
 _RAW_SECRET_FIELD_KEYS = frozenset(
@@ -2067,6 +2083,96 @@ def _scan_event_reaction_closure(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _layout_extensions_for_selected_packs(
+    capability_packs: list[dict[str, Any]] | None,
+) -> tuple[LayoutExtension, ...]:
+    extensions = list(layout_extensions_from_selected_packs(capability_packs))
+    claimed_paths: dict[str, str] = {}
+    for pack in capability_packs or []:
+        pack_id = _pack_id_from_descriptor(pack)
+        if not pack_id:
+            continue
+        for path in sorted(resolve_declared_pack_output_paths([pack])):
+            prior_owner = claimed_paths.get(path)
+            if prior_owner is not None and prior_owner != pack_id:
+                raise ManagedCapabilityTemplateError(
+                    f"Selected packs '{prior_owner}' and '{pack_id}' both declare "
+                    f"output path {path!r}; duplicate pack output claims fail closed"
+                )
+            claimed_paths[path] = pack_id
+            if _path_matches_core_layout(path):
+                continue
+            try:
+                extensions.append(
+                    LayoutExtension(
+                        slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+                        pack_id=pack_id,
+                        path=path,
+                    )
+                )
+            except (ValueError, PydanticValidationError) as exc:
+                raise ManagedCapabilityTemplateError(
+                    f"Pack '{pack_id}' declares output {path!r} outside the "
+                    f"permitted pack output lanes: {exc}"
+                ) from exc
+    return tuple(sorted(extensions, key=lambda item: (item.slot.value, item.pack_id, item.path or "")))
+
+
+def _path_matches_core_layout(path: str) -> bool:
+    """True when the core registry (no extensions) already classifies the path."""
+    registry = build_app_layout_registry(())
+    scopes = (
+        PathScope.APP_BUNDLE_ROOT,
+        PathScope.DEPLOYMENT_DERIVED,
+        PathScope.WORKSPACE_ROOT,
+        PathScope.GENERATED_STAGING,
+    )
+    for scope in scopes:
+        try:
+            registry.match_path(path, scope)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _scan_declared_pack_repo_support_outputs(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    try:
+        declared_paths = (
+            resolve_declared_pack_output_paths(capability_packs)
+            if capability_packs
+            else frozenset()
+        )
+    except ManagedCapabilityTemplateError as exc:
+        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
+
+    repo_support = (
+        ".claude/",
+        ".github/",
+        "docs/",
+        "scripts/",
+        "tests/",
+    )
+    invalid = sorted(
+        path
+        for path in _normalized_files_map(files_map)
+        if path.startswith(repo_support)
+        and path not in {".github/workflows/deploy.yml", ".github/workflows/readiness.yml"}
+        and path not in declared_paths
+    )
+    if not invalid:
+        return []
+    return [
+        "Generated app bundle contains undeclared repository-support pack outputs: "
+        f"{invalid}. Selected capability packs must declare generated docs, scripts, "
+        "and repository-support files explicitly."
+    ]
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -2088,63 +2194,78 @@ def scan_generated_bundle(
     - modules/*/contracts/reactions.yaml: event_type closure, target.kind taxonomy,
       target-kind-specific required fields.
     """
-    errors: list[str] = []
+    try:
+        selected_layout_extensions = _layout_extensions_for_selected_packs(capability_packs)
+    except ManagedCapabilityTemplateError as exc:
+        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
+    layout_report = validate_file_map_layout(
+        files_map,
+        selected_extensions=selected_layout_extensions,
+    )
+    errors: list[str] = layout_validation_errors(layout_report)
     errors.extend(
-        _scan_canonical_app_paths(
+        _scan_declared_pack_repo_support_outputs(
             files_map,
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_security_secret_contract(files_map))
-    errors.extend(_scan_pack_provenance_manifest(files_map))
-    errors.extend(_scan_route_manifest_consistency(files_map))
-    errors.extend(_scan_route_manifest_component_files(files_map))
-    errors.extend(_scan_page_schema_structure(files_map))
-    errors.extend(_scan_page_api_endpoint_alignment(files_map))
-    errors.extend(_scan_action_api_surface(files_map))
-    errors.extend(_scan_event_reaction_closure(files_map))
-    errors.extend(_scan_data_contract_module_alignment(files_map))
+    scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
+    errors.extend(
+        _scan_canonical_app_paths(
+            scannable_files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(_scan_security_secret_contract(scannable_files_map))
+    errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
+    errors.extend(_scan_route_manifest_consistency(scannable_files_map))
+    errors.extend(_scan_route_manifest_component_files(scannable_files_map))
+    errors.extend(_scan_page_schema_structure(scannable_files_map))
+    errors.extend(_scan_page_api_endpoint_alignment(scannable_files_map))
+    errors.extend(_scan_action_api_surface(scannable_files_map))
+    errors.extend(_scan_event_reaction_closure(scannable_files_map))
+    errors.extend(_scan_data_contract_module_alignment(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_managed_setup_provider_leaks(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_token_wallets_require_mozaikspay(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_mozaikspay_saas_contract(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_mozaiks_cloud_connector_contract(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_self_hosted_entitlement_dispatch_contract(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_entitlement_gate_capability_alignment(files_map))
-    errors.extend(_scan_auth_app_contract(files_map))
+    errors.extend(_scan_entitlement_gate_capability_alignment(scannable_files_map))
+    errors.extend(_scan_auth_app_contract(scannable_files_map))
     if require_deployment_artifacts:
-        errors.extend(_scan_deployment_artifacts_contract(files_map))
-        errors.extend(_scan_auth_deployment_contract(files_map))
+        errors.extend(_scan_deployment_artifacts_contract(scannable_files_map))
+        errors.extend(_scan_auth_deployment_contract(scannable_files_map))
 
     for path, content in files_map.items():
         if not isinstance(path, str) or not isinstance(content, str):

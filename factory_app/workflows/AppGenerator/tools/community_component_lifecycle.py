@@ -403,6 +403,9 @@ def apply_component_upgrade(
         path.relative_to(app_root).as_posix(): path.read_text(encoding="utf-8")
         for path in app_root.rglob("*")
         if path.is_file()
+        and "__pycache__" not in path.parts
+        and ".pytest_cache" not in path.parts
+        and path.suffix not in {".pyc", ".pyo"}
     })
     provenance_errors = [error for error in scanner_errors if "pack_provenance" in error]
     if provenance_errors:

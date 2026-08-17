@@ -74,6 +74,7 @@ class ArtifactKind(StrEnum):
     APP_UI_ROUTE_MANIFEST = "app_ui_route_manifest"
     APP_UI_PAGE_SCHEMA = "app_ui_page_schema"
     APP_UI_CUSTOM_ROUTE = "app_ui_custom_route"
+    APP_UI_AUTH_ADAPTER = "app_ui_auth_adapter"
     APP_UI_EXTENSION_BARREL = "app_ui_extension_barrel"
     APP_UI_MODULE_API = "app_ui_module_api"
     APP_ADMIN_REGISTRY = "app_admin_registry"
@@ -100,6 +101,7 @@ class ArtifactKind(StrEnum):
     WORKFLOW_TASK_BATCH = "workflow_task_batch"
     BUILD_CONTEXT_REGISTRY = "build_context_registry"
     BUILD_CONTEXT_ASSET = "build_context_asset"
+    CAPABILITY_PACK_OUTPUT = "capability_pack_output"
     GENERATED_APP_STAGING = "generated_app_staging"
     GENERATED_WORKFLOW_STAGING = "generated_workflow_staging"
     PROHIBITED_LEGACY = "prohibited_legacy"
@@ -216,6 +218,7 @@ class PlaceholderIdentifier(StrEnum):
 class ExtensionSlot(StrEnum):
     MANAGED_CAPABILITY_CONFIG = "managed_capability_config"
     MANAGED_CAPABILITY_CLIENT = "managed_capability_client"
+    CAPABILITY_PACK_OUTPUT = "capability_pack_output"
     SERVICE_ADAPTER = "service_adapter"
     SERVICE_ROUTE = "service_route"
     BUILD_CONTEXT_PACK = "build_context_pack"
@@ -288,6 +291,7 @@ class ArtifactMatch(LayoutModel):
 class LayoutExtension(LayoutModel):
     slot: ExtensionSlot
     pack_id: str = Field(min_length=1)
+    path: str | None = None
 
     @field_validator("pack_id")
     @classmethod
@@ -296,6 +300,23 @@ class LayoutExtension(LayoutModel):
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", text):
             raise ValueError("pack_id must be a lowercase registry identifier")
         return text
+
+    @field_validator("path")
+    @classmethod
+    def _validate_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalize_template(value)
+
+    @model_validator(mode="after")
+    def _validate_slot_path(self) -> LayoutExtension:
+        if self.slot == ExtensionSlot.CAPABILITY_PACK_OUTPUT:
+            if not self.path:
+                raise ValueError("capability_pack_output extensions require an exact path")
+            _validate_capability_pack_output_path(self.path)
+        elif self.path is not None:
+            raise ValueError("path is only valid for capability_pack_output extensions")
+        return self
 
 
 class AppLayoutRegistry(LayoutModel):
@@ -331,6 +352,12 @@ class AppLayoutRegistry(LayoutModel):
         ]
         if not matches:
             raise ValueError(f"path {path!r} is not registered for scope {resolved_scope.value!r}")
+        prohibited = [m for m in matches if m.family.requirement is Requirement.PROHIBITED]
+        if prohibited:
+            # Prohibition is absolute: no extension or literal registration may
+            # shadow a prohibited family through specificity precedence.
+            prohibited.sort(key=lambda m: (len(m.values), m.family.path_template))
+            return prohibited[0]
         if len(matches) > 1:
             # Deterministic specificity precedence: a template with fewer
             # placeholders is more literal and wins (a registered-extension
@@ -443,6 +470,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_UI_ROUTE_MANIFEST, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "ui/route_manifest.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_PAGE_SCHEMA, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/pages/{page_id}.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_PAGE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_CUSTOM_ROUTE, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/pages/custom/{page_id}.jsx", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
+        _family(ArtifactKind.APP_UI_AUTH_ADAPTER, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/auth/authAdapter.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_AUTH_ENABLED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_EXTENSION_BARREL, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/index.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_MODULE_API, LayoutOwner.PLATFORM, Requirement.CONDITIONAL, app, "ui/lib/moduleApi.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_ADMIN_REGISTRY, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "admin/admin_registry.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST),
@@ -486,6 +514,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".env.production.example", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "deployment.manifest.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/deploy.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
+        _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/readiness.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, workspace, "app/app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workspace, "workflows/{workflow_id}/orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, multiplicity=Multiplicity.MANY),
         _family(ArtifactKind.BUILD_CONTEXT_REGISTRY, LayoutOwner.CAPABILITY_PACK, Requirement.OPTIONAL, workspace, "build_context/{pack_id}/context.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.NONE, multiplicity=Multiplicity.MANY),
@@ -633,7 +662,99 @@ def _extension_families(extensions: tuple[LayoutExtension, ...]) -> tuple[Artifa
                     condition=ConditionIdentifier.WHEN_EXTENSION_SELECTED,
                 )
             )
+        elif extension.slot == ExtensionSlot.CAPABILITY_PACK_OUTPUT:
+            assert extension.path is not None
+            result.append(
+                _family(
+                    ArtifactKind.CAPABILITY_PACK_OUTPUT,
+                    LayoutOwner.CAPABILITY_PACK,
+                    Requirement.CONDITIONAL,
+                    _capability_pack_output_scope(extension.path),
+                    extension.path,
+                    ValidatorIdentifier.GENERATED_APP_VALIDATOR,
+                    _capability_pack_output_consumer(extension.path),
+                    condition=ConditionIdentifier.WHEN_EXTENSION_SELECTED,
+                    security=_capability_pack_output_security(extension.path),
+                )
+            )
     return tuple(result)
+
+
+# Pack contracts may declare only app-bundle interior outputs plus the two
+# authentic workspace-support lanes (docs/, scripts/) proven by shipped packs
+# such as operator_readiness.  Deployment artifacts stay renderer-owned,
+# generated/ staging stays factory-owned, and agent/CI configuration is never
+# a pack output.
+_PACK_OUTPUT_FORBIDDEN_PREFIXES = (
+    ".claude/",
+    ".github/",
+    "config/data_migrations/",
+    "control_plane/",
+    "generated/",
+    "services/data/",
+    "services/security/",
+    "tests/",
+)
+_PACK_OUTPUT_FORBIDDEN_EXACT = frozenset(
+    {
+        "Dockerfile",
+        "docker-compose.yml",
+        ".env.example",
+        ".env.staging.example",
+        ".env.production.example",
+        "deployment.manifest.json",
+        "config/data.json",
+        "config/llm.yaml",
+        "config/secrets.yaml",
+        "security/secrets.yaml",
+    }
+)
+_PACK_OUTPUT_SECRET_TOKEN_RE = re.compile(
+    r"(?:^|[._/-])(?:api[_-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:[._/-]|$)",
+    re.IGNORECASE,
+)
+_PACK_OUTPUT_SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".crt", ".der", ".jks")
+
+
+def _validate_capability_pack_output_path(path: str) -> None:
+    if _PLACEHOLDER_RE.search(path):
+        raise ValueError(
+            f"capability_pack_output paths must be exact literals, not templates: {path!r}"
+        )
+    lower = path.lower()
+    if path in _PACK_OUTPUT_FORBIDDEN_EXACT or any(
+        lower.startswith(prefix) for prefix in _PACK_OUTPUT_FORBIDDEN_PREFIXES
+    ):
+        raise ValueError(
+            f"capability_pack_output path is not a permitted pack output lane: {path!r}"
+        )
+    basename = PurePosixPath(path).name.lower()
+    if (
+        basename.startswith(".env")
+        or lower.endswith(_PACK_OUTPUT_SECRET_SUFFIXES)
+        or _PACK_OUTPUT_SECRET_TOKEN_RE.search(path)
+    ):
+        raise ValueError(
+            f"capability_pack_output path is secret-shaped and not registrable: {path!r}"
+        )
+
+
+def _capability_pack_output_scope(path: str) -> PathScope:
+    if path.startswith(("docs/", "scripts/")):
+        return PathScope.WORKSPACE_ROOT
+    return PathScope.APP_BUNDLE_ROOT
+
+
+def _capability_pack_output_consumer(path: str) -> RuntimeConsumerIdentifier:
+    if _capability_pack_output_scope(path) is PathScope.WORKSPACE_ROOT:
+        return RuntimeConsumerIdentifier.NONE
+    return RuntimeConsumerIdentifier.PLATFORM_HOST
+
+
+def _capability_pack_output_security(path: str) -> SecurityClass:
+    if path.lower().endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".ps1", ".sh")):
+        return SecurityClass.EXECUTABLE_STUB
+    return SecurityClass.INTERNAL_CONTRACT
 
 
 def _family(
