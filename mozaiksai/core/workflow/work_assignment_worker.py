@@ -61,6 +61,10 @@ class WorkAssignmentTransientError(Exception):
     """Executor-raised transient failure eligible for assignment/queue retry."""
 
 
+class WorkAssignmentLeaseLostError(Exception):
+    """Executor lost the current queue lease and must not publish a result."""
+
+
 class WorkAssignmentWorkerOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -250,6 +254,14 @@ class WorkAssignmentWorker:
                     executor_attempt_count=executor_attempt,
                     error_category=last_transient_category,
                     result_digest=None,
+                )
+            except WorkAssignmentLeaseLostError:
+                return _stale_outcome(
+                    item,
+                    token,
+                    claim.attempt_count,
+                    assignment,
+                    executor_attempt,
                 )
             except Exception:
                 return await self._dead_letter_claim(
@@ -542,6 +554,7 @@ __all__ = [
     "WorkAssignmentExecutor",
     "WorkAssignmentExecutorRegistry",
     "WorkAssignmentFailureCategory",
+    "WorkAssignmentLeaseLostError",
     "WorkAssignmentLifecycleEvent",
     "WorkAssignmentPermanentError",
     "WorkAssignmentRunStatus",

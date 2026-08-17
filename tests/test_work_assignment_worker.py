@@ -19,6 +19,7 @@ from mozaiksai.core.workflow.work_assignment_worker import (
     WorkAssignmentExecutionContext,
     WorkAssignmentExecutorRegistry,
     WorkAssignmentFailureCategory,
+    WorkAssignmentLeaseLostError,
     WorkAssignmentLifecycleEvent,
     WorkAssignmentPermanentError,
     WorkAssignmentRunStatus,
@@ -495,6 +496,24 @@ async def test_executor_result_outside_owned_paths_dead_letters() -> None:
     assert outcome.status is WorkAssignmentRunStatus.DEAD_LETTER
     assert outcome.error_category is WorkAssignmentFailureCategory.EXECUTOR_RESULT_INVALID
     assert queue.status(item_id) == "dead_letter"
+
+
+@pytest.mark.asyncio
+async def test_executor_lost_lease_returns_stale_without_dead_letter() -> None:
+    clock = ManualClock()
+    queue = InMemoryWorkQueue(now_fn=clock.now)
+    assignment = _assignment()
+    item_id, worker = await _enqueue_worker(
+        queue=queue,
+        assignment=assignment,
+        executor=RecordingExecutor([WorkAssignmentLeaseLostError("lost lease")]),
+    )
+
+    outcome = await worker.run_once()
+
+    assert outcome.status is WorkAssignmentRunStatus.STALE_CLAIM
+    assert queue.status(item_id) == "claimed"
+    assert queue.document(item_id)["error_category"] is None
 
 
 @pytest.mark.asyncio
