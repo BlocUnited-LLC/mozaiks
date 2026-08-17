@@ -47,6 +47,15 @@ EXCLUDED_PREFIXES = {
     ".claude/worktrees",
 }
 
+# Agent-local permission files, which must never be tracked. Exact paths rather
+# than .claude/**, so shared guidance under .claude/rules/ and .claude/skills/
+# stays tracked.
+AGENT_LOCAL_CONFIG_PATHS = {
+    ".agents/settings.local.json",
+    ".claude/settings.local.json",
+    ".codex/settings.local.json",
+}
+
 GRANTED_PERMISSIONS_NONE_ALLOWLIST = {
     "ARCHITECTURAL_INVARIANTS.md",
     "CHANGELOG.md",
@@ -187,6 +196,26 @@ def _text_file(path: Path) -> bool:
     return path.name == ".env.example" or path.suffix in TEXT_SUFFIXES
 
 
+def _is_git_tracked(path: Path, repo_root: Path) -> bool:
+    """Return True if path is in the git index (staged or committed).
+
+    A file that exists in the working tree but is untracked (not staged, not
+    committed) or gitignored returns False even if it is physically present on
+    disk.  This is the canonical authority for 'committed vs. merely present'.
+    """
+    try:
+        relative_path = path.relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return False
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", relative_path],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def _iter_all_files(repo_root: Path) -> list[Path]:
     files: list[Path] = []
     for path in repo_root.rglob("*"):
@@ -269,6 +298,20 @@ def _scan_file(path: Path, repo_root: Path) -> tuple[list[GovernanceFinding], li
     relative = _relative(path, repo_root)
     errors: list[GovernanceFinding] = []
     notices: list[GovernanceFinding] = []
+
+    if relative in AGENT_LOCAL_CONFIG_PATHS and _is_git_tracked(path, repo_root):
+        errors.append(
+            GovernanceFinding(
+                severity="error",
+                code="agent_local_config_committed",
+                path=relative,
+                line=0,
+                message=(
+                    "agent-local permission/config files must stay untracked; "
+                    "remove from git tracking and add the path to .gitignore"
+                ),
+            )
+        )
 
     if GRANTED_PERMISSIONS_NONE_RE.search(text) and relative not in GRANTED_PERMISSIONS_NONE_ALLOWLIST:
         match = GRANTED_PERMISSIONS_NONE_RE.search(text)
