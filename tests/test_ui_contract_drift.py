@@ -157,10 +157,17 @@ def test_python_display_mode_values_are_subset_of_js_normalizer():
     """Every Python UIDisplayMode value must be accepted by JS normalizeDisplayMode.
 
     Python emits only 'inline' and 'artifact'.  JS additionally recognises
-    'view' and 'fullscreen' as layout-mode aliases for internal use by the
-    artifact panel.  That asymmetry is intentional: Python never emits
-    'view'/'fullscreen', so no event would be dropped.  This test verifies
-    the containment relationship holds and documents the JS-internal extras.
+    'view' and 'fullscreen' as layout-mode aliases used internally by the
+    surface state machine (uiSurfaceReducer.js: deriveSurfaceMode checks
+    layoutMode === 'view', and shouldOpenArtifactPanel checks layoutMode !== 'full').
+    These are panel-layout control values driven by UI interactions, not transport
+    values emitted from Python.  That asymmetry is intentional: Python never emits
+    'view'/'fullscreen', so no event would be dropped.
+
+    This test verifies the containment relationship holds and documents the
+    JS-internal extras.  The assertion `js_internal == {"view", "fullscreen"}`
+    acts as a regression guard: if new JS-internal aliases are added (or existing
+    ones removed), this test will fail and prompt a deliberate review.
     """
     python_values = _get_python_display_mode_values()
     js_values = _parse_js_normalize_display_mode_values(UI_SURFACE_REDUCER_JS)
@@ -206,12 +213,20 @@ def _primitive_names_from_python() -> frozenset[str]:
 
 
 def test_primitive_names_aligned_across_all_sources():
-    """All four primitive name sources must be identical.
+    """All three primitive name sources must be identical.
 
     Sources:
-      • primitive_schemas.json (JS schema catalog)
-      • AppPageSection.primitive literal (structured output)
-      • get_page_ui_primitive_names() (Python runtime)
+      • primitive_schemas.json — JS schema catalog, generated from PrimitiveRegistry.js via
+        node scripts/export-primitive-schemas.js; treated as a separate authority because it
+        is a committed artifact and can drift from the registry if not regenerated.
+      • AppPageSection.primitive literal (structured output) — the generator contract that
+        agents emit.
+      • get_page_ui_primitive_names() (Python runtime) — reads import statements from
+        PrimitiveRegistry.js directly; genuine independent source from primitive_schemas.json
+        even though both derive from PrimitiveRegistry.js.
+
+    Note: the test title previously said "four" sources — that was a documentation error;
+    there are three distinct authority sources tested here.
     """
     json_names = _primitive_names_from_primitive_schemas_json(PRIMITIVE_SCHEMAS_JSON)
     so_names = _primitive_names_from_structured_outputs()
@@ -308,6 +323,62 @@ def test_factory_app_custom_route_manifest_exists_and_is_valid_json():
     assert len(manifest["pages"]) > 0, "route_manifest.json has no pages declared"
 
 
+# Component files are loaded from one of two roots depending on how admin/index.js imports them:
+#   - factory_app/app/admin/pages/{ComponentName}.jsx  (local admin pages)
+#   - chat-ui/src/pages/{ComponentName}.jsx            (@mozaiks/chat-ui/pages/* imports)
+_ADMIN_PAGES_ROOT = REPO_ROOT / "factory_app" / "app" / "admin" / "pages"
+_CHAT_UI_PAGES_ROOT = REPO_ROOT / "chat-ui" / "src" / "pages"
+
+
+def test_factory_app_manifest_component_files_exist_on_disk():
+    """Every component referenced in route_manifest.json must have a backing source file.
+
+    Components imported from '@mozaiks/chat-ui/pages/*' are resolved under
+    chat-ui/src/pages/.  All other components are resolved under
+    factory_app/app/admin/pages/.
+
+    This ensures the three-file closure (manifest entry → registration → file) is
+    complete: a component name in the manifest with no backing file would silently
+    fail at runtime when the module is lazy-loaded.
+    """
+    manifest = json.loads(FACTORY_ROUTE_MANIFEST.read_text(encoding="utf-8"))
+    admin_text = FACTORY_ADMIN_INDEX_JS.read_text(encoding="utf-8")
+
+    # Build a map: component_name → import source path string (from admin/index.js)
+    # e.g. "ProfilePage" → "@mozaiks/chat-ui/pages/ProfilePage.jsx"
+    #      "StudioPage"  → "./pages/StudioPage.jsx"
+    import_pattern = re.compile(
+        r"const\s+(\w+)\s*=\s*lazy\(\s*\(\)\s*=>\s*import\(['\"]([^'\"]+)['\"]\)\s*\)"
+    )
+    import_map: dict[str, str] = {
+        m.group(1): m.group(2) for m in import_pattern.finditer(admin_text)
+    }
+
+    missing: list[str] = []
+    for page in manifest.get("pages", []):
+        comp = page["component"]
+        import_src = import_map.get(comp, "")
+        if import_src.startswith("@mozaiks/chat-ui/pages/"):
+            # Resolve to chat-ui/src/pages/
+            filename = import_src.split("/")[-1]
+            candidate = _CHAT_UI_PAGES_ROOT / filename
+        else:
+            # Local admin page — try .jsx then .js
+            candidate = _ADMIN_PAGES_ROOT / f"{comp}.jsx"
+            if not candidate.exists():
+                candidate = _ADMIN_PAGES_ROOT / f"{comp}.js"
+
+        if not candidate.exists():
+            missing.append(
+                f"{comp!r} → expected file: {candidate} (import: {import_src!r})"
+            )
+
+    assert not missing, (
+        "route_manifest.json components have no backing source file:\n"
+        + "\n".join(f"  {m}" for m in missing)
+    )
+
+
 # ---------------------------------------------------------------------------
 # 7. AppPageSchema.extensions — whether PageRenderer.jsx reads the field
 #
@@ -343,13 +414,22 @@ def test_page_renderer_does_not_read_extensions_field_documents_gap():
 
 
 def test_extension_slot_values_defined_in_structured_output():
-    """AppPageSlotExtension.slot values must be present in the structured output."""
+    """Regression guard: AppPageSlotExtension.slot values are pinned to the known set.
+
+    This is a hardcoded regression guard, not a derived cross-source comparison.
+    It pins the slot names so that accidental additions or removals in the structured
+    output YAML cause an explicit CI failure and prompt a deliberate review.
+
+    If you intentionally add or remove slot names, update the 'expected' set here AND
+    update VALID_EXTENSION_SLOTS in generated_ui_contract.py (verified by the next test).
+    """
     slot_values = _so_field_literal_values("AppPageSlotExtension", "slot")
     expected = {"header", "empty_state", "hero", "sidebar", "actions_bar"}
     assert slot_values == expected, (
         f"AppPageSlotExtension.slot values changed.\n"
         f"  Actual: {sorted(slot_values)}\n"
-        f"  Expected: {sorted(expected)}"
+        f"  Expected: {sorted(expected)}\n"
+        "Update 'expected' here and VALID_EXTENSION_SLOTS in generated_ui_contract.py."
     )
 
 
