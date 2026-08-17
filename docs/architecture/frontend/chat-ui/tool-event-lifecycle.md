@@ -3,6 +3,9 @@
 This document maps the live Mozaiks workflow UI transport to AG-UI and
 CopilotKit.
 
+AG-UI and CopilotKit are research inputs in this document, not canonical
+authorities and not an adapter roadmap.
+
 It focuses on the actual implementation path in this repo:
 
 - how `use_ui_tool(...)` becomes frontend UI
@@ -222,7 +225,8 @@ The next protocol step should be:
 
 - keep the current authoring model
 - keep the `chat.*` namespace if desired
-- make the wire lifecycle more AG-UI-shaped
+- make the Mozaiks-owned wire lifecycle more explicit, using AG-UI as a comparison
+  point where helpful
 
 That means:
 
@@ -235,5 +239,6 @@ The goal is not “become CopilotKit.”
 
 The goal is:
 
-- AG-UI-grade protocol discipline
+- AG-UI-grade protocol discipline without adopting AG-UI identity or adapters by
+  default
 - plus Mozaiks-grade generated app composition

@@ -1,8 +1,9 @@
 # Frontend Architecture
 
-The authoritative architecture constitution for the native UI framework is
+The authoritative target architecture constitution for the native UI framework is
 [Mozaiks UI v1](mozaiks-ui-v1.md). Read it first for surface kinds, layer
-ownership, registries, the event constitution, and security invariants.
+ownership, registries, the event constitution, security invariants, and its
+current-versus-target table.
 
 Mozaiks frontend docs are split into two contracts:
 

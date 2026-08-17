@@ -15,12 +15,13 @@ This project follows a practical pre-1.0 changelog format:
 ### Added
 
 - **Mozaiks UI v1 architecture constitution**
-  (`docs/architecture/frontend/mozaiks-ui-v1.md`): the authoritative
+  (`docs/architecture/frontend/mozaiks-ui-v1.md`): the authoritative target
   documentation contract for the native UI framework — canonical surface kinds,
-  single-owner layer map, registry constitution, `mozaiks.ui.event.v1`
+  single-owner layer map, registry constitution, target `mozaiks.ui.event.v1`
   requirements, state-domain ownership, the deterministic generation pipeline,
   extension checklists, security invariants, and a dependency-ordered roadmap.
-  Documentation only; no runtime, schema, or registry behavior changed.
+  Documentation only; current implementation truth remains documented in the
+  current-versus-target table; no runtime, schema, or registry behavior changed.
 
 - **Canonical app layout registry v1** (`mozaiksai.core.runtime.app.layout_registry`):
   the first typed, versioned layout authority (`mozaiks.app_layout.v1`). Closed

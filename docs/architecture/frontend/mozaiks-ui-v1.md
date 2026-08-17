@@ -1,7 +1,7 @@
 # Mozaiks UI v1
 
-**Status:** Authoritative architecture constitution for the native Mozaiks UI framework.
-**Contract id:** `mozaiks.ui.v1` (documentation contract; runtime schema ids are introduced by the roadmap in §12).
+**Status:** Authoritative target architecture constitution for the native Mozaiks UI framework.
+**Contract id:** `mozaiks.ui.v1` (documentation contract only; runtime schema ids are introduced by the roadmap in §12).
 **Authority:** Subordinate to [Mozaiks OSS Software Design](../MOZAIKS_OSS_SOFTWARE_DESIGN.md) and the
 [Canonical Schema Generation Policy](../CANONICAL_SCHEMA_GENERATION_POLICY.md). Where this document and
 current source disagree, §11 says which is truth today; changes to this document follow §10.
@@ -44,8 +44,9 @@ Mozaiks UI is **not**:
 
 **External protocols.** AG-UI and A2UI are comparison inputs only. They are not
 dependencies, not canonical authorities, and no Mozaiks contract may reference their
-types for canonical identity. Any future interoperability adapter is optional,
-conditional, removable, and gated by §12's explicit decision gate.
+types for canonical identity. This document makes no adapter roadmap commitment. Any
+future interoperability adapter requires a separate ADR and explicit product decision
+before implementation work starts.
 
 ---
 
@@ -133,7 +134,7 @@ generators emit against and validators enforce. Changing one is a contract chang
 | Display modes | `chat.tool_call` `display` values (`inline`, `artifact`, `view`, `fullscreen`, `composer`) | closed enum in the §5 envelope |
 | Renderer capabilities | `ui.realization` (`shipped_component`, `workflow_wrapper`, `generated_component`) | unchanged; enum formalized |
 | Extension slots | `ExtensionSlot` in `layout_registry.py` (5 slots) + UI extension contracts (§8) | UI extension slots added to the layout registry pattern, not a parallel mechanism |
-| UI event types | today: `chat.*`, `chat.tool_call`, typed `ui.*` (fragmented) | the single closed taxonomy of `mozaiks.ui.event.v1` (§5) |
+| UI event types | today: `chat.*`, `chat.tool_call`, and typed `ui.*` including older `ui.render` consumers (fragmented) | the single closed taxonomy of `mozaiks.ui.event.v1` (§5); `ui.render` removed as a render lane |
 | State domains | implicit (reducer + context + runtime stores) | explicit closed list (§6) with one owner each |
 
 **Mutable runtime mounting registries** — process-local mount tables populated at boot
@@ -192,15 +193,18 @@ The envelope MUST provide:
     projected as chat text (per the AG2 runtime-handoff rule).
 
 **Canonical workflow-render lane (conceptual resolution).** The tool-call lifecycle —
-today carried as `chat.tool_call` / `tool_call_response` — **is** the canonical
-workflow-render lane and survives. There is no competing `ui.render` lane today and none
-will be introduced: `mozaiks.ui.event.v1` re-expresses the existing lane as its typed
-tool-lifecycle kinds, and the typed `ui.*` primitive bus narrows to a secondary
-refresh-only channel (never a renderer of new surfaces). This follows the
-keep/merge/delete map already recorded in the
-[AG-UI / CopilotKit comparison](chat-ui/ag-ui-copilotkit-comparison.md): one stream, one
-tool lifecycle, one response lane, a default renderer so tool activity is never
-invisible.
+today carried primarily as `chat.tool_call` / `tool_call_response` — **is** the
+canonical workflow-render lane and survives. Current source still contains `ui.render`
+consumer paths from the earlier typed-UI experiment; those paths are transitional
+implementation evidence, not a second canonical lane. The intended migration is:
+preserve `chat.tool_call` semantics, express that lane through
+`mozaiks.ui.event.v1` typed tool-lifecycle kinds, move any still-needed `ui.render`
+behavior into that envelope, then delete `ui.render` as a browser-facing render lane.
+After that migration, the typed `ui.*` primitive bus is secondary and refresh-only
+(never a renderer of new workflow surfaces). This follows the keep/merge/delete map
+already recorded in the [AG-UI / CopilotKit comparison](chat-ui/ag-ui-copilotkit-comparison.md):
+one stream, one tool lifecycle, one response lane, a default renderer so tool activity
+is never invisible.
 
 ---
 
@@ -359,7 +363,7 @@ unimplemented behavior as existing.
 | Page primitives | Closed `PRIMITIVES` map + JSON Schemas + exported `primitive_schemas.json` + tiered catalog | Unchanged mechanism; drift test binding registry ↔ structured outputs ↔ catalog |
 | Named components | `componentRegistry` Map with duplicate-warning; functional scanner checks registration closure | Explicit component-scope field; contract/mounting split named in code |
 | Layout types | `LAYOUT_CLASSES` with unknown → `full-width` mapping | Unknown layout fails validation before serve (§9.6) |
-| Workflow render lane | `chat.tool_call` + `tool_call_response`; typed `ui.*` bus; reducer-driven render state; no AG-UI producer exists (prior attempt removed) | One `mozaiks.ui.event.v1` envelope expressing the same lane; `ui.*` narrowed to refresh-only; default tool renderer |
+| Workflow render lane | `chat.tool_call` + `tool_call_response`; older `ui.render` consumer paths still exist in `dynamicUIHandler`, `ChatPage`, `WorkflowChat`, and `uiSurfaceReducer`; typed `ui.*` bus; reducer-driven render state; no AG-UI producer exists (prior attempt removed) | One `mozaiks.ui.event.v1` envelope expressing the `chat.tool_call` lane; `ui.render` removed as a workflow render lane; remaining `ui.*` narrowed to refresh-only; default tool renderer |
 | Event envelope | Envelopes built by `UnifiedEventDispatcher`; no unified version id, sequence, or idempotency contract | §5 requirements 1–12 |
 | State domains | Reducer + `ChatUIContext` caches + runtime stores; ownership implicit | §6 table explicit and tested |
 | Generation pipeline | Fully implemented: structured outputs → save tools → quality gates → scanners → functional scan → runtime boot → Playwright acceptance → promotion | Add §4/§5 registry validations as they land |
@@ -382,7 +386,7 @@ an ADR before any implementation PR may be opened.**
 | 2 | Layout-type strictness (1) | Unknown `layout` fails page validation before serve; enum mirrored into structured outputs | Scanner + serve-path tests prove unknown layout is an error; fixtures updated | Revert; prior mapping returns |
 | 3 | `mozaiks.ui.event.v1` schema (1) | Typed envelope + closed taxonomy as models and docs; producer/consumer untouched | Schema round-trip + taxonomy tests; no transport change | Revert models |
 | 4 | Envelope adoption — outbound (3) | `UnifiedEventDispatcher` emits versioned envelopes carrying the existing lane; frontend accepts both shapes for one PR window only, then the old shape is removed in the same series | Runtime smokes + widget/replay tests green; removal PR merges within the series | Revert adoption PR; dispatcher returns to prior envelopes |
-| 5 | Tool-lane consolidation (4) | `ui.*` bus narrowed to refresh-only; default tool renderer added; `dynamicUIHandler` reduced per the comparison doc's map | Tool-call lifecycle tests; no second render lane remains | Revert consolidation |
+| 5 | Tool-lane consolidation (4) | `ui.render` removed as a workflow render lane; remaining `ui.*` bus narrowed to refresh-only; default tool renderer added; `dynamicUIHandler` reduced per the comparison doc's map | Tool-call lifecycle tests; no second render lane remains | Revert consolidation |
 | 6 | State-domain table enforcement (4) | §6 domains named in code; reconnect/replay rebuilds render/shell state from durable stores in tests | Replay test proves reconstruction; approval durability test | Revert |
 | 7 | Component-scope registration (1) | Scope field on registrations; scanners check scope legality | Registration-closure tests extended | Revert |
 | 8 | Layout-registry keying (1, #286 wiring series) | UI artifact registries reference `mozaiks.app_layout.v1` kinds once layout wiring lands elsewhere | Drift test: every UI artifact kind maps to a layout family | Revert keying |
