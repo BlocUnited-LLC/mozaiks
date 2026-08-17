@@ -14,6 +14,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Canonical app layout registry v1** (`mozaiksai.core.runtime.app.layout_registry`):
+  the first typed, versioned layout authority (`mozaiks.app_layout.v1`). Closed
+  enums for artifact kind, owner, requirement, condition, path scope, materializer,
+  validator, runtime consumer, and security class; deterministic digest-signed
+  registry identity (prose and timestamps excluded); fail-closed path matching
+  with specificity precedence, Unicode NFC normalization, and explicit
+  prohibited-path families; bounded extension slots for managed-capability packs.
+  Data-only in this release — not yet wired into `paths.py`, loaders,
+  materializers, or prompts.
+
 - **Mozaiks Cloud OSS connector contracts** (`factory_app/build_context/mozaiks_cloud/`):
   versioned, optional capability pack wiring generated apps to the Mozaiks Cloud
   managed platform for deployment, environment endpoints, and domain management.
