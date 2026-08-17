@@ -297,11 +297,51 @@ async def test_transient_runner_failure_is_retryable() -> None:
         await executor.execute(_context(assignment))
 
 
+@pytest.mark.asyncio
+async def test_canonical_yaml_output_is_byte_identical_despite_input_key_ordering() -> None:
+    """Prove that YAML materialization is byte-identical even when input dict key order differs.
+
+    A real LLM run may emit the same conceptual YAML content with keys in
+    varying order on successive calls.  The executor must normalise key order
+    (sort_keys=True) so that content_digest and output_digest are stable across
+    runs regardless of key insertion order in the runner output.
+    """
+    assignment = _assignment(owned_paths=["modules/inventory/module.yaml"])
+
+    output_alpha = _module_output()
+    output_beta = _module_output()
+    # Reverse the key order of module_yaml — same data, different insertion order.
+    module_yaml_alpha: dict[str, Any] = output_alpha["module_contract"]["module_yaml"]
+    module_yaml_beta: dict[str, Any] = dict(reversed(list(module_yaml_alpha.items())))
+    output_beta["module_contract"]["module_yaml"] = module_yaml_beta
+
+    executor_alpha = ModuleContractExecutor(agent=FakeAgent(), runner=FakeRunner([_runner_result(output_alpha)]))
+    executor_beta = ModuleContractExecutor(agent=FakeAgent(), runner=FakeRunner([_runner_result(output_beta)]))
+
+    result_alpha = await executor_alpha.execute(_context(assignment))
+    result_beta = await executor_beta.execute(_context(assignment))
+
+    assert result_alpha.output_digest == result_beta.output_digest, (
+        "YAML content digest must be identical regardless of input key ordering"
+    )
+
+
 def test_register_module_contract_executor_uses_closed_registry() -> None:
     registry = WorkAssignmentExecutorRegistry()
     executor = register_module_contract_executor(registry, agent=FakeAgent(), runner=FakeRunner([]))
 
     assert registry.resolve("module_contract") is executor
+
+
+def test_executor_does_not_accept_lease_checkpoint_seconds() -> None:
+    """lease_checkpoint_seconds was a dead parameter — verify it is not accepted."""
+    import inspect
+
+    sig = inspect.signature(ModuleContractExecutor.__init__)
+    assert "lease_checkpoint_seconds" not in sig.parameters, (
+        "lease_checkpoint_seconds was removed because it was never used; "
+        "re-adding it would imply renewal fires during runner.run() which it does not"
+    )
 
 
 def test_executor_source_has_no_arbitrary_import_or_repository_mutation() -> None:

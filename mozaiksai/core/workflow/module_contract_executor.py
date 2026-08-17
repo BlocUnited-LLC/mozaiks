@@ -12,6 +12,12 @@ The executor is intentionally a thin bridge:
   the generated YAML before a WorkResult is returned.
 
 No repository files are written here; integration remains a separate phase.
+
+Lease renewal fires at three fixed checkpoints: before the runner call, after
+the runner returns, and after validation completes.  It does NOT fire during
+the blocking runner.run() call (which may run up to timeout_seconds).  This is
+intentional: the runner owns its own timeout via asyncio.wait_for, and injecting
+concurrent renewal would require unmanaged threads against the AG2 event loop.
 """
 
 from __future__ import annotations
@@ -113,7 +119,6 @@ class ModuleContractExecutor:
         agent_name: str = MODULE_CONTRACT_AGENT_NAME,
         workflow_name: str = MODULE_CONTRACT_WORKFLOW_NAME,
         timeout_seconds: int = 120,
-        lease_checkpoint_seconds: int = 300,
     ) -> None:
         if agent is None:
             raise ValueError("ModuleContractExecutor requires a pre-registered AG2 agent")
@@ -122,7 +127,6 @@ class ModuleContractExecutor:
         self.agent_name = _required_text(agent_name, "agent_name")
         self.workflow_name = _required_text(workflow_name, "workflow_name")
         self.timeout_seconds = int(timeout_seconds)
-        self.lease_checkpoint_seconds = int(lease_checkpoint_seconds)
 
     async def execute(self, context: WorkAssignmentExecutionContext) -> WorkResult:
         if context.assignment.assignment_kind is not AssignmentKind.MODULE_CONTRACT:
@@ -461,7 +465,7 @@ def _canonical_yaml(content: str) -> str:
         yaml.safe_dump(
             parsed,
             allow_unicode=True,
-            sort_keys=False,
+            sort_keys=True,
             default_flow_style=False,
         ),
     )
