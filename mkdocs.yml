@@ -254,6 +254,7 @@ nav:
       # Chat UI runtime, generated UI system, auth, and mobile.
       - Frontend & UI:
           - architecture/frontend/index.md
+          - Mozaiks UI v1 Constitution: architecture/frontend/mozaiks-ui-v1.md
           - Chat UI:
               - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
               - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
