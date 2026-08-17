@@ -313,6 +313,7 @@ class LayoutExtension(LayoutModel):
         if self.slot == ExtensionSlot.CAPABILITY_PACK_OUTPUT:
             if not self.path:
                 raise ValueError("capability_pack_output extensions require an exact path")
+            _validate_capability_pack_output_path(self.path)
         elif self.path is not None:
             raise ValueError("path is only valid for capability_pack_output extensions")
         return self
@@ -351,6 +352,12 @@ class AppLayoutRegistry(LayoutModel):
         ]
         if not matches:
             raise ValueError(f"path {path!r} is not registered for scope {resolved_scope.value!r}")
+        prohibited = [m for m in matches if m.family.requirement is Requirement.PROHIBITED]
+        if prohibited:
+            # Prohibition is absolute: no extension or literal registration may
+            # shadow a prohibited family through specificity precedence.
+            prohibited.sort(key=lambda m: (len(m.values), m.family.path_template))
+            return prohibited[0]
         if len(matches) > 1:
             # Deterministic specificity precedence: a template with fewer
             # placeholders is more literal and wins (a registered-extension
@@ -462,7 +469,6 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_DASHBOARD, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "dashboard/dashboard.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_ROUTE_MANIFEST, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "ui/route_manifest.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_PAGE_SCHEMA, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/pages/{page_id}.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_PAGE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.PAGE_BUNDLE,)),
-        _family(ArtifactKind.APP_UI_CUSTOM_ROUTE, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/pages/custom/{page_id}.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_CUSTOM_ROUTE, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/pages/custom/{page_id}.jsx", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_AUTH_ADAPTER, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/auth/authAdapter.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_AUTH_ENABLED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_EXTENSION_BARREL, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/index.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
@@ -508,6 +514,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".env.production.example", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "deployment.manifest.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/deploy.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
+        _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".github/workflows/readiness.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, workspace, "app/app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workspace, "workflows/{workflow_id}/orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, multiplicity=Multiplicity.MANY),
         _family(ArtifactKind.BUILD_CONTEXT_REGISTRY, LayoutOwner.CAPABILITY_PACK, Requirement.OPTIONAL, workspace, "build_context/{pack_id}/context.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.NONE, multiplicity=Multiplicity.MANY),
@@ -673,39 +680,80 @@ def _extension_families(extensions: tuple[LayoutExtension, ...]) -> tuple[Artifa
     return tuple(result)
 
 
-def _capability_pack_output_scope(path: str) -> PathScope:
-    if path.startswith("generated/"):
-        return PathScope.GENERATED_STAGING
-    if path in {
+# Pack contracts may declare only app-bundle interior outputs plus the two
+# authentic workspace-support lanes (docs/, scripts/) proven by shipped packs
+# such as operator_readiness.  Deployment artifacts stay renderer-owned,
+# generated/ staging stays factory-owned, and agent/CI configuration is never
+# a pack output.
+_PACK_OUTPUT_FORBIDDEN_PREFIXES = (
+    ".claude/",
+    ".github/",
+    "config/data_migrations/",
+    "control_plane/",
+    "generated/",
+    "services/data/",
+    "services/security/",
+    "tests/",
+)
+_PACK_OUTPUT_FORBIDDEN_EXACT = frozenset(
+    {
         "Dockerfile",
         "docker-compose.yml",
         ".env.example",
         ".env.staging.example",
         ".env.production.example",
         "deployment.manifest.json",
-        ".github/workflows/deploy.yml",
-    }:
-        return PathScope.DEPLOYMENT_DERIVED
-    if path.startswith(("docs/", "scripts/", ".claude/", ".github/")):
+        "config/data.json",
+        "config/llm.yaml",
+        "config/secrets.yaml",
+        "security/secrets.yaml",
+    }
+)
+_PACK_OUTPUT_SECRET_TOKEN_RE = re.compile(
+    r"(?:^|[._/-])(?:api[_-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:[._/-]|$)",
+    re.IGNORECASE,
+)
+_PACK_OUTPUT_SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".crt", ".der", ".jks")
+
+
+def _validate_capability_pack_output_path(path: str) -> None:
+    if _PLACEHOLDER_RE.search(path):
+        raise ValueError(
+            f"capability_pack_output paths must be exact literals, not templates: {path!r}"
+        )
+    lower = path.lower()
+    if path in _PACK_OUTPUT_FORBIDDEN_EXACT or any(
+        lower.startswith(prefix) for prefix in _PACK_OUTPUT_FORBIDDEN_PREFIXES
+    ):
+        raise ValueError(
+            f"capability_pack_output path is not a permitted pack output lane: {path!r}"
+        )
+    basename = PurePosixPath(path).name.lower()
+    if (
+        basename.startswith(".env")
+        or lower.endswith(_PACK_OUTPUT_SECRET_SUFFIXES)
+        or _PACK_OUTPUT_SECRET_TOKEN_RE.search(path)
+    ):
+        raise ValueError(
+            f"capability_pack_output path is secret-shaped and not registrable: {path!r}"
+        )
+
+
+def _capability_pack_output_scope(path: str) -> PathScope:
+    if path.startswith(("docs/", "scripts/")):
         return PathScope.WORKSPACE_ROOT
     return PathScope.APP_BUNDLE_ROOT
 
 
 def _capability_pack_output_consumer(path: str) -> RuntimeConsumerIdentifier:
-    if path.startswith(("docs/", "scripts/", ".claude/", ".github/")):
+    if _capability_pack_output_scope(path) is PathScope.WORKSPACE_ROOT:
         return RuntimeConsumerIdentifier.NONE
-    if _capability_pack_output_scope(path) == PathScope.DEPLOYMENT_DERIVED:
-        return RuntimeConsumerIdentifier.DOWNLOAD_EXPORT
     return RuntimeConsumerIdentifier.PLATFORM_HOST
 
 
 def _capability_pack_output_security(path: str) -> SecurityClass:
     if path.lower().endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".ps1", ".sh")):
         return SecurityClass.EXECUTABLE_STUB
-    if _capability_pack_output_scope(path) == PathScope.DEPLOYMENT_DERIVED:
-        return SecurityClass.DEPLOYMENT_METADATA
-    if path.startswith("generated/"):
-        return SecurityClass.GENERATED_STAGING
     return SecurityClass.INTERNAL_CONTRACT
 
 

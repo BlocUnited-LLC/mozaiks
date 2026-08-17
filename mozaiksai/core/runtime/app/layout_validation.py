@@ -13,7 +13,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mozaiksai.core.runtime.app.layout_registry import (
     AppLayoutRegistry,
@@ -54,6 +54,7 @@ class LayoutDiagnosticCode(StrEnum):
     UNKNOWN_PATH = "unknown_path"
     AMBIGUOUS_PATH = "ambiguous_path"
     UNSAFE_PATH = "unsafe_path"
+    INVALID_EXTENSION_REGISTRATION = "invalid_extension_registration"
 
 
 class LayoutFileClassification(LayoutValidationModel):
@@ -120,7 +121,24 @@ def validate_file_map_layout(
     not select extensions by filename.
     """
 
-    layout_registry = registry or build_app_layout_registry(selected_extensions)
+    try:
+        layout_registry = registry or build_app_layout_registry(selected_extensions)
+    except (ValueError, ValidationError) as exc:
+        return LayoutValidationReport(
+            classifications=(),
+            diagnostics=(
+                LayoutValidationDiagnostic(
+                    code=LayoutDiagnosticCode.INVALID_EXTENSION_REGISTRATION,
+                    path="",
+                    normalized_path="",
+                    scope=None,
+                    message=(
+                        "selected layout extensions could not be registered and the "
+                        f"file map fails closed: {exc}"
+                    ),
+                ),
+            ),
+        )
     classifications: list[LayoutFileClassification] = []
     diagnostics: list[LayoutValidationDiagnostic] = []
 
@@ -159,6 +177,7 @@ def classify_layout_path(
             reason=str(exc),
         )
 
+    accepted: list[LayoutFileClassification] = []
     for scope in _candidate_scopes(normalized, registry=layout_registry):
         classification = _match_scope(
             path,
@@ -167,12 +186,27 @@ def classify_layout_path(
             registry=layout_registry,
             selected_extensions=selected_extensions,
         )
-        if classification.status in {
-            LayoutClassificationStatus.REGISTERED,
-            LayoutClassificationStatus.PROHIBITED,
-            LayoutClassificationStatus.AMBIGUOUS,
-        }:
+        if classification.status is LayoutClassificationStatus.PROHIBITED:
             return classification
+        if classification.status is LayoutClassificationStatus.AMBIGUOUS:
+            return classification
+        if classification.status is LayoutClassificationStatus.REGISTERED:
+            accepted.append(classification)
+
+    if len(accepted) == 1:
+        return accepted[0]
+    if len(accepted) > 1:
+        scopes = sorted(item.scope.value for item in accepted if item.scope)
+        return LayoutFileClassification(
+            path=path,
+            normalized_path=normalized,
+            scope=None,
+            status=LayoutClassificationStatus.AMBIGUOUS,
+            reason=(
+                f"path {normalized!r} is registered in more than one scope {scopes}; "
+                "scope must be structurally unique, never selected by trial"
+            ),
+        )
 
     if _is_repo_support_path(normalized):
         return LayoutFileClassification(
@@ -317,27 +351,20 @@ def _classification_from_match(
 
 
 def _candidate_scopes(normalized: str, *, registry: AppLayoutRegistry) -> tuple[PathScope, ...]:
+    """Structural candidate scopes for a bundle-relative path.
+
+    Candidacy is derived from path structure alone — never from whether a scope
+    happens to accept the path.  Acceptance in more than one candidate scope is
+    reported as ambiguity by the caller, not resolved by ordering.
+    """
+    del registry
     if normalized.startswith("generated/"):
         return (PathScope.GENERATED_STAGING,)
-    scopes: list[PathScope] = []
-    if _matches_scope(registry, normalized, PathScope.DEPLOYMENT_DERIVED):
-        scopes.append(PathScope.DEPLOYMENT_DERIVED)
-    if _is_repo_support_path(normalized) and _matches_scope(
-        registry,
-        normalized,
-        PathScope.WORKSPACE_ROOT,
-    ):
+    scopes: list[PathScope] = [PathScope.DEPLOYMENT_DERIVED]
+    if _is_repo_support_path(normalized):
         scopes.append(PathScope.WORKSPACE_ROOT)
     scopes.append(PathScope.APP_BUNDLE_ROOT)
     return tuple(scopes)
-
-
-def _matches_scope(registry: AppLayoutRegistry, path: str, scope: PathScope) -> bool:
-    try:
-        registry.match_path(path, scope)
-    except ValueError:
-        return False
-    return True
 
 
 def _diagnostic_for(classification: LayoutFileClassification) -> LayoutValidationDiagnostic | None:

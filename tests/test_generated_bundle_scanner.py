@@ -1091,15 +1091,23 @@ def test_scan_page_schema_structure_skips_custom_pages() -> None:
     # Custom pages under ui/pages/custom/ are React escape-hatch files — not schema-native.
     errors = scan_generated_bundle(
         {
-            "ui/pages/custom/SpecialDashboard.yaml": """
-primitive: NotCanonicalAtAll
-""",
+            "ui/pages/custom/SpecialDashboard.jsx": "export default function SpecialDashboard() { return null; }",
         }
     )
 
-    # Must NOT raise an error for the custom page.
-    assert not any("SpecialDashboard" in e for e in errors)
+    # Must NOT schema-scan the custom React page.
     assert not any("canonical section primitive" in e for e in errors)
+
+    # A YAML file under ui/pages/custom/ is not a canonical artifact: no
+    # emitter writes one and no runtime loader serves one, so layout
+    # classification fails it closed instead of silently skipping it.
+    yaml_errors = scan_generated_bundle(
+        {
+            "ui/pages/custom/SpecialDashboard.yaml": "primitive: NotCanonicalAtAll\n",
+        }
+    )
+    assert any("ui/pages/custom/SpecialDashboard.yaml" in e for e in yaml_errors)
+    assert not any("canonical section primitive" in e for e in yaml_errors)
 
 
 # ---------------------------------------------------------------------------

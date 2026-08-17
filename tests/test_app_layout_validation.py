@@ -312,8 +312,10 @@ def test_ambiguous_registry_matches_are_diagnostics_not_success() -> None:
     assert "ambiguous" in report.diagnostics[0].message
 
 
-def test_scanner_ignores_repo_support_but_fails_unknown_runtime_files() -> None:
-    assert scan_generated_bundle({"docs/readme.md": "", "app.json": "{}"}) == []
+def test_scanner_fails_undeclared_repo_support_and_unknown_runtime_files() -> None:
+    # An undeclared repository-support file never sails through, packs or not.
+    undeclared = scan_generated_bundle({"docs/readme.md": "", "app.json": "{}"})
+    assert any("undeclared repository-support pack outputs" in error for error in undeclared)
 
     errors = scan_generated_bundle({"docs/readme.md": "", "server.py": ""})
     assert any("server.py" in error for error in errors)
@@ -324,7 +326,14 @@ def test_scanner_extension_selection_is_explicit_not_filename_inferred() -> None
     path = "config/integrations/payments.yaml"
     extension = LayoutExtension(slot=ExtensionSlot.MANAGED_CAPABILITY_CONFIG, pack_id="payments")
 
-    assert scan_generated_bundle({path: "{}"}, layout_extensions=(extension,)) == []
+    # Explicit selection classifies through the validation facade; the scanner
+    # derives extension authority only from selected pack contracts and exposes
+    # no caller-supplied extension bypass.
+    import inspect
+
+    assert "layout_extensions" not in inspect.signature(scan_generated_bundle).parameters
+    explicit = validate_file_map_layout({path: "{}"}, selected_extensions=(extension,))
+    assert explicit.passed
 
     errors = scan_generated_bundle({path: "{}"})
     assert any(path in error for error in errors)
@@ -357,3 +366,156 @@ def test_scanner_requires_repo_support_pack_outputs_to_be_declared_when_packs_se
         capability_packs=[pack],
     )
     assert any("undeclared repository-support pack outputs" in error for error in errors)
+
+
+# ---------------------------------------------------------------------------
+# Review regressions — each defect below was reproduced before fixing.
+# ---------------------------------------------------------------------------
+
+
+def test_pack_output_cannot_shadow_prohibited_families() -> None:
+    """An extension literal must never out-rank a prohibited family."""
+    with pytest.raises(ValidationError, match="not a permitted pack output lane"):
+        LayoutExtension(
+            slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+            pack_id="evil",
+            path="services/data/schema.py",
+        )
+
+    # And prohibition wins at match time over any more-literal family.
+    report = validate_file_map_layout({"services/data/schema.py": "x"})
+    assert not report.passed
+    assert report.diagnostics[0].code is LayoutDiagnosticCode.PROHIBITED_PATH
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".claude/settings.local.json",
+        ".github/workflows/deploy.yml",
+        "generated/apps/a/b/app/app.json",
+        "Dockerfile",
+        "deployment.manifest.json",
+        "config/secrets.yaml",
+        "security/secrets.yaml",
+        "tests/test_x.py",
+        "control_plane/routing.yaml",
+        "config/api_keys.json",
+        "certs/server.pem",
+        ".env.production.example",
+        "ui/pages/{page_id}.yaml",
+    ],
+)
+def test_pack_output_forbidden_lanes_fail_closed(path: str) -> None:
+    with pytest.raises(ValidationError):
+        LayoutExtension(
+            slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+            pack_id="sneaky",
+            path=path,
+        )
+
+
+def test_extension_registration_failure_is_diagnostic_not_crash() -> None:
+    """A pack output duplicating a core literal fails closed with a diagnostic."""
+    duplicate = LayoutExtension(
+        slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+        pack_id="dup",
+        path="services/config.py",
+    )
+    report = validate_file_map_layout(
+        {"services/config.py": "x"}, selected_extensions=(duplicate,)
+    )
+    assert not report.passed
+    assert report.diagnostics[0].code is (
+        LayoutDiagnosticCode.INVALID_EXTENSION_REGISTRATION
+    )
+
+
+def test_multi_scope_acceptance_is_ambiguity_not_first_scope_wins() -> None:
+    """A path accepted by more than one candidate scope fails closed."""
+    workspace = LayoutExtension(
+        slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+        pack_id="readiness",
+        path="docs/operations/guide.md",
+    )
+    base = validate_file_map_layout(
+        {"docs/operations/guide.md": ""}, selected_extensions=(workspace,)
+    )
+    assert base.passed  # single-scope acceptance stays valid
+
+    from mozaiksai.core.runtime.app.layout_registry import build_app_layout_registry
+
+    registry = build_app_layout_registry((workspace,))
+    forged = AppLayoutRegistry.model_construct(
+        families=(*registry.families, _family("docs/operations/guide.md")),
+        registry_digest="bypassed-for-multi-scope-test",
+    )
+    report = validate_file_map_layout(
+        {"docs/operations/guide.md": ""},
+        selected_extensions=(workspace,),
+        registry=forged,
+    )
+    assert not report.passed
+    assert report.diagnostics[0].code is LayoutDiagnosticCode.AMBIGUOUS_PATH
+    assert "more than one scope" in report.diagnostics[0].message
+
+
+def test_duplicate_pack_output_claims_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as scanner
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+    )
+
+    def _fake_declared(packs, **_kwargs):
+        return frozenset({"scripts/shared_output.ps1"})
+
+    monkeypatch.setattr(scanner, "resolve_declared_pack_output_paths", _fake_declared)
+
+    packs = [
+        {"id": "pack_one", "capability_source": "config_file"},
+        {"id": "pack_two", "capability_source": "config_file"},
+    ]
+    with pytest.raises(ManagedCapabilityTemplateError, match="duplicate pack output"):
+        scanner._layout_extensions_for_selected_packs(packs)
+
+    errors = scanner.scan_generated_bundle({"app.json": "{}"}, capability_packs=packs)
+    assert any("duplicate pack output claims" in error for error in errors)
+
+
+def test_declared_workspace_script_content_is_still_secret_scanned() -> None:
+    pack = {
+        "id": "operator_readiness",
+        "capability_source": "config_file",
+        "pack_source_path": "factory_app/build_context/operator_readiness",
+    }
+    leaked = "$env:PAYMENT_SECRET = 'provider_live_0123456789abcdef'\n"
+    errors = scan_generated_bundle(
+        {
+            "app.json": "{}",
+            "scripts/check_operator_readiness_local.ps1": leaked,
+        },
+        capability_packs=[pack],
+    )
+    assert any(
+        "scripts/check_operator_readiness_local.ps1" in error
+        and "raw provider secret" in error
+        for error in errors
+    )
+
+
+def test_custom_route_yaml_is_not_a_registered_family() -> None:
+    """ui/pages/custom/*.yaml has no emitter or runtime consumer — must fail."""
+    report = validate_file_map_layout({"ui/pages/custom/thing.yaml": ""})
+    assert not report.passed
+    assert report.diagnostics[0].code is LayoutDiagnosticCode.UNKNOWN_PATH
+
+
+def test_auth_adapter_family_matches_rendered_template_output() -> None:
+    """ui/auth/authAdapter.js is authentic: the webapp_builder template exists."""
+    template = Path(
+        "factory_app/build_context/webapp_builder/templates/ui/auth/authAdapter.js"
+    )
+    assert template.is_file()
+    classification = classify_layout_path("ui/auth/authAdapter.js")
+    assert classification.status is LayoutClassificationStatus.REGISTERED
+    assert classification.artifact_kind == ArtifactKind.APP_UI_AUTH_ADAPTER.value

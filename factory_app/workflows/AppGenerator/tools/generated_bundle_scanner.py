@@ -26,6 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from pydantic import ValidationError as PydanticValidationError
 
 from factory_app.workflows._shared.generated_ui_contract import (
     VALID_PAGE_TYPES as _CANONICAL_PAGE_TYPES,
@@ -120,6 +121,9 @@ _SCANNABLE_SUFFIXES = (
     ".py", ".js", ".jsx", ".ts", ".tsx",
     ".yaml", ".yml", ".env.example", ".env.staging.example",
     ".env.production.example", ".env",
+    # Pack-declared workspace scripts ship to customers and must never carry
+    # raw credentials or provider leaks.
+    ".ps1", ".sh",
 )
 
 _RAW_SECRET_FIELD_KEYS = frozenset(
@@ -2083,25 +2087,40 @@ def _layout_extensions_for_selected_packs(
     capability_packs: list[dict[str, Any]] | None,
 ) -> tuple[LayoutExtension, ...]:
     extensions = list(layout_extensions_from_selected_packs(capability_packs))
+    claimed_paths: dict[str, str] = {}
     for pack in capability_packs or []:
         pack_id = _pack_id_from_descriptor(pack)
         if not pack_id:
             continue
         for path in sorted(resolve_declared_pack_output_paths([pack])):
-            if _path_is_already_layout_registered(path, tuple(extensions)):
-                continue
-            extensions.append(
-                LayoutExtension(
-                    slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
-                    pack_id=pack_id,
-                    path=path,
+            prior_owner = claimed_paths.get(path)
+            if prior_owner is not None and prior_owner != pack_id:
+                raise ManagedCapabilityTemplateError(
+                    f"Selected packs '{prior_owner}' and '{pack_id}' both declare "
+                    f"output path {path!r}; duplicate pack output claims fail closed"
                 )
-            )
+            claimed_paths[path] = pack_id
+            if _path_matches_core_layout(path):
+                continue
+            try:
+                extensions.append(
+                    LayoutExtension(
+                        slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+                        pack_id=pack_id,
+                        path=path,
+                    )
+                )
+            except (ValueError, PydanticValidationError) as exc:
+                raise ManagedCapabilityTemplateError(
+                    f"Pack '{pack_id}' declares output {path!r} outside the "
+                    f"permitted pack output lanes: {exc}"
+                ) from exc
     return tuple(sorted(extensions, key=lambda item: (item.slot.value, item.pack_id, item.path or "")))
 
 
-def _path_is_already_layout_registered(path: str, extensions: tuple[LayoutExtension, ...]) -> bool:
-    registry = build_app_layout_registry(extensions)
+def _path_matches_core_layout(path: str) -> bool:
+    """True when the core registry (no extensions) already classifies the path."""
+    registry = build_app_layout_registry(())
     scopes = (
         PathScope.APP_BUNDLE_ROOT,
         PathScope.DEPLOYMENT_DERIVED,
@@ -2122,10 +2141,12 @@ def _scan_declared_pack_repo_support_outputs(
     *,
     capability_packs: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    if not capability_packs:
-        return []
     try:
-        declared_paths = resolve_declared_pack_output_paths(capability_packs)
+        declared_paths = (
+            resolve_declared_pack_output_paths(capability_packs)
+            if capability_packs
+            else frozenset()
+        )
     except ManagedCapabilityTemplateError as exc:
         return [f"Selected CapabilityPack output contract is invalid: {exc}"]
 
@@ -2134,12 +2155,13 @@ def _scan_declared_pack_repo_support_outputs(
         ".github/",
         "docs/",
         "scripts/",
+        "tests/",
     )
     invalid = sorted(
         path
         for path in _normalized_files_map(files_map)
         if path.startswith(repo_support)
-        and path != ".github/workflows/deploy.yml"
+        and path not in {".github/workflows/deploy.yml", ".github/workflows/readiness.yml"}
         and path not in declared_paths
     )
     if not invalid:
@@ -2155,7 +2177,6 @@ def scan_generated_bundle(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
-    layout_extensions: tuple[LayoutExtension, ...] | None = None,
     require_deployment_artifacts: bool = False,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
@@ -2174,11 +2195,7 @@ def scan_generated_bundle(
       target-kind-specific required fields.
     """
     try:
-        selected_layout_extensions = (
-            tuple(layout_extensions)
-            if layout_extensions is not None
-            else _layout_extensions_for_selected_packs(capability_packs)
-        )
+        selected_layout_extensions = _layout_extensions_for_selected_packs(capability_packs)
     except ManagedCapabilityTemplateError as exc:
         return [f"Selected CapabilityPack output contract is invalid: {exc}"]
     layout_report = validate_file_map_layout(
@@ -2250,7 +2267,7 @@ def scan_generated_bundle(
         errors.extend(_scan_deployment_artifacts_contract(scannable_files_map))
         errors.extend(_scan_auth_deployment_contract(scannable_files_map))
 
-    for path, content in scannable_files_map.items():
+    for path, content in files_map.items():
         if not isinstance(path, str) or not isinstance(content, str):
             continue
 
