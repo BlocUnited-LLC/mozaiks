@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -24,6 +25,7 @@ _PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 _GLOB_CHARS = frozenset("*?[")
 _RESERVED_MODULE_BACKEND_HELPERS = frozenset(
     {
+        "api",
         "base_handler",
         "handler",
         "models",
@@ -83,6 +85,7 @@ class ArtifactKind(StrEnum):
     MODULE_RUNTIME_EXTENSIONS = "module_runtime_extensions"
     MODULE_BACKEND_HANDLER = "module_backend_handler"
     MODULE_BACKEND_BASE_HANDLER = "module_backend_base_handler"
+    MODULE_BACKEND_API = "module_backend_api"
     MODULE_BACKEND_SERVICE = "module_backend_service"
     MODULE_BACKEND_REPO = "module_backend_repo"
     MODULE_BACKEND_POLICY = "module_backend_policy"
@@ -238,6 +241,13 @@ class ArtifactFamily(LayoutModel):
     def _validate_template(cls, value: str) -> str:
         return _normalize_template(value)
 
+    @field_validator("assignment_kinds")
+    @classmethod
+    def _normalize_assignment_kinds(cls, value: tuple[AssignmentKind, ...]) -> tuple[AssignmentKind, ...]:
+        # Sorted + deduplicated so declaration order can never alter identity
+        # payloads or registry_digest.
+        return tuple(sorted(set(value), key=lambda kind: kind.value))
+
     @model_validator(mode="after")
     def _validate_condition(self) -> ArtifactFamily:
         if self.requirement == Requirement.PROHIBITED and self.condition != ConditionIdentifier.NEVER:
@@ -322,7 +332,14 @@ class AppLayoutRegistry(LayoutModel):
         if not matches:
             raise ValueError(f"path {path!r} is not registered for scope {resolved_scope.value!r}")
         if len(matches) > 1:
-            templates = [match.family.path_template for match in matches]
+            # Deterministic specificity precedence: a template with fewer
+            # placeholders is more literal and wins (a registered-extension
+            # literal beats the generic core template it specializes).  Only a
+            # tie between distinct templates is genuine ambiguity.
+            best_specificity = min(len(match.values) for match in matches)
+            matches = [match for match in matches if len(match.values) == best_specificity]
+        if len(matches) > 1:
+            templates = sorted(match.family.path_template for match in matches)
             raise ValueError(f"path {path!r} is ambiguous for scope {resolved_scope.value!r}: {templates}")
         return matches[0]
 
@@ -409,17 +426,17 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, app, "app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER),
         _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/ai.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
         _family(ArtifactKind.APP_AUTH_CONFIG, LayoutOwner.PLATFORM, Requirement.CONDITIONAL, app, "config/auth.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_AUTH_ENABLED),
-        _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/asset_manifest.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
-        _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED),
-        _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED),
-        _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.yml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED),
+        _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/asset_manifest.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
+        _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_DECLARED),
+        _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_DECLARED),
+        _family(ArtifactKind.APP_INTEGRATIONS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/integrations.yml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_DECLARED),
         _family(ArtifactKind.APP_REFINEMENT_POLICY, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/refinement_policy.yaml", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.REFINEMENT_ENGINE, condition=ConditionIdentifier.WHEN_REFINEMENT_HARNESS_REQUIRED, assignment=(AssignmentKind.REFINEMENT_HARNESS,)),
         _family(ArtifactKind.APP_SHELL_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/shell.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_SUBSCRIPTION_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "config/subscriptions.yaml", ValidatorIdentifier.SUBSCRIPTIONS_LOADER, RuntimeConsumerIdentifier.ENTITLEMENT_ADAPTER, condition=ConditionIdentifier.WHEN_SUBSCRIPTIONS_REQUIRED, assignment=(AssignmentKind.SUBSCRIPTION_CONFIG,)),
         _family(ArtifactKind.APP_TARGETS_CONFIG, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "config/targets.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
         _family(ArtifactKind.APP_DATA_CONTRACT, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "data/contract.json", ValidatorIdentifier.DATA_CONTRACT_LOADER, RuntimeConsumerIdentifier.APP_LOADER, condition=ConditionIdentifier.WHEN_DATA_CONTRACT_REQUIRED, assignment=(AssignmentKind.PERSISTENCE_CONTRACT,)),
         _family(ArtifactKind.APP_DATA_MIGRATION, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "data/migrations/{migration_id}.json", ValidatorIdentifier.DATA_CONTRACT_LOADER, RuntimeConsumerIdentifier.APP_LOADER, condition=ConditionIdentifier.WHEN_DATA_CONTRACT_REQUIRED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.DATA_MIGRATIONS,)),
-        _family(ArtifactKind.APP_SECRET_REFERENCES, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "security/secrets.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED, security=SecurityClass.SECRET_REFERENCE_NAMES, assignment=(AssignmentKind.SERVICE_FOUNDATION,)),
+        _family(ArtifactKind.APP_SECRET_REFERENCES, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "security/secrets.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_APP_DECLARED, security=SecurityClass.SECRET_REFERENCE_NAMES, assignment=(AssignmentKind.SERVICE_FOUNDATION,)),
         _family(ArtifactKind.APP_PROVENANCE, LayoutOwner.FACTORY, Requirement.OPTIONAL, app, "provenance.yaml", ValidatorIdentifier.PROVENANCE_LOADER, RuntimeConsumerIdentifier.PROVENANCE_LOADER, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_BRAND_THEME, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "brand/theme_config.json", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_DASHBOARD, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "dashboard/dashboard.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.PAGE_BUNDLE,)),
@@ -429,7 +446,7 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_UI_EXTENSION_BARREL, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "ui/index.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_UI_MODULE_API, LayoutOwner.PLATFORM, Requirement.CONDITIONAL, app, "ui/lib/moduleApi.js", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_CUSTOM_ROUTE_DECLARED, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.PAGE_BUNDLE,)),
         _family(ArtifactKind.APP_ADMIN_REGISTRY, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "admin/admin_registry.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST),
-        _family(ArtifactKind.APP_FRAMEWORK_METADATA, LayoutOwner.FACTORY, Requirement.OPTIONAL, app, ".mozaiks/pack_provenance.yaml", ValidatorIdentifier.PROVENANCE_LOADER, RuntimeConsumerIdentifier.PROVENANCE_LOADER),
+        _family(ArtifactKind.APP_FRAMEWORK_METADATA, LayoutOwner.FACTORY, Requirement.OPTIONAL, app, ".mozaiks/pack_provenance.json", ValidatorIdentifier.PROVENANCE_LOADER, RuntimeConsumerIdentifier.PROVENANCE_LOADER),
         _family(ArtifactKind.APP_BACKEND_SUPPORT, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, "backend/admin_config.py", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.PLATFORM_HOST, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.API_SURFACE,)),
         _family(ArtifactKind.APP_REFINEMENT_HARNESS, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "refinement_harness/config/harness.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.REFINEMENT_ENGINE, condition=ConditionIdentifier.WHEN_REFINEMENT_HARNESS_REQUIRED, assignment=(AssignmentKind.REFINEMENT_HARNESS,)),
         _family(ArtifactKind.APP_REFINEMENT_HARNESS, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, app, "refinement_harness/config/tools.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.REFINEMENT_ENGINE, condition=ConditionIdentifier.WHEN_REFINEMENT_HARNESS_REQUIRED, assignment=(AssignmentKind.REFINEMENT_HARNESS,)),
@@ -444,11 +461,14 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/contracts/admin.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
         _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/contracts/profile.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
         _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/contracts/relationships.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/contracts/service.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/contracts/commercial.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
         _family(ArtifactKind.MODULE_RUNTIME_EXTENSIONS, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/runtime_extensions.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
-        _family(ArtifactKind.MODULE_BACKEND_HANDLER, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/handler.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.API_SURFACE,)),
+        _family(ArtifactKind.MODULE_BACKEND_HANDLER, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/handler.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
+        _family(ArtifactKind.MODULE_BACKEND_API, LayoutOwner.MODULE, Requirement.OPTIONAL, app, "modules/{module_id}/backend/api.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.API_SURFACE,)),
         _family(ArtifactKind.MODULE_BACKEND_BASE_HANDLER, LayoutOwner.MODULE, Requirement.OPTIONAL, app, "modules/{module_id}/backend/base_handler.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB),
         _family(ArtifactKind.MODULE_BACKEND_SERVICE, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/service.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
-        _family(ArtifactKind.MODULE_BACKEND_REPO, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/repo.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_DATA_CONTRACT_REQUIRED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
+        _family(ArtifactKind.MODULE_BACKEND_REPO, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/repo.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
         _family(ArtifactKind.MODULE_BACKEND_POLICY, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/policy.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
         _family(ArtifactKind.MODULE_BACKEND_SCHEMAS, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/schemas.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.DATA_MODELS,)),
         _family(ArtifactKind.MODULE_BACKEND_HELPER, LayoutOwner.MODULE, Requirement.CONDITIONAL, app, "modules/{module_id}/backend/{helper_id}.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB),
@@ -461,7 +481,6 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         *(_family(ArtifactKind.APP_ROOT_SUPPORT, LayoutOwner.APP_WORKSPACE, Requirement.OPTIONAL, app, path, ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST) for path in _APP_ROOT_SUPPORT_FILES),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "Dockerfile", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "docker-compose.yml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
-        _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, "env.example", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".env.example", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".env.staging.example", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
         _family(ArtifactKind.APP_DEPLOYMENT_ARTIFACT, LayoutOwner.DOWNLOAD_RENDERER, Requirement.GENERATED, deployment, ".env.production.example", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.DOWNLOAD_EXPORT, condition=ConditionIdentifier.WHEN_DEPLOYMENT_EXPORT_REQUESTED, security=SecurityClass.DEPLOYMENT_METADATA),
@@ -482,9 +501,20 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.WORKFLOW_TOOL, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "tools/{tool_id}.py", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB),
         _family(ArtifactKind.WORKFLOW_UI, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "ui/{workflow_id}/{component_id}.jsx", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB),
         _family(ArtifactKind.MODULE_MANIFEST, LayoutOwner.MODULE, Requirement.REQUIRED, module, "module.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, assignment=(AssignmentKind.MODULE_CONTRACT,)),
-        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/{pack_id}.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, multiplicity=Multiplicity.MANY, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/events.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/reactions.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/notifications.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/policy_hooks.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/settings.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/admin.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/profile.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/relationships.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/service.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _family(ArtifactKind.MODULE_CONTRACT, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "contracts/commercial.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, assignment=(AssignmentKind.MODULE_CONTRACT,)),
+        _prohibited(module, "contracts/subscriptions.yaml"),
         _family(ArtifactKind.MODULE_RUNTIME_EXTENSIONS, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "runtime_extensions.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, assignment=(AssignmentKind.MODULE_CONTRACT,)),
-        _family(ArtifactKind.MODULE_BACKEND_HANDLER, LayoutOwner.MODULE, Requirement.REQUIRED, module, "backend/handler.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.API_SURFACE,)),
+        _family(ArtifactKind.MODULE_BACKEND_HANDLER, LayoutOwner.MODULE, Requirement.REQUIRED, module, "backend/handler.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
+        _family(ArtifactKind.MODULE_BACKEND_API, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "backend/api.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.PLATFORM_HOST, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.API_SURFACE,)),
         _family(ArtifactKind.MODULE_BACKEND_SERVICE, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "backend/service.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
         _family(ArtifactKind.MODULE_BACKEND_REPO, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "backend/repo.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
         _family(ArtifactKind.MODULE_BACKEND_POLICY, LayoutOwner.MODULE, Requirement.OPTIONAL, module, "backend/policy.py", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_EXECUTOR, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.BUSINESS_SERVICES,)),
@@ -682,7 +712,7 @@ def _normalize_template(value: str) -> str:
 
 
 def _normalize_runtime_path(value: str) -> str:
-    text = str(value or "").replace("\\", "/").strip()
+    text = unicodedata.normalize("NFC", str(value or "")).replace("\\", "/").strip()
     if not text:
         raise ValueError("path must be non-empty")
     if text.startswith("/") or "://" in text:

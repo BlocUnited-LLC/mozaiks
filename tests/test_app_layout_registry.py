@@ -240,7 +240,7 @@ class TestCanonicalPathCoverage:
     def test_every_current_paths_py_root_dir_is_represented(self, root: str) -> None:
         samples = {
             ".github": ".github/workflows/deploy.yml",
-            ".mozaiks": ".mozaiks/pack_provenance.yaml",
+            ".mozaiks": ".mozaiks/pack_provenance.json",
             "admin": "admin/admin_registry.yaml",
             "backend": "backend/admin_config.py",
             "brand": "brand/theme_config.json",
@@ -295,9 +295,11 @@ class TestControlPlaneAndManagedCapabilityBoundaries:
         integrations = match_path("config/integrations.yaml", PathScope.APP_BUNDLE_ROOT)
         client = match_path("services/integrations/mozaikspay_client.py", PathScope.APP_BUNDLE_ROOT)
 
+        # integrations.yaml declares any external requirement, not only managed
+        # capabilities; only the generated client is capability-conditioned.
         assert integrations.family.requirement is Requirement.CONDITIONAL
         assert client.family.requirement is Requirement.CONDITIONAL
-        assert integrations.family.condition is ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED
+        assert integrations.family.condition is ConditionIdentifier.WHEN_APP_DECLARED
         assert client.family.condition is ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED
 
     def test_unselected_managed_capabilities_do_not_become_required_core(self) -> None:
@@ -356,6 +358,167 @@ class TestFileContractsResolveToLayoutFamilies:
                         unresolved.append(f"{task_id}:{key}:{template}->{sample}")
 
         assert unresolved == []
+
+
+class TestReviewRegressions:
+    """Defects found in final review — each must stay fixed."""
+
+    def test_extension_literal_beats_core_template_specificity(self) -> None:
+        registry = build_app_layout_registry(
+            (LayoutExtension(slot=ExtensionSlot.MANAGED_CAPABILITY_CLIENT, pack_id="mozaikspay"),)
+        )
+
+        match = registry.match_path(
+            "services/integrations/mozaikspay_client.py", PathScope.APP_BUNDLE_ROOT
+        )
+        assert match.family.owner is LayoutOwner.REGISTERED_EXTENSION
+
+        other = registry.match_path(
+            "services/integrations/sendgrid_client.py", PathScope.APP_BUNDLE_ROOT
+        )
+        assert other.family.owner is not LayoutOwner.REGISTERED_EXTENSION
+        assert other.values == {PlaceholderIdentifier.PACK_ID: "sendgrid"}
+
+    def test_service_route_and_build_context_extensions_match_their_paths(self) -> None:
+        registry = build_app_layout_registry(
+            (
+                LayoutExtension(slot=ExtensionSlot.SERVICE_ROUTE, pack_id="payments"),
+                LayoutExtension(slot=ExtensionSlot.BUILD_CONTEXT_PACK, pack_id="mozaikspay"),
+            )
+        )
+
+        route = registry.match_path("services/routes/payments.py", PathScope.APP_BUNDLE_ROOT)
+        assert route.family.owner is LayoutOwner.REGISTERED_EXTENSION
+
+        pack = registry.match_path("build_context/mozaikspay/context.yaml", PathScope.WORKSPACE_ROOT)
+        assert pack.family.owner is LayoutOwner.REGISTERED_EXTENSION
+
+    def test_equal_specificity_distinct_templates_still_ambiguous(self) -> None:
+        left = _minimal_family("config/example.json")
+        right = ArtifactFamily(
+            **{**_minimal_family("config/example.json").model_dump(), "kind": ArtifactKind.APP_TARGETS_CONFIG}
+        )
+        # Same template registered twice is rejected structurally, so genuine
+        # runtime ambiguity requires distinct same-specificity templates —
+        # which the shape check also rejects at construction.
+        with pytest.raises(ValidationError, match="duplicate"):
+            AppLayoutRegistry(families=(left, right), registry_digest="x")
+
+    def test_module_scope_contracts_are_a_closed_set(self) -> None:
+        for name in (
+            "events",
+            "reactions",
+            "notifications",
+            "policy_hooks",
+            "settings",
+            "admin",
+            "profile",
+            "relationships",
+            "service",
+            "commercial",
+        ):
+            match = match_path(f"contracts/{name}.yaml", PathScope.MODULE_RELATIVE)
+            assert match.family.kind is ArtifactKind.MODULE_CONTRACT
+
+        with pytest.raises(ValueError, match="not registered"):
+            match_path("contracts/anything_else.yaml", PathScope.MODULE_RELATIVE)
+
+    def test_module_scope_subscriptions_contract_is_prohibited_not_legitimized(self) -> None:
+        with pytest.raises(ValueError, match="prohibited"):
+            validate_registered_path(
+                "contracts/subscriptions.yaml", None, PathScope.MODULE_RELATIVE
+            )
+
+        with pytest.raises(ValueError, match="prohibited"):
+            validate_registered_path(
+                "modules/orders/contracts/subscriptions.yaml", None, PathScope.APP_BUNDLE_ROOT
+            )
+
+    def test_app_scope_service_and_commercial_contracts_are_registered(self) -> None:
+        for name in ("service", "commercial"):
+            match = match_path(f"modules/orders/contracts/{name}.yaml", PathScope.APP_BUNDLE_ROOT)
+            assert match.family.kind is ArtifactKind.MODULE_CONTRACT
+
+    def test_handler_owned_by_business_services_and_api_by_api_surface(self) -> None:
+        handler = validate_registered_path(
+            "modules/orders/backend/handler.py",
+            AssignmentKind.BUSINESS_SERVICES,
+            PathScope.APP_BUNDLE_ROOT,
+        )
+        assert handler.family.kind is ArtifactKind.MODULE_BACKEND_HANDLER
+
+        with pytest.raises(ValueError, match="not owned"):
+            validate_registered_path(
+                "modules/orders/backend/handler.py",
+                AssignmentKind.API_SURFACE,
+                PathScope.APP_BUNDLE_ROOT,
+            )
+
+        api = validate_registered_path(
+            "modules/orders/backend/api.py",
+            AssignmentKind.API_SURFACE,
+            PathScope.APP_BUNDLE_ROOT,
+        )
+        assert api.family.kind is ArtifactKind.MODULE_BACKEND_API
+
+    def test_assignment_kind_cannot_gain_broader_authority_than_registered(self) -> None:
+        with pytest.raises(ValueError, match="not owned"):
+            validate_registered_path(
+                "config/subscriptions.yaml",
+                AssignmentKind.PAGE_BUNDLE,
+                PathScope.APP_BUNDLE_ROOT,
+            )
+
+    def test_pack_provenance_matches_actual_json_artifact(self) -> None:
+        match = match_path(".mozaiks/pack_provenance.json", PathScope.APP_BUNDLE_ROOT)
+        assert match.family.kind is ArtifactKind.APP_FRAMEWORK_METADATA
+
+        with pytest.raises(ValueError, match="not registered"):
+            match_path(".mozaiks/pack_provenance.yaml", PathScope.APP_BUNDLE_ROOT)
+
+    def test_bare_env_example_is_not_legitimized(self) -> None:
+        # deployment_contract.py emits only the dot-prefixed env templates;
+        # the bare name survives only in stale prose and must not match.
+        assert _matches(".env.example", PathScope.DEPLOYMENT_DERIVED)
+        assert not _matches("env.example", PathScope.DEPLOYMENT_DERIVED)
+        assert not _matches("env.example", PathScope.APP_BUNDLE_ROOT)
+
+    def test_unicode_paths_normalize_nfc_and_fail_closed_deterministically(self) -> None:
+        composed = "ui/pages/café.yaml"
+        decomposed = "ui/pages/café.yaml"
+
+        results = []
+        for candidate in (composed, decomposed):
+            try:
+                match_path(candidate, PathScope.APP_BUNDLE_ROOT)
+                results.append("matched")
+            except ValueError as exc:
+                results.append("not registered" if "not registered" in str(exc) else "error")
+
+        # NFC normalization makes both forms behave identically, and non-ASCII
+        # placeholder values fail closed as unregistered.
+        assert results[0] == results[1] == "not registered"
+
+    def test_assignment_kind_order_does_not_change_identity_payload(self) -> None:
+        base = _minimal_family("config/example.json").model_dump()
+        forward = ArtifactFamily(
+            **{**base, "assignment_kinds": (AssignmentKind.SERVICE_FOUNDATION, AssignmentKind.API_SURFACE)}
+        )
+        reverse = ArtifactFamily(
+            **{**base, "assignment_kinds": (AssignmentKind.API_SURFACE, AssignmentKind.SERVICE_FOUNDATION)}
+        )
+
+        assert forward.identity_payload == reverse.identity_payload
+
+    def test_reserved_backend_names_never_classified_as_helper(self) -> None:
+        for name in ("handler", "base_handler", "service", "repo", "policy", "schemas", "models", "api"):
+            path = f"modules/orders/backend/{name}.py"
+            match = match_path(path, PathScope.APP_BUNDLE_ROOT)
+            assert match.family.kind is not ArtifactKind.MODULE_BACKEND_HELPER, path
+
+        # models.py resolves to its explicit prohibited family, never to helper
+        models = match_path("modules/orders/backend/models.py", PathScope.APP_BUNDLE_ROOT)
+        assert models.family.requirement is Requirement.PROHIBITED
 
 
 def _matches(path: str, scope: PathScope) -> bool:
