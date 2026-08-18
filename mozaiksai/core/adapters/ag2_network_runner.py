@@ -38,6 +38,12 @@ from ag2.network.client.handlers import default_handler
 
 from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.context.authority import (
+    AGENT_TEXT_WRITER,
+    CONTEXT_BRIDGE_WRITER,
+    LIVE_USER_CONTEXT_WRITER,
+    ContextAuthorityPolicy,
+)
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
@@ -80,6 +86,25 @@ def _json_safe_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return serialized if isinstance(serialized, dict) else {}
 
 
+def _authorized_context_updates(
+    updates: Mapping[str, Any] | None,
+    *,
+    writer_id: str,
+    context_authority_policy: ContextAuthorityPolicy | None,
+) -> dict[str, Any]:
+    if not updates:
+        return {}
+    safe: dict[str, Any] = {}
+    for key, value in updates.items():
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            continue
+        if context_authority_policy is not None:
+            context_authority_policy.require_can_write(clean_key, writer_id=writer_id, operation="set")  # type: ignore[arg-type]
+        safe[clean_key] = value
+    return safe
+
+
 @dataclass(slots=True)
 class AG2NetworkRunnerRequest:
     """Already-loaded workflow execution inputs for the AG2 Network runner."""
@@ -97,6 +122,7 @@ class AG2NetworkRunnerRequest:
     close_timeout_seconds: float = 120.0
     attach_network_plugin: bool = True
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
+    context_authority_policy: ContextAuthorityPolicy | None = None
     # ---------------------------------------------------------------------------
     # AG2 KnowledgeStore injection seam
     # ---------------------------------------------------------------------------
@@ -211,6 +237,7 @@ class AG2NetworkRunner:
                     client=client,
                     agent_name=name,
                     agent_text_context_deriver=request.agent_text_context_deriver,
+                    context_authority_policy=request.context_authority_policy,
                 )
                 agent_clients[name] = client
                 agent_id_by_name[name] = client.agent_id
@@ -223,6 +250,7 @@ class AG2NetworkRunner:
                 initial_agent_name=initial_agent_name,
                 agent_id_by_name=agent_id_by_name,
                 max_turns=request.max_turns,
+                context_authority_policy=request.context_authority_policy,
             )
 
             safe_context_vars = _json_safe_dict(request.context_variables)
@@ -374,6 +402,7 @@ class AG2NetworkRunner:
                         turn_failure_listener=turn_failure_listener,
                         snapshot_result=_snapshot_result,
                         close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
+                        context_authority_policy=request.context_authority_policy,
                     )
                     keep_live_run = True
                     return result
@@ -445,12 +474,14 @@ class AG2NetworkRunner:
         initial_agent_name: str,
         agent_id_by_name: Mapping[str, str],
         max_turns: int | None,
+        context_authority_policy: ContextAuthorityPolicy | None,
     ) -> TransitionGraph:
         graph = compile_transition_rules_to_graph(
             transition_rules,
             initial_agent_name=initial_agent_name,
             agent_id_by_name=agent_id_by_name,
             max_turns=max_turns,
+            context_authority_policy=context_authority_policy,
         )
         initiator_id = agent_id_by_name[_INITIATOR_NAME]
         initial_agent_id = agent_id_by_name[initial_agent_name]
@@ -487,6 +518,7 @@ class _AG2LiveWorkflowRun:
         turn_failure_listener: _TurnFailureListener,
         snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]],
         close_timeout_seconds: float,
+        context_authority_policy: ContextAuthorityPolicy | None,
     ) -> None:
         self.workflow_name = workflow_name
         self.chat_id = chat_id
@@ -502,6 +534,7 @@ class _AG2LiveWorkflowRun:
         self._closed = False
         self._lock = asyncio.Lock()
         self._wal_cursor = 0
+        self._context_authority_policy = context_authority_policy
 
     async def continue_with_user_message(
         self,
@@ -528,10 +561,15 @@ class _AG2LiveWorkflowRun:
             }
 
             if context_updates:
+                safe_updates = _authorized_context_updates(
+                    context_updates,
+                    writer_id=LIVE_USER_CONTEXT_WRITER,
+                    context_authority_policy=self._context_authority_policy,
+                )
                 await self._channel.send(
                     "",
                     event_type=EV_CONTEXT_SET,
-                    event_data={"set": _json_safe_dict(context_updates), "delete": []},
+                    event_data={"set": _json_safe_dict(safe_updates), "delete": []},
                 )
             audience = self._next_agent_audience_for_user_text(str(message or "."))
             await self._channel.send(str(message or "."), audience=audience)
@@ -686,6 +724,7 @@ def _install_context_update_handler(
     client: Any,
     agent_name: str,
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None,
+    context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> None:
     """Commit Mozaiks tool context mutations through AG2 workflow packets.
 
@@ -736,17 +775,31 @@ def _install_context_update_handler(
                             )
                             candidate_updates = {}
                         if isinstance(candidate_updates, Mapping):
-                            derived_updates = candidate_updates
+                            derived_updates = _authorized_context_updates(
+                                candidate_updates,
+                                writer_id=AGENT_TEXT_WRITER,
+                                context_authority_policy=context_authority_policy,
+                            )
                 if (
                     bridge_updates.get("set")
                     or bridge_updates.get("delete")
                     or derived_updates
                 ):
                     existing = dict(event_data.get("context_updates") or {})
+                    bridge_set = _authorized_context_updates(
+                        bridge_updates.get("set") or {},
+                        writer_id=CONTEXT_BRIDGE_WRITER,
+                        context_authority_policy=context_authority_policy,
+                    )
+                    existing_set = _authorized_context_updates(
+                        existing.get("set") or {},
+                        writer_id=CONTEXT_BRIDGE_WRITER,
+                        context_authority_policy=context_authority_policy,
+                    )
                     merged_set = {
-                        **_json_safe_dict(existing.get("set") or {}),
+                        **_json_safe_dict(existing_set),
                         **_json_safe_dict(derived_updates),
-                        **_json_safe_dict(bridge_updates.get("set") or {}),
+                        **_json_safe_dict(bridge_set),
                     }
                     merged_delete = [
                         *list(existing.get("delete") or []),

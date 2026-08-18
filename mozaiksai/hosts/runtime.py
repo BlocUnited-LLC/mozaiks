@@ -580,12 +580,24 @@ def _validate_context_for_workflow(workflow_name: str, context: dict[str, Any]) 
         return {}
 
     try:
+        from mozaiksai.core.workflow.context.authority import (
+            CALLER_INPUT_WRITER,
+            ContextAuthorityError,
+            build_context_authority_policy,
+        )
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
         wf_cfg = workflow_manager.get_config(workflow_name) or {}
-        declared_keys = set((wf_cfg.get("context_variables") or {}).get("definitions", {}).keys())
+        definitions = (wf_cfg.get("context_variables") or {}).get("definitions", {})
+        declared_keys = set(definitions.keys())
+        policy = build_context_authority_policy(
+            workflow_name=workflow_name,
+            definitions=definitions,
+            transition_rules=(wf_cfg.get("transition_graph") or {}).get("transition_rules") or [],
+        )
     except Exception:
         declared_keys = set()
+        policy = None
 
     validated: dict[str, Any] = {}
     for key, value in context.items():
@@ -597,6 +609,15 @@ def _validate_context_for_workflow(workflow_name: str, context: dict[str, Any]) 
                 extra={"workflow_name": workflow_name, "key": key},
             )
             continue
+        if policy is not None:
+            try:
+                policy.require_can_write(key, writer_id=CALLER_INPUT_WRITER)
+            except ContextAuthorityError as exc:
+                wf_logger.warning(
+                    "RUNTIME_CONTEXT_AUTHORITY_REJECTED",
+                    extra={"workflow_name": workflow_name, "key": key},
+                )
+                raise HTTPException(status_code=400, detail={"code": "CONTEXT_AUTHORITY_REJECTED"}) from exc
         validated[key] = value
     return validated
 

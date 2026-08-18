@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import Callable
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
@@ -73,6 +73,41 @@ def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
         name = str(message.get("name") or role).strip() or role
         rendered.append(f"{name} ({role}): {content}")
     return "\n\n".join(rendered).strip() or "."
+
+
+def _supports_workflow_name_kw(callable_obj: Callable[..., Any]) -> bool:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    return "workflow_name" in signature.parameters
+
+
+async def _fetch_chat_session_extra_context(
+    persistence_manager: Any,
+    *,
+    chat_id: str,
+    app_id: str,
+    workflow_name: str,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"chat_id": chat_id, "app_id": app_id}
+    if _supports_workflow_name_kw(persistence_manager.fetch_chat_session_extra_context):
+        kwargs["workflow_name"] = workflow_name
+    return cast(dict[str, Any], await persistence_manager.fetch_chat_session_extra_context(**kwargs))
+
+
+async def _persist_context_variables(
+    persistence_manager: Any,
+    *,
+    chat_id: str,
+    app_id: str,
+    workflow_name: str,
+    variables: dict[str, Any],
+) -> None:
+    kwargs: dict[str, Any] = {"chat_id": chat_id, "app_id": app_id, "variables": variables}
+    if _supports_workflow_name_kw(persistence_manager.persist_context_variables):
+        kwargs["workflow_name"] = workflow_name
+    await persistence_manager.persist_context_variables(**kwargs)
 
 
 def _first_agent_payload_from_runner_result(runner_result: Any, agent_name: str) -> dict[str, Any] | None:
@@ -617,6 +652,7 @@ async def _run_ag2_network_phase(
     max_turns: int,
     agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
     knowledge_store: Any = None,
+    context_authority_policy: Any = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -632,6 +668,7 @@ async def _run_ag2_network_phase(
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             knowledge_store=knowledge_store,
+            context_authority_policy=context_authority_policy,
         )
     )
 
@@ -769,7 +806,12 @@ async def run_workflow_orchestration(
 
         try:
             if context is not None:
-                extra_ctx = await persistence_manager.fetch_chat_session_extra_context(chat_id=chat_id, app_id=app_id)
+                extra_ctx = await _fetch_chat_session_extra_context(
+                    persistence_manager,
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    workflow_name=workflow_name,
+                )
                 if isinstance(extra_ctx, dict) and extra_ctx:
                     persisted_extra_ctx = dict(extra_ctx)
                     merge_persisted_extra_context(context, extra_ctx)
@@ -897,7 +939,16 @@ async def run_workflow_orchestration(
 
         if context_bridge is None:
             from .agents.factory import ContextVariablesBridge
-            context_bridge = ContextVariablesBridge(ctx_dict)
+            context_bridge = ContextVariablesBridge(
+                ctx_dict,
+                authority_policy=getattr(context, "_mozaiks_context_authority_policy", None),
+            )
+
+        context_authority_policy = getattr(context_bridge, "_mozaiks_context_authority_policy", None) or getattr(
+            context,
+            "_mozaiks_context_authority_policy",
+            None,
+        )
 
         initial_agent_name = _resolve_executable_initial_agent(
             initial_agent_name=initial_agent_name,
@@ -1031,6 +1082,7 @@ async def run_workflow_orchestration(
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
                 knowledge_store=knowledge_store,
+                context_authority_policy=context_authority_policy,
             )
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
@@ -1072,6 +1124,7 @@ async def run_workflow_orchestration(
                     wf_logger=wf_logger,
                     fresh_agents_per_task=True,
                     agents_factory=agents_factory,
+                    context_authority_policy=context_authority_policy,
                 )
                 continuation_agent = _resolve_continuation_agent_after_trigger(
                     transition_rules=transition_rules,
@@ -1100,6 +1153,7 @@ async def run_workflow_orchestration(
                         max_turns=max_turns,
                         agent_text_context_deriver=agent_text_context_deriver,
                         knowledge_store=knowledge_store,
+                        context_authority_policy=context_authority_policy,
                     )
                 else:
                     runner_result = first_phase_result
@@ -1118,6 +1172,7 @@ async def run_workflow_orchestration(
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
                 knowledge_store=knowledge_store,
+                context_authority_policy=context_authority_policy,
             )
 
         await _emit_structured_once(runner_result, projected_sequence)
@@ -1203,8 +1258,12 @@ async def run_workflow_orchestration(
 
         # 11) Persist final context snapshot
         try:
-            await persistence_manager.persist_context_variables(
-                chat_id=chat_id, app_id=app_id, variables=dict(ctx_dict),
+            await _persist_context_variables(
+                persistence_manager,
+                chat_id=chat_id,
+                app_id=app_id,
+                workflow_name=workflow_name,
+                variables=dict(ctx_dict),
             )
         except Exception as persist_ctx_err:
             wf_logger.debug("[%s] Final context persist failed: %s", workflow_name_upper, persist_ctx_err)

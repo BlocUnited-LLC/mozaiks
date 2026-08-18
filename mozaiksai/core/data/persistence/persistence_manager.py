@@ -109,6 +109,22 @@ def extract_pending_input_request(chat_doc: Any) -> dict[str, Any] | None:
     return pending if isinstance(pending, dict) else None
 
 
+def _context_authority_policy_for_workflow(workflow_name: str):
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
+
+    workflow_manager = get_workflow_manager()
+    workflow_config = workflow_manager.get_config(workflow_name) or {}
+    context_config = workflow_config.get("context_variables") or {}
+    definitions = context_config.get("definitions") or {}
+    transition_rules = (workflow_config.get("transition_graph") or {}).get("transition_rules") or []
+    return build_context_authority_policy(
+        workflow_name=workflow_name,
+        definitions=definitions,
+        transition_rules=transition_rules,
+    )
+
+
 class PersistenceManager:
     """Mongo connection holder for runtime persistence."""
 
@@ -435,6 +451,7 @@ class AG2PersistenceManager:
         *,
         chat_id: str,
         app_id: str | None = None,
+        workflow_name: str | None = None,
     ) -> dict[str, Any]:
         """Fetch non-canonical, non-message fields for a chat session.
 
@@ -446,6 +463,8 @@ class AG2PersistenceManager:
         - Excludes messages for performance.
         - Strips canonical identifiers/state to prevent accidental overwrites.
         """
+        from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -481,7 +500,22 @@ class AG2PersistenceManager:
                 if k in protected:
                     continue
                 extra[k] = v
+            if workflow_name:
+                try:
+                    from mozaiksai.core.workflow.context.authority import (
+                        PERSISTED_REPLAY_WRITER,
+                        ContextAuthorityError,
+                    )
+
+                    policy = _context_authority_policy_for_workflow(str(workflow_name))
+                    extra = policy.filter_for_replay(extra, writer_id=PERSISTED_REPLAY_WRITER)
+                except ContextAuthorityError:
+                    raise
+                except Exception as policy_err:
+                    logger.debug("[FETCH_EXTRA_CONTEXT] Authority policy unavailable workflow=%s: %s", workflow_name, policy_err)
             return extra
+        except ContextAuthorityError:
+            raise
         except Exception as e:  # pragma: no cover
             logger.debug("[FETCH_EXTRA_CONTEXT] Failed chat_id=%s: %s", chat_id, e)
             return {}
@@ -492,6 +526,7 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str | None = None,
         variables: dict[str, Any] | None = None,
+        workflow_name: str | None = None,
     ) -> None:
         """Persist runtime context variables as chat-session extra fields.
 
@@ -522,9 +557,22 @@ class AG2PersistenceManager:
             "pending_input_request",
         }
         safe_updates: dict[str, Any] = {}
+        policy = None
+        if workflow_name:
+            try:
+                policy = _context_authority_policy_for_workflow(str(workflow_name))
+            except Exception as policy_err:
+                logger.debug("[PERSIST_CONTEXT_VARIABLES] Authority policy unavailable workflow=%s: %s", workflow_name, policy_err)
         for key, value in variables.items():
             if not isinstance(key, str) or not key.strip() or key in protected:
                 continue
+            if policy is not None:
+                from mozaiksai.core.workflow.context.authority import PERSISTED_REPLAY_WRITER
+
+                policy.require_can_write(key, writer_id=PERSISTED_REPLAY_WRITER)
+                authority = policy.variables.get(key)
+                if authority is not None and not authority.persisted:
+                    continue
             safe_updates[key] = deepcopy(value)
 
         if not safe_updates:

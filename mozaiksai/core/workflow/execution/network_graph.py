@@ -22,6 +22,11 @@ from mozaiksai.core.adapters.ag2_transition_conditions import (
     SourceScopedContextExpression,
     SourceScopedToolCalled,
 )
+from mozaiksai.core.workflow.context.authority import (
+    ContextAuthorityError,
+    ContextAuthorityPolicy,
+    validate_transition_context_authority,
+)
 
 _SPECIAL_TERMINATE = frozenset({"terminate"})
 _SPECIAL_USER = frozenset({"user", "user_proxy", "userproxy", "userproxyagent"})
@@ -38,8 +43,18 @@ def compile_transition_rules_to_graph(
     initial_agent_name: str,
     agent_id_by_name: Mapping[str, str] | None = None,
     max_turns: int | None = None,
+    context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> TransitionGraph:
     """Compile validated `transition_graph.yaml` rules into an AG2 `TransitionGraph`."""
+    if context_authority_policy is not None:
+        try:
+            validate_transition_context_authority(
+                workflow_name=context_authority_policy.workflow_name,
+                policy=context_authority_policy,
+                transition_rules=list(transition_rules or []),
+            )
+        except ContextAuthorityError as err:
+            raise WorkflowGraphCompileError(str(err)) from err
 
     agent_ids = {str(k): str(v) for k, v in dict(agent_id_by_name or {}).items()}
     agent_ids.setdefault("user", "user")

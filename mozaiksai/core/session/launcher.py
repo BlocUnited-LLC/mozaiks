@@ -10,6 +10,13 @@ from uuid import uuid4
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.context.authority import (
+    CALLER_INPUT_WRITER,
+    TRANSITION_ROUTER_WRITER,
+    ContextAuthorityError,
+    ContextWriterId,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
@@ -66,7 +73,12 @@ _CONTEXT_MAX_KEYS = 50
 _CONTEXT_MAX_VALUE_BYTES = 65_536  # 64 KB per value
 
 
-def validate_context_for_workflow(workflow_id: str, merged_context: dict[str, Any]) -> dict[str, Any]:
+def validate_context_for_workflow(
+    workflow_id: str,
+    merged_context: dict[str, Any],
+    *,
+    writer_id: ContextWriterId = TRANSITION_ROUTER_WRITER,
+) -> dict[str, Any]:
     validated_context: dict[str, Any] = {}
     if not merged_context:
         return validated_context
@@ -75,9 +87,21 @@ def validate_context_for_workflow(workflow_id: str, merged_context: dict[str, An
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
         wf_cfg = workflow_manager.get_config(workflow_id) or {}
-        declared_keys = set((wf_cfg.get("context_variables") or {}).get("definitions", {}).keys())
+        definitions = (wf_cfg.get("context_variables") or {}).get("definitions", {})
+        declared_keys = set(definitions.keys())
+        transition_rules = (wf_cfg.get("transition_graph") or {}).get("transition_rules") or []
+        policy = (
+            build_context_authority_policy(
+                workflow_name=workflow_id,
+                definitions=definitions,
+                transition_rules=transition_rules,
+            )
+            if definitions
+            else None
+        )
     except Exception:
         declared_keys = set()
+        policy = None
 
     for key, value in merged_context.items():
         if not isinstance(key, str) or not key.strip():
@@ -85,6 +109,12 @@ def validate_context_for_workflow(workflow_id: str, merged_context: dict[str, An
         if declared_keys and key not in declared_keys:
             logger.warning("SESSION_LAUNCH_CONTEXT_KEY_REJECTED: key=%s workflow=%s", key, workflow_id)
             continue
+        if policy is not None:
+            try:
+                policy.require_can_write(key, writer_id=writer_id)
+            except ContextAuthorityError:
+                logger.warning("SESSION_LAUNCH_CONTEXT_AUTHORITY_REJECTED: key=%s workflow=%s writer=%s", key, workflow_id, writer_id)
+                raise
         if isinstance(value, str) and len(value.encode()) > _CONTEXT_MAX_VALUE_BYTES:
             logger.warning(
                 "SESSION_LAUNCH_CONTEXT_VALUE_TOO_LARGE: key=%s workflow=%s size=%d limit=%d",
@@ -258,7 +288,14 @@ async def prepare_routed_workflow_launch(
         trigger_source=trigger_source,
         journey_id=routing_decision.journey_id,
     )
-    validated_context = validate_context_for_workflow(resolved_workflow_id, merged_context)
+    launch_writer: ContextWriterId = (
+        TRANSITION_ROUTER_WRITER if trigger_source == "transition" else CALLER_INPUT_WRITER
+    )
+    validated_context = validate_context_for_workflow(
+        resolved_workflow_id,
+        merged_context,
+        writer_id=launch_writer,
+    )
     trigger_meta = _build_trigger_meta(
         trigger_source=trigger_source,
         routing_decision=routing_decision,
