@@ -1264,7 +1264,6 @@ agents:
           d. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces. Use `focused` for wizard/onboarding pages.
           e. Set `roles` to null unless the plan restricts page access.
           f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
-          g. Set `extensions` only when a specific UI zone cannot be expressed with primitives (see extension slot rules above). Null for most pages.
       4. Build the `manifest`:
           a. `app_name`, `description`, `tagline`, and `value_proposition` — preserve the approved concept identity from `value_manifest` / `concept_blueprint` when present. `description` should be the durable "what this app is" summary shown in Studio; `tagline` should be a short positioning line; `value_proposition` should carry the core user value.
           b. `pages` — list every declared `app_build_plan.pages[].name`.
@@ -1316,7 +1315,6 @@ agents:
             "shell_mode": "workspace",
             "roles": null,
             "navigation": { "id": "dashboard", "label": "Dashboard", "scope": "global", "order": 10, "visible": true, "placement": null },
-            "extensions": null,
             "sections": [
               {
                 "id": "kpi-row",
@@ -1388,7 +1386,7 @@ agents:
          footer intended for mobile primary navigation; local/workspace nav placed as
          global nav without an explicit reason; conversation/focused/immersive surfaces
          that keep distracting footer or bottom-bar chrome through custom chrome
-         overrides; extensions with unrecognized slot names; custom routes whose
+         overrides; custom routes whose
          `route_manifest[*].component` key is not registered by exactly one matching
          `custom_route_bundle.page_files[*].registry_key`;
          any `DataTable` or `ResourceTable` section with a non-null `api_endpoint`

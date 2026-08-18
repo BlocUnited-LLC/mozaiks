@@ -419,7 +419,16 @@ def test_generator_prompts_no_longer_promise_slot_extensions():
     agents_text = (
         Path("factory_app/workflows/AppGenerator/agents.yaml").read_text(encoding="utf-8")
     )
-    for marker in ("extensions.slot", "slot: header", "slot: empty_state", "Page extensions"):
+    for marker in (
+        "extensions.slot",
+        "slot: header",
+        "slot: empty_state",
+        "Page extensions",
+        "extension slot rules",
+        "extensions with unrecognized slot",
+        '"extensions": null',
+        "Set `extensions` only",
+    ):
         assert marker not in agents_text, (
             f"AppGenerator prompt still references removed slot extensions: {marker!r}"
         )
