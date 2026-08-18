@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LeadQualificationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "is_qualified",
+    "fit_score",
+    "buying_stage",
+    "budget_range",
+    "timeline",
+    "primary_need",
+    "decision_maker",
+    "urgency",
+    "summary",
+    "next_step",
+    "risk_flags",
+    "confidence",
+    "company_name",
+    "lead_name"
+  ],
+  "properties": {
+    "is_qualified": { "type": "boolean" },
+    "fit_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "buying_stage": { "type": "string" },
+    "budget_range": { "type": "string" },
+    "timeline": { "type": "string" },
+    "primary_need": { "type": "string" },
+    "decision_maker": { "type": "string" },
+    "urgency": { "type": "string", "enum": ["low", "medium", "high"] },
+    "summary": { "type": "string" },
+    "next_step": { "type": "string" },
+    "risk_flags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "company_name": { "type": "string" },
+    "lead_name": { "type": "string" }
+  }
+}

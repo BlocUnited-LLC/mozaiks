@@ -1,0 +1,50 @@
+registry:
+  LeadQualifierAgent: LeadQualificationResult
+
+models:
+  LeadQualificationResult:
+    type: model
+    fields:
+      is_qualified:
+        type: bool
+        description: Whether the lead is a good fit for the product or service.
+      fit_score:
+        type: int
+        description: 0-100 score based on fit, urgency, and authority.
+      buying_stage:
+        type: str
+        description: Current stage such as awareness, evaluation, proposal, or closed.
+      budget_range:
+        type: str
+        description: Estimated budget bracket or not disclosed.
+      timeline:
+        type: str
+        description: Desired implementation or purchase timeline.
+      primary_need:
+        type: str
+        description: Most important business problem driving the lead.
+      decision_maker:
+        type: str
+        description: Decision maker or buying committee identified so far.
+      urgency:
+        type: str
+        description: Low, medium, or high urgency.
+      summary:
+        type: str
+        description: Brief human-readable summary of the qualification.
+      next_step:
+        type: str
+        description: Recommended next action for sales or outreach.
+      risk_flags:
+        type: list
+        items: str
+        description: Any concerns such as low authority, no budget, or unclear need.
+      confidence:
+        type: str
+        description: High, medium, or low confidence in the assessment.
+      company_name:
+        type: str
+        description: Company associated with the lead.
+      lead_name:
+        type: str
+        description: Name of the lead contact.

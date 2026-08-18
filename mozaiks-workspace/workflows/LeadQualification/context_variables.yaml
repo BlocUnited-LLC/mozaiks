@@ -1,0 +1,116 @@
+definitions:
+  lead_name:
+    type: string
+    description: Lead contact name.
+    source:
+      type: state
+      default: null
+
+  company_name:
+    type: string
+    description: Company or organization name.
+    source:
+      type: state
+      default: null
+
+  lead_email:
+    type: string
+    description: Contact email address.
+    source:
+      type: state
+      default: null
+
+  company_size:
+    type: string
+    description: Approximate company size.
+    source:
+      type: state
+      default: null
+
+  primary_need:
+    type: string
+    description: Main challenge or buying need.
+    source:
+      type: state
+      default: null
+
+  buying_stage:
+    type: string
+    description: Current stage of the buying process.
+    source:
+      type: state
+      default: null
+
+  budget_range:
+    type: string
+    description: Estimated budget range.
+    source:
+      type: state
+      default: null
+
+  timeline:
+    type: string
+    description: Expected implementation or purchase timeline.
+    source:
+      type: state
+      default: null
+
+  decision_maker:
+    type: string
+    description: Known decision maker or buying committee.
+    source:
+      type: state
+      default: null
+
+  urgency:
+    type: string
+    description: Level of urgency for the problem.
+    source:
+      type: state
+      default: null
+
+  fit_score:
+    type: integer
+    description: 0-100 score describing lead quality.
+    source:
+      type: state
+      default: 0
+
+  qualification_complete:
+    type: boolean
+    description: True when the lead has been qualified or disqualified.
+    source:
+      type: state
+      default: false
+
+  lead_intro_received:
+    type: boolean
+    description: True when the workflow has intake from the lead.
+    source:
+      type: state
+      default: false
+
+  qualification_result:
+    type: object
+    description: Final structured JSON result for the lead.
+    source:
+      type: state
+      default: {}
+
+agents:
+  LeadQualifierAgent:
+    variables:
+      - lead_name
+      - company_name
+      - lead_email
+      - company_size
+      - primary_need
+      - buying_stage
+      - budget_range
+      - timeline
+      - decision_maker
+      - urgency
+      - fit_score
+      - qualification_complete
+      - lead_intro_received
+      - qualification_result

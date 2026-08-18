@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "lead_score": {
+      "type": "string",
+      "enum": ["HIGH", "MEDIUM", "LOW"]
+    },
+    "qualification_reason": {
+      "type": "string"
+    },
+    "recommended_action": {
+      "type": "string",
+      "enum": ["Book Demo Call", "Send Pricing Email", "Reject/Ignore"]
+    }
+  },
+  "required": ["lead_score", "qualification_reason", "recommended_action"]
+}

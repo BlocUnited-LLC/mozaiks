@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "description": "Data contract for durable module collections, cross-module aggregate ownership, or explicit existing database mappings.",
+  "version": "1",
+  "surfaces": [],
+  "shared_collections": []
+}

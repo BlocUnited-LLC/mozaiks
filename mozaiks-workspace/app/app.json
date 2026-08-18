@@ -1,0 +1,13 @@
+{
+  "appName": "mozaiks-workspace",
+  "preset": "chat",
+  "startup": {
+    "landing_spot": "/"
+  },
+  "targets": {
+    "web": true,
+    "mobile": false
+  },
+  "authRequired": false,
+  "admins": []
+}

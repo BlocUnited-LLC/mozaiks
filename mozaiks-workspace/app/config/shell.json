@@ -1,0 +1,176 @@
+{
+  "header": {
+    "logo": {
+      "src": "mozaik_logo.svg",
+      "wordmark": "mozaik.png",
+      "alt": "mozaiks-workspace logo",
+      "href": "/apps"
+    },
+    "pages": [],
+    "actions": [
+      {
+        "id": "create-app",
+        "intent": "create_app",
+        "label": "Create App",
+        "path": "/create",
+        "path_by_role": {
+          "admin": "/create",
+          "default": "/create"
+        },
+        "variants": [
+          {
+            "when": {
+              "surface": "workflow_session"
+            },
+            "label": "Open Studio",
+            "icon": "settings.svg",
+            "path": "/apps",
+            "variant": "secondary"
+          }
+        ],
+        "variant": "primary",
+        "visible": true
+      }
+    ]
+  },
+  "shortcuts": {
+    "profile": [
+      "profile",
+      "signout"
+    ],
+    "mobile": [
+      "create",
+      "profile"
+    ],
+    "footer": [
+      "legal",
+      "terms",
+      "cookies"
+    ],
+    "footerHideOnMobile": true
+  },
+  "navigation": {
+    "policy": {
+      "desktop": {
+        "global": "header",
+        "local": "sidebar",
+        "footer": "visible"
+      },
+      "mobile": {
+        "global": "bottomBar",
+        "local": "sheet",
+        "footer": "hidden"
+      },
+      "maxMobileItems": 5,
+      "autoFromPages": false
+    }
+  },
+  "chrome": {
+    "defaultMode": "standard",
+    "modes": {
+      "standard": {
+        "desktop": {
+          "header": true,
+          "footer": true,
+          "bottomBar": false,
+          "localNav": true
+        },
+        "mobile": {
+          "header": true,
+          "footer": false,
+          "bottomBar": true,
+          "localNav": "sheet"
+        }
+      },
+      "workspace": {
+        "desktop": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": true
+        },
+        "mobile": {
+          "header": true,
+          "footer": false,
+          "bottomBar": true,
+          "localNav": "sheet"
+        }
+      },
+      "conversation": {
+        "desktop": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        },
+        "mobile": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        }
+      },
+      "focused": {
+        "desktop": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        },
+        "mobile": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        }
+      },
+      "immersive": {
+        "desktop": {
+          "header": false,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        },
+        "mobile": {
+          "header": false,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        }
+      },
+      "public": {
+        "desktop": {
+          "header": true,
+          "footer": true,
+          "bottomBar": false,
+          "localNav": false
+        },
+        "mobile": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        }
+      },
+      "social": {
+        "desktop": {
+          "header": true,
+          "footer": false,
+          "bottomBar": false,
+          "localNav": false
+        },
+        "mobile": {
+          "header": true,
+          "footer": false,
+          "bottomBar": true,
+          "localNav": false
+        }
+      }
+    }
+  },
+  "notifications": {
+    "show": true,
+    "path": "/notifications",
+    "emptyText": "No unread notifications"
+  }
+}

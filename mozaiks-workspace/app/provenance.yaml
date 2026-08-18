@@ -1,0 +1,24 @@
+schema_version: mozaiks.provenance.v1
+app_kind: hand_authored
+created_with:
+  mode: cli
+  mozaiks_ref: package:0.1.11
+contracts:
+  app: mozaiks.app.v1
+  asset_manifest: mozaiks.asset_manifest.v1
+  auth: mozaiks.auth.v1
+  dashboard: mozaiks.dashboard.v1
+  data: mozaiks.data_contract.v1
+  module: mozaiks.module.v1
+  provenance: mozaiks.provenance.v1
+  refinement_harness: mozaiks.refinement_harness.v1
+  security: mozaiks.secrets.v1
+  subscriptions: mozaiks.subscriptions.v1
+  workflow: mozaiks.workflow.v1
+overlays:
+  refinement_policy: config/refinement_policy.yaml
+artifact_refs:
+  generated_artifact_ids: []
+  accepted_artifact_version_ids: []
+  app_context_version_ids: []
+notes: []

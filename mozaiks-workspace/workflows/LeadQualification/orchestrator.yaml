@@ -1,0 +1,13 @@
+workflow_name: LeadQualification
+max_turns: 18
+human_in_the_loop: true
+workflow_startup_mode: AgentDriven
+orchestration_pattern: ag2_network
+initial_message: >-
+  LeadQualifierAgent: qualify the lead using the available context, ask only for
+  missing details, and output a structured LeadQualificationResult when enough
+  information is available.
+initial_agent: LeadQualifierAgent
+triggers:
+  - type: chat
+    description: Start a new lead qualification conversation from the app or chat UI.

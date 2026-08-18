@@ -1,0 +1,13 @@
+name: lead_qualifier_workflow
+description: "AI Agent that qualifies incoming business leads based on budget and requirements."
+version: "1.0.0"
+
+trigger:
+  type: event
+  event_name: "new_lead_received"
+
+steps:
+  - id: process_lead
+    agent_type: "LLM_Agent"
+    prompt_template: "app/modules/lead_qualifier/prompt.jinja"
+    output_schema: "app/modules/lead_qualifier/schema.json"

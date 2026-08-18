@@ -1,0 +1,20 @@
+transition_rules:
+  - source_agent: user
+    target_agent: LeadQualifierAgent
+    transition_type: condition
+    condition_type: expression
+    condition: ${lead_intro_received} == false
+    transition_target: AgentTarget
+
+  - source_agent: LeadQualifierAgent
+    target_agent: user
+    transition_type: after_turn
+    transition_target: RevertToUserTarget
+
+  - source_agent: LeadQualifierAgent
+    target_agent: terminate
+    transition_type: condition
+    condition_type: context_equals
+    condition_key: qualification_complete
+    condition_value: true
+    transition_target: TerminateTarget

@@ -1,0 +1,14 @@
+.venv/
+.env
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+build/
+!app/services/
+!app/services/**
+app/services/**/__pycache__/
+app/services/**/*.py[cod]
+logs/
+generated/
+.pytest_cache/

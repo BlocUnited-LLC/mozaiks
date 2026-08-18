@@ -9,22 +9,6 @@
   "workflows": {
     "entry_point": "ValueEngine"
   },
-  "support": {
-    "enabled": true,
-    "escalation_prompt": "When the user seems frustrated, stuck, or asks for a human — acknowledge them warmly and let them know they can tap the ? button in the chat widget to reach an operator directly. Do not repeat the suggestion more than once per session.",
-    "entry_points": {
-      "widget": true,
-      "chat_page": true,
-      "profile_menu": false
-    },
-    "default_severity": "low",
-    "confirmation_message": "Got it — your request has been received. An operator will review it and follow up with you shortly.",
-    "widget_panel": {
-      "title": "Get help",
-      "subtitle": "Describe what you need and an operator will follow up shortly.",
-      "placeholder": "What do you need help with?"
-    }
-  },
   "llm": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-5"
