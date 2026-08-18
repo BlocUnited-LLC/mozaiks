@@ -33,9 +33,6 @@ VALID_PAGE_TYPES = frozenset({
     # required by post-payment redirect flows.
     "checkout_success",
 })
-VALID_EXTENSION_SLOTS = frozenset({
-    "header", "empty_state", "hero", "sidebar", "actions_bar",
-})
 COPY_FLAGS = (
     "placeholder",
     "lorem",
@@ -706,23 +703,15 @@ def audit_page_schemas(
                 f"{page_path} has invalid page_type '{page_type}'; must be one of: {', '.join(sorted(VALID_PAGE_TYPES))}."
             )
 
-        extensions = page.get("extensions")
-        if extensions is not None:
-            if not isinstance(extensions, list):
-                warnings.append(f"{page_path} extensions must be a list or null.")
-            else:
-                for ext in extensions:
-                    if not isinstance(ext, dict):
-                        continue
-                    slot = ext.get("slot")
-                    if slot not in VALID_EXTENSION_SLOTS:
-                        warnings.append(
-                            f"{page_path} extension uses invalid slot '{slot}'; must be one of: {', '.join(sorted(VALID_EXTENSION_SLOTS))}."
-                        )
-                    if not ext.get("component"):
-                        warnings.append(
-                            f"{page_path} extension slot '{slot}' is missing required 'component' field."
-                        )
+        if "extensions" in page:
+            # Retired contract: page slot extensions were never rendered by
+            # PageRenderer and are no longer part of AppPageSchema.  Custom UI
+            # zones belong to custom_route_bundle pages.
+            warnings.append(
+                f"{page_path} declares 'extensions', a retired unsupported field. "
+                "Remove it; use a custom_route_bundle page when primitives cannot "
+                "express the route."
+            )
 
         title = str(page.get("title") or page.get("name") or "")
         if "dashboard" in title.lower():

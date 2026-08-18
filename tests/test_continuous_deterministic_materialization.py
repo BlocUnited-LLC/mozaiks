@@ -358,8 +358,7 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                     "navigation": None,
                     "meta": None,
                     "sections": [],
-                    "extensions": None,
-                }
+                        }
             ],
             "custom_route_bundle": None,
             "theme_config_patch": {

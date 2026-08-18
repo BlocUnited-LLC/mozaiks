@@ -104,7 +104,6 @@ def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
             "placement": None,
         },
         "sections": sections,
-        "extensions": None,
     }
 
 

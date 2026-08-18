@@ -4631,30 +4631,6 @@ models:
     - AppActionButtonConfig
     - AppFileListConfig
 
-  AppPageSlotExtension:
-    type: model
-    fields:
-      slot:
-        type: literal
-        values:
-        - header
-        - empty_state
-        - hero
-        - sidebar
-        - actions_bar
-        description: >
-          Named UI zone this extension replaces within an otherwise declarative page.
-          header replaces the page header area; empty_state replaces the empty state of
-          the main data section; hero replaces the above-fold hero for gallery/landing
-          pages; sidebar provides custom sidebar content; actions_bar replaces the
-          actions zone above the main content section.
-      component:
-        type: str
-        description: >
-          Component registry key registered in ui/index.js. Must match a custom React
-          component under ui/pages/custom/. Use PascalCase matching the registerComponent
-          call in ui/index.js.
-
   AppPageSection:
     type: model
     fields:
@@ -4915,15 +4891,6 @@ models:
         type: list
         items: AppPageSection
         description: Ordered primitive sections composing the page.
-      extensions:
-        type: optional_list
-        items: AppPageSlotExtension
-        description: >
-          Declared custom slot overrides for specific UI zones. Use only when a named
-          zone (header, empty_state, hero, sidebar, actions_bar) cannot be expressed
-          with primitives. Each extension names a bounded slot and the registered custom
-          React component that replaces it. The rest of the page stays declarative.
-          Null for most pages — do not use as a general React escape hatch.
 
   AppBackendAdminPanel:
     type: model
