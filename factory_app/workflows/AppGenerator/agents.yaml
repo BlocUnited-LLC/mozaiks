@@ -1091,7 +1091,7 @@ agents:
       - `record_list`: entity browse with DataTable/ResourceTable + filter + actions bar
       - `record_detail`: Form + Panel/SurfaceCard detail zones driven by one primary record
       - `analytics_dashboard`: Grid of Metric/SummaryStrip/SegmentedBar; no primary editable entity
-      - `workflow_board`: custom_route_bundle or extensions.slot=header — primitives alone cannot express drag-to-reorder lanes; use `ui_surface: custom_react_page` or a custom slot override
+      - `workflow_board`: custom_route_bundle — primitives alone cannot express drag-to-reorder lanes; use `ui_surface: custom_react_page`
       - `activity_feed`: Timeline as primary section; chronological, no edit-in-place
       - `gallery`: Grid of SurfaceCards with image/thumbnail and action; pagination or infinite scroll
       - `wizard`: multi-step flow with `shell_mode: focused`. Required structure per step: ProgressTracker header (stages list — each stage has `id`, `label`, `state` ∈ {done|active|pending|error}) + at least one Form section with `submit_action` bound to an app-owned module action + ActionButton for navigation. A wizard without a Form section is invalid and will be flagged by the quality gate — the Form is the submission path to the backing module. Always declare `depends_on: [<module_contract_task_id>]` on the wizard page_bundle task so the module action exists before the page schema references it.
@@ -1114,7 +1114,7 @@ agents:
       - Form state between steps must be held by the module or passed through the submit_action payload chain. Do not store partial wizard state in client-only component state — if the user refreshes, the wizard must still resolve correctly.
       - If the wizard requires reading URL query params on mount, polling an endpoint, or conditional rendering based on async state, it cannot be declarative — use `custom_route_bundle` instead.
 
-      When `page_type` is `workflow_board` and the app requires drag-to-reorder kanban lanes, this exceeds the shipped primitive set. Use `custom_route_bundle` and declare a custom React page, or use `extensions` with `slot: header` to override the board surface while keeping auxiliary sections declarative.
+      When `page_type` is `workflow_board` and the app requires drag-to-reorder kanban lanes, this exceeds the shipped primitive set. Use `custom_route_bundle` and declare a custom React page.
 
       **External-redirect and post-redirect confirmation flows**:
       When an app includes an external-redirect checkout or payment flow (where the user is sent to a hosted third-party page and returned via redirect), the following page types and escape-hatch rules apply:
@@ -1132,14 +1132,6 @@ agents:
       - Keep the route authenticated together with `meta.routeAuth` for scoped private routes. Do not declare `routeAuth` for public landing/legal/static routes or for simple role-only navigation visibility.
       - In structured AppSchemaAgent output, `routeAuth.params` is a strict list of `{key, value}` entries that save_app_schema normalizes into the runtime object shape. Values may map shell placeholders to action inputs: `$route.<param>`, `$query.<param>`, `$meta.<path>`, `$user.<path>`, and `$path`.
       - If the route needs scoped access but the owning module does not yet declare a suitable `authorize_*_route` action, keep the route and module action in the same build plan dependency chain so the action exists before the page route references it.
-
-      **Page extensions** — `extensions[]` declares bounded custom slot overrides within an otherwise declarative page:
-      - Use `slot: empty_state` to replace a data section's empty state with a branded call-to-action
-      - Use `slot: header` to replace the page header with a custom branded or data-rich header component
-      - Use `slot: hero` for gallery/landing pages where the above-fold area is visual and custom
-      - Use `slot: sidebar` for a custom sidebar when the sidebar layout cannot express the required navigation
-      - Use `slot: actions_bar` for a complex multi-action toolbar above a table that ActionButton cannot express
-      Emit extensions only when a specific zone genuinely cannot be expressed with primitives. Null for most pages.
 
       **Page layout options**: grid | sidebar | full-width | split
 

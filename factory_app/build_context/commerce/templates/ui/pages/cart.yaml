@@ -96,4 +96,3 @@ sections:
             success_url: /checkout/success
             cancel_url: /cart
 roles: null
-extensions: null

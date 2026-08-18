@@ -380,75 +380,96 @@ def test_factory_app_manifest_component_files_exist_on_disk():
 
 
 # ---------------------------------------------------------------------------
-# 7. AppPageSchema.extensions — whether PageRenderer.jsx reads the field
+# 7. AppPageSchema.extensions — removed contract stays removed
 #
-# GAP: PageRenderer.jsx does not read the 'extensions' field.
-# The structured output model declares AppPageSlotExtension and the generator
-# validates extension slot names, but the renderer ignores the field entirely.
-# A corrective PR must add rendering logic in PageRenderer.jsx, or remove the
-# field from the structured output if slot extensions are not yet supported.
+# RESOLVED: the extensions / AppPageSlotExtension contract was a false promise
+# (the generator validated it, PageRenderer never rendered it) and has been
+# removed completely.  These tests prove the removal holds in every layer.
 # ---------------------------------------------------------------------------
 
-def test_page_renderer_does_not_read_extensions_field_documents_gap():
-    """PageRenderer.jsx must not reference 'extensions' — documents renderer gap.
+def test_page_slot_extension_model_is_removed_from_structured_outputs():
+    """AppPageSlotExtension must not exist and AppPageSchema must not declare extensions."""
+    models = _load_structured_outputs()["models"]
+    assert "AppPageSlotExtension" not in models, (
+        "AppPageSlotExtension returned to structured outputs. The slot-extension "
+        "contract was removed as a false promise; reintroducing it requires a "
+        "real PageRenderer implementation with closed component authority."
+    )
+    page_fields = models["AppPageSchema"].get("fields", {})
+    assert "extensions" not in page_fields, (
+        "AppPageSchema.extensions returned to structured outputs without a renderer."
+    )
 
-    This test PASSES when PageRenderer does NOT read extensions (confirming the
-    gap is still present).  If PageRenderer is updated to render extensions,
-    this test will fail and must be replaced with a positive coverage test.
 
-    Production gap: AppPageSchema declares extensions / AppPageSlotExtension and
-    the generator validates extension slot names, but PageRenderer.jsx ignores
-    the field.  No slot extension is ever rendered.
-    """
+def test_page_renderer_still_does_not_reference_extensions():
+    """PageRenderer.jsx must not reference the removed 'extensions' field."""
     text = PAGE_RENDERER_JSX.read_text(encoding="utf-8")
-    # Check that 'extensions' is not referenced as a JSX prop read or variable.
-    # We look for the pattern `extensions` appearing as a property access or
-    # destructured variable name, excluding comments.
     source_without_comments = re.sub(r"//[^\n]*", "", text)
     source_without_comments = re.sub(r"/\*.*?\*/", "", source_without_comments, flags=re.DOTALL)
     references = re.findall(r"\bextensions\b", source_without_comments)
     assert not references, (
-        "PageRenderer.jsx now references 'extensions' — the renderer gap may be fixed.\n"
-        "Replace this test with a positive test that verifies extensions are rendered."
+        "PageRenderer.jsx references 'extensions'. Rendering slot extensions "
+        "requires reintroducing the contract deliberately across structured "
+        "outputs, validators, prompts, and tests together."
     )
 
 
-def test_extension_slot_values_defined_in_structured_output():
-    """Regression guard: AppPageSlotExtension.slot values are pinned to the known set.
+def test_generator_prompts_no_longer_promise_slot_extensions():
+    """AppGenerator prompts must not instruct agents to emit page slot extensions."""
+    agents_text = (
+        Path("factory_app/workflows/AppGenerator/agents.yaml").read_text(encoding="utf-8")
+    )
+    for marker in ("extensions.slot", "slot: header", "slot: empty_state", "Page extensions"):
+        assert marker not in agents_text, (
+            f"AppGenerator prompt still references removed slot extensions: {marker!r}"
+        )
 
-    This is a hardcoded regression guard, not a derived cross-source comparison.
-    It pins the slot names so that accidental additions or removals in the structured
-    output YAML cause an explicit CI failure and prompt a deliberate review.
 
-    If you intentionally add or remove slot names, update the 'expected' set here AND
-    update VALID_EXTENSION_SLOTS in generated_ui_contract.py (verified by the next test).
-    """
-    slot_values = _so_field_literal_values("AppPageSlotExtension", "slot")
-    expected = {"header", "empty_state", "hero", "sidebar", "actions_bar"}
-    assert slot_values == expected, (
-        f"AppPageSlotExtension.slot values changed.\n"
-        f"  Actual: {sorted(slot_values)}\n"
-        f"  Expected: {sorted(expected)}\n"
-        "Update 'expected' here and VALID_EXTENSION_SLOTS in generated_ui_contract.py."
+def test_bundle_scanner_rejects_pages_declaring_extensions():
+    """Acceptance fails closed for any page that still declares 'extensions'."""
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (  # noqa: PLC0415
+        scan_generated_bundle,
     )
 
+    page_yaml = (
+        "name: items\n"
+        "route: /items\n"
+        "page_type: record_list\n"
+        "extensions: null\n"
+        "sections: []\n"
+    )
+    errors = scan_generated_bundle({"app.json": "{}", "ui/pages/items.yaml": page_yaml})
+    assert any("retired unsupported page field" in error for error in errors)
 
-def test_extension_slot_values_aligned_with_generated_ui_contract():
-    """VALID_EXTENSION_SLOTS in generated_ui_contract must match structured output slots."""
-    from factory_app.workflows._shared.generated_ui_contract import (
-        VALID_EXTENSION_SLOTS,  # noqa: PLC0415
+    clean_yaml = (
+        "name: items\n"
+        "route: /items\n"
+        "page_type: record_list\n"
+        "sections: []\n"
+    )
+    clean_errors = scan_generated_bundle({"app.json": "{}", "ui/pages/items.yaml": clean_yaml})
+    assert not any("retired unsupported page field" in error for error in clean_errors)
+
+
+def test_generated_ui_audit_flags_extensions_presence():
+    """The quality audit flags the removed field regardless of its value."""
+    from factory_app.workflows._shared.generated_ui_contract import (  # noqa: PLC0415
+        audit_page_schemas,
     )
 
-    so_slots = _so_field_literal_values("AppPageSlotExtension", "slot")
-    contract_slots = frozenset(VALID_EXTENSION_SLOTS)
-
-    assert so_slots == contract_slots, (
-        f"Extension slot drift between structured output and VALID_EXTENSION_SLOTS.\n"
-        f"  SO slots: {sorted(so_slots)}\n"
-        f"  VALID_EXTENSION_SLOTS: {sorted(contract_slots)}\n"
-        f"  In SO only: {sorted(so_slots - contract_slots)}\n"
-        f"  In contract only: {sorted(contract_slots - so_slots)}"
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Items",
+                "route": "/items",
+                "title": "Items",
+                "page_type": "record_list",
+                "extensions": None,
+                "sections": [],
+            }
+        ]
     )
+    assert any("retired unsupported field" in warning for warning in warnings)
 
 
 # ---------------------------------------------------------------------------

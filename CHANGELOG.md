@@ -12,6 +12,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Removed
+
+- **`AppPageSchema.extensions` / `AppPageSlotExtension`**: the page slot-override
+  contract is removed from structured outputs, generator prompts, and the UI
+  quality audit. It was a schema-only promise — `PageRenderer` never rendered
+  the field, no fixture or workspace used it, and no component-closure
+  authority existed. Generated pages declaring `extensions` now fail bundle
+  acceptance, and the quality audit flags the field for removal. Routes that
+  primitives cannot express use `custom_route_bundle`.
+
 ### Added
 
 - **Mozaiks UI v1 architecture constitution**

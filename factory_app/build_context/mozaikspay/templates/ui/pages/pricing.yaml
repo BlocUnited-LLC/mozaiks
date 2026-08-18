@@ -36,4 +36,3 @@ sections:
       method: POST
       response_url_field: portal_url
 roles: null
-extensions: null

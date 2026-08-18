@@ -1695,6 +1695,17 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
                 f"Must be one of: {', '.join(sorted(_CANONICAL_PAGE_TYPES))}."
             )
 
+        if "extensions" in schema:
+            # Retired contract: AppPageSchema slot extensions were never
+            # consumed by PageRenderer and are no longer part of the page
+            # schema.  A page that declares them would silently render nothing
+            # for those zones, so acceptance fails closed instead.
+            errors.append(
+                f"{path}: declares 'extensions', a retired unsupported page field. "
+                "Slot overrides are not rendered; use a custom_route_bundle page "
+                "when primitives cannot express the route."
+            )
+
         sections = schema.get("sections")
         if isinstance(sections, list):
             for i, section in enumerate(sections):

@@ -235,7 +235,6 @@ class TestDeclarativeCheckoutPageFixtures:
             "layout": "full-width",
             "shell_mode": "focused",
             "navigation": None,
-            "extensions": None,
             "sections": [
                 {
                     "id": "checkout-form",
@@ -267,7 +266,6 @@ class TestDeclarativeCheckoutPageFixtures:
             "layout": "full-width",
             "shell_mode": "focused",
             "navigation": None,
-            "extensions": None,
             "sections": [
                 {
                     "id": "cancelled-panel",
@@ -296,7 +294,6 @@ class TestDeclarativeCheckoutPageFixtures:
             "layout": "grid",
             "shell_mode": "workspace",
             "navigation": {"id": "orders", "label": "Orders", "scope": "local", "order": 30, "visible": True},
-            "extensions": None,
             "sections": [
                 {
                     "id": "orders-table",

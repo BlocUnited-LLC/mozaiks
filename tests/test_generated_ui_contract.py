@@ -395,7 +395,6 @@ def test_generated_ui_contract_accepts_clean_page_schema() -> None:
                 "route": "/tickets",
                 "title": "Tickets",
                 "page_type": "record_list",
-                "extensions": None,
                 "sections": [
                     {
                         "id": "tickets-header",
@@ -425,25 +424,6 @@ def test_generated_ui_contract_accepts_clean_page_schema() -> None:
     assert warnings == []
 
 
-def test_generated_ui_contract_accepts_extensions_slots() -> None:
-    warnings = audit_page_schemas(
-        [
-            {
-                "name": "Projects",
-                "route": "/projects",
-                "title": "Projects",
-                "page_type": "gallery",
-                "extensions": [
-                    {"slot": "empty_state", "component": "ProjectsEmptyState"},
-                    {"slot": "hero", "component": "ProjectsHero"},
-                ],
-                "sections": [],
-            }
-        ]
-    )
-    assert warnings == []
-
-
 def test_generated_ui_contract_blocks_missing_page_type() -> None:
     warnings = audit_page_schemas(
         [{"name": "Items", "route": "/items", "title": "Items", "sections": []}]
@@ -458,36 +438,24 @@ def test_generated_ui_contract_blocks_invalid_page_type() -> None:
     assert any("invalid page_type 'crud_list'" in warning for warning in warnings)
 
 
-def test_generated_ui_contract_blocks_invalid_extension_slot() -> None:
-    warnings = audit_page_schemas(
-        [
-            {
-                "name": "Items",
-                "route": "/items",
-                "title": "Items",
-                "page_type": "record_list",
-                "extensions": [{"slot": "footer", "component": "CustomFooter"}],
-                "sections": [],
-            }
-        ]
-    )
-    assert any("invalid slot 'footer'" in warning for warning in warnings)
-
-
-def test_generated_ui_contract_blocks_extension_missing_component() -> None:
-    warnings = audit_page_schemas(
-        [
-            {
-                "name": "Items",
-                "route": "/items",
-                "title": "Items",
-                "page_type": "record_list",
-                "extensions": [{"slot": "header", "component": ""}],
-                "sections": [],
-            }
-        ]
-    )
-    assert any("missing required 'component'" in warning for warning in warnings)
+def test_generated_ui_contract_rejects_retired_extensions_field() -> None:
+    """AppPageSchema.extensions is a removed contract — any presence fails."""
+    for value in (None, [], [{"slot": "header", "component": "CustomHeader"}]):
+        warnings = audit_page_schemas(
+            [
+                {
+                    "name": "Items",
+                    "route": "/items",
+                    "title": "Items",
+                    "page_type": "record_list",
+                    "extensions": value,
+                    "sections": [],
+                }
+            ]
+        )
+        assert any(
+            "retired unsupported field" in warning for warning in warnings
+        ), f"extensions={value!r} must be flagged"
 
 
 def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
@@ -498,7 +466,6 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
                 "route": "/operations",
                 "title": "Operations Dashboard",
                 "page_type": "analytics_dashboard",
-                "extensions": None,
                 "sections": [
                     {
                         "id": "summary-a",
@@ -550,7 +517,6 @@ def test_wizard_page_with_form_passes_quality_gate() -> None:
                 "route": "/enroll",
                 "title": "Enroll",
                 "page_type": "wizard",
-                "extensions": None,
                 "sections": [
                     {
                         "id": "enroll-progress",
@@ -592,7 +558,6 @@ def test_wizard_page_without_form_is_flagged() -> None:
                 "route": "/enroll",
                 "title": "Enroll",
                 "page_type": "wizard",
-                "extensions": None,
                 "sections": [
                     {
                         "id": "enroll-progress",
@@ -627,7 +592,6 @@ def test_wizard_page_form_warning_is_descriptive() -> None:
                 "route": "/setup",
                 "title": "Setup",
                 "page_type": "wizard",
-                "extensions": None,
                 "sections": [
                     {
                         "id": "setup-tracker",
@@ -655,7 +619,6 @@ def test_wizard_page_empty_sections_does_not_trigger_form_warning() -> None:
                 "route": "/onboard",
                 "title": "Onboard",
                 "page_type": "wizard",
-                "extensions": None,
                 "sections": [],
             }
         ]
@@ -680,7 +643,6 @@ def test_generated_ui_contract_accepts_minimal_schema_for_each_page_type(
                 "route": "/test",
                 "title": "Test",
                 "page_type": page_type,
-                "extensions": None,
                 "sections": [],
             }
         ]
