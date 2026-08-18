@@ -120,7 +120,19 @@ def _route_bundle_files(*, register_component: bool = True, clean_react: bool = 
         )
 
     return {
-        "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Overview\n",
+        "ui/pages/dashboard.yaml": (
+            "schema_version: mozaiks.app_page.v1\n"
+            "name: dashboard\n"
+            "route: /dashboard\n"
+            "title: Overview\n"
+            "page_type: landing\n"
+            "layout: full-width\n"
+            "sections:\n"
+            "  - id: dashboard-header\n"
+            "    primitive: PageHeader\n"
+            "    config:\n"
+            "      title: Overview\n"
+        ),
         "ui/route_manifest.json": _json(
             {
                 "pages": [
@@ -484,7 +496,19 @@ def test_validation_evidence_from_runner_can_enable_ui_patch_promotion(tmp_path:
         changes=[
             ScopedRefinementChange(
                 path="ui/pages/dashboard.yaml",
-                new_content="page_type: landing\ntitle: Overview Updated\n",
+                    new_content=(
+                        "schema_version: mozaiks.app_page.v1\n"
+                        "name: dashboard\n"
+                        "route: /dashboard\n"
+                        "title: Overview Updated\n"
+                        "page_type: landing\n"
+                        "layout: full-width\n"
+                        "sections:\n"
+                        "  - id: dashboard-header\n"
+                        "    primitive: PageHeader\n"
+                        "    config:\n"
+                        "      title: Overview Updated\n"
+                    ),
                 reason="Runner-backed UI patch update.",
             )
         ],
@@ -505,5 +529,7 @@ def test_validation_evidence_from_runner_can_enable_ui_patch_promotion(tmp_path:
 
     assert result.mutation_applied is True
     assert result.promoted_files[0].status == "promoted"
-    assert (source / "ui/pages/dashboard.yaml").read_text(encoding="utf-8") == "page_type: landing\ntitle: Overview Updated\n"
+    assert "title: Overview Updated\n" in (source / "ui/pages/dashboard.yaml").read_text(
+        encoding="utf-8"
+    )
 

@@ -338,13 +338,17 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
         ),
         "GeneratedApp/ui/pages/dashboard.yaml": "\n".join(
             [
+                "schema_version: mozaiks.app_page.v1",
                 "name: dashboard",
                 "title: Dashboard",
                 "route: /dashboard",
+                "page_type: record_list",
+                "layout: full-width",
                 "sections:",
                 "  - id: overview",
-                "    title: Overview",
-                "    layout: stack",
+                "    primitive: PageHeader",
+                "    config:",
+                "      title: Overview",
             ]
         ),
         "GeneratedApp/modules/tasks/module.yaml": "\n".join(

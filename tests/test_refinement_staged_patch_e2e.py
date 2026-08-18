@@ -44,7 +44,19 @@ def _write_source_bundle(root: Path) -> None:
     (root / "modules" / "projects" / "backend").mkdir(parents=True, exist_ok=True)
 
     (root / "ui" / "pages" / "dashboard.yaml").write_text(
-        "page_type: landing\ntitle: Dashboard\n",
+        (
+            "schema_version: mozaiks.app_page.v1\n"
+            "name: dashboard\n"
+            "route: /dashboard\n"
+            "title: Dashboard\n"
+            "page_type: landing\n"
+            "layout: full-width\n"
+            "sections:\n"
+            "  - id: dashboard-header\n"
+            "    primitive: PageHeader\n"
+            "    config:\n"
+            "      title: Dashboard\n"
+        ),
         encoding="utf-8",
     )
     (root / "ui" / "route_manifest.json").write_text(
@@ -327,11 +339,23 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
         request_id=request_id,
         source="deterministic",
         changes=[
-            StagedCodingWorkerChange(
-                path="ui/pages/dashboard.yaml",
-                new_content="page_type: landing\ntitle: Reports Overview\n",
-                reason="Prioritize reports on the overview surface.",
-            )
+                StagedCodingWorkerChange(
+                    path="ui/pages/dashboard.yaml",
+                    new_content=(
+                        "schema_version: mozaiks.app_page.v1\n"
+                        "name: dashboard\n"
+                        "route: /dashboard\n"
+                        "title: Reports Overview\n"
+                        "page_type: landing\n"
+                        "layout: full-width\n"
+                        "sections:\n"
+                        "  - id: dashboard-header\n"
+                        "    primitive: PageHeader\n"
+                        "    config:\n"
+                        "      title: Reports Overview\n"
+                    ),
+                    reason="Prioritize reports on the overview surface.",
+                )
         ],
     )
     scoped_result = run_deterministic_staged_coding_worker(plan, staging_result, worker_result)
@@ -476,7 +500,9 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert not (runtime_root / "refinement_review.json").exists()
     assert not (runtime_root / "execution_result.json").exists()
     assert not (runtime_root / "backups").exists()
-    assert (runtime_root / "ui" / "pages" / "dashboard.yaml").read_text(encoding="utf-8") == "page_type: landing\ntitle: Reports Overview\n"
+    assert "title: Reports Overview\n" in (
+        runtime_root / "ui" / "pages" / "dashboard.yaml"
+    ).read_text(encoding="utf-8")
     assert (runtime_root / "ui" / "index.js").read_text(encoding="utf-8") == (source_bundle / "ui" / "index.js").read_text(encoding="utf-8")
     assert (runtime_root / "ui" / "route_manifest.json").read_text(encoding="utf-8") == (
         source_bundle / "ui" / "route_manifest.json"

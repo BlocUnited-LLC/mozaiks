@@ -1,4 +1,4 @@
-schema_version: mozaiks.page.v1
+schema_version: mozaiks.app_page.v1
 name: cart
 route: /cart
 title: Cart
@@ -31,7 +31,6 @@ sections:
     primitive: SummaryStrip
     title: null
     config:
-      api_endpoint: /api/modules/commerce/get_cart
       items:
         - id: subtotal
           label: Subtotal

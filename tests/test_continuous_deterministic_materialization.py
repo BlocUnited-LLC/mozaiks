@@ -348,6 +348,7 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
             },
             "pages": [
                 {
+                    "schema_version": "mozaiks.app_page.v1",
                     "name": "Reports",
                     "route": "/reports",
                     "title": "Reports",

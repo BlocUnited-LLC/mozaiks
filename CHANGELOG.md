@@ -24,6 +24,23 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **`mozaiks.app_page.v1` runtime page validation** (`mozaiksai.core.runtime.app.page_schema`):
+  canonical, strict Pydantic validation of every declarative page schema at `AppLoader` boot
+  and at serve time. Apps with invalid page YAML fail to start rather than silently serving
+  bad schemas.
+  - `AppPageSchema` enforces `schema_version: mozaiks.app_page.v1`, 11 closed `page_type`
+    values, 4 closed `layout` values, 26 registered primitives, and `extra="forbid"` on all
+    nested config models. No unknown fields are silently accepted.
+  - `AppLoader.load()` validates every `ui/pages/**/*.yaml` before boot completes; a
+    `PageSchemaValidationError` aborts startup with a structured diagnostic.
+  - `GET /api/pages/{name}` serves from the pre-validated boot cache; the disk-read fallback
+    (dev/hot-reload) calls the identical canonical validator and returns `safe_page_schema_error_detail()`
+    — no raw exception text, file paths, or tracebacks in HTTP responses.
+  - `generated_ui_contract.audit_page_schemas()` and `generated_bundle_scanner` reuse the same
+    canonical validator so generation, acceptance, and runtime share one contract.
+  - Factory `page_plan_utils` injects `schema_version: mozaiks.app_page.v1` into every
+    materialized page; `save_app_schema` validates against the runtime schema before writing.
+
 - **Mozaiks UI v1 architecture constitution**
   (`docs/architecture/frontend/mozaiks-ui-v1.md`): the authoritative target
   documentation contract for the native UI framework — canonical surface kinds,

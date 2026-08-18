@@ -484,7 +484,7 @@ class TestPageYamls:
 
     def test_billing_page_schema_version(self):
         doc = _read_yaml(_BILLING_PAGE)
-        assert doc.get("schema_version") == "mozaiks.page.v1"
+        assert doc.get("schema_version") == "mozaiks.app_page.v1"
 
     def test_usage_page_calls_billing_portal_actions(self):
         content = _USAGE_PAGE.read_text(encoding="utf-8")
@@ -492,7 +492,7 @@ class TestPageYamls:
 
     def test_usage_page_schema_version(self):
         doc = _read_yaml(_USAGE_PAGE)
-        assert doc.get("schema_version") == "mozaiks.page.v1"
+        assert doc.get("schema_version") == "mozaiks.app_page.v1"
 
 
 # ---------------------------------------------------------------------------

@@ -587,13 +587,20 @@ def _page_output() -> dict[str, Any]:
                 "filename": "ui/pages/projects.yaml",
                 "content": yaml.safe_dump(
                     {
+                        "schema_version": "mozaiks.app_page.v1",
+                        "name": "Projects",
                         "route": "/projects",
                         "title": "Projects",
+                        "page_type": "record_list",
+                        "layout": "full-width",
                         "sections": [
                             {
                                 "id": "projects",
-                                "type": "data_table",
-                                "api_endpoint": "/api/modules/projects/list_projects",
+                                "primitive": "DataTable",
+                                "config": {
+                                    "columns": ["id", "name", "status"],
+                                    "api_endpoint": "/api/modules/projects/list_projects",
+                                },
                             }
                         ],
                     },
@@ -604,13 +611,20 @@ def _page_output() -> dict[str, Any]:
                 "filename": "ui/pages/tasks.yaml",
                 "content": yaml.safe_dump(
                     {
+                        "schema_version": "mozaiks.app_page.v1",
+                        "name": "Tasks",
                         "route": "/tasks",
                         "title": "Tasks",
+                        "page_type": "record_list",
+                        "layout": "full-width",
                         "sections": [
                             {
                                 "id": "tasks",
-                                "type": "data_table",
-                                "api_endpoint": "/api/modules/tasks/list_tasks",
+                                "primitive": "DataTable",
+                                "config": {
+                                    "columns": ["id", "title", "status"],
+                                    "api_endpoint": "/api/modules/tasks/list_tasks",
+                                },
                             }
                         ],
                     },

@@ -351,11 +351,12 @@ def _private_participation_generated_app_fixture() -> dict[str, str]:
         ).lstrip(),
         "ui/pages/ProjectGovernance.yaml": dedent(
             """
-            schema_version: mozaiks.page.v1
+            schema_version: mozaiks.app_page.v1
             name: Project Governance
             route: /projects/:projectId/governance
             title: Project Governance
-            page_type: workspace
+            page_type: settings
+            layout: full-width
             meta:
               requiresAuth: true
               routeAuth:
@@ -363,7 +364,11 @@ def _private_participation_generated_app_fixture() -> dict[str, str]:
                 action: authorize_project_route
                 params:
                   project_id: $route.projectId
-            sections: []
+            sections:
+              - id: governance-header
+                primitive: PageHeader
+                config:
+                  title: Project Governance
             """
         ).lstrip(),
     }

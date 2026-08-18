@@ -28,9 +28,6 @@ from typing import Any
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from factory_app.workflows._shared.generated_ui_contract import (
-    VALID_PAGE_TYPES as _CANONICAL_PAGE_TYPES,
-)
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
     resolve_declared_pack_output_paths,
@@ -46,6 +43,10 @@ from mozaiksai.core.runtime.app.layout_validation import (
     layout_extensions_from_selected_packs,
     layout_validation_errors,
     validate_file_map_layout,
+)
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    validate_page_schema,
 )
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
@@ -158,11 +159,6 @@ _AUTH_LOGIN_METHOD_KINDS = frozenset(
     }
 )
 
-# Canonical page_type values — imported from the shared quality-gate module so
-# there is exactly one source of truth.  Unknown values fail before promotion
-# so they cannot produce blank/unrendered page surfaces.
-# (Imported at module top as _CANONICAL_PAGE_TYPES from generated_ui_contract.)
-
 # Canonical action api_surface values — controls HTTP exposure posture.
 # Must match the typed literal in structured_outputs.yaml ModuleAction.api_surface
 # and the runtime ActionDef.api_surface field.
@@ -202,38 +198,6 @@ _SHELL_CORE_COMPONENTS = frozenset({
     "TokenStatusTab",
     "AdminMyUsagePanel",
     "AdminAppUsagePanel",
-})
-
-# Canonical section primitive names — must match PrimitiveSectionHint.primitive in
-# structured_outputs.yaml and the live PrimitiveRegistry.js shipped with chat-ui.
-# Unknown values fail before promotion so they cannot become runtime 404/blank surfaces.
-_CANONICAL_SECTION_PRIMITIVES = frozenset({
-    "DataTable",
-    "Form",
-    "Grid",
-    "Button",
-    "Modal",
-    "Alert",
-    "Skeleton",
-    "Empty",
-    "PageHeader",
-    "ResourceTable",
-    "SummaryStrip",
-    "InlineEmptyState",
-    "LoadingState",
-    "ErrorState",
-    "Panel",
-    "SurfaceCard",
-    "StatusPill",
-    "Metric",
-    "SegmentedBar",
-    "Timeline",
-    "CodeBlock",
-    "ProgressTracker",
-    "AlertBanner",
-    "ActionButton",
-    "FileList",
-    "PricingCatalog",
 })
 
 
@@ -1655,13 +1619,7 @@ def _scan_route_manifest_consistency(files_map: dict[str, str]) -> list[str]:
 
 
 def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
-    """Validate schema-native page YAML files when present in ui/pages/.
-
-    Checks that each schema-native page (files under ui/pages/ that are not under
-    ui/pages/custom/) has the required structural fields: name, route, and sections.
-    Custom React pages under ui/pages/custom/ are excluded — those are not
-    schema-native and carry weaker portability guarantees by design.
-    """
+    """Validate declarative page YAML with the runtime page-schema contract."""
     errors: list[str] = []
     normalized = _normalized_files_map(files_map)
 
@@ -1684,48 +1642,13 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
             errors.append(f"{path}: page schema must be a YAML mapping")
             continue
 
-        for required_field in ("name", "route", "sections"):
-            if required_field not in schema:
-                errors.append(f"{path}: schema-native page missing required field '{required_field}'")
-
-        page_type = str(schema.get("page_type") or "").strip()
-        if page_type and page_type not in _CANONICAL_PAGE_TYPES:
-            errors.append(
-                f"{path}: page_type '{page_type}' is not a canonical page type. "
-                f"Must be one of: {', '.join(sorted(_CANONICAL_PAGE_TYPES))}."
+        try:
+            validate_page_schema(schema)
+        except PageSchemaValidationError as exc:
+            errors.extend(
+                f"{path}: {diagnostic.location}: {diagnostic.code}"
+                for diagnostic in exc.diagnostics
             )
-
-        if "extensions" in schema:
-            # Retired contract: AppPageSchema slot extensions were never
-            # consumed by PageRenderer and are no longer part of the page
-            # schema.  A page that declares them would silently render nothing
-            # for those zones, so acceptance fails closed instead.
-            errors.append(
-                f"{path}: declares 'extensions', a retired unsupported page field. "
-                "Slot overrides are not rendered; use a custom_route_bundle page "
-                "when primitives cannot express the route."
-            )
-
-        sections = schema.get("sections")
-        if isinstance(sections, list):
-            for i, section in enumerate(sections):
-                if not isinstance(section, dict):
-                    errors.append(f"{path}: sections[{i}] must be a dict")
-                    continue
-                if "id" not in section:
-                    errors.append(f"{path}: sections[{i}] missing 'id'")
-                if "primitive" not in section:
-                    errors.append(f"{path}: sections[{i}] missing 'primitive'")
-                else:
-                    primitive = str(section.get("primitive") or "").strip()
-                    if primitive and primitive not in _CANONICAL_SECTION_PRIMITIVES:
-                        errors.append(
-                            f"{path}: sections[{i}] primitive '{primitive}' is not a "
-                            f"canonical section primitive. Must be one of: "
-                            f"{', '.join(sorted(_CANONICAL_SECTION_PRIMITIVES))}."
-                        )
-        elif sections is not None:
-            errors.append(f"{path}: 'sections' must be a list")
 
     return errors
 

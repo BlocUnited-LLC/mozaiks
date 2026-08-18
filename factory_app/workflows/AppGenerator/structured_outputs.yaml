@@ -4808,6 +4808,11 @@ models:
   AppPageSchema:
     type: model
     fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.app_page.v1
+        description: Must be mozaiks.app_page.v1.
       name:
         type: str
         description: Page name in PascalCase — used as the component registration key.

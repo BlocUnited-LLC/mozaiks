@@ -1066,21 +1066,20 @@ class TestTaxonomyAlignment:
             f"  Only in runtime: {runtime_kinds - _CANONICAL_REACTION_TARGET_KINDS}"
         )
 
-    # -- page type alignment (scanner uses imported constant) ---------------
+    # -- page schema alignment (scanner uses runtime validator) -------------
 
-    def test_scanner_page_types_are_same_object_as_canonical_source(self) -> None:
-        """The scanner's _CANONICAL_PAGE_TYPES must be the same Python object
-        as VALID_PAGE_TYPES — not a copy that can silently drift.
-        """
-        from factory_app.workflows._shared.generated_ui_contract import (
-            VALID_PAGE_TYPES,
-        )
-        from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
-            _CANONICAL_PAGE_TYPES,
-        )
+    def test_scanner_page_schema_uses_runtime_validator(self) -> None:
+        """The scanner must not own page-type or primitive copies."""
+        source = (
+            _workspace()
+            / "factory_app"
+            / "workflows"
+            / "AppGenerator"
+            / "tools"
+            / "generated_bundle_scanner.py"
+        ).read_text(encoding="utf-8")
 
-        assert _CANONICAL_PAGE_TYPES is VALID_PAGE_TYPES, (
-            "_CANONICAL_PAGE_TYPES in the scanner is not the same object as "
-            "VALID_PAGE_TYPES — it should be imported, not duplicated"
-        )
+        assert "validate_page_schema" in source
+        assert "_CANONICAL_PAGE_TYPES" not in source
+        assert "_CANONICAL_SECTION_PRIMITIVES" not in source
 

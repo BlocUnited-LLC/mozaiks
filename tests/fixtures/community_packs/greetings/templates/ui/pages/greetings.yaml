@@ -1,6 +1,8 @@
+schema_version: mozaiks.app_page.v1
 name: greetings
 route: /greetings
 title: Greetings
+page_type: record_list
 layout: full-width
 roles: []
 sections:

@@ -21,6 +21,10 @@ from factory_app.workflows._shared.generated_ui_contract import (
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
 )
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    validate_page_schema,
+)
 from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
@@ -1715,7 +1719,11 @@ def save_app_schema(
     if not manifest_dict.get("app_name"):
         raise ValueError("manifest.app_name is required")
 
-    page_list = [_normalize_page_schema(page) for page in _normalize_list(_to_plain(pages))]
+    raw_page_list = _normalize_list(_to_plain(pages))
+    for page in raw_page_list:
+        if isinstance(page, dict) and "extensions" in page:
+            raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
+    page_list = [_normalize_page_schema(page) for page in raw_page_list]
     if page_list and not isinstance(page_list, list):
         raise ValueError("save_app_schema: pages must be a list")
     _repair_missing_submit_hrefs(page_list, context_variables)
@@ -1765,6 +1773,14 @@ def save_app_schema(
                 section,
                 path=f"pages[{page.get('name')}].sections[{section_index}]",
             )
+        try:
+            validate_page_schema(page)
+        except PageSchemaValidationError as exc:
+            formatted = "; ".join(
+                f"{diagnostic.location}: {diagnostic.code}"
+                for diagnostic in exc.diagnostics
+            )
+            raise ValueError(f"Page '{page.get('name')}' violates mozaiks.app_page.v1: {formatted}") from exc
 
     if not page_list and custom_route_bundle is None:
         raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")

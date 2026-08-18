@@ -258,18 +258,26 @@ def _canonical_fixture() -> dict[str, str]:
             }
         ),
         "ui/pages/tasks.yaml": textwrap.dedent("""\
-            schema_version: mozaiks.page.v1
+            schema_version: mozaiks.app_page.v1
             name: tasks
             route: /tasks
             title: Tasks
             page_type: record_list
-            layout: stack
+            layout: full-width
             sections:
               - id: tasks-table
                 primitive: DataTable
                 title: All Tasks
                 config:
-                  columns: [id, title, status, created_at]
+                  columns:
+                    - key: id
+                      label: ID
+                    - key: title
+                      label: Title
+                    - key: status
+                      label: Status
+                    - key: created_at
+                      label: Created
                   search: true
                   selection: single
                   api_endpoint: /api/modules/tasks/list_tasks
@@ -277,29 +285,39 @@ def _canonical_fixture() -> dict[str, str]:
                 primitive: Form
                 title: Create Task
                 config:
+                  fields:
+                    - name: title
+                      label: Title
+                      type: text
                   submit_action:
-                    api_endpoint: /api/modules/tasks/create_task
+                    label: Create Task
+                    action_type: submit
+                    href: /api/modules/tasks/create_task
         """),
         "ui/pages/analytics.yaml": textwrap.dedent("""\
-            schema_version: mozaiks.page.v1
+            schema_version: mozaiks.app_page.v1
             name: analytics
             route: /analytics
             title: Analytics Dashboard
             page_type: analytics_dashboard
-            layout: stack
+            layout: full-width
             sections:
               - id: summary-strip
                 primitive: SummaryStrip
                 title: Key Metrics
                 config:
-                  metrics:
+                  items:
                     - label: Total Tasks
                       value: "0"
               - id: chart
                 primitive: DataTable
                 title: Task Breakdown
                 config:
-                  columns: [status, count]
+                  columns:
+                    - key: status
+                      label: Status
+                    - key: count
+                      label: Count
         """),
         # ---- Module: tasks ----
         "modules/tasks/module.yaml": textwrap.dedent("""\
@@ -972,7 +990,7 @@ class TestNegativeBundleStructure:
             "page_type: magic_layout",
         )
         errors = scan_generated_bundle(files)
-        assert any("page_type 'magic_layout' is not a canonical page type" in e for e in errors)
+        assert any("$.page_type: page_schema.literal_error" in e for e in errors)
 
     def test_unknown_section_primitive_rejected(self) -> None:
         files = _canonical_fixture()
@@ -981,7 +999,7 @@ class TestNegativeBundleStructure:
             "primitive: LegacyWidget",
         )
         errors = scan_generated_bundle(files)
-        assert any("LegacyWidget" in e and "canonical section primitive" in e for e in errors)
+        assert any("page_schema.value_error" in e for e in errors)
 
     def test_page_missing_name_field(self) -> None:
         files = _canonical_fixture()
@@ -991,7 +1009,7 @@ class TestNegativeBundleStructure:
             sections: []
         """)
         errors = scan_generated_bundle(files)
-        assert any("missing required field 'name'" in e for e in errors)
+        assert any("$.name: page_schema.missing" in e for e in errors)
 
 
 class TestNegativeValidationFacade:

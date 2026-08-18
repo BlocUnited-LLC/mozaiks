@@ -60,7 +60,23 @@ def test_review_ui_quality_passes_without_warnings() -> None:
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
             "app_manifest": {"app_name": "Support Operations"},
-            "app_pages": [{"name": "Tickets", "route": "/tickets", "page_type": "record_list", "sections": []}],
+            "app_pages": [
+                {
+                    "schema_version": "mozaiks.app_page.v1",
+                    "name": "Tickets",
+                    "route": "/tickets",
+                    "title": "Tickets",
+                    "page_type": "record_list",
+                    "layout": "full-width",
+                    "sections": [
+                        {
+                            "id": "tickets-header",
+                            "primitive": "PageHeader",
+                            "config": {"title": "Tickets"},
+                        }
+                    ],
+                }
+            ],
         }
     )
 
@@ -552,6 +568,7 @@ def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
                     },
                     "pages": [
                         {
+                            "schema_version": "mozaiks.app_page.v1",
                             "name": "Tickets",
                             "route": "/tickets",
                             "title": "Tickets",
@@ -570,7 +587,6 @@ def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
                                         "columns": [
                                             {"key": "subject", "label": "Ticket"}
                                         ],
-                                        "data": [],
                                     },
                                 },
                             ],
