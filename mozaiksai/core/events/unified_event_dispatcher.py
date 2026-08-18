@@ -34,6 +34,7 @@ from mozaiksai.core.events.runtime_events import (
 )
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
 from mozaiksai.core.ports.orchestration import DomainEvent
+from mozaiksai.core.transport.event_contract import MozaiksEventType
 from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 from mozaiksai.core.workflow.startup_messages import matches_hidden_initial_message
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -542,18 +543,18 @@ class UnifiedEventDispatcher:
                 event_dict['auto_tool_call'] = bool(event_dict['auto_tool_call'])
 
         ns_map = {
-            'print': 'chat.print', 'text': 'chat.text', 'input_ack': 'chat.input_ack',
-            'input_timeout': 'chat.input_timeout', 'select_speaker': 'chat.select_speaker', 'resume_boundary': 'chat.resume_boundary',
-            'usage_delta': 'chat.usage_delta', 'usage_summary': 'chat.usage_summary', 'run_complete': 'chat.run_complete', 'error': 'chat.error', 'tool_call': 'chat.tool_call', 'tool_response': 'chat.tool_response',
-            'tool_progress': 'chat.tool_progress',
-            'token_budget_alert': 'chat.token_budget_alert',
-            'agent_output_validated': 'chat.agent_output_validated', 'run_start': 'chat.run_start', 'tool_call_dismiss': 'chat.tool_call_dismiss',
-            'awaiting_reply': 'chat.awaiting_reply', 'activity': 'chat.activity',
-            'attachment_uploaded': 'chat.attachment_uploaded',
-            'stream_chunk': 'chat.stream_chunk', 'stream_end': 'chat.stream_end', 'custom_event': 'chat.custom_event',
-            'greeting_echo': 'chat.greeting_echo',
+            'print': MozaiksEventType.CHAT_PRINT, 'text': MozaiksEventType.CHAT_TEXT, 'input_ack': MozaiksEventType.CHAT_INPUT_ACK,
+            'input_timeout': MozaiksEventType.CHAT_INPUT_TIMEOUT, 'select_speaker': MozaiksEventType.CHAT_SELECT_SPEAKER, 'resume_boundary': MozaiksEventType.CHAT_RESUME_BOUNDARY,
+            'usage_delta': MozaiksEventType.CHAT_USAGE_DELTA, 'usage_summary': MozaiksEventType.CHAT_USAGE_SUMMARY, 'run_complete': MozaiksEventType.CHAT_RUN_COMPLETE, 'error': MozaiksEventType.CHAT_ERROR, 'tool_call': MozaiksEventType.CHAT_TOOL_CALL, 'tool_response': MozaiksEventType.CHAT_TOOL_RESPONSE,
+            'tool_progress': MozaiksEventType.CHAT_TOOL_PROGRESS,
+            'token_budget_alert': MozaiksEventType.CHAT_TOKEN_BUDGET_ALERT,
+            'agent_output_validated': MozaiksEventType.CHAT_AGENT_OUTPUT_VALIDATED, 'run_start': MozaiksEventType.CHAT_RUN_START, 'tool_call_dismiss': MozaiksEventType.CHAT_TOOL_CALL_DISMISS,
+            'awaiting_reply': MozaiksEventType.CHAT_AWAITING_REPLY, 'activity': MozaiksEventType.CHAT_ACTIVITY,
+            'attachment_uploaded': MozaiksEventType.CHAT_ATTACHMENT_UPLOADED,
+            'stream_chunk': MozaiksEventType.CHAT_STREAM_CHUNK, 'stream_end': MozaiksEventType.CHAT_STREAM_END, 'custom_event': MozaiksEventType.CHAT_CUSTOM_EVENT,
+            'greeting_echo': MozaiksEventType.CHAT_GREETING_ECHO,
             # ui.* namespace — typed primitive event contract (L2)
-            'ui_render': 'ui.render', 'ui_update': 'ui.update', 'ui_dismiss': 'ui.dismiss',
+            'ui_render': MozaiksEventType.UI_RENDER, 'ui_update': MozaiksEventType.UI_UPDATE, 'ui_dismiss': MozaiksEventType.UI_DISMISS,
         }
         mapped_type = kind if kind.startswith('chat.') else ns_map.get(kind, kind)
         
