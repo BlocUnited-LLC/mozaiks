@@ -517,6 +517,24 @@ models:
           is the canonical shared workflow component, `workflow_wrapper` when a workflow-local
           wrapper sits on top of a shipped component, `generated_component` for true workflow-local
           custom React, and `shell_builtin` only for planning-time `composer_reply`.
+  PayloadSchemaSpec:
+    type: model
+    fields:
+      type:
+        type: str
+        description: JSON Schema type string for the payload root (e.g. "object", "string", "array").
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional human-readable description of the payload shape.
+      required:
+        type: union
+        variants:
+        - list
+        - 'null'
+        description: Optional list of required property names when type is "object".
   UIToolAction:
     type: model
     fields:
@@ -548,8 +566,8 @@ models:
         - 'null'
         description: Optional approval semantic used by approval-style shared primitives.
       payload_schema:
-        type: dict
-        description: JSON-schema-like object describing expected payload shape for this action.
+        type: PayloadSchemaSpec
+        description: Typed payload schema spec describing the expected payload shape for this action.
   UIToolContract:
     type: model
     fields:
@@ -559,8 +577,8 @@ models:
         - agent_tool
         description: UI surface family. UI_Tool entries must use agent_tool.
       payload_schema:
-        type: dict
-        description: JSON-schema-like object describing the payload pushed from backend tool to UI component.
+        type: PayloadSchemaSpec
+        description: Typed payload schema spec describing the payload pushed from backend tool to UI component.
       actions_schema:
         type: list
         items: UIToolAction
