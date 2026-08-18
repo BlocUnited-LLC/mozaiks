@@ -11,6 +11,7 @@ from functools import wraps
 from typing import Any
 
 from ag2 import Agent
+from ag2.middleware.builtin import RetryMiddleware
 
 from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
 from mozaiksai.core.media.ag2 import (
@@ -616,7 +617,12 @@ async def create_agents(
                     # Anthropic / Gemini / Ollama — pass the schema directly;
                     # AG2 routes it through the provider's native mechanism.
                     beta_response_schema = structured_model_cls
-            except Exception:
+            except Exception as so_err:
+                logger.warning(
+                    "[AGENTS] Structured output schema resolution failed for '%s' — response_schema disabled: %s",
+                    agent_name,
+                    so_err,
+                )
                 beta_response_schema = None
 
         middleware = []
@@ -703,6 +709,11 @@ async def create_agents(
                     context_bridge=context_bridge,
                 )
             )
+
+        # Structured-output agents get RetryMiddleware so provider/network failures
+        # retry before the caller sees an exception (mirrors AG2StructuredAgentRunner).
+        if beta_response_schema is not None:
+            middleware.append(RetryMiddleware(max_retries=2))
 
         # Create beta Agent
         agent = Agent(
