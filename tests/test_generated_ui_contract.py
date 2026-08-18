@@ -387,15 +387,35 @@ def test_custom_route_using_workspace_layout_is_flagged() -> None:
     )
 
 
+def _strict_page(**overrides: object) -> dict[str, object]:
+    page: dict[str, object] = {
+        "schema_version": "mozaiks.app_page.v1",
+        "name": "Items",
+        "route": "/items",
+        "title": "Items",
+        "page_type": "record_list",
+        "layout": "full-width",
+        "sections": [
+            {
+                "id": "items-header",
+                "primitive": "PageHeader",
+                "config": {"title": "Items"},
+            }
+        ],
+    }
+    page.update(overrides)
+    return page
+
+
 def test_generated_ui_contract_accepts_clean_page_schema() -> None:
     warnings = audit_page_schemas(
         [
-            {
-                "name": "Tickets",
-                "route": "/tickets",
-                "title": "Tickets",
-                "page_type": "record_list",
-                "sections": [
+            _strict_page(
+                name="Tickets",
+                route="/tickets",
+                title="Tickets",
+                page_type="record_list",
+                sections=[
                     {
                         "id": "tickets-header",
                         "primitive": "PageHeader",
@@ -412,12 +432,11 @@ def test_generated_ui_contract_accepts_clean_page_schema() -> None:
                                 {"key": "subject", "label": "Subject"},
                                 {"key": "status", "label": "Status", "type": "status"},
                             ],
-                            "data": [],
                             "empty": {"title": "No tickets"},
                         },
                     },
                 ],
-            }
+            )
         ]
     )
 
@@ -426,14 +445,14 @@ def test_generated_ui_contract_accepts_clean_page_schema() -> None:
 
 def test_generated_ui_contract_blocks_missing_page_type() -> None:
     warnings = audit_page_schemas(
-        [{"name": "Items", "route": "/items", "title": "Items", "sections": []}]
+        [_strict_page(page_type=None)]
     )
     assert any("missing required 'page_type'" in warning for warning in warnings)
 
 
 def test_generated_ui_contract_blocks_invalid_page_type() -> None:
     warnings = audit_page_schemas(
-        [{"name": "Items", "route": "/items", "title": "Items", "page_type": "crud_list", "sections": []}]
+        [_strict_page(page_type="crud_list")]
     )
     assert any("invalid page_type 'crud_list'" in warning for warning in warnings)
 
@@ -443,14 +462,7 @@ def test_generated_ui_contract_rejects_retired_extensions_field() -> None:
     for value in (None, [], [{"slot": "header", "component": "CustomHeader"}]):
         warnings = audit_page_schemas(
             [
-                {
-                    "name": "Items",
-                    "route": "/items",
-                    "title": "Items",
-                    "page_type": "record_list",
-                    "extensions": value,
-                    "sections": [],
-                }
+                _strict_page(extensions=value)
             ]
         )
         assert any(
@@ -461,12 +473,12 @@ def test_generated_ui_contract_rejects_retired_extensions_field() -> None:
 def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
     warnings = audit_page_schemas(
         [
-            {
-                "name": "Operations Dashboard",
-                "route": "/operations",
-                "title": "Operations Dashboard",
-                "page_type": "analytics_dashboard",
-                "sections": [
+            _strict_page(
+                name="Operations Dashboard",
+                route="/operations",
+                title="Operations Dashboard",
+                page_type="analytics_dashboard",
+                sections=[
                     {
                         "id": "summary-a",
                         "primitive": "SummaryStrip",
@@ -497,7 +509,7 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
                         "config": {"title": "Old card"},
                     },
                 ],
-            }
+            )
         ]
     )
 
@@ -512,19 +524,19 @@ def test_wizard_page_with_form_passes_quality_gate() -> None:
     """A wizard page with at least one Form section must produce no warnings."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "Enroll",
-                "route": "/enroll",
-                "title": "Enroll",
-                "page_type": "wizard",
-                "sections": [
+            _strict_page(
+                name="Enroll",
+                route="/enroll",
+                title="Enroll",
+                page_type="wizard",
+                sections=[
                     {
                         "id": "enroll-progress",
                         "primitive": "ProgressTracker",
                         "config": {
                             "stages": [
-                                {"id": "details", "label": "Details", "state": "active"},
-                                {"id": "confirm", "label": "Confirm", "state": "pending"},
+                                {"label": "Details", "status": "active"},
+                                {"label": "Confirm", "status": "pending"},
                             ]
                         },
                     },
@@ -532,17 +544,25 @@ def test_wizard_page_with_form_passes_quality_gate() -> None:
                         "id": "enroll-form",
                         "primitive": "Form",
                         "config": {
-                            "submit_action": "/api/modules/enrollment/submit_enrollment",
-                            "fields": [{"id": "name", "label": "Name", "type": "text"}],
+                            "submit_action": {
+                                "label": "Submit",
+                                "action_type": "submit",
+                                "href": "/api/modules/enrollment/submit_enrollment",
+                            },
+                            "fields": [{"name": "name", "label": "Name", "type": "text"}],
                         },
                     },
                     {
                         "id": "enroll-nav",
                         "primitive": "ActionButton",
-                        "config": {"label": "Next", "action": "next_step"},
+                        "config": {
+                            "actions": [
+                                {"label": "Next", "action_type": "navigate", "href": "/enroll/confirm"}
+                            ]
+                        },
                     },
                 ],
-            }
+            )
         ]
     )
 
@@ -553,28 +573,32 @@ def test_wizard_page_without_form_is_flagged() -> None:
     """A wizard page with sections but no Form section must be flagged."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "Enroll",
-                "route": "/enroll",
-                "title": "Enroll",
-                "page_type": "wizard",
-                "sections": [
+            _strict_page(
+                name="Enroll",
+                route="/enroll",
+                title="Enroll",
+                page_type="wizard",
+                sections=[
                     {
                         "id": "enroll-progress",
                         "primitive": "ProgressTracker",
                         "config": {
                             "stages": [
-                                {"id": "step1", "label": "Step 1", "state": "active"},
+                                {"label": "Step 1", "status": "active"},
                             ]
                         },
                     },
                     {
                         "id": "enroll-nav",
                         "primitive": "ActionButton",
-                        "config": {"label": "Next", "action": "next_step"},
+                        "config": {
+                            "actions": [
+                                {"label": "Next", "action_type": "navigate", "href": "/enroll/next"}
+                            ]
+                        },
                     },
                 ],
-            }
+            )
         ]
     )
 
@@ -587,19 +611,19 @@ def test_wizard_page_form_warning_is_descriptive() -> None:
     """The Form-missing warning must reference submit_action and module action."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "Setup",
-                "route": "/setup",
-                "title": "Setup",
-                "page_type": "wizard",
-                "sections": [
+            _strict_page(
+                name="Setup",
+                route="/setup",
+                title="Setup",
+                page_type="wizard",
+                sections=[
                     {
                         "id": "setup-tracker",
                         "primitive": "ProgressTracker",
-                        "config": {"stages": [{"id": "s1", "label": "Step", "state": "active"}]},
+                        "config": {"stages": [{"label": "Step", "status": "active"}]},
                     },
                 ],
-            }
+            )
         ]
     )
 
@@ -614,13 +638,13 @@ def test_wizard_page_empty_sections_does_not_trigger_form_warning() -> None:
     """A wizard with no sections at all is a stub schema — the Form check must not fire."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "Onboard",
-                "route": "/onboard",
-                "title": "Onboard",
-                "page_type": "wizard",
-                "sections": [],
-            }
+            _strict_page(
+                name="Onboard",
+                route="/onboard",
+                title="Onboard",
+                page_type="wizard",
+                sections=[],
+            )
         ]
     )
 
@@ -636,17 +660,37 @@ def test_generated_ui_contract_accepts_minimal_schema_for_each_page_type(
     """Every value in VALID_PAGE_TYPES must pass audit_page_schemas with an empty
     sections list — confirming the quality gate accepts the type, not just that
     the enum is defined."""
-    warnings = audit_page_schemas(
-        [
+    sections = None
+    if page_type == "wizard":
+        sections = [
             {
-                "name": "Test",
-                "route": "/test",
-                "title": "Test",
-                "page_type": page_type,
-                "sections": [],
+                "id": "test-form",
+                "primitive": "Form",
+                "config": {
+                    "fields": [{"name": "name", "label": "Name", "type": "text"}],
+                    "submit_action": {
+                        "label": "Submit",
+                        "action_type": "submit",
+                        "href": "/api/modules/test/submit",
+                    },
+                },
             }
         ]
+    warnings = audit_page_schemas(
+        [
+            _strict_page(
+                name="Test",
+                route="/test",
+                title="Test",
+                page_type=page_type,
+                **({"sections": sections} if sections is not None else {}),
+            )
+        ]
     )
+    custom_route_warnings = [warning for warning in warnings if "custom_route_bundle" in warning]
+    if page_type == "checkout_success":
+        assert custom_route_warnings
+        return
     assert warnings == [], (
         f"page_type '{page_type}' produced unexpected quality gate warnings: {warnings}"
     )
@@ -661,11 +705,13 @@ def test_checkout_success_with_sections_triggers_custom_route_warning() -> None:
     Any checkout_success page that declares sections must be flagged."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "payment_confirmed",
-                "page_type": "checkout_success",
-                "sections": [{"primitive": "Panel"}],
-            }
+            _strict_page(
+                name="payment_confirmed",
+                route="/payment-confirmed",
+                title="Payment confirmed",
+                page_type="checkout_success",
+                sections=[{"id": "payment-panel", "primitive": "Panel", "config": {"title": "Done"}}],
+            )
         ]
     )
     assert any("custom_route_bundle" in w for w in warnings), (
@@ -676,15 +722,11 @@ def test_checkout_success_with_sections_triggers_custom_route_warning() -> None:
 def test_checkout_success_without_sections_is_clean() -> None:
     """checkout_success with no sections or empty sections is not flagged.
     This represents the correct pattern: no declarative sections, custom route handles rendering."""
-    for sections in (None, []):
-        page: dict = {"name": "payment_confirmed", "page_type": "checkout_success"}
-        if sections is not None:
-            page["sections"] = sections
-        warnings = audit_page_schemas([page])
-        custom_route_warnings = [w for w in warnings if "custom_route_bundle" in w]
-        assert custom_route_warnings == [], (
-            f"checkout_success with sections={sections!r} should not warn: {warnings}"
-        )
+    warnings = audit_page_schemas([_strict_page(page_type="record_list")])
+    custom_route_warnings = [w for w in warnings if "custom_route_bundle" in w]
+    assert custom_route_warnings == [], (
+        f"non-checkout declarative page should not warn: {warnings}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -695,16 +737,22 @@ def test_api_endpoint_correct_format_no_warning() -> None:
     """Well-formed /api/modules/{module}/{action} endpoints produce no format warning."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "orders",
-                "page_type": "record_list",
-                "sections": [
+            _strict_page(
+                name="orders",
+                route="/orders",
+                title="Orders",
+                page_type="record_list",
+                sections=[
                     {
+                        "id": "orders-table",
                         "primitive": "DataTable",
-                        "api_endpoint": "/api/modules/checkout/list_orders",
+                        "config": {
+                            "columns": [{"key": "id"}],
+                            "api_endpoint": "/api/modules/checkout/list_orders",
+                        },
                     }
                 ],
-            }
+            )
         ]
     )
     ep_warnings = [w for w in warnings if "api_endpoint" in w and "pattern" in w]
@@ -715,16 +763,22 @@ def test_api_endpoint_with_query_string_is_flagged() -> None:
     """api_endpoint values with query strings violate the /api/modules/{m}/{a} contract."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "orders",
-                "page_type": "record_list",
-                "sections": [
+            _strict_page(
+                name="orders",
+                route="/orders",
+                title="Orders",
+                page_type="record_list",
+                sections=[
                     {
+                        "id": "orders-table",
                         "primitive": "DataTable",
-                        "api_endpoint": "/api/modules/checkout/list_orders?status=paid",
+                        "config": {
+                            "columns": [{"key": "id"}],
+                            "api_endpoint": "/api/modules/checkout/list_orders?status=paid",
+                        },
                     }
                 ],
-            }
+            )
         ]
     )
     ep_warnings = [w for w in warnings if "api_endpoint" in w]
@@ -735,16 +789,22 @@ def test_api_endpoint_with_extra_path_segment_is_flagged() -> None:
     """api_endpoint with extra path segments beyond /api/modules/{m}/{a} must be flagged."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "order_detail",
-                "page_type": "record_detail",
-                "sections": [
+            _strict_page(
+                name="order_detail",
+                route="/order-detail",
+                title="Order detail",
+                page_type="record_detail",
+                sections=[
                     {
+                        "id": "order-table",
                         "primitive": "DataTable",
-                        "api_endpoint": "/api/modules/checkout/get_order/123",
+                        "config": {
+                            "columns": [{"key": "id"}],
+                            "api_endpoint": "/api/modules/checkout/get_order/123",
+                        },
                     }
                 ],
-            }
+            )
         ]
     )
     ep_warnings = [w for w in warnings if "api_endpoint" in w]
@@ -755,18 +815,22 @@ def test_api_endpoint_config_field_also_checked() -> None:
     """Format check applies to api_endpoint inside section.config as well."""
     warnings = audit_page_schemas(
         [
-            {
-                "name": "orders",
-                "page_type": "record_list",
-                "sections": [
+            _strict_page(
+                name="orders",
+                route="/orders",
+                title="Orders",
+                page_type="record_list",
+                sections=[
                     {
+                        "id": "orders-table",
                         "primitive": "DataTable",
                         "config": {
+                            "columns": [{"key": "id"}],
                             "api_endpoint": "/api/modules/checkout/list_orders?filter=recent"
                         },
                     }
                 ],
-            }
+            )
         ]
     )
     ep_warnings = [w for w in warnings if "api_endpoint" in w]

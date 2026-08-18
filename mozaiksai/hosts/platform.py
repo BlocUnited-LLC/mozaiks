@@ -91,6 +91,7 @@ app.state.subscriptions_config = None
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
+app.state.page_schemas = {}
 _runtime_services: list[Any] = []
 
 
@@ -253,6 +254,10 @@ async def _platform_startup() -> None:
     try:
         load_result = await AppLoader.load(str(app_root))
         app.state.subscriptions_config = load_result.subscriptions_config
+        app.state.page_schemas = {
+            name: schema.model_dump(mode="json", exclude_none=True)
+            for name, schema in sorted(load_result.page_schemas.items())
+        }
         if load_result.data_contract:
             index_app_id = (
                 load_result.data_contract.get("app_id")
@@ -419,8 +424,13 @@ async def _platform_startup() -> None:
         raise
     except DatabaseStartupPolicyError:
         raise
-    except AppLoadError:
-        logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
+    except AppLoadError as exc:
+        if str(exc).startswith("app.json not found"):
+            logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
+        else:
+            logger.error("APP_LOAD_FAILED_DEGRADED (AppLoadError): %s", exc)
+            app.state.startup_degraded = True
+            app.state.startup_degraded_reason = "APP_LOAD_ERROR"
     except ModuleLoadError as exc:
         # A module contract is invalid — platform starts in degraded state so
         # health checks can surface this rather than hiding it as a warning.

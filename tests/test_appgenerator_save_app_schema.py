@@ -53,9 +53,11 @@ def _base_manifest():
 
 def _base_page():
     return {
+        "schema_version": "mozaiks.app_page.v1",
         "name": "Dashboard",
         "route": "/dashboard",
         "title": "Dashboard",
+        "page_type": "record_list",
         "layout": "grid",
         "sections": [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}],
     }
@@ -63,9 +65,11 @@ def _base_page():
 
 def _canonical_page():
     return {
+        "schema_version": "mozaiks.app_page.v1",
         "name": "Dashboard",
         "route": "/dashboard",
         "title": "Dashboard",
+        "page_type": "record_list",
         "layout": "grid",
         "sections": [
             {
@@ -295,11 +299,14 @@ def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) ->
             "primitive": "Button",
             "config": {
                 "label": "Open Customer Support",
-                "action_type": "workflow",
-                "workflow_id": "CustomerSupport",
-                "context_variables": {
-                    "customer_id": "{id}",
-                    "source_page": "dashboard",
+                "action": {
+                    "label": "Open Customer Support",
+                    "action_type": "workflow",
+                    "workflow_id": "CustomerSupport",
+                    "context_variables": {
+                        "customer_id": "{id}",
+                        "source_page": "dashboard",
+                    },
                 },
             },
         }

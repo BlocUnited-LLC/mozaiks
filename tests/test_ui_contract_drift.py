@@ -9,10 +9,9 @@ Verifies cross-language and cross-contract alignment for:
   6.  Custom-route three-file closure for factory_app
   7.  AppPageSchema.extensions — whether PageRenderer.jsx reads the field
   8.  UIToolContractSpec — Pydantic model structure and validation
-  9.  Page serving — GET /api/pages/{name} field-level validation gap
+  9.  Page serving — GET /api/pages/{name} canonical validation owner
 
-No production code is changed by this module.  Tests that surface a real
-gap carry explicit gap markers so a corrective PR can target them precisely.
+No production code is changed by this module.
 """
 
 from __future__ import annotations
@@ -448,7 +447,7 @@ def test_bundle_scanner_rejects_pages_declaring_extensions():
         "sections: []\n"
     )
     errors = scan_generated_bundle({"app.json": "{}", "ui/pages/items.yaml": page_yaml})
-    assert any("retired unsupported page field" in error for error in errors)
+    assert any("page_schema.extra_forbidden" in error for error in errors)
 
     clean_yaml = (
         "name: items\n"
@@ -515,30 +514,13 @@ def test_ui_tool_contract_spec_accepts_raw_dict_payload():
 
 
 # ---------------------------------------------------------------------------
-# 9. Page serving — GET /api/pages/{name} field-level validation gap
-#
-# GAP: get_page_schema() only validates that the YAML is a dict.  It does not
-# validate AppPageSchema field names, layout values, page_type values, or any
-# other structured output constraint.  Malformed pages are served silently and
-# the frontend receives unvalidated content.
-#
-# A corrective PR should add pydantic validation of the schema dict against
-# an AppPageSchema model before returning the JSONResponse.
+# 9. Page serving — GET /api/pages/{name} canonical validation owner
 # ---------------------------------------------------------------------------
 
-def test_page_serving_validates_only_isinstance_dict_documents_gap():
-    """Shell router get_page_schema validates only isinstance(schema, dict).
-
-    This test documents the gap by reading the actual implementation source and
-    asserting it contains only the minimal isinstance check — no field validation.
-
-    Production gap: invalid AppPageSchema content (wrong layout, unknown page_type,
-    bad primitive names) passes GET /api/pages/{name} undetected and reaches the
-    frontend renderer.
-    """
+def test_page_serving_uses_canonical_page_schema_validator():
+    """Shell router must validate pages through the canonical runtime owner."""
     source = SHELL_ROUTER_PY.read_text(encoding="utf-8")
 
-    # Find the get_page_schema function body.
     fn_match = re.search(
         r"async def get_page_schema\(.*?\n((?:[ \t]+[^\n]*\n|\n)*)",
         source,
@@ -546,21 +528,6 @@ def test_page_serving_validates_only_isinstance_dict_documents_gap():
     assert fn_match, "get_page_schema not found in shell.py"
     fn_body = fn_match.group(1)
 
-    # Must have the isinstance check.
-    assert "isinstance(schema, dict)" in fn_body, (
-        "Expected isinstance(schema, dict) check was removed from get_page_schema — "
-        "update this test to reflect the new validation approach."
-    )
-
-    # Must NOT have schema field validation — e.g. pydantic parse call.
-    field_validation_patterns = [
-        "AppPageSchema",
-        "model_validate",
-        "parse_obj",
-        "VALID_PAGE_TYPES",
-    ]
-    found_validation = [p for p in field_validation_patterns if p in fn_body]
-    assert not found_validation, (
-        f"get_page_schema now appears to do field-level validation via: {found_validation}\n"
-        "Replace this gap-documentation test with a positive validation coverage test."
-    )
+    assert "load_and_validate_page_schema" in fn_body
+    assert "safe_page_schema_error_detail" in source
+    assert "isinstance(schema, dict)" not in fn_body

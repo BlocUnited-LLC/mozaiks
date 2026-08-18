@@ -838,38 +838,64 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
         ),
         "ui/pages/reports.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.app_page.v1
             name: Reports
             route: /reports
             title: Reports
+            page_type: record_list
+            layout: full-width
             sections:
               - id: report-list
                 primitive: DataTable
                 config:
+                  columns:
+                    - key: report_id
+                      label: Report
                   api_endpoint: /api/modules/reports/list_reports
               - id: report-generate
                 primitive: Form
                 config:
+                  fields:
+                    - name: report_name
+                      label: Report Name
+                      type: text
                   submit_action:
-                    api_endpoint: /api/modules/reports/generate_report
+                    label: Generate Report
+                    action_type: submit
+                    href: /api/modules/reports/generate_report
             """
         ).strip() + "\n",
         "ui/pages/usage.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.app_page.v1
             name: Usage
             route: /usage
             title: Usage
+            page_type: analytics_dashboard
+            layout: full-width
             sections:
               - id: usage-summary
-                primitive: SummaryStrip
+                primitive: DataTable
                 config:
+                  columns:
+                    - key: meter_id
+                      label: Meter
+                    - key: used
+                      label: Used
                   api_endpoint: /api/me/usage
               - id: token-balances
                 primitive: DataTable
                 config:
+                  columns:
+                    - key: token_type
+                      label: Token
                   api_endpoint: /api/me/tokens
               - id: token-ledger
                 primitive: DataTable
                 config:
+                  columns:
+                    - key: entry_id
+                      label: Entry
                   api_endpoint: /api/me/tokens/ledger
             """
         ).strip() + "\n",

@@ -168,10 +168,9 @@ def _wallet_replay_plan() -> dict[str, Any]:
                 "sections_hint": [
                     {
                         "section_id_hint": "wallet-summary",
-                        "primitive": "SummaryStrip",
+                        "primitive": "ResourceTable",
                         "config_hint": {
                             "api_endpoint": "/api/modules/wallet/get_wallet_summary",
-                            "method": "POST",
                         },
                     }
                 ],
@@ -264,7 +263,16 @@ def _wallet_task_outputs() -> dict[str, Any]:
                 },
                 {
                     "filename": "ui/pages/wallet.yaml",
-                    "content": "sections:\n  - config:\n      api_endpoint: /api/modules/wallet/get_wallet_summary\n",
+                    "content": (
+                        "sections:\n"
+                        "  - id: wallet-summary\n"
+                        "    primitive: ResourceTable\n"
+                        "    config:\n"
+                        "      columns:\n"
+                        "        - key: id\n"
+                        "          label: ID\n"
+                        "      api_endpoint: /api/modules/wallet_dashboard/get_wallet_summary\n"
+                    ),
                 },
             ]
         },
@@ -551,31 +559,39 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
                 {
                     "filename": "ui/pages/billing.yaml",
                     "content": (
-                        "schema_version: mozaiks.page.v1\n"
+                        "schema_version: mozaiks.app_page.v1\n"
                         "name: Billing\n"
                         "route: /billing\n"
                         "title: Billing\n"
                         "page_type: analytics_dashboard\n"
-                        "layout: stack\n"
+                        "layout: full-width\n"
                         "shell_mode: workspace\n"
                         "sections:\n"
-                        "  - config:\n"
-                        "      api_endpoint: /api/modules/mozaikspay/get_subscription_status\n"
+                        "  - id: billing-status\n"
+                        "    primitive: SummaryStrip\n"
+                        "    config:\n"
+                        "      items:\n"
+                        "        - label: Status\n"
+                        "          value_key: status\n"
                     ),
                 },
                 {
                     "filename": "ui/pages/usage.yaml",
                     "content": (
-                        "schema_version: mozaiks.page.v1\n"
+                        "schema_version: mozaiks.app_page.v1\n"
                         "name: Usage\n"
                         "route: /usage\n"
                         "title: Usage\n"
                         "page_type: analytics_dashboard\n"
-                        "layout: stack\n"
+                        "layout: full-width\n"
                         "shell_mode: workspace\n"
                         "sections:\n"
-                        "  - config:\n"
-                        "      api_endpoint: /api/modules/mozaikspay/get_usage_status\n"
+                        "  - id: usage-status\n"
+                        "    primitive: SummaryStrip\n"
+                        "    config:\n"
+                        "      items:\n"
+                        "        - label: Usage\n"
+                        "          value_key: runtime_ai_usage\n"
                     ),
                 },
             ]

@@ -14,8 +14,10 @@ def test_notifications_page_is_canonical_yaml_ui_proof() -> None:
     page_path = _workspace() / "factory_app" / "app" / "ui" / "pages" / "notifications.yaml"
     page = yaml.safe_load(page_path.read_text(encoding="utf-8"))
 
+    assert page["schema_version"] == "mozaiks.app_page.v1"
     assert page["name"] == "notifications"
     assert page["route"] == "/notifications"
+    assert page["page_type"] == "activity_feed"
     assert [section["primitive"] for section in page["sections"]] == [
         "PageHeader",
         "ResourceTable",

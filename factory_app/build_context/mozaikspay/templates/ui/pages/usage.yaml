@@ -1,9 +1,9 @@
-schema_version: mozaiks.page.v1
+schema_version: mozaiks.app_page.v1
 name: Usage
 route: /usage
 title: Usage
 page_type: analytics_dashboard
-layout: stack
+layout: full-width
 shell_mode: workspace
 navigation:
   id: usage
@@ -14,24 +14,22 @@ navigation:
   visible: true
 sections:
   - id: usage-status
-    primitive: SummaryStrip
+    primitive: DataTable
     title: Usage
     config:
       api_endpoint: /api/modules/billing_portal/get_usage_status
-      method: POST
-      fields:
-        - runtime_ai_usage.totals.total_tokens
-        - runtime_ai_usage.totals.prompt_tokens
-        - runtime_ai_usage.totals.completion_tokens
-        - runtime_ai_usage.totals.llm_calls
+      columns:
+        - key: runtime_ai_usage.totals.total_tokens
+          label: Total Tokens
+        - key: runtime_ai_usage.totals.llm_calls
+          label: LLM Calls
   - id: token-status
     primitive: SummaryStrip
     title: Token Balance
     config:
-      api_endpoint: /api/modules/billing_portal/get_token_status
-      method: POST
-      fields:
-        - runtime_ai_usage
-        - token_wallets
-        - top_up_products
+      items:
+        - label: Wallets
+          value_key: token_wallets
+        - label: Top Ups
+          value_key: top_up_products
 roles: null

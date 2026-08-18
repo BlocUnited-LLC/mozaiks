@@ -213,7 +213,7 @@ def test_commerce_page_templates_use_canonical_primitives_and_app_owned_endpoint
 
     for path in (TEMPLATES / "ui" / "pages").glob("*.yaml"):
         page = _read_yaml(path)
-        assert page["schema_version"] == "mozaiks.page.v1"
+        assert page["schema_version"] == "mozaiks.app_page.v1"
         assert page["page_type"] in valid_page_types
         assert page["layout"] in {"grid", "sidebar", "full-width", "split"}
 

@@ -25,7 +25,7 @@
           },
           {
             "primitive": "ActionButton",
-            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\", \"entitlement_gate\": \"reports.export\"}]}",
+            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\"}]}",
             "section_id_hint": "export-action",
             "title_hint": null
           }

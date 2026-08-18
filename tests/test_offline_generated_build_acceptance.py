@@ -85,19 +85,31 @@ def _generated_build_files() -> dict[str, str]:
             }
         ),
         "ui/pages/orders.yaml": """
+schema_version: mozaiks.app_page.v1
 name: Orders
 route: /orders
 title: Orders
+page_type: record_list
+layout: full-width
 sections:
   - id: orders-list
     primitive: DataTable
     config:
+      columns:
+        - key: order_id
+          label: Order
       api_endpoint: /api/modules/orders/list_orders
   - id: create-order
     primitive: Form
     config:
+      fields:
+        - name: customer_name
+          label: Customer
+          type: text
       submit_action:
-        api_endpoint: /api/modules/orders/create_order
+        label: Create Order
+        action_type: submit
+        href: /api/modules/orders/create_order
 """,
         "data/contract.json": json.dumps(data_contract),
         "security/secrets.yaml": """
@@ -253,13 +265,19 @@ plans:
             }
         ),
         "ui/pages/reports.yaml": """\
+schema_version: mozaiks.app_page.v1
 name: Reports
 route: /reports
 title: Reports
+page_type: record_list
+layout: full-width
 sections:
   - id: reports-list
     primitive: DataTable
     config:
+      columns:
+        - key: report_id
+          label: Report
       api_endpoint: /api/modules/reports/list_reports
 """,
         "modules/reports/module.yaml": """\

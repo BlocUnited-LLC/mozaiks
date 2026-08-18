@@ -283,8 +283,12 @@ def test_custom_react_coexists_with_schema_native_in_scanner() -> None:
     files_map = {
         # Schema-native page
         "ui/pages/greetings.yaml": (
+            "schema_version: mozaiks.app_page.v1\n"
             "name: greetings\n"
             "route: /greetings\n"
+            "title: Greetings\n"
+            "page_type: record_list\n"
+            "layout: full-width\n"
             "sections:\n"
             "  - id: header\n"
             "    primitive: PageHeader\n"
@@ -438,8 +442,12 @@ def test_scanner_accepts_valid_page_schema() -> None:
     scanner = _load_scanner()
     files_map = {
         "ui/pages/hello.yaml": (
+            "schema_version: mozaiks.app_page.v1\n"
             "name: hello\n"
             "route: /hello\n"
+            "title: Hello\n"
+            "page_type: record_list\n"
+            "layout: full-width\n"
             "sections:\n"
             "  - id: header\n"
             "    primitive: PageHeader\n"

@@ -46,9 +46,11 @@ def _base_manifest() -> dict:
 
 def _base_page() -> dict:
     return {
+        "schema_version": "mozaiks.app_page.v1",
         "name": "Dashboard",
         "route": "/dashboard",
         "title": "Dashboard",
+        "page_type": "record_list",
         "layout": "grid",
         "sections": [{"id": "overview", "primitive": "Panel", "config": {"title": "Overview"}}],
     }

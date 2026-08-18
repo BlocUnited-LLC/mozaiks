@@ -45,19 +45,31 @@ def _basic_crud_files() -> dict[str, str]:
             }
         ),
         "ui/pages/orders.yaml": """
+schema_version: mozaiks.app_page.v1
 name: orders
 route: /orders
 title: Orders
+page_type: record_list
+layout: full-width
 sections:
   - id: orders-list
     primitive: DataTable
     config:
+      columns:
+        - key: order_id
+          label: Order
       api_endpoint: /api/modules/orders/list_orders
   - id: create-order
     primitive: Form
     config:
+      fields:
+        - name: customer_name
+          label: Customer
+          type: text
       submit_action:
-        api_endpoint: /api/modules/orders/create_order
+        label: Create Order
+        action_type: submit
+        href: /api/modules/orders/create_order
 """,
         "data/contract.json": json.dumps(
             {
@@ -156,20 +168,21 @@ def _generated_monetized_saas_files() -> dict[str, str]:
         ),
         "ui/pages/reports.yaml": textwrap.dedent(
             """
-            schema_version: mozaiks.page.v1
+            schema_version: mozaiks.app_page.v1
             name: reports
             route: /reports
             title: Reports
-            page_type: dashboard
-            layout: stack
+            page_type: record_list
+            layout: full-width
             sections:
               - id: generate-report
                 primitive: ActionButton
                 title: Generate Report
                 config:
-                  label: Generate
-                  api_endpoint: /api/modules/reports/generate_report
-                  method: POST
+                  actions:
+                    - label: Generate
+                      action_type: submit
+                      href: /api/modules/reports/generate_report
             """
         ),
         "config/subscriptions.yaml": textwrap.dedent(
@@ -290,19 +303,20 @@ def _generated_workflow_agent_files() -> dict[str, str]:
         ),
         "ui/pages/research.yaml": textwrap.dedent(
             """
-            schema_version: mozaiks.page.v1
+            schema_version: mozaiks.app_page.v1
             name: research
             route: /research
             title: Research
-            page_type: dashboard
-            layout: stack
+            page_type: workflow_board
+            layout: full-width
             sections:
               - id: summary
                 primitive: ActionButton
                 config:
-                  label: Summarize
-                  api_endpoint: /api/modules/research/summarize_source
-                  method: POST
+                  actions:
+                    - label: Summarize
+                      action_type: submit
+                      href: /api/modules/research/summarize_source
             """
         ),
         "modules/research/module.yaml": textwrap.dedent(

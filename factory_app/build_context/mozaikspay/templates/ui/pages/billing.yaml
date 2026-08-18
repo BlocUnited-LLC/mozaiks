@@ -1,9 +1,9 @@
-schema_version: mozaiks.page.v1
+schema_version: mozaiks.app_page.v1
 name: Billing
 route: /billing
 title: Billing
 page_type: analytics_dashboard
-layout: stack
+layout: full-width
 shell_mode: workspace
 navigation:
   id: billing
@@ -14,31 +14,28 @@ navigation:
   visible: true
 sections:
   - id: billing-status
-    primitive: SummaryStrip
+    primitive: DataTable
     title: Current Plan
     config:
       api_endpoint: /api/modules/billing_portal/get_subscription_status
-      method: POST
-      fields:
-        - plan_name
-        - status
-        - starts_at
-        - expires_at
+      columns:
+        - key: plan_name
+          label: Plan
+        - key: status
+          label: Status
   - id: billing-catalog
     primitive: PricingCatalog
     title: Plans and Token Packs
     config:
       api_endpoint: /api/modules/billing_portal/list_plans
-      method: POST
-      fields:
-        - plans
-        - top_up_products
+      plans_key: plans
+      add_ons_key: top_up_products
   - id: manage-billing
     primitive: ActionButton
     title: Manage Billing
     config:
-      label: Manage Billing
-      api_endpoint: /api/modules/billing_portal/open_billing_portal
-      method: POST
-      response_url_field: portal_url
+      actions:
+        - label: Manage Billing
+          action_type: submit
+          href: /api/modules/billing_portal/open_billing_portal
 roles: null

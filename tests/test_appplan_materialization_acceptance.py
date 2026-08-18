@@ -505,9 +505,12 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                 {
                     "filename": "ui/pages/reports.yaml",
                     "content": (
+                        "schema_version: mozaiks.app_page.v1\n"
                         "name: Reports\n"
                         "route: /reports\n"
                         "title: Reports\n"
+                        "page_type: record_list\n"
+                        "layout: full-width\n"
                         "sections:\n"
                         "  - id: report-table\n"
                         "    primitive: DataTable\n"
@@ -525,7 +528,6 @@ def _task_output(*, task_id: str, task_type: str, task: dict[str, Any]) -> dict[
                         "        - label: Export Report\n"
                         "          action_type: event\n"
                         "          event_type: ui.modal.open\n"
-                        "          entitlement_gate: reports.export\n"
                     ),
                 },
             ],

@@ -212,27 +212,42 @@ class SubscriptionStatus:
     pass
 """,
         "ui/pages/billing.yaml": """
+schema_version: mozaiks.app_page.v1
 name: billing
 route: /billing
 title: Billing
+page_type: record_list
+layout: full-width
 sections:
   - id: subscription-status
     primitive: DataTable
     config:
+      columns:
+        - key: id
+          label: ID
       api_endpoint: /api/modules/billing_portal/get_subscription_status
   - id: billing-portal
     primitive: DataTable
     config:
+      columns:
+        - key: id
+          label: ID
       api_endpoint: /api/modules/billing_portal/open_billing_portal
 """,
         "ui/pages/usage.yaml": """
+schema_version: mozaiks.app_page.v1
 name: usage
 route: /usage
 title: Usage
+page_type: record_list
+layout: full-width
 sections:
   - id: usage-status
     primitive: DataTable
     config:
+      columns:
+        - key: id
+          label: ID
       api_endpoint: /api/modules/billing_portal/get_usage_status
 """,
     }
@@ -1040,14 +1055,19 @@ def test_scan_page_schema_structure_rejects_unknown_primitive() -> None:
             "ui/pages/orders.yaml": """
 name: Orders
 route: /orders
+title: Orders
+schema_version: mozaiks.app_page.v1
+page_type: record_list
+layout: full-width
 sections:
   - id: orders-table
     primitive: LegacyGridWidget
+    config: {}
 """,
         }
     )
 
-    assert any("primitive 'LegacyGridWidget' is not a canonical section primitive" in e for e in errors)
+    assert any("page_schema.value_error" in e for e in errors)
 
 
 def test_scan_page_schema_structure_accepts_canonical_primitives() -> None:
@@ -1057,15 +1077,34 @@ def test_scan_page_schema_structure_accepts_canonical_primitives() -> None:
             "ui/pages/dashboard.yaml": """
 name: Dashboard
 route: /dashboard
+title: Dashboard
+schema_version: mozaiks.app_page.v1
+page_type: record_list
+layout: full-width
 sections:
   - id: header
     primitive: PageHeader
+    config:
+      title: Dashboard
   - id: summary
     primitive: SummaryStrip
+    config:
+      items:
+        - label: Total
+          value: 1
   - id: table
     primitive: DataTable
+    config:
+      columns:
+        - key: id
+          label: ID
   - id: form
     primitive: Form
+    config:
+      fields:
+        - name: name
+          label: Name
+          type: text
 """,
         }
     )
@@ -1083,8 +1122,8 @@ sections: []
         }
     )
 
-    assert any("missing required field 'name'" in e for e in errors)
-    assert any("missing required field 'route'" in e for e in errors)
+    assert any("$.name: page_schema.missing" in e for e in errors)
+    assert any("$.route: page_schema.missing" in e for e in errors)
 
 
 def test_scan_page_schema_structure_skips_custom_pages() -> None:
@@ -1311,15 +1350,20 @@ def test_scan_page_schema_structure_rejects_unknown_page_type() -> None:
             "ui/pages/dashboard.yaml": """
 name: Dashboard
 route: /dashboard
+title: Dashboard
+schema_version: mozaiks.app_page.v1
 page_type: magic_dashboard
+layout: full-width
 sections:
   - id: header
     primitive: PageHeader
+    config:
+      title: Dashboard
 """,
         }
     )
 
-    assert any("page_type 'magic_dashboard' is not a canonical page type" in e for e in errors)
+    assert any("$.page_type: page_schema.literal_error" in e for e in errors)
 
 
 def test_scan_page_schema_structure_accepts_canonical_page_types() -> None:
@@ -1330,10 +1374,15 @@ def test_scan_page_schema_structure_accepts_canonical_page_types() -> None:
                 f"ui/pages/{page_type}.yaml": f"""
 name: Page
 route: /{page_type}
+title: Page
+schema_version: mozaiks.app_page.v1
 page_type: {page_type}
+layout: full-width
 sections:
   - id: s1
-    primitive: DataTable
+    primitive: PageHeader
+    config:
+      title: Page
 """,
             }
         )
@@ -1342,21 +1391,25 @@ sections:
         )
 
 
-def test_scan_page_schema_structure_accepts_missing_page_type() -> None:
-    # page_type is optional — absence must not be an error.
+def test_scan_page_schema_structure_rejects_missing_page_type() -> None:
     errors = scan_generated_bundle(
         {
             "ui/pages/orders.yaml": """
+schema_version: mozaiks.app_page.v1
 name: Orders
 route: /orders
+title: Orders
+layout: full-width
 sections:
   - id: table
-    primitive: DataTable
+    primitive: PageHeader
+    config:
+      title: Orders
 """,
         }
     )
 
-    assert not any("page_type" in e for e in errors)
+    assert any("$.page_type: page_schema.missing" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -1666,13 +1719,19 @@ reactions:
       notification_id: order_receipt
 """,
         "ui/pages/orders.yaml": """
+schema_version: mozaiks.app_page.v1
 name: Orders
 route: /orders
+title: Orders
 page_type: record_list
+layout: full-width
 sections:
   - id: orders-table
     primitive: DataTable
     config:
+      columns:
+        - key: id
+          label: ID
       api_endpoint: /api/modules/orders/list_orders
 """,
     }
@@ -1698,7 +1757,7 @@ def test_mutation_unknown_page_type_caught_early() -> None:
         "page_type: record_list", "page_type: unknown_layout"
     )
     errors = scan_generated_bundle(bundle)
-    assert any("page_type 'unknown_layout' is not a canonical page type" in e for e in errors)
+    assert any("$.page_type: page_schema.literal_error" in e for e in errors)
 
 
 def test_mutation_orphaned_reaction_event_caught_early() -> None:
