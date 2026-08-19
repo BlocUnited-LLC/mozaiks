@@ -1829,7 +1829,6 @@ async def get_profile_panels(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=list(principal.scopes) if principal else None,
                     authority=ModuleDispatchAuthority(
                         kind="authenticated_user",
                         permission_mode="enforce",
@@ -1939,7 +1938,6 @@ async def get_profile_tabs(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=list(principal.scopes) if principal else None,
                     authority=ModuleDispatchAuthority(
                         kind="authenticated_user",
                         permission_mode="enforce",
@@ -2081,7 +2079,6 @@ async def get_profile_pages(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=list(principal.scopes) if principal else None,
                     authority=ModuleDispatchAuthority(
                         kind="authenticated_user",
                         permission_mode="enforce",
@@ -2238,7 +2235,6 @@ async def get_current_user_relationships(
                 tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                 auth_token=None,
                 correlation_id=None,
-                granted_permissions=list(principal.scopes) if principal else None,
                 authority=ModuleDispatchAuthority(
                     kind="authenticated_user",
                     permission_mode="enforce",

@@ -12,6 +12,30 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- **Module dispatch requires explicit authority**: `ModuleRequest.authority` is
+  now a required keyword-only `ModuleDispatchAuthority`, and the
+  `granted_permissions` field is removed along with the
+  `from_granted_permissions()` translation shim and both compatibility
+  authority kinds. Permission and entitlement enforcement key exclusively on
+  `authority.permission_mode` and `authority.permissions`; a missing principal
+  or empty permission list now denies closed instead of silently bypassing.
+  Trusted bypass is restricted to a closed, constructor-validated set of
+  server-owned kinds (`framework_internal`, `operator_internal`,
+  contract-declared `event_reaction`, auth-disabled `local_development`);
+  `local_development` cannot be constructed while authentication is enabled or
+  the deployment environment is production. New `workflow_user_authority()` and
+  `event_reaction_authority()` helpers are the canonical producers for workflow
+  and event-reaction dispatch. `ModuleActionDispatchRequest.authority` is also
+  required (keyword-only) and the facade's separate permission-list field is
+  deleted: the caller's enforce-mode authority carries its permissions and is
+  passed to `ModuleExecutor` exactly as supplied. `ModuleContext` receives
+  `dispatch_authority`, `dispatch_provenance`, and `dispatch_audit` on every
+  execution path, including caller-supplied contexts. Downstream apps
+  constructing `ModuleRequest` or `ModuleActionDispatchRequest` directly must
+  supply an explicit authority when they adopt this version.
+
 ### Removed
 
 - **`AppPageSchema.extensions` / `AppPageSlotExtension`**: the page slot-override

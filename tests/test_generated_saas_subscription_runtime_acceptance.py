@@ -25,6 +25,7 @@ from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
 from mozaiksai.hosts.routers.billing import router as billing_router
+from tests.module_authority_test_helpers import enforce_authority
 
 
 class _Cursor:
@@ -401,7 +402,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert denied.success is False
@@ -451,7 +452,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert granted.success is True
@@ -533,7 +534,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert cancelled.success is False
@@ -606,7 +607,7 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert denied_before_fulfillment.success is False
@@ -652,7 +653,7 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert granted_after_fulfillment.success is True

@@ -100,7 +100,13 @@ async def test_dispatch_module_action_preserves_scope_metadata_and_permissions()
                 auth_token="token-1",
                 correlation_id="corr-1",
             ),
-            granted_permissions=["orders.read"],
+            authority=ModuleDispatchAuthority(
+                kind="app_internal",
+                permission_mode="enforce",
+                reason="app-local dispatch",
+                actor_id="user-1",
+                permissions=("orders.read",),
+            ),
         ),
         app=_app_with_executor(),
     )
@@ -134,7 +140,12 @@ async def test_dispatch_module_action_preserves_permission_enforcement() -> None
             module="orders",
             action="restricted",
             scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
-            granted_permissions=[],
+            authority=ModuleDispatchAuthority(
+                kind="app_internal",
+                permission_mode="enforce",
+                reason="app-local dispatch",
+                actor_id="user-1",
+            ),
         ),
         app=_app_with_executor(),
     )
@@ -171,13 +182,12 @@ async def test_dispatch_module_action_accepts_workflow_authority_and_provenance(
                 workspace_id="workspace-1",
             ),
             metadata=ModuleDispatchMetadata(correlation_id="corr-workflow"),
-            granted_permissions=["orders.read"],
             authority=ModuleDispatchAuthority(
                 kind="workflow",
                 permission_mode="enforce",
                 reason="campaign asset workflow dispatch",
                 actor_id="workflow-user",
-                permissions=("ignored.by.facade",),
+                permissions=("orders.read",),
             ),
             provenance=ModuleDispatchProvenance(
                 surface="workflow_tool",
@@ -219,7 +229,6 @@ async def test_dispatch_module_action_workflow_authority_still_requires_permissi
             module="orders",
             action="restricted",
             scope=ModuleDispatchScope(app_id="app-1", user_id="workflow-user"),
-            granted_permissions=[],
             authority=ModuleDispatchAuthority(
                 kind="workflow",
                 permission_mode="enforce",
@@ -239,16 +248,13 @@ async def test_dispatch_module_action_workflow_authority_still_requires_permissi
 
 
 @pytest.mark.asyncio
-async def test_dispatch_module_action_does_not_expose_implicit_trusted_bypass() -> None:
-    request = ModuleActionDispatchRequest(
-        module="orders",
-        action="restricted",
-        scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
-        granted_permissions=None,  # type: ignore[arg-type]
-    )
-
-    with pytest.raises(ValueError, match="Trusted/internal authority"):
-        await dispatch_module_action(request, app=_app_with_executor())
+async def test_dispatch_module_action_requires_explicit_authority() -> None:
+    with pytest.raises(TypeError):
+        ModuleActionDispatchRequest(  # type: ignore[call-arg]
+            module="orders",
+            action="restricted",
+            scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
+        )
 
 
 @pytest.mark.asyncio
@@ -256,23 +262,17 @@ async def test_dispatch_module_action_does_not_expose_implicit_trusted_bypass() 
     "authority",
     [
         ModuleDispatchAuthority(
-            kind="workflow",
-            permission_mode="trusted_bypass",
-            reason="not allowed",
-        ),
-        ModuleDispatchAuthority(
-            kind="legacy_trusted",
-            permission_mode="trusted_bypass",
-            reason="not allowed",
-            legacy_granted_permissions_none=True,
-        ),
-        ModuleDispatchAuthority(
-            kind="legacy_permissions",
+            kind="framework_internal",
             permission_mode="enforce",
             reason="not allowed",
         ),
         ModuleDispatchAuthority(
-            kind="framework_internal",
+            kind="operator_internal",
+            permission_mode="enforce",
+            reason="not allowed",
+        ),
+        ModuleDispatchAuthority(
+            kind="event_reaction",
             permission_mode="enforce",
             reason="not allowed",
         ),
@@ -283,9 +283,45 @@ async def test_dispatch_module_action_rejects_public_unsafe_authority(authority)
         module="orders",
         action="restricted",
         scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
-        granted_permissions=["orders.read"],
         authority=authority,
     )
 
     with pytest.raises(ValueError):
         await dispatch_module_action(request, app=_app_with_executor())
+
+
+@pytest.mark.asyncio
+async def test_dispatch_module_action_preserves_supplied_authority_exactly(monkeypatch) -> None:
+    policy_inputs = []
+
+    async def before_module_execution(policy_input):
+        policy_inputs.append(policy_input)
+        return True
+
+    registry = PlatformHookRegistry()
+    registry._register_bundle(
+        PlatformExtensionBundle(before_module_execution=before_module_execution)
+    )
+    monkeypatch.setattr(PlatformHookRegistry, "_instance", registry)
+
+    supplied = ModuleDispatchAuthority(
+        kind="authenticated_user",
+        permission_mode="enforce",
+        reason="caller-stated reason",
+        actor_id="user-42",
+        permissions=("orders.read", "orders.write"),
+    )
+    result = await dispatch_module_action(
+        ModuleActionDispatchRequest(
+            module="orders",
+            action="restricted",
+            scope=ModuleDispatchScope(app_id="app-1", user_id="user-42"),
+            authority=supplied,
+        ),
+        app=_app_with_executor(),
+    )
+
+    assert result.success is True
+    # The facade passes the caller's authority through unchanged — same object,
+    # no rebuilt kind/reason/actor/permissions.
+    assert policy_inputs[0].authority is supplied

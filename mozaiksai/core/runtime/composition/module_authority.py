@@ -14,11 +14,21 @@ ModuleDispatchAuthorityKind = Literal[
     "event_reaction",
     "app_internal",
     "operator_internal",
-    "legacy_permissions",
-    "legacy_trusted",
 ]
 
 ModuleDispatchPermissionMode = Literal["enforce", "trusted_bypass"]
+
+# Only server-owned dispatch reasons may ever bypass permission and
+# entitlement enforcement. Bypass is a property of how the authority was
+# constructed, never of a missing principal or an empty permission list.
+TRUSTED_BYPASS_KINDS: frozenset[str] = frozenset(
+    {
+        "framework_internal",
+        "operator_internal",
+        "event_reaction",
+        "local_development",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -34,34 +44,97 @@ class ModuleDispatchAuthority:
     reason: str
     actor_id: str | None = None
     permissions: tuple[str, ...] = ()
-    legacy_granted_permissions_none: bool = False
 
-    @classmethod
-    def from_granted_permissions(
-        cls,
-        granted_permissions: list[str] | None,
-        *,
-        actor_id: str | None = None,
-    ) -> ModuleDispatchAuthority:
-        """Translate existing ModuleRequest permission semantics into metadata."""
-
-        if granted_permissions is None:
-            return cls(
-                kind="legacy_trusted",
-                permission_mode="trusted_bypass",
-                reason="compatibility trusted dispatch",
-                actor_id=actor_id,
-                permissions=(),
-                legacy_granted_permissions_none=True,
+    def __post_init__(self) -> None:
+        if self.permission_mode == "trusted_bypass" and self.kind not in TRUSTED_BYPASS_KINDS:
+            raise ValueError(
+                f"Authority kind {self.kind!r} may not use trusted_bypass; "
+                f"only {sorted(TRUSTED_BYPASS_KINDS)} qualify."
             )
-        return cls(
-            kind="legacy_permissions",
-            permission_mode="enforce",
-            reason="compatibility concrete permissions dispatch",
-            actor_id=actor_id,
-            permissions=tuple(granted_permissions),
-            legacy_granted_permissions_none=False,
+        if self.kind == "workflow" and self.permission_mode != "enforce":
+            raise ValueError("workflow dispatch authority must always enforce permissions")
+        if self.kind == "local_development" and not _local_development_allowed():
+            raise ValueError(
+                "local_development dispatch authority is not available when "
+                "authentication is enabled or the deployment environment is production"
+            )
+
+
+def _local_development_allowed() -> bool:
+    """local_development authority exists only while runtime auth is disabled
+    and the deployment environment is not production."""
+
+    import os
+
+    from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+
+    if is_auth_enabled():
+        return False
+    env_name = os.getenv("ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
+    return env_name != "production"
+
+
+def workflow_user_authority(
+    *,
+    actor_id: str | None,
+    permissions: tuple[str, ...] = (),
+    workflow_name: str | None = None,
+) -> ModuleDispatchAuthority:
+    """Authority for a user-facing workflow tool dispatching a module action.
+
+    Identity and scopes must come from the server-side session principal,
+    never from workflow context_variables or model output. Workflow dispatch
+    always enforces the action's declared permissions and entitlement gate.
+    """
+
+    return ModuleDispatchAuthority(
+        kind="workflow",
+        permission_mode="enforce",
+        reason=f"workflow tool dispatch: {workflow_name or 'unknown'}",
+        actor_id=actor_id,
+        permissions=tuple(permissions),
+    )
+
+
+def event_reaction_authority(
+    *,
+    event_id: str,
+    event_type: str,
+    event_producer: str,
+    contract_declares_trusted: bool = False,
+    actor_id: str | None = None,
+) -> tuple[ModuleDispatchAuthority, ModuleDispatchProvenance]:
+    """Authority for an event reaction dispatching a module action.
+
+    Reactions enforce by default. A reaction may run trusted only when the
+    consuming module contract explicitly declares it trusted AND full event
+    provenance is supplied. Being an internal call is never sufficient.
+    """
+
+    if not (event_id and event_type and event_producer):
+        raise ValueError(
+            "event_reaction dispatch requires event_id, event_type, and event_producer provenance"
         )
+    mode: ModuleDispatchPermissionMode = (
+        "trusted_bypass" if contract_declares_trusted else "enforce"
+    )
+    authority = ModuleDispatchAuthority(
+        kind="event_reaction",
+        permission_mode=mode,
+        reason=(
+            "contract-declared trusted event reaction"
+            if contract_declares_trusted
+            else "event reaction dispatch"
+        ),
+        actor_id=actor_id,
+    )
+    provenance = ModuleDispatchProvenance(
+        surface="event_reaction",
+        event_id=event_id,
+        event_type=event_type,
+        event_producer=event_producer,
+    )
+    return authority, provenance
 
 
 @dataclass(frozen=True)
@@ -84,7 +157,7 @@ class ModulePermissionCheck:
     """Result of framework module permission enforcement."""
 
     checked: bool
-    granted_permissions: tuple[str, ...] = ()
+    granted: tuple[str, ...] = ()
     required_permissions: tuple[str, ...] = ()
     missing_permissions: tuple[str, ...] = ()
 
@@ -171,7 +244,7 @@ class ModuleDispatchAudit:
             "permission_mode": self.permission_mode,
             "permission_check": {
                 "checked": self.permission_check.checked,
-                "granted_permissions": list(self.permission_check.granted_permissions),
+                "granted": list(self.permission_check.granted),
                 "required_permissions": list(self.permission_check.required_permissions),
                 "missing_permissions": list(self.permission_check.missing_permissions),
                 "allowed": self.permission_check.allowed,

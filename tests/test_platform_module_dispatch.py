@@ -36,9 +36,6 @@ class _OrdersHandler:
         return {
             "authority_kind": authority.kind if authority else None,
             "permission_mode": authority.permission_mode if authority else None,
-            "legacy_granted_permissions_none": (
-                authority.legacy_granted_permissions_none if authority else None
-            ),
             "actor_id": authority.actor_id if authority else None,
             "permissions": list(authority.permissions) if authority else None,
             "surface": provenance.surface if provenance else None,
@@ -254,7 +251,6 @@ def test_auth_disabled_module_dispatch_uses_local_development_authority(monkeypa
     assert resp.json() == {
         "authority_kind": "local_development",
         "permission_mode": "trusted_bypass",
-        "legacy_granted_permissions_none": True,
         "actor_id": "anonymous",
         "permissions": [],
         "surface": "http_module_dispatch",
@@ -416,7 +412,6 @@ def test_authenticated_module_dispatch_uses_authenticated_user_authority(monkeyp
     assert resp.json() == {
         "authority_kind": "authenticated_user",
         "permission_mode": "enforce",
-        "legacy_granted_permissions_none": False,
         "actor_id": "u1",
         "permissions": ["orders.read"],
         "surface": "http_module_dispatch",

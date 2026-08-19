@@ -8,6 +8,7 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.module_loader import ActionDef, ModuleLoader, ModuleLoadError
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
 
 def _write_canonical_module(
@@ -501,7 +502,7 @@ async def test_module_executor_dispatches_public_action_id_to_handler_method(tmp
             action="create",
             params={"title": "Draft"},
             app_id="app_1",
-            user_id="user_1",
+            user_id="user_1", authority=trusted_framework_authority(),
         )
     )
 
@@ -532,7 +533,7 @@ async def test_module_executor_wraps_handler_events_in_canonical_envelope(tmp_pa
             app_id="app_1",
             user_id="user_1",
             tenant_id="tenant_1",
-            correlation_id="corr_1",
+            correlation_id="corr_1", authority=trusted_framework_authority(),
         )
     )
 
@@ -587,7 +588,7 @@ class TasksModule:
             action="create",
             params={"title": "Draft"},
             app_id="app_1",
-            user_id="user_1",
+            user_id="user_1", authority=trusted_framework_authority(),
         )
     )
 
@@ -705,7 +706,7 @@ class TasksModule:
     )
 
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")
+        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1", authority=trusted_framework_authority())
     )
 
     assert result.success is True
@@ -729,7 +730,7 @@ class TasksModule:
     executor.register(loaded.name, loaded.handler, action_method_map=loaded.action_method_map)
 
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")
+        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1", authority=trusted_framework_authority())
     )
 
     assert result.success is True
@@ -754,7 +755,7 @@ async def test_module_executor_enforces_action_permissions(tmp_path: Path) -> No
             action="create",
             params={"title": "x"},
             app_id="app_1",
-            granted_permissions=["tasks.write"],
+            authority=enforce_authority("tasks.write"),
         )
     )
     assert result_ok.success is True
@@ -766,7 +767,7 @@ async def test_module_executor_enforces_action_permissions(tmp_path: Path) -> No
             action="create",
             params={"title": "x"},
             app_id="app_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert result_denied.success is False
@@ -775,7 +776,11 @@ async def test_module_executor_enforces_action_permissions(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_module_executor_bypasses_enforcement_when_granted_permissions_is_none(tmp_path: Path) -> None:
+async def test_module_executor_has_no_implicit_bypass_path(tmp_path: Path) -> None:
+    """Bypass cannot exist by omission: a request without an explicit authority
+    is unconstructible, and an enforce-mode authority with no permissions is
+    denied. Only an explicitly constructed server-owned trusted authority skips
+    enforcement."""
     loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
     executor = ModuleExecutor()
     executor.register(
@@ -785,11 +790,34 @@ async def test_module_executor_bypasses_enforcement_when_granted_permissions_is_
         action_permissions=loaded.action_permissions_map,
     )
 
-    # granted_permissions=None → trusted call, bypasses enforcement
-    result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")
+    # Missing authority fails at construction — there is no default.
+    with pytest.raises(TypeError):
+        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")  # type: ignore[call-arg]
+
+    # An empty enforce-mode permission set is a denial, not a trusted call.
+    denied = await executor.execute(
+        ModuleRequest(
+            module="tasks",
+            action="create",
+            params={"title": "x"},
+            app_id="app_1",
+            authority=enforce_authority(),
+        )
     )
-    assert result.success is True
+    assert denied.success is False
+    assert denied.error_code == "PERMISSION_DENIED"
+
+    # Only an explicit server-owned trusted authority bypasses enforcement.
+    trusted = await executor.execute(
+        ModuleRequest(
+            module="tasks",
+            action="create",
+            params={"title": "x"},
+            app_id="app_1",
+            authority=trusted_framework_authority(),
+        )
+    )
+    assert trusted.success is True
 
 
 def test_module_definition_action_permissions_map(tmp_path: Path) -> None:
@@ -820,7 +848,7 @@ async def test_module_executor_rejects_invalid_input(tmp_path: Path) -> None:
 
     # Missing required 'title' → INVALID_PARAMS
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", params={}, app_id="app_1")
+        ModuleRequest(module="tasks", action="create", params={}, app_id="app_1", authority=trusted_framework_authority())
     )
     assert result.success is False
     assert result.error_code == "INVALID_PARAMS"
@@ -839,7 +867,7 @@ async def test_module_executor_accepts_valid_input(tmp_path: Path) -> None:
     )
 
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", params={"title": "My Task"}, app_id="app_1")
+        ModuleRequest(module="tasks", action="create", params={"title": "My Task"}, app_id="app_1", authority=trusted_framework_authority())
     )
     assert result.success is True
 
@@ -852,7 +880,7 @@ async def test_module_executor_skips_validation_when_no_schema(tmp_path: Path) -
     executor.register(loaded.name, loaded.handler, action_method_map=loaded.action_method_map)
 
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", params={}, app_id="app_1")
+        ModuleRequest(module="tasks", action="create", params={}, app_id="app_1", authority=trusted_framework_authority())
     )
     # No schema → dispatched even with missing params (handler gets TypeError → INVALID_PARAMS from existing guard)
     assert result.error_code in (None, "INVALID_PARAMS")  # either path is acceptable without schema

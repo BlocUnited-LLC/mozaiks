@@ -56,23 +56,6 @@ AGENT_LOCAL_CONFIG_PATHS = {
     ".codex/settings.local.json",
 }
 
-GRANTED_PERMISSIONS_NONE_ALLOWLIST = {
-    "ARCHITECTURAL_INVARIANTS.md",
-    "CHANGELOG.md",
-    "docs/architecture/app/tenant-auth-and-scope.md",
-    "docs/guides/adding-modules/01-overview.md",
-    "mozaiksai/core/runtime/composition/module_authority.py",
-    "mozaiksai/core/runtime/composition/module_dispatch.py",
-    "mozaiksai/hosts/routers/modules.py",
-    "scripts/governance_guardrails.py",
-    "tests/test_governance_guardrails.py",
-    "tests/test_module_action_dispatch_public_api.py",
-    "tests/test_module_dispatch_authority_policy.py",
-    "tests/test_module_executor_dispatch.py",
-    "tests/test_module_executor_permission_enforcement.py",
-    "tests/test_module_loader_contracts.py",
-}
-
 # Directories that are private by default (OSS_PUBLICATION_POLICY.md §Learned-Artifact Quarantine).
 # Finding any data file under these paths in OSS source is an error; the
 # *mechanism* (e.g. an eval runner script) may be public, but BlocUnited eval
@@ -141,7 +124,7 @@ REVIEW_MARKERS = (
     "governance_review:",
 )
 
-GRANTED_PERMISSIONS_NONE_RE = re.compile(r"\bgranted_permissions\s*=\s*None\b")
+GRANTED_PERMISSIONS_TOKEN_RE = re.compile(r"\bgranted_permissions\b")
 PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 PROVIDER_SECRET_RE = re.compile(
     r"\b(?:sk_live|rk_live|whsec|payment_provider_(?:live|test)|stripe_(?:live|test))_[A-Za-z0-9]{10,}\b"
@@ -313,18 +296,21 @@ def _scan_file(path: Path, repo_root: Path) -> tuple[list[GovernanceFinding], li
             )
         )
 
-    if GRANTED_PERMISSIONS_NONE_RE.search(text) and relative not in GRANTED_PERMISSIONS_NONE_ALLOWLIST:
-        match = GRANTED_PERMISSIONS_NONE_RE.search(text)
-        assert match is not None
-        errors.append(
-            GovernanceFinding(
-                severity="error",
-                code="authority_bypass_not_reviewed",
-                path=relative,
-                line=_line_for(text, match),
-                message="new granted_permissions=None usage requires explicit authority review",
+    if relative.startswith("mozaiksai/"):
+        match = GRANTED_PERMISSIONS_TOKEN_RE.search(text)
+        if match is not None:
+            errors.append(
+                GovernanceFinding(
+                    severity="error",
+                    code="authority_bypass_not_reviewed",
+                    path=relative,
+                    line=_line_for(text, match),
+                    message=(
+                        "granted_permissions is a removed dispatch contract; construct an "
+                        "explicit ModuleDispatchAuthority instead"
+                    ),
+                )
             )
-        )
 
     if _is_public_artifact(relative):
         for pattern, code in (

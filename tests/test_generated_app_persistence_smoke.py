@@ -17,6 +17,7 @@ from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
     load_data_migrations,
 )
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 
 class FakePersistenceCollection:
@@ -647,11 +648,11 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
             app_id="app_a",
             tenant_id="tenant_1",
             user_id="user_1",
-            params={"name": "Launch Plan", "project_id": "project_1"},
+            params={"name": "Launch Plan", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={}, authority=trusted_framework_authority())
     )
     created_task = await executor.execute(
         ModuleRequest(
@@ -659,14 +660,14 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
             action="create_task",
             app_id="app_a",
             user_id="user_1",
-            params={"title": "Draft scope", "task_id": "task_1", "project_id": "project_1"},
+            params={"title": "Draft scope", "task_id": "task_1", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_tasks = await executor.execute(
-        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"})
+        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"}, authority=trusted_framework_authority())
     )
     app_b_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={}, authority=trusted_framework_authority())
     )
 
     assert created_project.success is True
@@ -685,5 +686,5 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
     assert app_b_projects.data == {"items": [], "count": 0}
 
     assert any(context.app_id == "app_a" for context in FakePersistenceContext.constructed)
-    assert not hasattr(module_executor_module.ModuleRequest(module="x", action="y"), "db")
+    assert not hasattr(module_executor_module.ModuleRequest(module="x", action="y", authority=trusted_framework_authority()), "db")
 

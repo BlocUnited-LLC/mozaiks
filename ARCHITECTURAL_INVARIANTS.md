@@ -56,11 +56,11 @@ Automated guardrail: workflow, prompt, refinement, and intelligence surfaces pro
 
 Protects: permission boundaries while production authority is designed separately.
 
-Current enforcement: existing `granted_permissions=None` call sites are limited and tested.
+Current enforcement: every `ModuleRequest` carries a required, explicitly constructed `ModuleDispatchAuthority`. Trusted bypass exists only for a closed set of server-owned authority kinds and is validated at construction; it can never be obtained by omitting a principal or a permission list.
 
-Incomplete enforcement: a new caller could copy the pattern and obtain trusted internal execution by omission.
+Incomplete enforcement: a new caller could still construct a trusted server-owned authority kind outside its intended code path.
 
-Automated guardrail: governance CI rejects new `granted_permissions=None` source locations outside the explicit allowlist.
+Automated guardrail: governance CI rejects any reintroduction of the removed permission-list dispatch token in `mozaiksai/` source.
 
 ## 7. Mozaiks App Dogfoods Public Framework Contracts
 

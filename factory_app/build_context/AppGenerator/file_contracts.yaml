@@ -117,7 +117,7 @@ task_contracts:
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
       - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use internal/admin_internal for actions that require an authenticated token when AUTH_ENABLED=true.
-      - Public/public_readonly actions are only anonymous entrypoints; they still receive a concrete granted_permissions list and still run actions[].permissions and actions[].entitlement_gate checks.
+      - Public/public_readonly actions are only anonymous entrypoints; they still dispatch with an enforce-mode authority carrying a concrete (possibly empty) permission set and still run actions[].permissions and actions[].entitlement_gate checks.
       - External HTTP dispatch and internal runtime dispatch are separate paths. Internal event reactions may use api_surface=internal and permissions=[] because the event bus is the authorization boundary; do not mark internal reaction handlers public.
       - contracts/reactions.yaml target.kind may be handler, capability, notification, or service_adapter. service_adapter targets must declare target.adapter and target.adapter_method, point only to app-owned services/adapters/* support code, and must not be used to bypass facade modules, module state ownership, or managed-provider boundaries.
       - JS stubs are allowed only for declared customization surfaces.

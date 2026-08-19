@@ -8,6 +8,7 @@ import pytest
 from mozaiksai.core.metrics import AppMetrics, normalize_metric_event_name
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 
 class FakeCollection:
@@ -273,7 +274,7 @@ async def test_module_executor_injects_module_and_action_into_context() -> None:
     executor = ModuleExecutor()
     executor.register("analytics", Handler())
 
-    result = await executor.execute(ModuleRequest(module="analytics", action="run", app_id="app-1"))
+    result = await executor.execute(ModuleRequest(module="analytics", action="run", app_id="app-1", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data == {"module_id": "analytics", "action_id": "run"}

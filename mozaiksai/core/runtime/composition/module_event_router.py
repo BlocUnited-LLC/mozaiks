@@ -526,7 +526,7 @@ class ModuleEventRouter:
         authority = envelope.get("authority") if isinstance(envelope.get("authority"), dict) else {}
         granted = [
             str(permission).strip()
-            for permission in (authority.get("granted_permissions") if isinstance(authority, dict) else []) or []
+            for permission in (authority.get("permissions") if isinstance(authority, dict) else []) or []
             if str(permission).strip()
         ]
         missing = sorted(set(required) - set(granted))

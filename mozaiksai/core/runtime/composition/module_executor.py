@@ -125,11 +125,11 @@ class ModuleRequest:
     auth_token: str | None = None
     correlation_id: str | None = None
 
-    # Permission ids held by the caller. When None, enforcement is skipped
-    # (trusted internal / AI workflow call). When set (even to []), the executor
-    # checks that all action-declared permissions are present.
-    granted_permissions: list[str] | None = None
-    authority: ModuleDispatchAuthority | None = None
+    # Explicit framework dispatch authority. Required: every caller must state
+    # who is dispatching and whether the action's declared permissions and
+    # entitlement gate are enforced. Trusted bypass is a property of the
+    # authority's construction, never of a missing principal or empty list.
+    authority: ModuleDispatchAuthority = field(kw_only=True)
     provenance: ModuleDispatchProvenance | None = None
 
 
@@ -258,7 +258,8 @@ class ModuleExecutor:
             settings:            Setting definitions from settings.yaml (list of setting dicts).
                                  Injected into ModuleContext.settings on every action call.
             action_permissions:  Maps action id -> list of required permission ids.
-                                 Used to enforce ModuleRequest.granted_permissions at dispatch time.
+                                 Enforced against ModuleRequest.authority.permissions
+                                 for every enforce-mode dispatch.
             action_schemas:      Maps action id -> {input: JSON Schema, output: JSON Schema}.
                                  Input validated before dispatch; output validated after (warn only).
             action_entitlements: Maps action id -> capability_id (or None).
@@ -307,14 +308,11 @@ class ModuleExecutor:
 
         Builds a ModuleContext from the request if one is not supplied.
         """
-        dispatch_authority = request.authority or ModuleDispatchAuthority.from_granted_permissions(
-            request.granted_permissions,
-            actor_id=request.user_id,
-        )
+        dispatch_authority = request.authority
         dispatch_provenance = request.provenance or ModuleDispatchProvenance(
             correlation_id=request.correlation_id,
         )
-        permission_check = self._build_permission_check(request)
+        permission_check = self._build_permission_check(request, dispatch_authority)
         entitlement_check = ModuleEntitlementCheck(checked=False, status="skipped")
         dispatch_audit = self._build_dispatch_audit(
             request,
@@ -366,9 +364,9 @@ class ModuleExecutor:
             )
 
         # Entitlement check — only when the action declares an entitlement_gate.
-        # Trusted internal/AI-workflow calls (granted_permissions is None) bypass
-        # both permission and entitlement checks.
-        if request.granted_permissions is not None:
+        # Enforce-mode dispatch always runs it; trusted_bypass authorities
+        # (closed server-owned kinds only) skip both checks.
+        if dispatch_authority.permission_mode == "enforce":
             capability_id = self._action_entitlements.get(request.module, {}).get(request.action)
             if capability_id:
                 ent_result = await self._entitlement_checker.check(
@@ -477,8 +475,8 @@ class ModuleExecutor:
                 action_id=request.action,
                 auth_token=request.auth_token,
                 permissions=(
-                    list(request.granted_permissions)
-                    if request.granted_permissions is not None
+                    list(dispatch_authority.permissions)
+                    if dispatch_authority.permission_mode == "enforce"
                     else None
                 ),
                 correlation_id=request.correlation_id,
@@ -489,6 +487,12 @@ class ModuleExecutor:
                 dispatch_provenance=dispatch_provenance,
                 dispatch_audit=dispatch_audit,
             )
+        else:
+            # A caller-supplied context still carries this dispatch's authority
+            # facts so ctx.dispatch_authority is present on every execution path.
+            context.dispatch_authority = dispatch_authority
+            context.dispatch_provenance = dispatch_provenance
+            context.dispatch_audit = dispatch_audit
 
         timeout = _action_timeout()
         try:
@@ -613,16 +617,20 @@ class ModuleExecutor:
     def can_handle(self, target: str) -> bool:
         return target in self._modules
 
-    def _build_permission_check(self, request: ModuleRequest) -> ModulePermissionCheck:
-        if request.granted_permissions is None:
+    def _build_permission_check(
+        self,
+        request: ModuleRequest,
+        authority: ModuleDispatchAuthority,
+    ) -> ModulePermissionCheck:
+        if authority.permission_mode == "trusted_bypass":
             return ModulePermissionCheck(checked=False)
         required = tuple(self._action_permissions.get(request.module, {}).get(request.action, []))
-        granted = tuple(request.granted_permissions)
+        granted = tuple(authority.permissions)
         granted_set = set(granted)
         missing = tuple(permission for permission in required if permission not in granted_set)
         return ModulePermissionCheck(
             checked=True,
-            granted_permissions=granted,
+            granted=granted,
             required_permissions=required,
             missing_permissions=missing,
         )
@@ -735,16 +743,11 @@ class ModuleExecutor:
                 "payload": payload,
                 "visibility": "internal",
             }
-            if request.granted_permissions is not None:
-                authority = request.authority or ModuleDispatchAuthority.from_granted_permissions(
-                    request.granted_permissions,
-                    actor_id=request.user_id,
-                )
-                envelope["authority"] = {
-                    "kind": authority.kind,
-                    "permission_mode": authority.permission_mode,
-                    "granted_permissions": list(request.granted_permissions),
-                }
+            envelope["authority"] = {
+                "kind": request.authority.kind,
+                "permission_mode": request.authority.permission_mode,
+                "permissions": list(request.authority.permissions),
+            }
             if request.user_id:
                 envelope["actor"] = {"type": "user", "id": request.user_id}
 

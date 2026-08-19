@@ -40,8 +40,11 @@ class ModuleActionDispatchRequest:
     params: dict[str, Any] = field(default_factory=dict)
     scope: ModuleDispatchScope = field(default_factory=lambda: ModuleDispatchScope(app_id="default"))
     metadata: ModuleDispatchMetadata = field(default_factory=ModuleDispatchMetadata)
-    granted_permissions: list[str] = field(default_factory=list)
-    authority: ModuleDispatchAuthority | None = None
+    # Explicit dispatch authority. Required: the caller states who is
+    # dispatching and which concrete permissions it holds. This facade accepts
+    # only enforce-mode, public-safe authorities and passes them through to
+    # ModuleExecutor unchanged.
+    authority: ModuleDispatchAuthority = field(kw_only=True)
     provenance: ModuleDispatchProvenance | None = None
 
 
@@ -65,13 +68,7 @@ def _validate_request(request: ModuleActionDispatchRequest) -> None:
         raise ValueError("Invalid action name")
     if not request.scope.app_id:
         raise ValueError("scope.app_id is required")
-    if request.granted_permissions is None:  # type: ignore[unreachable]
-        raise ValueError(
-            "granted_permissions must be a concrete list. Trusted/internal authority "
-            "dispatch is intentionally not exposed by this public facade."
-        )
-    if request.authority is not None:
-        _validate_public_authority(request.authority)
+    _validate_public_authority(request.authority)
 
 
 def _validate_public_authority(authority: ModuleDispatchAuthority) -> None:
@@ -80,14 +77,11 @@ def _validate_public_authority(authority: ModuleDispatchAuthority) -> None:
             "Public module dispatch authority must use permission_mode='enforce'. "
             "Trusted bypass is intentionally not exposed by this facade."
         )
-    if authority.legacy_granted_permissions_none:
-        raise ValueError("legacy_trusted dispatch cannot be requested through the public facade.")
     if authority.kind in {
-        "legacy_permissions",
-        "legacy_trusted",
         "framework_internal",
         "operator_internal",
         "local_development",
+        "event_reaction",
     }:
         raise ValueError(f"Authority kind {authority.kind!r} is not valid for public module dispatch.")
 
@@ -99,29 +93,14 @@ async def dispatch_module_action(
 ) -> ModuleResult:
     """Dispatch an app-local module action without exposing executor registries.
 
-    This facade preserves current permission and entitlement behavior for
-    concrete permission lists. It intentionally does not provide a public path
-    to the current ``granted_permissions=None`` trusted bypass.
+    The caller's explicit enforce-mode authority is validated and passed to
+    ModuleExecutor exactly as supplied. This facade provides no trusted bypass
+    path of any kind and never rewrites the caller's permission set.
     """
 
     _validate_request(request)
     executor = _resolve_module_executor(app)
-    granted_permissions = list(request.granted_permissions)
-    authority = request.authority or ModuleDispatchAuthority(
-        kind="app_internal",
-        permission_mode="enforce",
-        reason="public app-local module dispatch facade",
-        actor_id=request.scope.user_id,
-        permissions=tuple(granted_permissions),
-    )
-    authority = ModuleDispatchAuthority(
-        kind=authority.kind,
-        permission_mode=authority.permission_mode,
-        reason=authority.reason,
-        actor_id=authority.actor_id or request.scope.user_id,
-        permissions=tuple(granted_permissions),
-        legacy_granted_permissions_none=False,
-    )
+    authority = request.authority
     provenance = request.provenance or ModuleDispatchProvenance(
         surface="app_local_dispatch",
         correlation_id=request.metadata.correlation_id,
@@ -148,7 +127,6 @@ async def dispatch_module_action(
         workspace_id=request.scope.workspace_id,
         auth_token=request.metadata.auth_token,
         correlation_id=request.metadata.correlation_id,
-        granted_permissions=granted_permissions,
         authority=authority,
         provenance=provenance,
     )

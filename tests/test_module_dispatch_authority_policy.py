@@ -15,6 +15,7 @@ from mozaiksai.core.runtime.composition import (
     PlatformHookRegistry,
 )
 from mozaiksai.core.runtime.composition import module_executor as module_executor_mod
+from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
 
 class _Handler:
@@ -86,7 +87,7 @@ async def test_no_configured_policy_hook_preserves_dispatch_behavior(monkeypatch
             action="run",
             params={"secret": "sk_test_secret"},
             app_id="app-1",
-            granted_permissions=["orders.run"],
+            authority=enforce_authority("orders.run"),
         )
     )
     await asyncio.sleep(0)
@@ -97,7 +98,7 @@ async def test_no_configured_policy_hook_preserves_dispatch_behavior(monkeypatch
     assert result.data["entitlement_status"] == "granted"
     assert result.data["has_params_in_audit"] is False
     assert result.data["secret_in_audit"] is False
-    assert hooks.policy_inputs[0].permission_check.granted_permissions == ("orders.run",)
+    assert hooks.policy_inputs[0].permission_check.granted == ("orders.run",)
     assert hooks.policy_inputs[0].entitlement_check.status == "granted"
 
 
@@ -113,7 +114,7 @@ async def test_policy_allow_hook_permits_dispatch(monkeypatch) -> None:
             module="orders",
             action="run",
             app_id="app-1",
-            granted_permissions=["orders.run"],
+            authority=enforce_authority("orders.run"),
         )
     )
 
@@ -139,7 +140,7 @@ async def test_policy_deny_hook_blocks_before_action_execution(monkeypatch) -> N
             module="orders",
             action="run",
             app_id="app-1",
-            granted_permissions=["orders.run"],
+            authority=enforce_authority("orders.run"),
         )
     )
     await asyncio.sleep(0)
@@ -168,7 +169,7 @@ async def test_policy_hook_exception_fails_closed(monkeypatch) -> None:
             module="orders",
             action="run",
             app_id="app-1",
-            granted_permissions=["orders.run"],
+            authority=enforce_authority("orders.run"),
         )
     )
 
@@ -186,7 +187,7 @@ async def test_permission_and_entitlement_denials_expose_structured_results(monk
     handler = _Handler()
 
     permission_result = await _executor(handler).execute(
-        ModuleRequest(module="orders", action="run", app_id="app-1", granted_permissions=[])
+        ModuleRequest(module="orders", action="run", app_id="app-1", authority=enforce_authority())
     )
     await asyncio.sleep(0)
 
@@ -204,7 +205,7 @@ async def test_permission_and_entitlement_denials_expose_structured_results(monk
             module="orders",
             action="run",
             app_id="app-1",
-            granted_permissions=["orders.run"],
+            authority=enforce_authority("orders.run"),
         )
     )
     await asyncio.sleep(0)
@@ -216,18 +217,18 @@ async def test_permission_and_entitlement_denials_expose_structured_results(monk
 
 
 @pytest.mark.asyncio
-async def test_legacy_trusted_dispatch_remains_explicit_and_skips_checks(monkeypatch) -> None:
+async def test_trusted_dispatch_requires_explicit_server_owned_authority(monkeypatch) -> None:
     hooks = _Hooks()
     audit = _AuditLogger()
     _install_hooks(monkeypatch, hooks, audit)
     handler = _Handler()
 
     result = await _executor(handler).execute(
-        ModuleRequest(module="orders", action="run", app_id="app-1", granted_permissions=None)
+        ModuleRequest(module="orders", action="run", app_id="app-1", authority=trusted_framework_authority())
     )
 
     assert result.success is True
-    assert hooks.policy_inputs[0].authority.kind == "legacy_trusted"
+    assert hooks.policy_inputs[0].authority.kind == "framework_internal"
     assert hooks.policy_inputs[0].permission_check.checked is False
     assert hooks.policy_inputs[0].entitlement_check.status == "skipped"
 

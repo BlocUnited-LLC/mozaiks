@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
 from mozaiksai.core.runtime.composition.module_executor import (
     ModuleExecutor,
     ModuleRequest,
 )
+from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
 # ── minimal handler ────────────────────────────────────────────────────────────
 
@@ -33,9 +35,6 @@ class _Handler:
         return {
             "authority_kind": authority.kind if authority else None,
             "permission_mode": authority.permission_mode if authority else None,
-            "legacy_granted_permissions_none": (
-                authority.legacy_granted_permissions_none if authority else None
-            ),
             "authority_permissions": list(authority.permissions) if authority else None,
             "provenance_correlation_id": provenance.correlation_id if provenance else None,
         }
@@ -58,13 +57,13 @@ def _executor_with_permissions(action_permissions: dict) -> ModuleExecutor:
     return executor
 
 
-def _request(*, action: str, granted_permissions) -> ModuleRequest:
+def _request(*, action: str, authority: ModuleDispatchAuthority) -> ModuleRequest:
     return ModuleRequest(
         module="orders",
         action=action,
         params={},
         app_id="app_1",
-        granted_permissions=granted_permissions,
+        authority=authority,
     )
 
 
@@ -72,64 +71,62 @@ def _request(*, action: str, granted_permissions) -> ModuleRequest:
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_none_bypasses_enforcement():
-    """granted_permissions=None is the trusted-internal bypass; always allowed."""
+async def test_trusted_authority_bypasses_enforcement():
+    """authority=trusted_framework_authority() is the trusted-internal bypass; always allowed."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
 
-    result = await executor.execute(_request(action="list", granted_permissions=None))
+    result = await executor.execute(_request(action="list", authority=trusted_framework_authority()))
 
     assert result.success is True
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_none_becomes_observable_legacy_trusted_authority():
+async def test_trusted_authority_is_observable_in_module_context():
     executor = _executor_with_permissions({"authority": ["orders:read"]})
 
-    result = await executor.execute(_request(action="authority", granted_permissions=None))
+    result = await executor.execute(_request(action="authority", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data == {
-        "authority_kind": "legacy_trusted",
+        "authority_kind": "framework_internal",
         "permission_mode": "trusted_bypass",
-        "legacy_granted_permissions_none": True,
         "authority_permissions": [],
         "provenance_correlation_id": None,
     }
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_containing_required_scope_allows_action():
+async def test_authority_containing_required_scope_allows_action():
     """When the granted set includes the required permission, the action proceeds."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
 
     result = await executor.execute(
-        _request(action="list", granted_permissions=["orders:read", "orders:write"])
+        _request(action="list", authority=enforce_authority("orders:read", "orders:write"))
     )
 
     assert result.success is True
 
 
 @pytest.mark.asyncio
-async def test_concrete_granted_permissions_become_observable_enforced_authority():
+async def test_enforced_authority_is_observable_in_module_context():
     executor = _executor_with_permissions({"authority": ["orders:read"]})
 
     result = await executor.execute(
-        _request(action="authority", granted_permissions=["orders:read"])
+        _request(action="authority", authority=enforce_authority("orders:read"))
     )
 
     assert result.success is True
-    assert result.data["authority_kind"] == "legacy_permissions"
+    assert result.data["authority_kind"] == "authenticated_user"
     assert result.data["permission_mode"] == "enforce"
-    assert result.data["legacy_granted_permissions_none"] is False
     assert result.data["authority_permissions"] == ["orders:read"]
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_missing_required_scope_denies_action():
+async def test_authority_missing_required_scope_denies_action():
     """When the required permission is absent from the granted set, PERMISSION_DENIED."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
 
-    result = await executor.execute(_request(action="list", granted_permissions=[]))
+    result = await executor.execute(_request(action="list", authority=enforce_authority()))
 
     assert result.success is False
     assert result.error_code == "PERMISSION_DENIED"
@@ -137,11 +134,11 @@ async def test_granted_permissions_missing_required_scope_denies_action():
 
 
 @pytest.mark.asyncio
-async def test_empty_action_permissions_allows_any_granted_set():
+async def test_empty_action_permissions_allows_any_authority():
     """Actions with no declared permissions are always allowed regardless of scopes."""
     executor = _executor_with_permissions({})  # no permissions declared
 
-    result = await executor.execute(_request(action="list", granted_permissions=[]))
+    result = await executor.execute(_request(action="list", authority=enforce_authority()))
 
     assert result.success is True
 
@@ -152,7 +149,7 @@ async def test_partial_scope_match_still_denies():
     executor = _executor_with_permissions({"read": ["orders:read", "orders:admin"]})
 
     result = await executor.execute(
-        _request(action="read", granted_permissions=["orders:read"])  # missing orders:admin
+        _request(action="read", authority=enforce_authority("orders:read"))  # missing orders:admin
     )
 
     assert result.success is False
@@ -161,12 +158,12 @@ async def test_partial_scope_match_still_denies():
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_are_injected_into_module_context():
+async def test_authority_permissions_are_injected_into_module_context():
     """Module policies can inspect ctx.permissions for resource-level checks."""
     executor = _executor_with_permissions({})
 
     result = await executor.execute(
-        _request(action="permissions", granted_permissions=["orders:read"])
+        _request(action="permissions", authority=enforce_authority("orders:read"))
     )
 
     assert result.success is True
@@ -188,7 +185,7 @@ async def test_type_error_does_not_leak_exception_message():
         action_method_map={"act": "do_action"},
         action_permissions={},
     )
-    req = ModuleRequest(module="bad", action="act", params={}, app_id="app_1", granted_permissions=None)
+    req = ModuleRequest(module="bad", action="act", params={}, app_id="app_1", authority=trusted_framework_authority())
     result = await executor.execute(req)
 
     assert result.success is False
@@ -228,7 +225,7 @@ async def test_execution_error_does_not_leak_exception_message():
         action="risky",
         params={},
         app_id="app_test",
-        granted_permissions=None,
+        authority=trusted_framework_authority(),
     )
 
     result = await executor.execute(req)
