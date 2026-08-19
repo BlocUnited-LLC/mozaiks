@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from ag2 import Agent
+from ag2.annotations import CONTEXT_OPTION_NAME, Inject
+from ag2.context import ConversationContext
 from ag2.network.policies import CHANNEL_STATE_DEP
+from ag2.stream import MemoryStream
 from pydantic import BaseModel
 
 from mozaiksai.core.adapters.ag2_task_batch_runner import (
@@ -15,6 +18,12 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunnerRequest,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.context.authority import (
+    CONTEXT_AUTHORITY_WRITER_DEP,
+    ContextAuthorityClass,
+    ScopedContextWriter,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
@@ -27,6 +36,14 @@ from mozaiksai.core.workflow.task_batches import (
 def _ag2_task_context(kwargs: dict) -> dict:
     state = kwargs["dependencies"][CHANNEL_STATE_DEP]
     return dict(state.context_vars)
+
+
+def _ag2_dependency_context(kwargs: dict) -> ConversationContext:
+    return ConversationContext(
+        stream=MemoryStream(),
+        variables=dict(kwargs.get("variables") or {}),
+        dependencies=dict(kwargs.get("dependencies") or {}),
+    )
 
 
 def _valid_payload() -> dict:
@@ -226,6 +243,40 @@ async def test_ag2_task_batch_runner_emits_authentic_start_and_completion_eviden
     assert "run_subtasks" not in repr(ask_kwargs)
     assert "background_agent_tool" not in repr(ask_kwargs)
     assert "dynamic_agent" not in repr(ask_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_exposes_scoped_writer_through_dependencies_only() -> None:
+    policy = build_context_authority_policy(
+        workflow_name="TaskBatchWorkflow",
+        definitions={
+            "app_validation_status": {
+                "authority_class": ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE,
+                "writer_ids": ["deterministic_tool"],
+                "model_visible": False,
+            }
+        },
+    )
+    agent = _RunnerAgent('{"ok": true}')
+
+    result = await AG2TaskBatchRunner().run(
+        _runner_request(
+            agent,
+            context_variables={"current_task_id": "review_a"},
+            context_authority_policy=policy,
+        )
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    ask_kwargs = agent.ask_calls[0]["kwargs"]
+    assert CONTEXT_AUTHORITY_WRITER_DEP not in ask_kwargs["variables"]
+    writer = ask_kwargs["dependencies"][CONTEXT_AUTHORITY_WRITER_DEP]
+    assert isinstance(writer, ScopedContextWriter)
+
+    context = _ag2_dependency_context(ask_kwargs)
+    injected = Inject(CONTEXT_AUTHORITY_WRITER_DEP).set_param_name("writer")
+    resolved = injected.use(**{CONTEXT_OPTION_NAME: context})
+    assert resolved["writer"] is writer
 
 
 @pytest.mark.asyncio

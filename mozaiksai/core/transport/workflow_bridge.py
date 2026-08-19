@@ -31,6 +31,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger("simple_transport.workflow")
 
 
+def _persist_context_kwargs(
+    *,
+    chat_id: str,
+    app_id: str,
+    variables: dict[str, Any],
+    workflow_name: str | None,
+    persistence_manager: Any,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "chat_id": chat_id,
+        "app_id": app_id,
+        "variables": variables,
+    }
+    if workflow_name and persistence_manager.__class__.__name__ == "AG2PersistenceManager":
+        kwargs["workflow_name"] = workflow_name
+    return kwargs
+
+
 class WorkflowBridgeMixin:
     """Mixin providing workflow integration functionality.
 
@@ -140,18 +158,30 @@ class WorkflowBridgeMixin:
         if manager is None:
             try:
                 from mozaiksai.core.workflow.context.adapter import create_context_container
+                from mozaiksai.core.workflow.context.authority import build_context_authority_policy
                 from mozaiksai.core.workflow.context.derived import DerivedContextManager
+                from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
                 persisted_context: dict[str, Any] = {}
                 if persistence_manager is not None:
                     persisted_context = await persistence_manager.fetch_chat_session_extra_context(
                         chat_id=chat_id,
                         app_id=str(app_id),
+                        workflow_name=str(workflow_name),
                     )
+                workflow_config = workflow_manager.get_config(str(workflow_name)) or {}
+                authority_policy = build_context_authority_policy(
+                    workflow_name=str(workflow_name),
+                    definitions=(workflow_config.get("context_variables") or {}).get("definitions") or {},
+                    transition_rules=(workflow_config.get("transition_graph") or {}).get("transition_rules") or [],
+                )
                 manager = DerivedContextManager(
                     str(workflow_name),
                     {},
-                    create_context_container(initial=persisted_context),
+                    create_context_container(
+                        initial=persisted_context,
+                        authority_policy=authority_policy,
+                    ),
                 )
             except Exception as err:
                 logger.debug("[SMART_ROUTING] Failed to build user_text manager for %s: %s", chat_id, err)
@@ -169,9 +199,13 @@ class WorkflowBridgeMixin:
         if updated and persistence_manager is not None:
             try:
                 await persistence_manager.persist_context_variables(
-                    chat_id=chat_id,
-                    app_id=str(app_id),
-                    variables=updated,
+                    **_persist_context_kwargs(
+                        chat_id=chat_id,
+                        app_id=str(app_id),
+                        workflow_name=str(workflow_name),
+                        variables=updated,
+                        persistence_manager=persistence_manager,
+                    )
                 )
             except Exception as err:
                 logger.debug("[SMART_ROUTING] Failed persisting user_text updates for %s: %s", chat_id, err)
@@ -562,9 +596,13 @@ class WorkflowBridgeMixin:
         if ctx:
             try:
                 await pm.persist_context_variables(
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    variables=ctx,
+                    **_persist_context_kwargs(
+                        chat_id=chat_id,
+                        app_id=app_id,
+                        workflow_name=workflow_name,
+                        variables=ctx,
+                        persistence_manager=pm,
+                    )
                 )
             except Exception as persist_err:
                 logger.debug("LIVE_AG2_CONTEXT_PERSIST_FAILED chat=%s: %s", chat_id, persist_err)

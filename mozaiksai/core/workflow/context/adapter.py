@@ -19,21 +19,36 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
+from .authority import RUNTIME_SYSTEM_WRITER, ContextAuthorityPolicy, ContextWriterId
+
 logger = logging.getLogger(__name__)
 
 
 class _RuntimeContextVariables:
-    def __init__(self, initial: dict[str, Any] | None = None, chat_id: str | None = None, app_id: str | None = None) -> None:
+    def __init__(
+        self,
+        initial: dict[str, Any] | None = None,
+        chat_id: str | None = None,
+        app_id: str | None = None,
+        authority_policy: ContextAuthorityPolicy | None = None,
+        writer_id: ContextWriterId = RUNTIME_SYSTEM_WRITER,
+    ) -> None:
         # Keep a shallow copy for local reads while optionally tracking the original
         self._data: dict[str, Any] = dict(initial or {})
         self._backing: dict[str, Any] | None = initial if isinstance(initial, dict) else None
         self._chat_id = chat_id
         self._app_id = app_id
+        self._mozaiks_context_authority_policy = authority_policy
+        self._mozaiks_context_writer_id = writer_id
 
     def get(self, key: str, default: Any | None = None) -> Any:
         return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
+        policy = getattr(self, "_mozaiks_context_authority_policy", None)
+        writer_id = getattr(self, "_mozaiks_context_writer_id", RUNTIME_SYSTEM_WRITER)
+        if policy is not None:
+            policy.require_can_write(key, writer_id=writer_id, operation="set")
         self._data[key] = value
         if self._backing is not None:
             self._backing[key] = value
@@ -74,6 +89,10 @@ class _RuntimeContextVariables:
                 )
 
     def remove(self, key: str) -> bool:
+        policy = getattr(self, "_mozaiks_context_authority_policy", None)
+        writer_id = getattr(self, "_mozaiks_context_writer_id", RUNTIME_SYSTEM_WRITER)
+        if policy is not None:
+            policy.require_can_write(key, writer_id=writer_id, operation="delete")
         removed = self._data.pop(key, None)
         if self._backing is not None:
             self._backing.pop(key, None)
@@ -90,8 +109,20 @@ class _RuntimeContextVariables:
         return self._data
 
 
-def create_context_container(initial: dict[str, Any] | None = None, chat_id: str | None = None, app_id: str | None = None):
-    return _RuntimeContextVariables(initial=initial, chat_id=chat_id, app_id=app_id)
+def create_context_container(
+    initial: dict[str, Any] | None = None,
+    chat_id: str | None = None,
+    app_id: str | None = None,
+    authority_policy: ContextAuthorityPolicy | None = None,
+    writer_id: ContextWriterId = RUNTIME_SYSTEM_WRITER,
+):
+    return _RuntimeContextVariables(
+        initial=initial,
+        chat_id=chat_id,
+        app_id=app_id,
+        authority_policy=authority_policy,
+        writer_id=writer_id,
+    )
 
 __all__ = ["create_context_container"]
 

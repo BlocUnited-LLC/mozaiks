@@ -9,9 +9,28 @@ from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
+from .authority import (
+    AGENT_TEXT_WRITER,
+    RUNTIME_SYSTEM_WRITER,
+    UI_RESPONSE_TRIGGER_WRITER,
+    USER_TEXT_TRIGGER_WRITER,
+    ContextWriterId,
+)
 from .schema import load_context_variables_config
 
 logger = get_workflow_logger("derived_context")
+
+
+def _provider_set_with_writer(provider: Any, key: str, value: Any, writer_id: ContextWriterId) -> None:
+    policy = getattr(provider, "_mozaiks_context_authority_policy", None)
+    old_writer = getattr(provider, "_mozaiks_context_writer_id", RUNTIME_SYSTEM_WRITER)
+    if policy is not None:
+        provider._mozaiks_context_writer_id = writer_id
+    try:
+        provider.set(key, value)
+    finally:
+        if policy is not None:
+            provider._mozaiks_context_writer_id = old_writer
 
 
 def _resolve_nested_key(payload: Any, key: str | None) -> Any:
@@ -224,7 +243,7 @@ class DerivedVariableSpec:
                 continue
             if hasattr(provider, "set"):
                 try:
-                    provider.set(self.name, self.default)  # type: ignore[attr-defined]
+                            _provider_set_with_writer(provider, self.name, self.default, RUNTIME_SYSTEM_WRITER)
                 except Exception as err:  # pragma: no cover
                     logger.debug("Derived variable seed failed: %s", err)
 
@@ -243,7 +262,7 @@ class DerivedVariableSpec:
                             if current != trigger.from_state:
                                 continue
                         try:
-                            provider.set(self.name, trigger.value)  # type: ignore[attr-defined]
+                            _provider_set_with_writer(provider, self.name, trigger.value, AGENT_TEXT_WRITER)
                         except Exception as err:  # pragma: no cover
                             logger.debug("Derived variable update failed: %s", err)
                 return True
@@ -439,7 +458,7 @@ class DerivedContextManager:
             for provider in self.providers:
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(binding.variable, value)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, binding.variable, value, UI_RESPONSE_TRIGGER_WRITER)
                         updated = True
                     except Exception as err:  # pragma: no cover
                         logger.debug("[DERIVED_CONTEXT] ui_response update failed: %s", err)
@@ -472,7 +491,7 @@ class DerivedContextManager:
             for provider in self.providers:
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(name, value)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, name, value, AGENT_TEXT_WRITER)
                         updated_vars[name] = value
                     except Exception as err:  # pragma: no cover
                         logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
@@ -525,7 +544,7 @@ class DerivedContextManager:
             for provider in self.providers:
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(binding.variable, binding.value)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, binding.variable, binding.value, USER_TEXT_TRIGGER_WRITER)
                         updated = True
                     except Exception as err:  # pragma: no cover
                         logger.debug("[DERIVED_CONTEXT] user_text update failed: %s", err)
@@ -580,7 +599,7 @@ class DerivedContextManager:
                     continue
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(name, default)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, name, default, RUNTIME_SYSTEM_WRITER)
                     except Exception as err:  # pragma: no cover
                         logger.debug("Derived variable seed failed: %s", err)
 

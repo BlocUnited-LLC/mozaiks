@@ -14,6 +14,7 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunnerRequest,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
 
 from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
@@ -338,6 +339,7 @@ async def execute_task_batches_for_trigger(
     wf_logger: Any | None = None,
     fresh_agents_per_task: bool = True,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+    context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> dict[str, Any]:
     """Execute workflow-local task batches triggered by an agent turn.
 
@@ -416,6 +418,7 @@ async def execute_task_batches_for_trigger(
                 wf_logger=wf_logger,
                 fresh_agents_per_task=fresh_agents_per_task,
                 agents_factory=agents_factory,
+                context_authority_policy=context_authority_policy,
             )
         except Exception:
             context_variables[batch.result.status_key] = "failed"
@@ -453,6 +456,7 @@ async def _execute_one_batch(
     wf_logger: Any | None,
     fresh_agents_per_task: bool,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
+    context_authority_policy: ContextAuthorityPolicy | None,
 ) -> dict[str, Any]:
     pending = {str(item["task_id"]): item for item in task_items}
     try:
@@ -533,6 +537,7 @@ async def _execute_one_batch(
                     semaphore=semaphore,
                     fresh_agents_per_task=fresh_agents_per_task,
                     agents_factory=agents_factory,
+                    context_authority_policy=context_authority_policy,
                 )
                 for item in ready
             ],
@@ -611,6 +616,7 @@ async def _run_one_task(
     semaphore: asyncio.Semaphore,
     fresh_agents_per_task: bool,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
+    context_authority_policy: ContextAuthorityPolicy | None,
 ) -> dict[str, Any]:
     agent_name = str(task.get(batch.worker.agent_field) or "").strip()
     prompt = str(task.get(batch.worker.prompt_field) or "").strip()
@@ -673,6 +679,7 @@ async def _run_one_task(
                     prompt=scoped_prompt,
                     context_variables=task_context,
                     structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                    context_authority_policy=context_authority_policy,
                     timeout_seconds=batch.execution.timeout_seconds,
                 )
             )

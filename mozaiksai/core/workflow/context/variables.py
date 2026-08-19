@@ -13,6 +13,7 @@ from typing import Any
 from logs.logging_config import get_workflow_logger
 
 from .adapter import create_context_container
+from .authority import RUNTIME_SYSTEM_WRITER, build_context_authority_policy
 from .data_entity import DataEntityManager
 from .db_adapters import get_db_adapter
 from .schema import (
@@ -427,6 +428,32 @@ def _load_workflow_plan(workflow_name: str) -> tuple[ContextVariablesPlan, dict[
     return plan, raw_section
 
 
+def _task_batch_context_keys(workflow_name: str) -> set[str]:
+    try:
+        from ..workflow_manager import get_workflow_manager
+
+        workflow_manager = get_workflow_manager()
+        workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
+        if workflow_path is None:
+            return set()
+        task_batches_path = workflow_path / "extended_orchestration" / "task_batches.yaml"
+        if not task_batches_path.exists():
+            return set()
+        import yaml
+
+        from ..task_batches import parse_task_batches_config
+
+        raw = yaml.safe_load(task_batches_path.read_text(encoding="utf-8")) or {}
+        config = parse_task_batches_config(raw)
+        keys: set[str] = set()
+        for batch in config.batches:
+            keys.add(batch.result.context_key)
+            keys.add(batch.result.status_key)
+        return {key for key in keys if key}
+    except Exception:
+        return set()
+
+
 # ---------------------------------------------------------------------------
 # Schema utilities shared by context loading and inspection paths
 # ---------------------------------------------------------------------------
@@ -538,6 +565,21 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
     internal_app_id = app_id or ""
 
     plan, raw_context_section = _load_workflow_plan(workflow_name)
+    definitions = plan.definitions or {}
+    try:
+        from ..workflow_manager import get_workflow_manager
+
+        workflow_manager = get_workflow_manager()
+        workflow_config = workflow_manager.get_config(workflow_name) or {}
+        transition_rules = (workflow_config.get("transition_graph") or {}).get("transition_rules") or []
+    except Exception:
+        transition_rules = []
+    authority_policy = build_context_authority_policy(
+        workflow_name=workflow_name,
+        definitions=definitions,
+        transition_rules=transition_rules,
+        task_batch_context_keys=_task_batch_context_keys(workflow_name),
+    )
 
     # Optional schema overview (gated by env)
     schema_capability_enabled = False
@@ -570,8 +612,9 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
 
     context.set("database_schema_available", schema_capability_enabled)
     context.set("database_schema_db", schema_capability_db)
+    context._mozaiks_context_authority_policy = authority_policy
+    context._mozaiks_context_writer_id = RUNTIME_SYSTEM_WRITER
 
-    definitions = plan.definitions or {}
     default_db = _database_defaults(raw_context_section)
     fallbacks = _load_data_reference_fallbacks()
     data_entity_managers: list[DataEntityManager] = []
@@ -651,6 +694,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
     # Expose definitions and agent plan on the context container for downstream consumers
     if definitions:
         context._mozaiks_context_definitions = definitions
+    context._mozaiks_context_authority_policy = authority_policy
     if plan.agents:
         context._mozaiks_context_agents = plan.agents
 

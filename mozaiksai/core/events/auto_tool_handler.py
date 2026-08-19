@@ -21,6 +21,10 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.events.event_serialization import serialize_event_content
 from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.context.authority import (
+    TOOL_WRITEBACK_WRITER,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.declarative import parse_tools_config
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -166,6 +170,7 @@ class AutoToolEventHandler:
             await self._persist_context_variables(
                 chat_id=chat_id,
                 app_id=context.get("app_id"),
+                workflow_name=workflow_name,
                 context_variables=container,
             )
 
@@ -354,10 +359,24 @@ class AutoToolEventHandler:
             else:
                 # Fallback: create ephemeral container from snapshot
                 snapshot = context.get("context_variables") if isinstance(context.get("context_variables"), dict) else None
+                authority_policy = None
+                workflow_name = context.get("workflow_name")
+                if workflow_name:
+                    try:
+                        workflow_config = workflow_manager.get_config(str(workflow_name)) or {}
+                        authority_policy = build_context_authority_policy(
+                            workflow_name=str(workflow_name),
+                            definitions=(workflow_config.get("context_variables") or {}).get("definitions") or {},
+                            transition_rules=(workflow_config.get("transition_graph") or {}).get("transition_rules") or [],
+                        )
+                    except Exception as policy_err:
+                        logger.debug("[AUTO_TOOL] Context authority policy unavailable for %s: %s", workflow_name, policy_err)
                 container = create_context_container(
                     snapshot,
                     chat_id=context.get("chat_id"),
                     app_id=context.get("app_id"),
+                    authority_policy=authority_policy,
+                    writer_id=TOOL_WRITEBACK_WRITER,
                 )
                 for key in ("chat_id", "app_id", "workflow_name", "turn_idempotency_key", "agent_name"):
                     value = context.get(key)
@@ -390,6 +409,7 @@ class AutoToolEventHandler:
         *,
         chat_id: str | None,
         app_id: str | None,
+        workflow_name: str | None,
         context_variables: Any,
     ) -> None:
         if not chat_id or not app_id or context_variables is None:
@@ -411,6 +431,7 @@ class AutoToolEventHandler:
             await pm.persist_context_variables(
                 chat_id=chat_id,
                 app_id=app_id,
+                workflow_name=workflow_name,
                 variables=snapshot,
             )
         except Exception as exc:

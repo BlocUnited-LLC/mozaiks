@@ -22,6 +22,12 @@ from ag2.stream import MemoryStream
 from ag2.task import Task, TaskSpec
 
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.context.authority import (
+    CONTEXT_AUTHORITY_WRITER_DEP,
+    DETERMINISTIC_TOOL_WRITER,
+    ContextAuthorityPolicy,
+    ScopedContextWriter,
+)
 from mozaiksai.core.workflow.outputs.runtime_validation import (
     reply_body_to_data,
     validate_agent_structured_output,
@@ -42,6 +48,7 @@ class AG2TaskBatchRunnerRequest:
     prompt: str
     context_variables: dict[str, Any] = field(default_factory=dict)
     structured_registry: dict[str, Any] = field(default_factory=dict)
+    context_authority_policy: ContextAuthorityPolicy | None = None
     timeout_seconds: int | None = None
 
 
@@ -74,11 +81,16 @@ class AG2TaskBatchRunner:
                 lifecycle_events.append(normalized)
 
         sub_id = stream.subscribe(_capture_lifecycle_event, sync_to_thread=False)
-        dependencies = {
+        dependencies: dict[Any, Any] = {
             CHANNEL_STATE_DEP: SimpleNamespace(
                 context_vars=dict(request.context_variables),
             )
         }
+        if request.context_authority_policy is not None:
+            dependencies[CONTEXT_AUTHORITY_WRITER_DEP] = ScopedContextWriter(
+                policy=request.context_authority_policy,
+                writer_id=DETERMINISTIC_TOOL_WRITER,
+            )
         context = ConversationContext(
             stream=stream,
             variables=dict(request.context_variables),

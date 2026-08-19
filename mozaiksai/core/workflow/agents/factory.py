@@ -21,6 +21,7 @@ from mozaiksai.core.media.ag2 import (
 )
 from mozaiksai.core.media.middleware import build_ag2_media_harvest_middleware
 
+from ..context.authority import CONTEXT_BRIDGE_WRITER, ContextAuthorityPolicy
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
 )
@@ -150,12 +151,28 @@ class ContextVariablesBridge:
     conditions see the same state that tools just wrote.
     """
 
-    __slots__ = ("_data", "_pending_set", "_pending_delete")
+    __slots__ = (
+        "_data",
+        "_pending_set",
+        "_pending_delete",
+        "_authority_policy",
+        "_writer_id",
+        "_mozaiks_context_authority_policy",
+    )
 
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        data: dict[str, Any],
+        *,
+        authority_policy: ContextAuthorityPolicy | None = None,
+        writer_id: str = CONTEXT_BRIDGE_WRITER,
+    ) -> None:
         self._data = data
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
+        self._authority_policy = authority_policy
+        self._writer_id = writer_id
+        self._mozaiks_context_authority_policy = authority_policy
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
@@ -171,6 +188,8 @@ class ContextVariablesBridge:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
+        if self._authority_policy is not None:
+            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
         self._data[clean_key] = value
         self._pending_set[clean_key] = value
         self._pending_delete.discard(clean_key)
@@ -179,6 +198,8 @@ class ContextVariablesBridge:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
+        if self._authority_policy is not None:
+            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="delete")  # type: ignore[arg-type]
         existed = clean_key in self._data
         value = self._data.pop(clean_key, default)
         if existed:
@@ -334,7 +355,9 @@ async def create_agents(
     else:
         ctx_dict = {}
 
-    context_bridge = ContextVariablesBridge(ctx_dict)
+    authority_policy = getattr(context_variables, "_mozaiks_context_authority_policy", None)
+    context_bridge = ContextVariablesBridge(ctx_dict, authority_policy=authority_policy)
+    context_bridge._mozaiks_context_authority_policy = authority_policy
 
     a2a_specs = load_a2a_agent_specs(workflow_config)
     local_agent_names = [n for n in agent_configs if n not in a2a_specs]

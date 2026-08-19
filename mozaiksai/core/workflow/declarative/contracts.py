@@ -371,12 +371,49 @@ class ContextVariableSourceSpec(DeclarativeModel):
 class ContextVariableDefinitionSpec(DeclarativeModel):
     type: str | None = None
     description: str | None = None
+    authority_class: Literal[
+        "immutable_runtime_authority",
+        "closed_writer_routing_state",
+        "closed_writer_quality_state",
+        "mutable_workflow_state",
+        "model_visible_information",
+        "tool_only_information",
+        "derived_information",
+    ] | None = None
+    model_visible: bool | None = None
+    tool_visible: bool | None = None
+    persisted: bool | None = None
+    routing: bool | None = None
+    authorization: bool | None = None
+    writer_ids: list[
+        Literal[
+            "runtime_system",
+            "caller_input",
+            "transition_router",
+            "live_user_context",
+            "context_bridge",
+            "tool_writeback",
+            "agent_text",
+            "ui_response_trigger",
+            "user_text_trigger",
+            "persisted_replay",
+            "task_batch",
+            "structured_output",
+            "lifecycle_tool",
+            "deterministic_tool",
+        ]
+    ] = Field(default_factory=list)
     source: ContextVariableSourceSpec
 
     @field_validator("type", "description", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
+
+    @field_validator("writer_ids")
+    @classmethod
+    def _normalize_writer_ids(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value)
 
 
 class ContextAgentViewSpec(DeclarativeModel):
