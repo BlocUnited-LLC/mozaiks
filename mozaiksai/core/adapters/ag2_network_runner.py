@@ -300,8 +300,8 @@ class AG2NetworkRunner:
                         app_id=request.app_id,
                         channel_id=channel.channel_id,
                         close_reason=close_reason,
-                        context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
-                        structured_outputs=structured_outputs,
+                        context_variables={},
+                        structured_outputs=[],
                         agent_name_by_id=agent_name_by_id,
                         wal=[_envelope_to_dict(envelope) for envelope in wal],
                         error=validation_error,
@@ -875,6 +875,10 @@ def _validate_wal_structured_outputs(
     agent_name_by_id: Mapping[str, str],
     structured_registry: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None]:
+    # AG2 Network WAL packets expose serialized body data, not the original
+    # AgentReply. Without that supported AG2 handle this runner cannot invoke
+    # AgentReply.content(retries=...) for schema-correction turns. It therefore
+    # performs post-hoc structured-output validation and fails the run closed.
     structured_outputs: list[dict[str, Any]] = []
     if not structured_registry:
         return structured_outputs, None
@@ -896,7 +900,7 @@ def _validate_wal_structured_outputs(
         if validation is None:
             continue
         if not validation.validation_passed or validation.structured_data is None:
-            return structured_outputs, (
+            return [], (
                 f"structured output validation failed for {agent_name}: {validation.error}"
             )
         structured_outputs.append(

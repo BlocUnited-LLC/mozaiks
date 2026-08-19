@@ -1,5 +1,6 @@
 agents:
   - name: BrandDesignerAgent
+    structured_outputs_required: false
     system_message: >
       You are a professional brand designer. Your job is to generate high-quality
       logo and brand imagery for apps built on the Mozaiks platform.

@@ -339,6 +339,69 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
         return sync_wrapper
 
 
+def _structured_outputs_required(agent_config: Mapping[str, Any]) -> bool:
+    if "structured_outputs_required" not in agent_config:
+        raise ValueError(
+            "Agent config must explicitly declare structured_outputs_required as true or false"
+        )
+    value = agent_config.get("structured_outputs_required")
+    if not isinstance(value, bool):
+        raise ValueError("Agent config structured_outputs_required must be a boolean")
+    return value is True
+
+
+def _required_structured_agent_names(
+    agent_configs: Mapping[str, Any],
+    *,
+    local_agent_names: Sequence[str],
+) -> set[str]:
+    local_names = set(local_agent_names)
+    return {
+        str(agent_name)
+        for agent_name, agent_config in agent_configs.items()
+        if agent_name in local_names
+        and isinstance(agent_config, Mapping)
+        and _structured_outputs_required(agent_config)
+    }
+
+
+def _prepare_response_schema_for_agent(
+    *,
+    workflow_name: str,
+    agent_name: str,
+    agent_config: Mapping[str, Any],
+    structured_model_cls: Any,
+    llm_config_dict: Mapping[str, Any] | None,
+) -> Any:
+    if structured_model_cls is None:
+        if _structured_outputs_required(agent_config):
+            raise ValueError(
+                f"[AGENTS] Agent '{agent_name}' in workflow '{workflow_name}' declares "
+                "structured_outputs_required: true but has no structured output registry entry"
+            )
+        return None
+
+    api_type = (
+        ((llm_config_dict or {}).get("config_list") or [{}])[0].get("api_type")
+        or "openai"
+    ).lower()
+    if api_type in ("openai", "azure"):
+        supports_strict, offending_path = supports_provider_response_format(structured_model_cls)
+        if not supports_strict:
+            if _structured_outputs_required(agent_config):
+                raise ValueError(
+                    f"[AGENTS] Agent '{agent_name}' in workflow '{workflow_name}' requires "
+                    "structured outputs, but its model cannot be prepared for provider "
+                    f"strict response_schema: {offending_path} uses an open-ended object field"
+                )
+            return None
+        return get_provider_response_model(structured_model_cls)
+
+    # Anthropic / Gemini / Ollama: pass the schema directly; AG2 routes it
+    # through the provider's structured-output/tool mechanism.
+    return structured_model_cls
+
+
 # ------------------------------------------------------------------
 # AGENT CREATION
 # ------------------------------------------------------------------
@@ -414,9 +477,19 @@ async def create_agents(
 
     auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
 
+    required_structured_agents = _required_structured_agent_names(
+        agent_configs,
+        local_agent_names=local_agent_names,
+    )
     try:
         structured_registry = get_structured_outputs_for_workflow(workflow_name)
-    except Exception:
+    except Exception as err:
+        if required_structured_agents:
+            raise ValueError(
+                f"[AGENTS] Workflow '{workflow_name}' has required structured-output agents "
+                f"{sorted(required_structured_agents)} but its structured output registry "
+                f"could not load: {err}"
+            ) from err
         structured_registry = {}
 
     context_dict: dict[str, Any] = {}
@@ -649,35 +722,13 @@ async def create_agents(
         except Exception as middleware_err:
             logger.debug("[AGENTS] Prompt middleware pre-load failed for '%s': %s", agent_name, middleware_err)
 
-        # Determine response schema for structured outputs
-        beta_response_schema = None
-        if structured_model_cls is not None:
-            # OpenAI strict structured outputs reject Dict[str, Any] fields.
-            # Anthropic (tool_use), Gemini, and Ollama have no such restriction —
-            # AG2 converts the Pydantic schema to a tool input schema internally,
-            # which handles freeform object fields. Only apply the strict-field
-            # gate for OpenAI providers; pass response_schema unconditionally for
-            # all other providers.
-            try:
-                _api_type = (
-                    ((llm_config_dict or {}).get("config_list") or [{}])[0].get("api_type") or "openai"
-                ).lower()
-                _openai_strict = _api_type in ("openai", "azure")
-                if _openai_strict:
-                    supports_strict, _ = supports_provider_response_format(structured_model_cls)
-                    if supports_strict:
-                        beta_response_schema = get_provider_response_model(structured_model_cls)
-                else:
-                    # Anthropic / Gemini / Ollama — pass the schema directly;
-                    # AG2 routes it through the provider's native mechanism.
-                    beta_response_schema = structured_model_cls
-            except Exception as so_err:
-                logger.warning(
-                    "[AGENTS] Structured output schema resolution failed for '%s' — response_schema disabled: %s",
-                    agent_name,
-                    so_err,
-                )
-                beta_response_schema = None
+        beta_response_schema = _prepare_response_schema_for_agent(
+            workflow_name=workflow_name,
+            agent_name=agent_name,
+            agent_config=agent_config,
+            structured_model_cls=structured_model_cls,
+            llm_config_dict=llm_config_dict,
+        )
 
         middleware = []
         observers = []
@@ -764,8 +815,9 @@ async def create_agents(
                 )
             )
 
-        # Structured-output agents get RetryMiddleware so provider/network failures
-        # retry before the caller sees an exception (mirrors AG2StructuredAgentRunner).
+        # RetryMiddleware covers provider/network exceptions raised during the
+        # AG2 LLM call. Schema correction is owned by AG2 AgentReply.content();
+        # this factory only supplies the validated response_schema.
         if beta_response_schema is not None:
             middleware.append(RetryMiddleware(max_retries=2))
 

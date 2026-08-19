@@ -91,10 +91,26 @@ def _write_agentgenerator_bundle(source_dir: Path, workflow_name: str) -> list[d
         source_dir / "agents.yaml",
         {
             "agents": [
-                {"name": "PlannerAgent", "system_message": "Plan workflow tasks."},
-                {"name": "WorkerAgent", "system_message": "Execute one workflow task."},
-                {"name": "SynthesisAgent", "system_message": "Synthesize task outputs."},
-                {"name": "ToolRouteAgent", "system_message": "Handle explicit routing tools."},
+                {
+                    "name": "PlannerAgent",
+                    "structured_outputs_required": True,
+                    "system_message": "Plan workflow tasks.",
+                },
+                {
+                    "name": "WorkerAgent",
+                    "structured_outputs_required": True,
+                    "system_message": "Execute one workflow task.",
+                },
+                {
+                    "name": "SynthesisAgent",
+                    "structured_outputs_required": True,
+                    "system_message": "Synthesize task outputs.",
+                },
+                {
+                    "name": "ToolRouteAgent",
+                    "structured_outputs_required": False,
+                    "system_message": "Handle explicit routing tools.",
+                },
             ]
         },
     )

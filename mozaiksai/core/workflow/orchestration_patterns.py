@@ -440,6 +440,13 @@ def _structured_model_for_agent(
     return None
 
 
+def _structured_output_validation_failed(runner_result: Any) -> bool:
+    return (
+        getattr(runner_result, "status", None) is RunStatus.FAILED
+        and "structured output validation failed" in str(getattr(runner_result, "error", "") or "")
+    )
+
+
 async def _emit_validated_structured_outputs_from_runner_result(
     *,
     runner_result: Any,
@@ -454,6 +461,9 @@ async def _emit_validated_structured_outputs_from_runner_result(
     wf_logger: Any,
 ) -> None:
     """Emit runtime structured-output events from AG2 Network results."""
+
+    if _structured_output_validation_failed(runner_result):
+        return
 
     structured_outputs = list(getattr(runner_result, "structured_outputs", []) or [])
     if not structured_outputs:
@@ -1189,9 +1199,11 @@ async def run_workflow_orchestration(
                 context_authority_policy=context_authority_policy,
             )
 
-        await _emit_structured_once(runner_result, projected_sequence)
+        structured_validation_failed = _structured_output_validation_failed(runner_result)
+        if not structured_validation_failed:
+            await _emit_structured_once(runner_result, projected_sequence)
 
-        if project_final_runner_result:
+        if project_final_runner_result and not structured_validation_failed:
             sequence_counter = await _project_ag2_wal_to_mozaiks_transport(
                 runner_result=runner_result,
                 transport=transport,
