@@ -7,10 +7,13 @@ Status: proposed
 ## Decision
 
 Expose Mozaiks app contracts and validation to external coding agents through an
-MCP server that is **read and validate only**. The v1 tool surface wraps existing
-`mozaiksai/` functions and introduces no new capability. Any tool that mutates an
-app bundle, stages artifacts, promotes versions, or executes commands in a user
-workspace is out of scope for v1 and requires a separate ADR.
+MCP server that is **read and validate only**. The v1 tool surface is a thin
+adapter over current `mozaiksai/` contract models, loaders, and validation
+helpers. It may normalize those results into MCP response envelopes, but it must
+not introduce a second source of truth for app identity, layout, modules, pages,
+or validation semantics. Any tool that mutates an app bundle, stages artifacts,
+promotes versions, executes commands in a user workspace, or decides edit scope
+is out of scope for v1 and requires a separate ADR.
 
 MCP is an adapter at the coding-agent boundary. It does not replace the
 refinement loop, and it does not become a second refinement path.
@@ -23,14 +26,20 @@ the app's canonical structure from copied framework files, which are
 framework-internals guidance rather than app-development guidance, and which
 drift from the validators they describe.
 
-MCP lets the agent ask the framework directly instead of inferring. The same
-capabilities then serve both consumers:
+MCP lets the agent ask the framework directly instead of inferring. Managed
+refinement and local development should consume the same framework contracts,
+but not the same authority boundary:
 
-- Managed refinement: Harness decides scope, coding worker implements, framework validates
-- Local development: coding agent connects over MCP to the same framework capabilities
+- Managed refinement: Harness decides scope and staging authority, coding
+  worker implements, framework validates.
+- Local development: coding agent connects over MCP for framework reads and
+  local validation only; no harness authority is delegated to the agent.
 
-AG2 already supports consuming and exposing MCP servers, so this uses the
-existing agent-protocol boundary rather than inventing a Mozaiks-specific one.
+The current dependency is `ag2[a2a,openai,tracing]==1.0.1`, and that package
+contains MCP support modules such as `ag2.mcp` and MCP server/toolkit helpers.
+This ADR chooses that protocol boundary rather than inventing a Mozaiks-specific
+agent protocol. The implementation ADR/PR must still verify the exact AG2 MCP
+API used by Mozaiks at implementation time.
 
 The boundary needs deciding now because a published MCP tool surface is a public
 protocol that third-party clients depend on, which `OSS_PUBLICATION_POLICY.md`
@@ -65,8 +74,11 @@ classifies as a one-way door.
 
 - A local coding agent can resolve canonical structure, existing modules, and
   contract violations from the framework instead of guessing.
-- Generated `AGENTS.md` and `CLAUDE.md` can shrink to identity, invariants, and a
-  pointer at MCP, which removes the copied-guidance drift problem.
+- Generated `AGENTS.md` and `CLAUDE.md` can shrink to identity, invariants,
+  static fallback guidance, and a pointer at MCP, which removes the copied
+  framework-internals drift problem. The current CLI generation and
+  synchronization path lives in `mozaiks_cli.agent_guidance` and
+  `mozaiks_cli.commands.sync_agent_guidance`.
 - The harness and local development consume one set of capabilities, so app
   contracts stay the single source of truth.
 
@@ -81,23 +93,94 @@ classifies as a one-way door.
 
 ### Contract and boundary changes
 
-- Adds a new public protocol surface: the MCP tool list and response shapes.
+- Adds a new public protocol surface: the MCP tool list plus exact request,
+  response, error, and version-envelope shapes.
 - Adds no new authority. Every v1 tool is a read or a pure validation over a
   path the caller already has on disk.
+- Requires fail-closed workspace path resolution before any tool reads the
+  filesystem.
 
 ## Proposed v1 Tool Surface
 
-Every tool below wraps an existing function. None introduce new capability.
+Every tool below wraps an existing `mozaiksai/` backing surface. None introduce
+new capability. The implementation may add an MCP adapter function per tool, but
+those adapters must call the backing surfaces listed here and return only
+schema-versioned, JSON-serializable data.
 
 | Tool | Backing function | Nature |
 |---|---|---|
-| `get_workspace_identity` | `core/runtime/app/provenance.py` (`AppProvenance`, `resolve_app_provenance_path`) | read |
-| `get_canonical_layout` | `core/runtime/app/layout_registry.py` (`LayoutModel`, `PathScope`, `ArtifactKind`, `LayoutOwner`, `Requirement`) | read |
-| `resolve_artifact_location` | `core/runtime/app/layout_registry.py` | read |
-| `list_modules` | `core/runtime/app/module_loader.py` (`discover_module_names`) | read |
+| `get_workspace_identity` | `core/runtime/app/provenance.py` (`load_app_provenance`, `resolve_app_provenance_path`, `AppProvenance`) | read |
+| `get_canonical_layout` | `core/runtime/app/layout_registry.py` (`default_app_layout_registry`, `AppLayoutRegistry`) | read |
+| `resolve_artifact_location` | `core/runtime/app/layout_registry.py` (`match_path`, `validate_registered_path`) | read |
+| `list_modules` | `core/runtime/app/module_loader.py` (`ModuleLoader.discover_module_names`) | read with constructor side effects constrained by path containment |
 | `list_pages` | `core/runtime/app/page_schema.py` (`discover_page_schema_paths`) | read |
-| `validate_app_bundle` | `control_plane/app_validation.py` (`run_app_validation_fallback_checks`) | pure validation |
+| `validate_app_bundle` | `control_plane/app_validation.py` (`run_app_validation_fallback_checks`) | pure validation; not equivalent to AppGenerator acceptance |
 | `plan_validation_commands` | `control_plane/app_validation.py` (`plan_app_source_validation_commands`) | read, plans without executing |
+
+`validate_app_bundle` is intentionally narrow in v1. It means local deterministic
+fallback validation over a resolved workspace root: JSON manifest parse, Python
+syntax compile, and YAML manifest parse. It does **not** mean
+`factory_app/workflows/AppGenerator/tools/app_validation.py`
+`run_app_bundle_acceptance_gate`, and it must not be described as promotion,
+export, or generated-app acceptance authority.
+
+### Protocol envelope
+
+The MCP contract version must be explicit in every tool response, not only
+declared in `app/provenance.yaml`. Every successful v1 response uses this
+minimum envelope:
+
+```json
+{
+  "protocol_schema_version": "mozaiks.mcp.v1",
+  "tool": "tool_name",
+  "workspace": {
+    "root": "absolute-resolved-path",
+    "app_root": "absolute-resolved-path/app",
+    "app_id": "optional-app-id",
+    "provenance_schema_version": "optional-provenance-version"
+  },
+  "result": {},
+  "diagnostics": []
+}
+```
+
+Every failure uses the same `protocol_schema_version` plus a stable `error`:
+
+```json
+{
+  "protocol_schema_version": "mozaiks.mcp.v1",
+  "tool": "tool_name",
+  "error": {
+    "code": "workspace_not_found",
+    "message": "Workspace root could not be resolved inside the allowed root."
+  },
+  "diagnostics": []
+}
+```
+
+The implementation PR must define exact Pydantic models or equivalent strict
+schemas for each `result` payload before the tool surface ships. A prose table is
+not sufficient for a public protocol.
+
+### Path and workspace containment
+
+Every tool request must include either no path, meaning the MCP process
+workspace root, or one workspace-relative path. The server resolves paths with
+`Path(...).expanduser().resolve()` and fails closed when:
+
+- the workspace root does not exist or is not a directory;
+- the resolved app root does not contain `app/app.json` or an equivalent
+  canonical app root selected by the implementation contract;
+- any requested path is absolute when the tool expects a relative path;
+- any requested path escapes the resolved workspace root;
+- any requested path contains `..`, a drive prefix, a URL/scheme, glob
+  characters, or a symlink escape after resolution.
+
+`list_modules` must account for the current `ModuleLoader` constructor adding
+import roots to `sys.path`; the MCP adapter may use it only after containment is
+proven, and must not call `ModuleLoader.load()` because loading executes module
+handler code.
 
 ### Explicitly excluded from v1
 
@@ -121,6 +204,11 @@ Every tool below wraps an existing function. None introduce new capability.
 
 - **Any create, edit, stage, or promote tool.**
 
+- **Factory-generated application MCP bindings.** Issue #338 tracks a separate
+  architecture concern: how Factory-generated applications consume or expose MCP
+  bindings through build-context/capability-pack contracts. That issue is not
+  implemented or approved by this ADR.
+
 ## Which Validator MCP Calls
 
 MCP calls `mozaiksai/control_plane/`, never `factory_app/`.
@@ -135,6 +223,12 @@ Calling a `factory_app/` validator would make local development depend on
 first-party factory policy. That breaks the separation `SessionRouter` already
 maintains by accepting an injected `TriggerRouteResolver` rather than importing
 the harness, and it would contradict invariant 7.
+
+This also preserves the managed Refinement Harness boundary. The Harness may use
+MCP-accessible framework reads and validations as evidence, but Harness authority
+still lives in its checkpoint routing, staging, plan, and promotion contracts.
+Local MCP callers do not receive those authority objects and must not infer
+allowed edit scope from read-only framework metadata.
 
 ## Reversibility
 
@@ -159,9 +253,17 @@ security regression in clients that came to rely on it.
 - **#7 Mozaiks App dogfoods public framework contracts.** Upheld by requiring MCP
   to call framework validators rather than factory pack ones.
 - **#4 Public schemas and contracts are classified and versioned.** The MCP tool
-  surface must carry an explicit contract version, and it should be declared in
-  `app/provenance.yaml` under `contracts:` alongside `app` and
-  `refinement_harness`.
+  surface must carry an explicit response envelope version,
+  `mozaiks.mcp.v1`. App provenance should additionally declare the supported MCP
+  contract under `contracts:`, but provenance is metadata, not the wire envelope.
+
+## Historical Notes
+
+PR #302 is not an MCP-related precursor. It was the generated quickstart
+workspace Git-ignore fix, merged on 2026-08-19. Do not cite PR #302 as MCP
+history. The related MCP follow-up concern is issue #338, which covers
+deterministic MCP capability bindings inside Factory-generated applications and
+is out of scope for this developer-facing read/validate MCP ADR.
 
 ## OSS Boundary
 
@@ -171,6 +273,13 @@ The tool surface, the request and response shapes, and the read-only
 implementation are framework capabilities and belong in OSS. Any hosted-only
 behaviour layered on top, such as operator credentials, cross-app knowledge, or
 deployment actions, stays outside this contract and is a separate review.
+
+The v1 server must not expose hosted operations, deployment execution, payment
+operations, credential values, production authority, managed-provider mutation,
+marketplace ranking, cross-app intelligence, customer-derived repair data, or
+operator KnowledgeStore contents. It may expose only one-workspace framework
+metadata and deterministic validation derived from files already present in the
+caller-selected workspace.
 
 ## Validation
 
@@ -185,3 +294,11 @@ Before merge of the implementation that follows this ADR:
   which is mechanically checkable and could become a governance guardrail.
 - Test asserting the declared MCP contract version is present in
   `app/provenance.yaml` under `contracts:`.
+- Test asserting every response contains `protocol_schema_version:
+  mozaiks.mcp.v1`.
+- Test asserting workspace path resolution fails closed for missing roots,
+  absolute paths where relative paths are required, traversal, symlink escapes,
+  URL/scheme-shaped paths, and paths outside the allowed workspace root.
+- Test asserting `validate_app_bundle` does not execute subprocesses, does not
+  call `ModuleLoader.load()`, and is not wired to the workflow-local
+  AppGenerator acceptance gate.
