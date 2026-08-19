@@ -1,0 +1,101 @@
+name: DCO
+
+# Verifies every commit in a pull request carries a Developer Certificate of
+# Origin sign-off. See DCO.md for the certificate text and how to sign off.
+#
+# Implemented inline rather than with a third-party action, matching how the
+# other repo-specific gates in ci.yml are written, and so this workflow pulls
+# in no supply-chain dependency of its own.
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    # Bot-authored PRs (Dependabot and friends) do not sign off and are trusted
+    # by virtue of being repo automation, not third-party contributions.
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check sign-off on every commit
+        env:
+          # Passed through the environment rather than interpolated into the
+          # script body, so PR-controlled values can never be executed.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import subprocess
+          import sys
+
+          base = os.environ["BASE_SHA"]
+          head = os.environ["HEAD_SHA"]
+
+          # \x1e separates records, \x1f separates fields - neither can appear
+          # in a commit message, unlike any printable delimiter.
+          fmt = "%H\x1f%an\x1f%ae\x1f%B\x1e"
+          out = subprocess.run(
+              ["git", "log", "--no-merges", f"--format={fmt}", f"{base}..{head}"],
+              capture_output=True, text=True, check=True,
+          ).stdout
+
+          # Presence and shape are enforced; an exact match against the commit
+          # author is not. Sign-off identities legitimately differ from author
+          # identities (shared machines, GitHub noreply addresses, patches
+          # relayed under DCO clause (c)), and failing those costs contributors
+          # more than it protects the project.
+          trailer = re.compile(r"^Signed-off-by: .+ <[^<>@\s]+@[^<>\s]+>\s*$", re.M)
+
+          unsigned = []
+          checked = 0
+          for record in out.split("\x1e"):
+              record = record.strip("\n")
+              if not record:
+                  continue
+              sha, name, email, message = record.split("\x1f", 3)
+              checked += 1
+              if not trailer.search(message):
+                  subject = message.strip().splitlines()[0] if message.strip() else "(no message)"
+                  unsigned.append((sha, name, email, subject))
+
+          if not checked:
+              print("No non-merge commits to check.")
+              sys.exit(0)
+
+          if unsigned:
+              print("Missing Developer Certificate of Origin sign-off:\n", file=sys.stderr)
+              for sha, name, email, subject in unsigned:
+                  print(f"  {sha[:12]}  {subject}", file=sys.stderr)
+                  print(f"                {name} <{email}>\n", file=sys.stderr)
+              print(
+                  "Every commit needs a 'Signed-off-by' line certifying you have the\n"
+                  "right to contribute it. There is no CLA and no rights assignment;\n"
+                  "see DCO.md.\n\n"
+                  "To fix the most recent commit:\n"
+                  "    git commit --amend -s --no-edit\n"
+                  "    git push --force-with-lease\n\n"
+                  f"To fix every commit on this branch:\n"
+                  f"    git rebase --signoff {base[:12]}\n"
+                  "    git push --force-with-lease\n\n"
+                  "Sign off future commits automatically with 'git commit -s'.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print(f"All {checked} commit(s) signed off.")
+          PY

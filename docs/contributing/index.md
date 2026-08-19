@@ -21,8 +21,15 @@ Start there.
 
 - **[Local Setup](../local-setup.md)** — source checkout, editable install, and how to run the builder stack from repo
 - **[Architecture](../architecture/index.md)** — how the runtime, app bundle contract, module system, workflows, and frontend fit together
+- **[AI Policy](ai-policy.md)** — what we ask of AI-assisted contributions, and the repository-boundary mistake coding agents make most often here
 - **[Agent Bootstrap Prompt](../agent-bootstrap-prompt.md)** — hand a task to Claude Code, Cursor, or Copilot with the repo-aware bootstrap prompt
 - **[Contributor Guidance Readiness](contributor-guidance-readiness.md)** — current skill coverage, routing map, deferrals, and guidance validation tests
+
+## Getting Help
+
+Ask in [Discord](https://discord.gg/Qnsywad9kp) — questions about an approach
+are welcome before you write the code, and usually save everyone a review
+cycle.
 
 ## Preview the Docs Locally
 

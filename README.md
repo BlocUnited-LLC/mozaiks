@@ -10,6 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
 [![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
+[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/Qnsywad9kp)
 
 </div>
 
@@ -135,6 +136,14 @@ Fork, branch, install development dependencies with `pip install -e ".[dev]"`,
 make a focused change, run the relevant tests, and open a pull request.
 Documentation, most tests, and many CLI changes don't need MongoDB, Node.js,
 or an LLM API key. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full path.
+
+Using an AI coding agent? Welcome — read the
+[AI Policy](.github/AI_POLICY.md) first. It is short, and it applies to
+maintainers and their agents on the same terms.
+
+Questions, or want to talk through an approach before writing code? Join us on
+[Discord](https://discord.gg/Qnsywad9kp).
+
 This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License

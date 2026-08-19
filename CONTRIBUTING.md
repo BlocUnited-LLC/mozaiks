@@ -21,13 +21,20 @@ change, a new test, or a small feature:
    ```
 
 4. **Make a focused change.** Keep the diff scoped to one thing and avoid unrelated refactors.
-5. **Run the relevant tests** for what you changed. Use the narrowest test slice that covers your change (see [Running Tests Locally](#running-tests-locally) below), or run the full suite with `pytest`.
-6. **Open a pull request** against `main` using the pull request template. Describe what changed, why, and what you tested.
+5. **Sign off your commits** with `git commit -s`. This certifies you have the
+   right to contribute the change under the
+   [Developer Certificate of Origin](DCO.md) - there is no CLA and no rights
+   assignment. CI checks for it, and forgetting is easy to fix after the fact.
+6. **Run the relevant tests** for what you changed. Use the narrowest test slice that covers your change (see [Running Tests Locally](#running-tests-locally) below), or run the full suite with `pytest`.
+7. **Open a pull request** against `main` using the pull request template. Describe what changed, why, and what you tested.
 
-Using an AI coding agent (Claude Code, Cursor, Copilot, or similar)? See
+Using an AI coding agent (Claude Code, Cursor, Copilot, or similar)? Read the
+[AI Policy](.github/AI_POLICY.md) first — it is short, it applies to
+maintainers and their agents too, and it explains what we ask of any
+contribution regardless of how it was written. Then see
 [Working With an AI Coding Agent](#working-with-an-ai-coding-agent-optional)
-below — it is optional tooling this repo supports, not a prerequisite for
-contributing.
+below for the repo's optional agent routing system, which is tooling this repo
+supports rather than a prerequisite for contributing.
 
 ## What You Can Contribute Without Extra Setup
 
@@ -84,6 +91,14 @@ enforced, and your pull request must pass CI regardless of what you ran
 locally.
 
 ## Working With an AI Coding Agent (Optional)
+
+> **Before anything below:** the [AI Policy](.github/AI_POLICY.md) covers what
+> we ask of AI-assisted contributions — you understand and have tested the
+> change, the description matches the diff, and you can discuss it in review.
+> It applies to maintainer agents on `cc/` and `codex/` branches on exactly the
+> same terms. It also explains the boundary question agents get wrong most
+> often here: which changes belong in this repository and which belong in the
+> hosted product.
 
 This repo also maintains a skill/rule routing system that AI coding agents
 (Claude Code, Cursor, Copilot, and similar tools) use to find the right
@@ -183,6 +198,44 @@ introduced. In addition:
 - Keep commits focused.
 - Avoid unrelated refactors in the same PR.
 - Do not include generated noise unless required.
+
+## Developer Certificate of Origin
+
+Mozaiks has **no CLA**. You keep the copyright to your work and assign us
+nothing. Instead, every commit carries a one-line certification that you have
+the right to contribute it, which is what the
+[Developer Certificate of Origin](DCO.md) says.
+
+`git commit -s` adds it for you:
+
+```
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+Set `git config user.name` and `git config user.email` first, since the line is
+generated from them.
+
+Forgot? Nothing is lost:
+
+```bash
+# most recent commit
+git commit --amend -s --no-edit && git push --force-with-lease
+
+# every commit on your branch
+git rebase --signoff origin/main && git push --force-with-lease
+```
+
+The `DCO` check on your pull request prints the exact command for your branch
+when it fails.
+
+## Getting Help
+
+- **[Discord](https://discord.gg/Qnsywad9kp)** — questions, design discussion,
+  and a good place to ask before writing code if you are unsure whether an
+  approach fits.
+- **[Docs](https://docs.mozaiks.ai)** — architecture, contracts, and guides.
+- **The issue itself** — if an issue is unclear or its suggested approach looks
+  wrong, say so there. That is useful feedback, not an interruption.
 
 ## Security
 
