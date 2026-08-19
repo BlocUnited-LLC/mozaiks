@@ -109,13 +109,13 @@ schema-versioned, JSON-serializable data.
 
 | Tool | Backing function | Nature |
 |---|---|---|
-| `get_workspace_identity` | `core/runtime/app/provenance.py` (`load_app_provenance`, `resolve_app_provenance_path`, `AppProvenance`) | read |
-| `get_canonical_layout` | `core/runtime/app/layout_registry.py` (`default_app_layout_registry`, `AppLayoutRegistry`) | read |
-| `resolve_artifact_location` | `core/runtime/app/layout_registry.py` (`match_path`, `validate_registered_path`) | read |
-| `list_modules` | `core/runtime/app/module_loader.py` (`ModuleLoader.discover_module_names`) | read with constructor side effects constrained by path containment |
-| `list_pages` | `core/runtime/app/page_schema.py` (`discover_page_schema_paths`) | read |
-| `validate_app_bundle` | `control_plane/app_validation.py` (`run_app_validation_fallback_checks`) | pure validation; not equivalent to AppGenerator acceptance |
-| `plan_validation_commands` | `control_plane/app_validation.py` (`plan_app_source_validation_commands`) | read, plans without executing |
+| `get_workspace_identity` | `mozaiksai/core/runtime/app/provenance.py` (`load_app_provenance`, `resolve_app_provenance_path`, `AppProvenance`) | read |
+| `get_canonical_layout` | `mozaiksai/core/runtime/app/layout_registry.py` (`default_app_layout_registry`, `AppLayoutRegistry`) | read |
+| `resolve_artifact_location` | `mozaiksai/core/runtime/app/layout_registry.py` (`match_path`, `validate_registered_path`) | read |
+| `list_modules` | `mozaiksai/core/runtime/app/module_loader.py` discovery contract, extracted into or wrapped by a side-effect-free `mozaiksai` helper before exposure | read |
+| `list_pages` | `mozaiksai/core/runtime/app/page_schema.py` (`discover_page_schema_paths`) | read |
+| `validate_app_bundle` | `mozaiksai/control_plane/app_validation.py` (`run_app_validation_fallback_checks`) | pure validation; not equivalent to AppGenerator acceptance |
+| `plan_validation_commands` | `mozaiksai/control_plane/app_validation.py` (`plan_app_source_validation_commands`) | read, plans without executing |
 
 `validate_app_bundle` is intentionally narrow in v1. It means local deterministic
 fallback validation over a resolved workspace root: JSON manifest parse, Python
@@ -177,10 +177,23 @@ workspace root, or one workspace-relative path. The server resolves paths with
 - any requested path contains `..`, a drive prefix, a URL/scheme, glob
   characters, or a symlink escape after resolution.
 
-`list_modules` must account for the current `ModuleLoader` constructor adding
-import roots to `sys.path`; the MCP adapter may use it only after containment is
-proven, and must not call `ModuleLoader.load()` because loading executes module
-handler code.
+`list_modules` must be side-effect-free. The current `ModuleLoader` constructor
+adds import roots to `sys.path`, so the MCP adapter must not instantiate
+`ModuleLoader` until discovery is refactored into a helper that has no such side
+effect. v1 module listing may only enumerate canonical `app/modules/*`
+directories and read module manifests through safe structured parsers after
+workspace containment is proven. It must not call `ModuleLoader.load()`, import
+generated modules, execute module-level code, or mutate `sys.path`.
+
+### Local transport and configuration
+
+MCP transport configuration is developer-local, not app-bundle output. A
+generated application may declare names-only provenance metadata indicating the
+framework MCP contract it supports, but generated app files must not contain
+local MCP credentials, tokens, API keys, ports, hostnames, absolute workspace
+paths, stdio command paths, client-specific MCP JSON, or other machine-specific
+connection details. Those settings belong in the developer's MCP client config,
+CLI invocation, or local environment outside generated app artifacts.
 
 ### Explicitly excluded from v1
 
@@ -299,6 +312,12 @@ Before merge of the implementation that follows this ADR:
 - Test asserting workspace path resolution fails closed for missing roots,
   absolute paths where relative paths are required, traversal, symlink escapes,
   URL/scheme-shaped paths, and paths outside the allowed workspace root.
+- Test asserting `list_modules` does not instantiate `ModuleLoader`, call
+  `ModuleLoader.load()`, import generated modules, execute module-level code, or
+  mutate `sys.path`.
 - Test asserting `validate_app_bundle` does not execute subprocesses, does not
   call `ModuleLoader.load()`, and is not wired to the workflow-local
   AppGenerator acceptance gate.
+- Test asserting generated app artifacts do not contain local MCP credentials,
+  tokens, ports, absolute paths, client-specific MCP JSON, or machine-specific
+  transport configuration.
