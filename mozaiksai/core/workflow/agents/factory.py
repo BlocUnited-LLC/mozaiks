@@ -153,7 +153,7 @@ class ContextVariablesBridge:
     """
 
     __slots__ = (
-        "_data",
+        "__data",
         "_pending_set",
         "_pending_delete",
         "_authority_policy",
@@ -168,7 +168,7 @@ class ContextVariablesBridge:
         authority_policy: ContextAuthorityPolicy | None = None,
         writer_id: str = CONTEXT_BRIDGE_WRITER,
     ) -> None:
-        self._data = detach(data)
+        self.__data: dict[str, Any] = detach(data)  # type: ignore[assignment]
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
         self._authority_policy = authority_policy
@@ -177,13 +177,13 @@ class ContextVariablesBridge:
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
-        return freeze(self._data.get(key, default))
+        return freeze(self.__data.get(key, default))
 
     def set(self, key: str, value: Any) -> None:
         self[key] = value
 
     def __getitem__(self, key: str) -> Any:
-        return freeze(self._data[key])
+        return freeze(self.__data[key])
 
     def __setitem__(self, key: str, value: Any) -> None:
         clean_key = str(key or "").strip()
@@ -191,7 +191,7 @@ class ContextVariablesBridge:
             raise KeyError("context variable key must be non-empty")
         if self._authority_policy is not None:
             self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
-        self._data[clean_key] = detach(value)
+        self.__data[clean_key] = detach(value)
         self._pending_set[clean_key] = detach(value)
         self._pending_delete.discard(clean_key)
 
@@ -201,8 +201,8 @@ class ContextVariablesBridge:
             raise KeyError("context variable key must be non-empty")
         if self._authority_policy is not None:
             self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="delete")  # type: ignore[arg-type]
-        existed = clean_key in self._data
-        value = self._data.pop(clean_key, default)
+        existed = clean_key in self.__data
+        value = self.__data.pop(clean_key, default)
         if existed:
             self._pending_set.pop(clean_key, None)
             self._pending_delete.add(clean_key)
@@ -212,22 +212,22 @@ class ContextVariablesBridge:
         self.pop(key, None)
 
     def __contains__(self, key: str) -> bool:
-        return key in self._data
+        return key in self.__data
 
     def __iter__(self):
-        return iter(self._data)
+        return iter(self.__data)
 
     def keys(self):
         """Return canonical context keys (strings are immutable — no wrapping needed)."""
-        return self._data.keys()
+        return self.__data.keys()
 
     def items(self):
         """Return (key, frozen_value) pairs. Values are recursively immutable views."""
-        return ((k, freeze(v)) for k, v in self._data.items())
+        return ((k, freeze(v)) for k, v in self.__data.items())
 
     def values(self):
         """Return frozen values. Each value is a recursively immutable view."""
-        return (freeze(v) for v in self._data.values())
+        return (freeze(v) for v in self.__data.values())
 
     def to_dict(self) -> dict[str, Any]:
         return self.snapshot()
@@ -240,7 +240,7 @@ class ContextVariablesBridge:
         reach canonical state. Only ScopedContextWriter / ContextAuthorityPolicy
         can mutate canonical state.
         """
-        return detach(self._data)
+        return detach(self.__data)
 
     @property
     def data(self) -> dict[str, Any]:

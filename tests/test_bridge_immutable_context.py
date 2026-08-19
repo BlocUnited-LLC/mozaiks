@@ -413,3 +413,22 @@ def test_authority_bearing_objects_are_rejected_from_context_variables():
     container = create_context_container()
     with pytest.raises(TypeError, match="Authority-bearing runtime objects"):
         container.set("service", _ServiceObject())
+
+
+# ---------------------------------------------------------------------------
+# Test: _data backing attribute is not accessible directly (INV-5)
+# Callers must go through the bridge API — direct backing dict access is blocked.
+# ---------------------------------------------------------------------------
+
+def test_backing_dict_not_accessible_via_single_underscore():
+    """INV-5: bridge._data must not expose the backing dict directly."""
+    bridge = make_bridge({"x": {"y": 1}})
+    with pytest.raises(AttributeError):
+        _ = bridge._data  # type: ignore[attr-defined]
+
+
+def test_adapter_backing_dict_not_accessible_via_single_underscore():
+    """INV-5 (adapter): container._data must not expose the backing dict directly."""
+    container = create_context_container({"x": {"y": 1}})
+    with pytest.raises(AttributeError):
+        _ = container._data  # type: ignore[attr-defined]
