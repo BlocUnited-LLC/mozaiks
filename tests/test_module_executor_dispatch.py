@@ -12,11 +12,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mozaiksai.core.ports.entitlement import EntitlementResult
+from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
 from mozaiksai.core.runtime.composition.module_executor import (
     ModuleExecutor,
     ModuleRequest,
     _validate_schema,
 )
+from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -54,7 +56,7 @@ def _request(
     user_id: str | None = "user-1",
     tenant_id: str | None = None,
     workspace_id: str | None = None,
-    granted_permissions: list[str] | None = None,
+    authority: ModuleDispatchAuthority | None = None,
 ) -> ModuleRequest:
     return ModuleRequest(
         module=module,
@@ -64,7 +66,7 @@ def _request(
         user_id=user_id,
         tenant_id=tenant_id,
         workspace_id=workspace_id,
-        granted_permissions=granted_permissions,
+        authority=authority if authority is not None else trusted_framework_authority(),
     )
 
 
@@ -151,7 +153,7 @@ class TestActionErrorHandling:
         """PermissionError raised inside a handler maps to PERMISSION_DENIED (403), not EXECUTION_ERROR (500)."""
         ex = ModuleExecutor()
         ex.register("contacts", _ErrorHandler())
-        result = await ex.execute(_request(action="restricted", granted_permissions=["contacts.read"]))
+        result = await ex.execute(_request(action="restricted", authority=enforce_authority("contacts.read")))
         assert result.success is False
         assert result.error_code == "PERMISSION_DENIED"
         # Generic message returned — internal permission names are not leaked to callers.
@@ -171,8 +173,8 @@ class TestPermissionEnforcement:
             _EchoHandler(),
             action_permissions={"echo": ["contacts.read"]},
         )
-        # granted_permissions=None → trusted internal call, no enforcement
-        result = await ex.execute(_request(granted_permissions=None))
+        # authority=trusted_framework_authority() → trusted internal call, no enforcement
+        result = await ex.execute(_request(authority=trusted_framework_authority()))
         assert result.success is True
 
     @pytest.mark.asyncio
@@ -183,7 +185,7 @@ class TestPermissionEnforcement:
             _EchoHandler(),
             action_permissions={"echo": ["contacts.read"]},
         )
-        result = await ex.execute(_request(granted_permissions=["contacts.read", "other.perm"]))
+        result = await ex.execute(_request(authority=enforce_authority("contacts.read", "other.perm")))
         assert result.success is True
 
     @pytest.mark.asyncio
@@ -194,7 +196,7 @@ class TestPermissionEnforcement:
             _EchoHandler(),
             action_permissions={"echo": ["contacts.read"]},
         )
-        result = await ex.execute(_request(granted_permissions=["other.perm"]))
+        result = await ex.execute(_request(authority=enforce_authority("other.perm")))
         assert result.success is False
         assert result.error_code == "PERMISSION_DENIED"
 
@@ -206,7 +208,7 @@ class TestPermissionEnforcement:
             _EchoHandler(),
             action_permissions={"echo": ["contacts.read"]},
         )
-        result = await ex.execute(_request(granted_permissions=[]))
+        result = await ex.execute(_request(authority=enforce_authority()))
         assert result.success is False
         assert result.error_code == "PERMISSION_DENIED"
 
@@ -218,7 +220,7 @@ class TestPermissionEnforcement:
             _EchoHandler(),
             action_permissions={},  # no permissions required
         )
-        result = await ex.execute(_request(granted_permissions=[]))
+        result = await ex.execute(_request(authority=enforce_authority()))
         assert result.success is True
 
 
@@ -237,7 +239,7 @@ class TestEntitlementGate:
             _EchoHandler(),
             action_entitlements={"echo": "wallet.payout"},
         )
-        result = await ex.execute(_request(module="wallet", granted_permissions=["wallet.manage"]))
+        result = await ex.execute(_request(module="wallet", authority=enforce_authority("wallet.manage")))
         assert result.success is True
         granted_checker.check.assert_awaited_once_with(
             "wallet.payout",
@@ -262,7 +264,7 @@ class TestEntitlementGate:
                 module="wallet",
                 tenant_id="tenant-1",
                 workspace_id="workspace-1",
-                granted_permissions=["wallet.manage"],
+                authority=enforce_authority("wallet.manage"),
             )
         )
         assert result.success is True
@@ -286,7 +288,7 @@ class TestEntitlementGate:
             _EchoHandler(),
             action_entitlements={"echo": "wallet.payout"},
         )
-        result = await ex.execute(_request(module="wallet", granted_permissions=["wallet.manage"]))
+        result = await ex.execute(_request(module="wallet", authority=enforce_authority("wallet.manage")))
         assert result.success is False
         assert result.error_code == "ENTITLEMENT_REQUIRED"
 
@@ -301,7 +303,7 @@ class TestEntitlementGate:
             _EchoHandler(),
             action_entitlements={"echo": "wallet.payout"},
         )
-        result = await ex.execute(_request(module="wallet", granted_permissions=None))
+        result = await ex.execute(_request(module="wallet", authority=trusted_framework_authority()))
         assert result.success is True
         checked.check.assert_not_awaited()
 
@@ -315,7 +317,7 @@ class TestEntitlementGate:
             _EchoHandler(),
             action_entitlements={},  # no gate on any action
         )
-        result = await ex.execute(_request(granted_permissions=["any.perm"]))
+        result = await ex.execute(_request(authority=enforce_authority("any.perm")))
         assert result.success is True
         checked.check.assert_not_awaited()
 

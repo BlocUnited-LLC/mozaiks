@@ -100,7 +100,7 @@ async def test_dispatch_module_action_preserves_scope_metadata_and_permissions()
                 auth_token="token-1",
                 correlation_id="corr-1",
             ),
-            granted_permissions=["orders.read"],
+            permissions=["orders.read"],
         ),
         app=_app_with_executor(),
     )
@@ -134,7 +134,7 @@ async def test_dispatch_module_action_preserves_permission_enforcement() -> None
             module="orders",
             action="restricted",
             scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
-            granted_permissions=[],
+            permissions=[],
         ),
         app=_app_with_executor(),
     )
@@ -171,7 +171,7 @@ async def test_dispatch_module_action_accepts_workflow_authority_and_provenance(
                 workspace_id="workspace-1",
             ),
             metadata=ModuleDispatchMetadata(correlation_id="corr-workflow"),
-            granted_permissions=["orders.read"],
+            permissions=["orders.read"],
             authority=ModuleDispatchAuthority(
                 kind="workflow",
                 permission_mode="enforce",
@@ -219,7 +219,7 @@ async def test_dispatch_module_action_workflow_authority_still_requires_permissi
             module="orders",
             action="restricted",
             scope=ModuleDispatchScope(app_id="app-1", user_id="workflow-user"),
-            granted_permissions=[],
+            permissions=[],
             authority=ModuleDispatchAuthority(
                 kind="workflow",
                 permission_mode="enforce",
@@ -244,7 +244,7 @@ async def test_dispatch_module_action_does_not_expose_implicit_trusted_bypass() 
         module="orders",
         action="restricted",
         scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
-        granted_permissions=None,  # type: ignore[arg-type]
+        permissions=None,  # type: ignore[arg-type]
     )
 
     with pytest.raises(ValueError, match="Trusted/internal authority"):
@@ -256,23 +256,17 @@ async def test_dispatch_module_action_does_not_expose_implicit_trusted_bypass() 
     "authority",
     [
         ModuleDispatchAuthority(
-            kind="workflow",
-            permission_mode="trusted_bypass",
-            reason="not allowed",
-        ),
-        ModuleDispatchAuthority(
-            kind="legacy_trusted",
-            permission_mode="trusted_bypass",
-            reason="not allowed",
-            legacy_granted_permissions_none=True,
-        ),
-        ModuleDispatchAuthority(
-            kind="legacy_permissions",
+            kind="framework_internal",
             permission_mode="enforce",
             reason="not allowed",
         ),
         ModuleDispatchAuthority(
-            kind="framework_internal",
+            kind="operator_internal",
+            permission_mode="enforce",
+            reason="not allowed",
+        ),
+        ModuleDispatchAuthority(
+            kind="event_reaction",
             permission_mode="enforce",
             reason="not allowed",
         ),
@@ -283,7 +277,7 @@ async def test_dispatch_module_action_rejects_public_unsafe_authority(authority)
         module="orders",
         action="restricted",
         scope=ModuleDispatchScope(app_id="app-1", user_id="user-1"),
-        granted_permissions=["orders.read"],
+        permissions=["orders.read"],
         authority=authority,
     )
 

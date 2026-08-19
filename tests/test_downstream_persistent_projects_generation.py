@@ -19,6 +19,7 @@ from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
     load_data_migrations,
 )
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "appplan_persistent_projects_output.json"
@@ -839,11 +840,11 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
             app_id="app_a",
             tenant_id="tenant_1",
             user_id="user_1",
-            params={"project_id": "project_1", "name": "Launch Plan"},
+            params={"project_id": "project_1", "name": "Launch Plan"}, authority=trusted_framework_authority(),
         )
     )
     listed_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={}, authority=trusted_framework_authority())
     )
     created_task = await executor.execute(
         ModuleRequest(
@@ -851,14 +852,14 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
             action="create_task",
             app_id="app_a",
             user_id="user_1",
-            params={"task_id": "task_1", "title": "Draft scope", "project_id": "project_1"},
+            params={"task_id": "task_1", "title": "Draft scope", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_tasks = await executor.execute(
-        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"})
+        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"}, authority=trusted_framework_authority())
     )
     app_b_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={}, authority=trusted_framework_authority())
     )
 
     assert created_project.success is True

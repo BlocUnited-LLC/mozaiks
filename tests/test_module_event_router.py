@@ -578,7 +578,7 @@ class TestHandleEventHandlerTarget:
                 "tenant": {"app_id": "app-99", "tenant_id": "t-99", "workspace_id": "w-99"},
                 "actor": {"type": "user", "id": "user-99"},
                 "correlation": {"correlation_id": "corr-99", "causation_id": "cause-99"},
-                "authority": {"granted_permissions": ["orders.react"]},
+                "authority": {"permissions": ["orders.react"]},
                 "payload": {},
             },
         )
@@ -643,7 +643,7 @@ class TestHandleEventHandlerTarget:
         await router.handle_event(
             "domain.orders.created",
             _envelope(payload={"order_id": "o-1"})
-            | {"authority": {"granted_permissions": ["orders.react"]}},
+            | {"authority": {"permissions": ["orders.react"]}},
         )
 
         assert len(received_ctx) == 1

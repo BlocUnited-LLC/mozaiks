@@ -209,7 +209,8 @@ async def _execute_module_action(
     # Internal-surface actions are event-bus reactions or trusted runtime calls.
     # They must never be reachable via the external HTTP module dispatch path,
     # regardless of authentication status.  Callers that need to invoke these
-    # actions directly must use ModuleExecutor with granted_permissions=None.
+    # actions directly must use ModuleExecutor with a server-owned trusted
+    # dispatch authority.
     if _is_internal_module_action(request, module_name, action_name):
         raise HTTPException(status_code=404, detail="Action not found")
 
@@ -309,18 +310,15 @@ async def _execute_module_action(
     # such module HTTP calls as trusted local dispatch so module permission
     # declarations don't block the Studio admin UI. In production
     # (AUTH_ENABLED=true), non-public HTTP callers must carry a token with
-    # explicit scopes, so granted_permissions remains a concrete list.
+    # explicit scopes that become the enforce-mode authority's permissions.
     if not is_auth_enabled():
-        granted_permissions = None
         authority = ModuleDispatchAuthority(
             kind="local_development",
             permission_mode="trusted_bypass",
             reason="auth-disabled local HTTP module dispatch",
             actor_id=str(user_id) if user_id else None,
-            legacy_granted_permissions_none=True,
         )
     else:
-        granted_permissions = list(dispatch_scope.get("permissions") or [])
         authority_kind = cast(
             ModuleDispatchAuthorityKind,
             "authenticated_user" if principal is not None else "public_http",
@@ -330,7 +328,7 @@ async def _execute_module_action(
             permission_mode="enforce",
             reason="HTTP module dispatch",
             actor_id=str(user_id) if user_id else None,
-            permissions=tuple(granted_permissions),
+            permissions=tuple(dispatch_scope.get("permissions") or []),
         )
 
     module_request = ModuleRequest(
@@ -343,12 +341,6 @@ async def _execute_module_action(
         workspace_id=str(dispatch_scope.get("workspace_id") or workspace_id) if (dispatch_scope.get("workspace_id") or workspace_id) else None,
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
-        # HTTP module dispatch supplies a concrete permission list when auth is
-        # enabled. When auth is disabled (dev mode, no principal) granted_permissions
-        # is None so the executor bypasses enforcement as a trusted internal call.
-        # Internal trusted calls can also bypass by invoking ModuleExecutor directly
-        # with granted_permissions=None.
-        granted_permissions=granted_permissions,
         authority=authority,
         provenance=ModuleDispatchProvenance(
             surface="http_module_dispatch",

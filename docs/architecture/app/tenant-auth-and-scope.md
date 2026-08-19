@@ -70,9 +70,10 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
 - When auth is enabled, external HTTP module dispatch requires an authenticated
   principal by default. The only anonymous HTTP module actions are those whose
   `actions[].api_surface` is explicitly `public` or `public_readonly`.
-- External HTTP module dispatch never uses the trusted internal
-  `granted_permissions=None` bypass. It passes a concrete permission list,
-  including an empty list for anonymous public actions.
+- External HTTP module dispatch always constructs an enforce-mode
+  `ModuleDispatchAuthority` carrying the caller's concrete permission set —
+  an empty set for anonymous public actions. There is no trusted bypass on
+  the HTTP path.
 - Authenticated HTTP module dispatch rejects request-supplied `user_id`,
   `tenant_id`, or `workspace_id` values that conflict with token-bound claims.
 - `PlatformHookRegistry` exposes `module_scope_resolver`, a provider-neutral
@@ -101,13 +102,16 @@ The platform should resolve external requests in this order:
 4. Return a canonical identity scope plus granted module permissions.
 5. Dispatch the module action with that scope in `ModuleRequest`.
 
-For external requests, missing auth or missing permission resolution should
-result in an empty permission list or an auth error, not the internal
-`granted_permissions=None` bypass.
+For external requests, missing auth or missing permission resolution results
+in an empty permission set on an enforce-mode authority or an auth error —
+never a trusted bypass.
 
-Internal runtime calls may still use trusted dispatch when the caller is already
-inside the runtime boundary. That path must stay explicit and separate from
-HTTP user traffic.
+Internal runtime calls may use trusted dispatch only by constructing one of
+the closed server-owned `ModuleDispatchAuthority` kinds
+(`framework_internal`, `operator_internal`, contract-declared
+`event_reaction`, or auth-disabled `local_development`). That path stays
+explicit and separate from HTTP user traffic; internal location alone never
+grants bypass.
 
 ## Remaining Production Work
 

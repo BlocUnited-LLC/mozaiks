@@ -35,6 +35,8 @@ from uuid import uuid4
 import pytest
 import yaml
 
+from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
+
 _RUN_ENV = "MOZAIKS_RUN_REAL_MONGO_TESTS"
 _LEGACY_ENV = "MOZAIKS_RUN_MONGO_INTEGRATION"
 
@@ -366,7 +368,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_free",
                 params={"report_id": "r1"},
-                granted_permissions=[],  # user request — triggers entitlement check
+                authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
         assert pre_result.success is False
@@ -381,7 +383,7 @@ async def test_entitlement_dispatch_docker_integration(
                 action="activate_subscription",
                 app_id=app_id,
                 user_id="user_pro",
-                params={"user_id": "user_pro", "plan_id": "pro"},
+                params={"user_id": "user_pro", "plan_id": "pro"}, authority=trusted_framework_authority(),
             )
         )
         assert activate_result.success is True, (
@@ -404,7 +406,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_pro",
                 params={"report_id": "r1"},
-                granted_permissions=[],  # user request — triggers entitlement check
+                authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
         assert export_result.success is True, (
@@ -420,7 +422,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_free",
                 params={"report_id": "r1"},
-                granted_permissions=[],  # user request — triggers entitlement check
+                authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
         assert free_result.success is False
@@ -436,7 +438,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_free",
                 params={},
-                granted_permissions=[],  # user request — triggers entitlement check
+                authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
         assert list_result.success is True
@@ -448,7 +450,7 @@ async def test_entitlement_dispatch_docker_integration(
                 action="deactivate_subscription",
                 app_id=app_id,
                 user_id="user_pro",
-                params={"user_id": "user_pro"},
+                params={"user_id": "user_pro"}, authority=trusted_framework_authority(),
             )
         )
         assert deactivate_result.success is True
@@ -465,7 +467,7 @@ async def test_entitlement_dispatch_docker_integration(
                 app_id=app_id,
                 user_id="user_pro",
                 params={"report_id": "r1"},
-                granted_permissions=[],  # user request — triggers entitlement check
+                authority=enforce_authority(),  # user request — triggers entitlement check
             )
         )
         assert post_deactivate_result.success is False

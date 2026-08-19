@@ -17,6 +17,7 @@ from mozaiksai.core.runtime.persistence import (
     migration_hash,
 )
 from mozaiksai.core.runtime.persistence.mongo import DEFAULT_APP_DATABASE_NAME
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 RUN_ENV = "MOZAIKS_RUN_REAL_MONGO_TESTS"
 LEGACY_RUN_ENV = "MOZAIKS_RUN_MONGO_INTEGRATION"
@@ -144,7 +145,7 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
                 action="create_project",
                 app_id=app_id,
                 user_id="integration_user",
-                params={"project_id": project_id, "name": "Real Mongo Smoke"},
+                params={"project_id": project_id, "name": "Real Mongo Smoke"}, authority=trusted_framework_authority(),
             )
         )
         assert create_result.success is True
@@ -158,10 +159,10 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
         )
 
         list_result = await executor.execute(
-            ModuleRequest(module="projects", action="list_projects", app_id=app_id)
+            ModuleRequest(module="projects", action="list_projects", app_id=app_id, authority=trusted_framework_authority())
         )
         other_list_result = await executor.execute(
-            ModuleRequest(module="projects", action="list_projects", app_id=other_app_id)
+            ModuleRequest(module="projects", action="list_projects", app_id=other_app_id, authority=trusted_framework_authority())
         )
 
         assert list_result.success is True

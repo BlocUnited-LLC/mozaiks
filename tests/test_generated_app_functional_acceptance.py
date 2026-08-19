@@ -18,6 +18,7 @@ from mozaiksai.core.validation import (
     scan_functional_generated_app,
     validate_generated_app_bundle,
 )
+from tests.module_authority_test_helpers import enforce_authority
 
 
 def _basic_crud_files() -> dict[str, str]:
@@ -871,7 +872,7 @@ def test_generated_monetized_saas_bundle_boots_and_serves_mozaikspay_runtime_sur
                 params={"topic": "retention"},
                 app_id="generated-saas",
                 user_id="anonymous",
-                granted_permissions=[],
+                authority=enforce_authority(),
             ),
         )
         assert enforced_result.success is False

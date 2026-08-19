@@ -27,6 +27,7 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, M
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
+from tests.module_authority_test_helpers import enforce_authority
 from tests.test_generated_saas_subscription_runtime_acceptance import (
     _Collection,
     _Database,
@@ -782,7 +783,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             params={"topic": "retention"},
             app_id="mozaikspay-replay",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert denied.success is False
@@ -795,7 +796,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             params={},
             app_id="mozaikspay-replay",
             user_id="user_1",
-            granted_permissions=["billing_portal.read"],
+            authority=enforce_authority("billing_portal.read"),
         )
     )
     assert plan_catalog.success is True
@@ -832,7 +833,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             params={"topic": "retention"},
             app_id="mozaikspay-replay",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert granted.success is True

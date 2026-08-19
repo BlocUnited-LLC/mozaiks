@@ -34,26 +34,30 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
-def test_governance_guardrail_rejects_new_permission_bypass(tmp_path: Path) -> None:
+def test_governance_guardrail_rejects_removed_permission_list_token(tmp_path: Path) -> None:
+    """Any reintroduction of the removed permission-list dispatch contract in
+    runtime source is an error, regardless of the value assigned."""
     guardrails = _load_guardrails_module()
-    path = _write(
-        tmp_path,
+    for candidate in (
         "mozaiksai/core/runtime/composition/new_dispatch.py",
-        "request = ModuleRequest(granted_permissions=None)\n",
-    )
+        "mozaiksai/hosts/routers/modules.py",
+    ):
+        path = _write(
+            tmp_path,
+            candidate,
+            "request = ModuleRequest(granted_permissions=['x'])\n",
+        )
+        errors, notices = guardrails.scan_paths([path], repo_root=tmp_path)
+        assert notices == []
+        assert [error.code for error in errors] == ["authority_bypass_not_reviewed"], candidate
 
-    errors, notices = guardrails.scan_paths([path], repo_root=tmp_path)
 
-    assert notices == []
-    assert [error.code for error in errors] == ["authority_bypass_not_reviewed"]
-
-
-def test_governance_guardrail_keeps_current_permission_allowlist(tmp_path: Path) -> None:
+def test_governance_guardrail_ignores_token_outside_runtime_source(tmp_path: Path) -> None:
     guardrails = _load_guardrails_module()
     path = _write(
         tmp_path,
-        "mozaiksai/hosts/routers/modules.py",
-        "request.granted_permissions = None\n",
+        "CHANGELOG.md",
+        "Removed granted_permissions from ModuleRequest.\n",
     )
 
     errors, notices = guardrails.scan_paths([path], repo_root=tmp_path)

@@ -123,7 +123,6 @@ def test_framework_authority_and_provenance_do_not_claim_production_authority() 
         actor_id="user-1",
         permissions=("orders.read",),
     )
-    translated = ModuleDispatchAuthority.from_granted_permissions(None, actor_id="system")
     event = ModuleEventProvenance(
         event_id="evt-1",
         event_type="domain.orders.created",
@@ -132,9 +131,8 @@ def test_framework_authority_and_provenance_do_not_claim_production_authority() 
     )
 
     assert authority.permission_mode == "enforce"
-    assert translated.kind == "leg" + "acy_trusted"
-    assert translated.permission_mode == "trusted" + "_bypass"
-    assert getattr(translated, "leg" + "acy_granted_permissions_none") is True
+    # The permission-list translation shim and its compatibility kinds are gone.
+    assert not hasattr(ModuleDispatchAuthority, "from_" + "granted_permissions")
     assert "payload" not in event.to_dict()
     authority_fields = {field.name for field in fields(authority)}
     assert "production_authority" not in authority_fields

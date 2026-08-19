@@ -8,6 +8,7 @@ from .extensions import (
     stop_services,
 )
 from .module_authority import (
+    TRUSTED_BYPASS_KINDS,
     ModuleDispatchAudit,
     ModuleDispatchAuthority,
     ModuleDispatchProvenance,
@@ -15,6 +16,8 @@ from .module_authority import (
     ModuleExecutionPolicyDecision,
     ModuleExecutionPolicyInput,
     ModulePermissionCheck,
+    event_reaction_authority,
+    workflow_user_authority,
 )
 from .module_context import ModuleContext
 from .module_dispatch import (
@@ -60,6 +63,9 @@ __all__ = [
     "normalize_module_reaction_provenance",
     "ModuleDispatchAudit",
     "ModuleDispatchAuthority",
+    "TRUSTED_BYPASS_KINDS",
+    "event_reaction_authority",
+    "workflow_user_authority",
     "ModuleDispatchProvenance",
     "ModuleEntitlementCheck",
     "ModuleExecutionPolicyDecision",
