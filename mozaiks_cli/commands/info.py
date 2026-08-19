@@ -2,8 +2,8 @@
 mozaiks info - Show current configuration.
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 from mozaiks_cli.workspace import resolve_active_app_root
