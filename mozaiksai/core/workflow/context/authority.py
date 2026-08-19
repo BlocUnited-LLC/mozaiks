@@ -434,7 +434,14 @@ def _infer_writer_ids(
         ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE,
         ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE,
     }:
-        writers.update({CALLER_INPUT_WRITER, TRANSITION_ROUTER_WRITER, CONTEXT_BRIDGE_WRITER, TOOL_WRITEBACK_WRITER})
+        writers.update({
+            CALLER_INPUT_WRITER,
+            TRANSITION_ROUTER_WRITER,
+            CONTEXT_BRIDGE_WRITER,
+            TOOL_WRITEBACK_WRITER,
+            PERSISTED_REPLAY_WRITER,
+            LIVE_USER_CONTEXT_WRITER,
+        })
     return writers
 
 
