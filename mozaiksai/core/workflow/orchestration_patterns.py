@@ -829,12 +829,19 @@ async def run_workflow_orchestration(
             ctx_dict: dict[str, Any] = {}
         elif hasattr(context, "to_dict"):
             ctx_dict = context.to_dict()
-        elif hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
-            ctx_dict = dict(context.data)
+        elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+            ctx_dict = context.snapshot()
         elif isinstance(context, dict):
             ctx_dict = context
         else:
-            ctx_dict = {}
+            # Fallback for generic context containers that expose a plain .data dict.
+            # ContextVariablesBridge.data now raises AttributeError to surface bugs;
+            # this branch serves _RuntimeContextVariables and similar containers.
+            try:
+                raw_data = getattr(context, "data", None)
+                ctx_dict = dict(raw_data) if isinstance(raw_data, dict) else {}
+            except AttributeError:
+                ctx_dict = {}
 
         ctx_dict.setdefault("workflow_name", workflow_name)
         ctx_dict.setdefault("app_id", app_id)
@@ -879,12 +886,20 @@ async def run_workflow_orchestration(
         # Lifecycle tools mutate the context container in place. Refresh the
         # bridge source before agent prompts and AG2 channel state are created.
         if context is not None:
-            if hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
-                ctx_dict.update(context.data)
-            elif hasattr(context, "to_dict"):
+            if hasattr(context, "to_dict"):
                 ctx_dict.update(context.to_dict())
+            elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+                ctx_dict.update(context.snapshot())
             elif isinstance(context, dict):
                 ctx_dict.update(context)
+            else:
+                # Fallback for generic context containers that expose a plain .data dict.
+                try:
+                    raw_data = getattr(context, "data", None)
+                    if isinstance(raw_data, dict):
+                        ctx_dict.update(raw_data)
+                except AttributeError:
+                    pass
 
         _conv_logger.info(
             "[%s] PRE_AGENT_CONTEXT_READY keys=%s key_count=%s",

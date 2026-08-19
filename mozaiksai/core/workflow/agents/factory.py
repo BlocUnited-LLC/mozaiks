@@ -28,6 +28,7 @@ from ..context.context_utils import (
 from ..context.context_utils import (
     context_to_dict as _context_to_dict,
 )
+from ..context.frozen import detach, freeze
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -176,13 +177,13 @@ class ContextVariablesBridge:
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+        return freeze(self._data.get(key, default))
 
     def set(self, key: str, value: Any) -> None:
         self[key] = value
 
     def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+        return freeze(self._data[key])
 
     def __setitem__(self, key: str, value: Any) -> None:
         clean_key = str(key or "").strip()
@@ -213,8 +214,42 @@ class ContextVariablesBridge:
     def __contains__(self, key: str) -> bool:
         return key in self._data
 
+    def __iter__(self):
+        return iter(self._data)
+
+    def keys(self):
+        """Return canonical context keys (strings are immutable — no wrapping needed)."""
+        return self._data.keys()
+
+    def items(self):
+        """Return (key, frozen_value) pairs. Values are recursively immutable views."""
+        return ((k, freeze(v)) for k, v in self._data.items())
+
+    def values(self):
+        """Return frozen values. Each value is a recursively immutable view."""
+        return (freeze(v) for v in self._data.values())
+
     def to_dict(self) -> dict[str, Any]:
         return dict(self._data)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a deep copy of canonical state with no shared references.
+
+        Use this for serialization, persistence, logging, and prompt rendering.
+        The returned dict is a plain mutable copy — mutations to it cannot
+        reach canonical state. Only ScopedContextWriter / ContextAuthorityPolicy
+        can mutate canonical state.
+        """
+        return detach(self._data)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        raise AttributeError(
+            "ContextVariablesBridge.data has been removed to prevent mutable-reference "
+            "exposure. Use bridge.snapshot() for a detached serializable copy, "
+            "bridge[key] / bridge.get(key) for frozen reads, or bridge.keys() to "
+            "iterate keys."
+        )
 
     def clear_context_updates(self) -> None:
         self._pending_set.clear()
@@ -227,10 +262,6 @@ class ContextVariablesBridge:
         }
         self.clear_context_updates()
         return updates
-
-    @property
-    def data(self) -> dict[str, Any]:
-        return self._data
 
 
 # ------------------------------------------------------------------
@@ -350,10 +381,17 @@ async def create_agents(
         ctx_dict = context_variables
     elif hasattr(context_variables, "to_dict"):
         ctx_dict = context_variables.to_dict()
-    elif hasattr(context_variables, "data") and isinstance(getattr(context_variables, "data", None), dict):
-        ctx_dict = context_variables.data
+    elif hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+        ctx_dict = context_variables.snapshot()
     else:
-        ctx_dict = {}
+        # Fallback for generic context containers that expose a plain .data dict.
+        # ContextVariablesBridge.data now raises AttributeError to surface bugs;
+        # this branch serves _RuntimeContextVariables and test doubles.
+        try:
+            raw_data = getattr(context_variables, "data", None)
+            ctx_dict = dict(raw_data) if isinstance(raw_data, dict) else {}
+        except AttributeError:
+            ctx_dict = {}
 
     authority_policy = getattr(context_variables, "_mozaiks_context_authority_policy", None)
     context_bridge = ContextVariablesBridge(ctx_dict, authority_policy=authority_policy)

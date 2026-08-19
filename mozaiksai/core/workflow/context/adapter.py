@@ -11,7 +11,7 @@ Returned object supports:
   .remove(key) -> bool
   .keys() -> Iterable[str]
   .contains(key) -> bool
-  .data (property) -> underlying dict (for logging only)
+  .data (property) -> raises AttributeError; removed. Use snapshot() for serialization.
 """
 from __future__ import annotations
 
