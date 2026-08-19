@@ -67,14 +67,19 @@ def _is_within_root(candidate: Path, root: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def _context_to_dict(container: Any) -> dict[str, Any]:
+    if hasattr(container, "snapshot") and callable(getattr(container, "snapshot", None)):
+        try:
+            snap = container.snapshot()
+            if isinstance(snap, dict):
+                return snap
+        except Exception:  # pragma: no cover
+            pass
     try:
         if hasattr(container, "to_dict"):
-            return dict(container.to_dict())  # type: ignore[arg-type]
+            data = container.to_dict()
+            return dict(data) if isinstance(data, dict) else {}
     except Exception:  # pragma: no cover
         pass
-    data = getattr(container, "data", None)
-    if isinstance(data, dict):
-        return dict(data)
     if isinstance(container, dict):
         return dict(container)
     return {}
@@ -656,7 +661,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
             )
             if manager:
                 data_entity_managers.append(manager)
-                context.set(name, manager)
+                context.set(name, {"kind": "data_entity", "name": name})
                 business_logger.debug("Initialized data_entity manager for %s", name)
         elif source_type == "computed":
             context.set(name, None)

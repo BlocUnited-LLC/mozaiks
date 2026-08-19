@@ -197,42 +197,42 @@ def test_vector2_authorized_context_updates_rejects_unknown_key() -> None:
 # ---------------------------------------------------------------------------
 
 def test_vector3_nested_dict_mutation_bypasses_setitem() -> None:
-    """Nested dict mutation via __getitem__ result bypasses __setitem__ policy.
+    """Nested dict mutation via __getitem__ result is now blocked by freeze().
 
-    This test documents a KNOWN OPEN VECTOR in this PR. Python dict mutation
-    on a returned reference cannot be intercepted without returning deep-frozen
-    or proxy objects. The authority.py module does not return frozen copies.
-
-    CURRENT BEHAVIOR: nested mutation succeeds silently.
-    REQUIRED FIX: __getitem__ should return a deep copy or raise for
-    authority-protected keys that contain mutable values.
+    Previously a KNOWN OPEN VECTOR: Python dict mutation on a returned reference
+    bypassed __setitem__ policy. Fixed in cc/bridge-immutable-context:
+    __getitem__ now returns freeze(value) — a recursively immutable MappingProxyType.
+    Nested in-place mutation now raises TypeError.
     """
     policy = _hostile_policy()
     bridge = ContextVariablesBridge({"config_data": {"setting": "normal"}}, authority_policy=policy)
 
-    # This bypasses __setitem__ — Python cannot intercept this without a proxy
+    # Attempt to mutate through __getitem__ — now raises TypeError (MappingProxyType)
     nested = bridge["config_data"]
-    nested["admin_override"] = True  # no policy check
+    with pytest.raises(TypeError):
+        nested["admin_override"] = True  # type: ignore[index]
 
-    # Confirm the mutation landed on the live backing data
-    assert bridge["config_data"]["admin_override"] is True  # DEFECT: should not succeed
+    # Canonical state must be unchanged
+    assert "admin_override" not in bridge["config_data"]
+    assert bridge["config_data"]["setting"] == "normal"
 
 
 def test_vector3_data_property_allows_direct_dict_write() -> None:
-    """bridge.data['app_id'] = 'evil' bypasses __setitem__ policy.
+    """bridge.data is now removed — it raises AttributeError.
 
-    CURRENT BEHAVIOR: Direct write to the backing dict through .data property
-    succeeds without policy check.
-    REQUIRED FIX: .data should return a read-only copy (MappingProxyType),
-    or the property should be removed from the public API.
+    Previously a KNOWN OPEN VECTOR: Direct write to the backing dict through
+    .data property bypassed __setitem__ policy. Fixed in cc/bridge-immutable-context:
+    .data now raises AttributeError, directing callers to bridge.snapshot().
     """
     policy = _hostile_policy()
     bridge = ContextVariablesBridge({"app_id": "legit"}, authority_policy=policy)
 
-    # Direct write through .data property — no policy check
-    bridge.data["app_id"] = "evil"  # DEFECT: should not succeed
+    # .data must raise — it has been removed
+    with pytest.raises(AttributeError, match="snapshot"):
+        _ = bridge.data
 
-    assert bridge.get("app_id") == "evil"  # confirms the bypass worked
+    # Canonical state must be unchanged
+    assert bridge.get("app_id") == "legit"
 
 
 # ---------------------------------------------------------------------------

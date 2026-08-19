@@ -70,6 +70,9 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
         def get(self, key: str, default=None):
             return self.data.get(key, default)
 
+        def snapshot(self):
+            return dict(self.data)
+
     async def _fake_llm_config(*args, **kwargs):
         return None, {"config_list": [{"model": "gpt-4o-mini", "api_key": "test-key"}]}
 

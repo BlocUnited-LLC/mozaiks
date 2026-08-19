@@ -144,7 +144,7 @@ def test_context_bridge_rejects_authority_key_write() -> None:
     with pytest.raises(ContextAuthorityError):
         bridge.set("app_id", "attacker")
 
-    assert "app_id" not in bridge.data
+    assert "app_id" not in bridge.snapshot()
 
 
 def test_agent_text_cannot_set_routing_or_quality_status() -> None:

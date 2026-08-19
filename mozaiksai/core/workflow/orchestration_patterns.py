@@ -829,8 +829,8 @@ async def run_workflow_orchestration(
             ctx_dict: dict[str, Any] = {}
         elif hasattr(context, "to_dict"):
             ctx_dict = context.to_dict()
-        elif hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
-            ctx_dict = dict(context.data)
+        elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+            ctx_dict = context.snapshot()
         elif isinstance(context, dict):
             ctx_dict = context
         else:
@@ -879,10 +879,10 @@ async def run_workflow_orchestration(
         # Lifecycle tools mutate the context container in place. Refresh the
         # bridge source before agent prompts and AG2 channel state are created.
         if context is not None:
-            if hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
-                ctx_dict.update(context.data)
-            elif hasattr(context, "to_dict"):
+            if hasattr(context, "to_dict"):
                 ctx_dict.update(context.to_dict())
+            elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+                ctx_dict.update(context.snapshot())
             elif isinstance(context, dict):
                 ctx_dict.update(context)
 
@@ -933,8 +933,22 @@ async def run_workflow_orchestration(
             cb = getattr(ag, "_mozaiks_context_bridge", None)
             if cb is not None:
                 context_bridge = cb
-                context_bridge._data.update(ctx_dict)
-                ctx_dict = context_bridge._data
+                bridge_state = context_bridge.snapshot() if hasattr(context_bridge, "snapshot") else {}
+                if bridge_state != ctx_dict:
+                    for key, value in ctx_dict.items():
+                        if bridge_state.get(key) == value:
+                            continue
+                        try:
+                            context_bridge.set(key, value)
+                        except Exception as sync_err:
+                            wf_logger.debug(
+                                "[%s] CONTEXT_BRIDGE_SYNC_SKIPPED key=%s: %s",
+                                workflow_name_upper,
+                                key,
+                                sync_err,
+                            )
+                    bridge_state = context_bridge.snapshot() if hasattr(context_bridge, "snapshot") else bridge_state
+                ctx_dict = bridge_state
                 break
 
         if context_bridge is None:

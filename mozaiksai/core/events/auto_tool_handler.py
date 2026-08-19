@@ -155,15 +155,27 @@ class AutoToolEventHandler:
 
             # Write back context changes to pattern context if available
             container = kwargs.get("context_variables")
-            if pattern_context_ref and container and hasattr(container, "data"):
+            if pattern_context_ref and container:
                 try:
+                    if hasattr(container, "snapshot") and callable(getattr(container, "snapshot", None)):
+                        container_snapshot = container.snapshot()
+                    elif hasattr(container, "to_dict") and callable(getattr(container, "to_dict", None)):
+                        container_snapshot = container.to_dict()
+                    else:
+                        container_snapshot = {}
+                    if not isinstance(container_snapshot, dict):
+                        container_snapshot = {}
                     # Copy changes from tool's container back to the shared pattern context
-                    for key, value in container.data.items():
+                    for key, value in container_snapshot.items():
                         try:
                             pattern_context_ref.set(key, value)
                         except Exception as _set_err:
                             logger.debug("[AUTO_TOOL] Context write-back failed key=%s: %s", key, _set_err)
-                    logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(container.data), binding.tool_name)
+                    logger.debug(
+                        "[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution",
+                        len(container_snapshot),
+                        binding.tool_name,
+                    )
                 except Exception as wb_err:
                     logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
 
@@ -418,10 +430,16 @@ class AutoToolEventHandler:
         snapshot: dict[str, Any] | None = None
         if isinstance(context_variables, dict):
             snapshot = context_variables
-        else:
-            data = getattr(context_variables, "data", None)
+        elif hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+            data = context_variables.snapshot()
             if isinstance(data, dict):
                 snapshot = data
+        elif hasattr(context_variables, "to_dict") and callable(getattr(context_variables, "to_dict", None)):
+            data = context_variables.to_dict()
+            if isinstance(data, dict):
+                snapshot = data
+        else:
+            snapshot = None
 
         if not isinstance(snapshot, dict) or not snapshot:
             return

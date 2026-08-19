@@ -28,6 +28,7 @@ from ..context.context_utils import (
 from ..context.context_utils import (
     context_to_dict as _context_to_dict,
 )
+from ..context.frozen import detach, freeze
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -152,7 +153,7 @@ class ContextVariablesBridge:
     """
 
     __slots__ = (
-        "_data",
+        "__data",
         "_pending_set",
         "_pending_delete",
         "_authority_policy",
@@ -167,7 +168,7 @@ class ContextVariablesBridge:
         authority_policy: ContextAuthorityPolicy | None = None,
         writer_id: str = CONTEXT_BRIDGE_WRITER,
     ) -> None:
-        self._data = data
+        self.__data: dict[str, Any] = detach(data)  # type: ignore[assignment]
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
         self._authority_policy = authority_policy
@@ -176,13 +177,13 @@ class ContextVariablesBridge:
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+        return freeze(self.__data.get(key, default))
 
     def set(self, key: str, value: Any) -> None:
         self[key] = value
 
     def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+        return freeze(self.__data[key])
 
     def __setitem__(self, key: str, value: Any) -> None:
         clean_key = str(key or "").strip()
@@ -190,8 +191,8 @@ class ContextVariablesBridge:
             raise KeyError("context variable key must be non-empty")
         if self._authority_policy is not None:
             self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
-        self._data[clean_key] = value
-        self._pending_set[clean_key] = value
+        self.__data[clean_key] = detach(value)
+        self._pending_set[clean_key] = detach(value)
         self._pending_delete.discard(clean_key)
 
     def pop(self, key: str, default: Any = None) -> Any:
@@ -200,21 +201,55 @@ class ContextVariablesBridge:
             raise KeyError("context variable key must be non-empty")
         if self._authority_policy is not None:
             self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="delete")  # type: ignore[arg-type]
-        existed = clean_key in self._data
-        value = self._data.pop(clean_key, default)
+        existed = clean_key in self.__data
+        value = self.__data.pop(clean_key, default)
         if existed:
             self._pending_set.pop(clean_key, None)
             self._pending_delete.add(clean_key)
-        return value
+        return detach(value)
 
     def delete(self, key: str) -> None:
         self.pop(key, None)
 
     def __contains__(self, key: str) -> bool:
-        return key in self._data
+        return key in self.__data
+
+    def __iter__(self):
+        return iter(self.__data)
+
+    def keys(self):
+        """Return canonical context keys (strings are immutable — no wrapping needed)."""
+        return self.__data.keys()
+
+    def items(self):
+        """Return (key, frozen_value) pairs. Values are recursively immutable views."""
+        return ((k, freeze(v)) for k, v in self.__data.items())
+
+    def values(self):
+        """Return frozen values. Each value is a recursively immutable view."""
+        return (freeze(v) for v in self.__data.values())
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self._data)
+        return self.snapshot()
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a deep copy of canonical state with no shared references.
+
+        Use this for serialization, persistence, logging, and prompt rendering.
+        The returned dict is a plain mutable copy — mutations to it cannot
+        reach canonical state. Only ScopedContextWriter / ContextAuthorityPolicy
+        can mutate canonical state.
+        """
+        return detach(self.__data)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        raise AttributeError(
+            "ContextVariablesBridge.data has been removed to prevent mutable-reference "
+            "exposure. Use bridge.snapshot() for a detached serializable copy, "
+            "bridge[key] / bridge.get(key) for frozen reads, or bridge.keys() to "
+            "iterate keys."
+        )
 
     def clear_context_updates(self) -> None:
         self._pending_set.clear()
@@ -222,15 +257,11 @@ class ContextVariablesBridge:
 
     def consume_context_updates(self) -> dict[str, Any]:
         updates = {
-            "set": dict(self._pending_set),
+            "set": detach(self._pending_set),
             "delete": sorted(self._pending_delete),
         }
         self.clear_context_updates()
         return updates
-
-    @property
-    def data(self) -> dict[str, Any]:
-        return self._data
 
 
 # ------------------------------------------------------------------
@@ -350,8 +381,8 @@ async def create_agents(
         ctx_dict = context_variables
     elif hasattr(context_variables, "to_dict"):
         ctx_dict = context_variables.to_dict()
-    elif hasattr(context_variables, "data") and isinstance(getattr(context_variables, "data", None), dict):
-        ctx_dict = context_variables.data
+    elif hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+        ctx_dict = context_variables.snapshot()
     else:
         ctx_dict = {}
 
