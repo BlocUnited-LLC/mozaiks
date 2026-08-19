@@ -192,20 +192,24 @@ aware that would make these representations inaccurate in any respect.
 ### 10. Governing Law
 
 This Agreement is governed by the laws of the Commonwealth of Pennsylvania,
-United States of America, without regard to its conflict of law provisions.
+United States of America, without regard to its conflict of law provisions. The
+state and federal courts located in Bucks County, Pennsylvania shall have
+exclusive jurisdiction over any dispute arising out of or relating to this
+Agreement.
 
 **[REVIEW]** — *Pennsylvania is formally a Commonwealth, and the phrasing above
-reflects that; "State of Pennsylvania" is a common drafting slip. Counsel should
-confirm the wording matches BlocUnited LLC's other agreements.*
+reflects that; "State of Pennsylvania" is a common drafting slip.*
 
-**[REVIEW: venue.]** — *No venue or dispute-resolution clause is included,
-because it depends on the county in which BlocUnited LLC maintains its principal
-place of business, which was not available when this was drafted. Counsel should
-add an exclusive-venue provision naming the appropriate Pennsylvania county, or
-advise that none is wanted. Note that a venue clause requiring an overseas
-contributor to litigate in Pennsylvania is, in practice, another reason people
-decline to sign; consider whether it is worth including at all for an agreement
-of this kind.*
+**[REVIEW: whether to keep the venue sentence at all.]** — *An exclusive-venue
+clause protects BlocUnited from being sued in a distant forum, which is its
+normal purpose. The tradeoff for a CLA specifically is that it asks a
+contributor in, say, Berlin or Bangalore to accept that any dispute is heard in
+Bucks County, and that is a recognized reason people decline to sign an
+agreement they are getting nothing for. Options, in descending order of
+protection: exclusive venue as drafted; non-exclusive (consent to jurisdiction
+without excluding other forums); or governing law only, with no venue clause.
+Disputes under a CLA are rare enough that counsel may reasonably advise the
+lighter options.*
 
 ### 11. Entire Agreement
 

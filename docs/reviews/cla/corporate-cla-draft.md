@@ -139,10 +139,13 @@ authorized to submit Contributions on Your behalf.
 ### 10. Governing Law
 
 This Agreement is governed by the laws of the Commonwealth of Pennsylvania,
-United States of America, without regard to its conflict of law provisions.
+United States of America, without regard to its conflict of law provisions. The
+state and federal courts located in Bucks County, Pennsylvania shall have
+exclusive jurisdiction over any dispute arising out of or relating to this
+Agreement.
 
-**[REVIEW]** — *Must match the Individual CLA, including any venue clause added
-there.*
+**[REVIEW]** — *Must match the Individual CLA, including whether the venue
+sentence is kept, narrowed to non-exclusive, or dropped.*
 
 ---
 
