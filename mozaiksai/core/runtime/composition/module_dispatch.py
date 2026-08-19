@@ -40,10 +40,11 @@ class ModuleActionDispatchRequest:
     params: dict[str, Any] = field(default_factory=dict)
     scope: ModuleDispatchScope = field(default_factory=lambda: ModuleDispatchScope(app_id="default"))
     metadata: ModuleDispatchMetadata = field(default_factory=ModuleDispatchMetadata)
-    # Concrete caller-held permission ids. Always a list; this facade has no
-    # trusted path, so an empty list simply means "no permissions held".
-    permissions: list[str] = field(default_factory=list)
-    authority: ModuleDispatchAuthority | None = None
+    # Explicit dispatch authority. Required: the caller states who is
+    # dispatching and which concrete permissions it holds. This facade accepts
+    # only enforce-mode, public-safe authorities and passes them through to
+    # ModuleExecutor unchanged.
+    authority: ModuleDispatchAuthority = field(kw_only=True)
     provenance: ModuleDispatchProvenance | None = None
 
 
@@ -67,13 +68,7 @@ def _validate_request(request: ModuleActionDispatchRequest) -> None:
         raise ValueError("Invalid action name")
     if not request.scope.app_id:
         raise ValueError("scope.app_id is required")
-    if request.permissions is None:  # type: ignore[unreachable]
-        raise ValueError(
-            "permissions must be a concrete list. Trusted/internal authority "
-            "dispatch is intentionally not exposed by this public facade."
-        )
-    if request.authority is not None:
-        _validate_public_authority(request.authority)
+    _validate_public_authority(request.authority)
 
 
 def _validate_public_authority(authority: ModuleDispatchAuthority) -> None:
@@ -98,22 +93,14 @@ async def dispatch_module_action(
 ) -> ModuleResult:
     """Dispatch an app-local module action without exposing executor registries.
 
-    This facade always dispatches with an enforce-mode authority built from the
-    caller's concrete permission list. It intentionally provides no trusted
-    bypass path of any kind.
+    The caller's explicit enforce-mode authority is validated and passed to
+    ModuleExecutor exactly as supplied. This facade provides no trusted bypass
+    path of any kind and never rewrites the caller's permission set.
     """
 
     _validate_request(request)
     executor = _resolve_module_executor(app)
-    permissions = tuple(request.permissions)
-    base = request.authority
-    authority = ModuleDispatchAuthority(
-        kind=base.kind if base is not None else "app_internal",
-        permission_mode="enforce",
-        reason=base.reason if base is not None else "public app-local module dispatch facade",
-        actor_id=(base.actor_id if base is not None else None) or request.scope.user_id,
-        permissions=permissions,
-    )
+    authority = request.authority
     provenance = request.provenance or ModuleDispatchProvenance(
         surface="app_local_dispatch",
         correlation_id=request.metadata.correlation_id,

@@ -71,7 +71,7 @@ def _request(*, action: str, authority: ModuleDispatchAuthority) -> ModuleReques
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_none_bypasses_enforcement():
+async def test_trusted_authority_bypasses_enforcement():
     """authority=trusted_framework_authority() is the trusted-internal bypass; always allowed."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
 
@@ -96,7 +96,7 @@ async def test_trusted_authority_is_observable_in_module_context():
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_containing_required_scope_allows_action():
+async def test_authority_containing_required_scope_allows_action():
     """When the granted set includes the required permission, the action proceeds."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
 
@@ -122,7 +122,7 @@ async def test_enforced_authority_is_observable_in_module_context():
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_missing_required_scope_denies_action():
+async def test_authority_missing_required_scope_denies_action():
     """When the required permission is absent from the granted set, PERMISSION_DENIED."""
     executor = _executor_with_permissions({"list": ["orders:read"]})
 
@@ -134,7 +134,7 @@ async def test_granted_permissions_missing_required_scope_denies_action():
 
 
 @pytest.mark.asyncio
-async def test_empty_action_permissions_allows_any_granted_set():
+async def test_empty_action_permissions_allows_any_authority():
     """Actions with no declared permissions are always allowed regardless of scopes."""
     executor = _executor_with_permissions({})  # no permissions declared
 
@@ -158,7 +158,7 @@ async def test_partial_scope_match_still_denies():
 
 
 @pytest.mark.asyncio
-async def test_granted_permissions_are_injected_into_module_context():
+async def test_authority_permissions_are_injected_into_module_context():
     """Module policies can inspect ctx.permissions for resource-level checks."""
     executor = _executor_with_permissions({})
 

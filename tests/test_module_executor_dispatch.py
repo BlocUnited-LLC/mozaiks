@@ -201,7 +201,7 @@ class TestPermissionEnforcement:
         assert result.error_code == "PERMISSION_DENIED"
 
     @pytest.mark.asyncio
-    async def test_empty_granted_permissions_denies_gated_action(self):
+    async def test_empty_authority_permissions_denies_gated_action(self):
         ex = ModuleExecutor()
         ex.register(
             "contacts",

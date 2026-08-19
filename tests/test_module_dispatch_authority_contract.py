@@ -218,3 +218,40 @@ async def test_entitlement_gate_enforced_in_enforce_mode_and_skipped_for_trusted
     )
     assert trusted.success is True
     assert entitlements.checks == 1  # no additional check for trusted dispatch
+
+
+def test_local_development_rejected_in_production_profile(monkeypatch) -> None:
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.delenv("AUTH_PROVIDER", raising=False)
+    monkeypatch.setenv("ENV", "production")
+    with pytest.raises(ValueError, match="local_development"):
+        ModuleDispatchAuthority(
+            kind="local_development",
+            permission_mode="trusted_bypass",
+            reason="dev dispatch",
+        )
+
+
+@pytest.mark.asyncio
+async def test_supplied_context_receives_dispatch_authority() -> None:
+    from mozaiksai.core.runtime.composition.module_context import ModuleContext
+
+    executor = _executor()
+    supplied_ctx = ModuleContext(app_id="app-1", module_id="orders", action_id="public_ping")
+    assert supplied_ctx.dispatch_authority is None
+
+    result = await executor.execute(
+        ModuleRequest(
+            module="orders",
+            action="public_ping",
+            app_id="app-1",
+            authority=enforce_authority(kind="public_http"),
+        ),
+        context=supplied_ctx,
+    )
+
+    assert result.success is True
+    assert supplied_ctx.dispatch_authority is not None
+    assert supplied_ctx.dispatch_authority.kind == "public_http"
+    assert supplied_ctx.dispatch_provenance is not None
+    assert supplied_ctx.dispatch_audit is not None

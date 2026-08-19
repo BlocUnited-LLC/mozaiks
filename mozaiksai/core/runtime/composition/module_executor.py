@@ -487,6 +487,12 @@ class ModuleExecutor:
                 dispatch_provenance=dispatch_provenance,
                 dispatch_audit=dispatch_audit,
             )
+        else:
+            # A caller-supplied context still carries this dispatch's authority
+            # facts so ctx.dispatch_authority is present on every execution path.
+            context.dispatch_authority = dispatch_authority
+            context.dispatch_provenance = dispatch_provenance
+            context.dispatch_audit = dispatch_audit
 
         timeout = _action_timeout()
         try:

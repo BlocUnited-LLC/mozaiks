@@ -24,12 +24,17 @@ This project follows a practical pre-1.0 changelog format:
   Trusted bypass is restricted to a closed, constructor-validated set of
   server-owned kinds (`framework_internal`, `operator_internal`,
   contract-declared `event_reaction`, auth-disabled `local_development`);
-  `local_development` cannot be constructed while authentication is enabled.
-  New `workflow_user_authority()` and `event_reaction_authority()` helpers are
-  the canonical producers for workflow and event-reaction dispatch. The public
-  app-local dispatch facade field is renamed to `permissions` and always
-  dispatches enforce-mode. Downstream apps constructing `ModuleRequest`
-  directly must supply an explicit authority when they adopt this version.
+  `local_development` cannot be constructed while authentication is enabled or
+  the deployment environment is production. New `workflow_user_authority()` and
+  `event_reaction_authority()` helpers are the canonical producers for workflow
+  and event-reaction dispatch. `ModuleActionDispatchRequest.authority` is also
+  required (keyword-only) and the facade's separate permission-list field is
+  deleted: the caller's enforce-mode authority carries its permissions and is
+  passed to `ModuleExecutor` exactly as supplied. `ModuleContext` receives
+  `dispatch_authority`, `dispatch_provenance`, and `dispatch_audit` on every
+  execution path, including caller-supplied contexts. Downstream apps
+  constructing `ModuleRequest` or `ModuleActionDispatchRequest` directly must
+  supply an explicit authority when they adopt this version.
 
 ### Removed
 
