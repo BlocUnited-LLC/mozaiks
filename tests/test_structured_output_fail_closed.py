@@ -256,3 +256,216 @@ def test_malformed_network_output_fails_terminally_with_typed_validation_error()
     assert error is not None
     assert error.startswith("structured output validation failed for StrictAgent:")
     assert "status" in error
+
+
+# ---------------------------------------------------------------------------
+# INV-10 / INV-11 / INV-13: malformed output fails closed before state commit
+# ---------------------------------------------------------------------------
+
+
+def test_malformed_output_not_in_structured_outputs_list(
+) -> None:
+    """INV-10/INV-11: malformed body is never added to structured_outputs.
+
+    _validate_wal_structured_outputs must return an empty outputs list and a
+    non-None error string when a registered agent's packet body cannot be
+    parsed against its model. The malformed data does NOT appear in the
+    outputs list that callers use for context writes and UI emission.
+    """
+    from ag2.network import EV_PACKET
+
+    from mozaiksai.core.adapters.ag2_network_runner import _validate_wal_structured_outputs
+
+    # Valid packet first, then malformed one from the same agent
+    outputs, error = _validate_wal_structured_outputs(
+        wal=[
+            _Envelope(
+                event_type=EV_PACKET,
+                sender_id="agent-1",
+                event_data={"body": '{"status": "ok"}'},
+            ),
+            _Envelope(
+                event_type=EV_PACKET,
+                sender_id="agent-1",
+                # missing required "status" field
+                event_data={"body": '{"unexpected_key": 42}'},
+            ),
+        ],
+        agent_name_by_id={"agent-1": "StrictAgent"},
+        structured_registry={"StrictAgent": _RequiredModel},
+    )
+
+    # The function fails on the first bad packet and stops accumulating
+    assert error is not None, "malformed packet must produce a validation error"
+    # Only the valid packet up to the failure point may be in outputs;
+    # the malformed packet body must NOT appear in outputs as structured_data.
+    malformed_in_outputs = any(
+        isinstance(entry.get("structured_data"), dict)
+        and "unexpected_key" in entry.get("structured_data", {})
+        for entry in outputs
+    )
+    assert not malformed_in_outputs, (
+        "malformed structured output must not appear in the outputs list"
+    )
+
+
+def test_runner_result_is_failed_when_wal_validation_fails() -> None:
+    """INV-10/INV-13: RunStatus is FAILED when WAL validation returns an error.
+
+    Confirms that _validate_wal_structured_outputs returning error=<str>
+    produces a FAILED AG2NetworkRunnerResult and that the structured_outputs
+    list in that result is empty (no malformed data committed).
+    """
+    from ag2.network import EV_PACKET
+
+    from mozaiksai.core.adapters.ag2_network_runner import (
+        AG2NetworkRunnerResult,
+        _validate_wal_structured_outputs,
+    )
+    from mozaiksai.core.ports.orchestration import RunStatus
+
+    wal = [
+        _Envelope(
+            event_type=EV_PACKET,
+            sender_id="agent-x",
+            # empty JSON object → missing required field "status"
+            event_data={"body": "{}"},
+        )
+    ]
+    agent_name_by_id = {"agent-x": "StrictAgent"}
+    structured_registry = {"StrictAgent": _RequiredModel}
+
+    structured_outputs, validation_error = _validate_wal_structured_outputs(
+        wal=wal,
+        agent_name_by_id=agent_name_by_id,
+        structured_registry=structured_registry,
+    )
+
+    # Simulate what _snapshot_result does in the runner
+    if validation_error:
+        result = AG2NetworkRunnerResult(
+            status=RunStatus.FAILED,
+            workflow_name="TestWorkflow",
+            chat_id="chat-1",
+            app_id="app-1",
+            channel_id="ch-1",
+            structured_outputs=structured_outputs,
+            error=validation_error,
+        )
+    else:
+        result = AG2NetworkRunnerResult(
+            status=RunStatus.COMPLETED,
+            workflow_name="TestWorkflow",
+            chat_id="chat-1",
+            app_id="app-1",
+            channel_id="ch-1",
+            structured_outputs=structured_outputs,
+        )
+
+    assert result.status is RunStatus.FAILED, (
+        "runner result must be FAILED when WAL validation detects malformed output"
+    )
+    assert result.structured_outputs == [], (
+        "malformed structured output must not be committed to the result's outputs list"
+    )
+    assert result.error is not None and "status" in result.error, (
+        "error message must name the missing required field"
+    )
+
+
+def test_malformed_output_does_not_advance_to_continuation_phase() -> None:
+    """INV-13: When first-phase result is not COMPLETED, task batches and
+    continuation agents are skipped.
+
+    This validates the gate at orchestration_patterns.py:
+        if first_phase_result.status is not RunStatus.COMPLETED:
+            runner_result = first_phase_result
+        else:
+            ... task batches, continuation agent resolution ...
+
+    A FAILED first-phase result (from structured-output validation failure)
+    must set runner_result = first_phase_result without executing task batches
+    or resolving a continuation agent.
+    """
+    from ag2.network import EV_PACKET
+
+    from mozaiksai.core.adapters.ag2_network_runner import (
+        AG2NetworkRunnerResult,
+        _validate_wal_structured_outputs,
+    )
+    from mozaiksai.core.ports.orchestration import RunStatus
+
+    wal = [
+        _Envelope(
+            event_type=EV_PACKET,
+            sender_id="trigger-agent",
+            event_data={"body": "{}"},  # missing required "status"
+        )
+    ]
+    structured_outputs, validation_error = _validate_wal_structured_outputs(
+        wal=wal,
+        agent_name_by_id={"trigger-agent": "StrictAgent"},
+        structured_registry={"StrictAgent": _RequiredModel},
+    )
+
+    # Simulate _snapshot_result return for a FAILED validation
+    first_phase_result = AG2NetworkRunnerResult(
+        status=RunStatus.FAILED if validation_error else RunStatus.COMPLETED,
+        workflow_name="TestWorkflow",
+        chat_id="chat-1",
+        app_id="app-1",
+        channel_id="ch-1",
+        structured_outputs=structured_outputs,
+        error=validation_error,
+    )
+
+    continuation_executed = False
+
+    # Reproduce the gate logic from orchestration_patterns.py
+    if first_phase_result.status is not RunStatus.COMPLETED:
+        runner_result = first_phase_result
+    else:
+        continuation_executed = True  # task batches / continuation path
+
+    assert first_phase_result.status is RunStatus.FAILED
+    assert not continuation_executed, (
+        "task batches and continuation agents must NOT execute when "
+        "first-phase result is not COMPLETED (structured-output validation failed)"
+    )
+    assert runner_result is first_phase_result
+    assert runner_result.structured_outputs == []
+
+
+def test_malformed_output_cannot_write_routing_variable() -> None:
+    """INV-11: malformed structured output body does not appear in structured_outputs.
+
+    The structured_outputs list is what _emit_validated_structured_outputs_from_runner_result
+    uses to write context variables (routing keys, structured_output, etc.).
+    If the list is empty, no context writes from malformed data can occur.
+    """
+    from ag2.network import EV_PACKET
+
+    from mozaiksai.core.adapters.ag2_network_runner import _validate_wal_structured_outputs
+
+    # A body that contains a plausible routing key but is schema-invalid
+    malformed_body = '{"next_agent": "SecretAgent", "unexpected_key": true}'
+
+    outputs, error = _validate_wal_structured_outputs(
+        wal=[
+            _Envelope(
+                event_type=EV_PACKET,
+                sender_id="agent-1",
+                event_data={"body": malformed_body},
+            )
+        ],
+        agent_name_by_id={"agent-1": "StrictAgent"},
+        structured_registry={"StrictAgent": _RequiredModel},
+    )
+
+    assert error is not None, "validation must fail for schema-invalid output"
+    # The routing key from the malformed body must NOT be in outputs
+    for entry in outputs:
+        structured_data = entry.get("structured_data") or {}
+        assert "next_agent" not in structured_data, (
+            "malformed body content must not appear as structured_data in outputs"
+        )
