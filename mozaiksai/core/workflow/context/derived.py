@@ -614,11 +614,12 @@ class DerivedContextManager:
             if var.apply(event, self.providers):
                 logger.debug("[DERIVED_CONTEXT] %s: %s -> True", self.workflow_name, var.name)
                 try:
-                    snapshot = (
-                        self.base_context.to_dict()
-                        if hasattr(self.base_context, "to_dict")
-                        else getattr(self.base_context, "data", {})
-                    )
+                    if hasattr(self.base_context, "snapshot") and callable(getattr(self.base_context, "snapshot", None)):
+                        snapshot = self.base_context.snapshot()
+                    elif hasattr(self.base_context, "to_dict") and callable(getattr(self.base_context, "to_dict", None)):
+                        snapshot = self.base_context.to_dict()
+                    else:
+                        snapshot = {}
                     logger.debug("[DERIVED_CONTEXT] base_context snapshot: %s", snapshot)
                 except Exception as ctx_err:  # pragma: no cover
                     logger.debug("[DERIVED_CONTEXT] base_context snapshot unavailable: %s", ctx_err)

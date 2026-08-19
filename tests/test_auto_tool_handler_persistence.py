@@ -31,6 +31,12 @@ class _ContextVariables:
     def set(self, key: str, value: object) -> None:
         self.data[key] = value
 
+    def snapshot(self) -> dict[str, object]:
+        return dict(self.data)
+
+    def to_dict(self) -> dict[str, object]:
+        return self.snapshot()
+
 
 async def _consume_task_batch_state(
     summary: str,

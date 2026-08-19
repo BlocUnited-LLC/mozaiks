@@ -834,14 +834,7 @@ async def run_workflow_orchestration(
         elif isinstance(context, dict):
             ctx_dict = context
         else:
-            # Fallback for generic context containers that expose a plain .data dict.
-            # ContextVariablesBridge.data now raises AttributeError to surface bugs;
-            # this branch serves _RuntimeContextVariables and similar containers.
-            try:
-                raw_data = getattr(context, "data", None)
-                ctx_dict = dict(raw_data) if isinstance(raw_data, dict) else {}
-            except AttributeError:
-                ctx_dict = {}
+            ctx_dict = {}
 
         ctx_dict.setdefault("workflow_name", workflow_name)
         ctx_dict.setdefault("app_id", app_id)
@@ -892,14 +885,6 @@ async def run_workflow_orchestration(
                 ctx_dict.update(context.snapshot())
             elif isinstance(context, dict):
                 ctx_dict.update(context)
-            else:
-                # Fallback for generic context containers that expose a plain .data dict.
-                try:
-                    raw_data = getattr(context, "data", None)
-                    if isinstance(raw_data, dict):
-                        ctx_dict.update(raw_data)
-                except AttributeError:
-                    pass
 
         _conv_logger.info(
             "[%s] PRE_AGENT_CONTEXT_READY keys=%s key_count=%s",
@@ -948,8 +933,22 @@ async def run_workflow_orchestration(
             cb = getattr(ag, "_mozaiks_context_bridge", None)
             if cb is not None:
                 context_bridge = cb
-                context_bridge._data.update(ctx_dict)
-                ctx_dict = context_bridge._data
+                bridge_state = context_bridge.snapshot() if hasattr(context_bridge, "snapshot") else {}
+                if bridge_state != ctx_dict:
+                    for key, value in ctx_dict.items():
+                        if bridge_state.get(key) == value:
+                            continue
+                        try:
+                            context_bridge.set(key, value)
+                        except Exception as sync_err:
+                            wf_logger.debug(
+                                "[%s] CONTEXT_BRIDGE_SYNC_SKIPPED key=%s: %s",
+                                workflow_name_upper,
+                                key,
+                                sync_err,
+                            )
+                    bridge_state = context_bridge.snapshot() if hasattr(context_bridge, "snapshot") else bridge_state
+                ctx_dict = bridge_state
                 break
 
         if context_bridge is None:

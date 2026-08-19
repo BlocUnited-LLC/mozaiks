@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .authority import RUNTIME_SYSTEM_WRITER, ContextAuthorityPolicy, ContextWriterId
+from .frozen import detach, freeze
 
 logger = logging.getLogger(__name__)
 
@@ -33,25 +34,21 @@ class _RuntimeContextVariables:
         authority_policy: ContextAuthorityPolicy | None = None,
         writer_id: ContextWriterId = RUNTIME_SYSTEM_WRITER,
     ) -> None:
-        # Keep a shallow copy for local reads while optionally tracking the original
-        self._data: dict[str, Any] = dict(initial or {})
-        self._backing: dict[str, Any] | None = initial if isinstance(initial, dict) else None
+        self._data: dict[str, Any] = detach(initial or {})
         self._chat_id = chat_id
         self._app_id = app_id
         self._mozaiks_context_authority_policy = authority_policy
         self._mozaiks_context_writer_id = writer_id
 
     def get(self, key: str, default: Any | None = None) -> Any:
-        return self._data.get(key, default)
+        return freeze(self._data.get(key, default))
 
     def set(self, key: str, value: Any) -> None:
         policy = getattr(self, "_mozaiks_context_authority_policy", None)
         writer_id = getattr(self, "_mozaiks_context_writer_id", RUNTIME_SYSTEM_WRITER)
         if policy is not None:
             policy.require_can_write(key, writer_id=writer_id, operation="set")
-        self._data[key] = value
-        if self._backing is not None:
-            self._backing[key] = value
+        self._data[key] = detach(value)
         
         # Auto-persist if context is bound to a session
         if self._chat_id and self._app_id:
@@ -68,7 +65,7 @@ class _RuntimeContextVariables:
                 _task = asyncio.create_task(pm.persist_context_variables(
                     chat_id=self._chat_id,
                     app_id=self._app_id,
-                    variables=self._data,
+                    variables=self.snapshot(),
                 ))
                 _task.add_done_callback(
                     lambda t: logger.warning(
@@ -94,8 +91,6 @@ class _RuntimeContextVariables:
         if policy is not None:
             policy.require_can_write(key, writer_id=writer_id, operation="delete")
         removed = self._data.pop(key, None)
-        if self._backing is not None:
-            self._backing.pop(key, None)
         return removed is not None
 
     def keys(self) -> Iterable[str]:  # noqa: D401
@@ -104,9 +99,19 @@ class _RuntimeContextVariables:
     def contains(self, key: str) -> bool:
         return key in self._data
 
+    def snapshot(self) -> dict[str, Any]:
+        data = detach(self._data)
+        return data if isinstance(data, dict) else {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.snapshot()
+
     @property
-    def data(self) -> dict[str, Any]:  # for logging only
-        return self._data
+    def data(self) -> dict[str, Any]:
+        raise AttributeError(
+            "_RuntimeContextVariables.data has been removed to prevent mutable-reference "
+            "exposure. Use snapshot() for detached serialization."
+        )
 
 
 def create_context_container(

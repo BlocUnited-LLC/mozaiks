@@ -16,17 +16,18 @@ Read surfaces under test:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+
 import pytest
+from pydantic import BaseModel
 
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import (
-    RUNTIME_SYSTEM_WRITER,
-    ContextAuthorityError,
-    ScopedContextWriter,
     build_context_authority_policy,
 )
+from mozaiksai.core.workflow.context.frozen import detach, freeze
 from mozaiksai.core.workflow.context.schema import load_context_variables_config
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -205,8 +206,8 @@ def test_scoped_writer_is_only_mutation_path():
         definitions=plan.definitions or {},
     )
 
-    backing: dict = {"score": 0}
-    bridge = ContextVariablesBridge(backing, authority_policy=policy)
+    initial: dict = {"score": 0}
+    bridge = ContextVariablesBridge(initial, authority_policy=policy)
 
     # Direct frozen-read: cannot mutate
     v = bridge["score"]
@@ -223,7 +224,7 @@ def test_scoped_writer_is_only_mutation_path():
     # Authorized write through __setitem__ (bridge uses context_bridge writer_id)
     bridge["score"] = 42
     assert bridge["score"] == 42, "Authorized write through bridge.__setitem__ should succeed"
-    assert backing["score"] == 42, "Authorized write must propagate to canonical backing dict"
+    assert initial["score"] == 0, "Original caller-owned dict must not share bridge backing state"
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +301,115 @@ def test_get_missing_key_returns_frozen_default():
         pass  # frozen — expected
     # Canonical state unaffected (the default was never in canonical state)
     assert bridge.get("nonexistent") is None
+
+
+def test_to_dict_is_detached():
+    bridge = make_bridge({"cfg": {"x": 1}, "items": [{"n": 1}]})
+    data = bridge.to_dict()
+    data["cfg"]["x"] = 999
+    data["items"][0]["n"] = 999
+
+    assert bridge["cfg"]["x"] == 1
+    assert bridge["items"][0]["n"] == 1
+
+
+def test_set_detaches_original_caller_reference_and_pending_update():
+    value = {"nested": {"items": [1, 2]}}
+    bridge = make_bridge({})
+
+    bridge.set("payload", value)
+    value["nested"]["items"].append(99)
+
+    assert list(bridge["payload"]["nested"]["items"]) == [1, 2]
+    updates = bridge.consume_context_updates()
+    updates["set"]["payload"]["nested"]["items"].append(42)
+
+    assert list(bridge["payload"]["nested"]["items"]) == [1, 2]
+
+
+def test_pop_returns_detached_value():
+    bridge = make_bridge({"payload": {"nested": {"ok": True}}})
+    popped = bridge.pop("payload")
+    popped["nested"]["ok"] = False
+
+    assert "payload" not in bridge
+    assert bridge.consume_context_updates()["delete"] == ["payload"]
+
+
+class _MutableModel(BaseModel):
+    name: str
+    flags: list[str]
+
+
+def test_pydantic_model_is_detached_on_set_and_frozen_on_read():
+    model = _MutableModel(name="safe", flags=["a"])
+    bridge = make_bridge({})
+
+    bridge.set("model", model)
+    model.flags.append("evil")
+    read_value = bridge["model"]
+
+    assert read_value["flags"] == ("a",)
+    with pytest.raises(TypeError):
+        read_value["name"] = "evil"
+
+
+@dataclass
+class _ContextDataclass:
+    name: str
+    flags: list[str]
+
+
+def test_dataclass_is_detached_on_set_and_frozen_on_read():
+    value = _ContextDataclass(name="safe", flags=["a"])
+    bridge = make_bridge({})
+
+    bridge.set("dataclass_value", value)
+    value.flags.append("evil")
+    read_value = bridge["dataclass_value"]
+
+    assert read_value["flags"] == ("a",)
+    with pytest.raises(TypeError):
+        read_value["name"] = "evil"
+
+
+def test_freeze_and_detach_reject_recursive_cycles_deterministically():
+    cyclic: dict[str, object] = {}
+    cyclic["self"] = cyclic
+
+    with pytest.raises(ValueError, match="recursive cycle"):
+        freeze(cyclic)
+    with pytest.raises(ValueError, match="recursive cycle"):
+        detach(cyclic)
+
+
+def test_runtime_context_container_has_no_mutable_data_surface():
+    source = {"cfg": {"x": 1}}
+    container = create_context_container(source)
+
+    source["cfg"]["x"] = 999
+    assert container.get("cfg")["x"] == 1
+
+    with pytest.raises(AttributeError, match="snapshot"):
+        _ = container.data
+
+    snap = container.snapshot()
+    snap["cfg"]["x"] = 42
+    assert container.get("cfg")["x"] == 1
+
+    container.set("cfg", {"x": 2})
+    assert source["cfg"]["x"] == 999
+
+
+def test_authority_bearing_objects_are_rejected_from_context_variables():
+    class _ServiceObject:
+        def __init__(self) -> None:
+            self.secret = "runtime"
+
+    bridge = make_bridge({})
+    with pytest.raises(TypeError, match="Authority-bearing runtime objects"):
+        bridge.set("service", _ServiceObject())
+
+    container = create_context_container()
+    with pytest.raises(TypeError, match="Authority-bearing runtime objects"):
+        container.set("service", _ServiceObject())

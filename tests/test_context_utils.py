@@ -71,10 +71,10 @@ class TestContextToDict:
                 return {"key": "value"}
         assert context_to_dict(Container()) == {"key": "value"}
 
-    def test_data_dict_attr_used(self):
+    def test_data_dict_attr_ignored(self):
         class Container:
             data = {"a": 1, "b": 2}
-        assert context_to_dict(Container()) == {"a": 1, "b": 2}
+        assert context_to_dict(Container()) == {}
 
     def test_plain_dict_returned_as_copy(self):
         d = {"x": 10}

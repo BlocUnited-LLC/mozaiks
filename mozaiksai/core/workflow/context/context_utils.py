@@ -37,9 +37,9 @@ __all__ = [
 def context_to_dict(container: Any) -> dict[str, Any]:
     """Convert context container to dictionary.
     
-    Supports multiple container formats:
+    Supports detached context surfaces only:
+    - Objects with snapshot() method
     - Objects with to_dict() method
-    - Objects with data attribute (dict)
     - Plain dictionaries
     
     Args:
@@ -48,11 +48,6 @@ def context_to_dict(container: Any) -> dict[str, Any]:
     Returns:
         Dictionary representation of context
     """
-    try:
-        if hasattr(container, "to_dict"):
-            return dict(container.to_dict())  # type: ignore[arg-type]
-    except Exception:  # pragma: no cover
-        pass
     if hasattr(container, "snapshot") and callable(getattr(container, "snapshot", None)):
         try:
             snap = container.snapshot()
@@ -60,14 +55,11 @@ def context_to_dict(container: Any) -> dict[str, Any]:
                 return snap
         except Exception:  # pragma: no cover
             pass
-    # Fallback for generic context containers (e.g., _RuntimeContextVariables) that
-    # expose a plain .data dict attribute. ContextVariablesBridge no longer has .data;
-    # it raises AttributeError to surface mutable-reference exposure bugs.
     try:
-        data = getattr(container, "data", None)
-        if isinstance(data, dict):
-            return dict(data)
-    except AttributeError:
+        if hasattr(container, "to_dict"):
+            data = container.to_dict()
+            return dict(data) if isinstance(data, dict) else {}
+    except Exception:  # pragma: no cover
         pass
     if isinstance(container, dict):
         return dict(container)

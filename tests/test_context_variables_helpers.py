@@ -90,9 +90,9 @@ class TestContextToDict:
         result = _context_to_dict(_HasToDict())
         assert result == {"from_to_dict": True}
 
-    def test_object_with_data_dict_returned(self):
+    def test_object_with_data_dict_ignored(self):
         result = _context_to_dict(_HasData())
-        assert result == {"from_data": "yes"}
+        assert result == {}
 
     def test_object_with_non_dict_data_returns_empty(self):
         result = _context_to_dict(_HasDataNonDict())

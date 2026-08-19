@@ -168,7 +168,7 @@ class ContextVariablesBridge:
         authority_policy: ContextAuthorityPolicy | None = None,
         writer_id: str = CONTEXT_BRIDGE_WRITER,
     ) -> None:
-        self._data = data
+        self._data = detach(data)
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
         self._authority_policy = authority_policy
@@ -191,8 +191,8 @@ class ContextVariablesBridge:
             raise KeyError("context variable key must be non-empty")
         if self._authority_policy is not None:
             self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
-        self._data[clean_key] = value
-        self._pending_set[clean_key] = value
+        self._data[clean_key] = detach(value)
+        self._pending_set[clean_key] = detach(value)
         self._pending_delete.discard(clean_key)
 
     def pop(self, key: str, default: Any = None) -> Any:
@@ -206,7 +206,7 @@ class ContextVariablesBridge:
         if existed:
             self._pending_set.pop(clean_key, None)
             self._pending_delete.add(clean_key)
-        return value
+        return detach(value)
 
     def delete(self, key: str) -> None:
         self.pop(key, None)
@@ -230,7 +230,7 @@ class ContextVariablesBridge:
         return (freeze(v) for v in self._data.values())
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self._data)
+        return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
         """Return a deep copy of canonical state with no shared references.
@@ -257,7 +257,7 @@ class ContextVariablesBridge:
 
     def consume_context_updates(self) -> dict[str, Any]:
         updates = {
-            "set": dict(self._pending_set),
+            "set": detach(self._pending_set),
             "delete": sorted(self._pending_delete),
         }
         self.clear_context_updates()
@@ -384,14 +384,7 @@ async def create_agents(
     elif hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
         ctx_dict = context_variables.snapshot()
     else:
-        # Fallback for generic context containers that expose a plain .data dict.
-        # ContextVariablesBridge.data now raises AttributeError to surface bugs;
-        # this branch serves _RuntimeContextVariables and test doubles.
-        try:
-            raw_data = getattr(context_variables, "data", None)
-            ctx_dict = dict(raw_data) if isinstance(raw_data, dict) else {}
-        except AttributeError:
-            ctx_dict = {}
+        ctx_dict = {}
 
     authority_policy = getattr(context_variables, "_mozaiks_context_authority_policy", None)
     context_bridge = ContextVariablesBridge(ctx_dict, authority_policy=authority_policy)
