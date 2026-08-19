@@ -45,6 +45,7 @@ def _write_minimal_workflow(root: Path, workflow_name: str) -> None:
             [
                 "agents:",
                 "  - name: DemoAgent",
+                "    structured_outputs_required: false",
                 "    prompt_sections:",
                 "      - id: role",
                 "        heading: \"[ROLE]\"",

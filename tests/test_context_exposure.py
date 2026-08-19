@@ -41,6 +41,7 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
                 "agents": [
                     {
                         "name": "AppSchemaAgent",
+                        "structured_outputs_required": False,
                         "prompt_sections": [
                             {"heading": "[ROLE]", "content": "Generate the app UI."}
                         ],

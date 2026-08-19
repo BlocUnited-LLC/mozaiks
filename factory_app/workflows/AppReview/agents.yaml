@@ -1,5 +1,6 @@
 agents:
   - name: ReviewAgent
+    structured_outputs_required: false
     description: >
       Presents the app build summary as an in-chat artifact and manages
       the promote-or-revise HITL decision. On first turn, calls

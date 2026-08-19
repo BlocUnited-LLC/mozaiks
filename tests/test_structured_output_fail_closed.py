@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -177,6 +178,24 @@ async def test_explicitly_unstructured_agent_still_loads_without_registry(
 
 
 @pytest.mark.asyncio
+async def test_agent_missing_structured_outputs_required_aborts_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mozaiksai.core.workflow.agents import factory
+
+    _patch_agent_factory(
+        monkeypatch,
+        agent_config={"name": "AmbiguousAgent"},
+        registry={},
+    )
+
+    with pytest.raises(ValueError, match="explicitly declare structured_outputs_required"):
+        await factory.create_agents("AmbiguousWorkflow", context_variables={})
+
+    assert _FakeAgent.created == []
+
+
+@pytest.mark.asyncio
 async def test_required_structured_agent_reaches_ag2_with_response_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -258,6 +277,22 @@ def test_malformed_network_output_fails_terminally_with_typed_validation_error()
     assert "status" in error
 
 
+def test_agents_yaml_requires_explicit_structured_outputs_required() -> None:
+    from mozaiksai.core.workflow.declarative.contracts import parse_agents_config
+
+    with pytest.raises(ValueError, match="structured_outputs_required"):
+        parse_agents_config(
+            {
+                "agents": [
+                    {
+                        "name": "AmbiguousAgent",
+                        "prompt_sections": [{"heading": "Role", "content": "Work."}],
+                    }
+                ]
+            }
+        )
+
+
 # ---------------------------------------------------------------------------
 # INV-10 / INV-11 / INV-13: malformed output fails closed before state commit
 # ---------------------------------------------------------------------------
@@ -295,17 +330,11 @@ def test_malformed_output_not_in_structured_outputs_list(
         structured_registry={"StrictAgent": _RequiredModel},
     )
 
-    # The function fails on the first bad packet and stops accumulating
+    # The function fails on the first bad packet and discards any accumulated
+    # output so a partially valid WAL cannot commit context or artifacts.
     assert error is not None, "malformed packet must produce a validation error"
-    # Only the valid packet up to the failure point may be in outputs;
-    # the malformed packet body must NOT appear in outputs as structured_data.
-    malformed_in_outputs = any(
-        isinstance(entry.get("structured_data"), dict)
-        and "unexpected_key" in entry.get("structured_data", {})
-        for entry in outputs
-    )
-    assert not malformed_in_outputs, (
-        "malformed structured output must not appear in the outputs list"
+    assert outputs == [], (
+        "any structured-output validation failure must discard accumulated outputs"
     )
 
 
@@ -469,3 +498,40 @@ def test_malformed_output_cannot_write_routing_variable() -> None:
         assert "next_agent" not in structured_data, (
             "malformed body content must not appear as structured_data in outputs"
         )
+
+
+@pytest.mark.asyncio
+async def test_failed_structured_output_runner_result_does_not_commit_context() -> None:
+    """INV-11: failed structured-output runner results do not write context."""
+    from mozaiksai.core.ports.orchestration import RunStatus
+    from mozaiksai.core.workflow.orchestration_patterns import (
+        _emit_validated_structured_outputs_from_runner_result,
+    )
+
+    runner_result = SimpleNamespace(
+        status=RunStatus.FAILED,
+        error="structured output validation failed for StrictAgent: status missing",
+        structured_outputs=[
+            {
+                "agent": "StrictAgent",
+                "model_name": "RequiredModel",
+                "structured_data": {"status": "should-not-commit"},
+            }
+        ],
+    )
+    context_vars: dict[str, Any] = {}
+
+    await _emit_validated_structured_outputs_from_runner_result(
+        runner_result=runner_result,
+        workflow_name="StrictWorkflow",
+        chat_id="chat-1",
+        app_id="app-1",
+        user_id=None,
+        turn_sequence_start=0,
+        context_vars_dict=context_vars,
+        context_bridge=None,
+        structured_registry={"StrictAgent": _RequiredModel},
+        wf_logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+    )
+
+    assert context_vars == {}

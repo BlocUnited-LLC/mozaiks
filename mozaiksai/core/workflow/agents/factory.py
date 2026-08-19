@@ -340,7 +340,14 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
 
 
 def _structured_outputs_required(agent_config: Mapping[str, Any]) -> bool:
-    return agent_config.get("structured_outputs_required") is True
+    if "structured_outputs_required" not in agent_config:
+        raise ValueError(
+            "Agent config must explicitly declare structured_outputs_required as true or false"
+        )
+    value = agent_config.get("structured_outputs_required")
+    if not isinstance(value, bool):
+        raise ValueError("Agent config structured_outputs_required must be a boolean")
+    return value is True
 
 
 def _required_structured_agent_names(

@@ -138,7 +138,7 @@ class AgentSpec(DeclarativeModel):
     description: str | None = None
     human_input_mode: str | None = None
     max_consecutive_auto_reply: int = 2
-    structured_outputs_required: bool = False
+    structured_outputs_required: bool
     multimodal_inputs_enabled: bool = False
     image_generation_enabled: bool = False
     image_generation: ImageGenerationSpec | None = None

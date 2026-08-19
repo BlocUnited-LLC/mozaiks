@@ -11,6 +11,7 @@ class _FakeManager:
             "agents": [
                 {
                     "name": "ResearchAgent",
+                    "structured_outputs_required": False,
                     "prompt_sections": [
                         {"heading": "[ROLE]", "content": "Research the app."}
                     ],

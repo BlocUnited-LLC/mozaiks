@@ -267,39 +267,59 @@ class TestOrchestratorConfigRequiredText:
 class TestAgentSpecPromptShape:
     def test_no_prompt_sections_and_no_system_message_raises(self):
         with pytest.raises(ValidationError, match="must provide"):
-            AgentSpec(name="MyAgent")
+            AgentSpec(name="MyAgent", structured_outputs_required=False)
 
     def test_system_message_alone_accepted(self):
-        agent = AgentSpec(name="MyAgent", system_message="You are a helpful agent.")
+        agent = AgentSpec(
+            name="MyAgent",
+            structured_outputs_required=False,
+            system_message="You are a helpful agent.",
+        )
         assert agent.system_message == "You are a helpful agent."
 
     def test_prompt_sections_alone_accepted(self):
         agent = AgentSpec(
             name="MyAgent",
+            structured_outputs_required=False,
             prompt_sections=[PromptSectionSpec(heading="Role", content="You are a helper.")],
         )
         assert len(agent.prompt_sections) == 1
 
     def test_empty_name_raises(self):
         with pytest.raises(ValidationError):
-            AgentSpec(name="", system_message="Hello")
+            AgentSpec(name="", structured_outputs_required=False, system_message="Hello")
 
     def test_whitespace_name_raises(self):
         with pytest.raises(ValidationError):
-            AgentSpec(name="   ", system_message="Hello")
+            AgentSpec(name="   ", structured_outputs_required=False, system_message="Hello")
 
 
 class TestAgentSpecMaxAutoReply:
     def test_negative_raises(self):
         with pytest.raises(ValidationError, match=">= 0"):
-            AgentSpec(name="A", system_message="Hi", max_consecutive_auto_reply=-1)
+            AgentSpec(
+                name="A",
+                structured_outputs_required=False,
+                system_message="Hi",
+                max_consecutive_auto_reply=-1,
+            )
 
     def test_zero_accepted(self):
-        agent = AgentSpec(name="A", system_message="Hi", max_consecutive_auto_reply=0)
+        agent = AgentSpec(
+            name="A",
+            structured_outputs_required=False,
+            system_message="Hi",
+            max_consecutive_auto_reply=0,
+        )
         assert agent.max_consecutive_auto_reply == 0
 
     def test_positive_accepted(self):
-        agent = AgentSpec(name="A", system_message="Hi", max_consecutive_auto_reply=5)
+        agent = AgentSpec(
+            name="A",
+            structured_outputs_required=False,
+            system_message="Hi",
+            max_consecutive_auto_reply=5,
+        )
         assert agent.max_consecutive_auto_reply == 5
 
 
@@ -311,14 +331,14 @@ class TestAgentsConfigUniqueNames:
     def test_duplicate_names_raises(self):
         with pytest.raises(ValidationError, match="duplicate"):
             AgentsConfig(agents=[
-                AgentSpec(name="Agent", system_message="Hi"),
-                AgentSpec(name="Agent", system_message="There"),
+                AgentSpec(name="Agent", structured_outputs_required=False, system_message="Hi"),
+                AgentSpec(name="Agent", structured_outputs_required=False, system_message="There"),
             ])
 
     def test_unique_names_accepted(self):
         config = AgentsConfig(agents=[
-            AgentSpec(name="AgentA", system_message="Hi"),
-            AgentSpec(name="AgentB", system_message="There"),
+            AgentSpec(name="AgentA", structured_outputs_required=False, system_message="Hi"),
+            AgentSpec(name="AgentB", structured_outputs_required=False, system_message="There"),
         ])
         assert len(config.agents) == 2
 
