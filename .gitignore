@@ -122,3 +122,6 @@ web_shell/.mozaiks-tailwind-sources/
 .agents/settings.local.json
 .claude/settings.local.json
 .codex/settings.local.json
+
+# Local quickstart workspace (generated output, contains copies of repo files)
+mozaiks-workspace/
