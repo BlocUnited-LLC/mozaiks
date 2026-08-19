@@ -159,13 +159,29 @@ def test_factory_structured_output_agent_gets_retry_middleware() -> None:
 
 
 def test_factory_so_schema_error_is_logged_not_silently_swallowed() -> None:
-    """factory.py must log a warning when structured-output resolution fails."""
+    """Required structured-output agents must fail instead of disabling schemas."""
     source = _read_factory_source()
-    # Verify the warning log call is present in the exception handler
-    assert "logger.warning" in source, "factory.py must call logger.warning somewhere"
-    assert "response_schema disabled" in source or "Structured output schema" in source, (
-        "factory.py warning message should mention structured output schema resolution failure"
-    )
+    assert "response_schema disabled" not in source
+    assert "structured output registry " in source
+    assert "could not load" in source
+    assert "has no structured output registry entry" in source
+
+
+def test_factory_retry_middleware_comment_does_not_claim_schema_correction() -> None:
+    """RetryMiddleware is provider retry only; schema correction is AgentReply.content."""
+    source = _read_factory_source()
+    assert "RetryMiddleware covers provider/network exceptions" in source
+    assert "Schema correction is owned by AG2 AgentReply.content()" in source
+    assert "mirrors AG2StructuredAgentRunner" not in source
+
+
+def test_network_runner_documents_post_hoc_validation_limitation() -> None:
+    """Network runner should not claim malformed-output correction without AgentReply."""
+    network_runner = (
+        _REPO_ROOT / "mozaiksai" / "core" / "adapters" / "ag2_network_runner.py"
+    ).read_text(encoding="utf-8")
+    assert "post-hoc structured-output validation" in network_runner
+    assert "AgentReply.content(retries=...)" in network_runner
 
 
 # ---------------------------------------------------------------------------

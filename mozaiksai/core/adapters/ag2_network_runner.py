@@ -875,6 +875,10 @@ def _validate_wal_structured_outputs(
     agent_name_by_id: Mapping[str, str],
     structured_registry: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None]:
+    # AG2 Network WAL packets expose serialized body data, not the original
+    # AgentReply. Without that supported AG2 handle this runner cannot invoke
+    # AgentReply.content(retries=...) for schema-correction turns. It therefore
+    # performs post-hoc structured-output validation and fails the run closed.
     structured_outputs: list[dict[str, Any]] = []
     if not structured_registry:
         return structured_outputs, None
