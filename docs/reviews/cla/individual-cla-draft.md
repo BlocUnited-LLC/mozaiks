@@ -86,9 +86,10 @@ the date such litigation is filed.
 ### 4. Outbound Licensing
 
 **[REVIEW]** — *This section is the substantive addition to the standard ASF
-text and is the reason BlocUnited is adopting a CLA at all. Counsel should
-confirm it achieves the intended effect and is enforceable in the governing
-jurisdiction.*
+text and is the confirmed reason BlocUnited is adopting a CLA: preserving the
+option to change the outbound license of the framework in the future. If this
+section does not achieve that, the Agreement has no purpose. Counsel should
+confirm it achieves the intended effect and is enforceable in Pennsylvania.*
 
 You acknowledge and agree that BlocUnited may license the Work, including Your
 Contributions, to third parties under any license terms BlocUnited selects,
@@ -103,12 +104,35 @@ revokes or limits any license previously granted to any recipient of the Work.
 Any version of the Work already distributed under the MIT License remains
 available to its recipients under that license.
 
-**[REVIEW]** — *Consider whether to add a commitment that the Work will remain
-available under an OSI-approved license, or that a relicensing decision
-requires some notice period. Such a commitment is not legally necessary, but
-its absence is the single most common reason contributors refuse to sign a CLA,
-and adding it materially reduces that friction. This is a business decision
-about how much optionality to trade for goodwill.*
+BlocUnited will continue to make the source code of the Work publicly
+available. This commitment does not restrict the license terms BlocUnited may
+select under this Section.
+
+**[REVIEW]** — *The paragraph immediately above is a deliberate business
+choice, not boilerplate, and it can be removed or strengthened. Context:*
+
+*The absence of any commitment is the most common reason contributors decline
+to sign a CLA — what they are actually afraid of is the project going closed.
+But the obvious-looking commitment is a trap. Three graduated options:*
+
+| Option | Contributor comfort | What it forecloses |
+|---|---|---|
+| No commitment | Lowest | Nothing |
+| **Source stays public** (drafted) | Moderate | Going fully closed-source |
+| OSI-approved license guaranteed | Highest | **BSL, SSPL, and every source-available license** |
+
+*The third option is the one to be careful about. BSL and SSPL are not
+OSI-approved, so guaranteeing an OSI-approved license would rule out precisely
+the relicensing move a company with a hosted product is most likely to want —
+the one Elastic, MongoDB, and HashiCorp each made to stop cloud providers
+reselling their software. AGPL is OSI-approved and would remain available, but
+it is a poor substitute for that specific purpose.*
+
+*The middle option is drafted because it preserves BSL, SSPL, dual licensing,
+and commercial terms, while ruling out only the scenario contributors actually
+fear. Counsel should confirm the wording creates the intended obligation and
+no more — in particular that "publicly available" is not read as a commitment
+to a particular license, delivery method, or timeframe.*
 
 ### 5. Representation of Entitlement
 

@@ -87,6 +87,10 @@ License. Nothing in this Agreement obligates BlocUnited to continue
 distributing the Work under the MIT License, and nothing in this Agreement
 revokes or limits any license previously granted to any recipient of the Work.
 
+BlocUnited will continue to make the source code of the Work publicly
+available. This commitment does not restrict the license terms BlocUnited may
+select under this Section.
+
 ### 5. Representation of Authority
 
 You represent that You are legally entitled to grant the above licenses. You
