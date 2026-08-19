@@ -18,6 +18,8 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.session.build_context_schema import validate_pack_context
+
 
 class BuildContextError(RuntimeError):
     """Raised when a workspace build-context file is invalid."""
@@ -78,27 +80,10 @@ def load_build_context(context_path: Path) -> dict[str, Any]:
     if not context_path.exists():
         raise BuildContextError(f"Build context file not found: {context_path}")
     data = _load_yaml_mapping(context_path, label="Build context file")
-    context_id = str(data.get("context_id") or "").strip()
-    if not context_id:
-        raise BuildContextError(f"Build context file must declare context_id: {context_path}")
-    workflows = data.get("workflows")
-    if workflows is not None and not isinstance(workflows, Mapping):
-        raise BuildContextError(f"Build context workflows must be a mapping: {context_path}")
-    applies_to = data.get("applies_to_workflows")
-    if applies_to is not None and not isinstance(applies_to, list):
-        raise BuildContextError(f"Build context applies_to_workflows must be a list: {context_path}")
-    assets = data.get("assets")
-    if not isinstance(assets, list):
-        raise BuildContextError(f"Build context assets must be a list: {context_path}")
-    for index, asset in enumerate(assets):
-        if not isinstance(asset, Mapping):
-            raise BuildContextError(f"Build context asset #{index + 1} must be a mapping: {context_path}")
-        asset_path = str(asset.get("path") or "").strip()
-        asset_kind = str(asset.get("kind") or "").strip()
-        if not asset_path or not asset_kind:
-            raise BuildContextError(
-                f"Build context asset #{index + 1} must declare path and kind: {context_path}"
-            )
+    result = validate_pack_context(data)
+    if not result.valid:
+        error_messages = "; ".join(f"{d.field}: {d.message}" for d in result.errors)
+        raise BuildContextError(f"Build context file failed schema validation: {context_path}: {error_messages}")
     return data
 
 
@@ -224,6 +209,7 @@ def build_provider_values(*, root: Path, config: Mapping[str, Any]) -> dict[str,
         "applies_to_workflows",
         "assets",
         "projections",
+        "values",
         "workflows",
     }
     values: dict[str, Any] = {}

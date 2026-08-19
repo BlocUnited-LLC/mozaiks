@@ -93,7 +93,7 @@ def test_factory_build_context_uses_named_context_roots() -> None:
 
 
 def test_context_yaml_is_structural_not_semantic_guidance() -> None:
-    semantic_context_fields = {"description", "purpose", "templates"}
+    semantic_context_fields = {"purpose", "templates"}
     semantic_projection_fields = {"purpose", "description"}
 
     for context_path in FACTORY_BUILD_CONTEXT.glob("*/context.yaml"):

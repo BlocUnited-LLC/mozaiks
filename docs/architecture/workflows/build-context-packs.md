@@ -114,6 +114,9 @@ Required fields:
 
 Optional fields:
 
+- `description`: short structural registry metadata for human inspection. It is
+  not projected into workflow context variables unless repeated through
+  `values` or an explicit projection source.
 - `pack`: marks the context as a selectable build pack.
 - `pack.version`: required version string for selectable packs.
 - `pack.required_integrations`: connector requirements that selected packs add
@@ -124,7 +127,8 @@ Optional fields:
   API base URLs and client ids may be frontend safe.
 - `capabilities`, `facades`: structured pack metadata for planning agents.
 - `projections.context_variables`: values projected into workflow launch state.
-- `values`: static provider values used by projection rules.
+- `values`: static provider values used by projection rules. Put custom
+  projection inputs here rather than adding free-form top-level keys.
 
 Keep `context.yaml` structural. Do not put human guidance, semantic purpose
 text, generated file mappings, endpoint rewrites, resolver code, build tasks,

@@ -11,15 +11,13 @@ from typing import Any
 import yaml
 from jinja2 import Template
 
-from factory_app.workflows.AppGenerator.tools.pack_context_schema import (
-    validate_pack_context,
-)
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
     iter_context_assets,
     resolve_context_asset_path,
 )
+from mozaiksai.core.session.build_context_schema import validate_pack_context
 
 logger = logging.getLogger(__name__)
 

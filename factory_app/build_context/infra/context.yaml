@@ -1,7 +1,5 @@
 context_id: infra
-pack_id: infra
-label: Infra Scaffold
-version: 1
+description: Provider-neutral deployment scaffold templates.
 
 applies_to_workflows:
   - AppGenerator
