@@ -134,10 +134,11 @@ authorized to submit Contributions on Your behalf.
 
 ### 10. Governing Law
 
-**[REVIEW]** — *Must match the Individual CLA. Counsel to set.*
+This Agreement is governed by the laws of the Commonwealth of Pennsylvania,
+United States of America, without regard to its conflict of law provisions.
 
-This Agreement is governed by the laws of [STATE], [COUNTRY], without regard to
-its conflict of law provisions.
+**[REVIEW]** — *Must match the Individual CLA, including any venue clause added
+there.*
 
 ---
 

@@ -167,13 +167,21 @@ aware that would make these representations inaccurate in any respect.
 
 ### 10. Governing Law
 
-**[REVIEW]** — *Counsel must set this. It should match BlocUnited LLC's state
-of formation and any venue provisions used in the company's other agreements.
-Do not guess.*
+This Agreement is governed by the laws of the Commonwealth of Pennsylvania,
+United States of America, without regard to its conflict of law provisions.
 
-This Agreement is governed by the laws of [STATE], [COUNTRY], without regard to
-its conflict of law provisions. **[REVIEW: venue / dispute resolution clause,
-if desired.]**
+**[REVIEW]** — *Pennsylvania is formally a Commonwealth, and the phrasing above
+reflects that; "State of Pennsylvania" is a common drafting slip. Counsel should
+confirm the wording matches BlocUnited LLC's other agreements.*
+
+**[REVIEW: venue.]** — *No venue or dispute-resolution clause is included,
+because it depends on the county in which BlocUnited LLC maintains its principal
+place of business, which was not available when this was drafted. Counsel should
+add an exclusive-venue provision naming the appropriate Pennsylvania county, or
+advise that none is wanted. Note that a venue clause requiring an overseas
+contributor to litigate in Pennsylvania is, in practice, another reason people
+decline to sign; consider whether it is worth including at all for an agreement
+of this kind.*
 
 ### 11. Entire Agreement
 
@@ -186,10 +194,13 @@ Certificate of Origin sign-off requirement if both remain in effect.*
 ## Acceptance
 
 **[REVIEW]** — *Electronic acceptance via cla-assistant.io records a signature
-as a comment on a pull request from an authenticated GitHub account. Counsel
-should confirm this satisfies signature requirements in the governing
-jurisdiction, and whether the fields below are needed given that GitHub supplies
-identity.*
+as a comment on a pull request from an authenticated GitHub account. The federal
+E-SIGN Act and Pennsylvania's electronic-transactions statute both generally
+give electronic records and signatures the same effect as written ones, so this
+method is likely sufficient, but counsel should confirm rather than rely on this
+note. Counsel should also advise whether the postal address and country fields
+below are needed at all, given that GitHub supplies verified identity and that
+collecting contributors' home addresses carries its own privacy obligations.*
 
 By signing electronically, or by signing and returning this Agreement, You
 accept and agree to its terms for Your present and future Contributions to
