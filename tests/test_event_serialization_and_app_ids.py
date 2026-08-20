@@ -338,6 +338,15 @@ class TestNormalizeAppId:
         result = normalize_app_id(12345)
         assert result == "12345"
 
+    def test_bool_false_returns_none(self):
+        assert normalize_app_id(False) is None
+
+    def test_bool_true_returns_none(self):
+        assert normalize_app_id(True) is None
+
+    def test_bool_does_not_leak_into_scope_filter(self):
+        assert build_app_scope_filter(False) == {"app_id": "__invalid__"}
+
 
 # ---------------------------------------------------------------------------
 # 5. coalesce_app_id
