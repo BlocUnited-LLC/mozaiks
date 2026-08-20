@@ -237,6 +237,16 @@ when it fails.
 - **The issue itself** — if an issue is unclear or its suggested approach looks
   wrong, say so there. That is useful feedback, not an interruption.
 
+## Bounties
+
+Mozaiks does not run a bounty program. Issues here carry no payment, including
+those labeled `good first issue`, and we cannot act on requests for payment
+attached to a pull request.
+
+Contributions are voluntary. We think that is worth stating plainly rather than
+leaving people to guess, since some ecosystems do attach bounties to issues and
+the absence of a policy reads as ambiguity rather than as an answer.
+
 ## Security
 
 Do not commit secrets, production tokens, or private keys. To report a security

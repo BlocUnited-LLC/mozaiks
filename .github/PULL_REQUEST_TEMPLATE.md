@@ -6,6 +6,9 @@
   Using an AI coding agent? That is welcome — see .github/AI_POLICY.md. The
   short version: make sure this description matches what the diff actually
   does, and that you can explain the change in review.
+
+  Mozaiks does not run a bounty program; issues carry no payment. See
+  CONTRIBUTING.md.
 -->
 
 ## Related issue
