@@ -4,12 +4,13 @@ from typing import Any
 
 
 def normalize_app_id(value: Any) -> str | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
     if isinstance(value, str):
         trimmed = value.strip()
         return trimmed or None
-    return str(value) or None
+    s = str(value).strip()
+    return s or None
 
 
 def coalesce_app_id(*, app_id: Any = None) -> str | None:

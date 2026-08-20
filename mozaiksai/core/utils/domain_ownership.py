@@ -44,7 +44,8 @@ def challenge_name_for_domain(domain: str) -> str:
         challenge_name_for_domain("example.com")
         # → "_mozaiks-verify.example.com"
     """
-    return f"{_CHALLENGE_PREFIX}.{domain}"
+    normalized = (domain or "").strip().lower().rstrip(".")
+    return f"{_CHALLENGE_PREFIX}.{normalized}"
 
 
 def challenge_value_for_token(token: str) -> str:
