@@ -199,6 +199,11 @@ make a focused change, run the relevant tests, and open a pull request.
 Documentation, most tests, and many CLI changes don't need MongoDB, Node.js,
 or an LLM API key. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full path.
 
+Looking for a first issue? Start with
+[good first issue](https://github.com/BlocUnited-LLC/mozaiks/labels/good%20first%20issue)
+— comment on one to claim it before you start, so two people do not build the
+same fix.
+
 Using an AI coding agent? Welcome — read the
 [AI Policy](.github/AI_POLICY.md) first. It is short, and it applies to
 maintainers and their agents on the same terms.
