@@ -36,6 +36,41 @@ contribution regardless of how it was written. Then see
 below for the repo's optional agent routing system, which is tooling this repo
 supports rather than a prerequisite for contributing.
 
+## Where to Start
+
+Looking for something to work on:
+
+- **[good first issue](https://github.com/BlocUnited-LLC/mozaiks/labels/good%20first%20issue)** — scoped, self-contained, and written with file and line references so you are not hunting for context.
+- **[help wanted](https://github.com/BlocUnited-LLC/mozaiks/labels/help%20wanted)** — larger or more open-ended, and still a good entry point if you want more room.
+
+Most of these need no MongoDB, Node.js, or LLM API key — see
+[What You Can Contribute Without Extra Setup](#what-you-can-contribute-without-extra-setup).
+
+### Claim it before you start
+
+**Comment on the issue saying you are taking it, and wait for a maintainer to
+assign it to you.** GitHub does not let contributors self-assign, so the
+assignment has to come from our side; it is usually quick.
+
+This matters more than it looks. Two people have already built the same fix
+half an hour apart because nothing here said to claim first, and one of them
+lost the work. That was our fault, not theirs, and this section exists so it
+does not happen again. An issue with an assignee is taken; an issue without one
+is free.
+
+If an issue is assigned but has gone quiet for a couple of weeks, comment and
+ask — people's circumstances change and we would rather hand it on than let it
+sit.
+
+### A note on the suggested approach
+
+Many issues here include a suggested fix. That is a starting point written by
+someone who may have been wrong, not a specification. Read the surrounding code
+first, and if the suggestion looks wrong, **say so on the issue** — noticing
+that is worth more to us than implementing it faithfully.
+
+There is no bounty program; see [Bounties](#bounties).
+
 ## What You Can Contribute Without Extra Setup
 
 Running the full Mozaiks Studio stack needs MongoDB, Node.js, and an LLM API
