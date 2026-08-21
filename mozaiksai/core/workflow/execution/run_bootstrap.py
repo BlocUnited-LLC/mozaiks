@@ -12,24 +12,12 @@ from typing import Any
 
 
 def merge_persisted_extra_context(context: Any, extra_ctx: dict[str, Any]) -> None:
-    """Apply persisted run context over workflow-declared defaults."""
+    """Hydrate validated persisted state over workflow-declared defaults."""
     if not isinstance(extra_ctx, dict) or not extra_ctx:
         return
-    for k, v in extra_ctx.items():
-        if not isinstance(k, str) or not k.strip():
-            continue
-        try:
-            if hasattr(context, "set"):
-                context.set(k, v)
-            elif hasattr(context, "__setitem__"):
-                context[k] = v
-        except Exception:
-            continue
-    try:
-        if extra_ctx.get("parent_chat_id") and hasattr(context, "set"):
-            context.set("automated_workflow_run", True)
-    except Exception:
-        pass
+    from ..context.adapter import _hydrate_persisted_context
+
+    _hydrate_persisted_context(context, extra_ctx)
 
 
 def _hidden_config_seed(config: dict[str, Any], *, suppress: bool) -> dict[str, Any] | None:
@@ -124,15 +112,12 @@ async def bootstrap_run_messages(
             })
 
         current_user_id = user_id or "system_user"
-        try:
-            await persistence_manager.create_chat_session(
-                chat_id=chat_id,
-                app_id=app_id,
-                workflow_name=workflow_name,
-                user_id=current_user_id,
-            )
-        except Exception as cs_err:
-            wf_logger.error("Failed to create chat session for %s: %s", chat_id, cs_err)
+        await persistence_manager.create_chat_session(
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            user_id=current_user_id,
+        )
 
     if not seed_messages and config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
         seed_messages = [{

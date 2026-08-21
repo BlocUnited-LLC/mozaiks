@@ -165,11 +165,82 @@ def test_ui_and_user_triggers_reject_undeclared_keys() -> None:
         policy.require_can_write("undeclared_ready", writer_id=USER_TEXT_TRIGGER_WRITER)
 
 
-def test_persisted_replay_rejects_unauthorized_authority_value() -> None:
+def test_persisted_replay_skips_declared_non_persisted_authority_before_authorization() -> None:
+    policy = _policy()
+    diagnostics: list[str] = []
+
+    result = policy.filter_for_replay(
+        {"app_id": {"spoofed": True}},
+        writer_id=PERSISTED_REPLAY_WRITER,
+        diagnostics=diagnostics,
+    )
+
+    assert result == {}
+    assert diagnostics == ["context_authority.replay_skipped_non_persisted workflow=AuthorityFlow key=app_id"]
+
+
+def test_persistence_skips_declared_non_persisted_authority_before_value_validation() -> None:
+    policy = _policy()
+    diagnostics: list[str] = []
+
+    result = policy.filter_for_persistence(
+        {"app_id": {"spoofed": True}, "ordinary_state": "saved"},
+        diagnostics=diagnostics,
+    )
+
+    assert result == {"ordinary_state": "saved"}
+    assert diagnostics == [
+        "context_authority.persistence_skipped_non_persisted workflow=AuthorityFlow key=app_id"
+    ]
+
+
+def test_persisted_replay_allows_known_replayable_quality_state() -> None:
     policy = _policy()
 
-    with pytest.raises(ContextAuthorityError):
-        policy.filter_for_replay({"app_id": "evil"}, writer_id=PERSISTED_REPLAY_WRITER)
+    result = policy.filter_for_replay(
+        {"app_validation_status": "passed"},
+        writer_id=PERSISTED_REPLAY_WRITER,
+    )
+
+    assert result == {"app_validation_status": "passed"}
+
+
+def test_persisted_replay_rejects_persisted_immutable_runtime_authority() -> None:
+    plan = load_context_variables_config(
+        {
+            "definitions": {
+                "app_id": {
+                    "type": "string",
+                    "persisted": True,
+                    "source": {"type": "state", "default": "app_1"},
+                },
+            },
+            "agents": {},
+        }
+    )
+
+    with pytest.raises(ContextAuthorityError, match="not replayable"):
+        build_context_authority_policy(
+            workflow_name="PersistedImmutableFlow",
+            definitions=plan.definitions,
+            transition_rules=[],
+        )
+
+
+def test_persisted_replay_drops_stale_unknown_historical_keys_with_diagnostics() -> None:
+    policy = _policy()
+    diagnostics: list[str] = []
+
+    result = policy.filter_for_replay(
+        {"unknown_historical_key": "old", "ordinary_state": "restored"},
+        writer_id=PERSISTED_REPLAY_WRITER,
+        diagnostics=diagnostics,
+    )
+
+    assert result == {"ordinary_state": "restored"}
+    assert diagnostics == [
+        "context_authority.replay_dropped_unknown workflow=AuthorityFlow key=unknown_historical_key"
+    ]
 
 
 def test_packet_and_raw_context_set_guards_reject_bypass_attempts() -> None:
@@ -401,3 +472,75 @@ def test_factory_context_inventory_classifies_authority_like_keys() -> None:
                 checked += 1
 
     assert checked > 0
+
+
+def test_persisted_replay_rejects_known_malformed_value() -> None:
+    policy = _policy()
+
+    with pytest.raises(ContextAuthorityError, match="invalid_value"):
+        policy.filter_for_replay({"review_complete": "true"}, writer_id=PERSISTED_REPLAY_WRITER)
+
+
+def test_unresolved_workflow_declarations_fail_replay_closed() -> None:
+    """An unresolved policy must not masquerade as 'every stored key is stale'."""
+
+    policy = build_context_authority_policy(
+        workflow_name="UnloadedFlow",
+        definitions={},
+        transition_rules=[],
+        declarations_resolved=False,
+    )
+
+    with pytest.raises(ContextAuthorityError, match="unresolved_declarations"):
+        policy.filter_for_replay(
+            {"interview_complete": True},
+            writer_id=PERSISTED_REPLAY_WRITER,
+        )
+
+
+def test_unresolved_workflow_declarations_fail_persistence_closed() -> None:
+    policy = build_context_authority_policy(
+        workflow_name="UnloadedFlow",
+        definitions={},
+        transition_rules=[],
+        declarations_resolved=False,
+    )
+
+    with pytest.raises(ContextAuthorityError, match="unresolved_declarations"):
+        policy.filter_for_persistence({"interview_complete": True})
+
+
+def test_unresolved_declarations_tolerate_empty_value_sets() -> None:
+    """Nothing to write is not a failure, even when declarations are unresolved."""
+
+    policy = build_context_authority_policy(
+        workflow_name="UnloadedFlow",
+        definitions={},
+        transition_rules=[],
+        declarations_resolved=False,
+    )
+
+    assert policy.filter_for_replay({}, writer_id=PERSISTED_REPLAY_WRITER) == {}
+    assert policy.filter_for_persistence({}) == {}
+
+
+def test_resolved_workflow_with_no_declarations_still_drops_stale_keys() -> None:
+    """A workflow that legitimately declares nothing keeps stale-key drop semantics."""
+
+    policy = build_context_authority_policy(
+        workflow_name="NoContextFlow",
+        definitions={},
+        transition_rules=[],
+    )
+    diagnostics: list[str] = []
+
+    result = policy.filter_for_replay(
+        {"stale_key": "old"},
+        writer_id=PERSISTED_REPLAY_WRITER,
+        diagnostics=diagnostics,
+    )
+
+    assert result == {}
+    assert diagnostics == [
+        "context_authority.replay_dropped_unknown workflow=NoContextFlow key=stale_key"
+    ]

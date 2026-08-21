@@ -363,20 +363,28 @@ def test_vector7_live_resume_ordinary_key_is_allowed() -> None:
 # Vector 8: EV_CONTEXT_SET / persisted replay
 # ---------------------------------------------------------------------------
 
-def test_vector8_persisted_replay_rejects_immutable_key() -> None:
-    """filter_for_replay with PERSISTED_REPLAY_WRITER must reject immutable keys."""
+def test_vector8_persisted_replay_skips_non_persisted_immutable_key() -> None:
+    """filter_for_replay skips declared non-persisted immutable keys before authorization."""
+    policy = _hostile_policy()
+    diagnostics: list[str] = []
+
+    result = policy.filter_for_replay(
+        {"app_id": "evil"},
+        writer_id=PERSISTED_REPLAY_WRITER,
+        diagnostics=diagnostics,
+    )
+
+    assert result == {}
+    assert diagnostics == ["context_authority.replay_skipped_non_persisted workflow=HostileTestFlow key=app_id"]
+
+
+def test_vector8_persisted_replay_allows_persisted_quality_key() -> None:
+    """filter_for_replay allows known replayable quality state."""
     policy = _hostile_policy()
 
-    with pytest.raises(ContextAuthorityError, match="context_authority"):
-        policy.filter_for_replay({"app_id": "evil"}, writer_id=PERSISTED_REPLAY_WRITER)
+    result = policy.filter_for_replay({"app_validation_status": "passed"}, writer_id=PERSISTED_REPLAY_WRITER)
 
-
-def test_vector8_persisted_replay_rejects_quality_key() -> None:
-    """filter_for_replay with PERSISTED_REPLAY_WRITER must reject quality-gate keys."""
-    policy = _hostile_policy()
-
-    with pytest.raises(ContextAuthorityError, match="context_authority"):
-        policy.filter_for_replay({"app_validation_status": "passed"}, writer_id=PERSISTED_REPLAY_WRITER)
+    assert result == {"app_validation_status": "passed"}
 
 
 def test_vector8_persisted_replay_allows_ordinary_key() -> None:
@@ -385,6 +393,14 @@ def test_vector8_persisted_replay_allows_ordinary_key() -> None:
 
     result = policy.filter_for_replay({"ordinary_state": "restored"}, writer_id=PERSISTED_REPLAY_WRITER)
     assert result == {"ordinary_state": "restored"}
+
+
+def test_vector8_persisted_replay_identity_cannot_mutate_live_context() -> None:
+    """The stored-state replay identity is not live write authority."""
+    policy = _hostile_policy()
+
+    with pytest.raises(ContextAuthorityError, match="context_authority.rejected"):
+        policy.require_can_write("ordinary_state", writer_id=PERSISTED_REPLAY_WRITER)
 
 
 # ---------------------------------------------------------------------------

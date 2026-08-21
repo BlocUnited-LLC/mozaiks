@@ -34,6 +34,12 @@ class _StubPersistenceManager:
         self.persisted_run_messages.append(kwargs)
 
 
+class _FailingSessionPersistenceManager(_StubPersistenceManager):
+    async def create_chat_session(self, **kwargs):
+        self.created_sessions.append(kwargs)
+        raise RuntimeError("required session persistence unavailable")
+
+
 @pytest.mark.asyncio
 async def test_run_bootstrap_keeps_direct_initial_message_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
@@ -96,6 +102,33 @@ async def test_run_bootstrap_keeps_config_seed_out_of_persisted_transcript() -> 
         }
     ]
     assert pm.persisted_batches == []
+
+
+@pytest.mark.asyncio
+async def test_run_bootstrap_propagates_required_session_creation_failure() -> None:
+    pm = _FailingSessionPersistenceManager()
+
+    with pytest.raises(RuntimeError, match="required session persistence unavailable"):
+        await _bootstrap_run_messages(
+            persistence_manager=pm,
+            config={},
+            chat_id="chat-create-fails",
+            app_id="app-1",
+            workflow_name="RuntimeSmoke",
+            user_id="user-1",
+            initial_message="Hello runtime",
+            initial_agent_name=None,
+            wf_logger=logging.getLogger("test.orchestration.seed"),
+        )
+
+    assert pm.created_sessions == [
+        {
+            "chat_id": "chat-create-fails",
+            "app_id": "app-1",
+            "workflow_name": "RuntimeSmoke",
+            "user_id": "user-1",
+        }
+    ]
 
 
 @pytest.mark.asyncio
