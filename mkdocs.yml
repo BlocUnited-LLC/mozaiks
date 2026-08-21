@@ -70,7 +70,11 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      # Allows docs pages to include canonical files kept outside docs/,
+      # e.g. .github/AI_POLICY.md, so GitHub and the docs site cannot drift.
+      base_path: ["."]
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -281,6 +285,7 @@ nav:
           - Refinement Classifier: manual-smoke-tests/refinement-classifier.md
           - Refinement Dry Run: manual-smoke-tests/refinement-dry-run.md
       - AI Coding Agents:
+          - AI Policy: contributing/ai-policy.md
           - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
       - Release:
           - Releasing: releasing.md
