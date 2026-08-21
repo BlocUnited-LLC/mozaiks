@@ -56,8 +56,8 @@ def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> 
     assert mozaikspay["recommendation_rank"] == 1
     assert mozaikspay["capability_kind"] == "operator_pack"
     assert {"billing", "subscriptions", "usage", "saas"} <= set(mozaikspay["domains"])
-    assert "Recommend the mozaikspay capability pack" in notes
-    assert "monetization_provider=mozaiks_pay" in notes
+    assert "Default to the mozaikspay capability pack" in notes
+    assert "monetization_provider=entitlement_dispatch" in notes
     assert "billing_portal facade" in notes
     assert "mozaikspay_client.py" in notes
     assert "Do not generate checkout, webhook handlers" in notes
@@ -67,7 +67,7 @@ def test_managed_adapter_rules_keep_default_packs_app_agnostic() -> None:
     directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
     app_agnostic_rules = " ".join(directory.get("app_agnostic_rules", []))
 
-    assert "recommendation-only" in app_agnostic_rules
+    assert "replaceable" in app_agnostic_rules
     assert "runtime requirements" in app_agnostic_rules
     assert "provider-neutral" in app_agnostic_rules
     assert "external_adapter replacement path" in app_agnostic_rules
@@ -81,7 +81,7 @@ def test_mozaikspay_declares_replaceable_adapter_boundary() -> None:
     adapter_contract = mozaikspay["adapter_contract"]
     alternatives = mozaikspay.get("alternatives", [])
 
-    assert adapter_contract["role"] == "recommended_managed_adapter"
+    assert adapter_contract["role"] == "default_managed_adapter"
     assert adapter_contract["replacement_kind"] == "external_adapter"
     assert adapter_contract["runtime_effect_boundary"] == "BillingFulfillmentCommand"
     assert adapter_contract["runtime_read_boundary"] == "EntitlementPort"

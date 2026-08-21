@@ -357,9 +357,10 @@ layers:
            declare the app-specific module as custom_owned with the same
            interface contract instead of inventing provider internals.
         7. For SaaS subscriptions, paid tiers, seats, credits, usage limits, or
-           billing portal requests, recommend the managed mozaikspay capability
-           pack, but select it only when AppBuildPlan.monetization_provider is
-           mozaiks_pay. Use entitlement_dispatch for the self-managed OSS path.
+           billing portal requests, default to the managed mozaikspay capability
+           pack when the user has not selected another path. Set
+           AppBuildPlan.monetization_provider=mozaiks_pay. Use
+           entitlement_dispatch only for an explicit self-managed OSS choice.
       Never generate payment provider, payment provider internals, or raw payment credentials
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).

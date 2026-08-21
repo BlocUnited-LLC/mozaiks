@@ -10,17 +10,17 @@ global_rules:
   - If a recommended pack is selected, use app-owned facade modules and thin service clients.
   - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, token usage measurement, and token wallet accounting are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
 app_agnostic_rules:
-  - Recommended managed adapters are recommendation-only and must not become runtime requirements.
+  - Default managed adapters must remain replaceable and must not become runtime requirements.
   - A selected managed adapter must cross runtime state changes through provider-neutral commands, events, or configured records.
   - Generated app pages must call app-owned facade modules; they must not call hosted product internals or payment provider SDKs directly.
-  - Any recommended managed adapter must declare an external_adapter replacement path so user-selected providers can satisfy the same app-facing contract.
+  - Any default managed adapter must declare an external_adapter replacement path so user-selected providers can satisfy the same app-facing contract.
 capabilities:
   - id: mozaikspay
     label: MozaiksPay Managed SaaS Billing
     capability_kind: operator_pack
     recommendation_rank: 1
     adapter_contract:
-      role: recommended_managed_adapter
+      role: default_managed_adapter
       app_facing_facades:
         - billing_portal
       replacement_kind: external_adapter
@@ -47,7 +47,7 @@ capabilities:
       - subscriptions
       - saas monetization
     generator_notes:
-      - Recommend the mozaikspay capability pack for SaaS monetization, but select it only when the user explicitly chooses MozaiksPay or the structured plan sets monetization_provider=mozaiks_pay.
+      - Default to the mozaikspay capability pack for SaaS subscriptions when no different provider path is explicitly selected. Preserve monetization_provider=entitlement_dispatch as the self-managed OSS override.
       - Generate the app-owned billing_portal facade, thin services/integrations/mozaikspay_client.py client, billing/usage pages, pricing page, and app/config/subscriptions.yaml plan contract.
       - Do not generate provider-specific billing module internals or hosted service code.
       - Do not generate checkout, webhook handlers, invoice logic, customer/payment provider mapping, refunds, wallet, payout, or provider credential handling.

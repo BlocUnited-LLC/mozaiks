@@ -63,9 +63,13 @@ def _run_plan(plan: dict[str, object]) -> _Context:
     return context
 
 
-def test_subscription_config_requires_explicit_monetization_provider() -> None:
-    with pytest.raises(ValueError, match="monetization_provider is required"):
-        _run_plan(_base_plan(capability_packs=[_mozaikspay_pack()]))
+def test_subscription_config_defaults_to_mozaikspay() -> None:
+    context = _run_plan(_base_plan())
+
+    normalized = context.values["app_build_plan"]
+    assert isinstance(normalized, dict)
+    assert normalized["monetization_provider"] == "mozaiks_pay"
+    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
 
 
 def test_unknown_monetization_provider_fails_before_materialization() -> None:
@@ -73,9 +77,13 @@ def test_unknown_monetization_provider_fails_before_materialization() -> None:
         _run_plan(_base_plan(monetization_provider="custom"))
 
 
-def test_mozaiks_pay_requires_explicit_mozaikspay_pack_selection() -> None:
-    with pytest.raises(ValueError, match="requires the mozaikspay managed capability pack"):
-        _run_plan(_base_plan(monetization_provider="mozaiks_pay"))
+def test_explicit_mozaiks_pay_provider_includes_public_pack_contract() -> None:
+    context = _run_plan(_base_plan(monetization_provider="mozaiks_pay"))
+
+    normalized = context.values["app_build_plan"]
+    assert isinstance(normalized, dict)
+    assert normalized["monetization_provider"] == "mozaiks_pay"
+    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
 
 
 def test_mozaiks_pay_and_entitlement_dispatch_are_mutually_exclusive() -> None:
@@ -109,6 +117,15 @@ def test_explicit_self_managed_selection_uses_entitlement_dispatch_only() -> Non
             capability_packs=[_entitlement_dispatch_pack()],
         )
     )
+
+    normalized = context.values["app_build_plan"]
+    assert isinstance(normalized, dict)
+    assert normalized["monetization_provider"] == "entitlement_dispatch"
+    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"entitlement_dispatch"}
+
+
+def test_selected_self_managed_pack_is_an_explicit_default_override() -> None:
+    context = _run_plan(_base_plan(capability_packs=[_entitlement_dispatch_pack()]))
 
     normalized = context.values["app_build_plan"]
     assert isinstance(normalized, dict)

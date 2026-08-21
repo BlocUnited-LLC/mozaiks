@@ -663,13 +663,92 @@ def _ensure_context_selected_capability_packs(
     return result
 
 
+def _default_mozaikspay_descriptor(context_variables: Any | None) -> dict[str, Any]:
+    """Return the public MozaiksPay pack descriptor used for SaaS defaults."""
+    available_packs = _context_available_pack_map(context_variables)
+    configured = available_packs.get(MOZAIKSPAY_PACK_ID)
+    if isinstance(configured, dict):
+        descriptor = dict(configured)
+    else:
+        import yaml
+
+        from factory_app.workflows._shared.hook_utils import workflow_context_path
+
+        contract_path = workflow_context_path(MOZAIKSPAY_PACK_ID, "contract.yaml")
+        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+        descriptor = {
+            "id": MOZAIKSPAY_PACK_ID,
+            "display_name": "MozaiksPay",
+            "description": "Managed subscription billing provider for generated SaaS apps.",
+            "provides_capabilities": contract.get("provides_capabilities") or [],
+            "required_integrations": contract.get("required_integrations") or [],
+            "facades": contract.get("facades") or [],
+        }
+
+    descriptor.setdefault("capability_pack_id", MOZAIKSPAY_PACK_ID)
+    descriptor.setdefault("capability_source", "managed_capability")
+    descriptor.setdefault("surface_id", "mozaikspay_managed")
+    descriptor.setdefault("surface_kind", "external_integration")
+    descriptor.setdefault("implementation_mode", "external_integration")
+    descriptor.setdefault("pack_type", "managed_capability")
+    descriptor.setdefault("label", descriptor.get("display_name") or "MozaiksPay")
+    descriptor.setdefault(
+        "summary",
+        descriptor.get("description") or "Managed subscription billing capability.",
+    )
+    return descriptor
+
+
+def _apply_default_monetization_provider(
+    capability_packs: list[dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
+    *,
+    monetization_provider: str | None,
+    context_variables: Any | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Default subscription builds to MozaiksPay while preserving explicit overrides.
+
+    A subscription_config task is the deterministic signal that the generated
+    app needs a subscription assignment write path. An explicit provider value
+    always wins. Selecting entitlement_dispatch without a provider value is also
+    treated as an explicit self-managed choice. Otherwise MozaiksPay is selected
+    and its public, replaceable managed-capability descriptor is added.
+    """
+    has_subscription_config = any(
+        isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
+        for task in build_tasks
+    )
+    if not has_subscription_config:
+        return capability_packs, monetization_provider
+
+    selected_ids = {
+        _pack_id_from_descriptor(pack)
+        for pack in capability_packs
+        if isinstance(pack, dict)
+    } - {""}
+    if monetization_provider == MOZAIKS_PAY_PROVIDER_ID and MOZAIKSPAY_PACK_ID not in selected_ids:
+        return [*capability_packs, _default_mozaikspay_descriptor(context_variables)], monetization_provider
+    if monetization_provider:
+        return capability_packs, monetization_provider
+    if SELF_MANAGED_PROVIDER_ID in selected_ids:
+        return capability_packs, SELF_MANAGED_PROVIDER_ID
+    if MOZAIKSPAY_PACK_ID in selected_ids:
+        return capability_packs, MOZAIKS_PAY_PROVIDER_ID
+
+    _logger.info(
+        "[app_build_plan] defaulting SaaS subscription provider to MozaiksPay; "
+        "set monetization_provider='entitlement_dispatch' to use the self-managed OSS path"
+    )
+    return [*capability_packs, _default_mozaikspay_descriptor(context_variables)], MOZAIKS_PAY_PROVIDER_ID
+
+
 def _validate_monetization_provider_selection(
     capability_packs: list[dict[str, Any]],
     build_tasks: list[dict[str, Any]],
     *,
     monetization_provider: str | None,
 ) -> None:
-    """Validate explicit SaaS subscription-assignment provider selection."""
+    """Validate the resolved SaaS subscription-assignment provider selection."""
     has_subscription_config = any(
         isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
         for task in build_tasks
@@ -1830,6 +1909,16 @@ def app_build_plan(
         ],
         key=_task_sort_key,
     ))
+    capability_packs, monetization_provider = _apply_default_monetization_provider(
+        capability_packs,
+        build_tasks,
+        monetization_provider=monetization_provider,
+        context_variables=context_variables,
+    )
+    capability_packs = _normalize_capability_pack_sources(
+        capability_packs,
+        context_variables=context_variables,
+    )
     inferred_managed_capability_ids = _infer_managed_capability_ids_from_adapter_tasks(
         build_tasks,
         context_variables=context_variables,

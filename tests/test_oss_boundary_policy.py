@@ -18,6 +18,7 @@ _BOUNDARY_POLICY = (
 _REQUIRED_ADRS = [
     REPO_ROOT / "docs" / "adr" / "0001-public-architecture-and-oss-strategy-boundary.md",
     REPO_ROOT / "docs" / "adr" / "0003-pre-1-0-oss-proprietary-boundary-freeze.md",
+    REPO_ROOT / "docs" / "adr" / "0004-mozaikspay-first-commercialization-boundary.md",
 ]
 
 # Families that must be declared in the boundary policy document.

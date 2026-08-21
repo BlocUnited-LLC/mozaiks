@@ -1,8 +1,8 @@
 # MozaiksPay Provider Contract
 
-MozaiksPay is the recommended managed monetization provider for generated SaaS
-applications. It is not mandatory and must be selected explicitly with the
-canonical provider id `mozaiks_pay`. A compatible provider can replace the
+MozaiksPay is the recommended managed monetization provider and the default for
+generated SaaS applications. It is not mandatory: an explicit `entitlement_dispatch` choice
+selects the self-managed OSS path, and a compatible provider can replace the
 hosted MozaiksPay service when it satisfies the same app-facing contract.
 
 This contract describes the public boundary a canonical app depends on. It does
@@ -11,8 +11,8 @@ merchant operations, fee policy, credentials, or production authority internals.
 
 ## Generated App Boundary
 
-When Factory explicitly selects `monetization_provider: mozaiks_pay` and the
-`mozaikspay` capability pack, the generated app receives:
+When Factory resolves `monetization_provider: mozaiks_pay` and the `mozaikspay`
+capability pack—by default or explicit choice—the generated app receives:
 
 - `app/services/integrations/mozaikspay_client.py`
 - `app/modules/billing_portal/`
@@ -34,12 +34,11 @@ generated page
 
 ## Selection And Replacement Semantics
 
-Factory may recommend MozaiksPay for monetizable apps when the app needs SaaS
-subscriptions, billing portal redirects, token top-ups, usage status, or paid
-feature gates. Recommendation is not activation: generated bundles must contain
-no MozaiksPay client, imports, endpoints, secret declarations, callbacks,
-configuration, or telemetry unless `AppBuildPlan.monetization_provider` is
-`mozaiks_pay` and the `mozaikspay` managed capability pack is selected.
+Factory defaults MozaiksPay for apps that need SaaS subscriptions, billing
+portal redirects, token top-ups, usage status, or paid feature gates. Selection
+is not activation: no account is created and the connector remains unconfigured
+until an operator supplies credentials. Non-subscription and explicitly
+self-managed apps receive no MozaiksPay artifacts.
 
 The executable provider choices for subscription assignment are:
 
