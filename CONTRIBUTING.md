@@ -40,8 +40,10 @@ supports rather than a prerequisite for contributing.
 
 Looking for something to work on:
 
-- **[good first issue](https://github.com/BlocUnited-LLC/mozaiks/labels/good%20first%20issue)** — scoped, self-contained, and written with file and line references so you are not hunting for context.
-- **[help wanted](https://github.com/BlocUnited-LLC/mozaiks/labels/help%20wanted)** — larger or more open-ended, and still a good entry point if you want more room.
+Browse the
+**[good first issue](https://github.com/BlocUnited-LLC/mozaiks/labels/good%20first%20issue)**
+label — scoped, self-contained work, written with file and line references so
+you are not hunting for context.
 
 Most of these need no MongoDB, Node.js, or LLM API key — see
 [What You Can Contribute Without Extra Setup](#what-you-can-contribute-without-extra-setup).
