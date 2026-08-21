@@ -119,8 +119,12 @@ def validate_pack_context(context: dict[str, Any]) -> PackContextValidationResul
     if not context_id:
         diagnostics.append(PackContextDiagnostic("context_id", "context_id is required"))
 
+    # Optional: managed-capability packs are selected by capability id and
+    # legitimately omit workflow bindings. Only reject a present-but-wrong type.
     applies_to = context.get("applies_to_workflows")
-    if not _require_list(applies_to, "applies_to_workflows", diagnostics):
+    if applies_to is not None and not _require_list(
+        applies_to, "applies_to_workflows", diagnostics
+    ):
         applies_to = []
     if isinstance(applies_to, list):
         for index, workflow_id in enumerate(applies_to):
