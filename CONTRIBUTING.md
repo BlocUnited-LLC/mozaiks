@@ -63,12 +63,15 @@ focused test file(s) that cover what you touched:
 python -m pytest tests/test_your_file.py -q
 ```
 
-**Coverage gate note:** This repo's shared `pytest` configuration enforces a
-repository-wide minimum coverage threshold (`--cov-fail-under=30`, measured
-against `mozaiksai`). Running a narrow test file against that global
-threshold will often report a coverage failure even when every test you ran
-passes. That failure reflects the coverage math for the whole package, not a
-problem with your change.
+**Coverage gate note:** The local `pyproject.toml` configuration sets a
+repository-wide minimum coverage threshold of 30% (`--cov-fail-under=30`,
+measured against `mozaiksai`). However, **CI enforces a stricter 70% gate**
+(`--cov-fail-under=70` in `.github/workflows/ci.yml`). CI is authoritative —
+your pull request must pass the 70% threshold regardless of local results.
+
+Running a narrow test file against the global threshold will often report a
+coverage failure even when every test you ran passes. That failure reflects
+the coverage math for the whole package, not a problem with your change.
 
 To run a focused slice without tripping the repository-wide coverage gate,
 use the verified command:
@@ -79,9 +82,8 @@ python -m pytest tests/test_your_file.py -q --no-cov
 
 **CI remains authoritative.** `--no-cov` is a local convenience for fast
 iteration on a narrow slice. It does not weaken what is enforced in CI — the
-full test suite still runs in CI with the project's coverage requirements
-enforced, and your pull request must pass CI regardless of what you ran
-locally.
+full test suite runs in CI with the 70% coverage gate enforced, and your pull
+request must pass CI regardless of what you ran locally.
 
 ## Working With an AI Coding Agent (Optional)
 
