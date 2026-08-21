@@ -48,6 +48,7 @@ def _write_pack(root: Path, pack_id: str, files: dict[str, str], *, status: str 
         yaml.safe_dump(
             {
                 "context_id": pack_id,
+                "applies_to_workflows": ["AppGenerator"],
                 "assets": [
                     {"path": "templates/", "kind": "templates"},
                 ],
