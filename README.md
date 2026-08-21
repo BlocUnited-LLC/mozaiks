@@ -34,6 +34,68 @@ separate from builder workflows.
 Mozaiks is not published as a public PyPI package yet. Install it from a local
 checkout in editable mode.
 
+## What The Framework Gives You
+
+Generation is the visible part. What makes the generated output worth keeping is
+the runtime underneath it, which is the same runtime whether an app was
+generated or hand-written.
+
+### Subscription to entitlement to feature gate
+
+The pattern almost every SaaS rebuilds by hand. In Mozaiks it is a runtime
+primitive: a module action names a capability, and the executor checks it before
+dispatch.
+
+```yaml
+# modules/reports/module.yaml
+actions:
+  - id: export_report
+    description: Export the current report as CSV
+    handler_method: export_report
+    entitlement_gate: reports.export    # checked before the handler runs
+```
+
+`app/config/subscriptions.yaml` declares which plans grant `reports.export`.
+Apps with no subscriptions get `NoOpEntitlementAdapter` and are entirely
+unaffected. Enforcement fails closed: an adapter that errors denies rather than
+grants.
+
+### Ports and adapters, not a framework you are stuck inside
+
+Infrastructure sits behind protocols the runtime declares and never implements
+for you:
+
+| Port | Contract | Ships with |
+|---|---|---|
+| `EntitlementPort` | is this capability granted for this scope? | no-op + config-driven adapters |
+| `ArtifactStore` | read/write named artifact blobs | local filesystem + S3 |
+| `AppBackendPort` | runtime to backend request/emit/health | generic HTTP adapter |
+| `SandboxPort` | isolated execution sessions | Docker adapter |
+| `SslProviderPort` | certificate provisioning | protocol only |
+
+Swap any of them for your own without forking the runtime.
+
+### Contracts that are validated, not conventions that are hoped for
+
+Every canonical YAML shape - modules, actions, events, reactions, pages,
+workflows, data contracts - is backed by a strict typed model and validated
+before it becomes active. A contract that cannot be generated repeatably and
+validated deterministically is not treated as a contract.
+
+### Execution that survives a crash
+
+The workflow queue uses leases with fencing tokens, bounded retry, and
+dead-lettering, so a worker dying mid-run does not strand or duplicate work.
+Module dispatch requires an explicit authority object rather than trusting the
+caller. Tenant isolation goes through one canonical scope filter instead of each
+query hand-rolling its own.
+
+### Apps you can leave with
+
+Generated apps are provider-neutral and self-hostable: a Dockerfile, a compose
+file, an env manifest, and staged data-contract migrations. Nothing requires
+BlocUnited's hosted platform to run.
+
 ## Quickstart
 
 Install Python 3.11+ and Node.js 18+. Studio also needs a reachable MongoDB
