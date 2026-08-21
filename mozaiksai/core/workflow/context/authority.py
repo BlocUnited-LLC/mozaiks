@@ -99,7 +99,6 @@ _ORDINARY_MUTATION_WRITERS = {
     TOOL_WRITEBACK_WRITER,
     UI_RESPONSE_TRIGGER_WRITER,
     USER_TEXT_TRIGGER_WRITER,
-    PERSISTED_REPLAY_WRITER,
     TASK_BATCH_WRITER,
     STRUCTURED_OUTPUT_WRITER,
     LIFECYCLE_TOOL_WRITER,
@@ -184,6 +183,7 @@ class ContextVariableAuthority:
     routing: bool
     authorization: bool
     writer_ids: frozenset[ContextWriterId] = field(default_factory=frozenset)
+    value_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +192,11 @@ class ContextAuthorityPolicy:
 
     workflow_name: str
     variables: Mapping[str, ContextVariableAuthority]
+    # False when the caller could not resolve this workflow's declarations at
+    # all (for example the workflow is not loaded in this process). An empty
+    # declaration set is NOT the same as "this key is stale": the former must
+    # fail closed so durable state is never silently discarded wholesale.
+    declarations_resolved: bool = True
 
     def require_can_write(self, key: str, *, writer_id: ContextWriterId, operation: str = "set") -> None:
         clean_key = _clean_key(key)
@@ -214,6 +219,8 @@ class ContextAuthorityPolicy:
             return False
         if writer_id == RUNTIME_SYSTEM_WRITER:
             return True
+        if writer_id == PERSISTED_REPLAY_WRITER:
+            return False
         if authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY:
             return writer_id == RUNTIME_SYSTEM_WRITER
         if writer_id == AGENT_TEXT_WRITER:
@@ -232,16 +239,108 @@ class ContextAuthorityPolicy:
             return writer_id in authority.writer_ids
         return writer_id in _ORDINARY_MUTATION_WRITERS
 
-    def filter_for_replay(self, values: Mapping[str, Any], *, writer_id: ContextWriterId) -> dict[str, Any]:
+    def _require_resolved_declarations(self, values: Mapping[str, Any], *, operation: str) -> None:
+        """Fail closed when this workflow's declarations were never resolved.
+
+        Dropping an individual unknown key is correct: it is stale stored state.
+        Dropping every key because the policy itself is empty is not - that
+        silently discards durable workflow state. The two cases are only
+        distinguishable here, so an unresolved policy raises instead.
+        """
+
+        if not values or self.declarations_resolved:
+            return
+        raise ContextAuthorityError(
+            f"context_authority.unresolved_declarations workflow={self.workflow_name} "
+            f"writer={PERSISTED_REPLAY_WRITER} op={operation}"
+        )
+
+    def require_replayable_value(self, key: str, value: Any, *, operation: str) -> None:
+        clean_key = _clean_key(key)
+        if not clean_key:
+            raise ContextAuthorityError("context_authority.empty_key")
+        authority = self.variables.get(clean_key)
+        if authority is None:
+            raise ContextAuthorityError(
+                f"context_authority.unknown_key workflow={self.workflow_name} key={clean_key} writer={PERSISTED_REPLAY_WRITER} op={operation}"
+            )
+        if not authority.persisted:
+            return
+        if not _is_replayable_authority(authority):
+            raise ContextAuthorityError(
+                f"context_authority.non_replayable workflow={self.workflow_name} key={clean_key} writer={PERSISTED_REPLAY_WRITER} op={operation}"
+            )
+        if not _is_valid_context_value(value, value_type=authority.value_type):
+            raise ContextAuthorityError(
+                f"context_authority.invalid_value workflow={self.workflow_name} key={clean_key} writer={PERSISTED_REPLAY_WRITER} op={operation}"
+            )
+
+    def filter_for_replay(
+        self,
+        values: Mapping[str, Any],
+        *,
+        writer_id: ContextWriterId,
+        diagnostics: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._require_resolved_declarations(values, operation="replay")
         accepted: dict[str, Any] = {}
         for key, value in values.items():
             clean_key = _clean_key(key)
             if not clean_key:
                 continue
-            self.require_can_write(clean_key, writer_id=writer_id)
             authority = self.variables.get(clean_key)
+            if authority is None:
+                if writer_id == PERSISTED_REPLAY_WRITER:
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            f"context_authority.replay_dropped_unknown workflow={self.workflow_name} key={clean_key}"
+                        )
+                    continue
+                self.require_can_write(clean_key, writer_id=writer_id)
             if authority is not None and not authority.persisted:
+                if diagnostics is not None:
+                    diagnostics.append(
+                        f"context_authority.replay_skipped_non_persisted workflow={self.workflow_name} key={clean_key}"
+                    )
                 continue
+            self.require_replayable_value(clean_key, value, operation="replay")
+            accepted[clean_key] = value
+        return accepted
+
+    def filter_for_persistence(
+        self,
+        values: Mapping[str, Any],
+        *,
+        diagnostics: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Filter live, already-authorized context state for durable hydration.
+
+        Persistence receives a live snapshot after normal writer authorization has
+        happened at mutation time. Replay receives stored state later. Both paths
+        use the same persisted/replayable/value validation, but only replay has a
+        stored-state writer identity.
+        """
+
+        self._require_resolved_declarations(values, operation="persist")
+        accepted: dict[str, Any] = {}
+        for key, value in values.items():
+            clean_key = _clean_key(key)
+            if not clean_key:
+                continue
+            authority = self.variables.get(clean_key)
+            if authority is None:
+                if diagnostics is not None:
+                    diagnostics.append(
+                        f"context_authority.persistence_dropped_unknown workflow={self.workflow_name} key={clean_key}"
+                    )
+                continue
+            if not authority.persisted:
+                if diagnostics is not None:
+                    diagnostics.append(
+                        f"context_authority.persistence_skipped_non_persisted workflow={self.workflow_name} key={clean_key}"
+                    )
+                continue
+            self.require_replayable_value(clean_key, value, operation="persist")
             accepted[clean_key] = value
         return accepted
 
@@ -269,6 +368,7 @@ def build_context_authority_policy(
     definitions: Mapping[str, Any],
     transition_rules: Any = None,
     task_batch_context_keys: set[str] | None = None,
+    declarations_resolved: bool = True,
 ) -> ContextAuthorityPolicy:
     routing_keys = _transition_context_keys(transition_rules)
     task_keys = set(task_batch_context_keys or set())
@@ -277,13 +377,19 @@ def build_context_authority_policy(
         key = _clean_key(raw_key)
         if not key:
             continue
-        variables[key] = infer_context_authority(
+        authority = infer_context_authority(
             key,
             definition=definition,
             routing_keys=routing_keys,
             task_batch_context_keys=task_keys,
         )
-    return ContextAuthorityPolicy(workflow_name=str(workflow_name or ""), variables=variables)
+        _validate_replay_contract(workflow_name=str(workflow_name or ""), authority=authority)
+        variables[key] = authority
+    return ContextAuthorityPolicy(
+        workflow_name=str(workflow_name or ""),
+        variables=variables,
+        declarations_resolved=declarations_resolved,
+    )
 
 
 def infer_context_authority(
@@ -337,6 +443,7 @@ def infer_context_authority(
         routing=routing,
         authorization=authorization,
         writer_ids=frozenset(writer_ids),
+        value_type=_definition_type(definition),
     )
 
 
@@ -376,6 +483,11 @@ def _metadata_from_definition(definition: Any | None) -> ContextAuthorityMetadat
         "writer_ids": _value(definition, "writer_ids", []) or [],
     }
     return ContextAuthorityMetadata.model_validate(raw)
+
+
+def _definition_type(definition: Any | None) -> str | None:
+    text = str(_value(definition, "type", "") or "").strip().lower()
+    return text or None
 
 
 def _definition_source(definition: Any | None) -> Any:
@@ -439,10 +551,52 @@ def _infer_writer_ids(
             TRANSITION_ROUTER_WRITER,
             CONTEXT_BRIDGE_WRITER,
             TOOL_WRITEBACK_WRITER,
-            PERSISTED_REPLAY_WRITER,
             LIVE_USER_CONTEXT_WRITER,
         })
     return writers
+
+
+def _is_replayable_authority(authority: ContextVariableAuthority) -> bool:
+    if authority.authorization:
+        return False
+    return authority.authority_class in {
+        ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE,
+        ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE,
+        ContextAuthorityClass.MUTABLE_WORKFLOW_STATE,
+        ContextAuthorityClass.MODEL_VISIBLE_INFORMATION,
+        ContextAuthorityClass.DERIVED_INFORMATION,
+    }
+
+
+def _is_valid_context_value(value: Any, *, value_type: str | None) -> bool:
+    if value is None:
+        return True
+    if value_type in {None, "", "any"}:
+        return True
+    if value_type in {"string", "str"}:
+        return isinstance(value, str)
+    if value_type in {"boolean", "bool"}:
+        return isinstance(value, bool)
+    if value_type in {"integer", "int"}:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if value_type in {"number", "float"}:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if value_type in {"object", "dict", "map"}:
+        return isinstance(value, Mapping)
+    if value_type in {"array", "list"}:
+        return isinstance(value, list)
+    return True
+
+
+def _validate_replay_contract(*, workflow_name: str, authority: ContextVariableAuthority) -> None:
+    if not authority.persisted:
+        return
+    if _is_replayable_authority(authority):
+        return
+    raise ContextAuthorityError(
+        f"{workflow_name} context authority contract mismatch: persisted context variable "
+        f"{authority.key!r} is not replayable"
+    )
 
 
 def _transition_context_keys(transition_rules: Any) -> frozenset[str]:

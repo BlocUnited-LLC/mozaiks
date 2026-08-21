@@ -36,6 +36,8 @@ import mozaiksai.core.workflow.workflow_manager as workflow_manager_module
 from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 
@@ -859,12 +861,16 @@ async def test_ag2_network_runner_fails_invalid_structured_output_contract() -> 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("persistence_failure", [None, "fetch", "persist"])
 async def test_run_workflow_orchestration_uses_ag2_network_runner(
     monkeypatch: pytest.MonkeyPatch,
+    persistence_failure: str | None,
 ) -> None:
     class _Persistence:
         def __init__(self) -> None:
             self.persisted_context: dict[str, Any] | None = None
+            self.persisted_scope: tuple[str, str, str] | None = None
+            self.fetched_scope: tuple[str, str, str] | None = None
             self.assistant_messages: list[dict[str, Any]] = []
             self.completed: list[tuple[str, str]] = []
             self.created_sessions: list[dict[str, Any]] = []
@@ -881,7 +887,16 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
         async def get_or_assign_cache_seed(self, chat_id: str, app_id: str) -> int:
             return 7
 
-        async def fetch_chat_session_extra_context(self, *, chat_id: str, app_id: str) -> dict[str, Any]:
+        async def fetch_chat_session_extra_context(
+            self,
+            *,
+            chat_id: str,
+            app_id: str,
+            workflow_name: str,
+        ) -> dict[str, Any]:
+            self.fetched_scope = (chat_id, app_id, workflow_name)
+            if persistence_failure == "fetch":
+                raise RuntimeError("context fetch failed")
             return {}
 
         async def persist_context_variables(
@@ -889,9 +904,13 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
             *,
             chat_id: str,
             app_id: str,
+            workflow_name: str,
             variables: dict[str, Any],
         ) -> None:
+            self.persisted_scope = (chat_id, app_id, workflow_name)
             self.persisted_context = dict(variables)
+            if persistence_failure == "persist":
+                raise RuntimeError("context update failed")
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
             self.assistant_messages.append(dict(kwargs))
@@ -971,15 +990,28 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     from mozaiksai.core.workflow.execution import lifecycle as lifecycle_module
     monkeypatch.setattr(lifecycle_module, "get_lifecycle_manager", lambda _workflow: _PreloadLifecycle())
 
-    result = await run_workflow_orchestration(
-        workflow_name="AlignmentSmoke",
-        app_id="app-1",
-        chat_id="chat-1",
-        user_id="user-1",
-        initial_message="Build the alignment smoke.",
-        agents_factory=_agents_factory,
-        context_factory=lambda: {"seed": "context"},
-    )
+    run_kwargs = {
+        "workflow_name": "AlignmentSmoke",
+        "app_id": "app-1",
+        "chat_id": "chat-1",
+        "user_id": "user-1",
+        "initial_message": "Build the alignment smoke.",
+        "agents_factory": _agents_factory,
+        "context_factory": lambda: {"seed": "context"},
+    }
+
+    if persistence_failure is not None:
+        expected_error = "context fetch failed" if persistence_failure == "fetch" else "context update failed"
+        with pytest.raises(RuntimeError, match=expected_error):
+            await run_workflow_orchestration(**run_kwargs)
+        assert persistence.fetched_scope == ("chat-1", "app-1", "AlignmentSmoke")
+        if persistence_failure == "fetch":
+            assert persistence.persisted_scope is None
+        else:
+            assert persistence.persisted_scope == ("chat-1", "app-1", "AlignmentSmoke")
+        return
+
+    result = await run_workflow_orchestration(**run_kwargs)
 
     assert result is not None
     assert result["run_completed"] is True
@@ -992,6 +1024,10 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
     assert worker_agent.ask_calls
     assert [event["kind"] for _, event in transport.events].count("chat.text") == 2
     assert transport.events[-1][1]["kind"] == "run_complete"
+    assert persistence.fetched_scope == ("chat-1", "app-1", "AlignmentSmoke")
+    assert persistence.persisted_scope == ("chat-1", "app-1", "AlignmentSmoke")
+    assert persistence.persisted_context is not None
+    assert persistence.persisted_context["preload_status"] == "ready"
     assert persistence.completed == [("chat-1", "app-1")]
     assert [message["agent_name"] for message in persistence.assistant_messages] == [
         "PlannerAgent",
@@ -1020,7 +1056,14 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
         async def get_or_assign_cache_seed(self, chat_id: str, app_id: str) -> int:
             return 7
 
-        async def fetch_chat_session_extra_context(self, *, chat_id: str, app_id: str) -> dict[str, Any]:
+        async def fetch_chat_session_extra_context(
+            self,
+            *,
+            chat_id: str,
+            app_id: str,
+            workflow_name: str,
+        ) -> dict[str, Any]:
+            assert workflow_name == "AgentGenerator"
             return {
                 "interview_complete": True,
                 "workflow_review_approved": True,
@@ -1032,8 +1075,10 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
             *,
             chat_id: str,
             app_id: str,
+            workflow_name: str,
             variables: dict[str, Any],
         ) -> None:
+            assert workflow_name == "AgentGenerator"
             self.persisted_context = dict(variables)
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
@@ -1128,11 +1173,28 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
         user_id="user-1",
         initial_agent_name_override="user",
         agents_factory=_agents_factory,
-        context_factory=lambda: {
-            "interview_complete": False,
-            "workflow_review_approved": False,
-            "workflow_review_revision_requested": False,
-        },
+        context_factory=lambda: create_context_container(
+            initial={
+                "interview_complete": False,
+                "workflow_review_approved": False,
+                "workflow_review_revision_requested": False,
+            },
+            authority_policy=build_context_authority_policy(
+                workflow_name="AgentGenerator",
+                definitions={
+                    key: {
+                        "type": "boolean",
+                        "source": {"type": "state", "default": False},
+                    }
+                    for key in (
+                        "interview_complete",
+                        "workflow_review_approved",
+                        "workflow_review_revision_requested",
+                    )
+                },
+                transition_rules=[],
+            ),
+        ),
     )
 
     assert result is not None
@@ -1163,7 +1225,14 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         async def get_or_assign_cache_seed(self, chat_id: str, app_id: str) -> int:
             return 7
 
-        async def fetch_chat_session_extra_context(self, *, chat_id: str, app_id: str) -> dict[str, Any]:
+        async def fetch_chat_session_extra_context(
+            self,
+            *,
+            chat_id: str,
+            app_id: str,
+            workflow_name: str,
+        ) -> dict[str, Any]:
+            assert workflow_name == "TaskBatchAlignmentSmoke"
             return {}
 
         async def persist_context_variables(
@@ -1171,8 +1240,10 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             *,
             chat_id: str,
             app_id: str,
+            workflow_name: str,
             variables: dict[str, Any],
         ) -> None:
+            assert workflow_name == "TaskBatchAlignmentSmoke"
             self.persisted_context = dict(variables)
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:
@@ -1342,7 +1413,14 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
         async def get_or_assign_cache_seed(self, chat_id: str, app_id: str) -> int:
             return 7
 
-        async def fetch_chat_session_extra_context(self, *, chat_id: str, app_id: str) -> dict[str, Any]:
+        async def fetch_chat_session_extra_context(
+            self,
+            *,
+            chat_id: str,
+            app_id: str,
+            workflow_name: str,
+        ) -> dict[str, Any]:
+            assert workflow_name == "AgentGenerator"
             return {}
 
         async def persist_context_variables(
@@ -1350,8 +1428,10 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
             *,
             chat_id: str,
             app_id: str,
+            workflow_name: str,
             variables: dict[str, Any],
         ) -> None:
+            assert workflow_name == "AgentGenerator"
             return None
 
         async def append_run_assistant_message(self, **kwargs: Any) -> None:

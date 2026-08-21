@@ -23,19 +23,27 @@ Covers:
 
   resume.merge_persisted_extra_context:
     - empty/None extra_ctx → no-op
-    - non-str keys skipped
-    - uses context.set() when available
-    - uses context[key] = value when __setitem__ available
-    - parent_chat_id sets automated_workflow_run=True
-    - parent_chat_id absent → automated_workflow_run not set
+    - canonical loader context and resolved replay policy are required
+    - valid persisted values hydrate atomically
+    - stale/non-persisted keys are skipped without exposing values
+    - malformed known values and unresolved policies fail closed
+    - persisted replay authority is not retained for live writes
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from pydantic import BaseModel
 
+from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.context.authority import (
+    RUNTIME_SYSTEM_WRITER,
+    ContextAuthorityError,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.execution.run_bootstrap import merge_persisted_extra_context
 from mozaiksai.core.workflow.outputs.runtime_validation import (
     reply_body_to_data,
@@ -54,6 +62,45 @@ class _SampleModel(BaseModel):
 class _ObjectWithBody:
     def __init__(self, body: Any):
         self.body = body
+
+
+def _replay_policy():
+    return build_context_authority_policy(
+        workflow_name="ReplayFlow",
+        definitions={
+            "app_id": {
+                "type": "string",
+                "source": {"type": "state", "default": "app-canonical"},
+            },
+            "key": {
+                "type": "string",
+                "source": {"type": "state", "default": "default"},
+            },
+            "valid": {
+                "type": "string",
+                "source": {"type": "state", "default": "default"},
+            },
+            "review_complete": {
+                "type": "boolean",
+                "source": {"type": "state", "default": False},
+            },
+        },
+        transition_rules=[],
+    )
+
+
+def _replay_context(
+    initial: dict[str, Any] | None = None,
+    *,
+    policy=None,
+    bind_session: bool = False,
+):
+    return create_context_container(
+        initial=initial,
+        authority_policy=policy or _replay_policy(),
+        chat_id="chat-1" if bind_session else None,
+        app_id="app-1" if bind_session else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -230,43 +277,87 @@ class TestMergePersistedExtraContext:
         merge_persisted_extra_context(ctx, "not a dict")  # type: ignore[arg-type]
         ctx.set.assert_not_called()
 
-    def test_uses_context_set_when_available(self):
-        ctx = MagicMock()
-        ctx.set = MagicMock()
-        merge_persisted_extra_context(ctx, {"key": "value"})
-        ctx.set.assert_any_call("key", "value")
+    def test_hydrates_valid_state_into_canonical_loader_context(self):
+        ctx = _replay_context({"key": "default"})
 
-    def test_uses_setitem_when_no_set(self):
-        ctx: dict = {}
         merge_persisted_extra_context(ctx, {"key": "value"})
-        assert ctx["key"] == "value"
+
+        assert ctx.snapshot() == {"key": "value"}
+        assert ctx._mozaiks_context_writer_id == RUNTIME_SYSTEM_WRITER
+
+    def test_rejects_noncanonical_context_for_nonempty_replay(self):
+        ctx: dict[str, Any] = {}
+
+        with pytest.raises(TypeError, match="canonical runtime context container"):
+            merge_persisted_extra_context(ctx, {"key": "value"})
+
+        assert ctx == {}
+
+    def test_requires_bound_replay_policy(self):
+        ctx = create_context_container(initial={"key": "default"})
+
+        with pytest.raises(ContextAuthorityError, match="replay_policy_unavailable"):
+            merge_persisted_extra_context(ctx, {"key": "value"})
+
+        assert ctx.snapshot() == {"key": "default"}
 
     def test_skips_non_str_keys(self):
-        ctx = MagicMock()
-        ctx.set = MagicMock()
-        merge_persisted_extra_context(ctx, {42: "value", "valid": "v"})
-        # Only "valid" should be set, 42 is not a str
-        call_keys = [call[0][0] for call in ctx.set.call_args_list]
-        assert "valid" in call_keys
-        assert 42 not in call_keys
+        ctx = _replay_context({"valid": "default"})
+
+        merge_persisted_extra_context(ctx, {42: "value", "valid": "v"})  # type: ignore[dict-item]
+
+        assert ctx.snapshot() == {"valid": "v"}
 
     def test_skips_whitespace_only_keys(self):
-        ctx = MagicMock()
-        ctx.set = MagicMock()
-        merge_persisted_extra_context(ctx, {"   ": "value"})
-        ctx.set.assert_not_called()
+        ctx = _replay_context({"valid": "default"})
 
-    def test_parent_chat_id_sets_automated_workflow_run(self):
-        ctx = MagicMock()
-        ctx.set = MagicMock()
-        merge_persisted_extra_context(ctx, {"parent_chat_id": "chat-123"})
-        # automated_workflow_run should be set to True
-        set_calls = {call[0][0]: call[0][1] for call in ctx.set.call_args_list}
-        assert set_calls.get("automated_workflow_run") is True
+        merge_persisted_extra_context(ctx, {"   ": "value", "valid": "v"})
 
-    def test_no_parent_chat_id_no_automated_workflow_run(self):
-        ctx = MagicMock()
-        ctx.set = MagicMock()
-        merge_persisted_extra_context(ctx, {"some_key": "value"})
-        call_keys = [call[0][0] for call in ctx.set.call_args_list]
-        assert "automated_workflow_run" not in call_keys
+        assert ctx.snapshot() == {"valid": "v"}
+
+    def test_non_persisted_authority_identifier_is_not_restored(self):
+        ctx = _replay_context({"app_id": "app-canonical", "key": "default"})
+
+        merge_persisted_extra_context(
+            ctx,
+            {"app_id": "app-attacker", "key": "restored"},
+        )
+
+        assert ctx.snapshot() == {"app_id": "app-canonical", "key": "restored"}
+
+    def test_stale_key_is_dropped_without_losing_valid_sibling_or_logging_value(self, caplog):
+        ctx = _replay_context({"key": "default"})
+
+        with caplog.at_level(logging.DEBUG, logger="mozaiksai.core.workflow.context.adapter"):
+            merge_persisted_extra_context(
+                ctx,
+                {"stale_historical_key": "sensitive-old-value", "key": "restored"},
+            )
+
+        assert ctx.snapshot() == {"key": "restored"}
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("workflow=ReplayFlow key=stale_historical_key" in message for message in messages)
+        assert all("sensitive-old-value" not in message for message in messages)
+
+    def test_known_malformed_value_fails_without_partial_hydration(self):
+        ctx = _replay_context({"key": "default", "review_complete": False})
+
+        with pytest.raises(ContextAuthorityError, match="invalid_value"):
+            merge_persisted_extra_context(
+                ctx,
+                {"key": "would-be-partial", "review_complete": "true"},
+            )
+
+        assert ctx.snapshot() == {"key": "default", "review_complete": False}
+
+    def test_session_bound_loader_set_does_not_start_background_persistence(self, monkeypatch):
+        import asyncio
+
+        create_task = MagicMock()
+        monkeypatch.setattr(asyncio, "create_task", create_task)
+        ctx = _replay_context({"key": "default"}, bind_session=True)
+
+        ctx.set("key", "live-update")
+
+        assert ctx.snapshot() == {"key": "live-update"}
+        create_task.assert_not_called()

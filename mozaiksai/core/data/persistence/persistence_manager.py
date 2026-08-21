@@ -122,6 +122,10 @@ def _context_authority_policy_for_workflow(workflow_name: str):
         workflow_name=workflow_name,
         definitions=definitions,
         transition_rules=transition_rules,
+        # An unloaded workflow yields an empty config, which would otherwise
+        # look identical to "every stored key is stale" and silently discard
+        # the whole persisted context.
+        declarations_resolved=bool(workflow_config),
     )
 
 
@@ -442,9 +446,14 @@ class AG2PersistenceManager:
                     session_doc[k] = v
 
             session_doc = dual_write_app_scope(session_doc, resolved_app_id)
-            await coll.insert_one(session_doc)
+            result = await coll.insert_one(session_doc)
+            if getattr(result, "acknowledged", True) is False:
+                raise RuntimeError(
+                    f"failed to create chat session for chat_id={chat_id}: write was not acknowledged"
+                )
         except Exception as e:  # pragma: no cover
             logger.error("Failed to create chat session %s: %s", chat_id, e, exc_info=True)
+            raise
 
     async def fetch_chat_session_extra_context(
         self,
@@ -469,56 +478,81 @@ class AG2PersistenceManager:
         if not resolved_app_id:
             raise ValueError("app_id is required")
 
+        clean_workflow_name = str(workflow_name or "").strip()
+        query = {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))}
+        if clean_workflow_name:
+            query["workflow_name"] = clean_workflow_name
+
         try:
             coll = await self._coll()
             doc = await coll.find_one(
-                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                query,
                 {"messages": 0},
             )
-            if not isinstance(doc, dict):
-                return {}
-
-            protected = {
-                "_id",
-                "chat_id",
-                "app_id",
-                "workflow_name",
-                "user_id",
-                "status",
-                "created_at",
-                "last_updated_at",
-                "last_sequence",
-                "messages",
-                "workflow_ui_state",
-                "last_artifact",
-                "pending_input_request",
-            }
-            extra: dict[str, Any] = {}
-            for k, v in doc.items():
-                if not isinstance(k, str) or not k.strip():
-                    continue
-                if k in protected:
-                    continue
-                extra[k] = v
-            if workflow_name:
-                try:
-                    from mozaiksai.core.workflow.context.authority import (
-                        PERSISTED_REPLAY_WRITER,
-                        ContextAuthorityError,
-                    )
-
-                    policy = _context_authority_policy_for_workflow(str(workflow_name))
-                    extra = policy.filter_for_replay(extra, writer_id=PERSISTED_REPLAY_WRITER)
-                except ContextAuthorityError:
-                    raise
-                except Exception as policy_err:
-                    logger.debug("[FETCH_EXTRA_CONTEXT] Authority policy unavailable workflow=%s: %s", workflow_name, policy_err)
-            return extra
-        except ContextAuthorityError:
-            raise
         except Exception as e:  # pragma: no cover
-            logger.debug("[FETCH_EXTRA_CONTEXT] Failed chat_id=%s: %s", chat_id, e)
+            raise RuntimeError(
+                f"failed to fetch persisted workflow context for chat_id={chat_id}"
+            ) from e
+
+        if not isinstance(doc, dict):
             return {}
+
+        protected = {
+            "_id",
+            "chat_id",
+            "app_id",
+            "ag2_stream_id",
+            "workflow_name",
+            "user_id",
+            "status",
+            "created_at",
+            "last_updated_at",
+            "last_sequence",
+            "session_version",
+            "messages",
+            "workflow_ui_state",
+            "last_artifact",
+            "pending_input_request",
+        }
+        extra: dict[str, Any] = {}
+        for k, v in doc.items():
+            if not isinstance(k, str) or not k.strip():
+                continue
+            if k in protected:
+                continue
+            extra[k] = v
+        if not extra:
+            return {}
+        if not clean_workflow_name:
+            raise ContextAuthorityError(
+                "context_authority.workflow_required workflow=<missing> op=replay"
+            )
+
+        try:
+            from mozaiksai.core.workflow.context.authority import PERSISTED_REPLAY_WRITER
+
+            policy = _context_authority_policy_for_workflow(clean_workflow_name)
+        except Exception as e:  # pragma: no cover
+            if isinstance(e, ContextAuthorityError):
+                raise
+            raise ContextAuthorityError(
+                f"context_authority.policy_unavailable workflow={clean_workflow_name} op=replay"
+            ) from e
+
+        replay_diagnostics: list[str] = []
+        filtered = policy.filter_for_replay(
+            extra,
+            writer_id=PERSISTED_REPLAY_WRITER,
+            diagnostics=replay_diagnostics,
+        )
+        if replay_diagnostics:
+            logger.debug(
+                "[FETCH_EXTRA_CONTEXT] Replay diagnostics workflow=%s chat_id=%s diagnostics=%s",
+                clean_workflow_name,
+                chat_id,
+                replay_diagnostics,
+            )
+        return filtered
 
     async def persist_context_variables(
         self,
@@ -540,6 +574,27 @@ class AG2PersistenceManager:
         if not isinstance(variables, dict) or not variables:
             return
 
+        from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+
+        clean_workflow_name = str(workflow_name or "").strip()
+        if not clean_workflow_name:
+            raise ContextAuthorityError(
+                "context_authority.workflow_required workflow=<missing> op=persist"
+            )
+        try:
+            policy = _context_authority_policy_for_workflow(clean_workflow_name)
+        except Exception as policy_err:
+            if isinstance(policy_err, ContextAuthorityError):
+                raise
+            raise ContextAuthorityError(
+                f"context_authority.policy_unavailable workflow={clean_workflow_name} op=persist"
+            ) from policy_err
+        if not policy.declarations_resolved:
+            raise ContextAuthorityError(
+                f"context_authority.unresolved_declarations workflow={clean_workflow_name} "
+                "writer=persisted_replay op=persist"
+            )
+
         protected = {
             "_id",
             "chat_id",
@@ -556,23 +611,29 @@ class AG2PersistenceManager:
             "last_artifact",
             "pending_input_request",
         }
-        safe_updates: dict[str, Any] = {}
-        policy = None
-        if workflow_name:
-            try:
-                policy = _context_authority_policy_for_workflow(str(workflow_name))
-            except Exception as policy_err:
-                logger.debug("[PERSIST_CONTEXT_VARIABLES] Authority policy unavailable workflow=%s: %s", workflow_name, policy_err)
+        candidate_updates: dict[str, Any] = {}
         for key, value in variables.items():
             if not isinstance(key, str) or not key.strip() or key in protected:
                 continue
-            if policy is not None:
-                from mozaiksai.core.workflow.context.authority import PERSISTED_REPLAY_WRITER
+            candidate_updates[key] = value
+        if not candidate_updates:
+            return
 
-                policy.require_can_write(key, writer_id=PERSISTED_REPLAY_WRITER)
-                authority = policy.variables.get(key)
-                if authority is not None and not authority.persisted:
-                    continue
+        persist_diagnostics: list[str] = []
+        candidate_updates = policy.filter_for_persistence(
+            candidate_updates,
+            diagnostics=persist_diagnostics,
+        )
+        if persist_diagnostics:
+            logger.debug(
+                "[PERSIST_CONTEXT_VARIABLES] Persistence diagnostics workflow=%s chat_id=%s diagnostics=%s",
+                clean_workflow_name,
+                chat_id,
+                persist_diagnostics,
+            )
+
+        safe_updates: dict[str, Any] = {}
+        for key, value in candidate_updates.items():
             safe_updates[key] = deepcopy(value)
 
         if not safe_updates:
@@ -580,14 +641,24 @@ class AG2PersistenceManager:
 
         safe_updates["last_updated_at"] = datetime.now(UTC)
 
-        try:
-            coll = await self._coll()
-            await coll.update_one(
-                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"$set": safe_updates, "$inc": {"session_version": 1}},
+        coll = await self._coll()
+        result = await coll.update_one(
+            {
+                "_id": chat_id,
+                **build_app_scope_filter(str(resolved_app_id)),
+                "workflow_name": clean_workflow_name,
+            },
+            {"$set": safe_updates, "$inc": {"session_version": 1}},
+        )
+        if getattr(result, "acknowledged", True) is False:
+            raise RuntimeError(
+                f"failed to persist workflow context for chat_id={chat_id}: write was not acknowledged"
             )
-        except Exception as e:  # pragma: no cover
-            logger.debug("[PERSIST_CONTEXT_VARIABLES] Failed chat_id=%s: %s", chat_id, e)
+        matched_count = getattr(result, "matched_count", None)
+        if matched_count is not None and matched_count == 0:
+            raise RuntimeError(
+                f"failed to persist workflow context for chat_id={chat_id}: scoped session was not found"
+            )
 
     async def create_general_chat_session(
         self,

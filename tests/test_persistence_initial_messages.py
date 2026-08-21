@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from ag2.events import ModelResponse
@@ -17,8 +18,21 @@ PersistenceManager = _persistence_mod.PersistenceManager
 
 
 class _FakeUpdateResult:
-    def __init__(self, modified_count: int):
+    def __init__(
+        self,
+        modified_count: int,
+        *,
+        matched_count: int | None = None,
+        acknowledged: bool = True,
+    ):
         self.modified_count = modified_count
+        self.matched_count = modified_count if matched_count is None else matched_count
+        self.acknowledged = acknowledged
+
+
+class _FakeInsertResult:
+    def __init__(self, *, acknowledged: bool = True):
+        self.acknowledged = acknowledged
 
 
 def _apply_set(target: dict, dotted_path: str, value) -> None:  # noqa: ANN001
@@ -30,27 +44,61 @@ def _apply_set(target: dict, dotted_path: str, value) -> None:  # noqa: ANN001
 
 
 class _FakeCollection:
-    def __init__(self, doc: dict):
+    def __init__(
+        self,
+        doc: dict,
+        *,
+        find_error: Exception | None = None,
+        update_error: Exception | None = None,
+        insert_error: Exception | None = None,
+        update_result: _FakeUpdateResult | None = None,
+        insert_result: _FakeInsertResult | None = None,
+    ):
         self.doc = doc
+        self.find_error = find_error
+        self.update_error = update_error
+        self.insert_error = insert_error
+        self.update_result = update_result
+        self.insert_result = insert_result
+        self.find_filters: list[dict] = []
+        self.update_filters: list[dict] = []
 
     async def find_one(self, filter_doc, projection=None):  # noqa: ANN001
+        self.find_filters.append(deepcopy(filter_doc))
+        if self.find_error is not None:
+            raise self.find_error
         if self.doc.get("_id") != filter_doc.get("_id"):
             return None
         expected_app_id = filter_doc.get("app_id")
         if expected_app_id and self.doc.get("app_id") != expected_app_id:
+            return None
+        expected_workflow = filter_doc.get("workflow_name")
+        if expected_workflow and self.doc.get("workflow_name") != expected_workflow:
             return None
         return deepcopy(self.doc)
 
     async def update_one(self, filter_doc, update_doc, array_filters=None):  # noqa: ANN001
+        self.update_filters.append(deepcopy(filter_doc))
+        if self.update_error is not None:
+            raise self.update_error
         if self.doc.get("_id") != filter_doc.get("_id"):
-            return _FakeUpdateResult(0)
+            return _FakeUpdateResult(0, matched_count=0)
         expected_app_id = filter_doc.get("app_id")
         if expected_app_id and self.doc.get("app_id") != expected_app_id:
-            return _FakeUpdateResult(0)
+            return _FakeUpdateResult(0, matched_count=0)
+        expected_workflow = filter_doc.get("workflow_name")
+        if expected_workflow and self.doc.get("workflow_name") != expected_workflow:
+            return _FakeUpdateResult(0, matched_count=0)
 
         for dotted_path, value in (update_doc.get("$set") or {}).items():
             _apply_set(self.doc, dotted_path, value)
-        return _FakeUpdateResult(1)
+        return self.update_result or _FakeUpdateResult(1, matched_count=1)
+
+    async def insert_one(self, document):  # noqa: ANN001
+        if self.insert_error is not None:
+            raise self.insert_error
+        self.doc = deepcopy(document)
+        return self.insert_result or _FakeInsertResult()
 
 
 def _apply_unset(target: dict, dotted_path: str) -> None:
@@ -105,6 +153,501 @@ class _FakeLegacyCollection:
                 _apply_unset(doc, dotted_path)
         return _FakeUpdateResult(len(operations))
 
+
+@pytest.fixture
+def authentic_workflow_policies():
+    """Pin these round trips to the real factory workflow root.
+
+    An unresolvable workflow fails closed rather than silently dropping state.
+    This local fixture explicitly binds the canonical Factory declarations for
+    these persistence assertions and restores the previously active root afterward.
+    """
+
+    from mozaiksai.core.workflow.workflow_manager import (
+        get_workflow_manager,
+        initialize_workflows,
+    )
+
+    previous_root = str(get_workflow_manager().workflows_base_path)
+    canonical_root = str(Path(__file__).resolve().parents[1] / "factory_app" / "workflows")
+    initialize_workflows(canonical_root)
+    try:
+        yield
+    finally:
+        initialize_workflows(previous_root)
+
+@pytest.mark.asyncio
+async def test_context_variable_persistence_resume_round_trip_honors_authority_policy(
+    monkeypatch,
+    authentic_workflow_policies,
+    caplog,
+):
+    manager = AG2PersistenceManager()
+    doc = {
+        "_id": "chat-1",
+        "app_id": "app-1",
+        "workflow_name": "ValueEngine",
+    }
+    coll = _FakeCollection(doc)
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    await manager.persist_context_variables(
+        chat_id="chat-1",
+        app_id="app-1",
+        workflow_name="ValueEngine",
+        variables={
+            "build_registry_id": "registry-1",
+            "chat_app_id": "authority-app-1",
+            "build_mode": "revision",
+            "app_name": "Round Trip App",
+            "stale_unknown_context_key": "old",
+        },
+    )
+
+    assert "build_registry_id" not in doc
+    assert "chat_app_id" not in doc
+    assert "stale_unknown_context_key" not in doc
+    assert doc["build_mode"] == "revision"
+    assert doc["app_name"] == "Round Trip App"
+    assert coll.update_filters[-1]["workflow_name"] == "ValueEngine"
+
+    doc["build_registry_id"] = "stale-registry"
+    doc["chat_app_id"] = "stale-authority-app"
+    doc["ag2_stream_id"] = "stale-stream"
+    doc["session_version"] = 7
+    doc["stale_historical_key"] = "SECRET_STALE_CONTEXT_VALUE"
+    caplog.set_level(10)
+
+    replayed = await manager.fetch_chat_session_extra_context(
+        chat_id="chat-1",
+        app_id="app-1",
+        workflow_name="ValueEngine",
+    )
+
+    assert replayed == {
+        "build_mode": "revision",
+        "app_name": "Round Trip App",
+    }
+    assert coll.find_filters[-1]["workflow_name"] == "ValueEngine"
+    assert "stale_historical_key" in caplog.text
+    assert "ValueEngine" in caplog.text
+    assert "SECRET_STALE_CONTEXT_VALUE" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_registered_factory_workflow_persistence_resume_round_trip(
+    monkeypatch,
+    authentic_workflow_policies,
+):
+    workflow_name = "AppGenerator"
+    variables = {
+        "task_run_mode": True,
+        "workflow_integration_repair_status": "needs_revision",
+        "app_validation_status": "failed",
+    }
+    expected = dict(variables)
+    manager = AG2PersistenceManager()
+    doc = {
+        "_id": f"chat-{workflow_name}",
+        "app_id": "app-1",
+        "workflow_name": workflow_name,
+    }
+    coll = _FakeCollection(doc)
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    await manager.persist_context_variables(
+        chat_id=f"chat-{workflow_name}",
+        app_id="app-1",
+        workflow_name=workflow_name,
+        variables={**variables, "stale_unknown_context_key": "old"},
+    )
+
+    for key, value in expected.items():
+        assert doc[key] == value
+    assert "stale_unknown_context_key" not in doc
+
+    doc["stale_unknown_context_key"] = "old"
+    replayed = await manager.fetch_chat_session_extra_context(
+        chat_id=f"chat-{workflow_name}",
+        app_id="app-1",
+        workflow_name=workflow_name,
+    )
+
+    assert replayed == expected
+
+
+@pytest.mark.asyncio
+async def test_known_malformed_persisted_value_fails_closed(monkeypatch, authentic_workflow_policies):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection({"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"})
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(ValueError, match="invalid_value"):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+            variables={"interview_complete": "true"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_malformed_stored_value_fails_replay_closed(monkeypatch, authentic_workflow_policies):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {
+            "_id": "chat-1",
+            "app_id": "app-1",
+            "workflow_name": "ValueEngine",
+            "interview_complete": "true",
+            "concept_presented": True,
+        }
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(ValueError, match="invalid_value"):
+        await manager.fetch_chat_session_extra_context(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+        )
+
+
+@pytest.mark.parametrize("workflow_name", [None, "", "   "])
+@pytest.mark.asyncio
+async def test_nonempty_context_persistence_requires_workflow_identity(
+    monkeypatch,
+    workflow_name,
+):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"}
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(ValueError, match=r"workflow_required .*op=persist"):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name=workflow_name,
+            variables={"app_name": "Bounded App"},
+        )
+
+    assert coll.update_filters == []
+
+
+@pytest.mark.asyncio
+async def test_protected_only_nonempty_context_requires_workflow_identity(monkeypatch):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"}
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(ValueError, match=r"workflow_required .*op=persist"):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name=None,
+            variables={"chat_id": "forged-chat-id"},
+        )
+
+    assert coll.update_filters == []
+
+
+@pytest.mark.asyncio
+async def test_protected_only_nonempty_context_requires_resolved_declarations(monkeypatch):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"}
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(
+        ValueError,
+        match=r"unresolved_declarations workflow=NotARegisteredWorkflow .*op=persist",
+    ):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="NotARegisteredWorkflow",
+            variables={"chat_id": "forged-chat-id"},
+        )
+
+    assert coll.update_filters == []
+
+
+@pytest.mark.parametrize("workflow_name", [None, "", "   "])
+@pytest.mark.asyncio
+async def test_nonempty_context_replay_requires_workflow_identity(
+    monkeypatch,
+    workflow_name,
+):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {
+            "_id": "chat-1",
+            "app_id": "app-1",
+            "workflow_name": "ValueEngine",
+            "app_name": "Bounded App",
+        }
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(ValueError, match=r"workflow_required .*op=replay"):
+        await manager.fetch_chat_session_extra_context(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name=workflow_name,
+        )
+
+
+@pytest.mark.asyncio
+async def test_context_persistence_policy_resolution_failure_is_not_silenced(monkeypatch):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"}
+    )
+
+    async def _fake_coll():
+        return coll
+
+    def _fail_policy(_workflow_name):
+        raise RuntimeError("SECRET_POLICY_RESOLUTION_VALUE")
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+    monkeypatch.setattr(_persistence_mod, "_context_authority_policy_for_workflow", _fail_policy)
+
+    with pytest.raises(ValueError, match=r"policy_unavailable workflow=ValueEngine op=persist") as exc_info:
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+            variables={"app_name": "Bounded App"},
+        )
+
+    assert "SECRET_POLICY_RESOLUTION_VALUE" not in str(exc_info.value)
+    assert coll.update_filters == []
+
+
+@pytest.mark.asyncio
+async def test_context_replay_policy_resolution_failure_is_not_silenced(monkeypatch):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {
+            "_id": "chat-1",
+            "app_id": "app-1",
+            "workflow_name": "ValueEngine",
+            "app_name": "Bounded App",
+        }
+    )
+
+    async def _fake_coll():
+        return coll
+
+    def _fail_policy(_workflow_name):
+        raise RuntimeError("SECRET_POLICY_RESOLUTION_VALUE")
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+    monkeypatch.setattr(_persistence_mod, "_context_authority_policy_for_workflow", _fail_policy)
+
+    with pytest.raises(ValueError, match=r"policy_unavailable workflow=ValueEngine op=replay") as exc_info:
+        await manager.fetch_chat_session_extra_context(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+        )
+
+    assert "SECRET_POLICY_RESOLUTION_VALUE" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_context_replay_storage_failure_propagates(monkeypatch):
+    manager = AG2PersistenceManager()
+    storage_error = RuntimeError("find failed")
+    coll = _FakeCollection({}, find_error=storage_error)
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(RuntimeError, match="failed to fetch persisted workflow context") as exc_info:
+        await manager.fetch_chat_session_extra_context(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+        )
+
+    assert exc_info.value.__cause__ is storage_error
+
+
+@pytest.mark.asyncio
+async def test_context_update_storage_failure_propagates(
+    monkeypatch,
+    authentic_workflow_policies,
+):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"},
+        update_error=RuntimeError("update failed"),
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(RuntimeError, match="update failed"):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+            variables={"app_name": "Bounded App"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("update_result", "message"),
+    [
+        (
+            _FakeUpdateResult(0, matched_count=1, acknowledged=False),
+            "write was not acknowledged",
+        ),
+        (
+            _FakeUpdateResult(0, matched_count=0, acknowledged=True),
+            "scoped session was not found",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_context_update_rejects_unacknowledged_or_unmatched_writes(
+    monkeypatch,
+    authentic_workflow_policies,
+    update_result,
+    message,
+):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"},
+        update_result=update_result,
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(RuntimeError, match=message):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+            variables={"app_name": "Bounded App"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_context_update_accepts_matched_noop_write(
+    monkeypatch,
+    authentic_workflow_policies,
+):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection(
+        {"_id": "chat-1", "app_id": "app-1", "workflow_name": "ValueEngine"},
+        update_result=_FakeUpdateResult(0, matched_count=1, acknowledged=True),
+    )
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    await manager.persist_context_variables(
+        chat_id="chat-1",
+        app_id="app-1",
+        workflow_name="ValueEngine",
+        variables={"app_name": "Bounded App"},
+    )
+
+    assert coll.update_filters[-1] == {
+        "_id": "chat-1",
+        "app_id": "app-1",
+        "workflow_name": "ValueEngine",
+    }
+
+
+@pytest.mark.asyncio
+async def test_required_chat_session_insert_failure_propagates(monkeypatch):
+    manager = AG2PersistenceManager()
+    insert_error = RuntimeError("insert failed")
+    coll = _FakeCollection({}, insert_error=insert_error)
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(RuntimeError, match="insert failed") as exc_info:
+        await manager.create_chat_session(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+            user_id="user-1",
+        )
+
+    assert exc_info.value is insert_error
+
+
+@pytest.mark.asyncio
+async def test_required_chat_session_rejects_unacknowledged_insert(monkeypatch):
+    manager = AG2PersistenceManager()
+    coll = _FakeCollection({}, insert_result=_FakeInsertResult(acknowledged=False))
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(RuntimeError, match="write was not acknowledged"):
+        await manager.create_chat_session(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="ValueEngine",
+            user_id="user-1",
+        )
 
 
 @pytest.mark.asyncio
@@ -513,3 +1056,35 @@ async def test_persistence_manager_backfills_pre_migration_workflow_ui_state_wit
     assert modern["workflow_ui_state"]["last_artifact"] == {"tool_name": "CurrentArtifact"}
     assert coll.bulk_write_calls == 1
 
+
+
+@pytest.mark.asyncio
+async def test_unloaded_workflow_fails_closed_instead_of_dropping_all_state(
+    monkeypatch, authentic_workflow_policies
+):
+    """A workflow absent from this process must not silently lose persisted state."""
+
+    manager = AG2PersistenceManager()
+    doc = {"_id": "chat-1", "app_id": "app-1", "workflow_name": "NotARegisteredWorkflow"}
+    coll = _FakeCollection(doc)
+
+    async def _fake_coll():
+        return coll
+
+    monkeypatch.setattr(manager, "_coll", _fake_coll)
+
+    with pytest.raises(ValueError, match="unresolved_declarations"):
+        await manager.persist_context_variables(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="NotARegisteredWorkflow",
+            variables={"interview_complete": True},
+        )
+
+    doc["interview_complete"] = True
+    with pytest.raises(ValueError, match="unresolved_declarations"):
+        await manager.fetch_chat_session_extra_context(
+            chat_id="chat-1",
+            app_id="app-1",
+            workflow_name="NotARegisteredWorkflow",
+        )

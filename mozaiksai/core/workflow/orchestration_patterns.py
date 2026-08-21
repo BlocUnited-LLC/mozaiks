@@ -75,14 +75,6 @@ def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
     return "\n\n".join(rendered).strip() or "."
 
 
-def _supports_workflow_name_kw(callable_obj: Callable[..., Any]) -> bool:
-    try:
-        signature = inspect.signature(callable_obj)
-    except (TypeError, ValueError):
-        return False
-    return "workflow_name" in signature.parameters
-
-
 async def _fetch_chat_session_extra_context(
     persistence_manager: Any,
     *,
@@ -90,10 +82,14 @@ async def _fetch_chat_session_extra_context(
     app_id: str,
     workflow_name: str,
 ) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"chat_id": chat_id, "app_id": app_id}
-    if _supports_workflow_name_kw(persistence_manager.fetch_chat_session_extra_context):
-        kwargs["workflow_name"] = workflow_name
-    return cast(dict[str, Any], await persistence_manager.fetch_chat_session_extra_context(**kwargs))
+    return cast(
+        dict[str, Any],
+        await persistence_manager.fetch_chat_session_extra_context(
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+        ),
+    )
 
 
 async def _persist_context_variables(
@@ -104,10 +100,12 @@ async def _persist_context_variables(
     workflow_name: str,
     variables: dict[str, Any],
 ) -> None:
-    kwargs: dict[str, Any] = {"chat_id": chat_id, "app_id": app_id, "variables": variables}
-    if _supports_workflow_name_kw(persistence_manager.persist_context_variables):
-        kwargs["workflow_name"] = workflow_name
-    await persistence_manager.persist_context_variables(**kwargs)
+    await persistence_manager.persist_context_variables(
+        chat_id=chat_id,
+        app_id=app_id,
+        workflow_name=workflow_name,
+        variables=variables,
+    )
 
 
 def _first_agent_payload_from_runner_result(runner_result: Any, agent_name: str) -> dict[str, Any] | None:
@@ -814,19 +812,16 @@ async def run_workflow_orchestration(
                 except Exception as _ctx_err:
                     wf_logger.debug("[%s] frontend_context inject failed key=%s: %s", workflow_name_upper, prefixed, _ctx_err)
 
-        try:
-            if context is not None:
-                extra_ctx = await _fetch_chat_session_extra_context(
-                    persistence_manager,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    workflow_name=workflow_name,
-                )
-                if isinstance(extra_ctx, dict) and extra_ctx:
-                    persisted_extra_ctx = dict(extra_ctx)
-                    merge_persisted_extra_context(context, extra_ctx)
-        except Exception as seed_err:
-            wf_logger.debug("[%s] Persisted extra context merge failed: %s", workflow_name_upper, seed_err)
+        if context is not None:
+            extra_ctx = await _fetch_chat_session_extra_context(
+                persistence_manager,
+                chat_id=chat_id,
+                app_id=app_id,
+                workflow_name=workflow_name,
+            )
+            if isinstance(extra_ctx, dict) and extra_ctx:
+                persisted_extra_ctx = dict(extra_ctx)
+                merge_persisted_extra_context(context, extra_ctx)
 
         context_time = (perf_counter() - context_start) * 1000
         performance_logger.info("context_load_duration_ms", extra={
@@ -1282,17 +1277,16 @@ async def run_workflow_orchestration(
             "sequence_counter": sequence_counter,
         }
 
-        # 11) Persist final context snapshot
-        try:
-            await _persist_context_variables(
-                persistence_manager,
-                chat_id=chat_id,
-                app_id=app_id,
-                workflow_name=workflow_name,
-                variables=dict(ctx_dict),
-            )
-        except Exception as persist_ctx_err:
-            wf_logger.debug("[%s] Final context persist failed: %s", workflow_name_upper, persist_ctx_err)
+        # 11) Persist the final AG2 orchestration/network snapshot. The agent
+        # context bridge is a detached store and is intentionally not overlaid
+        # here; unifying those stores is a separate runtime architecture change.
+        await _persist_context_variables(
+            persistence_manager,
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            variables=dict(ctx_dict),
+        )
 
         workflow_complete = run_completed and not awaiting_user_input and not run_failed
         workflow_status_value = 1 if workflow_complete else 0
