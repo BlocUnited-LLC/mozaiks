@@ -15,7 +15,8 @@ canonical_provider:
     - MOZAIKSPAY_API_KEY
     - MOZAIKSPAY_CLIENT_ID
     - MOZAIKSPAY_CLIENT_SECRET
-  activation_requires_explicit_selection: true
+  activation_requires_explicit_selection: false
+  activation_requires_credentials: true
   self_managed_replacement_provider_id: entitlement_dispatch
 
 # Declares capabilities this pack provides to the OSS planning system.
@@ -31,7 +32,7 @@ selection_rules:
       app_declares:
         - token_wallets
         - top_up_products
-    action: require_explicit_user_confirmation
+    action: select_pack
   - id: select_for_saas_billing
     when:
       intent_any:
@@ -39,7 +40,7 @@ selection_rules:
         - subscriptions
         - billing portal
         - runtime usage display
-    action: require_explicit_user_confirmation
+    action: select_pack
   - id: do_not_select_for_generic_payments
     when:
       intent_any:

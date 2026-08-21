@@ -239,7 +239,8 @@ class TestContractYaml:
         assert provider["api_contract_version"] == "mozaiks.provider_api_contract.v1"
         assert provider["fulfillment_boundary"] == "BillingFulfillmentCommand"
         assert provider["entitlement_boundary"] == "EntitlementPort"
-        assert provider["activation_requires_explicit_selection"] is True
+        assert provider["activation_requires_explicit_selection"] is False
+        assert provider["activation_requires_credentials"] is True
 
     def test_required_outputs_declared(self):
         c = _read_yaml(_CONTRACT_YAML)
