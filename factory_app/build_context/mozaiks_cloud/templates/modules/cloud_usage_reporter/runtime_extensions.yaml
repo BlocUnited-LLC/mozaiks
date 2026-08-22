@@ -1,0 +1,4 @@
+schema_version: mozaiks.runtime_extensions.v1
+extensions:
+  - kind: startup_service
+    entrypoint: backend.reporter:UsageReporterService

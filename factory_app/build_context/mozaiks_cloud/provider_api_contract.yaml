@@ -30,6 +30,9 @@ auth:
       - deployments:rollback
     domains_write:
       - domains:write
+    usage:
+      - cloud:usage
+      - cloud:deploy
       - domains:manage
     domains_manage:
       - domains:manage
@@ -231,7 +234,24 @@ operations:
     app_pr_208: not_applicable
     app_pr_209: implemented_wrong_base_path_and_wrong_auth
 
+  - id: report_usage_rollups
+    status: supported
+    method: POST
+    path: /usage/rollups
+    scope: cloud:usage | cloud:deploy
+    request_model: UsageRollupsRequest
+    response_model: UsageRollupsAccepted
+    idempotency: required
+    async_behavior: synchronous; the (app_id, granularity, period_start) upsert is naturally idempotent
+    internal_app_owner: hosted_app_usage.ingest_rollups (app_id attributed from credentials)
+    app_pr_208: not_applicable
+    app_pr_209: not_applicable
+
 request_models:
+  UsageRollupsRequest:
+    required: [rollups]
+    fields:
+      rollups: "list[{period_start: str YYYY-MM-DD, granularity: 'day', page_views: int, unique_sessions: int | null, action_invocations: int | null, active_users: int | null, events: dict[str, int] | null}] (max 31)"
   SubmitDeploymentRequest:
     required: [app_id]
     fields:
@@ -292,6 +312,12 @@ request_models:
       app_id: str | null
 
 response_models:
+  UsageRollupsAccepted:
+    fields:
+      success: bool
+      app_id: "str (from credentials, never from payload)"
+      accepted: int
+      rejected: "list[{index: int, code: str}]"
   OperationAccepted:
     required: [success, operation]
     operation_ref: operation_status_model

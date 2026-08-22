@@ -1,0 +1,29 @@
+schema_version: mozaiks.module.v1
+module:
+  id: cloud_usage_reporter
+  label: Cloud Usage Reporter
+  description: >
+    Periodically rolls up the app's own AppMetrics usage instrumentation
+    (page views, sessions, action invocations) into daily aggregate counts
+    and reports them to the configured Mozaiks Cloud-compatible operator
+    endpoint. Sink-agnostic: silently idle when no mozaiks_cloud connector
+    or MOZAIKS_CLOUD_* configuration exists — the app never phones home by
+    default. Aggregate counts only; no per-user or per-session data leaves
+    the app.
+  capability_source: managed_capability
+  provider: mozaiks_cloud
+
+permissions:
+  - id: cloud_usage_reporter.read
+    label: View usage reporting status
+
+actions:
+  - id: get_reporter_status
+    label: Get Usage Reporter Status
+    handler_method: get_reporter_status
+    api_surface: public_readonly
+    permissions:
+      - cloud_usage_reporter.read
+    description: >
+      Report whether usage reporting is configured/enabled and when the last
+      report was sent.

@@ -27,6 +27,7 @@ pack:
         - cloud:read
         - cloud:deploy
         - cloud:rollback
+        - cloud:usage
         - domains:read
         - domains:write
         - domains:manage
@@ -70,6 +71,8 @@ capabilities:
     facade_recommended: cloud_domain
   - capability_id: cloud.domain.disconnect
     facade_recommended: cloud_domain
+  - capability_id: cloud.usage.report
+    facade_recommended: cloud_usage_reporter
 facades:
   - module_id: cloud_deployment
     provider_module: mozaiks_cloud
@@ -82,6 +85,10 @@ facades:
       - name: Deployments
         route: /deployments
         page_type_hint: list_detail
+  - module_id: cloud_usage_reporter
+    provider_module: mozaiks_cloud
+    provider_actions:
+      - report_usage_rollups
   - module_id: cloud_domain
     provider_module: mozaiks_cloud
     provider_actions:

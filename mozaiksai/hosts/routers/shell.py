@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from mozaiksai.core.auth.dependencies import validate_path_id
+from mozaiksai.core.metrics.usage_instrumentation import record_page_view
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     load_and_validate_page_schema,
@@ -91,6 +92,11 @@ async def get_app_theme(app_id: str):
 async def get_page_schema(name: str, request: Request):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
         raise HTTPException(status_code=400, detail="Invalid page name")
+
+    record_page_view(
+        app_id=str(request.query_params.get("app_id") or "default"),
+        page_name=name,
+    )
 
     validated_pages = getattr(request.app.state, "page_schemas", None)
     if isinstance(validated_pages, dict) and name in validated_pages:
