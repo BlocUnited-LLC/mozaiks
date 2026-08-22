@@ -55,8 +55,8 @@ Mozaiks still owns deterministic product contracts around those primitives:
 | Structured-output validation after AG2 packets | `mozaiksai/core/workflow/outputs/runtime_validation.py`, `mozaiksai/core/workflow/outputs/runtime_events.py`, `AG2NetworkRunner._validate_wal_structured_outputs(...)` | AG2 owns model execution; Mozaiks owns canonical app/workflow/module artifact schemas and hard validation. | If AG2 Network supports per-agent `response_schema` on workflow channels, use it for model pressure, but keep Mozaiks validation as the artifact contract authority. |
 | Task-batch scheduling and result merge | `mozaiksai/core/workflow/task_batches.py`, `mozaiksai/core/adapters/ag2_task_batch_runner.py` | AG2 `Task` is lifecycle/observation; it does not assign, dependency-sort, enforce owned paths, or merge generated artifact outputs. Mozaiks now wraps each already-authorized worker turn in an AG2 1.0.1 `Task`, subscribes to that task's standalone `MemoryStream`, and records normalized `TaskStarted`, `TaskCompleted`, `TaskFailed`, or `TaskExpired` evidence. `TaskMirror` is not active here because AG2 requires a `HubClient` or `Hub`; no AG2 channel id or durable channel resume is claimed for this standalone path. | If AG2 adds a deterministic task graph/scheduler with dependency and observation semantics, move worker execution and lifecycle there while keeping Mozaiks artifact ownership validation. If task batches move into real Hub/AgentClient worker channels, attach `TaskMirror` and use real channel ids from AG2. |
 | Phased task-batch workflow execution | `mozaiksai/core/workflow/orchestration_patterns.py` | A planning phase runs through AG2, Mozaiks executes deterministic task lifecycle-wrapped worker turns, then a continuation phase resumes with merged context. This keeps the DAG deterministic but splits one logical workflow across channels/task streams. | Replace with AG2-native parent/child workflow channels or task lineage when AG2 can preserve parent workflow context, WAL lineage, cancellation, and observation in one execution surface. |
-| Approved-generation smoke coordinator uses AG2 task primitive | `scripts/smoke_agentgenerator_live_pack.py` | Live AgentGenerator pack smoke found the single-agent AG2 Network coordinator/metadata path timing out before packet emission, while direct AG2 task calls completed reliably. The smoke keeps the production-critical parallel workflow generation path on the real AG2 task batch runner and keeps this one-shot approved-boundary coordinator outside Mozaiks runtime code. | If AG2 Network single-agent channels gain deterministic packet emission/close behavior for one-shot coordinator calls, move the smoke coordinator/metadata calls back through `AG2NetworkRunner` or an AG2-recommended one-shot network primitive. |
-| Refinement Engine LLM checkpoints | `mozaiksai/control_plane/implementations/*`, `mozaiksai/core/adapters/ag2_agent_runner.py` | The Refinement Engine is deterministic artifact-aware policy; AG2 should only own the LLM call used for classifier/proposer/coding-plan structured output. | If AG2 Harness gains a typed one-shot agent primitive that better fits this use, adapt `AG2StructuredAgentRunner`. Do not move artifact routing, promotion, invalidation, or scoped patch policy into AG2. |
+| Approved-generation smoke coordinator uses AG2 task primitive | `scripts/smoke_agentgenerator_live_pack.py` | Live AgentGenerator pack smoke found the single-agent AG2 Network coordinator/metadata path timing out before packet emission, while direct AG2 task calls completed reliably. The smoke keeps the production-critical parallel workflow generation path on the real AG2 task batch runner and keeps this one-shot approved-boundary coordinator outside Mozaiks runtime code. | The AG2 Consulting channel shape (one question, one reply, auto-close) is the likely native primitive for these one-shot coordinator/metadata calls. If Consulting channels gain deterministic packet emission/close behavior, move the smoke calls back through `AG2NetworkRunner` or a Consulting-channel path. |
+| Refinement Engine LLM checkpoints | `mozaiksai/control_plane/implementations/*`, `mozaiksai/core/adapters/ag2_agent_runner.py` | The Refinement Engine is deterministic artifact-aware policy; AG2 should only own the LLM call used for classifier/proposer/coding-plan structured output. | Each LLM checkpoint is semantically an AG2 Consulting interaction: one question, one structured reply, hard close. If AG2's Consulting channel shape hardens into a typed one-shot primitive with `response_schema` support, adapt `AG2StructuredAgentRunner` to use it. Do not move artifact routing, promotion, invalidation, or scoped patch policy into AG2. |
 | Studio/platform event projection | `_project_ag2_wal_to_mozaiks_transport(...)` in `mozaiksai/core/adapters/ag2_network_runner.py` | The frontend consumes Mozaiks websocket events and app-scoped chat persistence, not raw AG2 envelopes. | Prefer AG2 Hub listeners or channel event subscriptions for live projection when they support app-scoped transport and chat persistence boundaries. |
 | Durable resume boundary | `AG2OrchestrationAdapter.cancel(...)`, `AG2OrchestrationAdapter.resume(...)`, process-live handles registered by `SimpleTransport` | Current in-process continuation uses the live AG2 Hub/channel when available. After backend restart or live-handle loss, resume re-enters Mozaiks orchestration from persisted AG2 stream events rather than hydrating a durable AG2 channel. | Move durable restart resume to AG2 if AG2 exposes tenant-safe channel hydration/continuation over a durable KnowledgeStore. |
 
@@ -117,6 +117,30 @@ changes under `mozaiksai/core/workflow`, `mozaiksai/core/adapters`, or
 6. Update this file and any affected architecture docs in the same change.
 
 ## Current Decision Log
+
+### August 22, 2026
+
+- **Action-Driven Network blog post reviewed, layering confirmed**: reviewed
+  AG2's Action-Driven Network post
+  (<https://docs.ag2.ai/docs/blog/2026/05/14/AG2-Action-Driven-Network/>)
+  against the Mozaiks routing layers. Conclusions:
+  - `transition_graph.yaml` compiled through `AG2NetworkRunner` is the layer
+    aligned with the ADN Workflow shape (`WorkflowAdapter` + `TransitionGraph`).
+    Keep it thin and ADN-shaped so it continues to delegate routing to AG2.
+  - `factory_app/workflows/extended_orchestration/extension_registry.json`
+    (cross-workflow build journeys, human `user_choice_context` screen
+    transitions, artifact dependency graph, `affected_declarative_families`)
+    sits above what ADN models. ADN channels have no concept of human screen
+    steps, artifact lineage, or staleness-driven re-entry. This stays
+    Mozaiks-owned; do not model a build journey as one ADN Workflow channel.
+  - The Refinement Engine (`mozaiksai/control_plane/`) is deterministic
+    artifact policy whose LLM checkpoints map to the ADN Consulting shape
+    (1Q1R, auto-close) via `AG2StructuredAgentRunner`. It stays Mozaiks-owned
+    per the existing ownership boundary; only the one-shot LLM call belongs to
+    AG2.
+  - No new divergence introduced. Sharpened the two Consulting-shape
+    watchpoint rows and added upstream question 6 on cross-workflow
+    sequencing.
 
 ### August 14, 2026
 
@@ -226,3 +250,8 @@ Use these with the AG2 team when planning the next alignment pass:
    or should applications keep registering source-scoped custom conditions?
 5. What is the recommended durable cancellation/resume model for long-running
    workflow channels with HITL pauses?
+6. Does the Action-Driven Network roadmap intend to model cross-workflow
+   sequencing with human-in-the-loop steps between channels (for example a
+   channel-of-channels or journey primitive), or is the intended pattern
+   application-owned sequencing that opens one Workflow channel per step, as
+   Mozaiks does today through `extension_registry.json` workflow sequences?
