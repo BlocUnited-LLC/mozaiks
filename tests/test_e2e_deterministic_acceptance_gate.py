@@ -547,6 +547,8 @@ def _configure_platform(
     monkeypatch.setenv("AUTH_PROVIDER", "test")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    for name in ("MONGO_URI", "MONGODB_URI", "MONGO_URL"):
+        monkeypatch.delenv(name, raising=False)
     fake_mongo = _FakeMongoClient()
     monkeypatch.setattr("mozaiksai.hosts.runtime.get_mongo_client", lambda: fake_mongo)
     monkeypatch.setattr("mozaiksai.core.startup.validation.get_mongo_client", lambda: fake_mongo)

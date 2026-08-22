@@ -45,7 +45,9 @@ class _FakeCollection:
     async def create_index(self, keys: list[tuple[str, int]], **kwargs: Any) -> str:
         self.create_index_calls.append((keys, kwargs))
         name = str(kwargs.get("name") or "_".join(f for f, _ in keys))
-        self._index_rows.append({"name": name, "key": dict(keys)})
+        self._index_rows.append(
+            {"name": name, "key": dict(keys), **{key: value for key, value in kwargs.items() if key != "name"}}
+        )
         return name
 
     async def insert_one(self, document: dict[str, Any]) -> dict[str, Any]:
@@ -275,7 +277,8 @@ async def test_e2e_apply_indexes_creates_all_declared_indexes(tmp_path: Path) ->
 
     applied = await apply_database_indexes(load_result.data_contract, persistence=context)
 
-    assert applied == 4  # 2 projects + 2 tasks
+    assert applied.created == 4  # 2 projects + 2 tasks
+    assert applied.verified == 4
 
     projects_col = _get_collection(client, module_id="projects", entity_name="projects")
     tasks_col = _get_collection(client, module_id="tasks", entity_name="tasks")
@@ -312,7 +315,7 @@ async def test_e2e_apply_indexes_is_idempotent(tmp_path: Path) -> None:
 
     await apply_database_indexes(load_result.data_contract, persistence=context)
     # Second application must not call create_index again for any existing name.
-    second_count = await apply_database_indexes(load_result.data_contract, persistence=context)
+    second_result = await apply_database_indexes(load_result.data_contract, persistence=context)
 
     projects_col = _get_collection(client, module_id="projects", entity_name="projects")
     tasks_col = _get_collection(client, module_id="tasks", entity_name="tasks")
@@ -320,8 +323,8 @@ async def test_e2e_apply_indexes_is_idempotent(tmp_path: Path) -> None:
     # Total create_index calls stay at 2 per collection after two applications.
     assert len(projects_col.create_index_calls) == 2
     assert len(tasks_col.create_index_calls) == 2
-    # apply_database_indexes still returns the spec count (not new-only count).
-    assert second_count == 4
+    assert second_result.created == 0
+    assert second_result.verified == 4
 
 
 @pytest.mark.asyncio
@@ -360,7 +363,8 @@ async def test_e2e_apply_indexes_noops_when_intent_is_none() -> None:
 
     applied = await apply_database_indexes(None, persistence=context)
 
-    assert applied == 0
+    assert applied.success is True
+    assert applied.verified == 0
     assert client.databases == {}
 
 
@@ -402,11 +406,13 @@ async def test_e2e_full_load_then_apply_indexes(
     # --- Phase 2: first application ---
     context, client = _make_context()
     applied_first = await apply_database_indexes(load_result.data_contract, persistence=context)
-    assert applied_first == 4
+    assert applied_first.created == 4
+    assert applied_first.verified == 4
 
     # --- Phase 3: idempotent second application ---
     applied_second = await apply_database_indexes(load_result.data_contract, persistence=context)
-    assert applied_second == 4  # spec count unchanged
+    assert applied_second.created == 0
+    assert applied_second.verified == 4
 
     projects_col = _get_collection(client, module_id="projects", entity_name="projects")
     tasks_col = _get_collection(client, module_id="tasks", entity_name="tasks")

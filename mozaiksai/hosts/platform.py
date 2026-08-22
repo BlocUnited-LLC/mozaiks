@@ -69,6 +69,7 @@ from mozaiksai.core.runtime.persistence import (
     DatabaseStartupPolicyError,
     apply_data_migrations,
     apply_database_indexes,
+    database_persistence_is_enabled,
     get_database_startup_policy,
     load_data_migrations,
 )
@@ -258,7 +259,9 @@ async def _platform_startup() -> None:
             name: schema.model_dump(mode="json", exclude_none=True)
             for name, schema in sorted(load_result.page_schemas.items())
         }
-        if load_result.data_contract:
+        app.state.database_index_readiness = None
+        persistence_enabled = database_persistence_is_enabled(database_startup_policy)
+        if load_result.data_contract and persistence_enabled:
             index_app_id = (
                 load_result.data_contract.get("app_id")
                 or load_result.definition.config.get("appId")
@@ -266,22 +269,37 @@ async def _platform_startup() -> None:
                 or _resolve_default_app_id()
             )
             try:
-                index_count = await apply_database_indexes(load_result.data_contract, app_id=str(index_app_id))
-                if index_count:
-                    logger.info("DATABASE_INDEXES_READY: app_id=%s count=%s", index_app_id, index_count)
+                index_result = await apply_database_indexes(
+                    load_result.data_contract,
+                    app_id=str(index_app_id),
+                )
+                app.state.database_index_readiness = index_result
+                if index_result.verified:
+                    logger.info(
+                        "DATABASE_INDEXES_READY: app_id=%s verified=%s created=%s",
+                        index_app_id,
+                        index_result.verified,
+                        index_result.created,
+                    )
             except Exception as exc:
-                logger.warning(
-                    "DATABASE_INDEXES_NOT_APPLIED: policy=%s app_id=%s app_root=%s error=%s",
+                app.state.database_index_readiness = None
+                logger.error(
+                    "DATABASE_INDEXES_NOT_READY: policy=%s app_id=%s app_root=%s error=%s",
                     database_startup_policy,
                     index_app_id,
                     app_root,
                     exc,
                 )
-                if database_startup_policy == "required":
-                    raise DatabaseStartupError(
-                        f"Database indexes were not applied for app_id={index_app_id!r} "
-                        f"at app_root={str(app_root)!r}: {exc}"
-                    ) from exc
+                raise DatabaseStartupError(
+                    f"Database indexes are not ready for app_id={index_app_id!r} "
+                    f"at app_root={str(app_root)!r}: {exc}"
+                ) from exc
+        elif load_result.data_contract:
+            logger.info(
+                "DATABASE_INDEXES_SKIPPED: persistence is disabled for local best-effort startup "
+                "app_root=%s",
+                app_root,
+            )
         try:
             migrations = load_data_migrations(app_root)
             if migrations:

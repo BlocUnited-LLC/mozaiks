@@ -417,7 +417,8 @@ It should:
 - reject blocked/destructive operations unless explicitly approved by policy
 
 Current implementation status: runtime loads `data/contract.json`,
-ensures declared indexes exist, loads `data/migrations/*.json`, and
+verifies declared indexes exactly, creates missing definitions with all
+declared options and rereads them, loads `data/migrations/*.json`, and
 records migration state in `mozaiksai.AppDatabaseMigrations`. Supported
 migration operations are limited to `ensure_collection` and `ensure_index`.
 Runtime does not mutate existing documents, apply destructive changes, execute
@@ -427,10 +428,22 @@ yet.
 Database startup policy is controlled by `MOZAIKS_DATABASE_STARTUP_POLICY`:
 
 - `best_effort` is the default for generated apps and existing app setups.
-  Index or migration failures are logged and platform startup continues.
-- `required` is recommended for production persistent generated apps. Index or
-  migration failures fail startup with app id, app root, and original error
-  context.
+  Migration failures are logged and platform startup continues. Declared index
+  readiness failures always abort startup because an incompatible uniqueness,
+  partial-filter, collation, TTL, sparse, hidden, wildcard, or ordered-key
+  definition can change application correctness.
+- `required` is recommended for production persistent generated apps. Migration
+  failures also fail startup with app id, app root, and original error context.
+
+The index readiness comparison covers the name, ordered keys, `unique`,
+`sparse`, `partialFilterExpression`, `collation`, `expireAfterSeconds`,
+`hidden`, and `wildcardProjection`. A same-name mismatch or any same-key
+definition under another name is a startup conflict. Runtime index
+application is additive only: it never drops or rewrites an existing index.
+Operators changing a definition must validate existing data, create an
+additive replacement where Mongo permits coexistence, or perform an explicit
+maintenance-window removal of the obsolete index before startup creates and
+verifies the replacement.
 
 App business data is stored in the generated-app database selected by:
 
@@ -546,13 +559,15 @@ Runtime app loading behavior:
 - valid `data/contract.json` is loaded and indexed by
   `(module_id, entity_name)`.
 - invalid JSON or invalid shape fails app load.
-- declared indexes are applied idempotently.
+- declared indexes are applied idempotently and verified against materialized
+  Mongo metadata before startup reports readiness.
 - additive migration files are loaded from `data/migrations/*.json`.
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`.
 - supported migration operations are `ensure_collection` and `ensure_index`.
 - destructive migrations and arbitrary migration code are not supported.
-- production persistent apps should set
-  `MOZAIKS_DATABASE_STARTUP_POLICY=required`.
+- index readiness failures always fail startup; production persistent apps
+  should also set `MOZAIKS_DATABASE_STARTUP_POLICY=required` so migration
+  failures fail closed.
 
 Compact neutral example:
 

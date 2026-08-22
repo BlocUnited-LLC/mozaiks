@@ -30,6 +30,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **Fail-closed Mongo index readiness**: app data-contract indexes are now
+  compared against materialized Mongo metadata by name, ordered keys, and the
+  complete supported option set (`unique`, `sparse`, partial filters,
+  collation, TTL, hidden state, and wildcard projection). Same-name mismatches
+  and same-key definitions under another name abort startup; missing indexes are awaited,
+  reread, and verified before readiness. Inspection and creation errors are no
+  longer swallowed, and the runtime never drops conflicting indexes.
+
 - **Module dispatch requires explicit authority**: `ModuleRequest.authority` is
   now a required keyword-only `ModuleDispatchAuthority`, and the
   `granted_permissions` field is removed along with the

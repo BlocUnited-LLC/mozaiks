@@ -55,7 +55,9 @@ class PersistenceCollection(Protocol):
     async def aggregate(self, pipeline: Sequence[Mapping[str, Any]]) -> list[Document]:
         ...
 
-    async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> None:
+    async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> list[Any]:
+        """Return verified materialization results for every declared index."""
+
         ...
 
 

@@ -192,8 +192,9 @@ effect of handler code.
 - the runtime loads `data/contract.json` during app load; missing
   intent is allowed for non-persistent apps, while invalid JSON or invalid shape
   fails app loading
-- the runtime applies declared indexes idempotently and applies only additive
-  migration files from `data/migrations/*.json`
+- the runtime applies and rereads declared indexes idempotently, reports
+  readiness only after exact materialized verification, and applies only
+  additive migration files from `data/migrations/*.json`
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`
 
 The target contract is:
@@ -213,10 +214,22 @@ fields, rename fields, or rewrite documents as part of generated app migrations.
 Generated-app database startup policy is controlled by
 `MOZAIKS_DATABASE_STARTUP_POLICY`:
 
-- `best_effort` is the default. Index and migration failures are logged and
-  startup continues.
-- `required` is recommended for production persistent generated apps. Index and
-  migration failures fail startup.
+- `best_effort` is the default for additive migrations. Migration failures are
+  logged and startup continues.
+- declared index inspection, mismatch, creation, or verification failures
+  always fail startup; an app cannot report healthy against an incompatible
+  persistence contract.
+- `required` is recommended for production persistent generated apps so
+  migration failures also fail startup.
+
+Apps with no `data/contract.json`, with no declared indexes, or running locally
+under `best_effort` without a configured Mongo connection keep the
+non-persistent startup path and do not require Mongo index readiness. A Mongo
+connection, `required` policy, or production environment enables the readiness
+gate.
+Index comparison uses names, ordered keys, and all canonical materialized
+options. Runtime application is additive only and never drops an index;
+definition changes require an explicit operator compatibility migration.
 
 App business data database names are resolved from an injected adapter value,
 then `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then

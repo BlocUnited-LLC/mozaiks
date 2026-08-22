@@ -12,7 +12,11 @@ from pymongo import ReturnDocument
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.runtime.app.paths import APP_DATA_MIGRATIONS_DIR
 
-from .indexes import DatabaseIndexApplyError, _normalize_index_spec
+from .indexes import (
+    DatabaseIndexApplyError,
+    _ensure_raw_collection_indexes,
+    _normalize_index_spec,
+)
 from .mongo import MongoPersistenceContext
 
 SYSTEM_DATABASE = "mozaiksai"
@@ -269,18 +273,17 @@ def _history_collection(client: Any | None = None, *, database_name: str | None 
 
 
 async def _ensure_history_indexes(history: Any) -> None:
-    existing_names: set[str] = set()
-    try:
-        existing = await history.list_indexes().to_list(length=None)
-        existing_names = {str(item.get("name")) for item in existing if isinstance(item, dict) and item.get("name")}
-    except Exception:
-        existing_names = set()
-    if "adm_app_migration" not in existing_names:
-        await history.create_index(
-            [("app_id", 1), ("migration_id", 1)],
-            name="adm_app_migration",
-            unique=True,
-        )
+    await _ensure_raw_collection_indexes(
+        history,
+        [
+            {
+                "name": "adm_app_migration",
+                "keys": [("app_id", 1), ("migration_id", 1)],
+                "unique": True,
+            }
+        ],
+        collection_label=APP_DATA_MIGRATIONS_COLLECTION,
+    )
 
 
 async def _claim_migration(
@@ -407,12 +410,31 @@ async def _apply_operation(
         if op_type == "ensure_index":
             index_spec = op.get("index")
             if index_spec is None:
-                index_spec = {key: value for key, value in op.items() if key in {"keys", "name", "unique", "sparse"}}
+                index_spec = {
+                    key: value
+                    for key, value in op.items()
+                    if key
+                    in {
+                        "collation",
+                        "expireAfterSeconds",
+                        "hidden",
+                        "keys",
+                        "name",
+                        "partialFilterExpression",
+                        "sparse",
+                        "unique",
+                        "wildcardProjection",
+                    }
+                }
             try:
                 normalized = _normalize_index_spec(index_spec, f"{path}.index")
             except DatabaseIndexApplyError as exc:
                 raise DatabaseMigrationError(str(exc)) from exc
-            index_dict: dict[str, Any] = {"keys": normalized.keys, "name": normalized.name, **normalized.options}
+            index_dict: dict[str, Any] = {
+                "keys": normalized.keys,
+                "name": normalized.name,
+                **normalized.options,
+            }
             await collection.ensure_indexes([index_dict])
     except Exception as exc:
         message = (

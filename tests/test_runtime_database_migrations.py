@@ -17,6 +17,7 @@ from mozaiksai.core.runtime.persistence import (
     load_data_migrations,
     migration_hash,
 )
+from mozaiksai.core.runtime.persistence.indexes import DataContractIndexRunResult
 from mozaiksai.core.runtime.persistence.migrations import DatabaseMigrationError
 from mozaiksai.core.runtime.persistence.mongo import (
     DEFAULT_APP_DATABASE_NAME,
@@ -66,7 +67,9 @@ class FakeMongoCollection:
     async def create_index(self, keys: list[tuple[str, int]], **kwargs: Any):
         self.create_index_calls.append((keys, kwargs))
         name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
-        self.index_rows.append({"name": name, "key": dict(keys)})
+        self.index_rows.append(
+            {"name": name, "key": dict(keys), **{key: value for key, value in kwargs.items() if key != "name"}}
+        )
         return name
 
     async def find_one(self, query: dict[str, Any], projection=None):
@@ -617,7 +620,9 @@ async def test_platform_startup_calls_migration_application_after_index_applicat
 
     async def fake_apply_indexes(_intent, *, app_id=None):
         calls.append("indexes")
-        return 0
+        return DataContractIndexRunResult(
+            items=[], planned=0, created=0, skipped=0, conflicts=0, verified=0, dry_run=False, success=True
+        )
 
     def fake_load_migrations(_root):
         calls.append("load_migrations")
