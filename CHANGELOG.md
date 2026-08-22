@@ -12,6 +12,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **Generic usage instrumentation and rollups**: the platform host records
+  `app.page_view` (per page-schema serve) and `app.action_invoked` (per
+  successful module action) into the app's own AppMetrics store —
+  fire-and-forget, env-gated `MOZAIKS_USAGE_METRICS` (default on), no data
+  leaves the app. `AppMetrics.usage_rollup(since, until)` aggregates them
+  into daily buckets (page views, unique sessions, action invocations,
+  active users). The mozaiks_cloud pack gains a sink-agnostic
+  `cloud_usage_reporter` module template plus `mozaiks_cloud_usage_client`
+  posting daily aggregate rollups to a configured Mozaiks Cloud-compatible
+  operator endpoint (`POST /usage/rollups`, scope `cloud:usage`); when no
+  connector or `MOZAIKS_CLOUD_*` configuration exists the reporter is
+  silently idle — generated apps never phone home by default, and only
+  aggregate counts are ever sent.
+
 ### Security
 
 - **Module dispatch requires explicit authority**: `ModuleRequest.authority` is

@@ -18,6 +18,12 @@ from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 APP_METRICS_MODULE_ID = "app_metrics"
 APP_METRICS_ENTITY_NAME = "events"
 
+# Generic usage instrumentation events recorded by the platform host
+# (mozaiksai/core/metrics/usage_instrumentation.py) and aggregated by
+# AppMetrics.usage_rollup().
+USAGE_PAGE_VIEW_EVENT = "app.page_view"
+USAGE_ACTION_EVENT = "app.action_invoked"
+
 _ALLOWED_VISIBILITIES = {"private", "admin", "public"}
 _MAX_EVENT_NAME_CHARS = 128
 _MAX_TEXT_CHARS = 256
@@ -486,6 +492,76 @@ class AppMetrics:
             previous_count = count
         return {"steps": rows}
 
+    async def usage_rollup(
+        self,
+        *,
+        since: datetime | str | None = None,
+        until: datetime | str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Daily usage rollups over the generic usage instrumentation events.
+
+        Aggregates ``app.page_view`` and ``app.action_invoked`` events into
+        one bucket per UTC day: ``{period_start, page_views,
+        unique_sessions, action_invocations, active_users}``. The shape
+        matches what a cloud usage reporter posts to a hosting operator —
+        aggregate counts only, no per-user or per-session records leave the
+        app's own store.
+        """
+        collection = self._collection()
+        query = self._base_query(
+            event_names=[USAGE_PAGE_VIEW_EVENT, USAGE_ACTION_EVENT],
+            since=since,
+            until=until,
+        )
+        pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": {"$substrBytes": ["$occurred_at", 0, 10]},
+                    "page_views": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$event_name", USAGE_PAGE_VIEW_EVENT]},
+                                "$value",
+                                0,
+                            ]
+                        }
+                    },
+                    "action_invocations": {
+                        "$sum": {
+                            "$cond": [
+                                {"$eq": ["$event_name", USAGE_ACTION_EVENT]},
+                                "$value",
+                                0,
+                            ]
+                        }
+                    },
+                    "sessions": {"$addToSet": "$session_id"},
+                    "actors": {"$addToSet": "$actor_id"},
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+        rows = await collection.aggregate(pipeline)
+        rollups: list[dict[str, Any]] = []
+        for row in rows or []:
+            period_start = _safe_text(row.get("_id"), maximum=10)
+            if not period_start:
+                continue
+            sessions = [s for s in (row.get("sessions") or []) if _safe_text(s)]
+            actors = [a for a in (row.get("actors") or []) if _safe_text(a)]
+            rollups.append(
+                {
+                    "period_start": period_start,
+                    "granularity": "day",
+                    "page_views": int(float(row.get("page_views") or 0)),
+                    "action_invocations": int(float(row.get("action_invocations") or 0)),
+                    "unique_sessions": len(sessions),
+                    "active_users": len(actors),
+                }
+            )
+        return rollups
+
     async def recent(
         self,
         *,
@@ -519,6 +595,8 @@ class AppMetrics:
 __all__ = [
     "APP_METRICS_ENTITY_NAME",
     "APP_METRICS_MODULE_ID",
+    "USAGE_ACTION_EVENT",
+    "USAGE_PAGE_VIEW_EVENT",
     "AppMetricTrackError",
     "AppMetrics",
     "normalize_metric_event_name",

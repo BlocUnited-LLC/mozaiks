@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from mozaiksai.core.auth import UserPrincipal, optional_user
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import validate_path_app_id
+from mozaiksai.core.metrics.usage_instrumentation import record_action_invocation
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
     ModuleDispatchAuthorityKind,
@@ -364,6 +365,12 @@ async def _execute_module_action(
 
     result = await module_executor.execute(module_request, context=None)
     if result.success:
+        record_action_invocation(
+            app_id=str(module_request.app_id or "default"),
+            module_id=module_name,
+            action_id=action_name,
+            user_id=module_request.user_id,
+        )
         if module_name in _OBSERVED_MODULES:
             data: dict[str, Any] = result.data if isinstance(result.data, dict) else {}
             thread_data = data.get("thread")

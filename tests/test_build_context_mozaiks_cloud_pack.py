@@ -76,6 +76,7 @@ def test_mozaiks_cloud_context_declares_capabilities() -> None:
         "cloud.domain.connect",
         "cloud.domain.status",
         "cloud.domain.disconnect",
+        "cloud.usage.report",
     }
 
 
@@ -203,6 +204,7 @@ def test_mozaiks_cloud_provider_api_contract_has_exact_operation_set() -> None:
         "request_domain_activation",
         "get_domain_status",
         "disconnect_domain",
+        "report_usage_rollups",
     }
 
 
