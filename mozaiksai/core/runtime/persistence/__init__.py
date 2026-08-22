@@ -50,6 +50,7 @@ from .naming import (
 from .startup_policy import (
     DATABASE_STARTUP_POLICY_ENV,
     DatabaseStartupPolicyError,
+    database_persistence_is_enabled,
     get_database_startup_policy,
 )
 
@@ -70,6 +71,7 @@ __all__ = [
     "DatabaseMigrationError",
     "DatabaseMigrationOperationError",
     "DatabaseStartupPolicyError",
+    "database_persistence_is_enabled",
     "aliases_from_data_contract",
     "app_data_from_context",
     "apply_database_indexes",

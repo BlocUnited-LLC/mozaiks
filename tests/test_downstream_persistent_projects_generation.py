@@ -103,6 +103,19 @@ class FakePersistenceCollection:
     async def count(self, query: Mapping[str, Any]) -> int:
         return len(await self.find_many(query, limit=100))
 
+    def list_indexes(self):
+        return FakeCursor(
+            [
+                {"name": name, "key": dict(index["keys"]), **{k: v for k, v in index.items() if k not in {"name", "keys"}}}
+                for name, index in self.indexes.items()
+            ]
+        )
+
+    async def create_index(self, keys: list[tuple[str, int]], **kwargs: Any) -> str:
+        name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
+        self.indexes[name] = {"name": name, "keys": list(keys), **{k: v for k, v in kwargs.items() if k != "name"}}
+        return name
+
     async def ensure_indexes(self, indexes: Sequence[Mapping[str, Any]]) -> None:
         for index in indexes:
             name = str(index.get("name") or "_".join(str(key[0]) for key in index.get("keys", [])))
@@ -194,7 +207,9 @@ class FakeHistoryCollection:
 
     async def create_index(self, keys, **kwargs):
         name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
-        self.index_rows.append({"name": name, "key": dict(keys)})
+        self.index_rows.append(
+            {"name": name, "key": dict(keys), **{key: value for key, value in kwargs.items() if key != "name"}}
+        )
         return name
 
     async def find_one(self, query: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -816,7 +831,8 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
         persistence=persistence,
         history_client=FakeHistoryClient(),
     )
-    assert applied_indexes == 2
+    assert applied_indexes.created == 2
+    assert applied_indexes.verified == 2
     assert applied_migrations == 1
     assert "project_owner_created_at" in persistence.collection("projects", "projects").indexes
     assert "task_project_status" in persistence.collection("tasks", "tasks").indexes

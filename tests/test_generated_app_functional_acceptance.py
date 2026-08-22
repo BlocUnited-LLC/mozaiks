@@ -725,6 +725,8 @@ def test_generated_crud_bundle_boots_and_serves_declared_http_surfaces(tmp_path,
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    for name in ("MONGO_URI", "MONGODB_URI", "MONGO_URL"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr("mozaiksai.hosts.runtime.get_mongo_client", lambda: fake_mongo_client)
     monkeypatch.setattr("mozaiksai.core.startup.validation.get_mongo_client", lambda: fake_mongo_client)
     reset_auth_adapter()
@@ -775,6 +777,8 @@ def test_generated_monetized_saas_bundle_boots_and_serves_mozaikspay_runtime_sur
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    for name in ("MONGO_URI", "MONGODB_URI", "MONGO_URL"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MOZAIKSPAY_API_BASE", "https://mozaikspay-compatible.test")
     monkeypatch.setenv("MOZAIKSPAY_API_KEY", "mzk_test_generated_saas")
     reset_auth_adapter()
@@ -902,6 +906,8 @@ def test_generated_workflow_agent_bundle_loads_catalog_and_starts_runtime_sessio
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    for name in ("MONGO_URI", "MONGODB_URI", "MONGO_URL"):
+        monkeypatch.delenv(name, raising=False)
     reset_auth_adapter()
 
     from mozaiksai.core.workflow.workflow_manager import initialize_workflows, workflow_manager

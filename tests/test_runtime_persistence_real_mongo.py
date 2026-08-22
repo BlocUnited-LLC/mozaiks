@@ -16,6 +16,7 @@ from mozaiksai.core.runtime.persistence import (
     collection_name_for,
     migration_hash,
 )
+from mozaiksai.core.runtime.persistence.indexes import DatabaseIndexApplyError
 from mozaiksai.core.runtime.persistence.mongo import DEFAULT_APP_DATABASE_NAME
 from tests.module_authority_test_helpers import trusted_framework_authority
 
@@ -102,6 +103,27 @@ def _migration() -> dict:
     }
 
 
+def _literal_index_contract(app_id: str, collection_name: str, indexes: list[dict]) -> dict:
+    return {
+        "version": "1",
+        "app_id": app_id,
+        "surfaces": [
+            {
+                "surface_id": "checkout_records",
+                "surface_kind": "module",
+                "collections": [
+                    {
+                        "name": "refund_records",
+                        "mongo_collection": collection_name,
+                        "ownership": {"surface_id": "checkout_records", "surface_kind": "module"},
+                        "indexes": indexes,
+                    }
+                ],
+            }
+        ],
+    }
+
+
 @pytest.mark.asyncio
 async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
     """Opt-in smoke for the actual Mongo-backed generated-app persistence path.
@@ -172,8 +194,9 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
         assert list_result.data["items"][0]["user_id"] == "integration_user"
         assert other_list_result.data["items"][0]["app_id"] == other_app_id
 
-        index_count = await apply_database_indexes(_data_contract(app_id), app_id=app_id)
-        assert index_count == 1
+        index_result = await apply_database_indexes(_data_contract(app_id), app_id=app_id)
+        assert index_result.created == 1
+        assert index_result.verified == 1
         index_names = {index["name"] for index in await raw_collection.list_indexes().to_list(length=None)}
         assert "project_owner_idx" in index_names
 
@@ -203,3 +226,132 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
             await other_collection.drop()
         close_mongo_client()
 
+
+@pytest.mark.asyncio
+async def test_real_mongo_index_readiness_is_exact_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prove creation, reread verification, hostile mismatch rejection, and no drops."""
+
+    if not _has_mongo_connection_env():
+        pytest.skip(
+            "MONGO_URI, MONGODB_URI, or MONGO_URL is required for real-Mongo index readiness"
+        )
+
+    database_name, generated_database = _test_database_name()
+    monkeypatch.setenv(APP_DB_ENV, database_name)
+    app_id = f"index_readiness_{uuid4().hex}"
+    prefix = f"refund_checkout_{uuid4().hex[:10]}"
+    ready_name = f"{prefix}_ready"
+    wrong_name = f"{prefix}_wrong_name"
+    alternate_name = f"{prefix}_alternate_name"
+    client = get_mongo_client()
+    ready = client[database_name][ready_name]
+    wrong = client[database_name][wrong_name]
+    alternate = client[database_name][alternate_name]
+    declared_indexes = [
+        {
+            "name": "refund_checkout_unique_partial",
+            "keys": [["checkout_ref", 1]],
+            "unique": True,
+            "partialFilterExpression": {"checkout_ref": {"$type": "string"}},
+            "collation": {"locale": "en", "strength": 2},
+            "hidden": True,
+        },
+        {
+            "name": "refund_expiry_ttl",
+            "keys": [["expires_at", 1]],
+            "expireAfterSeconds": 600,
+            "hidden": True,
+        },
+        {"name": "refund_legacy_sparse", "keys": [["legacy_ref", 1]], "sparse": True},
+        {
+            "name": "refund_payload_wildcard",
+            "keys": [["$**", 1]],
+            "wildcardProjection": {"payload.secret": 0},
+        },
+    ]
+
+    try:
+        first = await apply_database_indexes(
+            _literal_index_contract(app_id, ready_name, declared_indexes), app_id=app_id
+        )
+        second = await apply_database_indexes(
+            _literal_index_contract(app_id, ready_name, declared_indexes), app_id=app_id
+        )
+        assert first.created == first.verified == 4
+        assert second.created == 0
+        assert second.verified == 4
+        materialized = {row["name"]: row for row in await ready.list_indexes().to_list(length=None)}
+        assert materialized["refund_checkout_unique_partial"]["unique"] is True
+        assert materialized["refund_checkout_unique_partial"]["partialFilterExpression"] == {
+            "checkout_ref": {"$type": "string"}
+        }
+        assert materialized["refund_checkout_unique_partial"]["collation"]["strength"] == 2
+        assert materialized["refund_checkout_unique_partial"]["hidden"] is True
+        assert materialized["refund_expiry_ttl"]["expireAfterSeconds"] == 600
+        assert materialized["refund_legacy_sparse"]["sparse"] is True
+        assert materialized["refund_payload_wildcard"]["wildcardProjection"] == {
+            "payload.secret": 0
+        }
+
+        await wrong.create_index(
+            [("wrong_field", 1)],
+            name="checkout_refund_provider_reference_unique",
+            unique=False,
+        )
+        before_wrong = {row["name"] for row in await wrong.list_indexes().to_list(length=None)}
+        with pytest.raises(
+            DatabaseIndexApplyError, match="requested index name exists.*keys expected"
+        ):
+            await apply_database_indexes(
+                _literal_index_contract(
+                    app_id,
+                    wrong_name,
+                    [
+                        {
+                            "name": "checkout_refund_provider_reference_unique",
+                            "keys": [["stripe_refund_id", 1]],
+                            "unique": True,
+                            "partialFilterExpression": {"stripe_refund_id": {"$type": "string"}},
+                        }
+                    ],
+                ),
+                app_id=app_id,
+            )
+        assert {
+            row["name"] for row in await wrong.list_indexes().to_list(length=None)
+        } == before_wrong
+
+        await alternate.create_index([("checkout_ref", 1)], name="legacy_checkout_lookup")
+        before_alternate = {
+            row["name"] for row in await alternate.list_indexes().to_list(length=None)
+        }
+        with pytest.raises(
+            DatabaseIndexApplyError, match="under another name.*unique expected=True actual=False"
+        ):
+            await apply_database_indexes(
+                _literal_index_contract(
+                    app_id,
+                    alternate_name,
+                    [
+                        {
+                            "name": "refund_checkout_unique",
+                            "keys": [["checkout_ref", 1]],
+                            "unique": True,
+                        }
+                    ],
+                ),
+                app_id=app_id,
+            )
+        assert {
+            row["name"] for row in await alternate.list_indexes().to_list(length=None)
+        } == before_alternate
+    finally:
+        if generated_database:
+            await client.drop_database(database_name)
+        else:
+            await ready.drop()
+            await wrong.drop()
+            await alternate.drop()
+        close_mongo_client()

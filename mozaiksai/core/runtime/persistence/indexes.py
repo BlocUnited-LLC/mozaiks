@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from .app_data import (
     AppData,
@@ -21,7 +20,30 @@ class DatabaseIndexApplyError(ValueError):
     """Raised when data contract index metadata cannot be applied."""
 
 
-_SPEC_COMPARISON_OPTION_EXCLUSIONS = {"background"}
+_IGNORED_INDEX_OPTIONS = {"background"}
+_SUPPORTED_INDEX_OPTIONS = frozenset(
+    {
+        "collation",
+        "expireAfterSeconds",
+        "hidden",
+        "partialFilterExpression",
+        "sparse",
+        "unique",
+        "wildcardProjection",
+    }
+)
+_BOOLEAN_INDEX_OPTIONS = frozenset({"hidden", "sparse", "unique"})
+_COLLATION_REVERSE_SECONDARY_OPTION = "back" + "wards"
+_COLLATION_DEFAULTS: dict[str, Any] = {
+    "alternate": "non-ignorable",
+    _COLLATION_REVERSE_SECONDARY_OPTION: False,
+    "caseFirst": "off",
+    "caseLevel": False,
+    "maxVariable": "punct",
+    "normalization": False,
+    "numericOrdering": False,
+    "strength": 3,
+}
 
 
 @dataclass
@@ -43,6 +65,7 @@ class DataContractIndexRunResult:
     created: int
     skipped: int
     conflicts: int
+    verified: int
     dry_run: bool
     success: bool
 
@@ -62,6 +85,15 @@ class _IndexedCollection:
     alias: str
     collection_name: str
     indexes: list[_NormalizedIndexSpec]
+
+
+@dataclass(frozen=True)
+class _IndexInspection:
+    spec: _NormalizedIndexSpec
+    action: str
+    reason: str
+    materialized_name: str | None = None
+    mismatch: str | None = None
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -103,14 +135,27 @@ def _normalize_index_spec(raw_spec: Any, path: str) -> _NormalizedIndexSpec:
     if not name:
         raise DatabaseIndexApplyError(f"{path}.name is required")
     keys = _normalize_index_keys(raw_spec.get("keys"), path)
-    options = {
-        key: value
-        for key, value in raw_spec.items()
-        if key not in {"name", "keys"}
-        and key not in _SPEC_COMPARISON_OPTION_EXCLUSIONS
-        and not str(key).startswith("_")
-        and value is not None
-    }
+    options: dict[str, Any] = {}
+    for key, value in raw_spec.items():
+        if key in {"name", "keys"} or key in _IGNORED_INDEX_OPTIONS:
+            continue
+        if str(key).startswith("_") or value is None:
+            continue
+        if key not in _SUPPORTED_INDEX_OPTIONS:
+            raise DatabaseIndexApplyError(f"{path}.{key} is not a supported canonical index option")
+        if key in _BOOLEAN_INDEX_OPTIONS:
+            if not isinstance(value, bool):
+                raise DatabaseIndexApplyError(f"{path}.{key} must be a boolean")
+        elif key == "expireAfterSeconds":
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise DatabaseIndexApplyError(f"{path}.expireAfterSeconds must be a non-negative integer")
+        elif key in {"collation", "partialFilterExpression", "wildcardProjection"}:
+            if not isinstance(value, Mapping):
+                raise DatabaseIndexApplyError(f"{path}.{key} must be an object")
+            if key == "collation" and not _is_non_empty_string(value.get("locale")):
+                raise DatabaseIndexApplyError(f"{path}.collation.locale is required")
+            value = dict(value)
+        options[key] = value
     return _NormalizedIndexSpec(name=name, keys=keys, options=options)
 
 
@@ -166,38 +211,225 @@ def _index_spec_dict(spec: _NormalizedIndexSpec) -> dict[str, Any]:
     return {"name": spec.name, "keys": list(spec.keys), **dict(spec.options)}
 
 
-async def _ensure_collection_indexes(collection: Any, indexes: Sequence[dict[str, Any]]) -> None:
-    ensure_indexes = getattr(collection, "ensure_indexes", None)
-    if inspect.ismethod(ensure_indexes) or inspect.isfunction(ensure_indexes):
-        await ensure_indexes(indexes)
-        return
+def _canonical_document(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_document(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_document(item) for item in value]
+    return value
+
+
+def _canonical_collation(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    locale = str(value.get("locale") or "").strip()
+    if not locale or locale == "simple":
+        return None
+    normalized = {**_COLLATION_DEFAULTS, **dict(value), "locale": locale}
+    normalized.pop("version", None)
+    return cast(dict[str, Any], _canonical_document(normalized))
+
+
+def _canonical_option_value(options: Mapping[str, Any], key: str) -> Any:
+    if key in _BOOLEAN_INDEX_OPTIONS:
+        return bool(options.get(key, False))
+    if key == "collation":
+        return _canonical_collation(options.get(key))
+    value = options.get(key)
+    if value is None:
+        return None
+    return _canonical_document(value)
+
+
+def _index_mismatches(index_doc: Mapping[str, Any], spec: _NormalizedIndexSpec) -> list[str]:
+    mismatches: list[str] = []
+    actual_name = str(index_doc.get("name") or "")
+    if actual_name != spec.name:
+        mismatches.append(f"name expected={spec.name!r} actual={actual_name!r}")
+    try:
+        actual_keys = _normalize_existing_keys(index_doc.get("key", {}))
+    except DatabaseIndexApplyError as exc:
+        return [f"keys unreadable ({exc})"]
+    if actual_keys != spec.keys:
+        mismatches.append(f"keys expected={spec.keys!r} actual={actual_keys!r}")
+    for key in sorted(_SUPPORTED_INDEX_OPTIONS):
+        expected = _canonical_option_value(spec.options, key)
+        actual = _canonical_option_value(index_doc, key)
+        if actual != expected:
+            mismatches.append(f"{key} expected={expected!r} actual={actual!r}")
+    return mismatches
+
+
+def _index_matches_spec(index_doc: Mapping[str, Any], spec: _NormalizedIndexSpec) -> bool:
+    return not _index_mismatches(index_doc, spec)
+
+
+async def _read_materialized_indexes(collection: Any) -> list[dict[str, Any]]:
+    list_indexes = getattr(collection, "list_indexes", None)
+    if not callable(list_indexes):
+        raise DatabaseIndexApplyError("collection does not support materialized index inspection")
+    try:
+        rows = await list_indexes().to_list(length=None)
+    except Exception as exc:
+        raise DatabaseIndexApplyError(f"could not read materialized indexes: {exc}") from exc
+    return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _inspect_index(existing_docs: Sequence[Mapping[str, Any]], spec: _NormalizedIndexSpec) -> _IndexInspection:
+    named_match = next((row for row in existing_docs if str(row.get("name") or "") == spec.name), None)
+    if named_match is not None:
+        mismatch = "; ".join(_index_mismatches(named_match, spec))
+        if mismatch:
+            return _IndexInspection(
+                spec=spec,
+                action="conflict",
+                reason="requested index name exists with an incompatible definition",
+                materialized_name=spec.name,
+                mismatch=mismatch,
+            )
+        for row in existing_docs:
+            if row is named_match:
+                continue
+            try:
+                row_has_same_keys = _normalize_existing_keys(row.get("key", {})) == spec.keys
+            except DatabaseIndexApplyError:
+                continue
+            if row_has_same_keys and not _index_matches_spec(row, spec):
+                return _IndexInspection(
+                    spec=spec,
+                    action="conflict",
+                    reason="equivalent key pattern exists under another name with incompatible options",
+                    materialized_name=str(row.get("name") or "") or None,
+                    mismatch="; ".join(_index_mismatches(row, spec)),
+                )
+        return _IndexInspection(
+            spec=spec,
+            action="exists",
+            reason="matching index already exists",
+            materialized_name=spec.name,
+        )
+
+    same_keys: list[Mapping[str, Any]] = []
+    for row in existing_docs:
+        try:
+            if _normalize_existing_keys(row.get("key", {})) == spec.keys:
+                same_keys.append(row)
+        except DatabaseIndexApplyError:
+            continue
+    if same_keys:
+        row = same_keys[0]
+        return _IndexInspection(
+            spec=spec,
+            action="conflict",
+            reason="equivalent key pattern exists under another name",
+            materialized_name=str(row.get("name") or "") or None,
+            mismatch="; ".join(_index_mismatches(row, spec)),
+        )
+    return _IndexInspection(spec=spec, action="create", reason="missing index")
+
+
+def _conflict_error(collection_label: str, inspection: _IndexInspection) -> DatabaseIndexApplyError:
+    materialized = inspection.materialized_name or "<unnamed>"
+    return DatabaseIndexApplyError(
+        f"Index readiness conflict for collection={collection_label!r} "
+        f"declared_name={inspection.spec.name!r} materialized_name={materialized!r}: "
+        f"{inspection.reason}; {inspection.mismatch or 'definition mismatch'}"
+    )
+
+
+def _validate_declared_index_set(
+    specs: Sequence[_NormalizedIndexSpec],
+    *,
+    collection_label: str,
+) -> None:
+    for index, spec in enumerate(specs):
+        for prior in specs[:index]:
+            prior_doc = {"name": prior.name, "key": dict(prior.keys), **prior.options}
+            same_name = prior.name == spec.name
+            same_keys = prior.keys == spec.keys
+            if not same_name and not same_keys:
+                continue
+            mismatch = "; ".join(_index_mismatches(prior_doc, spec))
+            if mismatch:
+                relationship = "name" if same_name else "ordered key pattern"
+                raise DatabaseIndexApplyError(
+                    f"Conflicting declared indexes for collection={collection_label!r}: "
+                    f"{relationship} is reused by {prior.name!r} and {spec.name!r}; {mismatch}"
+                )
+
+
+async def _ensure_raw_collection_indexes(
+    collection: Any,
+    indexes: Sequence[dict[str, Any]],
+    *,
+    collection_label: str = "collection",
+) -> list[_IndexInspection]:
+    specs = [_normalize_index_spec(dict(spec), f"indexes[{index}]") for index, spec in enumerate(indexes)]
+    _validate_declared_index_set(specs, collection_label=collection_label)
+    existing_docs = await _read_materialized_indexes(collection)
+    inspections = [_inspect_index(existing_docs, spec) for spec in specs]
+    conflict = next((item for item in inspections if item.action == "conflict"), None)
+    if conflict is not None:
+        raise _conflict_error(collection_label, conflict)
 
     create_index = getattr(collection, "create_index", None)
     if not callable(create_index):
-        raise DatabaseIndexApplyError("collection does not support index creation")
+        if any(item.action == "create" for item in inspections):
+            raise DatabaseIndexApplyError("collection does not support index creation")
+        return inspections
 
-    existing_names: set[str] = set()
-    list_indexes = getattr(collection, "list_indexes", None)
-    if callable(list_indexes):
-        try:
-            existing = await list_indexes().to_list(length=None)
-            existing_names = {
-                str(item.get("name"))
-                for item in existing
-                if isinstance(item, Mapping) and item.get("name")
-            }
-        except Exception:
-            existing_names = set()
+    verified: list[_IndexInspection] = []
+    for prior in inspections:
+        current_docs = await _read_materialized_indexes(collection)
+        current = _inspect_index(current_docs, prior.spec)
+        if current.action == "conflict":
+            raise _conflict_error(collection_label, current)
+        if current.action == "create":
+            spec = prior.spec
+            try:
+                await create_index(spec.keys, name=spec.name, **spec.options)
+            except Exception as exc:
+                raise DatabaseIndexApplyError(
+                    f"Could not create index collection={collection_label!r} name={spec.name!r}: {exc}"
+                ) from exc
+        materialized_docs = await _read_materialized_indexes(collection)
+        post = _inspect_index(materialized_docs, prior.spec)
+        if post.action == "conflict":
+            raise _conflict_error(collection_label, post)
+        if post.action == "create":
+            raise DatabaseIndexApplyError(
+                f"Index verification failed for collection={collection_label!r} "
+                f"name={prior.spec.name!r}: materialized index is missing after creation"
+            )
+        verified.append(
+            _IndexInspection(
+                spec=prior.spec,
+                action="created" if current.action == "create" else "exists",
+                reason="created and materialized definition verified" if current.action == "create" else post.reason,
+                materialized_name=post.materialized_name,
+            )
+        )
+    return verified
 
-    for spec in indexes:
-        keys = list(spec.get("keys") or [])
-        name = spec.get("name")
-        kwargs = {key: value for key, value in dict(spec).items() if key not in {"keys", "name"}}
-        if name:
-            if str(name) in existing_names:
-                continue
-            kwargs["name"] = str(name)
-        await create_index(keys, **kwargs)
+
+async def _ensure_collection_indexes(
+    collection: Any,
+    indexes: Sequence[dict[str, Any]],
+    *,
+    collection_label: str = "collection",
+) -> list[_IndexInspection]:
+    if callable(getattr(collection, "list_indexes", None)):
+        return await _ensure_raw_collection_indexes(collection, indexes, collection_label=collection_label)
+    ensure_indexes = getattr(collection, "ensure_indexes", None)
+    if not callable(ensure_indexes):
+        raise DatabaseIndexApplyError("collection does not support verified index materialization")
+    result = await ensure_indexes(indexes)
+    if not isinstance(result, list) or not all(isinstance(item, _IndexInspection) for item in result):
+        raise DatabaseIndexApplyError("collection index adapter did not return verified materialization results")
+    return result
 
 
 def _normalize_existing_keys(raw_keys: Any) -> list[tuple[str, int]]:
@@ -230,24 +462,6 @@ def _normalize_existing_keys(raw_keys: Any) -> list[tuple[str, int]]:
     return normalized
 
 
-def _existing_option_value(index_doc: dict[str, Any], key: str) -> Any:
-    if key in {"unique", "sparse"}:
-        return bool(index_doc.get(key, False))
-    return index_doc.get(key)
-
-
-def _index_matches_spec(index_doc: dict[str, Any], spec: _NormalizedIndexSpec) -> bool:
-    try:
-        if _normalize_existing_keys(index_doc.get("key", {})) != spec.keys:
-            return False
-    except DatabaseIndexApplyError:
-        return False
-    for key, expected in spec.options.items():
-        if _existing_option_value(index_doc, key) != expected:
-            return False
-    return True
-
-
 def _shared_entry_matches_module(entry: dict[str, Any], module_id: str | None) -> bool:
     if module_id is None:
         return True
@@ -263,22 +477,21 @@ async def apply_database_indexes(
     *,
     app_id: str | None = None,
     persistence: MongoPersistenceContext | None = None,
-) -> int:
-    """Ensure indexes declared in the app data contract exist.
-
-    This is index-only. It does not mutate documents, apply migrations, or
-    write migration history.
-    """
+) -> DataContractIndexRunResult:
+    """Ensure and verify indexes declared in the app data contract."""
 
     if contract is None:
-        return 0
+        return DataContractIndexRunResult(
+            items=[], planned=0, created=0, skipped=0, conflicts=0,
+            verified=0, dry_run=False, success=True,
+        )
 
     resolved_app_id = str(app_id or contract.get("app_id") or "").strip()
     if not resolved_app_id:
         raise DatabaseIndexApplyError("app_id is required to apply database indexes")
 
     context = persistence or MongoPersistenceContext(app_id=resolved_app_id)
-    applied_specs = 0
+    items: list[DataContractIndexPlanItem] = []
     for indexed_collection in _iter_indexed_collections(contract):
         if not indexed_collection.indexes:
             continue
@@ -286,12 +499,36 @@ async def apply_database_indexes(
             collection = context.literal_collection(indexed_collection.collection_name)  # type: ignore[attr-defined]
         else:
             collection = context.collection(indexed_collection.module_id, indexed_collection.entity_name)
-        await _ensure_collection_indexes(
+        collection_label = indexed_collection.collection_name or f"{indexed_collection.module_id}.{indexed_collection.entity_name}"
+        outcomes = await _ensure_collection_indexes(
             collection,
             [_index_spec_dict(spec) for spec in indexed_collection.indexes],
+            collection_label=collection_label,
         )
-        applied_specs += len(indexed_collection.indexes)
-    return applied_specs
+        for outcome in outcomes:
+            items.append(
+                DataContractIndexPlanItem(
+                    surface_id=indexed_collection.surface_id,
+                    alias=indexed_collection.alias,
+                    collection_name=collection_label,
+                    index_name=outcome.spec.name,
+                    keys=list(outcome.spec.keys),
+                    options=dict(outcome.spec.options),
+                    action=outcome.action,
+                    reason=outcome.reason,
+                )
+            )
+    created = sum(1 for item in items if item.action == "created")
+    return DataContractIndexRunResult(
+        items=items,
+        planned=created,
+        created=created,
+        skipped=sum(1 for item in items if item.action == "exists"),
+        conflicts=0,
+        verified=len(items),
+        dry_run=False,
+        success=True,
+    )
 
 
 def _default_app_data() -> AppData:
@@ -394,20 +631,20 @@ def _summarize(
     *,
     created: int,
     dry_run: bool,
-    fail_on_conflict: bool,
 ) -> DataContractIndexRunResult:
     planned = sum(1 for item in items if item.action == "create")
     skipped = sum(1 for item in items if item.action in {"exists", "skipped"})
     conflicts = sum(1 for item in items if item.action == "conflict")
-    success = not (fail_on_conflict and conflicts > 0)
+    verified = sum(1 for item in items if item.action in {"created", "exists"})
     return DataContractIndexRunResult(
         items=items,
         planned=planned,
         created=created,
         skipped=skipped,
         conflicts=conflicts,
+        verified=verified,
         dry_run=dry_run,
-        success=success,
+        success=conflicts == 0,
     )
 
 
@@ -415,33 +652,26 @@ async def run_data_index_application(
     *,
     dry_run: bool = True,
     module_id: str | None = None,
-    fail_on_conflict: bool = False,
     metadata: dict[str, Any] | None = None,
     persistence: Any | None = None,
 ) -> DataContractIndexRunResult:
     contract = metadata or load_app_data_contract()
     indexed_collections = _iter_indexed_collections(contract)
     if module_id is not None:
-        indexed_collections = [
-            collection for collection in indexed_collections if collection.surface_id == module_id
-        ]
+        indexed_collections = [collection for collection in indexed_collections if collection.surface_id == module_id]
     surfaced_collection_names = {
-        collection.collection_name
-        for collection in indexed_collections
-        if collection.collection_name
+        collection.collection_name for collection in indexed_collections if collection.collection_name
     }
     items = _build_skip_items(
         contract,
         surfaced_collection_names=surfaced_collection_names,
         module_id=module_id,
     )
-
     if not indexed_collections:
-        return _summarize(items, created=0, dry_run=dry_run, fail_on_conflict=fail_on_conflict)
+        return _summarize(items, created=0, dry_run=dry_run)
 
     resolved_persistence = persistence or _default_app_data()
-    pending_creates: list[tuple[Any, _NormalizedIndexSpec]] = []
-
+    created = 0
     for indexed_collection in indexed_collections:
         if indexed_collection.alias:
             collection = resolved_persistence.collection(indexed_collection.alias)
@@ -453,79 +683,35 @@ async def run_data_index_application(
             raise DatabaseIndexApplyError(
                 f"surface {indexed_collection.surface_id}/{indexed_collection.entity_name} has no data_alias or mongo_collection"
             )
-        existing_rows = await collection.list_indexes().to_list(length=None)
-        existing_docs = [row for row in existing_rows if isinstance(row, dict)]
-        existing_by_name = {
-            str(row.get("name")): row
-            for row in existing_docs
-            if _is_non_empty_string(row.get("name"))
-        }
-
-        for spec in indexed_collection.indexes:
-            named_match = existing_by_name.get(spec.name)
-            if named_match is not None:
-                if _index_matches_spec(named_match, spec):
-                    action = "exists"
-                    reason = "matching index already exists"
-                else:
-                    action = "conflict"
-                    reason = "index name exists with different keys or options"
-                items.append(
-                    DataContractIndexPlanItem(
-                        surface_id=indexed_collection.surface_id,
-                        alias=indexed_collection.alias,
-                        collection_name=indexed_collection.collection_name,
-                        index_name=spec.name,
-                        keys=list(spec.keys),
-                        options=dict(spec.options),
-                        action=action,
-                        reason=reason,
-                    )
-                )
-                continue
-
-            same_shape = next((row for row in existing_docs if _index_matches_spec(row, spec)), None)
-            if same_shape is not None:
-                items.append(
-                    DataContractIndexPlanItem(
-                        surface_id=indexed_collection.surface_id,
-                        alias=indexed_collection.alias,
-                        collection_name=indexed_collection.collection_name,
-                        index_name=spec.name,
-                        keys=list(spec.keys),
-                        options=dict(spec.options),
-                        action="exists",
-                        reason=(
-                            "matching key shape already exists"
-                            if not same_shape.get("name")
-                            else f"matching key shape already exists as {same_shape['name']}"
-                        ),
-                    )
-                )
-                continue
-
+        collection_label = indexed_collection.collection_name or indexed_collection.alias or f"{indexed_collection.module_id}.{indexed_collection.entity_name}"
+        if dry_run:
+            existing_docs = await _read_materialized_indexes(collection)
+            outcomes = [_inspect_index(existing_docs, spec) for spec in indexed_collection.indexes]
+        else:
+            outcomes = await _ensure_collection_indexes(
+                collection,
+                [_index_spec_dict(spec) for spec in indexed_collection.indexes],
+                collection_label=collection_label,
+            )
+        for outcome in outcomes:
+            if outcome.action == "created":
+                created += 1
+            reason = outcome.reason
+            if outcome.mismatch:
+                reason = f"{reason}; {outcome.mismatch}"
             items.append(
                 DataContractIndexPlanItem(
                     surface_id=indexed_collection.surface_id,
                     alias=indexed_collection.alias,
-                    collection_name=indexed_collection.collection_name,
-                    index_name=spec.name,
-                    keys=list(spec.keys),
-                    options=dict(spec.options),
-                    action="create",
-                    reason="missing index",
+                    collection_name=collection_label,
+                    index_name=outcome.spec.name,
+                    keys=list(outcome.spec.keys),
+                    options=dict(outcome.spec.options),
+                    action=outcome.action,
+                    reason=reason,
                 )
             )
-            pending_creates.append((collection, spec))
-
-    conflicts = sum(1 for item in items if item.action == "conflict")
-    created = 0
-    if not dry_run and (conflicts == 0 or not fail_on_conflict):
-        for collection, spec in pending_creates:
-            await collection.create_index(spec.keys, name=spec.name, **spec.options)
-            created += 1
-
-    return _summarize(items, created=created, dry_run=dry_run, fail_on_conflict=fail_on_conflict)
+    return _summarize(items, created=created, dry_run=dry_run)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -547,11 +733,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Create missing app data indexes for surfaced collections.",
     )
     parser.add_argument("--module", dest="module_id", help="Limit to one surface_id.")
-    parser.add_argument(
-        "--fail-on-conflict",
-        action="store_true",
-        help="Return a failure status when an incompatible existing index is detected.",
-    )
     return parser
 
 
@@ -566,6 +747,7 @@ def _print_result(result: DataContractIndexRunResult) -> None:
         "Summary: "
         f"planned={result.planned} "
         f"created={result.created} "
+        f"verified={result.verified} "
         f"skipped={result.skipped} "
         f"conflicts={result.conflicts} "
         f"dry_run={result.dry_run}"
@@ -580,15 +762,18 @@ def main(
 ) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    result = asyncio.run(
-        run_data_index_application(
-            dry_run=not args.apply,
-            module_id=args.module_id,
-            fail_on_conflict=args.fail_on_conflict,
-            metadata=metadata,
-            persistence=persistence,
+    try:
+        result = asyncio.run(
+            run_data_index_application(
+                dry_run=not args.apply,
+                module_id=args.module_id,
+                metadata=metadata,
+                persistence=persistence,
+            )
         )
-    )
+    except DatabaseIndexApplyError as exc:
+        print(f"Index readiness failed: {exc}")
+        return 1
     _print_result(result)
     return 0 if result.success else 1
 

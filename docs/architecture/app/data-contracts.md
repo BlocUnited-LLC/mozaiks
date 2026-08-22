@@ -119,7 +119,44 @@ For module-owned business data, each collection should declare:
 The index runner only applies indexes declared in
 `surfaces[*].collections[*].indexes`. It validates index names, ordered keys,
 and supported options, compares them with existing Mongo indexes, and creates
-missing indexes idempotently.
+missing indexes idempotently. The canonical per-index options are `unique`,
+`sparse`, `partialFilterExpression`, `collation`, `expireAfterSeconds`,
+`hidden`, and `wildcardProjection`. Nested option documents are compared
+semantically, so object key order does not matter; compound index key order
+does matter. `background` is non-materialized compatibility metadata and does
+not participate in readiness.
+
+Index readiness is exact and fail closed:
+
+- the same name with different keys or options is a conflict
+- the same ordered keys under another name are a conflict, even when the other
+  options match, because the declared name is part of the canonical identity
+- a missing index is created with the complete declared option set, awaited,
+  reread from Mongo, and accepted only when the materialized definition matches
+- inspection, creation, and post-creation verification failures propagate
+- the runtime never drops or rewrites an existing index
+
+Platform startup awaits this check whenever persistence is enabled and a loaded
+data contract declares indexes. Persistence is enabled by a configured Mongo
+connection, `MOZAIKS_DATABASE_STARTUP_POLICY=required`, or a production
+environment. A conflict or backend error then aborts startup even when the
+general database startup policy is `best_effort`; that policy continues to
+govern additive migration failure handling. Local best-effort workflows with no
+Mongo connection skip index readiness, preserving intentionally non-persistent
+operation even when a generated fixture contains a data contract.
+
+### Changing an existing index
+
+Index option changes are compatibility migrations, not in-place runtime
+repairs. Before changing a contract, inspect the live collection and validate
+that existing data satisfies the new constraint (especially uniqueness and
+partial-filter changes). Create an additive replacement under a new name when
+Mongo permits both definitions. If Mongo rejects coexistence, schedule an
+operator-controlled maintenance step to remove the obsolete index, then deploy
+the new contract and let startup create and verify its replacement. Remove old
+contract declarations only after the replacement is verified. The runtime does
+not automatically drop a conflicting index because that could change query or
+write correctness without operator review.
 
 ### `shared_collections`
 

@@ -33,6 +33,7 @@ Covers:
     - spec with no extra options → {"name": ..., "keys": [...]}
     - spec with options → options merged into result
 """
+
 from __future__ import annotations
 
 import pytest
@@ -49,6 +50,7 @@ from mozaiksai.core.runtime.persistence.indexes import (
 # ---------------------------------------------------------------------------
 # 1. _is_non_empty_string
 # ---------------------------------------------------------------------------
+
 
 class TestIsNonEmptyString:
     def test_non_string_returns_false(self):
@@ -72,6 +74,7 @@ class TestIsNonEmptyString:
 # ---------------------------------------------------------------------------
 # 2. _normalize_index_keys
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeIndexKeys:
     def test_non_list_raises(self):
@@ -137,6 +140,7 @@ class TestNormalizeIndexKeys:
 # ---------------------------------------------------------------------------
 # 3. _normalize_index_spec
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeIndexSpec:
     def test_non_dict_raises(self):
@@ -205,10 +209,20 @@ class TestNormalizeIndexSpec:
         result = _normalize_index_spec(raw, "spec")
         assert result.options == {"unique": True}
 
+    def test_unknown_materialized_option_is_rejected(self):
+        raw = {
+            "name": "idx_name",
+            "keys": [{"field": "name", "order": 1}],
+            "providerSpecificOption": True,
+        }
+        with pytest.raises(DatabaseIndexApplyError, match="not a supported canonical index option"):
+            _normalize_index_spec(raw, "spec")
+
 
 # ---------------------------------------------------------------------------
 # 4. _index_spec_dict
 # ---------------------------------------------------------------------------
+
 
 class TestIndexSpecDict:
     def test_basic_spec_dict(self):

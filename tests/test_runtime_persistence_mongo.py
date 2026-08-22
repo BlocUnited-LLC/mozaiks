@@ -79,7 +79,11 @@ class FakeMongoCollection:
 
     async def create_index(self, keys: list[tuple[str, int]], **kwargs: Any):
         self.create_index_calls.append((keys, kwargs))
-        return kwargs.get("name")
+        name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
+        self.index_rows.append(
+            {"name": name, "key": dict(keys), **{key: value for key, value in kwargs.items() if key != "name"}}
+        )
+        return name
 
 
 class FakeDatabase:
