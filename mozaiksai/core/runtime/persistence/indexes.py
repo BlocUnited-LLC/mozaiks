@@ -4,7 +4,7 @@ import argparse
 import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from .app_data import (
     AppData,
@@ -230,7 +230,7 @@ def _canonical_collation(value: Any) -> dict[str, Any] | None:
         return None
     normalized = {**_COLLATION_DEFAULTS, **dict(value), "locale": locale}
     normalized.pop("version", None)
-    return _canonical_document(normalized)
+    return cast(dict[str, Any], _canonical_document(normalized))
 
 
 def _canonical_option_value(options: Mapping[str, Any], key: str) -> Any:
@@ -294,10 +294,10 @@ def _inspect_index(existing_docs: Sequence[Mapping[str, Any]], spec: _Normalized
             if row is named_match:
                 continue
             try:
-                same_keys = _normalize_existing_keys(row.get("key", {})) == spec.keys
+                row_has_same_keys = _normalize_existing_keys(row.get("key", {})) == spec.keys
             except DatabaseIndexApplyError:
                 continue
-            if same_keys and not _index_matches_spec(row, spec):
+            if row_has_same_keys and not _index_matches_spec(row, spec):
                 return _IndexInspection(
                     spec=spec,
                     action="conflict",
