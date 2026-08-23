@@ -134,8 +134,20 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
     agent_name = str(getattr(agent, "name", "") or "").strip()
     if agent_name not in _TARGET_AGENTS:
         return
-    contract = _find_contract(_context_data(agent))
+    data = _context_data(agent)
+    contract = _find_contract(data)
     if not contract:
+        # A cleared contract with a changes_requested review status means the
+        # reviewer rejected the last submission and no approved contract exists.
+        # Downstream generation must not silently proceed as a non-SaaS build;
+        # the SubscriptionContractDesigner revision loop owns re-approval.
+        review_status = str(data.get("subscription_contract_review_status") or "").strip()
+        if review_status == "changes_requested":
+            raise RuntimeError(
+                "Subscription contract review requested changes and no approved "
+                "contract is available. Re-run SubscriptionContractDesigner to "
+                "revise and approve the contract before downstream generation."
+            )
         return
     _apply_text(agent, _render_contract(contract))
 

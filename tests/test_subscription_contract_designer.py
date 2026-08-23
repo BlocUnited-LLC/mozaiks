@@ -607,6 +607,100 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
     assert context["subscription_contract_review_status"] == "changes_requested"
 
 
+def test_transition_graph_routes_changes_requested_back_to_designer() -> None:
+    """The HITL revision loop must exist: changes_requested re-enters the designer."""
+    graph = _read_yaml(SUBSCRIPTION_WORKFLOW / "transition_graph.yaml")
+    rules = graph["transition_rules"]
+
+    loop_back = next(
+        (
+            rule
+            for rule in rules
+            if rule["source_agent"] == "ContractDesignerAgent"
+            and rule["target_agent"] == "ContractDesignerAgent"
+        ),
+        None,
+    )
+    assert loop_back is not None, (
+        "SubscriptionContractDesigner must loop back to the designer on "
+        "changes_requested instead of terminating without an approved contract"
+    )
+    assert loop_back["transition_type"] == "condition"
+    assert loop_back["condition_type"] == "context_expression"
+    assert "changes_requested" in loop_back["context_expression"]
+    assert "subscription_contract_review_status" in loop_back["context_expression"]
+
+    terminate = [
+        rule
+        for rule in rules
+        if rule["source_agent"] == "ContractDesignerAgent" and rule["target_agent"] == "terminate"
+    ]
+    assert terminate, "designer must still terminate once review is not requesting changes"
+
+    # The declared rules must compile into a valid AG2 TransitionGraph.
+    from mozaiksai.core.workflow.execution.network_graph import (
+        compile_transition_rules_to_graph,
+    )
+
+    compiled = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name="ContractDesignerAgent",
+        agent_id_by_name={"ContractDesignerAgent": "contract_designer"},
+    )
+    assert compiled is not None
+
+
+def _generator_agent_stub(name: str, context: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        context_variables=SimpleNamespace(data=context),
+        system_message="base",
+    )
+
+
+def test_inject_subscription_contract_context_raises_on_unapproved_changes_requested() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    agent = _generator_agent_stub(
+        "AppPlanAgent",
+        {
+            "subscription_contract": None,
+            "subscription_contract_review_status": "changes_requested",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="requested changes"):
+        inject_subscription_contract_context(agent, [])
+
+
+def test_inject_subscription_contract_context_noop_without_contract_or_rejection() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    agent = _generator_agent_stub("AppPlanAgent", {})
+    inject_subscription_contract_context(agent, [])
+    assert agent.system_message == "base"
+
+
+def test_inject_subscription_contract_context_ignores_rejection_for_untargeted_agents() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    agent = _generator_agent_stub(
+        "SomeOtherAgent",
+        {
+            "subscription_contract": None,
+            "subscription_contract_review_status": "changes_requested",
+        },
+    )
+    inject_subscription_contract_context(agent, [])
+    assert agent.system_message == "base"
+
+
 def test_subscription_contract_normalizer_rejects_hosted_product_terms() -> None:
     from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
         normalize_subscription_contract,

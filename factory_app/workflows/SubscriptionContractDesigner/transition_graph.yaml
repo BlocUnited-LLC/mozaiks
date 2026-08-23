@@ -1,4 +1,15 @@
 transition_rules:
+  # HITL revision loop: when the reviewer requests changes,
+  # save_subscription_contract clears the contract and records
+  # subscription_contract_review_status=changes_requested. Route back to the
+  # designer so it revises the structured output and re-submits for review
+  # instead of terminating with no approved contract. Conditional rules are
+  # evaluated before unconditional after_turn fallbacks.
+  - source_agent: ContractDesignerAgent
+    target_agent: ContractDesignerAgent
+    transition_type: condition
+    condition_type: context_expression
+    context_expression: "${subscription_contract_review_status} == 'changes_requested'"
   - source_agent: ContractDesignerAgent
     target_agent: terminate
     transition_type: after_turn
