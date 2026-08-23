@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
-[![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
+[![AG2](https://img.shields.io/badge/AG2-1.0.1-green)](https://github.com/ag2ai/ag2)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/Qnsywad9kp)
 
 </div>
@@ -31,8 +31,116 @@ The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
 artifacts, validates them against strict contracts, and keeps runtime concerns
 separate from builder workflows.
 
+## Quickstart
+
+Five steps from a checkout to your first app in Studio.
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 18+
+- A reachable MongoDB database for workspace state
+
+Docker Desktop is not required; use MongoDB Atlas, a local MongoDB install, or
+Docker only if that is how you prefer to run MongoDB.
+
+### 1. Install
+
 Mozaiks is not published as a public PyPI package yet. Install it from a local
-checkout in editable mode.
+checkout in editable mode:
+
+```powershell
+python -m pip install -e ".[dev]"
+```
+
+### 2. Point Mozaiks at MongoDB
+
+Studio stores workspace state in MongoDB, so configure it before opening Studio:
+
+```powershell
+# Local MongoDB
+$env:MONGO_URI="mongodb://localhost:27017/mozaiks"
+
+# Or MongoDB Atlas
+$env:MONGO_URI="<your MongoDB connection string>"
+```
+
+### 3. Set an LLM key
+
+Builds call an LLM, so set a key before running real builds:
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+```
+
+### 4. Create your workspace and open Studio
+
+```powershell
+python -m mozaiks quickstart --dir .\mozaiks-workspace
+```
+
+This creates `.\mozaiks-workspace` and starts the local Studio.
+
+`.\mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
+output, config, and launch scripts. It is not the app itself. The app is
+created later from inside Studio.
+
+### 5. Build your first app
+
+Open `http://localhost:3000/apps` and click `Create App`, then describe what you
+want to build. The workflow walks you through the build steps and stages the
+generated artifacts for review. In-progress builds stay in **Apps**, so you can
+always pick up where you left off.
+
+### Troubleshooting
+
+**`mozaiks` is not recognized** — use `python -m mozaiks` instead. The `mozaiks`
+shortcut requires your Python scripts directory to be on PATH, which some
+systems do not configure automatically.
+
+**Builds fail or hang** — make sure your LLM API key is set in the current shell
+session. You can open Studio without a key, but builds will not run.
+
+**Cannot reach MongoDB** — confirm `MONGO_URI` points at a database that is
+actually running and reachable from this machine.
+
+### Which Tool To Use
+
+The **Studio** is the browser product for creating apps, continuing builds,
+reviewing artifacts, and managing apps. The **CLI** is just how you set up the
+local workspace, start processes, run diagnostics, and open Studio.
+
+`studio` is also the host name used internally for that same browser product.
+Most users can start from Studio and ignore the host details.
+
+Studio itself is organized into two scopes:
+
+- **Workspace dashboard** (`/apps`, `/usage`, `/integrations`) for your app
+  inventory, workspace-wide token usage, and shared provider connections.
+- **App dashboard** (`/apps/:appId/overview`) for a single app, covering
+  Overview, Building, Branding, Launch, Growth, Users, Usage, Support, and
+  Settings.
+
+Main repo layout:
+
+- `web_shell/` - local Vite shell host source
+- `factory_app/app/` - first-party Studio app bundle and default brand assets
+- `factory_app/workflows/` - shared builder workflow root
+
+### Where To Go Next
+
+| Guide | What it covers |
+|---|---|
+| [Use Studio](https://docs.mozaiks.ai/studio/) | The workspace and app-dashboard pages |
+| [Add a Workflow](https://docs.mozaiks.ai/guides/adding-workflows/01-overview/) | Extend an app with a custom AI workflow |
+| [Add a Module](https://docs.mozaiks.ai/guides/adding-modules/01-overview/) | Add a self-contained backend capability |
+| [Add a Page](https://docs.mozaiks.ai/guides/adding-pages/01-overview/) | Add new pages and routes to your app workspace |
+| [Config Files](https://docs.mozaiks.ai/guides/configs/) | Find the right file to edit |
+| [Integrations](https://docs.mozaiks.ai/guides/integrations/01-overview/) | Connect shared services once and let apps declare what they need |
+| [App Shell & Branding](https://docs.mozaiks.ai/guides/custom-brand-integration/01-overview/) | Themes, navigation, logos, and shell behavior |
+| [Self-Hosting](https://docs.mozaiks.ai/guides/self-hosting/) | Run Mozaiks on your own server |
+
+Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
 
 ## What The Framework Gives You
 
@@ -95,65 +203,6 @@ query hand-rolling its own.
 Generated apps are provider-neutral and self-hostable: a Dockerfile, a compose
 file, an env manifest, and staged data-contract migrations. Nothing requires
 BlocUnited's hosted platform to run.
-
-## Quickstart
-
-Install Python 3.11+ and Node.js 18+. Studio also needs a reachable MongoDB
-database for workspace state. Docker Desktop is not required; use MongoDB Atlas,
-a local MongoDB install, or Docker only if that is how you prefer to run MongoDB.
-
-Install from a local checkout:
-
-```powershell
-python -m pip install -e ".[dev]"
-```
-
-Configure MongoDB before opening Studio:
-
-```powershell
-# Local MongoDB
-$env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-
-# Or MongoDB Atlas
-$env:MONGO_URI="<your MongoDB connection string>"
-```
-
-Set an LLM key before running real builds:
-
-```powershell
-$env:OPENAI_API_KEY="sk-..."
-```
-
-Then start Mozaiks:
-
-```powershell
-python -m mozaiks quickstart --dir .\mozaiks-workspace
-```
-
-This creates `.\mozaiks-workspace` and starts the local Studio.
-
-Then open `http://localhost:3000/apps` and click `Create App`.
-
-`.\mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
-output, config, and launch scripts. It is not the app itself. The app is
-created later from inside Studio.
-
-### Which Tool To Use
-
-The **Studio** is the browser product for creating apps, continuing builds,
-reviewing artifacts, and managing apps. The **CLI** is just how you set up the
-local workspace, start processes, run diagnostics, and open Studio.
-
-`studio` is also the host name used internally for that same browser product.
-Most users can start from Studio and ignore the host details.
-
-Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
-
-Main repo layout:
-
-- `web_shell/` - local Vite shell host source
-- `factory_app/app/` - first-party Studio app bundle and default brand assets
-- `factory_app/workflows/` - shared builder workflow root
 
 ---
 

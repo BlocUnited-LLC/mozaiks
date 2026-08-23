@@ -12,6 +12,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- **README onboarding restructured around the documented first-run path**: the
+  Quickstart now opens with a prerequisites list and five numbered steps
+  (install, MongoDB, LLM key, `quickstart`, first app), and sits above the
+  architecture deep-dive so a new reader reaches an install command without
+  scrolling past runtime internals first. Adds a short troubleshooting list
+  and a "Where To Go Next" table pointing at the Studio and guides pages.
+- **README AG2 badge no longer claims a beta**: it now reads `1.0.1`, matching
+  the pinned `ag2==1.0.1` dependency in `pyproject.toml` and `requirements.txt`.
+
 ### Added
 
 - **Subscription contract refinement routing**: the refinement harness now has
