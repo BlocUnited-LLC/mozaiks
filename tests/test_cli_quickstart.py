@@ -85,3 +85,21 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
     assert launched["frontend_port"] == 3010
     assert launched["open_browser"] is False
 
+
+
+def test_env_warnings_accept_gemini_key_as_default_provider(monkeypatch, capsys) -> None:
+    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MONGO_URI"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017/mozaiks")
+
+    args = Namespace(provider=None)
+
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-test-1234")
+    quickstart_command._print_environment_warnings(args)
+    assert "No provider API key detected" not in capsys.readouterr().out
+
+    monkeypatch.delenv("GEMINI_API_KEY")
+    quickstart_command._print_environment_warnings(args)
+    warning_out = capsys.readouterr().out
+    assert "No provider API key detected" in warning_out
+    assert "GEMINI_API_KEY" in warning_out

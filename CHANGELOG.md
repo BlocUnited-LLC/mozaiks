@@ -52,6 +52,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Gemini is consistently the documented default LLM provider** (#367): the
+  README quickstart now leads with `GEMINI_API_KEY` (matching
+  `docs/getting-started.md` and `.env.example`), and the `quickstart` CLI's
+  no-key warning checks and names `GEMINI_API_KEY` instead of telling Gemini
+  users they have no API key.
 - **SaaS bundles can no longer sell capabilities they never enforce**: the
   generated-bundle scanner now fails a bundle whose
   `config/subscriptions.yaml` grants plan capabilities while no module action

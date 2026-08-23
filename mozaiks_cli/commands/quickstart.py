@@ -59,9 +59,12 @@ def _print_environment_warnings(args) -> None:
         warnings.append(
             f"{provider.upper()} provider selected. Make sure the matching provider credentials are available."
         )
-    elif provider is None and not any(os.environ.get(key) for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")):
+    elif provider is None and not any(
+        os.environ.get(key) for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+    ):
         warnings.append(
-            "No provider API key detected. Set OPENAI_API_KEY or ANTHROPIC_API_KEY before starting a build."
+            "No provider API key detected. Set GEMINI_API_KEY (default provider, free tier), "
+            "OPENAI_API_KEY, or ANTHROPIC_API_KEY before starting a build."
         )
 
     if not warnings:
