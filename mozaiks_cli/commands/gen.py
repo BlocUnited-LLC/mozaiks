@@ -381,6 +381,13 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
     dst = staging_root / workflow_name
     dst.mkdir(parents=True, exist_ok=True)
 
+    # Middleware and hooks reference helpers as ../_shared/... relative to the
+    # workflow directory; stage the sibling _shared tree or every such import
+    # fails in the temp staging root and generation silently degrades.
+    shared_src = source_dir / "_shared"
+    if shared_src.is_dir():
+        shutil.copytree(shared_src, staging_root / "_shared", dirs_exist_ok=True)
+
     for item in src.iterdir():
         if item.is_dir():
             # For tools directory, we need to adapt Python files
@@ -595,13 +602,21 @@ def run(args):
             )
 
         if result.get("success"):
+            written = [f for f in sorted(output_dir.rglob("*")) if f.is_file()]
+            if not written:
+                _print_error(
+                    "Generation finished but wrote no files. The workflow "
+                    "degraded or its outputs were lost — check the logs above "
+                    "(middleware import failures are a common cause)."
+                )
+                return 1
+
             _print_success("Generation complete!")
             _print_info(f"Files written to: {output_dir}")
 
             _print("\nGenerated files:", style="bold")
-            for f in sorted(output_dir.rglob("*")):
-                if f.is_file():
-                    _print_info(f"  {f.relative_to(output_dir)}")
+            for f in written:
+                _print_info(f"  {f.relative_to(output_dir)}")
 
             _print("\nNext steps:", style="bold")
             _print_info(f"  cd {output_dir}")
