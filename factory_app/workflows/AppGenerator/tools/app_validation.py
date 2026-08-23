@@ -12,6 +12,7 @@ This tool can:
 import ast
 import asyncio
 import builtins
+import hashlib
 import json
 import logging
 import os
@@ -1876,6 +1877,19 @@ def _select_bundle_repair_target(classified: dict[str, list[str]]) -> str | None
     return None
 
 
+def _repair_failure_fingerprint(*, repair_kind: str, evidence: Any) -> str:
+    """Return a stable digest for deterministic repair no-progress checks."""
+
+    normalized = json.dumps(
+        {"repair_kind": repair_kind, "evidence": evidence},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _bundle_repair_request(
     *,
     target: str,
@@ -1915,6 +1929,9 @@ def _prepare_bundle_repair(
         _context_get(context_variables, "bundle_repair_attempt_count", 0),
         0,
     )
+    previous_fingerprint = str(
+        _context_get(context_variables, "bundle_repair_failure_fingerprint", "") or ""
+    ).strip()
     max_attempts = max(0, _as_int(max_attempts, 2))
 
     if bundle_scan_result.get("passed"):
@@ -1929,12 +1946,16 @@ def _prepare_bundle_repair(
             "errors": [],
             "target_errors": [],
             "deferred_errors": [],
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "bundle_repair_status", "passed")
         _context_set(context_variables, "bundle_repair_target", None)
         _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
         _context_set(context_variables, "bundle_repair_request", None)
         _context_set(context_variables, "bundle_repair_errors", [])
+        _context_set(context_variables, "bundle_repair_failure_fingerprint", None)
+        _context_set(context_variables, "bundle_repair_no_progress", False)
         _context_set(context_variables, "bundle_repair_result", result)
         return result
 
@@ -1954,12 +1975,16 @@ def _prepare_bundle_repair(
             "errors": errors,
             "target_errors": [],
             "deferred_errors": errors,
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "bundle_repair_status", status)
         _context_set(context_variables, "bundle_repair_target", None)
         _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
         _context_set(context_variables, "bundle_repair_request", None)
         _context_set(context_variables, "bundle_repair_errors", errors)
+        _context_set(context_variables, "bundle_repair_failure_fingerprint", None)
+        _context_set(context_variables, "bundle_repair_no_progress", False)
         _context_set(context_variables, "bundle_repair_result", result)
         return result
 
@@ -1974,8 +1999,20 @@ def _prepare_bundle_repair(
         target_errors=target_errors,
         deferred_errors=deferred_errors,
     )
+    failure_fingerprint = _repair_failure_fingerprint(
+        repair_kind=f"bundle:{target}",
+        evidence={
+            "target_errors": sorted(target_errors),
+            "deferred_errors": sorted(deferred_errors),
+        },
+    )
+    no_progress = bool(
+        prior_attempts > 0
+        and previous_fingerprint
+        and previous_fingerprint == failure_fingerprint
+    )
 
-    if prior_attempts >= max_attempts:
+    if no_progress or prior_attempts >= max_attempts:
         status = "blocked"
         attempt = prior_attempts
         repairable = False
@@ -1997,6 +2034,8 @@ def _prepare_bundle_repair(
         "errors": errors,
         "target_errors": target_errors,
         "deferred_errors": deferred_errors,
+        "failure_fingerprint": failure_fingerprint,
+        "no_progress": no_progress,
     }
     _context_set(context_variables, "bundle_repair_status", status)
     _context_set(context_variables, "bundle_repair_target", repair_target)
@@ -2004,6 +2043,8 @@ def _prepare_bundle_repair(
     _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
     _context_set(context_variables, "bundle_repair_request", repair_request)
     _context_set(context_variables, "bundle_repair_errors", errors)
+    _context_set(context_variables, "bundle_repair_failure_fingerprint", failure_fingerprint)
+    _context_set(context_variables, "bundle_repair_no_progress", no_progress)
     _context_set(context_variables, "bundle_repair_result", result)
     return result
 
@@ -2027,9 +2068,13 @@ def _prepare_workflow_integration_repair(
             "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
             "max_attempts": max_attempts,
             "repair_request": None,
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "workflow_integration_repair_status", "passed")
         _context_set(context_variables, "workflow_integration_repair_request", None)
+        _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", None)
+        _context_set(context_variables, "workflow_integration_repair_no_progress", False)
         _context_set(context_variables, "workflow_integration_repair_result", result)
         return result
     if not failed_tests:
@@ -2040,16 +2085,35 @@ def _prepare_workflow_integration_repair(
             "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
             "max_attempts": max_attempts,
             "repair_request": None,
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "workflow_integration_repair_status", "not_applicable")
+        _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", None)
+        _context_set(context_variables, "workflow_integration_repair_no_progress", False)
         _context_set(context_variables, "workflow_integration_repair_result", result)
         return result
 
     prior_attempts = _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0)
+    previous_fingerprint = str(
+        _context_get(context_variables, "workflow_integration_repair_failure_fingerprint", "") or ""
+    ).strip()
     max_attempts = max(0, _as_int(max_attempts, 2))
     repair_request = _workflow_integration_repair_request(failed_tests)
+    failure_fingerprint = _repair_failure_fingerprint(
+        repair_kind="workflow_integration",
+        evidence=sorted(
+            failed_tests,
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        ),
+    )
+    no_progress = bool(
+        prior_attempts > 0
+        and previous_fingerprint
+        and previous_fingerprint == failure_fingerprint
+    )
 
-    if prior_attempts >= max_attempts:
+    if no_progress or prior_attempts >= max_attempts:
         status = "blocked"
         attempt = prior_attempts
         repairable = False
@@ -2066,12 +2130,16 @@ def _prepare_workflow_integration_repair(
         "max_attempts": max_attempts,
         "repair_request": repair_request,
         "failed_tests": failed_tests,
+        "failure_fingerprint": failure_fingerprint,
+        "no_progress": no_progress,
     }
     _context_set(context_variables, "workflow_integration_repair_status", status)
     _context_set(context_variables, "workflow_integration_repair_count", attempt)
     _context_set(context_variables, "workflow_integration_repair_max_attempts", max_attempts)
     _context_set(context_variables, "workflow_integration_repair_request", repair_request)
     _context_set(context_variables, "workflow_integration_repair_failed_tests", failed_tests)
+    _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", failure_fingerprint)
+    _context_set(context_variables, "workflow_integration_repair_no_progress", no_progress)
     _context_set(context_variables, "workflow_integration_repair_result", result)
     return result
 

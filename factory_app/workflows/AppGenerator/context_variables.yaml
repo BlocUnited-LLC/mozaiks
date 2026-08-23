@@ -839,6 +839,18 @@ definitions:
     source:
       type: computed
       default: []
+  workflow_integration_repair_failure_fingerprint:
+    type: string
+    description: Stable digest of the last workflow-integration failure evidence.
+    source:
+      type: computed
+      default: null
+  workflow_integration_repair_no_progress:
+    type: boolean
+    description: True when a repair pass reproduces the identical workflow-integration failure.
+    source:
+      type: computed
+      default: false
   workflow_integration_repair_result:
     type: object
     description: Full workflow integration repair scheduling result.
@@ -885,6 +897,18 @@ definitions:
     source:
       type: computed
       default: []
+  bundle_repair_failure_fingerprint:
+    type: string
+    description: Stable digest of the last targeted generated-bundle failure evidence.
+    source:
+      type: computed
+      default: null
+  bundle_repair_no_progress:
+    type: boolean
+    description: True when a repair pass reproduces the identical targeted bundle failure.
+    source:
+      type: computed
+      default: false
   bundle_repair_result:
     type: object
     description: Full generated-bundle scanner repair scheduling result.
