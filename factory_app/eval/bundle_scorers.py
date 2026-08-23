@@ -4,34 +4,40 @@ Generation-time evaluation: grade what the Factory produced, before anything is
 hosted. This needs no customers, no traffic and no LLM — only bundles — which is
 why it is buildable ahead of launch while runtime outcome collection is not.
 
-Scorers return `ag2.eval.Feedback` so they migrate cleanly to `@scorer` if and
-when the Factory itself is evaluated through `run_agent`. The runner here is
-bespoke because a bundle is a directory of artifacts, not an agent trace.
+Scorers return a local `Feedback` dataclass inspired by `ag2.eval.Feedback`.
+The runner here is bespoke because a bundle is a directory of artifacts, not
+an agent trace.
 
-Return-type convention follows AG2: a `score` of 1.0/0.0 aggregates as a pass
-rate, a `value` aggregates as a distribution. One question per scorer.
+Return-type convention is AG2-inspired but deliberately diverges from ag2
+1.0.1's contract: a `score` of 1.0/0.0 aggregates as a pass rate, and `value`
+holds a numeric measurement aggregated as a distribution (ag2 types `value`
+as a categorical `str | None`). One question per scorer.
 """
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-try:  # ag2 is the source of truth for the feedback shape.
-    from ag2.eval import Feedback
-except Exception:  # pragma: no cover - exercised only without ag2 installed
-    from dataclasses import dataclass, field
 
-    @dataclass
-    class Feedback:  # type: ignore[no-redef]
-        key: str
-        score: float | None = None
-        value: Any = None
-        comment: str | None = None
-        detail: dict[str, Any] = field(default_factory=dict)
+@dataclass
+class Feedback:
+    """AG2-inspired feedback record with a numeric-friendly `value`.
+
+    Unlike ag2 1.0.1's `Feedback` (where `value` is a categorical
+    `str | None`), `value` here is `Any` so numeric scorers can feed
+    distribution aggregation.
+    """
+
+    key: str
+    score: float | None = None
+    value: Any = None
+    comment: str | None = None
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
 PASS = 1.0

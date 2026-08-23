@@ -7,9 +7,11 @@ changes, which land in this repository.
 
 Deliberate design note (do not "fix" this into ag2.eval.run_agent): the
 subject of these scorers is a directory of artifacts, not an agent trace, so
-the runner is bespoke. Scorers still return ``ag2.eval.Feedback`` so they
-migrate cleanly if the Factory is later evaluated through AG2 runs, and the
-persistence/diff shapes mirror AG2's evaluation runs.
+the runner is bespoke. Scorers return a local, AG2-inspired ``Feedback``
+dataclass rather than ``ag2.eval.Feedback``: it deliberately types ``value``
+as ``Any`` so numeric scorers can feed distribution aggregation, diverging
+from ag2 1.0.1's categorical ``value: str | None``. The persistence/diff
+shapes mirror AG2's evaluation runs.
 """
 from .bundle_eval import (
     BundleRun,
