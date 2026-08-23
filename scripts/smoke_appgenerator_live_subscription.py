@@ -292,6 +292,11 @@ def _task_context(task: dict[str, Any], contract: dict[str, Any]) -> dict[str, A
     return {
         "workflow_name": "AppGenerator",
         "app_id": DEFAULT_APP_ID,
+        # chat_id/user_id give the usage ledger the full identity it requires;
+        # without them TokenManager.emit_usage_delta silently drops the event
+        # and headless smoke builds record zero token usage.
+        "chat_id": "smoke-appgenerator-live-subscription",
+        "user_id": "smoke-harness",
         "task_run_mode": True,
         "current_build_task_id": task["task_id"],
         "current_build_task_type": task["task_type"],
@@ -1169,10 +1174,21 @@ async def _run_config_task(
         "base",
         agent_name="ConfigMiddlewareAgent",
     )
+    from mozaiksai.core.usage.middleware import build_ag2_usage_middleware
+
     agent = Agent(
         "ConfigMiddlewareAgent",
         prompt=system_prompt,
         config=llm_config_to_ag2_config(llm_config),
+        # Meter this one-shot call in the runtime usage ledger so live smoke
+        # builds produce real per-build token/cost numbers.
+        middleware=[
+            build_ag2_usage_middleware(
+                agent_name="ConfigMiddlewareAgent",
+                workflow_name="AppGenerator",
+                context_variables=context,
+            )
+        ],
     )
     task_prompt = "\n\n".join(
         [
