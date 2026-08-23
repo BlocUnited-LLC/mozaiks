@@ -67,11 +67,15 @@ $env:MONGO_URI="<your MongoDB connection string>"
 
 ### 3. Set an LLM key
 
-Builds call an LLM, so set a key before running real builds:
+Builds call an LLM, so set a key before running real builds. The default
+provider is Google Gemini, which has a free tier (no credit card required):
 
 ```powershell
-$env:OPENAI_API_KEY="sk-..."
+$env:GEMINI_API_KEY="your-key-here"
 ```
+
+OpenAI and Anthropic work too — set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
+instead and select the provider in Studio or via `--provider`.
 
 ### 4. Create your workspace and open Studio
 
