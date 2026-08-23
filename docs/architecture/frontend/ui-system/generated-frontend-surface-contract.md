@@ -261,15 +261,16 @@ declarative form submission, and responsive layout regressions.
 Browser findings flow through `scripts/generated_ui_acceptance.py` when they
 need to become structured production-readiness feedback:
 
-- output status: `passed`, `needs_revision`, or `blocked`
-- structured findings: severity, route, category, message, suggested fix
-- revision text: concrete rendered issue, not generic prompt advice
+- canonical `ValidationRun` with the `generated_ui_browser` gate result
+- structured `ValidationIssue` entries with code, severity, route, message,
+  suggested fix, and repair owner
+- one `RepairDecision`: `accept`, `repair`, or `block`
 
 This keeps strictness bounded. Playwright failures should be converted into
-specific findings such as route, severity, category, message, and suggested fix;
-they should not become an open-ended agent loop. The acceptance script has its
-own revision-budget vocabulary and can block to user/operator review when the
-generated UI keeps failing browser checks.
+specific canonical issues; they should not become an open-ended agent loop. The
+shared acceptance controller owns the repair budget and blocks to user/operator
+review when the evidence is unchanged or the budget is exhausted. The script
+does not maintain a second browser-specific retry state machine.
 
 To run the generic rendered-app smoke against a generated app root instead of
 the checked-in fixture:

@@ -1,8 +1,7 @@
 """Production-readiness helper for generated UI browser acceptance.
 
-This script keeps Playwright outside the live AppGenerator agent loop. It can run
-the generic generated-app browser smoke, parse Playwright JSON output, and emit
-structured findings that a human or later promotion gate can inspect.
+This script runs the generic generated-app browser smoke through the canonical
+validation registry and acceptance controller.
 """
 
 from __future__ import annotations
@@ -15,6 +14,15 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
+
+from mozaiksai.core.validation import (
+    AcceptanceController,
+    ValidationGate,
+    ValidationIssue,
+    ValidationRegistry,
+)
+
+_GATE_ID = "generated_ui_browser"
 
 
 def _string(value: Any) -> str:
@@ -29,21 +37,22 @@ def _finding(
     category: str = "render",
     source: str = "playwright",
     suggested_fix: str | None = None,
-) -> dict[str, str]:
-    out = {
-        "severity": severity,
-        "route": route or "",
-        "category": category,
-        "message": message,
-        "source": source,
-        "suggested_fix": suggested_fix
+) -> ValidationIssue:
+    return ValidationIssue(
+        gate_id=_GATE_ID,
+        code=category,
+        severity=severity,
+        route=route,
+        message=message,
+        source=source,
+        suggested_fix=suggested_fix
         or "Revise the generated page schema or bounded custom React for the affected route.",
-    }
-    return {key: value for key, value in out.items() if value}
+        repair_owner="AppSchemaAgent",
+    )
 
 
-def normalize_ui_acceptance_findings(value: Any) -> list[dict[str, str]]:
-    """Normalize arbitrary finding payloads into structured dictionaries."""
+def normalize_ui_acceptance_findings(value: Any) -> list[ValidationIssue]:
+    """Normalize arbitrary finding payloads into canonical validation issues."""
 
     if value is None:
         return []
@@ -65,17 +74,17 @@ def normalize_ui_acceptance_findings(value: Any) -> list[dict[str, str]]:
             )
         ]
     if isinstance(value, Iterable):
-        findings: list[dict[str, str]] = []
+        findings: list[ValidationIssue] = []
         for item in value:
             findings.extend(normalize_ui_acceptance_findings(item))
         return findings
     return [_finding(message=str(value))]
 
 
-def parse_playwright_json_report(report: dict[str, Any]) -> list[dict[str, str]]:
+def parse_playwright_json_report(report: dict[str, Any]) -> list[ValidationIssue]:
     """Convert Playwright JSON reporter output into UI acceptance findings."""
 
-    findings: list[dict[str, str]] = []
+    findings: list[ValidationIssue] = []
 
     for error in report.get("errors") or []:
         if not isinstance(error, dict):
@@ -145,72 +154,6 @@ def parse_playwright_json_report(report: dict[str, Any]) -> list[dict[str, str]]
     return findings
 
 
-def review_ui_acceptance_findings(
-    findings: Any,
-    *,
-    acceptance_ran: bool = True,
-    require_acceptance_run: bool = False,
-    prior_revision_count: int = 0,
-    max_revision_attempts: int = 1,
-) -> dict[str, Any]:
-    """Return a bounded production-readiness status for browser findings."""
-
-    normalized = normalize_ui_acceptance_findings(findings)
-    if require_acceptance_run and not acceptance_ran:
-        normalized.append(
-            _finding(
-                message="Browser UI acceptance did not run before final delivery.",
-                category="acceptance",
-                suggested_fix="Run the generated UI Playwright acceptance smoke before promotion.",
-            )
-        )
-
-    if not normalized:
-        status = "passed"
-        revision_request = None
-        revision_count = prior_revision_count
-    elif prior_revision_count < max(0, max_revision_attempts):
-        status = "needs_revision"
-        revision_count = prior_revision_count + 1
-        revision_request = _format_revision_request(normalized)
-    else:
-        status = "blocked"
-        revision_count = prior_revision_count
-        revision_request = (
-            "Browser UI acceptance findings remain after the automated revision budget. "
-            "User/operator review is required:\n- "
-            + _format_findings(normalized)
-        )
-
-    return {
-        "status": status,
-        "findings": normalized,
-        "revision_count": revision_count,
-        "max_revision_attempts": max(0, max_revision_attempts),
-        "revision_request": revision_request,
-    }
-
-
-def _format_findings(findings: list[dict[str, str]]) -> str:
-    lines: list[str] = []
-    for finding in findings:
-        route = f" route={finding['route']}" if finding.get("route") else ""
-        suggestion = finding.get("suggested_fix") or "Revise the generated UI."
-        lines.append(
-            f"{finding.get('severity', 'error')} {finding.get('category', 'render')}{route}: "
-            f"{finding.get('message', '')} Suggested fix: {suggestion}"
-        )
-    return "\n- ".join(lines)
-
-
-def _format_revision_request(findings: list[dict[str, str]]) -> str:
-    return (
-        "Revise the generated UI based on browser acceptance findings. "
-        "Do not add new decorative sections; fix the concrete rendered issue:\n- "
-        + _format_findings(findings)
-    )
-
-
 def _extract_json_report(stdout: str) -> dict[str, Any]:
     text = stdout.strip()
     if not text:
@@ -275,15 +218,21 @@ def run_playwright_acceptance(
                 suggested_fix="Inspect Playwright runner output and fix the generated app or test environment.",
             )
         ]
-    review = review_ui_acceptance_findings(findings, acceptance_ran=True)
+    registry = ValidationRegistry()
+    registry.register(
+        ValidationGate(
+            gate_id=_GATE_ID,
+            description="Generated app browser rendering acceptance.",
+            handler=lambda _context: findings,
+        )
+    )
+    acceptance = AcceptanceController(registry).run(context={})
     result = {
-        "success": completed.returncode == 0 and review["status"] == "passed",
+        "success": completed.returncode == 0 and acceptance.accepted,
         "returncode": completed.returncode,
-        "status": review["status"],
-        "findings": review["findings"],
-        "revision_request": review["revision_request"],
+        **acceptance.model_dump(mode="json"),
     }
-    if not result["success"] and not review["findings"]:
+    if not result["success"] and not findings:
         result["runner_error"] = (completed.stderr or completed.stdout or "").strip()[-2000:]
     return result
 
@@ -322,6 +271,5 @@ if __name__ == "__main__":
 __all__ = [
     "normalize_ui_acceptance_findings",
     "parse_playwright_json_report",
-    "review_ui_acceptance_findings",
     "run_playwright_acceptance",
 ]
