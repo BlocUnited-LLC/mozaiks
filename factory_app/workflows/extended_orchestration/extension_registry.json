@@ -586,6 +586,52 @@
       ]
     },
     {
+      "id": "subscription_patch",
+      "description": "Scoped subscription contract revision owned by SubscriptionContractDesigner, then an app-bundle refresh to re-emit the contract's generated config and gated action declarations.",
+      "affected_declarative_families": [
+        "subscription_contract",
+        "app_bundle"
+      ],
+      "steps": [
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subscription_revision",
+      "description": "Subscription contract revision that refreshes workflow metering and regenerated app artifacts.",
+      "affected_declarative_families": [
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle"
+      ],
+      "steps": [
+        {
+          "workflows": [
+            "SubscriptionContractDesigner"
+          ]
+        },
+        {
+          "workflows": [
+            "AgentGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppGenerator"
+          ]
+        }
+      ]
+    },
+    {
       "id": "workflow_patch",
       "description": "Scoped workflow-bundle revision owned by AgentGenerator.",
       "affected_declarative_families": [
