@@ -45,6 +45,16 @@ This project follows a practical pre-1.0 changelog format:
   and denied again after `subscription_cancelled`. The previous check
   (`status_code in {200, 402}`) passed regardless of whether entitlement
   enforcement existed at all.
+- **Factory regression suite**: `factory_app/eval/` (bundle scorers + run
+  persistence + baseline diff, upstreamed from the hosted product's
+  build_intelligence bundle evaluation) and
+  `tests/test_factory_regression_suite.py`, which materializes the five
+  archetype-matrix app plans offline (no LLM, no network), scores every
+  generated bundle deterministically, and fails CI when a check that passed
+  on the committed baseline (`tests/fixtures/factory_bundle_eval_baseline.json`)
+  regresses. Refresh deliberately with `REFRESH_FACTORY_EVAL_BASELINE=1` and
+  commit the reviewed delta. A determinism guard asserts two
+  materialize+score passes agree exactly.
 
 - **Generic usage instrumentation and rollups**: the platform host records
   `app.page_view` (per page-schema serve) and `app.action_invoked` (per
