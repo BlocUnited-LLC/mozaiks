@@ -26,6 +26,12 @@ This project follows a practical pre-1.0 changelog format:
   pricing landing page can render the plan catalog before login. The scanner
   now also requires `ui/pages/pricing.yaml` in mozaikspay SaaS bundles and
   verifies it binds to `list_plans`.
+- **Rejecting the subscription contract review no longer silently produces a
+  non-SaaS build**: when a reviewer requests changes,
+  SubscriptionContractDesigner now loops back to the designer agent to revise
+  and re-submit instead of terminating without an approved contract, and the
+  downstream generator context hook fails loudly if an unapproved
+  (changes-requested) contract state ever reaches AppGenerator/AgentGenerator.
 
 ### Added
 
