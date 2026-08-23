@@ -12,6 +12,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **Subscription contract refinement routing**: the refinement harness now has
+  a `subscription_contract` build family. Post-build monetization change
+  requests (plans, pricing tiers, entitlement gates) route to new
+  `subscription_patch` (`SubscriptionContractDesigner → AppGenerator`) and
+  `subscription_revision` (`SubscriptionContractDesigner → AgentGenerator →
+  AppGenerator`) sequences instead of silently falling back to `app_bundle`
+  routes that skipped the contract designer. New closure tests enforce that
+  every harness route resolves to a declared sequence, every refinable family
+  has explicit routes, and any sequence claiming to refresh
+  `subscription_contract` actually runs SubscriptionContractDesigner.
+
 ### Fixed
 
 - **SaaS bundles can no longer sell capabilities they never enforce**: the

@@ -9,8 +9,12 @@ content: |
   - core: change in value proposition, target user, product identity, business model, architecture direction, or anything that should reopen ValueEngine
 
   ## Artifact family dependency order (upstream → downstream)
-  concept → design_docs → workflow_bundle → app_bundle
+  concept → design_docs → subscription_contract → workflow_bundle → app_bundle
   concept → brand → app_bundle
+
+  Requests about plans, pricing tiers, entitlement gating, token allowances, or
+  monetization scope target the subscription_contract family when the refined
+  artifact is the subscription contract itself.
 
   ## Staleness-aware routing rules
 

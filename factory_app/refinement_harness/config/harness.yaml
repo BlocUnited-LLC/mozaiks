@@ -24,6 +24,17 @@ routing:
           workflow_sequence: design_revision
         core:
           workflow_sequence: full_rebuild
+    - build_family: subscription_contract
+      label: subscription contract
+      routes:
+        patch:
+          workflow_sequence: subscription_patch
+        design:
+          workflow_sequence: subscription_revision
+        feature:
+          workflow_sequence: subscription_revision
+        core:
+          workflow_sequence: full_rebuild
     - build_family: workflow_bundle
       label: workflow bundle
       routes:
