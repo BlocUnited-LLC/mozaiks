@@ -175,6 +175,15 @@ lifecycle_tools: []
 - `UI_Surface` = one-way artifact/status surface emitted via `emit_ui_surface(...)`
 - `Agent_Tool` = backend-only logic; omit the `ui` block entirely
 
+**Component naming convention**:
+- Only components registered in the workflow's `ui/index.js` and referenced by
+  a `ui.component` entry in `tools.yaml` are artifacts or inline components.
+- Internal sub-components that render *inside* a registered artifact (tabs,
+  split panes, status strips) are **panes** — name them `*Pane.js` (e.g.
+  `PreviewPane`, `FileTreePane`), never `*Artifact.js`. An `Artifact` suffix
+  on an unregistered component misleads readers (and future generator agents)
+  into treating it as an independently registered surface.
+
 ---
 
 ## Implementation Guidelines for Generator Agents

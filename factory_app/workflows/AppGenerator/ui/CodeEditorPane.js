@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/CodeEditorArtifact.js
+// FILE: ChatUI/src/workflows/AppGenerator/components/CodeEditorPane.js
 // DESCRIPTION: Monaco code editor wrapper for AppWorkbench
 // ==============================================================================
 
@@ -28,7 +28,7 @@ const getLanguageFromPath = (filePath, fallback = 'javascript') => {
   return languageMap[ext] || 'plaintext';
 };
 
-const CodeEditorArtifact = ({ filePath, content, onChange, config = {}, readOnly = false }) => {
+const CodeEditorPane = ({ filePath, content, onChange, config = {}, readOnly = false }) => {
   const editorCfg = useMemo(() => config?.artifacts?.['code-editor'] || {}, [config]);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -111,4 +111,4 @@ const CodeEditorArtifact = ({ filePath, content, onChange, config = {}, readOnly
   );
 };
 
-export default CodeEditorArtifact;
+export default CodeEditorPane;

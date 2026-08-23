@@ -10,11 +10,11 @@ import { useChatUI } from '@mozaiks/chat-ui/context/ChatUIContext.jsx';
 import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
-import BuildStatusArtifact from './BuildStatusArtifact';
-import CodeEditorArtifact from './CodeEditorArtifact';
-import E2BPreviewArtifact from './E2BPreviewArtifact';
+import BuildStatusPane from './BuildStatusPane';
+import CodeEditorPane from './CodeEditorPane';
+import PreviewPane from './PreviewPane';
 import ExportActions from './ExportActions';
-import FileTreeArtifact from './FileTreeArtifact';
+import FileTreePane from './FileTreePane';
 import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.jsx';
 import { studioFetch } from '../../../app/admin/pages/studioApi.js';
 
@@ -356,7 +356,7 @@ const AppWorkbench = ({
       </div>
 
       <div className="p-4 space-y-4">
-        <BuildStatusArtifact
+        <BuildStatusPane
           config={config}
           validationResult={validationResult}
           validationStatus={validationStatus}
@@ -574,7 +574,7 @@ const AppWorkbench = ({
         <div className={['grid gap-4', showSplit ? 'grid-cols-12' : 'grid-cols-12'].join(' ')}>
           {(showSplit || showCode) && (
             <div className={showSplit ? 'col-span-3' : 'col-span-4'}>
-              <FileTreeArtifact
+              <FileTreePane
                 filesMap={filesMap}
                 config={config}
                 selectedPath={selectedPath}
@@ -585,7 +585,7 @@ const AppWorkbench = ({
 
           {(showSplit || showCode) && (
             <div className={showSplit ? 'col-span-5' : 'col-span-8'}>
-              <CodeEditorArtifact
+              <CodeEditorPane
                 config={config}
                 filePath={selectedPath}
                 content={currentContent}
@@ -599,7 +599,7 @@ const AppWorkbench = ({
 
           {(showSplit || showPreview) && (
             <div className={showSplit ? 'col-span-4' : 'col-span-12'}>
-              <E2BPreviewArtifact
+              <PreviewPane
                 previewUrl={livePreviewUrl || previewUrl}
                 sandboxStatus={sandboxStatus}
                 sandboxSyncing={sandboxSyncing}

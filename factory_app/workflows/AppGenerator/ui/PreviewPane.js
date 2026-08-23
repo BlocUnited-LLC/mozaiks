@@ -1,12 +1,12 @@
 // ==============================================================================
-// FILE: factory_app/workflows/AppGenerator/ui/E2BPreviewArtifact.js
+// FILE: factory_app/workflows/AppGenerator/ui/PreviewPane.js
 // DESCRIPTION: Preview iframe with basic controls
 // ==============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 
-const E2BPreviewArtifact = ({ previewUrl, sandboxStatus, sandboxSyncing, sandboxError, config = {} }) => {
+const PreviewPane = ({ previewUrl, sandboxStatus, sandboxSyncing, sandboxError, config = {} }) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
   const [iframeKey, setIframeKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -36,9 +36,9 @@ const E2BPreviewArtifact = ({ previewUrl, sandboxStatus, sandboxSyncing, sandbox
           </div>
         ) : (
           <>
-            <div className="text-sm text-[var(--color-text-muted)]">No preview URL available.</div>
+            <div className="text-sm text-[var(--color-text-muted)]">Live preview not available for this build.</div>
             <div className="text-xs text-[var(--color-text-muted)] mt-1">
-              Preview URLs are typically available for <span className="font-mono">e2b</span> validation runs with <span className="font-mono">start_dev_server=true</span>.
+              Previews appear when app validation runs in a sandbox (<span className="font-mono">e2b</span> with an API key, or local <span className="font-mono">docker</span>). Builds validated with the <span className="font-mono">local</span> or <span className="font-mono">skip</span> strategy have no live preview.
             </div>
           </>
         )}
@@ -137,4 +137,4 @@ const E2BPreviewArtifact = ({ previewUrl, sandboxStatus, sandboxSyncing, sandbox
   );
 };
 
-export default E2BPreviewArtifact;
+export default PreviewPane;

@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/FileTreeArtifact.js
+// FILE: ChatUI/src/workflows/AppGenerator/components/FileTreePane.js
 // DESCRIPTION: Generated file browser (tree) for AppWorkbench
 // ==============================================================================
 
@@ -96,7 +96,7 @@ const TreeNode = ({ name, node, depth, onSelectFile, selectedPath, defaultExpand
   );
 };
 
-const FileTreeArtifact = ({ filesMap = {}, config = {}, selectedPath, onSelectFile }) => {
+const FileTreePane = ({ filesMap = {}, config = {}, selectedPath, onSelectFile }) => {
   const treeConfig = useMemo(() => config?.artifacts?.['file-tree'] || {}, [config]);
   const tree = useMemo(() => buildTree(filesMap), [filesMap]);
   const entries = useMemo(() => sortEntries(Object.entries(tree), treeConfig.sortFoldersFirst !== false), [tree, treeConfig]);
@@ -133,4 +133,4 @@ const FileTreeArtifact = ({ filesMap = {}, config = {}, selectedPath, onSelectFi
   );
 };
 
-export default FileTreeArtifact;
+export default FileTreePane;
