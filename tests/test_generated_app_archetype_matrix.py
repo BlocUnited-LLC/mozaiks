@@ -21,12 +21,18 @@ from mozaiksai.core.admin.registry import AdminRegistry, build_admin_shell_route
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
 from mozaiksai.core.auth.adapters.registry import register_adapter, reset_auth_adapter
+from mozaiksai.core.billing.fulfillment import (
+    BillingFulfillmentCommandStore,
+    BillingFulfillmentService,
+)
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition import module_executor as module_executor_mod
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
 from mozaiksai.core.startup import validation as startup_validation
+from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.core.validation import GeneratedAppValidationRequest, scan_functional_generated_app
 from mozaiksai.core.validation.generated_app import validate_generated_app_bundle
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
@@ -789,7 +795,58 @@ def _configure_platform(
     if spec.auth_enabled:
         register_adapter("matrix", _MatrixAuthAdapter)
 
-    executor = ModuleExecutor()
+    # Monetized archetypes get the REAL entitlement chain, not a no-op: the
+    # ConfiguredEntitlementAdapter reads the bundle's own subscriptions.yaml
+    # and an in-memory assignment store, and the platform's billing
+    # fulfillment endpoint is wired so runtime checks can flip entitlement
+    # by applying verified-provider commands over HTTP — the same loop a
+    # deployed generated app runs.
+    entitlement_checker = None
+    platform.app.state.billing_fulfillment_command_store = None
+    platform.app.state.billing_fulfillment_service_factory = None
+    if loaded.subscriptions_config is not None:
+        from tests.test_generated_saas_subscription_runtime_acceptance import (
+            _Collection as _SaasCollection,
+        )
+        from tests.test_generated_saas_subscription_runtime_acceptance import (
+            _Database as _SaasDatabase,
+        )
+        from tests.test_generated_saas_subscription_runtime_acceptance import (
+            _NoopAuditLogger as _SaasNoopAuditLogger,
+        )
+
+        assignments = _SaasCollection([])
+        fulfillment_db = _SaasDatabase()
+        ledger = TokenWalletLedger(database=fulfillment_db)
+        command_store = BillingFulfillmentCommandStore(database=fulfillment_db)
+        entitlement_checker = ConfiguredEntitlementAdapter(
+            config=loaded.subscriptions_config,
+            collection_resolver=lambda alias: assignments,
+        )
+        monkeypatch.setenv("INTERNAL_API_KEY", "matrix-internal-key")
+        monkeypatch.setattr(
+            "mozaiksai.hosts.routers.billing.get_audit_logger",
+            lambda: _SaasNoopAuditLogger(),
+        )
+        monkeypatch.setattr(
+            "mozaiksai.core.runtime.composition.module_executor.get_audit_logger",
+            lambda: _SaasNoopAuditLogger(),
+        )
+        platform.app.state.billing_fulfillment_command_store = command_store
+        platform.app.state.billing_fulfillment_service_factory = (
+            lambda request: BillingFulfillmentService(
+                config=loaded.subscriptions_config,
+                ledger=ledger,
+                collection_resolver=lambda alias: assignments,
+                command_store=command_store,
+            )
+        )
+
+    executor = (
+        ModuleExecutor(entitlement_checker=entitlement_checker)
+        if entitlement_checker is not None
+        else ModuleExecutor()
+    )
     for module in loaded.modules:
         executor.register(
             module.name,
@@ -928,16 +985,60 @@ def _crud_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> No
 
 
 def _saas_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> None:
+    """Prove the subscription → entitlement → gate chain, not just page serving.
+
+    The gated action must be DENIED on the free default plan, GRANTED after a
+    verified-provider fulfillment command upgrades the user to pro through the
+    app's own /api/billing/fulfillment/apply endpoint, and DENIED again after
+    cancellation — the exact loop a deployed monetized app runs.
+    """
     headers = {"Authorization": "Bearer matrix-token"}
     page = client.get("/api/pages/reports", headers=headers)
     _assert_not_missing_or_placeholder(page, surface="/api/pages/reports")
     assert page.status_code == 200
+
+    # Free default plan grants reports.view — the ungated/free surface works.
     list_reports = client.post("/api/modules/reports/view_report", json={"params": {}}, headers=headers)
     _assert_not_missing_or_placeholder(list_reports, surface="/api/modules/reports/view_report")
     assert list_reports.status_code == 200
-    export_report = client.post("/api/modules/reports/export_report", json={"params": {}}, headers=headers)
-    _assert_not_missing_or_placeholder(export_report, surface="/api/modules/reports/export_report")
-    assert export_report.status_code in {200, 402}
+
+    # reports.export is pro-only: denied before any subscription exists.
+    denied = client.post("/api/modules/reports/export_report", json={"params": {}}, headers=headers)
+    assert denied.status_code == 402, (
+        f"ENTITLEMENT_GATE_INERT: expected 402 before fulfillment, got {denied.status_code}"
+    )
+    assert denied.json()["detail"]["error_code"] == "ENTITLEMENT_REQUIRED"
+
+    fulfillment_headers = {"x-internal-api-key": "matrix-internal-key"}
+
+    def _apply(command_id: str, event_type: str) -> None:
+        response = client.post(
+            "/api/billing/fulfillment/apply",
+            json={
+                "command_id": command_id,
+                "event_type": event_type,
+                "source": "mozaikspay",
+                "app_id": "matrix",
+                "user_id": "matrix-user",
+                "plan_id": "pro",
+                "occurred_at": "2026-08-01T00:00:00+00:00",
+            },
+            headers=fulfillment_headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "applied"
+
+    _apply("cmd_matrix_saas_activate_1", "subscription_activated")
+    granted = client.post("/api/modules/reports/export_report", json={"params": {}}, headers=headers)
+    assert granted.status_code == 200, (
+        f"ENTITLEMENT_NOT_GRANTED after fulfillment: {granted.status_code} {granted.text[:200]}"
+    )
+
+    _apply("cmd_matrix_saas_cancel_1", "subscription_cancelled")
+    denied_again = client.post("/api/modules/reports/export_report", json={"params": {}}, headers=headers)
+    assert denied_again.status_code == 402, (
+        f"ENTITLEMENT_NOT_REVOKED after cancellation: {denied_again.status_code}"
+    )
 
 
 def _workflow_checks(client: TestClient, _files: dict[str, str], _loaded: Any) -> None:

@@ -35,6 +35,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Monetized archetype proves the entitlement chain**: the generated-app
+  archetype matrix now wires the monetized SaaS archetype with the real
+  `ConfiguredEntitlementAdapter` and the platform billing fulfillment
+  endpoint instead of a no-op checker, and asserts the full loop — gated
+  action denied on the free default plan (402 ENTITLEMENT_REQUIRED),
+  granted after a verified-provider `subscription_activated` fulfillment
+  command applied through the app's own `/api/billing/fulfillment/apply`,
+  and denied again after `subscription_cancelled`. The previous check
+  (`status_code in {200, 402}`) passed regardless of whether entitlement
+  enforcement existed at all.
+
 - **Generic usage instrumentation and rollups**: the platform host records
   `app.page_view` (per page-schema serve) and `app.action_invoked` (per
   successful module action) into the app's own AppMetrics store —
