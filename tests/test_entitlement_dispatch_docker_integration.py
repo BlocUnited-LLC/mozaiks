@@ -263,6 +263,7 @@ def _collection_name_for_billing_subscriptions() -> str:
                     "collections": [
                         {
                             "name": "subscriptions",
+                            "mongo_collection": "subscriptions",
                             "ownership": {"surface_id": "entitlement_dispatch", "surface_kind": "module"},
                             "data_alias": "billing.subscriptions",
                         }
