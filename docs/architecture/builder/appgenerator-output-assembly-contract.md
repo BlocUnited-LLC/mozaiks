@@ -440,6 +440,27 @@ acceptance gate writes a bundle repair contract before export can proceed:
 - `bundle_repair_errors`
 - `bundle_repair_result`
 
+Both workflow-integration and generated-bundle repair contracts also persist a
+stable failure fingerprint and a `no_progress` flag. The acceptance gate
+normalizes the current failure evidence and hashes it before scheduling a repair.
+If validation after a repair produces the identical fingerprint, the gate marks
+the repair `blocked` immediately instead of spending another model turn on the
+same unchanged failure. A changed fingerprint may consume the next bounded
+attempt. Passing validation clears the fingerprint and no-progress state.
+
+This makes the repair controller deterministic:
+
+1. observe validation evidence
+2. classify the narrowest owning agent
+3. emit a bounded repair request
+4. apply only that agent's owned file delta
+5. re-run the authoritative acceptance gate
+6. stop on pass, repeated evidence, or attempt exhaustion
+
+Agent prompts may propose a patch, but they do not decide whether the loop
+continues. The acceptance gate, failure fingerprint, ownership table, and retry
+budget are the control authority.
+
 The target must be the narrowest owning agent: `AppSchemaAgent` for page/schema
 endpoint drift, `ConfigMiddlewareAgent` for config or managed-capability client
 drift, `ServiceAgent` for backend Python/service drift, and `FrontendStubAgent`

@@ -747,6 +747,127 @@ async def test_app_bundle_acceptance_blocks_bundle_repair_after_max_attempts() -
     assert context.get("bundle_repair_attempt_count") == 2
 
 
+@pytest.mark.asyncio
+async def test_app_bundle_acceptance_blocks_identical_no_progress_repair() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    files["modules/support_tickets/backend/token_wallet_ledger.py"] = (
+        "class TokenWalletLedger:\n"
+        "    pass\n"
+    )
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    repeated = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert first["bundle_repair"]["status"] == "needs_revision"
+    assert repeated["bundle_repair"]["status"] == "blocked"
+    assert repeated["bundle_repair"]["no_progress"] is True
+    assert repeated["bundle_repair"]["failure_fingerprint"] == first["bundle_repair"]["failure_fingerprint"]
+    assert repeated["bundle_repair"]["attempt"] == 1
+    assert context.get("bundle_repair_no_progress") is True
+    assert context.get("bundle_repair_target") is None
+
+
+def test_bundle_repair_allows_changed_failure_within_budget() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    first_error = "modules/support/backend/token_wallet_ledger.py: forbidden helper"
+    changed_error = "modules/support/backend/provider_client.py: raw provider secret key literal"
+    first_fingerprint = module._repair_failure_fingerprint(
+        repair_kind="bundle:ServiceAgent",
+        evidence={"target_errors": [first_error], "deferred_errors": []},
+    )
+    context = _Context(
+        {
+            "bundle_repair_attempt_count": 1,
+            "bundle_repair_failure_fingerprint": first_fingerprint,
+        }
+    )
+
+    result = module._prepare_bundle_repair(
+        {"passed": False, "errors": [changed_error]},
+        context,
+    )
+
+    assert result["status"] == "needs_revision"
+    assert result["no_progress"] is False
+    assert result["attempt"] == 2
+    assert result["failure_fingerprint"] != first_fingerprint
+    assert context.get("bundle_repair_target") == "ServiceAgent"
+
+
+@pytest.mark.asyncio
+async def test_workflow_integration_repair_blocks_identical_no_progress_failure() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    del files["modules/support_tickets/contracts/reactions.yaml"]
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    first = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    repeated = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert first["workflow_integration_repair"]["status"] == "needs_revision"
+    assert repeated["workflow_integration_repair"]["status"] == "blocked"
+    assert repeated["workflow_integration_repair"]["no_progress"] is True
+    assert (
+        repeated["workflow_integration_repair"]["failure_fingerprint"]
+        == first["workflow_integration_repair"]["failure_fingerprint"]
+    )
+    assert repeated["workflow_integration_repair"]["attempt"] == 1
+    assert context.get("workflow_integration_repair_no_progress") is True
+
+
+def test_workflow_integration_fingerprint_ignores_failed_test_order() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    failed_tests = [
+        {"test": "event", "path": "modules/a/contracts/events.yaml", "error": "missing event"},
+        {"test": "reaction", "path": "modules/a/contracts/reactions.yaml", "error": "missing reaction"},
+    ]
+    context = _Context({})
+
+    first = module._prepare_workflow_integration_repair(
+        {"passed": False, "failed_tests": failed_tests},
+        context,
+    )
+    repeated = module._prepare_workflow_integration_repair(
+        {"passed": False, "failed_tests": list(reversed(failed_tests))},
+        context,
+    )
+
+    assert first["status"] == "needs_revision"
+    assert repeated["status"] == "blocked"
+    assert repeated["no_progress"] is True
+    assert repeated["failure_fingerprint"] == first["failure_fingerprint"]
+
+
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
     from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 

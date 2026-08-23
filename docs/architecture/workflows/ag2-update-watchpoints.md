@@ -24,6 +24,10 @@ Reviewed on August 14, 2026 against:
   - <https://docs.ag2.ai/latest/docs/beta/network/task_observation/>
   - <https://docs.ag2.ai/latest/docs/beta/tasks/>
   - <https://docs.ag2.ai/latest/docs/beta/ag2_compatibility/>
+  - <https://docs.ag2.ai/docs/blog/2026/05/14/AG2-Action-Driven-Network/>
+  - <https://docs.ag2.ai/docs/blog/2026/05/16/AG2-Network-What-Survives/>
+  - <https://docs.ag2.ai/docs/blog/2026/06/16/AG2-Network-Networks-You-Can-Deploy/>
+  - <https://docs.ag2.ai/docs/blog/2026/06/17/AG2-Agent-Harness/>
 
 AG2 currently owns the primitives Mozaiks should not recreate:
 
@@ -119,6 +123,31 @@ changes under `mozaiksai/core/workflow`, `mozaiksai/core/adapters`, or
 ## Current Decision Log
 
 ### August 22, 2026
+
+- **AG2 Harness and deployable-network series reviewed; build repair remains
+  Mozaiks-owned deterministic policy**: reviewed the Agent Harness, Networks You
+  Can Deploy, and What Survives posts alongside the Action-Driven Network review.
+  Conclusions:
+  - `MemoryStream`, retry/telemetry middleware, token observers, tools, and
+    human-input hooks are useful execution and observability primitives. Mozaiks
+    already uses the applicable primitives behind adapter boundaries.
+  - AG2 `LoopDetector` observes repeated tool calls; it does not replace the
+    AppGenerator acceptance gate. AppGenerator therefore fingerprints normalized
+    validation failures and deterministically blocks an unchanged repair result.
+  - AG2 compaction, aggregation, and `KnowledgeStore` are conversation-memory
+    concerns. App context, validation evidence, artifact lineage, staleness,
+    acceptance, and promotion remain typed Mozaiks records rather than agent
+    memory.
+  - Hub WAL, checkpoint storage, at-least-once delivery, authentication, dynamic
+    membership, and federation matter when workflow workers cross process or
+    trust boundaries. They are not prerequisites for the local build-repair
+    loop. Mozaiks should adopt the native durable channel path when it can
+    preserve tenant scope and exact resumability, rather than creating a second
+    agent network.
+  - None of the four posts changes the ownership boundary: AG2 may execute agent
+    turns and preserve channel events; Mozaiks selects the artifact version,
+    classifies impact, validates generated files, bounds repair, requires review,
+    and authorizes promotion.
 
 - **Action-Driven Network blog post reviewed, layering confirmed**: reviewed
   AG2's Action-Driven Network post
