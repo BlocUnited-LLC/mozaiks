@@ -131,6 +131,12 @@ class BuildRecord(BaseModel):
     canonical_inputs_version: dict[str, str] = Field(default_factory=dict)
     lifecycle_status: BuildRecordStatus = BuildRecordStatus.DRAFT
     validation_status: BuildRecordValidationStatus = BuildRecordValidationStatus.PENDING
+    # Sandbox build-validation outcome, first-class and queryable (the full
+    # trimmed result stays in commit_metadata.metadata["app_validation_result"]).
+    app_validation_status: str | None = None
+    app_validation_strategy: str | None = None
+    sandbox_session_id: str | None = None
+    sandbox_provider: str | None = None
     invalidated_by_build_record_id: str | None = None
     invalidation_reason: str | None = None
     stale_at: datetime | None = None

@@ -24,6 +24,20 @@ This project follows a practical pre-1.0 changelog format:
   every harness route resolves to a declared sequence, every refinable family
   has explicit routes, and any sequence claiming to refresh
   `subscription_contract` actually runs SubscriptionContractDesigner.
+- **Sandbox boundary, previews, and persistence**: codified the boundary
+  between AG2 agent-level execution (`SandboxShellTool`) and Mozaiks-owned
+  app-preview/validation sandboxes (`SandboxPort`) in the ownership-boundary
+  and watchpoints docs, plus a consolidated
+  `docs/architecture/builder/app-validation-sandboxes.md` (strategies, all
+  env vars, hosted e2b activation and cost posture). Docker validation
+  sandboxes now publish preview ports so `get_preview_url` works locally for
+  free. Validation results persist `sandbox_session_id`/`sandbox_provider`,
+  provider sandboxes are created with identity metadata and kill deadlines
+  (closing the orphaned-sandbox billing vector), and `BuildRecord` gains
+  queryable `app_validation_status` / `app_validation_strategy` /
+  `sandbox_session_id` / `sandbox_provider` fields. The control-plane coding
+  worker's unimplemented `e2b` validation label was removed so build records
+  only claim strategies that actually ran.
 
 ### Fixed
 

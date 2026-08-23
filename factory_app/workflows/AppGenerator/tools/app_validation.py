@@ -957,8 +957,15 @@ async def _run_sandbox_validation(
     commands: list[str],
     start_dev_server: bool,
     timeout_seconds: int,
+    session_metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Run build validation through a SandboxPort adapter (e2b or docker)."""
+    """Run build validation through a SandboxPort adapter (e2b or docker).
+
+    The session is tagged with app/chat identity metadata so orphaned
+    provider sandboxes can be reconciled to their app, and the session
+    identity is recorded on the result so the run that produced a validation
+    outcome is durable evidence rather than an ephemeral local variable.
+    """
     from mozaiksai.core.adapters import get_sandbox_adapter
 
     try:
@@ -973,8 +980,13 @@ async def _run_sandbox_validation(
     result = _base_result(strategy=strategy, status="passed")
     session_id: str | None = None
     try:
-        session = await adapter.create_session(timeout_seconds=timeout_seconds)
+        session = await adapter.create_session(
+            timeout_seconds=timeout_seconds,
+            metadata=session_metadata or {"purpose": "app_validation"},
+        )
         session_id = session.session_id
+        result["sandbox_session_id"] = session_id
+        result["sandbox_provider"] = session.provider
 
         await adapter.write_files(session_id=session_id, files=resolved_files)
 
@@ -2482,6 +2494,11 @@ async def validate_app_build(
         commands=list(commands),
         start_dev_server=bool(start_dev_server),
         timeout_seconds=timeout_seconds,
+        session_metadata={
+            "purpose": "app_validation",
+            **({"app_id": str(app_id)} if app_id else {}),
+            **({"chat_id": str(chat_id)} if chat_id else {}),
+        },
     )
     result["strategy_reason"] = strategy_reason
     _persist_validation_context(context_variables=context_variables, result=result)

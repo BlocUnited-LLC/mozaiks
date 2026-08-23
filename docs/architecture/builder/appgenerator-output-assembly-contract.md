@@ -515,6 +515,7 @@ implicit E2B-only behavior.
 Canonical strategy values:
 
 - `e2b`
+- `docker`
 - `local`
 - `skip`
 
@@ -527,6 +528,9 @@ Canonical status values:
 Rules:
 
 - Studio/hosted environments may prefer `e2b` when sandbox credentials are available.
+- Local environments with a running Docker daemon resolve to `docker`, which also
+  exposes a preview URL (see
+  [app-validation-sandboxes.md](app-validation-sandboxes.md)).
 - CLI/local environments may resolve to `local` or explicit `skip`.
 - generation/export must not be blocked solely because E2B is unavailable.
 - `skip` is explicit and deterministic; it is not a hidden fallback and it is not
