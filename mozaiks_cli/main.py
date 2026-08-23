@@ -339,7 +339,7 @@ def create_parser():
     )
     gen_parser.add_argument(
         "--validation-strategy",
-        choices=["e2b", "local", "skip"],
+        choices=["e2b", "docker", "local", "skip"],
         default=None,
         help="App validation strategy for AppGenerator runs (default: resolved from the current environment)",
     )
