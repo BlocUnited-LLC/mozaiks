@@ -59,7 +59,8 @@ For the hosted product (users have no local Docker):
 
 1. Set `E2B_API_KEY` on the platform environment. Strategy auto-resolves to
    `e2b`; the Studio conversation renders the preview iframe
-   (`E2BPreviewArtifact`) from the validation result's preview URL.
+   (the `PreviewPane` inside the `AppWorkbench` artifact) from the validation
+   result's preview URL.
 2. **Cost posture:** e2b bills per sandbox-minute. Sessions carry a kill
    deadline (`E2B_TIMEOUT` for validation runs, `SANDBOX_TTL_MINUTES` for
    artifact preview sessions) and identity metadata — audit orphans by

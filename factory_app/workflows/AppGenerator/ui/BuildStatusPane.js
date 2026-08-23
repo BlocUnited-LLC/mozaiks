@@ -1,12 +1,12 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/BuildStatusArtifact.js
+// FILE: ChatUI/src/workflows/AppGenerator/components/BuildStatusPane.js
 // DESCRIPTION: Build/test validation status summary
 // ==============================================================================
 
 import React, { useMemo, useRef, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 
-const BuildStatusArtifact = ({
+const BuildStatusPane = ({
   validationResult = {},
   validationStatus = 'pending',
   validationStrategy = null,
@@ -275,4 +275,4 @@ const BuildStatusArtifact = ({
   );
 };
 
-export default BuildStatusArtifact;
+export default BuildStatusPane;

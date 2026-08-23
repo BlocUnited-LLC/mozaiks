@@ -14,6 +14,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- **AppWorkbench pane naming and preview messaging cleaned up**: the internal
+  panes of the Studio `AppWorkbench` artifact are now named `*Pane.js`
+  (`PreviewPane`, `FileTreePane`, `CodeEditorPane`, `BuildStatusPane`) instead
+  of the misleading `*Artifact.js`, since only `AppWorkbench` itself is a
+  registered UI artifact. The preview pane's empty state now explains when a
+  live preview is available (e2b or Docker sandbox validation) instead of
+  referencing e2b internals. The workflow UI docs gain an explicit
+  artifact-vs-pane naming convention.
+
 - **README onboarding restructured around the documented first-run path**: the
   Quickstart now opens with a prerequisites list and five numbered steps
   (install, MongoDB, LLM key, `quickstart`, first app), and sits above the
