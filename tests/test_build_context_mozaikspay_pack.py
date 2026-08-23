@@ -255,12 +255,21 @@ def test_billing_portal_module_permissions_are_declared() -> None:
 
 def test_billing_portal_read_actions_require_read_permission() -> None:
     module_yaml = _read_yaml(TEMPLATES / "modules" / "billing_portal" / "module.yaml")
-    read_actions = {"get_subscription_status", "get_usage_status", "get_token_status", "list_plans"}
+    # list_plans is excluded: it is the anonymous public catalog behind /pricing
+    # (api_surface public_readonly, no permissions).
+    read_actions = {"get_subscription_status", "get_usage_status", "get_token_status"}
     for action in (module_yaml.get("actions") or []):
         if action["id"] in read_actions:
             assert "billing_portal.read" in action.get("permissions", []), (
                 f"{action['id']} must require billing_portal.read"
             )
+
+
+def test_billing_portal_list_plans_is_public_catalog() -> None:
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "billing_portal" / "module.yaml")
+    list_plans = next(a for a in module_yaml["actions"] if a["id"] == "list_plans")
+    assert list_plans.get("api_surface") == "public_readonly"
+    assert not list_plans.get("permissions")
 
 
 def test_billing_portal_manage_actions_require_manage_permission() -> None:

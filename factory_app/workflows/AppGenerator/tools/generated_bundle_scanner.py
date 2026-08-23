@@ -833,6 +833,7 @@ def _scan_mozaikspay_saas_contract(
         "modules/billing_portal/backend/schemas.py",
         "ui/pages/billing.yaml",
         "ui/pages/usage.yaml",
+        "ui/pages/pricing.yaml",
     }
     missing = sorted(path for path in required_paths if path not in normalized_files)
     if missing:
@@ -883,13 +884,33 @@ def _scan_mozaikspay_saas_contract(
     module_content = normalized_files.get("modules/billing_portal/module.yaml", "")
     if module_content:
         actions = _module_actions_from_yaml("modules/billing_portal/module.yaml", module_content)
-        required_actions = {"get_subscription_status", "get_usage_status", "open_billing_portal"}
+        required_actions = {
+            "get_subscription_status",
+            "get_usage_status",
+            "list_plans",
+            "open_billing_portal",
+        }
         missing_actions = sorted(required_actions - actions)
         if missing_actions:
             errors.append(
                 "modules/billing_portal/module.yaml must expose app-owned SaaS billing facade "
                 f"actions: {missing_actions}."
             )
+        parsed_module, module_parse_error = _load_yaml_mapping_from_file(
+            {"modules/billing_portal/module.yaml": module_content},
+            "modules/billing_portal/module.yaml",
+        )
+        if not module_parse_error and isinstance(parsed_module, dict):
+            for action in parsed_module.get("actions") or []:
+                if not isinstance(action, dict) or action.get("id") != "list_plans":
+                    continue
+                surface = str(action.get("api_surface") or "").strip()
+                if surface not in {"public", "public_readonly"} or action.get("permissions"):
+                    errors.append(
+                        "modules/billing_portal/module.yaml: 'list_plans' is the canonical "
+                        "anonymous data source for the public /pricing page and must declare "
+                        "api_surface public_readonly with no permissions."
+                    )
         declared_module_id = _declared_module_id_from_yaml(
             "modules/billing_portal/module.yaml",
             module_content,
@@ -937,6 +958,9 @@ def _scan_mozaikspay_saas_contract(
         },
         "ui/pages/usage.yaml": {
             "/api/modules/billing_portal/get_usage_status",
+        },
+        "ui/pages/pricing.yaml": {
+            "/api/modules/billing_portal/list_plans",
         },
     }
     for page_path, required_endpoints in page_requirements.items():
@@ -1246,7 +1270,23 @@ def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> li
             gate_contexts.append((path, action_id, gate))
 
     if not gate_contexts:
-        # No gated actions in any module — nothing to validate.
+        module_paths = sorted(
+            path
+            for path in normalized_files
+            if path.startswith("modules/") and path.endswith("/module.yaml")
+        )
+        if plan_capabilities and module_paths:
+            # The bundle sells plan capabilities but gates nothing, so every
+            # declared capability is unenforceable at dispatch time and the
+            # subscription contract is decorative.
+            return [
+                "config/subscriptions.yaml grants plan capabilities "
+                f"{sorted(plan_capabilities)} but no module action declares an "
+                "entitlement_gate. A SaaS bundle that sells capabilities must "
+                "enforce at least one of them: set actions[].entitlement_gate "
+                "to a granted capability_id on each plan-gated action in "
+                f"{module_paths}."
+            ]
         return []
 
     errors: list[str] = []

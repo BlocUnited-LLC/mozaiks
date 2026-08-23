@@ -12,6 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **SaaS bundles can no longer sell capabilities they never enforce**: the
+  generated-bundle scanner now fails a bundle whose
+  `config/subscriptions.yaml` grants plan capabilities while no module action
+  declares an `entitlement_gate` — previously such bundles passed validation
+  and shipped a decorative subscription contract. Token/usage-only plans
+  (no capabilities) are unaffected.
+- **Public /pricing page works anonymously in MozaiksPay SaaS apps**: the
+  mozaikspay pack's `billing_portal.list_plans` action now declares
+  `api_surface: public_readonly` with no permission requirement, so the
+  pricing landing page can render the plan catalog before login. The scanner
+  now also requires `ui/pages/pricing.yaml` in mozaikspay SaaS bundles and
+  verifies it binds to `list_plans`.
+
 ### Added
 
 - **Generic usage instrumentation and rollups**: the platform host records

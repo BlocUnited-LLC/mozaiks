@@ -263,9 +263,11 @@ layers:
           - event: hosted.billing.subscription.cancelled
             reaction: revoke gated capabilities
         operator_pack_note: >
-          When the user explicitly selects monetization_provider=mozaiks_pay and
-          the managed mozaikspay pack is available in capability_packs, use it
-          as the recommended SaaS monetization provider. Generate only the app-owned
+          When the build resolves monetization_provider=mozaiks_pay — the
+          default for SaaS builds unless the user explicitly selects the
+          self-managed OSS path — and the managed mozaikspay pack is available
+          in capability_packs, use it as the SaaS monetization provider.
+          Generate only the app-owned
           billing_portal facade, MozaiksPay client, subscriptions.yaml plan contract,
           pricing/billing/usage pages, and entitlement gates. The generated app calls
           the hosted MozaiksPay API for subscription status and billing portal sessions.
