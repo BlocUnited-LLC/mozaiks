@@ -255,3 +255,41 @@ def test_diff_ignores_bundles_not_in_both_runs(tmp_path):
     delta = diff_runs(current, baseline)
     assert delta.only_in_current == ["b2"]
     assert not delta.regressions
+
+
+def test_diff_gates_pass_to_errored_transitions(tmp_path):
+    """A scorer that passed on baseline and produces no score now (errored or
+    lost its input) must gate as a regression — a raising scorer must not keep
+    CI green while its coverage silently disappears."""
+    _write_bundle(tmp_path / "c4" / "b1")
+    baseline = run_corpus(discover_bundles(tmp_path / "c4"), run_id="v1").to_dict()
+    current = run_corpus(discover_bundles(tmp_path / "c4"), run_id="v2").to_dict()
+
+    # Simulate the scorer erroring on the current run: score and value gone.
+    for feedback in current["bundles"]["b1"]:
+        if feedback["key"] == "gated_capabilities_declared":
+            feedback["score"] = None
+            feedback["value"] = None
+            feedback["comment"] = ""
+
+    delta = diff_runs(current, baseline)
+    keys = {(r["bundle"], r["scorer"]) for r in delta.regressions}
+    assert ("b1", "gated_capabilities_declared") in keys
+
+    # Baseline None (value-only or already-errored scorers) still never gates.
+    for feedback in baseline["bundles"]["b1"]:
+        if feedback["key"] == "gated_capabilities_declared":
+            feedback["score"] = None
+    delta = diff_runs(current, baseline)
+    assert not delta.regressions
+
+
+def test_non_utf8_artifact_degrades_to_scorer_failure(tmp_path):
+    """A stray non-UTF-8 byte in one generated file must not crash the run —
+    Bundle is constructed outside the per-scorer error boundary."""
+    root = _write_bundle(tmp_path / "b8")
+    (root / "config" / "subscriptions.yaml").write_bytes(b"plans:\n  - id: caf\xe9\n")
+    scores = _by_key(root)
+    assert scores["bundle_parses"].score == 0.0
+    # The rest of the run still completes.
+    assert scores["has_app_manifest"].score == 1.0

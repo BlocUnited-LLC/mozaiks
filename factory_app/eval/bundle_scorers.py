@@ -74,7 +74,10 @@ class Bundle:
             return None
         try:
             return path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
+            # UnicodeDecodeError: a generated artifact with a stray non-UTF-8
+            # byte must degrade to a scorer failure, not crash the whole run —
+            # Bundle is constructed outside the per-scorer error boundary.
             self.errors.append(f"{rel}: {exc}")
             return None
 

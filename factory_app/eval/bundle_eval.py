@@ -201,7 +201,19 @@ def diff_runs(current: dict[str, Any], baseline: dict[str, Any]) -> RunDiff:
         base = {f["key"]: f for f in base_bundles[bundle_id]}
         for key in sorted(set(cur) & set(base)):
             before, after = base[key].get("score"), cur[key].get("score")
-            if before is None or after is None:
+            if before is None:
+                continue
+            if after is None:
+                # A scorer that produced a pass/fail score in the baseline but
+                # returned none now has errored or lost its input. Gate it like
+                # a failure — otherwise a scorer that starts raising keeps CI
+                # green while its coverage silently disappears.
+                if before >= 0.5:
+                    out.regressions.append(
+                        {"bundle": bundle_id, "scorer": key,
+                         "comment": cur[key].get("comment")
+                         or "scorer produced no score (errored)"}
+                    )
                 continue
             if before >= 0.5 and after < 0.5:
                 out.regressions.append(
