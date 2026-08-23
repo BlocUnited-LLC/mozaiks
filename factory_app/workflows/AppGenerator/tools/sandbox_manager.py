@@ -152,10 +152,22 @@ class ArtifactSandboxManager:
             self._artifact_to_sandbox[artifact_id] = sandbox_id
             self._sandboxes[sandbox_id] = st
 
-        # Create provider sandbox outside lock
+        # Create provider sandbox outside lock. Two orphan-protection rules:
+        # a provider-side kill deadline matching the TTL (this manager keeps
+        # its session map in memory only, so a process crash must not leave a
+        # sandbox billing forever), and identity metadata so any survivor can
+        # be reconciled back to its artifact by listing provider sandboxes.
         self._logger.info("SANDBOX_CREATE", extra={"artifactId": artifact_id, "sandboxId": sandbox_id})
         try:
-            st.sandbox = Sandbox.create(template=self._template, timeout=None)
+            st.sandbox = Sandbox.create(
+                template=self._template,
+                timeout=(self._ttl_minutes * 60) if self._ttl_minutes > 0 else None,
+                metadata={
+                    "purpose": "artifact_preview",
+                    "artifact_id": str(artifact_id),
+                    "manager_sandbox_id": sandbox_id,
+                },
+            )
             st.status = "starting"
             st.last_error = None
             await self._broadcast(sandbox_id, {"type": "status", "status": "starting"})

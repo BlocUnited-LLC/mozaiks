@@ -57,6 +57,39 @@ schemas. Custom logic is not appropriate when it is a generic replacement for
 AG2 Hub, AgentClient, network adapters, task streams, task observation,
 delegation engines, or agent scheduling.
 
+## Sandbox Execution Boundary
+
+AG2 owns agent-level code and shell execution: `SandboxCodeTool` /
+`SandboxShellTool` over `CodeEnvironment` backends (local, docker, daytona,
+tenki) — the model writes a snippet or command, it runs, results return.
+Mozaiks agents that need shell access declare `sandbox_shell: true` and get
+the AG2 tool; do not build a Mozaiks snippet executor.
+
+Mozaiks owns application-preview and build-validation sandboxes:
+`SandboxPort` and its e2b/docker adapters boot a full generated app —
+write the bundle, install, run the build, start a dev server, expose a
+preview URL, manage session lifecycle and cost. That is application-runtime
+behavior, not agent tooling, and AG2's execution surface deliberately does
+not provide it (no long-lived servers, no preview URLs).
+
+Rules:
+
+- Do not route app preview/validation through AG2 execution tools, and do
+  not reimplement snippet execution behind `SandboxPort`.
+- Every provider sandbox is created with identity metadata (app/chat or
+  artifact id, purpose) and a provider-side kill deadline, and the session
+  id that produced a validation outcome is persisted with the outcome. An
+  orphaned sandbox must be attributable and self-terminating.
+- Sandboxes are ephemeral workspaces, never truth stores — committed output
+  must persist into artifact versions before the session dies (see the
+  refinement engine's E2B contract).
+- A validation strategy label on a build record must name an execution path
+  that actually ran.
+
+Watchpoint: if AG2 `CodeEnvironment` grows long-lived sessions with exposed
+ports, preview URLs, and per-session budgets, shrink `SandboxPort` adapters
+to request/result conversion (see ag2-update-watchpoints.md).
+
 ## Missing AG2 Capability Process
 
 If AG2 does not provide a required capability:

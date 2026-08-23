@@ -34,6 +34,19 @@ _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT", "300"))
 
 
+def _preview_ports() -> list[int]:
+    """Container ports published at create time for preview URLs.
+
+    The configured preview port (SANDBOX_PREVIEW_PORT, default 3000 for node
+    dev servers) plus 8000 for python backends, deduplicated.
+    """
+    preview_port = int(os.getenv("SANDBOX_PREVIEW_PORT", "3000"))
+    ports = [preview_port]
+    if 8000 not in ports:
+        ports.append(8000)
+    return ports
+
+
 def docker_available() -> bool:
     """Return True if the Docker CLI is installed and the daemon is reachable."""
     if not shutil.which("docker"):
@@ -99,11 +112,20 @@ class DockerSandboxAdapter:
         for key, val in (envs or {}).items():
             env_args += ["-e", f"{key}={val}"]
 
+        # Publish the preview ports with random host bindings so
+        # get_preview_url's `docker port` lookup can resolve a URL. Without
+        # -p at create time no binding ever exists and docker previews are
+        # structurally dead.
+        port_args: list[str] = []
+        for container_port in _preview_ports():
+            port_args += ["-p", f"127.0.0.1:0:{container_port}"]
+
         # Run a long-lived idle container so we can exec into it
         rc, stdout, stderr = await self._run([
             "docker", "run", "-d", "--rm",
             "-w", _DEFAULT_WORKDIR,
             *env_args,
+            *port_args,
             image,
             "sh", "-c", f"sleep {timeout_seconds or self._timeout}",
         ])

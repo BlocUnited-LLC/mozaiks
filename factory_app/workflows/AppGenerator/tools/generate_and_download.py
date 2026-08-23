@@ -608,10 +608,23 @@ async def _register_app_bundle_artifact_version(
     parent_version_id = None
     validation_status_raw = None
     lifecycle_status = None
+    app_validation_status = None
+    app_validation_strategy = None
+    sandbox_session_id = None
+    sandbox_provider = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
             parent_version_id = context_variables.get("artifact_version_id")
             validation_status_raw = context_variables.get("app_bundle_acceptance_status")
+            # Sandbox build-validation outcome, persisted first-class so
+            # "which builds passed e2b/docker validation" is queryable
+            # instead of buried in the commit_metadata blob.
+            app_validation_status = context_variables.get("app_validation_status")
+            app_validation_strategy = context_variables.get("app_validation_strategy_used")
+            validation_result = context_variables.get("app_validation_result")
+            if isinstance(validation_result, dict):
+                sandbox_session_id = validation_result.get("sandbox_session_id")
+                sandbox_provider = validation_result.get("sandbox_provider")
         except Exception:
             parent_version_id = None
             validation_status_raw = None
@@ -719,6 +732,10 @@ async def _register_app_bundle_artifact_version(
         source_chat_id=chat_id,
         lifecycle_status=lifecycle_status,
         validation_status=validation_status,
+        app_validation_status=str(app_validation_status) if app_validation_status else None,
+        app_validation_strategy=str(app_validation_strategy) if app_validation_strategy else None,
+        sandbox_session_id=str(sandbox_session_id) if sandbox_session_id else None,
+        sandbox_provider=str(sandbox_provider) if sandbox_provider else None,
         commit_metadata={
             "message": f"{workflow_name}: {bundle_name}",
             "author_user_id": user_id,

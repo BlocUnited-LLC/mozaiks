@@ -33,7 +33,12 @@ from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
-_VALIDATION_STRATEGIES = {"skip", "local", "e2b"}
+# Deliberately excludes "e2b": this worker validates via local subprocesses
+# (run_current_app_source_validation) and has no sandbox execution path, so a
+# plan claiming e2b would stamp a strategy onto build records that never ran.
+# Sandbox-backed worker validation is an AG2 SandboxCodeTool/SandboxPort
+# integration tracked in docs/architecture/workflows/ag2-update-watchpoints.md.
+_VALIDATION_STRATEGIES = {"skip", "local"}
 _CHECKPOINT_EVENT = "coding_requested"
 _MODEL_VALIDATION_COMMAND_MAX_LENGTH = 240
 
@@ -379,7 +384,7 @@ class ScopedRefinementCodingWorker:
             (
                 '{"summary":"...","owned_paths":["..."],'
                 '"updated_files":[{"path":"relative/path","content":"full file content"}],'
-                '"validation_strategy":"skip|local|e2b",'
+                '"validation_strategy":"skip|local",'
                 '"validation_commands":["..."],"start_preview":false,'
                 '"needs_human_review":false,"rationale":"..."}'
             ),

@@ -641,6 +641,10 @@ class BuildRecordStore:
         lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
         validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PENDING,
         commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
+        app_validation_status: str | None = None,
+        app_validation_strategy: str | None = None,
+        sandbox_session_id: str | None = None,
+        sandbox_provider: str | None = None,
     ) -> BuildRecord:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -686,6 +690,10 @@ class BuildRecordStore:
             canonical_inputs_version=dict(canonical_inputs_version or {}),
             lifecycle_status=lifecycle_status,
             validation_status=validation_status,
+            app_validation_status=app_validation_status,
+            app_validation_strategy=app_validation_strategy,
+            sandbox_session_id=sandbox_session_id,
+            sandbox_provider=sandbox_provider,
             files_manifest=manifest_entries,
             commit_metadata=commit_doc,
             created_at=now,
