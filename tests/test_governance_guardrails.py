@@ -28,6 +28,18 @@ def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True, capture_output=True)
+    # Keep the temp repo hermetic: a contributor's global gitignore
+    # (core.excludesFile) may ignore paths like .claude/settings.local.json,
+    # which makes plain `git add` of fixture files fail locally while CI passes.
+    # git rejects os.devnull ("nul" on Windows) as an excludes file, so point
+    # at an empty file inside the temp repo instead.
+    empty_excludes = repo / ".git" / "empty-global-ignore"
+    empty_excludes.write_text("", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.excludesFile", str(empty_excludes)],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _git(repo: Path, *args: str) -> None:
