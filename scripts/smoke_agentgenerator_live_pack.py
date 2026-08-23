@@ -707,7 +707,10 @@ async def run_live_agentgenerator_pack_smoke(
     _require_live_env()
     if enable_telemetry:
         os.environ["AG2_OTEL_ENABLED"] = "true"
-    os.environ["USAGE_EVENTS_ENABLED"] = "false"
+    # Default usage metering off for hermetic runs, but honour an explicit
+    # USAGE_EVENTS_ENABLED=true so live smokes can record per-build token
+    # costs in the runtime usage ledger when a Mongo sink is available.
+    os.environ.setdefault("USAGE_EVENTS_ENABLED", "false")
     os.environ["MOZAIKS_LLM_CONFIG_SKIP_MONGO"] = "true"
     if int(str(os.getenv("LLM_CONFIG_CACHE_TTL") or "0") or "0") <= 0:
         os.environ["LLM_CONFIG_CACHE_TTL"] = "300"
