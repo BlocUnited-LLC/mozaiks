@@ -82,8 +82,10 @@ actions:
     description: >
       Return the available plan catalog declared in app/config/subscriptions.yaml.
       Safe plan display fields only — never exposes managed-capability internals
-      or granted capability identifiers.
+      or granted capability identifiers. Public so the /pricing landing page can
+      render the catalog without authentication.
     handler_method: list_plans
+    api_surface: public_readonly
     input_schema:
       type: object
       properties: {}
@@ -105,7 +107,7 @@ actions:
               token_allowances: {type: array}
         top_up_products: {type: array}
         pricing_catalog: {type: object}
-    permissions: [billing_portal.read]
+    permissions: []
 
   - id: start_subscription_checkout
     description: >

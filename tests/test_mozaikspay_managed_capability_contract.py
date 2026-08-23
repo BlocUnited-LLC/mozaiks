@@ -127,6 +127,35 @@ plans:
 """
 
 
+def _golden_gated_reports_module_yaml() -> str:
+    return """
+schema_version: mozaiks.module.v1
+module:
+  id: reports
+  display_name: Reports
+  version: 1.0.0
+  description: Golden gated feature module
+  handler: backend.handler:ReportsHandler
+permissions:
+  - id: reports.read
+    description: Read generated reports.
+actions:
+  - id: generate_report
+    description: Generate a report for the current workspace.
+    handler_method: generate_report
+    entitlement_gate: reports.generate
+    permissions: [reports.read]
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+"""
+
+
 def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
     pack_descriptor = dict(_read_yaml(_CONTEXT_YAML)["pack"])
     pack_descriptor.setdefault("pack_source_path", str(_PACK_ROOT))
@@ -137,6 +166,9 @@ def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
     }
     files["app.json"] = '{"name":"Golden MozaiksPay SaaS","version":"1.0.0"}\n'
     files["config/subscriptions.yaml"] = _golden_subscriptions_yaml()
+    # A real SaaS bundle gates at least one feature action behind a sold
+    # capability; the scanner rejects capability catalogs with zero gates.
+    files["modules/reports/module.yaml"] = _golden_gated_reports_module_yaml()
 
     deployment_env = _deployment_env_for_capability_packs(capability_packs)
     files.update(
@@ -448,6 +480,18 @@ class TestBillingPortalModuleYaml:
         action_ids = {a["id"] for a in doc.get("actions", [])}
         assert {"get_subscription_status", "get_usage_status", "open_billing_portal"} <= action_ids
 
+    def test_list_plans_is_public_readonly(self):
+        doc = _read_yaml(_MODULE_YAML)
+        list_plans = next(a for a in doc["actions"] if a["id"] == "list_plans")
+        assert list_plans.get("api_surface") == "public_readonly", (
+            "list_plans feeds the public /pricing landing page and must be "
+            "anonymously dispatchable"
+        )
+        assert not list_plans.get("permissions"), (
+            "list_plans must not require permissions — the /pricing page renders "
+            "before authentication"
+        )
+
     def test_no_raw_provider_credentials_in_output_schema(self):
         content = _MODULE_YAML.read_text(encoding="utf-8")
         for forbidden in ("payment_provider_customer_id", "payment_provider_subscription_id", "PAYMENT_PROVIDER_"):
@@ -520,6 +564,7 @@ class TestGoldenGeneratedMozaiksPaySaasBundle:
             "config/subscriptions.yaml",
             "ui/pages/billing.yaml",
             "ui/pages/usage.yaml",
+            "ui/pages/pricing.yaml",
             ".env.example",
             "deployment.manifest.json",
         } <= set(files)

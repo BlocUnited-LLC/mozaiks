@@ -147,7 +147,7 @@ plans:
         cadence: monthly
   - plan_id: pro
     label: Pro
-    capabilities: [billing_portal.read]
+    capabilities: [billing_portal.read, reports.generate]
     usage_limits:
       - meter_id: ai_tokens
         unit: tokens
@@ -187,8 +187,21 @@ actions:
     handler_method: get_subscription_status
   - id: get_usage_status
     handler_method: get_usage_status
+  - id: list_plans
+    handler_method: list_plans
+    api_surface: public_readonly
   - id: open_billing_portal
     handler_method: open_billing_portal
+""",
+        "modules/reports/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: reports
+  handler: backend.handler:ReportsHandler
+actions:
+  - id: generate_report
+    handler_method: generate_report
+    entitlement_gate: reports.generate
 """,
         "modules/billing_portal/backend/handler.py": """
 class BillingPortalHandler:
@@ -249,6 +262,20 @@ sections:
         - key: id
           label: ID
       api_endpoint: /api/modules/billing_portal/get_usage_status
+""",
+        "ui/pages/pricing.yaml": """
+schema_version: mozaiks.app_page.v1
+name: pricing
+route: /pricing
+title: Pricing
+page_type: landing
+layout: full-width
+sections:
+  - id: plan-catalog
+    primitive: PricingCatalog
+    config:
+      title: Plans
+      api_endpoint: /api/modules/billing_portal/list_plans
 """,
     }
     if include_deployment:
@@ -869,7 +896,7 @@ plans:
     capabilities: []
   - plan_id: pro
     label: Pro
-    capabilities: [billing_portal.read]
+    capabilities: [billing_portal.read, reports.generate]
 """
 
     errors = scan_generated_bundle(

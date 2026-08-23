@@ -312,9 +312,22 @@ class TestEntitlementGateClosurePositive:
         )
         assert _scan_entitlement_gate_capability_alignment(bundle) == []
 
-    def test_app_with_no_gated_actions_and_subscriptions_passes(self) -> None:
+    def test_capability_free_subscriptions_with_no_gates_passes(self) -> None:
+        """Token/usage-only SaaS: no plan grants capabilities, so no gate is required."""
+        subs_no_caps = textwrap.dedent("""\
+            schema_version: mozaiks.subscriptions.v1
+            label: Token Only SaaS
+            default_plan_id: free
+            plans:
+              - plan_id: free
+                label: Free
+                capabilities: []
+              - plan_id: pro
+                label: Pro
+                capabilities: []
+        """)
         bundle = _bundle(
-            subs=_SUBS_V1_WITH_STORE,
+            subs=subs_no_caps,
             modules={
                 "modules/tasks/module.yaml": _module_yaml(
                     "tasks",
@@ -322,6 +335,11 @@ class TestEntitlementGateClosurePositive:
                 )
             },
         )
+        assert _scan_entitlement_gate_capability_alignment(bundle) == []
+
+    def test_capabilities_without_module_files_passes(self) -> None:
+        """A bundle fragment with no modules has nothing to gate; other scans own file completeness."""
+        bundle = _bundle(subs=_SUBS_V1_WITH_STORE)
         assert _scan_entitlement_gate_capability_alignment(bundle) == []
 
     def test_v2_multi_product_subscriptions_valid_gate(self) -> None:
@@ -364,6 +382,36 @@ class TestEntitlementGateClosurePositive:
 
 class TestEntitlementGateClosureNegative:
     """Invalid bundles must produce at least one error."""
+
+    def test_sold_capabilities_with_zero_gated_actions_fails(self) -> None:
+        """Plan capabilities with no gated action anywhere = unenforceable monetization."""
+        bundle = _bundle(
+            subs=_SUBS_V1_WITH_STORE,
+            modules={
+                "modules/tasks/module.yaml": _module_yaml(
+                    "tasks",
+                    actions=[{"id": "list_tasks"}],
+                )
+            },
+        )
+        errors = _scan_entitlement_gate_capability_alignment(bundle)
+        assert len(errors) == 1
+        assert "no module action declares an entitlement_gate" in errors[0]
+        assert "tasks.create" in errors[0]
+        assert "modules/tasks/module.yaml" in errors[0]
+
+    def test_zero_gate_error_reaches_scan_generated_bundle(self) -> None:
+        bundle = _bundle(
+            subs=_SUBS_V1_WITH_STORE,
+            modules={
+                "modules/tasks/module.yaml": _module_yaml(
+                    "tasks",
+                    actions=[{"id": "list_tasks"}],
+                )
+            },
+        )
+        errors = scan_generated_bundle(bundle)
+        assert any("no module action declares an entitlement_gate" in error for error in errors)
 
     def test_unknown_gate_fails(self) -> None:
         bundle = _bundle(
