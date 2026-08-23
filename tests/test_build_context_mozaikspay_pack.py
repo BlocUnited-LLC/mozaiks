@@ -357,6 +357,28 @@ def test_mozaikspay_usage_page_template_ships() -> None:
     assert content.get("page_type") == "analytics_dashboard"
 
 
+def test_mozaikspay_contract_declares_every_shipped_page() -> None:
+    """The bundle scanner hard-requires the Pricing page, so the pack contract
+    must declare it: contract.yaml facades[].pages is the single source of
+    truth for the pack's page surface and must not drift from the shipped
+    templates."""
+    contract = _read_yaml(MOZAIKSPAY / "contract.yaml")
+    declared_routes = {
+        page.get("route")
+        for facade in contract.get("facades") or []
+        for page in facade.get("pages") or []
+    }
+    template_routes = {
+        _read_yaml(page_file).get("route")
+        for page_file in (TEMPLATES / "ui" / "pages").glob("*.yaml")
+    }
+    assert template_routes <= declared_routes, (
+        f"pack templates ship pages {sorted(template_routes - declared_routes)} "
+        "that contract.yaml facades[].pages does not declare"
+    )
+    assert "/pricing" in declared_routes
+
+
 def test_mozaikspay_pages_bind_through_billing_portal_facade() -> None:
     """Pages must call billing_portal actions, never the hosted MozaiksPay API directly."""
     for page_file in (TEMPLATES / "ui" / "pages").glob("*.yaml"):

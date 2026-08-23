@@ -152,6 +152,14 @@ facades:
       - create_token_top_up_session
       - start_token_top_up
     pages:
+      - name: Pricing
+        route: /pricing
+        page_type_hint: landing
+        primary_entities:
+          - subscription
+        primary_actions:
+          - list_plans
+          - open_billing_portal
       - name: Billing
         route: /billing
         page_type_hint: analytics_dashboard
