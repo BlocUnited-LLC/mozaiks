@@ -461,6 +461,16 @@ Agent prompts may propose a patch, but they do not decide whether the loop
 continues. The acceptance gate, failure fingerprint, ownership table, and retry
 budget are the control authority.
 
+The automated repair controller currently covers workflow-integration failures
+and generated-bundle scanner failures. Other acceptance failures still fail
+closed to the user. Browser interaction evidence (console errors, failed network
+requests, screenshots, and replayable user-flow assertions) is not yet a
+first-class automatic repair input. Closing that gap requires a typed,
+environment-scoped verification-evidence contract that maps each failure to an
+owning agent and replays the same scenario after the patch. Browser evidence may
+inform repair, but it must not bypass deterministic acceptance, review, or
+promotion.
+
 The target must be the narrowest owning agent: `AppSchemaAgent` for page/schema
 endpoint drift, `ConfigMiddlewareAgent` for config or managed-capability client
 drift, `ServiceAgent` for backend Python/service drift, and `FrontendStubAgent`
