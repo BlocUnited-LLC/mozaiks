@@ -50,28 +50,29 @@ Runner:
 
 Output:
 
-- `status`
-- `findings`
-- `revision_request`
+- `validation_run` with ordered gate results and canonical issues
+- `repair_decision` with `accept`, `repair`, or `block`
 - `returncode`
 
 Browser findings are structured:
 
 ```json
 {
+  "gate_id": "generated_ui_browser",
+  "code": "layout",
   "severity": "error",
   "route": "/tickets",
-  "category": "layout",
   "message": "Horizontal overflow on mobile.",
-  "suggested_fix": "Use ResourceTable responsive behavior or reduce columns."
+  "suggested_fix": "Use ResourceTable responsive behavior or reduce columns.",
+  "repair_owner": "AppSchemaAgent"
 }
 ```
 
-Production readiness should use the same bounded status vocabulary:
+The canonical acceptance controller owns the bounded routing decision:
 
-- `passed` -> continue delivery
-- `needs_revision` -> revise generated artifacts before promotion
-- `blocked` -> user/operator review
+- `accept` -> continue delivery
+- `repair` -> revise generated artifacts within budget
+- `block` -> user/operator review
 
 ## Why Two Gates
 

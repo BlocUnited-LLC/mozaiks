@@ -94,6 +94,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- **Generated UI browser acceptance retired result vocabulary**: the
+  `scripts/generated_ui_acceptance.py` output no longer exposes top-level
+  `status`, `findings`, `revision_count`, or `revision_request` fields. Browser
+  validation now returns the canonical `ValidationRun` and one
+  `RepairDecision` (`accept`, `repair`, or `block`) from the shared acceptance
+  controller. No aliases or compatibility translation are retained; consumers
+  must read `validation_run.gate_results` and `repair_decision` before adopting
+  this version.
+
 - **`AppPageSchema.extensions` / `AppPageSlotExtension`**: the page slot-override
   contract is removed from structured outputs, generator prompts, and the UI
   quality audit. It was a schema-only promise — `PageRenderer` never rendered
