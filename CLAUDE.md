@@ -246,6 +246,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | First-party admin/Studio pages | `factory_app/app/admin/pages/` |
 | Admin portal registry | `factory_app/app/admin/admin_registry.yaml` |
 | Shared factory workflows | `factory_app/workflows/` |
+| Factory bundle-quality scorers and regression eval | `factory_app/eval/` |
 | Generated app/workflow artifacts | `generated/` |
 
 ## App Backend Integration
