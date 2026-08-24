@@ -46,6 +46,9 @@ This project follows a practical pre-1.0 changelog format:
   when `MONGO_URI` is unset. The orchestration result payload now carries
   `agents_created` / `agent_turns` evidence, echoed in the completion
   summary as `agents=N turns=M`.
+- **Apps no longer shows a duplicate Create App action**: app creation remains
+  available from the shell header while the Apps management page focuses on
+  searching, filtering, and opening existing apps.
 - **AppWorkbench live-preview refresh actually works now**: the preview
   sandbox API the workbench calls after a scoped refinement
   (`/api/artifacts/{id}/sandbox`, `/api/sandbox/*`, `/ws/sandbox/*`) was

@@ -966,7 +966,8 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   const main = page.locator('main');
 
   await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Create App' })).toBeVisible();
+  await expect(page.locator('header').getByRole('button', { name: 'Create App' })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Create App' })).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Import App' })).toHaveCount(0);
   await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -1008,9 +1009,8 @@ test('create app transition overlay can return to Apps', async ({ page, isMobile
   test.skip(isMobile, 'Overlay navigation assertion is flaky on mobile CI; desktop-only');
 
   await page.goto('/apps');
-  const main = page.locator('main');
 
-  await main.getByRole('button', { name: 'Create App' }).click();
+  await page.locator('header').getByRole('button', { name: 'Create App' }).click();
 
   await expect(page).toHaveURL(/\/create$/);
   await expect(page.getByRole('heading', { name: 'Choose Your App Journey' })).toBeVisible();
@@ -1493,7 +1493,10 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
     {
       href: '/apps',
       heading: 'Apps',
-      detail: async () => expect(main.getByRole('button', { name: 'Create App' })).toBeVisible(),
+      detail: async () => {
+        await expect(page.locator('header').getByRole('button', { name: 'Create App' })).toBeVisible();
+        await expect(main.getByRole('button', { name: 'Create App' })).toHaveCount(0);
+      },
     },
   ];
 

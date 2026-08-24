@@ -208,9 +208,12 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "Manage your apps" in layout_source
     assert "App workspace" in layout_source
     assert "Mozaiks Studio" not in layout_source
-    assert "Create App" in source
+    shell_source = _read("factory_app/app/config/shell.json")
+    assert "Create App" not in source
+    assert '"id": "create-app"' in shell_source
+    assert '"path": "/create"' in shell_source
     assert "Import App" not in source
-    assert "const CREATE_APP_PATH = '/create'" in source
+    assert "const CREATE_APP_PATH = '/create'" not in source
     assert "/chat?workflow=ValueEngine&mode=workflow&defer_start=1" not in source
     assert "/chat?workflow=ValueEngine&mode=workflow&new=1" not in source
     assert "row.primaryAction?.href" in source
