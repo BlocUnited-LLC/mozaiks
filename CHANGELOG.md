@@ -17,6 +17,19 @@ This project follows a practical pre-1.0 changelog format:
 - **Ask-mode assistant replies now render while they stream**: live text frames
   retain their general-chat provenance, so the active chat no longer hides the
   reply until the persisted transcript is reloaded.
+- **`mozaiks gen` burned tokens on runs it could never finish** (#383): the
+  CLI takes one `--prompt` and has no way to reply, but AgentGenerator opens
+  with `InterviewAgent`, which asks a clarifying question and hands the turn
+  to `user`. Every run therefore stalled at `WORKFLOW_AWAITING_INPUT` with
+  zero files written — after real LLM spend. `gen` now inspects the staged
+  workflow's own declarative config before executing anything and refuses
+  when the workflow can hand control to a user (`human_in_the_loop: true` in
+  `orchestrator.yaml`, or a `transition_graph.yaml` edge targeting `user` /
+  reverting to the user), redirecting to `mozaiks studio --dir . --open`.
+  Detection is on the property, not the workflow name, so genuinely one-shot
+  workflows still run and future interview-driven ones are covered.
+  `--allow-interactive` bypasses the refusal for anyone who wants to start a
+  run and drive it elsewhere.
 - **Every workflow failed instantly under context-authority enforcement**:
   the routing-variable validation added in #298/#344 required deterministic
   writers that the runtime never actually produced — agent-sentinel triggers

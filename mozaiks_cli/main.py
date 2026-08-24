@@ -317,8 +317,13 @@ def create_parser():
     # mozaiks gen
     gen_parser = subparsers.add_parser(
         "gen",
-        help="Generate workflows or apps using AI",
-        description="Generate AI agent workflows or full apps from a descriptive prompt.",
+        help="Generate workflows or apps from a one-shot prompt",
+        description=(
+            "Generate AI agent workflows or full apps from a single descriptive prompt. "
+            "This supports one-shot workflows only. Conversational (interview-driven) "
+            "workflows ask clarifying questions mid-run, which the CLI cannot answer; "
+            "run those in Studio (mozaiks studio --dir . --open)."
+        ),
     )
     gen_parser.add_argument(
         "mode",
@@ -342,6 +347,15 @@ def create_parser():
         choices=["e2b", "docker", "local", "skip"],
         default=None,
         help="App validation strategy for AppGenerator runs (default: resolved from the current environment)",
+    )
+    gen_parser.add_argument(
+        "--allow-interactive",
+        action="store_true",
+        help=(
+            "Start the run even when the workflow is conversational. The run will "
+            "pause at the first question and spend tokens without writing output; "
+            "use this only to start a run you intend to drive elsewhere."
+        ),
     )
 
     # mozaiks migrations
