@@ -22,7 +22,7 @@ AI-native software products.
 It brings together three things that usually live in separate tools:
 
 - **Mozaiks Studio** for creating apps, continuing builds, and managing them.
-- **AI workflow orchestration powered by AG2** for planning, tool use, human
+- **AI workflow orchestration powered by [AG2](https://github.com/ag2ai/ag2)** for planning, tool use, human
   review, and generation.
 - **Generated app files** with modules, pages, workflows, config, and brand
   assets that Mozaiks validates before making active.
@@ -98,38 +98,9 @@ always pick up where you left off.
 
 ### Troubleshooting
 
-**`mozaiks` is not recognized** — use `python -m mozaiks` instead. The `mozaiks`
-shortcut requires your Python scripts directory to be on PATH, which some
-systems do not configure automatically.
-
-**Builds fail or hang** — make sure your LLM API key is set in the current shell
-session. You can open Studio without a key, but builds will not run.
-
-**Cannot reach MongoDB** — confirm `MONGO_URI` points at a database that is
-actually running and reachable from this machine.
-
-### Which Tool To Use
-
-The **Studio** is the browser product for creating apps, continuing builds,
-reviewing artifacts, and managing apps. The **CLI** is just how you set up the
-local workspace, start processes, run diagnostics, and open Studio.
-
-`studio` is also the host name used internally for that same browser product.
-Most users can start from Studio and ignore the host details.
-
-Studio itself is organized into two scopes:
-
-- **Workspace dashboard** (`/apps`, `/usage`, `/integrations`) for your app
-  inventory, workspace-wide token usage, and shared provider connections.
-- **App dashboard** (`/apps/:appId/overview`) for a single app, covering
-  Overview, Building, Branding, Launch, Growth, Users, Usage, Support, and
-  Settings.
-
-Main repo layout:
-
-- `web_shell/` - local Vite shell host source
-- `factory_app/app/` - first-party Studio app bundle and default brand assets
-- `factory_app/workflows/` - shared builder workflow root
+If setup fails, check three things first: use `python -m mozaiks` if the
+`mozaiks` command is unavailable, make sure `MONGO_URI` points to a reachable
+MongoDB instance, and set an LLM API key before running builds.
 
 ### Where To Go Next
 
