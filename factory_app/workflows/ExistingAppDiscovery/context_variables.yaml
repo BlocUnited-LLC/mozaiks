@@ -445,7 +445,7 @@ definitions:
       default: {}
 
   evidence_sources:
-    type: object
+    type: array
     description: Deterministic evidence sources used before chat.
     source:
       type: state
@@ -494,7 +494,7 @@ definitions:
       default: {}
 
   unresolved_questions:
-    type: object
+    type: array
     description: Gaps the collector could not determine.
     source:
       type: state
@@ -523,7 +523,7 @@ definitions:
       default: false
 
   detected_connectors:
-    type: object
+    type: array
     description: >
       List of ConnectorSpec objects detected from package manifests and source imports.
       Each item has: provider_id, package_or_import, category, confidence,
@@ -623,7 +623,7 @@ definitions:
   # ---------------------------------------------------------------------------
 
   capabilities:
-    type: object
+    type: array
     description: Existing product capabilities identified during discovery.
     source:
       type: state
@@ -651,7 +651,7 @@ definitions:
       default: null
 
   key_entities:
-    type: object
+    type: array
     description: Main data entities already present in the host app.
     source:
       type: state
@@ -665,21 +665,21 @@ definitions:
       default: false
 
   service_surfaces:
-    type: object
+    type: array
     description: Existing service-facing surfaces such as APIs, hubs, or workers.
     source:
       type: state
       default: []
 
   route_surfaces:
-    type: object
+    type: array
     description: Existing frontend routes or route modules relevant to adoption.
     source:
       type: state
       default: []
 
   agent_ready_capabilities:
-    type: object
+    type: array
     description: Capability ids that are technically ready for agent access.
     source:
       type: state
@@ -734,7 +734,7 @@ definitions:
       default: null
 
   ai_accessible_capabilities:
-    type: object
+    type: array
     description: Capability ids approved for initial AI access.
     source:
       type: state
@@ -748,14 +748,14 @@ definitions:
       default: null
 
   initial_workflows:
-    type: object
+    type: array
     description: Initial workflows or agentic experiences to attach first.
     source:
       type: state
       default: []
 
   ecosystem_bindings:
-    type: object
+    type: array
     description: Mozaiks ecosystem modules to connect now or next.
     source:
       type: state
@@ -843,7 +843,7 @@ definitions:
       default: null
 
   capability_specs:
-    type: object
+    type: array
     description: Canonical existing capability artifacts persisted after discovery.
     source:
       type: state

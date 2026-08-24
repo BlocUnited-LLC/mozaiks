@@ -22,7 +22,7 @@ from mozaiksai.core.events.event_serialization import serialize_event_content
 from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import (
-    TOOL_WRITEBACK_WRITER,
+    DETERMINISTIC_TOOL_WRITER,
     build_context_authority_policy,
 )
 from mozaiksai.core.workflow.declarative import parse_tools_config
@@ -388,7 +388,7 @@ class AutoToolEventHandler:
                     chat_id=context.get("chat_id"),
                     app_id=context.get("app_id"),
                     authority_policy=authority_policy,
-                    writer_id=TOOL_WRITEBACK_WRITER,
+                    writer_id=DETERMINISTIC_TOOL_WRITER,
                 )
                 for key in ("chat_id", "app_id", "workflow_name", "turn_idempotency_key", "agent_name"):
                     value = context.get(key)

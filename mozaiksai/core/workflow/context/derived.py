@@ -12,6 +12,7 @@ from logs.logging_config import get_workflow_logger
 from .authority import (
     AGENT_TEXT_WRITER,
     RUNTIME_SYSTEM_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
     UI_RESPONSE_TRIGGER_WRITER,
     USER_TEXT_TRIGGER_WRITER,
     ContextWriterId,
@@ -19,6 +20,16 @@ from .authority import (
 from .schema import load_context_variables_config
 
 logger = get_workflow_logger("derived_context")
+
+
+def _agent_text_writer_for(trigger: Any) -> ContextWriterId:
+    """Exact-equals triggers with a fixed declared value are deterministic
+    sentinel extraction; anything freeform (contains/regex/capture) is not."""
+    equals = str(getattr(trigger, "equals", "") or "").strip()
+    value = getattr(trigger, "value", None)
+    if equals and value != "$1":
+        return SENTINEL_TEXT_TRIGGER_WRITER
+    return AGENT_TEXT_WRITER
 
 
 def _provider_set_with_writer(provider: Any, key: str, value: Any, writer_id: ContextWriterId) -> None:
@@ -262,7 +273,7 @@ class DerivedVariableSpec:
                             if current != trigger.from_state:
                                 continue
                         try:
-                            _provider_set_with_writer(provider, self.name, trigger.value, AGENT_TEXT_WRITER)
+                            _provider_set_with_writer(provider, self.name, trigger.value, _agent_text_writer_for(trigger))
                         except Exception as err:  # pragma: no cover
                             logger.debug("Derived variable update failed: %s", err)
                 return True
@@ -487,11 +498,16 @@ class DerivedContextManager:
             return {}
 
         updated_vars: dict[str, Any] = {}
+        trigger_by_var = {var.name: list(var.triggers) for var in self.variables}
         for name, value in updates.items():
+            matched = trigger_by_var.get(name) or []
+            writer = AGENT_TEXT_WRITER
+            if matched and all(_agent_text_writer_for(t) == SENTINEL_TEXT_TRIGGER_WRITER for t in matched):
+                writer = SENTINEL_TEXT_TRIGGER_WRITER
             for provider in self.providers:
                 if hasattr(provider, "set"):
                     try:
-                        _provider_set_with_writer(provider, name, value, AGENT_TEXT_WRITER)
+                        _provider_set_with_writer(provider, name, value, writer)
                         updated_vars[name] = value
                     except Exception as err:  # pragma: no cover
                         logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
