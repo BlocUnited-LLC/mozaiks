@@ -74,6 +74,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- **Factory Studio demo mode now uses a three-app canonical fleet**: the six
+  disconnected pseudo-app records were replaced by three accepted archetypes
+  (authenticated CRUD, admin operations, and monetized AI SaaS). Usage,
+  billing, deployment, users, activity, integrations, workflows, runs,
+  sessions, and artifact history now stay closed over the same three app IDs,
+  with current passing bundles and healthy deployed states for meaningful
+  cross-portal testing.
 - **AppWorkbench leads with the app, speaks the user's language**: the
   file-tree/editor/preview grid now renders directly under the status strip
   (previously it sat below the review and refinement panels), build logs
