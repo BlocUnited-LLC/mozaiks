@@ -12,6 +12,11 @@
 [![AG2](https://img.shields.io/badge/AG2-1.0.1-green)](https://github.com/ag2ai/ag2)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/Qnsywad9kp)
 
+[![Studio](https://img.shields.io/badge/Studio-management%20interface-7c3aed)](https://docs.mozaiks.ai/studio/)
+[![Runtime](https://img.shields.io/badge/Runtime-AI%20substrate-0f766e)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURE.md)
+[![Workflows](https://img.shields.io/badge/Workflows-builder%20systems-2563eb)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/docs/architecture/workflows/workflow-authoring-contracts.md)
+[![Community](https://img.shields.io/badge/Community-contributors%20welcome-f59e0b)](https://github.com/BlocUnited-LLC/mozaiks/graphs/contributors)
+
 </div>
 
 ## What is Mozaiks?
@@ -234,6 +239,22 @@ maintainers and their agents on the same terms.
 
 Questions, or want to talk through an approach before writing code? Join us on
 [Discord](https://discord.gg/Qnsywad9kp).
+
+## Contributors Wall
+
+<div align="center">
+
+<a href="https://github.com/BlocUnited-LLC/mozaiks/graphs/contributors">
+  <img
+    src="https://contrib.rocks/image?repo=BlocUnited-LLC/mozaiks"
+    alt="Contributors wall for Mozaiks"
+  />
+</a>
+
+Everyone who reports bugs, writes docs, reviews code, or ships fixes belongs on
+this wall.
+
+</div>
 
 This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
