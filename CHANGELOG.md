@@ -36,6 +36,16 @@ This project follows a practical pre-1.0 changelog format:
   guard fail-closes on. Declarations corrected to `type: array`, and the new
   drift guard also validates every declared default against its declared
   type.
+- **`mozaiks gen` no longer reports a silent no-op as success** (issue #379):
+  the CLI now initialises real logging (workflow-engine INFO records and file
+  sinks were previously swallowed), asserts on the orchestration result —
+  failed runs, runs paused awaiting a user reply, and runs where no agent
+  ever produced a turn now exit 1 with distinct messages — points
+  `MOZAIKS_GENERATED_ARTIFACTS_PATH` at the CLI output directory so the
+  empty-output check inspects where tools actually write, and warns loudly
+  when `MONGO_URI` is unset. The orchestration result payload now carries
+  `agents_created` / `agent_turns` evidence, echoed in the completion
+  summary as `agents=N turns=M`.
 - **AppWorkbench live-preview refresh actually works now**: the preview
   sandbox API the workbench calls after a scoped refinement
   (`/api/artifacts/{id}/sandbox`, `/api/sandbox/*`, `/ws/sandbox/*`) was

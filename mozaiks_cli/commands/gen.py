@@ -74,6 +74,41 @@ def _check_api_key() -> bool:
     return False
 
 
+def _warn_if_no_mongo():
+    """Warn loudly (without failing) when MONGO_URI is unset.
+
+    Local generation without Mongo is a legitimate flow, but the operator
+    should know that build records, artifacts, and usage events will not
+    persist anywhere.
+    """
+    if not os.environ.get("MONGO_URI"):
+        _print(
+            "Warning: MONGO_URI is not set. Generation will still run, but "
+            "build records, artifacts, and usage events will NOT persist.",
+            style="bold yellow",
+        )
+
+
+def _init_logging():
+    """Initialise real logging so workflow-engine INFO records reach the operator.
+
+    Without this, the engine's degradation warnings (middleware import
+    failures, zero-turn runs) are swallowed and gen can exit "successfully"
+    after a silent no-op (issue #379). Also creates the file log sinks.
+    """
+    try:
+        from logs.logging_config import setup_development_logging
+
+        setup_development_logging()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        import logging
+
+        logging.basicConfig(level=logging.INFO)
+        logging.getLogger(__name__).warning(
+            "Could not initialise mozaiks logging (%s); using basicConfig.", exc
+        )
+
+
 def _find_generator_source() -> Path | None:
     """Locate the AgentGenerator workflow source directory."""
     candidates = [
@@ -423,7 +458,7 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
 
 
 
-def _setup_environment(repo_root: Path, staging_workflows: Path):
+def _setup_environment(repo_root: Path, staging_workflows: Path, output_dir: Path):
     """Configure sys.path and env vars for workflow execution."""
     for p in (str(repo_root), str(repo_root / "mozaiksai")):
         if p not in sys.path:
@@ -431,6 +466,11 @@ def _setup_environment(repo_root: Path, staging_workflows: Path):
 
     # Point the workflow manager at our staging directory
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(staging_workflows)
+
+    # Point artifact-writing tools (workflow_converter et al.) at the CLI
+    # output directory, so the post-run empty-output check inspects the
+    # directory the tools actually write to (issue #379).
+    os.environ["MOZAIKS_GENERATED_ARTIFACTS_PATH"] = str(output_dir)
 
 
 # ── Runner ─────────────────────────────────────────────────────────
@@ -516,6 +556,79 @@ def _create_output_structure(output_dir: Path, mode: str):
         (output_dir / "frontend").mkdir(exist_ok=True)
 
 
+def _report_run_outcome(result: dict[str, Any], output_dir: Path, mode: str) -> int:
+    """Assert on the orchestration result and report success or a loud failure.
+
+    ``mozaiks gen`` used to treat any non-exception return as success; a run
+    that failed, paused for user input, or never executed a single agent turn
+    still printed "Generation complete!" (issue #379). Success now requires an
+    actually-completed run with agent activity and files on disk.
+    """
+    if not result.get("success"):
+        _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")
+        return 1
+
+    raw_payload = result.get("result")
+    payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+
+    if payload.get("failed") or payload.get("error"):
+        _print_error(
+            f"Workflow run failed: {payload.get('error') or 'unknown workflow error'} "
+            "— check the logs above."
+        )
+        return 1
+
+    if payload.get("awaiting_user_input"):
+        _print_error(
+            "Workflow paused waiting for a user reply — this is not a completed "
+            "generation. Drive this workflow from Studio, which supports replies."
+        )
+        return 1
+
+    if not payload.get("run_completed"):
+        _print_error(
+            f"Workflow did not complete (run_status: {payload.get('run_status', 'unknown')}). "
+            "Treating this as a failed generation."
+        )
+        return 1
+
+    agents_created = payload.get("agents_created")
+    agent_turns = payload.get("agent_turns")
+    if agent_turns == 0:
+        _print_error(
+            "Workflow completed but no agent ever produced a reply — this is "
+            "the silent no-op from issue #379. Check the logs above for "
+            "middleware or agent-creation failures."
+        )
+        return 1
+
+    written = [f for f in sorted(output_dir.rglob("*")) if f.is_file()]
+    if not written:
+        _print_error(
+            "Generation finished but wrote no files under the artifact root "
+            f"({output_dir}). Agents ran, but no tool persisted any output "
+            "there — check the logs above for tool failures."
+        )
+        return 1
+
+    _print_success("Generation complete!")
+    if agents_created is not None or agent_turns is not None:
+        _print_info(f"agents={agents_created} turns={agent_turns}")
+    _print_info(f"Files written to: {output_dir}")
+
+    _print("\nGenerated files:", style="bold")
+    for f in written:
+        _print_info(f"  {f.relative_to(output_dir)}")
+
+    _print("\nNext steps:", style="bold")
+    _print_info(f"  cd {output_dir}")
+    _print_info("  # Review and customise the generated files")
+    if mode == "app":
+        _print_info("  Promote the generated app bundle into an active app root before running it")
+        _print_info("  Open Studio: python -m mozaiks studio --dir . --open")
+    return 0
+
+
 def run(args):
     """Execute the gen command."""
     mode = args.mode
@@ -536,6 +649,9 @@ def run(args):
         _print_error("No LLM API key found.")
         _print_info("Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_OPENAI_API_KEY")
         return 1
+
+    _warn_if_no_mongo()
+    _init_logging()
 
     source_path = _find_generator_source()
     if not source_path:
@@ -563,7 +679,7 @@ def run(args):
         _stage_workflow(source_path, staging_dir, "AgentGenerator")
 
         # Set up runtime environment pointing at staged workflows
-        _setup_environment(repo_root, staging_dir)
+        _setup_environment(repo_root, staging_dir, output_dir)
 
         _create_output_structure(output_dir, mode)
 
@@ -575,10 +691,14 @@ def run(args):
         _print("\nGenerating... (this may take a few minutes)\n", style="yellow")
 
         if RICH_AVAILABLE:
+            # transient=True clears the spinner when done; rich's live display
+            # redirects stdout/stderr by default, so workflow log lines print
+            # above the spinner instead of being garbled or swallowed.
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console,
+                transient=True,
             ) as progress:
                 task = progress.add_task("Running AgentGenerator...", total=None)
                 result = asyncio.run(
@@ -601,33 +721,7 @@ def run(args):
                 )
             )
 
-        if result.get("success"):
-            written = [f for f in sorted(output_dir.rglob("*")) if f.is_file()]
-            if not written:
-                _print_error(
-                    "Generation finished but wrote no files. The workflow "
-                    "degraded or its outputs were lost — check the logs above "
-                    "(middleware import failures are a common cause)."
-                )
-                return 1
-
-            _print_success("Generation complete!")
-            _print_info(f"Files written to: {output_dir}")
-
-            _print("\nGenerated files:", style="bold")
-            for f in written:
-                _print_info(f"  {f.relative_to(output_dir)}")
-
-            _print("\nNext steps:", style="bold")
-            _print_info(f"  cd {output_dir}")
-            _print_info("  # Review and customise the generated files")
-            if mode == "app":
-                _print_info("  Promote the generated app bundle into an active app root before running it")
-                _print_info("  Open Studio: python -m mozaiks studio --dir . --open")
-            return 0
-        else:
-            _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")
-            return 1
+        return _report_run_outcome(result, output_dir, mode)
 
     except KeyboardInterrupt:
         _print("\n\nGeneration cancelled.", style="yellow")
