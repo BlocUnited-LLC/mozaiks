@@ -371,6 +371,9 @@ async def _platform_startup() -> None:
             module_event_router.register(dispatcher)
             app.state.module_event_router = module_event_router
 
+            # Verified at load time; None when the app declares no adapters.
+            app.state.adapter_registry = load_result.adapter_registry
+
             entitlement_checker: EntitlementPort | None = None
             if load_result.subscriptions_config is not None:
                 entitlement_checker = _load_entitlement_adapter(

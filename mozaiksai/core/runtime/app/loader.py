@@ -27,6 +27,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.adapters.registry import (
+    AdapterRegistry,
+    load_adapter_registry,
+)
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.app.page_schema import (
@@ -71,6 +75,8 @@ class AppLoadResult:
         data_contract:        Parsed data contract, or None
         data_entities_by_key: Data entities indexed by (module_id, entity_name)
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
+        adapter_registry:     Verified provider adapters, or None when the app
+                              declares no config/adapters.yaml
         provenance:           Parsed app provenance, or None when not declared
         page_schemas:         Validated declarative page schemas indexed by page name
         failed_module_names:  Names of modules that failed to load — empty on full success
@@ -80,6 +86,7 @@ class AppLoadResult:
     data_contract: dict[str, Any] | None = None
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
+    adapter_registry: AdapterRegistry | None = None
     provenance: AppProvenance | None = None
     page_schemas: dict[str, AppPageSchema] = field(default_factory=dict)
     failed_module_names: list[str] = field(default_factory=list)
@@ -164,6 +171,23 @@ class AppLoader:
             logger.warning(
                 "SUBSCRIPTIONS_CONFIG_INVALID: %s — entitlement enforcement disabled", exc)
 
+        # Adapter resolution deliberately does NOT degrade the way subscriptions
+        # does. A declared adapter that cannot be imported, or that does not
+        # satisfy its port, is a deployment defect that will fail at the moment
+        # of use — surfacing it at startup with a precise message is the entire
+        # purpose of declaring adapters. Apps without config/adapters.yaml get
+        # None and are unaffected.
+        adapter_registry = load_adapter_registry(base_path)
+        if adapter_registry is not None:
+            logger.info(
+                "ADAPTERS_LOADED: %s area(s) — %s",
+                len(adapter_registry.areas()),
+                ", ".join(
+                    f"{area}={adapter_registry.active_provider_id(area) or 'no-active'}"
+                    for area in adapter_registry.areas()
+                ),
+            )
+
         logger.info(
             "APP_LOADED: name=%s version=%s mode=%s workflows=%s modules=%s",
             app_def.name, app_def.version, app_def.execution_mode.value,
@@ -208,6 +232,7 @@ class AppLoader:
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
             subscriptions_config=subscriptions_config,
+            adapter_registry=adapter_registry,
             provenance=provenance,
             page_schemas=page_schemas,
             failed_module_names=failed_module_names,
