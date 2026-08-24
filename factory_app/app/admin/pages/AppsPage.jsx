@@ -31,8 +31,6 @@ const FILTER_OPTIONS = [
   { label: 'Building', value: 'building' },
   { label: 'Live', value: 'live' },
 ]
-const CREATE_APP_PATH = '/create'
-
 function matchesFilter(row, activeFilter) {
   if (activeFilter === 'all') return true
   return row.filterBucket === activeFilter
@@ -285,11 +283,6 @@ export default function AppsPage() {
             filters={filterOptions}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
-            actions={(
-              <ActionButton onClick={() => navigate(CREATE_APP_PATH)}>
-                Create App
-              </ActionButton>
-            )}
           />
           {visibleRows.length > 0 ? (
             <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={handleDelete} />
