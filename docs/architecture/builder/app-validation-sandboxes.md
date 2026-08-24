@@ -25,6 +25,25 @@ All sandbox strategies route through the `SandboxPort` seam
 Sandboxes are **ephemeral workspaces, never truth stores** — outcomes
 persist into build records; the sandbox itself is disposable.
 
+## Live preview sessions (AppWorkbench)
+
+Beyond one-shot validation, the Studio host mounts an artifact preview session
+API so the AppWorkbench can boot (and re-boot) a generated bundle on demand —
+this is what refreshes the preview iframe after a scoped refinement patch:
+
+- Manager: `mozaiksai/core/sandbox/preview_sessions.py`
+  (`ArtifactPreviewSessionManager` over `SandboxPort`; one session per
+  artifact, TTL'd via `SANDBOX_TTL_MINUTES`, identity-tagged).
+- Routes (Studio host, `mozaiksai/hosts/routers/sandbox.py`):
+  `POST /api/artifacts/{artifactId}/sandbox` (create/reuse),
+  `POST /api/sandbox/{id}/sync`, `POST /api/sandbox/{id}/start`,
+  `GET /api/sandbox/{id}/status`, `POST /api/sandbox/{id}/stop`,
+  `WS /ws/sandbox/{id}` (status stream). All authenticated.
+- Provider resolution mirrors the validation ladder's preview-capable rungs:
+  e2b when `E2B_API_KEY` is set, otherwise local Docker. With neither, the
+  create call returns 503 with a clear message (`local`/`skip` builds have no
+  live preview).
+
 ## What persists
 
 - The validation result (status, strategy, errors, trimmed build output,

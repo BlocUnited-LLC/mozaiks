@@ -265,11 +265,11 @@ const AppWorkbench = ({
     setRefinementError(null);
     setRefinementResult(null);
     if (!artifactVersionId) {
-      setRefinementError('This workbench does not have an artifact version yet, so scoped refinement cannot branch from it.');
+      setRefinementError('This build has not been saved as a refinable version yet. Wait for generation to finish, then try again.');
       return;
     }
     if (!refinementRequest.trim()) {
-      setRefinementError('Describe the patch you want to apply.');
+      setRefinementError('Describe the change you want first.');
       return;
     }
     const response = await startWorkflow(
@@ -284,11 +284,11 @@ const AppWorkbench = ({
     setRefinementError(null);
     setRefinementResult(null);
     if (!artifactVersionId) {
-      setRefinementError('No artifact version available for theme refinement.');
+      setRefinementError('This build has not been saved as a refinable version yet. Wait for generation to finish, then try again.');
       return;
     }
     if (!refinementRequest.trim()) {
-      setRefinementError('Describe the theme change you want applied.');
+      setRefinementError('Describe the theme change you want first.');
       return;
     }
     const response = await startWorkflow(
@@ -337,9 +337,6 @@ const AppWorkbench = ({
           <div className="min-w-0">
             <div className="text-white font-bold font-heading text-sm">{headerText}</div>
             <div className="text-xs text-[var(--color-text-muted)] mt-1">{subtitle}</div>
-            <div className="text-[10px] text-[var(--color-text-muted)] mt-1">
-              {generatedWorkflowName || sourceWorkflowName || 'AppGenerator'} • event {toolCallId || 'n/a'}
-            </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button type="button" className={toolbarBtn(showSplit)} onClick={() => setView('split')} title="Split view">
@@ -364,6 +361,125 @@ const AppWorkbench = ({
           integrationTestResult={integrationTestResult}
           integrationPassed={integrationPassed}
         />
+
+        <div className={['grid gap-4', showSplit ? 'grid-cols-12' : 'grid-cols-12'].join(' ')}>
+          {(showSplit || showCode) && (
+            <div className={showSplit ? 'col-span-3' : 'col-span-4'}>
+              <FileTreePane
+                filesMap={filesMap}
+                config={config}
+                selectedPath={selectedPath}
+                onSelectFile={setSelectedPath}
+              />
+            </div>
+          )}
+
+          {(showSplit || showCode) && (
+            <div className={showSplit ? 'col-span-5' : 'col-span-8'}>
+              <CodeEditorPane
+                config={config}
+                filePath={selectedPath}
+                content={currentContent}
+                onChange={(val) => updateFileContent(selectedPath, val)}
+              />
+              <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
+                Edits here stay in your browser only. To really change your app, describe the change below and apply it.
+              </div>
+            </div>
+          )}
+
+          {(showSplit || showPreview) && (
+            <div className={showSplit ? 'col-span-4' : 'col-span-12'}>
+              <PreviewPane
+                previewUrl={livePreviewUrl || previewUrl}
+                sandboxStatus={sandboxStatus}
+                sandboxSyncing={sandboxSyncing}
+                sandboxError={sandboxSyncError}
+                config={config}
+                onStartPreview={() => syncAndRestart(filesMap)}
+                canStartPreview={Object.keys(filesMap || {}).length > 0}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-white">Refine your app</div>
+              <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                Describe a change and the agents will patch your app, then refresh the preview.
+              </div>
+            </div>
+            <div className="text-right text-[10px] text-[var(--color-text-muted)]">
+              <div>{selectedPath ? `Scoped to ${selectedPath}` : 'Agents will pick the right files'}</div>
+              {!artifactVersionId && <div>Waiting for this build to be saved…</div>}
+            </div>
+          </div>
+
+          <textarea
+            value={refinementRequest}
+            onChange={(event) => setRefinementRequest(event.target.value)}
+            placeholder="Describe what you want changed — e.g. 'Make the header sticky' or 'Add a delete button to each task row'. Select a file first to limit the change to that file."
+            className="mt-3 min-h-24 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-[rgba(var(--color-primary-rgb),0.45)]"
+          />
+
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
+              disabled={!canApplyScopedRefinement || refinementStarting}
+              onClick={handleApplyScopedRefinement}
+            >
+              {refinementStarting ? 'Applying…' : 'Apply change'}
+            </button>
+            <button
+              type="button"
+              className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
+              disabled={!canApplyScopedRefinement || refinementStarting}
+              onClick={handleThemeRefinement}
+              title="Routes through ThemeCapture for design-level changes; uses the coding worker for small patches."
+            >
+              {refinementStarting ? 'Applying...' : 'Redesign theme'}
+            </button>
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Use <span className="font-medium text-white/70">Apply change</span> for features, code, or layout.
+              Use <span className="font-medium text-white/70">Redesign theme</span> for colors, fonts, or full visual identity.
+            </div>
+          </div>
+
+          {(refinementError || workflowStartError) && (
+            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+              {refinementError || workflowStartError}
+            </div>
+          )}
+
+          {refinementResult?.coding_worker && (
+            <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-xs text-emerald-100">
+              <div className="font-semibold text-emerald-50">
+                {refinementResult.coding_worker.plan?.summary || 'Scoped refinement applied.'}
+              </div>
+              <div className="mt-1">
+                Status: {refinementResult.coding_worker.status}
+                {refinementResult.coding_worker.metadata?.artifact_version_id
+                  ? ` • Artifact ${refinementResult.coding_worker.metadata.artifact_version_id}`
+                  : ''}
+              </div>
+            </div>
+          )}
+
+          {refinementResult?.harness_decision && (
+            <div className="mt-3">
+              <HarnessDecisionCard
+                decision={refinementResult.harness_decision}
+                busy={refinementStarting}
+                error={refinementError || workflowStartError}
+                onAction={handleHarnessDecisionAction}
+                className="border-white/10 bg-black/20"
+              />
+            </div>
+          )}
+        </div>
 
         {artifactReview && (
           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -491,124 +607,6 @@ const AppWorkbench = ({
             )}
           </div>
         )}
-
-        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-white">Scoped Refinement</div>
-              <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Send the current file through the control-plane harness for a codex-backed patch refinement.
-              </div>
-            </div>
-            <div className="text-right text-[10px] text-[var(--color-text-muted)]">
-              <div>Scope: {selectedPath || 'select a file'}</div>
-              <div>Mode: {selectedPath ? 'explicit file scope' : 'auto scope proposal'}</div>
-              <div>Artifact: {artifactVersionId || 'missing artifact version'}</div>
-            </div>
-          </div>
-
-          <textarea
-            value={refinementRequest}
-            onChange={(event) => setRefinementRequest(event.target.value)}
-            placeholder="Describe the patch you want applied. Select a file for explicit scope, or let the harness infer scope from the artifact workspace."
-            className="mt-3 min-h-24 w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-[rgba(var(--color-primary-rgb),0.45)]"
-          />
-
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
-              disabled={!canApplyScopedRefinement || refinementStarting}
-              onClick={handleApplyScopedRefinement}
-            >
-              {refinementStarting ? 'Applying...' : 'Apply scoped refinement'}
-            </button>
-            <button
-              type="button"
-              className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
-              disabled={!canApplyScopedRefinement || refinementStarting}
-              onClick={handleThemeRefinement}
-              title="Routes through ThemeCapture for design-level changes; uses the coding worker for small patches."
-            >
-              {refinementStarting ? 'Applying...' : 'Redesign theme'}
-            </button>
-            <div className="text-xs text-[var(--color-text-muted)]">
-              Use <span className="font-medium text-white/70">Apply scoped refinement</span> for code or layout changes.
-              Use <span className="font-medium text-white/70">Redesign theme</span> for colors, fonts, or full visual identity.
-            </div>
-          </div>
-
-          {(refinementError || workflowStartError) && (
-            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-              {refinementError || workflowStartError}
-            </div>
-          )}
-
-          {refinementResult?.coding_worker && (
-            <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-xs text-emerald-100">
-              <div className="font-semibold text-emerald-50">
-                {refinementResult.coding_worker.plan?.summary || 'Scoped refinement applied.'}
-              </div>
-              <div className="mt-1">
-                Status: {refinementResult.coding_worker.status}
-                {refinementResult.coding_worker.metadata?.artifact_version_id
-                  ? ` • Artifact ${refinementResult.coding_worker.metadata.artifact_version_id}`
-                  : ''}
-              </div>
-            </div>
-          )}
-
-          {refinementResult?.harness_decision && (
-            <div className="mt-3">
-              <HarnessDecisionCard
-                decision={refinementResult.harness_decision}
-                busy={refinementStarting}
-                error={refinementError || workflowStartError}
-                onAction={handleHarnessDecisionAction}
-                className="border-white/10 bg-black/20"
-              />
-            </div>
-          )}
-        </div>
-
-        <div className={['grid gap-4', showSplit ? 'grid-cols-12' : 'grid-cols-12'].join(' ')}>
-          {(showSplit || showCode) && (
-            <div className={showSplit ? 'col-span-3' : 'col-span-4'}>
-              <FileTreePane
-                filesMap={filesMap}
-                config={config}
-                selectedPath={selectedPath}
-                onSelectFile={setSelectedPath}
-              />
-            </div>
-          )}
-
-          {(showSplit || showCode) && (
-            <div className={showSplit ? 'col-span-5' : 'col-span-8'}>
-              <CodeEditorPane
-                config={config}
-                filePath={selectedPath}
-                content={currentContent}
-                onChange={(val) => updateFileContent(selectedPath, val)}
-              />
-              <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
-                Editor changes are local to your browser session. Use scoped refinement to apply and sync a patch.
-              </div>
-            </div>
-          )}
-
-          {(showSplit || showPreview) && (
-            <div className={showSplit ? 'col-span-4' : 'col-span-12'}>
-              <PreviewPane
-                previewUrl={livePreviewUrl || previewUrl}
-                sandboxStatus={sandboxStatus}
-                sandboxSyncing={sandboxSyncing}
-                sandboxError={sandboxSyncError}
-                config={config}
-              />
-            </div>
-          )}
-        </div>
 
         {showExportActions && (
           <div className="pt-2">

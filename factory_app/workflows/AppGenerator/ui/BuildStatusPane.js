@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/BuildStatusPane.js
+// FILE: factory_app/workflows/AppGenerator/ui/BuildStatusPane.js
 // DESCRIPTION: Build/test validation status summary
 // ==============================================================================
 
@@ -15,7 +15,12 @@ const BuildStatusPane = ({
   config = {},
 }) => {
   const statusCfg = useMemo(() => config?.artifacts?.['build-status'] || {}, [config]);
-  const [showLogs, setShowLogs] = useState(statusCfg.showLogs !== false);
+  // Logs default open only when there is something to debug; a passing
+  // build stays a slim strip so the app itself is the hero.
+  const [showLogs, setShowLogs] = useState(
+    statusCfg.showLogs === true ||
+    (statusCfg.showLogs !== false && validationStatus === 'failed')
+  );
   const [showWarnings, setShowWarnings] = useState(statusCfg.collapseWarnings !== true);
   const logRef = useRef(null);
 

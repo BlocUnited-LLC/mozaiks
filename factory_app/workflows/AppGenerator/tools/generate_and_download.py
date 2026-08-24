@@ -1058,6 +1058,7 @@ async def generate_and_download(
         "artifact_kind": "app_bundle",
         "artifact_key": "app_bundle",
         "artifact_version_id": artifact_version_id,
+        "app_id": str(app_id),
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }

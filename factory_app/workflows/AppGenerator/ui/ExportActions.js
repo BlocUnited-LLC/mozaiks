@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/ExportActions.js
+// FILE: factory_app/workflows/AppGenerator/ui/ExportActions.js
 // DESCRIPTION: Export/download actions using the shipped DownloadCenter workflow primitive.
 // ==============================================================================
 

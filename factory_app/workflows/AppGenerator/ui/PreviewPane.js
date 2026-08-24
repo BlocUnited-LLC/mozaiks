@@ -4,9 +4,17 @@
 // ==============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { ExternalLink, RefreshCw } from 'lucide-react';
+import { ExternalLink, Play, RefreshCw } from 'lucide-react';
 
-const PreviewPane = ({ previewUrl, sandboxStatus, sandboxSyncing, sandboxError, config = {} }) => {
+const PreviewPane = ({
+  previewUrl,
+  sandboxStatus,
+  sandboxSyncing,
+  sandboxError,
+  config = {},
+  onStartPreview = null,
+  canStartPreview = false,
+}) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
   const [iframeKey, setIframeKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -36,10 +44,28 @@ const PreviewPane = ({ previewUrl, sandboxStatus, sandboxSyncing, sandboxError, 
           </div>
         ) : (
           <>
-            <div className="text-sm text-[var(--color-text-muted)]">Live preview not available for this build.</div>
-            <div className="text-xs text-[var(--color-text-muted)] mt-1">
-              Previews appear when app validation runs in a sandbox (<span className="font-mono">e2b</span> with an API key, or local <span className="font-mono">docker</span>). Builds validated with the <span className="font-mono">local</span> or <span className="font-mono">skip</span> strategy have no live preview.
-            </div>
+            <div className="text-sm text-[var(--color-text-muted)]">Your app is not running yet.</div>
+            {onStartPreview && canStartPreview ? (
+              <>
+                <div className="text-xs text-[var(--color-text-muted)] mt-1">
+                  Start a live preview to see and use your app right here.
+                </div>
+                <button
+                  type="button"
+                  onClick={onStartPreview}
+                  className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-white border border-white/10 transition-colors"
+                >
+                  <Play className="w-3.5 h-3.5" /> Start live preview
+                </button>
+                <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
+                  Runs in a temporary sandbox (hosted, or local Docker) — nothing to install in your app.
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-[var(--color-text-muted)] mt-1">
+                A live preview needs a sandbox: a hosted sandbox key (<span className="font-mono">E2B_API_KEY</span>) or a running local Docker daemon.
+              </div>
+            )}
           </>
         )}
         {sandboxError && (
