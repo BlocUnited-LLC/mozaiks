@@ -157,6 +157,16 @@ def test_ask_bootstrap_sessions_do_not_count_as_workflow_runs() -> None:
     assert "askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}" in chat_page_source
 
 
+def test_ask_live_stream_keeps_general_agent_provenance() -> None:
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+    transport_source = _read("mozaiksai/core/transport/simple_transport.py")
+
+    assert "metadata=_chunk_metadata" in transport_source
+    assert "const streamChunkMetadata = data.metadata || data.data?.metadata || null;" in chat_page_source
+    assert "metadata: streamChunkMetadata || m.metadata || null" in chat_page_source
+    assert "metadata: streamChunkMetadata" in chat_page_source
+
+
 def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None:
     storage_source = _read("chat-ui/src/session/chatSessionStorage.js")
     controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")

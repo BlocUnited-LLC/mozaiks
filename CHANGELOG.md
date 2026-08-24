@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Ask-mode assistant replies now render while they stream**: live text frames
+  retain their general-chat provenance, so the active chat no longer hides the
+  reply until the persisted transcript is reloaded.
 - **Every workflow failed instantly under context-authority enforcement**:
   the routing-variable validation added in #298/#344 required deterministic
   writers that the runtime never actually produced — agent-sentinel triggers

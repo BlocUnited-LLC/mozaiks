@@ -52,6 +52,49 @@ def test_chunk_text_for_stream_compacts_long_messages_without_losing_content():
     assert all(chunk for chunk in chunks)
 
 
+def test_stream_chunks_preserve_message_source_metadata(monkeypatch):
+    transport = SimpleTransport()
+    transport.connections = {"chat-ask": {"workflow_name": "ExistingAppDiscovery", "user_id": "user-1"}}
+    sent = []
+
+    class _FakeDispatcher:
+        def build_outbound_event_envelope(self, *, raw_event, chat_id, get_sequence_cb, workflow_name):  # noqa: ANN001
+            return {
+                "type": "chat.text",
+                "data": {
+                    "agent": "Assistant",
+                    "content": "Visible while streaming.",
+                    "metadata": {
+                        "source": "general_agent",
+                        "general_chat_id": "generalchat-app-1-user-1-0001",
+                    },
+                },
+            }
+
+    monkeypatch.setattr(_dispatcher_mod, "get_event_dispatcher", lambda: _FakeDispatcher())
+    monkeypatch.setattr(transport, "should_show_to_user", lambda agent_name, chat_id: True)
+    monkeypatch.setattr(
+        transport,
+        "_broadcast_to_websockets",
+        lambda event, chat_id=None: _record_broadcast(sent, event, chat_id),
+    )
+
+    import asyncio
+
+    asyncio.run(
+        transport.send_event_to_ui(
+            {"kind": "text", "agent": "Assistant", "content": "Visible while streaming."},
+            "chat-ask",
+        )
+    )
+
+    chunk_events = [event for event, _chat_id in sent if event["type"] == "chat.stream_chunk"]
+    assert chunk_events
+    assert all(event["data"]["metadata"] == {"source": "general_agent"} for event in chunk_events)
+    assert sent[-1][0]["type"] == "chat.stream_end"
+    assert sent[-1][0]["data"]["metadata"]["source"] == "general_agent"
+
+
 class RecursiveString:
     def __str__(self) -> str:
         return str(self)
