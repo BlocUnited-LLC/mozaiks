@@ -1,0 +1,6 @@
+{
+  "pages": [
+    { "path": "/projects", "component": "SchemaPage", "label": "Projects", "schema": "projects" },
+    { "path": "/tasks", "component": "SchemaPage", "label": "Tasks", "schema": "tasks" }
+  ]
+}

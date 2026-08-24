@@ -1,0 +1,8 @@
+{
+  "migration_id": "001_collections",
+  "version": "1",
+  "operations": [
+    { "type": "ensure_collection", "module_id": "research", "entity_name": "summaries" },
+    { "type": "ensure_collection", "module_id": "incidents", "entity_name": "incidents" }
+  ]
+}

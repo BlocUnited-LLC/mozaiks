@@ -1,0 +1,7 @@
+tools:
+  - agent: ResearchAgent
+    file: summarize.py
+    function: summarize_source
+    tool_type: Agent_Tool
+    auto_tool_call: false
+lifecycle_tools: []

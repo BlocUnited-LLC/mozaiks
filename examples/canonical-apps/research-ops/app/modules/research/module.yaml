@@ -1,0 +1,21 @@
+schema_version: mozaiks.module.v1
+module:
+  id: research
+  display_name: Research
+  version: 1.0.0
+  handler: backend.handler:ResearchHandler
+actions:
+  - id: summarize_source
+    description: Deterministically summarize local source text.
+    handler_method: summarize_source
+    input_schema:
+      type: object
+      required: [source_text]
+      properties:
+        source_text: { type: string, minLength: 1 }
+    output_schema: { type: object }
+  - id: start_research
+    description: Return the canonical workflow launch contract.
+    handler_method: start_research
+    input_schema: { type: object }
+    output_schema: { type: object }

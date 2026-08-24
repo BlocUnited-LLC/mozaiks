@@ -1,0 +1,18 @@
+schema_version: mozaiks.module.v1
+module:
+  id: reports
+  display_name: Reports
+  version: 1.0.0
+  handler: backend.handler:ReportsHandler
+actions:
+  - id: view_report
+    description: View available reports.
+    handler_method: view_report
+    input_schema: { type: object }
+    output_schema: { type: object }
+  - id: export_report
+    description: Export a report.
+    handler_method: export_report
+    entitlement_gate: reports.export
+    input_schema: { type: object }
+    output_schema: { type: object }

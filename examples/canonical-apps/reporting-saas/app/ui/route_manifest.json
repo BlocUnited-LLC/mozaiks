@@ -1,0 +1,5 @@
+{
+  "pages": [
+    { "path": "/reports", "component": "SchemaPage", "label": "Reports", "schema": "reports" }
+  ]
+}

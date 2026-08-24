@@ -1,0 +1,6 @@
+{
+  "pages": [
+    { "path": "/research", "component": "SchemaPage", "label": "Research", "schema": "research" },
+    { "path": "/operations", "component": "SchemaPage", "label": "Operations", "schema": "operations" }
+  ]
+}

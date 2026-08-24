@@ -1,0 +1,23 @@
+schema_version: mozaiks.module.v1
+module:
+  id: tasks
+  display_name: Tasks
+  version: 1.0.0
+  handler: backend.handler:TasksHandler
+actions:
+  - id: create_task
+    description: Create a task.
+    handler_method: create_task
+    input_schema:
+      type: object
+      required: [title, project_id]
+      properties:
+        title: { type: string, minLength: 1 }
+        project_id: { type: string, minLength: 1 }
+        status: { type: string, enum: [todo, doing, done] }
+    output_schema: { type: object }
+  - id: list_tasks
+    description: List tasks.
+    handler_method: list_tasks
+    input_schema: { type: object }
+    output_schema: { type: object }

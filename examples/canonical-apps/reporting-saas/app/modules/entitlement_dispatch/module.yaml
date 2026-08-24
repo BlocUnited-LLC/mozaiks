@@ -1,0 +1,26 @@
+schema_version: mozaiks.module.v1
+module:
+  id: entitlement_dispatch
+  display_name: Entitlement Dispatch
+  version: 1.0.0
+  handler: backend.handler:EntitlementDispatchHandler
+actions:
+  - id: assign_subscription
+    description: Assign an active subscription plan.
+    handler_method: assign_subscription
+    input_schema:
+      type: object
+      required: [user_id, plan_id]
+      properties:
+        user_id: { type: string, minLength: 1 }
+        plan_id: { type: string, enum: [free, pro] }
+    output_schema: { type: object }
+  - id: deactivate_subscription
+    description: Deactivate a subscription assignment.
+    handler_method: deactivate_subscription
+    input_schema:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string, minLength: 1 }
+    output_schema: { type: object }

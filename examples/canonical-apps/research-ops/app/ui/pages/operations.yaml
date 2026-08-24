@@ -1,0 +1,22 @@
+schema_version: mozaiks.app_page.v1
+name: operations
+route: /operations
+title: Operations
+page_type: analytics_dashboard
+layout: full-width
+roles: []
+sections:
+  - id: operations-header
+    primitive: PageHeader
+    config:
+      title: Research operations
+      subtitle: Review workflow incidents and operational state.
+  - id: incident-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/incidents/list_incidents
+      data_key: items
+      columns:
+        - { key: title, label: Incident }
+        - { key: status, label: Status, type: badge }
+      empty: { title: No incidents, message: Healthy workflow runs appear here. }

@@ -1,0 +1,11 @@
+agents:
+  - name: ResearchAgent
+    prompt_sections:
+      - id: role
+        heading: '[ROLE]'
+        content: Summarize the supplied source without inventing facts.
+      - id: output
+        heading: '[OUTPUT]'
+        content: Return valid JSON matching ResearchSummary.
+    max_consecutive_auto_reply: 2
+    structured_outputs_required: true

@@ -1,0 +1,18 @@
+schema_version: mozaiks.subscriptions.v1
+label: Reporting SaaS
+default_plan_id: free
+assignment_store:
+  data_alias: billing.subscriptions
+  app_id_field: app_id
+  user_id_field: user_id
+  status_field: status
+  plan_id_field: plan_id
+  capabilities_field: granted_capabilities
+  active_statuses: [active, trialing]
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: [reports.view]
+  - plan_id: pro
+    label: Pro
+    capabilities: [reports.view, reports.export]
