@@ -9,6 +9,12 @@ and build state management — belongs to Studio. This command should not expand
 to duplicate those surfaces. If you need to review output, compare versions,
 track history, or promote artifacts, use Studio.
 
+``gen`` only supports workflows that are genuinely one-shot: a single prompt
+in, artifacts out. Conversational (interview-driven) workflows hand control
+back to the user mid-run, and the CLI has no way to carry a reply — such runs
+always stall at ``WORKFLOW_AWAITING_INPUT`` after spending real tokens
+(issue #383). Those are refused before execution and redirected to Studio.
+
 Usage:
     mozaiks gen workflow --prompt "description of what you want"
     mozaiks gen app --prompt "description of your app"
@@ -457,6 +463,94 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
     return dst
 
 
+# ── Conversational-workflow detection (issue #383) ─────────────────
+# A workflow that can hand the conversational turn back to the user cannot
+# be driven to completion by `mozaiks gen`, which has exactly one prompt and
+# no way to reply. Detect that *property* from the workflow's own declarative
+# config rather than matching on a workflow name, so any interview-driven
+# workflow is covered and genuinely one-shot workflows still run.
+
+STUDIO_COMMAND = "mozaiks studio --dir . --open"
+ALLOW_INTERACTIVE_FLAG = "--allow-interactive"
+
+# Transition targets that yield the turn to the human participant.
+_USER_TRANSITION_TARGETS = {"reverttousertarget", "usertarget"}
+
+
+def _detect_conversational_signals(workflow_dir: Path) -> list[str]:
+    """Return declarative signals that *workflow_dir* can await a user reply.
+
+    Signals, each read straight from the workflow's own config:
+
+    * ``orchestrator.yaml``'s ``human_in_the_loop: true`` — the workflow
+      declares that a human participates in the run.
+    * a ``transition_graph.yaml`` rule whose ``target_agent`` is ``user`` or
+      whose ``transition_target`` reverts to the user — the graph declares an
+      edge that parks the run on a human turn.
+
+    An empty list means nothing in the config can hand control to a user, so
+    the workflow is safe to run one-shot.
+    """
+    signals: list[str] = []
+
+    orchestrator = _safe_load_yaml(workflow_dir / "orchestrator.yaml")
+    if orchestrator.get("human_in_the_loop") is True:
+        signals.append("orchestrator.yaml declares human_in_the_loop: true")
+
+    graph = _safe_load_yaml(workflow_dir / "transition_graph.yaml")
+    rules = graph.get("transition_rules")
+    if isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            source = str(rule.get("source_agent", "")).strip()
+            target = str(rule.get("target_agent", "")).strip()
+            transition_target = str(rule.get("transition_target", "")).strip()
+            if target.lower() == "user" or transition_target.lower() in _USER_TRANSITION_TARGETS:
+                signals.append(
+                    "transition_graph.yaml hands control to the user "
+                    f"({source or '?'} -> {target or transition_target})"
+                )
+
+    return signals
+
+
+def _safe_load_yaml(path: Path) -> dict[str, Any]:
+    """Load a YAML mapping, returning ``{}`` for missing or unreadable files."""
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _refuse_conversational_workflow(workflow_name: str, signals: list[str]) -> None:
+    """Print the honest redirect for a workflow the CLI cannot drive."""
+    _print_error(
+        f"{workflow_name} is a conversational workflow: it asks clarifying "
+        "questions and waits for your reply."
+    )
+    _print_info(
+        "`mozaiks gen` takes a single --prompt and cannot carry a reply, so this "
+        "run would stall waiting for input after spending tokens and writing no "
+        "files. Refusing before any model call."
+    )
+    _print("\nDetected from the workflow's own config:", style="bold")
+    for signal in signals[:4]:
+        _print_info(f"  - {signal}")
+
+    _print("\nRun this generation in Studio instead:", style="bold")
+    _print_info(f"  {STUDIO_COMMAND}")
+    _print_info("  Studio drives the conversation and supports replies.")
+    _print(
+        f"\nTo start the run anyway and drive it elsewhere, pass {ALLOW_INTERACTIVE_FLAG} "
+        "(the run will still pause at the first question).",
+        style="dim",
+    )
+
 
 def _setup_environment(repo_root: Path, staging_workflows: Path, output_dir: Path):
     """Configure sys.path and env vars for workflow execution."""
@@ -676,7 +770,14 @@ def run(args):
     staging_dir = Path(tempfile.mkdtemp(prefix="mozaiks_gen_"))
     try:
         _print_info("Staging AgentGenerator workflow...")
-        _stage_workflow(source_path, staging_dir, "AgentGenerator")
+        staged_workflow = _stage_workflow(source_path, staging_dir, "AgentGenerator")
+
+        # Refuse interview-driven workflows before any LLM call (issue #383).
+        if not getattr(args, "allow_interactive", False):
+            signals = _detect_conversational_signals(staged_workflow)
+            if signals:
+                _refuse_conversational_workflow("AgentGenerator", signals)
+                return 1
 
         # Set up runtime environment pointing at staged workflows
         _setup_environment(repo_root, staging_dir, output_dir)
