@@ -26,6 +26,17 @@ This project follows a practical pre-1.0 changelog format:
   previously it was hard-wired to e2b, so OSS self-hosters had no live
   refresh at all.
 
+### Added
+
+- **Per-build usage attribution and emission counters**: runtime usage events
+  now carry an optional `build_id` (read from the build-lifecycle context
+  variable) so token cost can be rolled up per build, not just per chat or
+  workflow. `TokenManager` also counts emission outcomes
+  (`emitted` / `dropped_disabled` / `dropped_missing_context` / `failed`),
+  exposes them via `get_usage_emission_stats()`, and logs a one-time warning
+  per drop reason — a fully-dropped usage stream now announces itself instead
+  of looking identical to a healthy one.
+
 ### Changed
 
 - **AppWorkbench leads with the app, speaks the user's language**: the

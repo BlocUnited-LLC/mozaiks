@@ -137,6 +137,7 @@ class RuntimeUsageLedger:
             "tenant_id": tenant_id,
             "workspace_id": workspace_id,
             "workflow_name": workflow_name,
+            "build_id": _text(payload.get("build_id")),
             "agent_name": _text(payload.get("agent_name")),
             "model_name": model_name,
             "prompt_tokens": prompt_tokens,

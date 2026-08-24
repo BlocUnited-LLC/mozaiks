@@ -144,6 +144,7 @@ class MozaiksUsageMiddleware(BaseMiddleware):
                 tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
                 workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
                 workflow_name=_text(_ctx_get(self._context_variables, "workflow_name", self._workflow_name)),
+                build_id=_text(_ctx_get(self._context_variables, "build_id", "")) or None,
                 agent_name=self._agent_name,
                 model_name=str(model_name) if model_name else self._model_name,
                 prompt_tokens=prompt_tokens,
