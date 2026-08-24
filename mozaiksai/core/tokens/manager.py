@@ -20,6 +20,40 @@ def _usage_events_enabled() -> bool:
     return value not in {"0", "false", "off", "no", "disabled"}
 
 
+# Emission accounting. Usage measurement is advisory and must never break a
+# run, but a silently dropped event stream is invisible by design — these
+# counters (plus a once-per-reason warning) make an all-drop run announce
+# itself instead of looking identical to a healthy one.
+_EMISSION_STATS: dict[str, int] = {
+    "emitted": 0,
+    "dropped_disabled": 0,
+    "dropped_missing_context": 0,
+    "failed": 0,
+}
+_WARNED_REASONS: set[str] = set()
+
+
+def _count_emission(reason: str) -> None:
+    _EMISSION_STATS[reason] = _EMISSION_STATS.get(reason, 0) + 1
+    if reason != "emitted" and reason not in _WARNED_REASONS:
+        _WARNED_REASONS.add(reason)
+        logger.warning(
+            "USAGE_EVENTS_DROPPED: first usage event dropped (reason=%s). "
+            "Further drops for this reason are counted silently; inspect "
+            "get_usage_emission_stats() for totals. For reason=dropped_disabled "
+            "set USAGE_EVENTS_ENABLED=true to record; for "
+            "reason=dropped_missing_context supply chat_id/app_id/user_id/"
+            "workflow_name in context variables.",
+            reason,
+        )
+
+
+def get_usage_emission_stats() -> dict[str, int]:
+    """Return a snapshot of usage-event emission counters for this process."""
+
+    return dict(_EMISSION_STATS)
+
+
 class TokenManager:
     """Neutral token usage collector (measurement + emission only).
 
@@ -37,6 +71,7 @@ class TokenManager:
         workflow_name: str,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
+        build_id: str | None = None,
         agent_name: str | None = None,
         model_name: str | None = None,
         prompt_tokens: int = 0,
@@ -50,9 +85,11 @@ class TokenManager:
     ) -> None:
         # Advisory measurement only. Do not add enforcement or billing logic here.
         if not _usage_events_enabled():
+            _count_emission("dropped_disabled")
             return
 
         if not chat_id or not app_id or not user_id or not workflow_name:
+            _count_emission("dropped_missing_context")
             logger.debug(
                 "usage_delta_missing_context",
                 extra={
@@ -78,6 +115,7 @@ class TokenManager:
             "tenant_id": tenant_id or None,
             "workspace_id": workspace_id or None,
             "workflow_name": workflow_name,
+            "build_id": build_id or None,
             "agent_name": agent_name or None,
             "model_name": model_name or None,
             "prompt_tokens": prompt,
@@ -94,7 +132,9 @@ class TokenManager:
 
             dispatcher = get_event_dispatcher()
             await dispatcher.emit(USAGE_DELTA_EVENT_TYPE, payload)
+            _count_emission("emitted")
         except Exception as exc:  # pragma: no cover - best effort
+            _count_emission("failed")
             logger.debug("usage_delta_emit_failed", extra={"error": str(exc)})
 
     @staticmethod
