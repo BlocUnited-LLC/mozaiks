@@ -745,8 +745,19 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         "STREAM_TEXT_CHUNK agent=%s chat_id=%s len=%d",
                         _agent, chat_id, len(_content),
                     )
+                    # Stream frames need the same provenance as stream_end so
+                    # clients can enforce mode isolation before the turn ends.
+                    # Keep the per-frame payload compact: classification only.
+                    _message_metadata = _d.get('metadata')
+                    _chunk_metadata = None
+                    if isinstance(_message_metadata, dict) and _message_metadata.get('source'):
+                        _chunk_metadata = {'source': _message_metadata['source']}
                     await self._emit_text_as_chunks(
-                        _content, str(_agent), chat_id or '', _stream_id
+                        _content,
+                        str(_agent),
+                        chat_id or '',
+                        _stream_id,
+                        metadata=_chunk_metadata,
                     )
                     await self._broadcast_to_websockets(
                         {
@@ -825,6 +836,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         agent_name: str,
         chat_id: str,
         stream_id: str,
+        *,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Split *content* into adaptive text chunks and emit each as chat.stream_chunk.
 
@@ -834,19 +847,23 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         A minimal async yield between chunks ensures React 18's automatic
         batching doesn't collapse all updates into a single render. The caller
-        is responsible for sending chat.stream_end afterwards.
+        is responsible for sending chat.stream_end afterwards. ``metadata`` is
+        compact message provenance forwarded with every chunk.
         """
         chunks = self._chunk_text_for_stream(content)
         for seq, token in enumerate(chunks):
+            chunk_data: dict[str, Any] = {
+                "agent": agent_name,
+                "content": token,
+                "stream_id": stream_id,
+                "chunk_seq": seq,
+            }
+            if metadata:
+                chunk_data["metadata"] = dict(metadata)
             await self._broadcast_to_websockets(
                 {
                     "type": "chat.stream_chunk",
-                    "data": {
-                        "agent": agent_name,
-                        "content": token,
-                        "stream_id": stream_id,
-                        "chunk_seq": seq,
-                    },
+                    "data": chunk_data,
                 },
                 chat_id or None,
             )

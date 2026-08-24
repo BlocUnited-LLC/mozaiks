@@ -2453,6 +2453,7 @@ const ChatPage = () => {
         const agentNameChunk = extractAgentName(data);
         const chunkContent = data.content || '';
         const streamId = data.stream_id || null;
+        const streamChunkMetadata = data.metadata || data.data?.metadata || null;
         if (!chunkContent) return;
         // Hide init spinner on first streaming token
         if (showInitSpinner) setShowInitSpinner(false);
@@ -2470,6 +2471,7 @@ const ChatPage = () => {
               updated[i] = {
                 ...m,
                 content: `${m.content || ''}${chunkContent}`,
+                metadata: streamChunkMetadata || m.metadata || null,
               };
               return updated;
             }
@@ -2486,6 +2488,7 @@ const ChatPage = () => {
             isStructuredCapable: !!(data.is_structured_capable),
             isVisual: data.is_visual !== undefined ? !!data.is_visual : true,
             isToolAgent: !!(data.is_tool_agent),
+            metadata: streamChunkMetadata,
           });
           return updated;
         });
