@@ -12,8 +12,33 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **AppWorkbench live-preview refresh actually works now**: the preview
+  sandbox API the workbench calls after a scoped refinement
+  (`/api/artifacts/{id}/sandbox`, `/api/sandbox/*`, `/ws/sandbox/*`) was
+  defined but never mounted by any host, so every refinement-triggered
+  preview refresh failed with a 404 and the iframe kept showing the stale
+  app. The session manager was promoted from workflow-local dead code to
+  `mozaiksai/core/sandbox/preview_sessions.py` over the `SandboxPort` seam
+  and the routes are mounted on the Studio host with auth. Because it now
+  rides `SandboxPort`, the live-preview loop also works on local Docker —
+  previously it was hard-wired to e2b, so OSS self-hosters had no live
+  refresh at all.
+
 ### Changed
 
+- **AppWorkbench leads with the app, speaks the user's language**: the
+  file-tree/editor/preview grid now renders directly under the status strip
+  (previously it sat below the review and refinement panels), build logs
+  default to collapsed unless validation failed, and the refinement panel's
+  copy no longer leaks internal vocabulary ("control-plane harness",
+  "codex-backed patch", artifact version ids) — it reads "Describe a change
+  and the agents will patch your app." The preview pane gains a
+  **Start live preview** button when no preview exists yet (boots the bundle
+  in an e2b or Docker sandbox on demand), and `generate_and_download` now
+  passes `app_id` so preview sandboxes are keyed to the app
+  deterministically.
 - **AppWorkbench pane naming and preview messaging cleaned up**: the internal
   panes of the Studio `AppWorkbench` artifact are now named `*Pane.js`
   (`PreviewPane`, `FileTreePane`, `CodeEditorPane`, `BuildStatusPane`) instead

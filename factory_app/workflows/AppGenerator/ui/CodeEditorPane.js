@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/CodeEditorPane.js
+// FILE: factory_app/workflows/AppGenerator/ui/CodeEditorPane.js
 // DESCRIPTION: Monaco code editor wrapper for AppWorkbench
 // ==============================================================================
 

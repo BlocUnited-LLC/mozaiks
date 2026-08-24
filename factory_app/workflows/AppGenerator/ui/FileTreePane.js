@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: ChatUI/src/workflows/AppGenerator/components/FileTreePane.js
+// FILE: factory_app/workflows/AppGenerator/ui/FileTreePane.js
 // DESCRIPTION: Generated file browser (tree) for AppWorkbench
 // ==============================================================================
 

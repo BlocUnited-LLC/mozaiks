@@ -191,32 +191,32 @@ def test_coding_worker_plan_rejects_e2b():
 
 
 # ---------------------------------------------------------------------------
-# Sandbox manager creates provider sandboxes with deadline + identity
+# Preview session manager creates provider sandboxes with deadline + identity
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_artifact_sandbox_manager_tags_and_bounds_sessions(monkeypatch):
-    from factory_app.workflows.AppGenerator.tools import sandbox_manager as sm
+async def test_artifact_preview_manager_tags_and_bounds_sessions(monkeypatch):
+    from mozaiksai.core.sandbox.preview_sessions import ArtifactPreviewSessionManager
 
     created: dict[str, Any] = {}
 
-    class _FakeSandbox:
-        sandbox_id = "e2b-abc"
-
-        @classmethod
-        def create(cls, **kwargs):
+    class _FakeAdapter:
+        async def create_session(self, **kwargs):
             created.update(kwargs)
-            return cls()
+            from mozaiksai.core.ports.sandbox import SandboxSessionInfo
+
+            return SandboxSessionInfo(session_id="fake-session", provider="e2b")
 
     monkeypatch.setenv("SANDBOX_TTL_MINUTES", "15")
-    monkeypatch.setattr(sm, "Sandbox", _FakeSandbox)
-    manager = sm.ArtifactSandboxManager()
+    manager = ArtifactPreviewSessionManager(
+        provider_resolver=lambda: ("e2b", _FakeAdapter())
+    )
     manager._broadcast = AsyncMock()
 
     state = await manager.create_or_reuse("artifact-123")
 
-    assert state.sandbox is not None
-    assert created["timeout"] == 15 * 60
+    assert state.session_id == "fake-session"
+    assert created["timeout_seconds"] == 15 * 60
     metadata = created["metadata"]
     assert metadata["purpose"] == "artifact_preview"
     assert metadata["artifact_id"] == "artifact-123"
