@@ -151,6 +151,7 @@ nav:
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
           - Public Architecture & OSS Boundary: architecture/foundations/public-architecture-and-oss-boundary.md
+          - Eval & Build Intelligence Boundary: architecture/foundations/eval-and-build-intelligence-boundary.md
           - Framework & Operator Intelligence Boundary: architecture/foundations/framework-operator-intelligence-boundary.md
           - App Intelligence Plane: architecture/foundations/app-intelligence-plane.md
           - App Intelligence User Journey: architecture/foundations/app-intelligence-user-journey.md
