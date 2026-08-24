@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests.test_generated_app_archetype_matrix import _matrix_specs
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_DATA = ROOT / "factory_app" / "app" / "admin" / "pages" / "studioDemoData.js"
 EXPECTED_APP_IDS = {
