@@ -49,6 +49,22 @@ of it in six seconds — see issue #379 for the full trace.
 - When a real run teaches you something, write it to the tracking issue, not
   only into your session. Findings that live in a scratchpad do not survive.
 
+## Corroboration from other lanes (2026-08-24)
+
+Within hours of this rule being drafted, two unrelated lanes reported the same
+pattern from different domains:
+
+- **Refund pipeline**: its two highest-severity findings — a journal-duplicate
+  race and a CI discovery gap — surfaced only when proofs ran against real
+  infrastructure, *after* the code and the checks already looked green.
+- **Seam audits**: an AST scan proving that every OSS symbol the hosted repo
+  imports actually resolves caught three live `ImportError`s, one of which had
+  silently disabled a paid-tier gate. Separately, a Playwright spec was found
+  mocking the wrong 402 envelope shape — so the test *certifies* the bug it
+  exists to catch.
+
+Green CI is not proof. It is the absence of one kind of disproof.
+
 ## When this lifts
 
 When the traversal has been observed end to end and the product-loop table in
