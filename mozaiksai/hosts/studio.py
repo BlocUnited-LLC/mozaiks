@@ -117,8 +117,10 @@ from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
 )
+from mozaiksai.hosts.routers.sandbox import router as _sandbox_router
 
 app = platform_app.app
+app.include_router(_sandbox_router)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200

@@ -1,12 +1,14 @@
 // ==============================================================================
 // FILE: factory_app/workflows/AppGenerator/ui/useSandbox.js
-// DESCRIPTION: Hook for managing a live e2b sandbox tied to an artifact.
+// DESCRIPTION: Hook for managing a live preview sandbox (e2b or Docker) tied
+//   to an artifact.
 //   - Tracks sandboxId and live status via WebSocket
 //   - Exposes syncAndRestart(filesMap) to push updated files and reboot the
 //     dev server after a coding-worker patch is applied
 // ==============================================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getStudioAccessToken, studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 export function useSandbox(artifactId) {
   const [sandboxId, setSandboxId] = useState(null);
@@ -21,7 +23,10 @@ export function useSandbox(artifactId) {
     if (!sandboxId) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/sandbox/${encodeURIComponent(sandboxId)}`);
+    const wsUrl = new URL(`${protocol}//${window.location.host}/ws/sandbox/${encodeURIComponent(sandboxId)}`);
+    const token = getStudioAccessToken();
+    if (token) wsUrl.searchParams.set('access_token', token);
+    const ws = new WebSocket(wsUrl.toString());
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -59,7 +64,7 @@ export function useSandbox(artifactId) {
 
       try {
         // 1. Create or reuse an existing sandbox for this artifact
-        const createRes = await fetch(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox`, {
+        const createRes = await studioFetch(`/api/artifacts/${encodeURIComponent(artifactId)}/sandbox`, {
           method: 'POST',
         });
         if (!createRes.ok) {
@@ -70,7 +75,7 @@ export function useSandbox(artifactId) {
         setSandboxId(sid);
 
         // 2. Push all current files into the sandbox
-        const syncRes = await fetch(`/api/sandbox/${encodeURIComponent(sid)}/sync`, {
+        const syncRes = await studioFetch(`/api/sandbox/${encodeURIComponent(sid)}/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -85,7 +90,7 @@ export function useSandbox(artifactId) {
 
         // 3. Restart the dev server; WebSocket will broadcast the new previewUrl
         setSandboxStatus('starting');
-        const startRes = await fetch(`/api/sandbox/${encodeURIComponent(sid)}/start`, {
+        const startRes = await studioFetch(`/api/sandbox/${encodeURIComponent(sid)}/start`, {
           method: 'POST',
         });
         if (!startRes.ok) {
