@@ -167,6 +167,23 @@ def test_ask_live_stream_keeps_general_agent_provenance() -> None:
     assert "metadata: streamChunkMetadata" in chat_page_source
 
 
+def test_ask_optimistic_user_message_keeps_general_agent_provenance() -> None:
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+
+    send_start = chat_page_source.index("const sendMessage = async")
+    send_end = chat_page_source.index("const sendWsMessage", send_start)
+    send_block = chat_page_source[send_start:send_end]
+
+    assert "metadata: conversationMode === 'ask'" in send_block
+    assert "source: 'general_agent'" in send_block
+    assert "general_chat_id: activeGeneralChatId" in send_block
+
+    echo_start = chat_page_source.index("if (isGeneralUserEcho)")
+    echo_end = chat_page_source.index("// Enhanced suppression", echo_start)
+    echo_block = chat_page_source[echo_start:echo_end]
+    assert ".find(message => message && !message.isThinking)" in echo_block
+
+
 def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None:
     storage_source = _read("chat-ui/src/session/chatSessionStorage.js")
     controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")

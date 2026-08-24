@@ -2748,7 +2748,9 @@ const ChatPage = () => {
           return;
         }
         if (isGeneralUserEcho) {
-          const recent = messagesRef.current[messagesRef.current.length - 1];
+          const recent = [...messagesRef.current]
+            .reverse()
+            .find(message => message && !message.isThinking);
           if (recent && recent.sender === 'user') {
             const recentText = String(recent.content || '').trim();
             if (recentText && recentText === String(content).trim()) {
@@ -4997,7 +4999,13 @@ const ChatPage = () => {
       agentName: 'You',
       content: messageContent.content,
       timestamp: Date.now(),
-      isStreaming: false
+      isStreaming: false,
+      metadata: conversationMode === 'ask'
+        ? {
+            source: 'general_agent',
+            ...(activeGeneralChatId ? { general_chat_id: activeGeneralChatId } : {})
+          }
+        : null
     };
     
     

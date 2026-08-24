@@ -14,9 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
-- **Ask-mode assistant replies now render while they stream**: live text frames
-  retain their general-chat provenance, so the active chat no longer hides the
-  reply until the persisted transcript is reloaded.
+- **Ask-mode messages now render immediately**: optimistic user messages and
+  live assistant frames retain their general-chat provenance, so the active
+  chat no longer hides either side until the persisted transcript is reloaded.
 - **`mozaiks gen` burned tokens on runs it could never finish** (#383): the
   CLI takes one `--prompt` and has no way to reply, but AgentGenerator opens
   with `InterviewAgent`, which asks a clarifying question and hands the turn
