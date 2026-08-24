@@ -681,6 +681,50 @@ async def _run_ag2_network_phase(
     )
 
 
+def _assemble_result_payload(
+    *,
+    workflow_name: str,
+    chat_id: str,
+    app_id: str,
+    user_id: str | None,
+    workflow_complete: bool,
+    awaiting_user_input: bool,
+    run_failed: bool,
+    run_error: Any,
+    workflow_status_value: int,
+    agents_created: int,
+    agent_turns: int,
+    ag2_channel_id: Any,
+    ag2_close_reason: Any,
+    structured_outputs: Any,
+) -> dict[str, Any]:
+    """Final orchestration result contract handed back to callers (Studio, CLI).
+
+    ``agents_created`` and ``agent_turns`` are the evidence a caller needs to
+    distinguish a real generation from a silent no-op where the graph loaded
+    but no agent ever produced a reply (issue #379).
+    """
+    return {
+        "workflow_name": workflow_name,
+        "chat_id": chat_id,
+        "app_id": app_id,
+        "user_id": user_id,
+        "messages": None,
+        "max_turns_reached": False,
+        "response": None,
+        "run_completed": workflow_complete,
+        "awaiting_user_input": awaiting_user_input,
+        "run_status": "failed" if run_failed else workflow_status_value,
+        "failed": run_failed,
+        "error": run_error,
+        "agents_created": agents_created,
+        "agent_turns": agent_turns,
+        "ag2_channel_id": ag2_channel_id,
+        "ag2_close_reason": ag2_close_reason,
+        "structured_outputs": structured_outputs,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main orchestration entry point
 # ---------------------------------------------------------------------------
@@ -1315,23 +1359,22 @@ async def run_workflow_orchestration(
         duration_sec = perf_counter() - start_time
         wf_logger.info("[EXECUTION_COMPLETE] Duration: %.2fs", duration_sec)
 
-        result_payload = {
-            "workflow_name": workflow_name,
-            "chat_id": chat_id,
-            "app_id": app_id,
-            "user_id": user_id,
-            "messages": None,
-            "max_turns_reached": False,
-            "response": None,
-            "run_completed": workflow_complete,
-            "awaiting_user_input": awaiting_user_input,
-            "run_status": "failed" if run_failed else workflow_status_value,
-            "failed": run_failed,
-            "error": run_error,
-            "ag2_channel_id": runner_result.channel_id,
-            "ag2_close_reason": runner_result.close_reason,
-            "structured_outputs": runner_result.structured_outputs,
-        }
+        result_payload = _assemble_result_payload(
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+            user_id=user_id,
+            workflow_complete=workflow_complete,
+            awaiting_user_input=awaiting_user_input,
+            run_failed=run_failed,
+            run_error=run_error,
+            workflow_status_value=workflow_status_value,
+            agents_created=len(agents),
+            agent_turns=sequence_counter,
+            ag2_channel_id=runner_result.channel_id,
+            ag2_close_reason=runner_result.close_reason,
+            structured_outputs=runner_result.structured_outputs,
+        )
 
     except Exception as e:
         logger.error("[%s] Orchestration failed: %s", workflow_name_upper, e, exc_info=True)
