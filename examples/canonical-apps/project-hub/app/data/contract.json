@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "app_id": "project-hub",
+  "surfaces": [
+    { "surface_id": "projects", "surface_kind": "module", "collections": [{ "module_id": "projects", "name": "projects", "entity_name": "projects" }] },
+    { "surface_id": "tasks", "surface_kind": "module", "collections": [{ "module_id": "tasks", "name": "tasks", "entity_name": "tasks" }] }
+  ]
+}

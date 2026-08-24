@@ -1,0 +1,5 @@
+{
+  "header": { "pages": [] },
+  "navigation": { "policy": { "autoFromPages": true } },
+  "chrome": { "defaultMode": "standard" }
+}

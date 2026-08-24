@@ -1,0 +1,22 @@
+schema_version: mozaiks.module.v1
+module:
+  id: projects
+  display_name: Projects
+  version: 1.0.0
+  handler: backend.handler:ProjectsHandler
+actions:
+  - id: create_project
+    description: Create a project.
+    handler_method: create_project
+    input_schema:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        status: { type: string, enum: [planned, active, complete] }
+    output_schema: { type: object }
+  - id: list_projects
+    description: List projects.
+    handler_method: list_projects
+    input_schema: { type: object }
+    output_schema: { type: object }

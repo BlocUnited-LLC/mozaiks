@@ -1,0 +1,30 @@
+schema_version: mozaiks.app_page.v1
+name: research
+route: /research
+title: Research
+page_type: workflow_board
+layout: full-width
+roles: []
+sections:
+  - id: research-header
+    primitive: PageHeader
+    config:
+      title: Research workspace
+      subtitle: Summarize local source material and launch the research workflow.
+  - id: summarize-source
+    primitive: ActionButton
+    config:
+      actions:
+        - id: summarize-source
+          label: Summarize source
+          variant: primary
+          action_type: submit
+          href: /api/modules/research/summarize_source
+  - id: start-research
+    primitive: ActionButton
+    config:
+      actions:
+        - id: start-research
+          label: Start workflow
+          action_type: workflow
+          workflow_id: ResearchWorkflow

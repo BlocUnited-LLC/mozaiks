@@ -1,0 +1,8 @@
+{
+  "appId": "project-hub",
+  "appName": "Project Hub",
+  "version": "1.0.0",
+  "description": "Authenticated project and task tracking reference app.",
+  "authRequired": true,
+  "startup": { "landing_spot": "/projects" }
+}

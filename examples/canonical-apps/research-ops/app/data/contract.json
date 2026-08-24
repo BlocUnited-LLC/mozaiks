@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "app_id": "research-ops",
+  "surfaces": [
+    { "surface_id": "research", "surface_kind": "module", "collections": [{ "module_id": "research", "name": "summaries", "entity_name": "summaries" }] },
+    { "surface_id": "incidents", "surface_kind": "module", "collections": [{ "module_id": "incidents", "name": "incidents", "entity_name": "incidents" }] }
+  ]
+}

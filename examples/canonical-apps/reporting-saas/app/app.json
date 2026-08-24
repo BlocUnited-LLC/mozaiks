@@ -1,0 +1,8 @@
+{
+  "appId": "reporting-saas",
+  "appName": "Reporting SaaS",
+  "version": "1.0.0",
+  "description": "Subscription and entitlement enforcement reference app.",
+  "authRequired": true,
+  "startup": { "landing_spot": "/reports" }
+}

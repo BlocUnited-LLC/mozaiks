@@ -1,0 +1,9 @@
+registry:
+  ResearchAgent: ResearchSummary
+models:
+  ResearchSummary:
+    type: model
+    fields:
+      summary:
+        type: str
+        description: Source summary.

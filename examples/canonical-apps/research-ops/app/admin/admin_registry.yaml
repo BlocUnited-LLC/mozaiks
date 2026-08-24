@@ -1,0 +1,9 @@
+schema_version: mozaiks.admin.registry.v1
+pages:
+  - id: operations
+    label: Operations
+    path: /admin/operations
+    order: 10
+    enabled: true
+    scope: app
+    surfaces: [platform]

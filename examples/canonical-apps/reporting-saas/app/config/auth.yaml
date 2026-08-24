@@ -1,0 +1,34 @@
+schema_version: mozaiks.auth.v1
+auth_required: true
+strategy: oidc
+mode: brokered_oidc
+signup_enabled: false
+routes:
+  login: /login
+  callback: /auth/callback
+  logout: /login
+  post_login_default: /reports
+frontend:
+  adapter: oidc_pkce
+  client_id_env: VITE_OIDC_CLIENT_ID
+  authority_env: VITE_OIDC_AUTHORITY
+  discovery_url_env: VITE_OIDC_DISCOVERY_URL
+  redirect_uri_env: VITE_OIDC_REDIRECT_URI
+  scope_env: VITE_OIDC_SCOPE
+  default_scopes: [openid, profile, email]
+runtime:
+  provider_env: AUTH_PROVIDER
+  enabled_env: AUTH_ENABLED
+  authority_env: MOZAIKS_OIDC_AUTHORITY
+  discovery_url_env: MOZAIKS_OIDC_DISCOVERY_URL
+  issuer_env: AUTH_ISSUER
+  jwks_url_env: AUTH_JWKS_URL
+identity_providers: []
+login_methods:
+  - id: broker
+    kind: oidc_redirect
+    label: Sign in
+    primary: true
+customization:
+  login_theme_source: brand/theme_config.json
+  upstream_provider_setup: host_or_operator

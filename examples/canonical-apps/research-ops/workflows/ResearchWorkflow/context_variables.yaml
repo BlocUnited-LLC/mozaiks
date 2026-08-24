@@ -1,0 +1,8 @@
+definitions:
+  source_text:
+    source:
+      type: state
+      default: Local deterministic source
+agents:
+  ResearchAgent:
+    variables: [source_text]
