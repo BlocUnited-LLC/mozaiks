@@ -48,6 +48,7 @@ ContextWriterId = Literal[
     "structured_output",
     "lifecycle_tool",
     "deterministic_tool",
+    "sentinel_text_trigger",
 ]
 
 RUNTIME_SYSTEM_WRITER: ContextWriterId = "runtime_system"
@@ -64,6 +65,12 @@ TASK_BATCH_WRITER: ContextWriterId = "task_batch"
 STRUCTURED_OUTPUT_WRITER: ContextWriterId = "structured_output"
 LIFECYCLE_TOOL_WRITER: ContextWriterId = "lifecycle_tool"
 DETERMINISTIC_TOOL_WRITER: ContextWriterId = "deterministic_tool"
+# Sentinel extraction: an agent_text trigger whose match is an exact `equals`
+# token mapped to a fixed declared value (e.g. "NEXT" -> true). The model only
+# emits the token; the value written is decided by the declaration and an
+# exact string comparison, so the write is deterministic runtime machinery —
+# unlike freeform contains/regex-capture triggers, which stay AGENT_TEXT.
+SENTINEL_TEXT_TRIGGER_WRITER: ContextWriterId = "sentinel_text_trigger"
 CONTEXT_AUTHORITY_WRITER_DEP = "mozaiks.context_authority.scoped_writer"
 
 _ALL_WRITERS = {
@@ -81,6 +88,7 @@ _ALL_WRITERS = {
     STRUCTURED_OUTPUT_WRITER,
     LIFECYCLE_TOOL_WRITER,
     DETERMINISTIC_TOOL_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
 }
 _DETERMINISTIC_WRITERS = {
     RUNTIME_SYSTEM_WRITER,
@@ -90,6 +98,7 @@ _DETERMINISTIC_WRITERS = {
     STRUCTURED_OUTPUT_WRITER,
     LIFECYCLE_TOOL_WRITER,
     DETERMINISTIC_TOOL_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
 }
 _ORDINARY_MUTATION_WRITERS = {
     CALLER_INPUT_WRITER,
@@ -103,6 +112,7 @@ _ORDINARY_MUTATION_WRITERS = {
     STRUCTURED_OUTPUT_WRITER,
     LIFECYCLE_TOOL_WRITER,
     DETERMINISTIC_TOOL_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
 }
 _IMMUTABLE_EXACT = {
     "app_id",
@@ -406,6 +416,12 @@ def infer_context_authority(
     triggers = list(_value(source, "triggers", []) or [])
     trigger_types = {str(_value(trigger, "type", "") or "").strip() for trigger in triggers}
     task_keys = task_batch_context_keys or set()
+    sentinel_trigger = any(
+        str(_value(trigger, "type", "") or "").strip() == "agent_text"
+        and str(_value(_value(trigger, "match", None), "equals", "") or "").strip()
+        and str(_value(trigger, "value", "") or "") != "$1"
+        for trigger in triggers
+    )
 
     authority_class = metadata.authority_class
     if authority_class is None:
@@ -424,7 +440,9 @@ def infer_context_authority(
     }
     writer_ids = set(metadata.writer_ids)
     if not writer_ids:
-        writer_ids = _infer_writer_ids(authority_class, source_type, trigger_types, clean_key, task_keys)
+        writer_ids = _infer_writer_ids(
+            authority_class, source_type, trigger_types, clean_key, task_keys, sentinel_trigger
+        )
 
     if authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY:
         writer_ids = set()
@@ -530,10 +548,32 @@ def _infer_writer_ids(
     trigger_types: set[str],
     key: str,
     task_batch_context_keys: set[str],
+    sentinel_trigger: bool = False,
 ) -> set[ContextWriterId]:
     if authority_class is ContextAuthorityClass.DERIVED_INFORMATION and "agent_text" in trigger_types:
-        return {AGENT_TEXT_WRITER}
+        derived_writers: set[ContextWriterId] = {AGENT_TEXT_WRITER}
+        if sentinel_trigger:
+            derived_writers.add(SENTINEL_TEXT_TRIGGER_WRITER)
+        return derived_writers
     writers: set[ContextWriterId] = set()
+    if authority_class in {
+        ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE,
+        ContextAuthorityClass.CLOSED_WRITER_QUALITY_STATE,
+    }:
+        # Closed state may only be advanced by deterministic runtime
+        # machinery. Declared workflow tools (auto-invoked on validated
+        # structured output), lifecycle hooks, and structured-output
+        # projection are that machinery; freeform model text and replay
+        # remain excluded. Without this baseline, closed variables written
+        # by tools have an empty writer set and every graph that routes on
+        # them fails to compile.
+        writers.update({
+            DETERMINISTIC_TOOL_WRITER,
+            LIFECYCLE_TOOL_WRITER,
+            STRUCTURED_OUTPUT_WRITER,
+        })
+    if sentinel_trigger:
+        writers.add(SENTINEL_TEXT_TRIGGER_WRITER)
     if "ui_response" in trigger_types:
         writers.add(UI_RESPONSE_TRIGGER_WRITER)
     if "user_text" in trigger_types:
@@ -640,6 +680,7 @@ def _clean_key(value: Any) -> str:
 
 __all__ = [
     "AGENT_TEXT_WRITER",
+    "SENTINEL_TEXT_TRIGGER_WRITER",
     "CALLER_INPUT_WRITER",
     "CONTEXT_BRIDGE_WRITER",
     "DETERMINISTIC_TOOL_WRITER",

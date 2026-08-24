@@ -14,6 +14,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Every workflow failed instantly under context-authority enforcement**:
+  the routing-variable validation added in #298/#344 required deterministic
+  writers that the runtime never actually produced — agent-sentinel triggers
+  ("say NEXT") wrote as freeform `agent_text` and declared workflow tools
+  wrote as `tool_writeback`/`context_bridge`, all banned for routing state.
+  Every graph compile raised `ContextAuthorityError` before any agent spoke,
+  so every Studio conversation "completed" in under a second with zero agent
+  activity. The writer taxonomy is now complete: exact-match `equals`
+  triggers write as a new deterministic `sentinel_text_trigger` writer
+  (freeform contains/regex-capture stays banned from routing), auto-invoked
+  tools write as `deterministic_tool`, closed routing/quality state accepts
+  the deterministic tool/lifecycle/structured-output machinery, and the AG2
+  runner elevates bridge/derive writes to the declared deterministic writer
+  per variable. A new drift guard
+  (`tests/test_workflow_context_authority_compile.py`) compiles all 14
+  factory workflows against their real policies on every PR — the test that
+  would have caught this before merge.
+- **ExistingAppDiscovery crashed at persist time**: twelve context variables
+  declared `type: object` with list defaults/values, which the replay type
+  guard fail-closes on. Declarations corrected to `type: array`, and the new
+  drift guard also validates every declared default against its declared
+  type.
 - **AppWorkbench live-preview refresh actually works now**: the preview
   sandbox API the workbench calls after a scoped refinement
   (`/api/artifacts/{id}/sandbox`, `/api/sandbox/*`, `/ws/sandbox/*`) was

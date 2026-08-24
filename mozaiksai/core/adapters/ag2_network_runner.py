@@ -41,7 +41,9 @@ from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import (
     AGENT_TEXT_WRITER,
     CONTEXT_BRIDGE_WRITER,
+    DETERMINISTIC_TOOL_WRITER,
     LIVE_USER_CONTEXT_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
     ContextAuthorityPolicy,
 )
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
@@ -86,11 +88,33 @@ def _json_safe_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return serialized if isinstance(serialized, dict) else {}
 
 
+def _resolve_declared_writer(
+    key: str,
+    *,
+    base_writer: str,
+    elevated_writer: str,
+    context_authority_policy: ContextAuthorityPolicy | None,
+) -> str:
+    """Label a write with the highest-fidelity writer the declaration
+    authorizes for this mechanism. The policy stays the single authority —
+    this only picks between the mechanism's base writer and its declared
+    deterministic form (e.g. a bridge write to a variable whose declaration
+    authorizes deterministic tools, or an agent-text derive for a variable
+    declared with an exact-match sentinel trigger)."""
+    if context_authority_policy is None:
+        return base_writer
+    authority = context_authority_policy.variables.get(key)
+    if authority is not None and elevated_writer in authority.writer_ids:
+        return elevated_writer
+    return base_writer
+
+
 def _authorized_context_updates(
     updates: Mapping[str, Any] | None,
     *,
     writer_id: str,
     context_authority_policy: ContextAuthorityPolicy | None,
+    elevated_writer_id: str | None = None,
 ) -> dict[str, Any]:
     if not updates:
         return {}
@@ -99,8 +123,16 @@ def _authorized_context_updates(
         clean_key = str(key or "").strip()
         if not clean_key:
             continue
+        effective_writer = writer_id
+        if elevated_writer_id is not None:
+            effective_writer = _resolve_declared_writer(
+                clean_key,
+                base_writer=writer_id,
+                elevated_writer=elevated_writer_id,
+                context_authority_policy=context_authority_policy,
+            )
         if context_authority_policy is not None:
-            context_authority_policy.require_can_write(clean_key, writer_id=writer_id, operation="set")  # type: ignore[arg-type]
+            context_authority_policy.require_can_write(clean_key, writer_id=effective_writer, operation="set")  # type: ignore[arg-type]
         safe[clean_key] = value
     return safe
 
@@ -779,6 +811,7 @@ def _install_context_update_handler(
                                 candidate_updates,
                                 writer_id=AGENT_TEXT_WRITER,
                                 context_authority_policy=context_authority_policy,
+                                elevated_writer_id=SENTINEL_TEXT_TRIGGER_WRITER,
                             )
                 if (
                     bridge_updates.get("set")
@@ -790,11 +823,13 @@ def _install_context_update_handler(
                         bridge_updates.get("set") or {},
                         writer_id=CONTEXT_BRIDGE_WRITER,
                         context_authority_policy=context_authority_policy,
+                        elevated_writer_id=DETERMINISTIC_TOOL_WRITER,
                     )
                     existing_set = _authorized_context_updates(
                         existing.get("set") or {},
                         writer_id=CONTEXT_BRIDGE_WRITER,
                         context_authority_policy=context_authority_policy,
+                        elevated_writer_id=DETERMINISTIC_TOOL_WRITER,
                     )
                     merged_set = {
                         **_json_safe_dict(existing_set),
