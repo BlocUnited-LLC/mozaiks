@@ -616,7 +616,7 @@ Once the semantic compiler exists, journey execution consumes its canonical
 graph and build version identifiers. Production implementation of this port
 waits until the semantic-compiler ADR determines those identities. Lifecycle
 and outbox primitives may be designed independently, but they must not embed
-`AppBuildPlan` fields, filesystem artifact families, or legacy semantic
+`AppBuildPlan` fields, filesystem artifact families, or pre-compiler semantic
 authority.
 
 ## OSS And Proprietary Boundary
@@ -659,7 +659,7 @@ Existing `RunRequest`/`ResumeRequest` callers remain unchanged initially when
 no journey handle or journey-wide guarantee and must be observable so new
 public entrypoints do not adopt it. `JourneyExecutionPort.start` always requires
 a bounded policy and all capabilities that policy and journey require. A later
-pre-1.0 decision may remove legacy mode after all journey entrypoints migrate.
+pre-1.0 decision may remove compatibility mode after all journey entrypoints migrate.
 
 ### Phase 1: lifecycle, deadline, observation, and cancellation
 
@@ -720,9 +720,9 @@ OSS mechanism. Hard cost reservation remains a later decision.
   extend the deadline.
 - Partial artifacts are scoped, sanitized, retained/removed by policy, and
   cleaned idempotently.
-- Existing workflow callers remain compatible in temporary legacy mode.
+- Existing workflow callers remain compatible in temporary compatibility mode.
 - A raw-prompt evaluation can await the complete build rather than the first
-  workflow, but live evaluation cannot start through legacy mode.
+  workflow, but live evaluation cannot start through compatibility mode.
 
 ## Consequences
 
