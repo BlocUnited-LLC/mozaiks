@@ -40,6 +40,83 @@ _BUILT_IN_ROUTE_COMPONENTS = {
 }
 
 
+def _javascript_lexical_view(source: str) -> tuple[str, frozenset[int]]:
+    """Blank JS comments and identify offsets that are executable code."""
+    out: list[str] = []
+    code_offsets: set[int] = set()
+    index = 0
+    contexts: list[dict[str, Any]] = [{"kind": "code", "template_depth": None}]
+    while index < len(source):
+        char = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        context = contexts[-1]
+        kind = context["kind"]
+        if kind == "string":
+            out.append(char)
+            if char == "\\" and index + 1 < len(source):
+                index += 1
+                out.append(source[index])
+            elif char == context["quote"]:
+                contexts.pop()
+            index += 1
+            continue
+        if kind == "template":
+            out.append(char)
+            if char == "\\" and index + 1 < len(source):
+                index += 1
+                out.append(source[index])
+            elif char == "`":
+                contexts.pop()
+            elif char == "$" and following == "{":
+                index += 1
+                out.append(source[index])
+                contexts.append({"kind": "code", "template_depth": 1})
+            index += 1
+            continue
+        code_offsets.add(index)
+        if char == "/" and following == "/":
+            out.extend((" ", " "))
+            index += 2
+            while index < len(source) and source[index] not in {"\r", "\n"}:
+                out.append(" ")
+                index += 1
+            continue
+        if char == "/" and following == "*":
+            out.extend((" ", " "))
+            index += 2
+            while index < len(source):
+                char = source[index]
+                following = source[index + 1] if index + 1 < len(source) else ""
+                if char == "*" and following == "/":
+                    out.extend((" ", " "))
+                    index += 2
+                    break
+                out.append(char if char in {"\r", "\n"} else " ")
+                index += 1
+            continue
+        if char in {"'", '"'}:
+            out.append(char)
+            contexts.append({"kind": "string", "quote": char})
+            index += 1
+            continue
+        if char == "`":
+            out.append(char)
+            contexts.append({"kind": "template"})
+            index += 1
+            continue
+        template_depth = context["template_depth"]
+        if template_depth is not None:
+            if char == "{":
+                context["template_depth"] = template_depth + 1
+            elif char == "}":
+                context["template_depth"] = template_depth - 1
+                if context["template_depth"] == 0:
+                    contexts.pop()
+        out.append(char)
+        index += 1
+    return "".join(out), frozenset(code_offsets)
+
+
 def _safe_path(raw: Any) -> str:
     if not isinstance(raw, str):
         return ""
@@ -431,9 +508,11 @@ def _collect_module_refs(
                     refs.append((path, match.group(1), match.group(2), value.strip()))
             continue
         if pure.suffix.lower() in {".js", ".jsx", ".ts", ".tsx"}:
-            for match in _MODULE_ACTION_CALL_RE.finditer(content):
-                refs.append((path, match.group("module"), match.group("action"), "moduleAction(...)"))
-            for match in _MODULE_ENDPOINT_ANYWHERE_RE.finditer(content):
+            searchable_content, code_offsets = _javascript_lexical_view(content)
+            for match in _MODULE_ACTION_CALL_RE.finditer(searchable_content):
+                if match.start() in code_offsets:
+                    refs.append((path, match.group("module"), match.group("action"), "moduleAction(...)"))
+            for match in _MODULE_ENDPOINT_ANYWHERE_RE.finditer(searchable_content):
                 refs.append((path, match.group(1), match.group(2), match.group(0)))
     return refs
 
