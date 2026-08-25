@@ -56,7 +56,8 @@ Relevant current boundaries are:
   `AG2TaskBatchRunner` in
   `mozaiksai/core/adapters/ag2_task_batch_runner.py`;
 - post-call usage events in `mozaiksai/core/usage/middleware.py` and
-  `mozaiksai/core/tokens/manager.py`;
+  `mozaiksai/core/tokens/manager.py`, with that middleware also invoking the
+  per-call commercial `TokenUsageGuard` preflight;
 - `RuntimeUsageLedger` in `mozaiksai/core/usage/ledger.py`;
 - the alert-only AG2 token watchdog in
   `mozaiksai/core/usage/watchdog.py`; and
@@ -72,8 +73,13 @@ Introduce a distinct provider-neutral `JourneyExecutionPort` above
 `RunRequest`, `ResumeRequest`, and `RunResult` gain typed journey/run scope, and
 its current ambiguous `cancel(run_id: str)` contract is replaced pre-1.0 by a
 typed `WorkflowCancelRequest` containing `workflow_run_id`, `chat_id`, and the
-same protected journey scope. It does not gain journey start, listing, waiting,
-artifact retention, or cross-workflow cancellation methods.
+same protected journey scope. The string contract has no production caller and
+no behavioral test today, so this is a contract replacement, not a caller
+migration: slice 3 removes the unused signature and introduces the typed
+request directly, and cancellation capability is advertised only after real
+authorization, identity, adapter, and cancellation-behavior tests pass. It
+does not gain journey start, listing, waiting, artifact retention, or
+cross-workflow cancellation methods.
 
 `JourneyExecutionPort` owns one complete declared journey from durable start to
 one durable execution outcome and a separately settling accounting record. It
@@ -95,11 +101,20 @@ The canonical identities are:
 | `parent_workflow_run_id` | Optional link to the workflow run that spawned a child through advancement, repair, or decomposition. |
 | `chat_id` | Workflow conversation/session identity; not a journey or run identity. |
 | provider run ID | Adapter-private AG2/provider identity; never a public journey identity. |
-| `invocation_id` | One provider/model call. Runtime-generated before transmission and used as the reservation key. It is distinct from the provider-reported response ID that current usage events and the runtime usage ledger record; provider response IDs remain post-call observational evidence correlated to the reservation, never the reservation key. |
+| `invocation_id` | One logical provider/model call intent. Server-generated before any transmission. Owns call idempotency, the reservation record, retry grouping, and usage reconciliation. |
+| `transmission_id` | One physical provider transmission attempt of a logical invocation. Server-generated and durably claimed before the request may leave the adapter. Owns the `transmitted` fence and the provider-retry attempt claim. |
+| provider response ID | Optional provider-observed identity returned after a call. Owns nothing authoritative; retained as provider-response correlation evidence alongside the server-generated identities. |
 
 `journey_id` and `workflow_run_id` are server-generated, opaque, immutable, and
 tenant-scoped. They are distinct from `app_id`, subscription/customer usage
 identity, `chat_id`, and AG2 identifiers.
+
+Ledger deduplication for journey-scoped usage keys on the server-generated
+`invocation_id`/`transmission_id`, never on the provider response ID alone.
+Current usage events and the runtime usage ledger use the name `invocation_id`
+for the provider-reported response ID; the implementation renames that
+observational field when the reservation contract lands so one name never
+denotes two identities.
 
 Current routing uses `journey_id`/`journey_key` for sequence selection and
 `journey_instance_id` for an instance. A future pre-1.0 implementation replaces
@@ -205,6 +220,13 @@ process-local monotonic deadline when derived. It is an explicit typed field
 such as `RunRequest.journey_scope`, `ResumeRequest.journey_scope`, and the
 equivalent task-batch request field. It must not be hidden in `RunRequest.extra`,
 workflow prompt text, arbitrary context metadata, or AG2 objects.
+
+`JourneyScope` and the related identity, policy, and access contract types are
+defined in a stdlib-only provider-neutral contracts module under
+`mozaiksai/core/ports/` (slice 1's `journey_execution.py`), so
+`OrchestrationPort` never imports from session, transport, workflow, or
+journey implementation modules and the ports layer keeps its current
+stdlib-only dependency direction.
 
 `JourneyStartRequest` contains `ExecutionAccess`, an idempotency key,
 `workflow_sequence_id`, one typed entry reference, any route choices already
@@ -389,12 +411,20 @@ released_untransmitted
 expired_conservatively
 ```
 
+Allowed transitions are `reserved → transmitted | released_untransmitted`,
+`transmitted → reconciled | expired_conservatively`, and
+`expired_conservatively → reconciled` only while accounting is `pending`.
+`reconciled` and `released_untransmitted` are final states;
+`expired_conservatively` is provisional until accounting reaches its final
+status and immutable thereafter.
+
 `reserved` records `journey_id`, unique `invocation_id`, conservative amount,
 owner/lease identity, lease expiry, and creation version before external
 transmission. Duplicate reservation of the same invocation returns the same
 record and amount or fails an input-hash conflict; it never reserves twice.
-Transmission is made durable by atomically changing the reservation to
-`transmitted` before the provider request can leave the adapter boundary.
+Transmission is made durable by atomically recording a new `transmission_id`
+claim and changing the reservation to `transmitted` before the provider
+request can leave the adapter boundary.
 
 A crash while still `reserved` proves no request was transmitted: recovery
 moves it to `released_untransmitted` immediately or when its lease expires,
@@ -420,15 +450,35 @@ capability.
 automatically retransmit an invocation merely because no response was recorded.
 Retransmission is permitted only when the adapter proves the prior attempt did
 not leave the process, or when the provider offers an authoritative idempotency
-contract keyed by the same `invocation_id`. Otherwise the invocation is charged
+contract keyed by the same `invocation_id`. Every permitted retransmission
+claims a new durable `transmission_id` under the same reservation and consumes
+the provider-retry counter. Otherwise the invocation is charged
 conservatively, its output remains quarantined, and execution fails with the
-stable `provider_transmission_ambiguous` terminal reason. Ambiguous
-transmission therefore always produces a `failed` execution outcome; its
-reservation follows the normal conservative disposition, so accounting becomes
-`settlement_failed` unless authoritative provider usage reconciles the
-invocation before accounting finalizes. The provider-retry counter never
+stable `provider_transmission_ambiguous` terminal reason. When ambiguous
+transmission terminates execution, the outcome is `failed` with that reason;
+if another terminal state has already won under the documented precedence, the
+conservative charge and quarantine still apply without changing that immutable
+outcome. Either way the reservation follows the normal conservative
+disposition, so accounting becomes `settlement_failed` unless authoritative
+provider usage reconciles the invocation before accounting finalizes. The provider-retry counter never
 converts an uncertain external side effect into permission to issue a
 duplicate call.
+
+The reservation and transmission fence must sit at a boundary that observes
+every physical transmission. Current agent construction in
+`mozaiksai/core/workflow/agents/factory.py` appends AG2 `RetryMiddleware`
+after the usage middleware, so a retry layer beneath a naive reservation hook
+could retransmit without a new durable claim. Bounded execution therefore
+requires that no retry layer below the reservation boundary can issue a
+transmission lacking its own durable `transmission_id` claim; if AG2
+middleware ordering cannot guarantee that, bounded execution replaces or wraps
+provider retry with a Mozaiks-owned retry/reservation boundary. Logical
+invocations and physical transmissions are never conflated. Accounting
+semantics are selected with the execution mode, once per request: transitional
+calls keep today's observational accounting, and a bounded request that cannot
+mount the reservation boundary fails closed with
+`token_reservation_unavailable` instead of silently degrading to
+observational accounting.
 
 Accounting cannot remain pending forever. A terminal execution persists an
 `accounting_deadline_utc` derived from the policy settlement grace. At that
@@ -451,6 +501,18 @@ The usage fields are:
 
 Post-call accounting alone is rejected as a hard bound because one call can
 overshoot before usage is reported.
+
+Current enforcement, stated accurately: the commercial `TokenUsageGuard` runs
+as a per-call wallet preflight inside the usage middleware and the
+`simple_llm` capability; `simple_llm` estimates a character-ratio input bound
+plus configured maximum output, while the AG2 workflow path resolves its
+required-token preflight from context keys or environment and defaults to one
+token, making that check effectively a nonzero-balance test; actual wallet
+debits happen through post-call usage ingestion; and the token watchdog is
+advisory. That existing ratio estimate is not conservative and does not
+satisfy this contract's estimator requirement. No shared atomic journey
+reservation exists today; that is the gap this contract closes, and the
+commercial wallet lane remains a separate authority from journey safety.
 
 V1 chooses pre-call reservation. Before every model call, the adapter computes
 a conservative prompt-token upper bound and adds the configured maximum output
@@ -513,6 +575,18 @@ stable reason:
 `workflow_repair_limit_exhausted`, or `app_refinement_limit_exhausted`. A single
 attempt can intentionally consume multiple orthogonal counters; no combined
 `max_retry_repair_attempts` alias is retained.
+
+Journey counters compose with existing workflow-local limits instead of
+replacing them: `TaskBatchExecution.retry_limit` (AppGenerator's
+`app_build_tasks` declares `retry_limit: 1`), AG2 `RetryMiddleware` provider
+retries, `AgentReply.content` schema-correction retries,
+`bundle_repair_attempt_count`, `workflow_integration_repair_count`, and
+AgentGenerator workflow-bundle repair routing. Local limits remain owned by
+their existing contracts. An operation is permitted only when its local limit
+and every applicable journey counter both allow it; exhaustion of either is
+fail-closed. Each counted operation carries a stable operation/attempt ID, so
+duplicate delivery returns the existing claim and can neither consume another
+claim nor bypass a local limit.
 
 ## Cost And Commercial Separation
 
@@ -704,13 +778,13 @@ an outcome, but does not become that subsystem's source of truth.
 | `SessionRouter`, `launch_transition`, `/api/transitions/resolve`, transition UI | Route resolution, user-choice validation, launch navigation | retained unchanged | Bounded inputs call the same resolver against the pinned definition; the journey store records claims/outcomes only. | Existing router/UI tests plus pinned-choice and duplicate-input tests. No removal. |
 | `SessionState` and `SessionStateStore` | One app/user navigation snapshot, refinement state, and ambiguous journey fields | migrated into `JourneyExecutionPort` | Move only `journey_instance_id`, `journey_key`, `journey_position`, `journey_total_steps`, and bounded sequence lifecycle to journey records. These four fields are also denormalized onto chat-session documents by `SessionRouter` and read from those documents by `SessionRouter` group-completion queries and the factory build-lifecycle hooks in `factory_app/workflows/_shared/platform/build_lifecycle.py`; bounded journeys migrate those readers to journey records too. Keep chat navigation, pending harness decisions, revision history, and artifact refs here. | Migration tests prove bounded reads — including chat-document copies and build-lifecycle hooks — use only the journey store. Remove migrated fields when compatibility mode retires. |
 | `AG2PersistenceManager` chat documents and run streams | `chat_id`, messages, pending input, UI state, AG2 run trace | separate authority that ADR 0006 must not absorb | Add immutable `workflow_run_id`/`journey_id` correlation and fenced pending-input claims; do not copy transcript ownership into journey snapshots. | Chat replay/persistence and scoped pending-input tests. No removal. |
-| `WorkflowBridgeMixin`, `SimpleTransport`, and transport handlers | Workflow input, resume, run completion, process-live run handles (the live-run registry lives on `SimpleTransport`) | extended by ADR 0006 | Route bounded calls through typed run/resume/cancel requests and durable claims; retain transport projection. | Duplicate resume, expired review, late output, replay, and transitional-call tests. |
+| `WorkflowBridgeMixin`, `SimpleTransport`, and transport handlers | Workflow input, resume, run completion, and process-live run handles — `SimpleTransport` owns the `_live_ag2_workflow_runs` registry and accessors; `WorkflowBridgeMixin` consumes and projects those handles without owning the registry | extended by ADR 0006 | Route bounded calls through typed run/resume/cancel requests and durable claims; retain transport projection. | Duplicate resume, expired review, late output, replay, and transitional-call tests. |
 | `JourneyOrchestrator` plus `SimpleTransport._background_tasks` | Best-effort process-local auto-advancement | removed after migration | Replace bounded advancement with durable child claims/outbox delivery; never run both advancement paths for one bounded journey. | Crash/replay/duplicate delivery tests. Remove after every journey entrypoint uses durable dispatch and rollback window closes. |
 | `OrchestrationPort`, `AG2OrchestrationAdapter`, `AG2NetworkRunner` | One workflow run through AG2 and Mozaiks result projection | extended by ADR 0006 | Add typed scope/results/cancel request and checkpoints; journey execution calls this one engine path. | Port, adapter, AG2 alignment, cancellation, and scope-propagation tests. No engine replacement. |
 | `WorkflowQueue` / `MongoWorkflowQueue` | Generic at-least-once delivery, leases, fencing, bounded retries; currently dormant — no production caller enqueues, and the default backend is `noop` | extended by ADR 0006 | Reuse it as the delivery projection for durable journey intents. The journey store owns the intent/child claim; do not add a second generic queue. `NoOpWorkflowQueue` cannot advertise durable dispatch. | Queue lease/fencing plus journey outbox projection tests. No removal. |
 | `task_batches.py` and `AG2TaskBatchRunner` | Deterministic dependency scheduling, owned-path merge, AG2 `Task` evidence | extended by ADR 0006 | Add typed scope, stable attempt IDs, shared claims/reservations, deadline, and quarantine checks; keep AG2 task lifecycle observational. | Concurrent attempt limit, cancellation, timeout, identity, and merge-quarantine tests. |
 | AG2 1.0.2 `Hub`, `WorkflowAdapter`, `TransitionGraph`, `Task`, streams, and events | Agent/network execution, routing fold, task lifecycle, WAL/event mechanics | retained unchanged | Use native cancellation/task/event hooks where available; Mozaiks owns only durable product policy around them. | Real-package alignment tests. Revisit local adapters only when AG2 supplies an equivalent primitive. |
-| Usage middleware, structured-output validation/correction, workflow and generated-bundle repair routes | Model usage observation and bounded workflow-local correction/repair behavior | extended by ADR 0006 | Add exact attempt/invocation claims and stop checkpoints; do not move repair-selection semantics into journey execution. | Retry/correction/repair counter, late usage, and no-progress tests. Existing repair state remains until its owning contract migrates. |
+| Usage middleware, structured-output validation/correction, workflow and generated-bundle repair routes | Model usage observation — the same middleware also hosts the separate per-call commercial `TokenUsageGuard` preflight — and bounded workflow-local correction/repair behavior | extended by ADR 0006 | Add exact attempt/invocation claims and stop checkpoints; do not move repair-selection semantics into journey execution. | Retry/correction/repair counter, late usage, and no-progress tests. Existing repair state remains until its owning contract migrates. |
 | `AppBuildPlan`, app/design schemas, module/event/reaction contracts, materializers, validators, AppLoader, export/deployment | Semantic application structure and deterministic artifact production | unresolved pending the semantic-compiler ADR | Journey execution consumes typed refs only and cannot embed these shapes or infer artifact families. | Compiler contract, reference-closure, materialization, loader, and generated-app acceptance tests defined by that ADR. No removal authorized here. |
 | Named `build_context` registries, projected context variables, prompt/system-message assembly, AG2 `KnowledgeStore` seam | Build inputs, workflow state, prompts, and agent memory | separate authority that ADR 0006 must not absorb | Pin `BuildContextBindingRef`; journey policy cannot rewrite catalogs, prompts, context authority, or knowledge contents. | Binding digest, context authority, prompt assembly, and tenant-isolation tests. No removal. |
 | `mozaiksai/control_plane` and `factory_app/refinement_harness` | Change classification, checkpoint routing, patch/staging policy, attempt meaning | separate authority that ADR 0006 must not absorb | It requests a declared sequence and supplies `RefinementPatchRef`; journey execution counts starts and enforces stops only. | Existing refinement routing/staging/promotion tests plus bounded re-entry claims. No removal. |
@@ -730,7 +804,7 @@ removal is behavior whose authority moves into the durable journey path:
 |---|---|---|---|
 | `SessionState.journey_instance_id`, `journey_key`, `journey_position`, and `journey_total_steps`, including their denormalized chat-document copies | Durable journey identity, pinned sequence ref, and stage records | All entrypoints bounded; active transitional sessions drained; migration tests prove bounded reads — including `SessionRouter` chat-document queries and `factory_app/workflows/_shared/platform/build_lifecycle.py` hooks — never consult old fields. | Roll back before field deletion; do not restore dual-write after deletion. |
 | `JourneyOrchestrator._inflight` and bounded use of `SimpleTransport._background_tasks` | Durable child claim, journey outbox, queue delivery, and fencing | Restart, duplicate delivery, cancelled-intent, and multi-worker tests pass; operational drain is proven. | Disable new starts and drain with the durable version; never fall back in flight. |
-| `OrchestrationPort.cancel(run_id: str)` where `run_id` means `chat_id` | Typed `WorkflowCancelRequest` | The current signature has no production caller; every future caller supplies workflow/chat/journey scope and authorization tests pass. | Keep the old signature only inside explicit transitional mode until slice 7, then remove directly. |
+| `OrchestrationPort.cancel(run_id: str)` where `run_id` means `chat_id` | Typed `WorkflowCancelRequest` | The current signature has no production caller or behavioral test; authorization, identity, adapter, and cancellation-behavior tests pass before `cooperative_cancellation` is advertised. | Remove the unused string signature directly in slice 3 when the typed request lands; no transitional retention is needed because no caller exists. |
 | `legacy_unbounded` public compatibility mode | `bounded_only_v1` | Every supported start/resume/refinement/evaluation caller advertises and requires the bounded capabilities. | Deployment rollback is permitted before removal; per-request fallback or dual execution is not. |
 
 ## OSS And Proprietary Boundary
@@ -815,6 +889,8 @@ public record and capability is versioned.
   invocation events do not double-count.
 - An ambiguously transmitted invocation is never retried unless non-transmission
   is proved or the provider enforces idempotency for the same `invocation_id`.
+- Every physical provider transmission is preceded by a durable reservation and
+  `transmission_id` claim, including transmissions issued by any retry layer.
 - A crash after child-advancement commit but before dispatch is recovered from
   its durable intent; duplicate outbox delivery cannot create a second child.
 - Every policy counter stops at its exact configured maximum under concurrency
