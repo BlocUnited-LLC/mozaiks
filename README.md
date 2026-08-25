@@ -9,7 +9,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
-[![AG2](https://img.shields.io/badge/AG2-1.0.1-green)](https://github.com/ag2ai/ag2)
+[![AG2](https://img.shields.io/badge/AG2-1.0.2-green)](https://github.com/ag2ai/ag2)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/Qnsywad9kp)
 
 [![Studio](https://img.shields.io/badge/Studio-management%20interface-7c3aed)](https://docs.mozaiks.ai/studio/)
