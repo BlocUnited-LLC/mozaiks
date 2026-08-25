@@ -101,8 +101,8 @@ The canonical identities are:
 | `parent_workflow_run_id` | Optional link to the workflow run that spawned a child through advancement, repair, or decomposition. |
 | `chat_id` | Workflow conversation/session identity; not a journey or run identity. |
 | provider run ID | Adapter-private AG2/provider identity; never a public journey identity. |
-| `invocation_id` | One logical provider/model call intent. Server-generated before any transmission. Owns call idempotency, reservation lineage and aggregation, retry grouping, and usage reconciliation. |
-| `transmission_id` | One physical provider transmission attempt of a logical invocation. Server-generated and durably claimed with its own per-transmission reservation before the request may leave the adapter. Owns the reservation record, the `transmitted` fence, and the provider-retry attempt claim. |
+| `invocation_id` | One logical provider/model call intent. Server-generated before any transmission. Owns call idempotency, reservation lineage and aggregation, and retry grouping. |
+| `transmission_id` | One physical provider transmission attempt of a logical invocation. Server-generated and durably claimed with its own per-transmission reservation before the request may leave the adapter. Owns the reservation record, the `transmitted` fence, the provider-retry attempt claim, and that transmission's usage disposition. |
 | provider response ID | Optional provider-observed identity returned after a call. Owns nothing authoritative; retained as provider-response correlation evidence alongside the server-generated identities. |
 
 `journey_id` and `workflow_run_id` are server-generated, opaque, immutable, and
@@ -264,7 +264,8 @@ task, or model call starts before persistence succeeds.
 - workflow/chat/run identities and stage outcomes;
 - timestamps and absolute deadline;
 - maximum token ceiling, estimated prompt tokens, outstanding reservations,
-  provider-observed actual usage, and reconciled committed usage;
+  conservatively committed usage, provider-observed actual usage, and
+  authoritatively reconciled committed usage;
 - retry/repair counts where available;
 - cancellation request, reason, `cancellation_requested_at`,
   `cancellation_deadline_utc`, and settlement metadata;
@@ -437,8 +438,10 @@ reservation never disappears because its worker dies. A crash after
 `transmitted` cannot release the reservation. On lease expiry it becomes
 `expired_conservatively` and its full reserved amount is committed. If
 authoritative provider usage arrives before accounting settlement finalizes,
-idempotent reconciliation replaces that conservative amount with actual usage
-and moves the reservation to `reconciled`, without double-counting. After
+idempotent reconciliation atomically removes that transmission's conservative
+commitment, adds its actual usage to authoritative reconciled usage, and moves
+the reservation to `reconciled`, without double-counting or temporarily
+releasing budget capacity. After
 accounting becomes `settled` or `settlement_failed`, later signals are retained
 only as sanitized discrepancy evidence and cannot mutate the immutable settled
 result. Reservation state changes and the corresponding journey counters occur
@@ -459,8 +462,8 @@ claimed only when the prior transmission has a known disposition:
   authoritative transport failure before any request left the adapter —
   resolves it to `released_untransmitted` or reconciles it with zero usage;
 - an authoritative provider terminal response was received, so it is
-  reconciled with reported usage or, when usage is missing or malformed,
-  charged conservatively; or
+  reconciled with explicitly reported usage, including an explicitly known
+  zero, or, when usage is missing or malformed, charged conservatively; or
 - the provider offers an authoritative idempotency contract keyed by the same
   `invocation_id`. Sibling transmissions under such a contract form an
   idempotent group whose worst-case exposure and conservative charge is the
@@ -468,6 +471,17 @@ claimed only when the prior transmission has a known disposition:
   provider guarantees at most one execution. Without that contract,
   reconciliation of one provider response settles only the transmission it
   belongs to.
+
+An HTTP or provider error response is authoritative evidence only for what it
+actually proves. A `429`, `5xx`, or provider timeout response may permit a
+successor transmission, but it proves zero execution only when the provider
+contract or response explicitly and authoritatively reports zero usage;
+otherwise the prior transmission is charged conservatively. A client-side
+timeout, connection reset, truncated response, or response that cannot be
+authoritatively correlated to the transmission is not a provider terminal
+response and remains ambiguous absent authoritative provider idempotency.
+Known zero usage is represented explicitly and is never inferred from a
+missing field, a malformed value, or a parser default of zero.
 
 Every successor transmission claims its own reservation through the same
 atomic journey budget check before it may leave the adapter; a retry that
@@ -520,8 +534,17 @@ The usage fields are:
 
 - `estimated_prompt_tokens`: conservative input estimate before a call;
 - `reserved_tokens`: outstanding worst-case capacity;
+- `conservatively_committed_tokens`: reserved amounts committed for physical
+  transmissions whose actual usage is unavailable, counting an authoritative
+  idempotent group once at its maximum member amount;
 - `observed_actual_tokens`: provider-reported post-call usage; and
-- `reconciled_tokens`: authoritative committed usage.
+- `reconciled_tokens`: authoritatively reconciled committed usage.
+
+`committed_token_exposure` is the sum of `reconciled_tokens` and
+`conservatively_committed_tokens`. An `expired_conservatively` reservation
+therefore remains charged against the journey ceiling; changing it to
+`reconciled` replaces its conservative contribution atomically rather than
+freeing capacity between the two states.
 
 Post-call accounting alone is rejected as a hard bound because one call can
 overshoot before usage is reported.
@@ -544,13 +567,26 @@ configured maximum output tokens. The lifecycle store atomically permits the
 transmission only when:
 
 ```text
-reconciled_tokens + outstanding_reserved_tokens + requested_reservation
+reconciled_tokens
+    + conservatively_committed_tokens
+    + outstanding_reserved_tokens
+    + requested_reservation_delta
     <= max_total_tokens
 ```
 
 `outstanding_reserved_tokens` sums every outstanding per-transmission
 reservation, counting an authoritative idempotent group once at its maximum
-member amount, so the formula bounds actual physical transmission exposure
+member amount. For an ordinary transmission,
+`requested_reservation_delta` is its full conservative amount. For a member of
+an authoritative idempotent group, it is the non-negative increase from the
+group exposure already counted across reconciled usage, conservative
+commitments, and outstanding reservations to the prospective maximum after
+adding the new member. Reconciled and conservative contributions from that
+authoritative group are likewise aggregated once at the group's maximum rather
+than added once per member. Thus a
+conservatively expired ordinary transmission never releases capacity for a
+retry, while a provider-guaranteed at-most-one group is still counted exactly
+once at its maximum. The formula bounds actual physical transmission exposure
 rather than logical call count. All concurrent workflows and AppGenerator
 task-batch workers contend on the same journey reservation authority.
 
@@ -915,6 +951,9 @@ public record and capability is versioned.
   calls, workers, reservations, or missing usage.
 - An expired journey cannot start or resume after process restart.
 - Concurrent calls cannot reserve beyond the shared maximum token ceiling.
+- Conservative charges remain included in the atomic ceiling check; later
+  authoritative reconciliation replaces them atomically and cannot reopen
+  capacity in between.
 - Reservation recovery distinguishes crashes before and after durable
   transmission; missing/malformed usage is charged conservatively and duplicate
   invocation events do not double-count.
