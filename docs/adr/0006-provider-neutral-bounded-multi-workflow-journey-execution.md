@@ -68,10 +68,12 @@ Relevant current boundaries are:
 Introduce a distinct provider-neutral `JourneyExecutionPort` above
 `OrchestrationPort`.
 
-`OrchestrationPort` remains responsible for one workflow execution. It gains
-only typed journey scope on its existing run/resume requests. It does not gain
-journey start, listing, waiting, artifact retention, or cross-workflow
-cancellation methods.
+`OrchestrationPort` remains responsible for one workflow execution. Its
+`RunRequest`, `ResumeRequest`, and `RunResult` gain typed journey/run scope, and
+its current ambiguous `cancel(run_id: str)` contract is replaced pre-1.0 by a
+typed `WorkflowCancelRequest` containing `workflow_run_id`, `chat_id`, and the
+same protected journey scope. It does not gain journey start, listing, waiting,
+artifact retention, or cross-workflow cancellation methods.
 
 `JourneyExecutionPort` owns one complete declared journey from durable start to
 one durable execution outcome and a separately settling accounting record. It
@@ -205,17 +207,27 @@ equivalent task-batch request field. It must not be hidden in `RunRequest.extra`
 workflow prompt text, arbitrary context metadata, or AG2 objects.
 
 `JourneyStartRequest` contains `ExecutionAccess`, an idempotency key,
-`workflow_sequence_id`, its declared entry transition/entrypoint, required typed
-route choices, initial user message where supported, and the policy. Before
-persisting `pending`, start resolves the named sequence from the authoritative
-registry, validates that the entry transition and every route choice are
-declared by that sequence, and pins an immutable sequence version or
-content-addressed digest. The persisted resolved sequence is authoritative for
-the journey lifetime; a later registry edit cannot alter an in-progress
-journey. The canonical idempotency request hash includes the pinned sequence
-version, validated route choices, entry transition, immutable creation scope,
-and complete policy. Start then uses the existing `SessionRouter` and launcher;
-no workflow, task, or model call starts before persistence succeeds.
+`workflow_sequence_id`, one typed entry reference, any route choices already
+known at start, initial user message where supported, and the policy. A public
+entry uses `workflow_entrypoint_id`; an internal refinement re-entry uses an
+entry stage declared by the named sequence. Callers do not submit a second
+free-form transition target. Before persisting `pending`, start resolves the
+named sequence from the authoritative registry, verifies the entry reference
+belongs to it, validates every supplied route choice against the pinned
+transition declaration, and pins the fully resolved sequence plus all referenced
+transition and dependency declarations by content digest. Registry `version: 3`
+is a schema version and is not sufficient as a journey-definition version.
+
+Later user choices are not required prematurely at start. Each is accepted as
+an idempotent journey input addressed by `journey_id`, `workflow_run_id`, stable
+pending `input_request_id`, and selected option ID; it is validated against the
+pinned transition before advancement. The persisted resolved definition is
+authoritative for the journey lifetime, so a later registry or overlay edit
+cannot alter an in-progress journey. The canonical idempotency request hash
+includes the resolved-definition digest, supplied route choices, entry
+reference, immutable creation scope, semantic input references, and complete
+policy. Start then uses the existing `SessionRouter` and launcher; no workflow,
+task, or model call starts before persistence succeeds.
 
 ## Observation Contract
 
@@ -393,6 +405,15 @@ accounting becomes `settled` or `settlement_failed`, later signals are retained
 only as sanitized discrepancy evidence and cannot mutate the immutable settled
 result. Reservation state changes and the corresponding journey counters occur
 in one atomic transaction or a provably equivalent consistency boundary.
+
+`transmitted` is also the ambiguity boundary for retries. Recovery must not
+automatically retransmit an invocation merely because no response was recorded.
+Retransmission is permitted only when the adapter proves the prior attempt did
+not leave the process, or when the provider offers an authoritative idempotency
+contract keyed by the same `invocation_id`. Otherwise the invocation is charged
+conservatively, its output remains quarantined, and execution fails with a
+stable ambiguous-transmission reason. The provider-retry counter never converts
+an uncertain external side effect into permission to issue a duplicate call.
 
 Accounting cannot remain pending forever. A terminal execution persists an
 `accounting_deadline_utc` derived from the policy settlement grace. At that
@@ -612,12 +633,87 @@ the application manifest, taxonomy, semantic graph, implementation binding,
 `CompilationPlan`, refinement semantics, transition UX, evaluation scoring, or
 commercial usage.
 
-Once the semantic compiler exists, journey execution consumes its canonical
-graph and build version identifiers. Production implementation of this port
-waits until the semantic-compiler ADR determines those identities. Lifecycle
-and outbox primitives may be designed independently, but they must not embed
-`AppBuildPlan` fields, filesystem artifact families, or pre-compiler semantic
-authority.
+The future semantic-compiler ADR must define the identity and version semantics
+for the typed references that journey execution consumes:
+
+- `ApplicationManifestRef` for the canonical app/product manifest, including a
+  pre-app form that does not invent a final `app_id`;
+- `SemanticGraphRef` for semantic graph identity plus immutable version or
+  digest;
+- `TaxonomyNamespaceRef` for each namespaced taxonomy version used by typed
+  references and child contracts;
+- `CompilationPlanRef` for the deterministic compilation plan and renderer set;
+- `BuildContextBindingRef` for the exact declared build-context inputs and
+  projections used by compilation;
+- `RefinementPatchRef` for a typed patch/replay operation over a known semantic
+  and artifact base;
+- `ArtifactRevisionRef` for validated candidate and promoted artifact identity;
+  and
+- the typed child-contract references covering modules, pages, actions,
+  workflows, capabilities, events, reactions, data contracts, and bounded
+  Python/JavaScript customization stubs.
+
+These names identify required reference roles only; this ADR does not define
+their fields, namespace rules, digest algorithm, graph topology, renderer
+contracts, patch format, or validation/promotion semantics. Those decisions
+belong to the semantic-compiler ADR and the existing canonical contract owners.
+`JourneyScope` may carry the resulting opaque typed references and record which
+version ran, but it may not interpret or rewrite them.
+
+`WorkflowSequenceRef` is separate. Its source remains the fully resolved
+`extension_registry.json` workflow sequence plus referenced transition and
+dependency declarations. The journey store pins that resolved definition by
+content digest; the semantic compiler may reference the same sequence but may
+not redefine its steps, route choices, transition UX, or advancement rules.
+
+Production `JourneyExecutionPort.start`, production capability advertisement,
+and any public live-model journey entrypoint are blocked until the
+semantic-compiler ADR is accepted and those references exist. Generic lifecycle
+models, store prototypes, CAS tests, and outbox tests may be developed earlier
+only behind non-production test seams; they may not start workflows, mutate
+generated artifacts, advertise a production capability, or establish temporary
+semantic identities. No rollout slice below may cross that gate implicitly.
+
+## Current Authority And Migration Boundary
+
+Each current subsystem has exactly one disposition. “Separate authority” means
+journey execution may carry a reference, enforce a stop checkpoint, or observe
+an outcome, but does not become that subsystem's source of truth.
+
+| Current component and source of truth | Current responsibility | Disposition after this ADR | Overlap and migration action | Compatibility, tests, and removal condition |
+|---|---|---|---|---|
+| `factory_app/workflows/extended_orchestration/extension_registry.json`; `workflow.pack.schema/config` | Sequences, entrypoints, workflow dependencies, and transition declarations | retained unchanged | Journey start resolves and pins it; it never writes an alternate sequence graph. | Registry closure/digest/overlay tests. No removal. |
+| `SessionRouter`, `launch_transition`, `/api/transitions/resolve`, transition UI | Route resolution, user-choice validation, launch navigation | retained unchanged | Bounded inputs call the same resolver against the pinned definition; the journey store records claims/outcomes only. | Existing router/UI tests plus pinned-choice and duplicate-input tests. No removal. |
+| `SessionState` and `SessionStateStore` | One app/user navigation snapshot, refinement state, and ambiguous journey fields | migrated into `JourneyExecutionPort` | Move only `journey_instance_id`, `journey_key`, `journey_position`, `journey_total_steps`, and bounded sequence lifecycle to journey records. Keep chat navigation, pending harness decisions, revision history, and artifact refs here. | Migration tests prove bounded reads use only the journey store. Remove migrated fields when compatibility mode retires. |
+| `AG2PersistenceManager` chat documents and run streams | `chat_id`, messages, pending input, UI state, AG2 run trace | separate authority that ADR 0006 must not absorb | Add immutable `workflow_run_id`/`journey_id` correlation and fenced pending-input claims; do not copy transcript ownership into journey snapshots. | Chat replay/persistence and scoped pending-input tests. No removal. |
+| `WorkflowBridgeMixin` and transport handlers | Workflow input, resume, run completion, process-live handles | extended by ADR 0006 | Route bounded calls through typed run/resume/cancel requests and durable claims; retain transport projection. | Duplicate resume, expired review, late output, replay, and transitional-call tests. |
+| `JourneyOrchestrator` plus `SimpleTransport._background_tasks` | Best-effort process-local auto-advancement | removed after migration | Replace bounded advancement with durable child claims/outbox delivery; never run both advancement paths for one bounded journey. | Crash/replay/duplicate delivery tests. Remove after every journey entrypoint uses durable dispatch and rollback window closes. |
+| `OrchestrationPort`, `AG2OrchestrationAdapter`, `AG2NetworkRunner` | One workflow run through AG2 and Mozaiks result projection | extended by ADR 0006 | Add typed scope/results/cancel request and checkpoints; journey execution calls this one engine path. | Port, adapter, AG2 alignment, cancellation, and scope-propagation tests. No engine replacement. |
+| `WorkflowQueue` / `MongoWorkflowQueue` | Generic at-least-once delivery, leases, fencing, bounded retries | extended by ADR 0006 | Reuse it as the delivery projection for durable journey intents. The journey store owns the intent/child claim; do not add a second generic queue. `NoOpWorkflowQueue` cannot advertise durable dispatch. | Queue lease/fencing plus journey outbox projection tests. No removal. |
+| `task_batches.py` and `AG2TaskBatchRunner` | Deterministic dependency scheduling, owned-path merge, AG2 `Task` evidence | extended by ADR 0006 | Add typed scope, stable attempt IDs, shared claims/reservations, deadline, and quarantine checks; keep AG2 task lifecycle observational. | Concurrent attempt limit, cancellation, timeout, identity, and merge-quarantine tests. |
+| AG2 1.0.2 `Hub`, `WorkflowAdapter`, `TransitionGraph`, `Task`, streams, and events | Agent/network execution, routing fold, task lifecycle, WAL/event mechanics | retained unchanged | Use native cancellation/task/event hooks where available; Mozaiks owns only durable product policy around them. | Real-package alignment tests. Revisit local adapters only when AG2 supplies an equivalent primitive. |
+| Usage middleware, structured-output validation/correction, workflow and generated-bundle repair routes | Model usage observation and bounded workflow-local correction/repair behavior | extended by ADR 0006 | Add exact attempt/invocation claims and stop checkpoints; do not move repair-selection semantics into journey execution. | Retry/correction/repair counter, late usage, and no-progress tests. Existing repair state remains until its owning contract migrates. |
+| `AppBuildPlan`, app/design schemas, module/event/reaction contracts, materializers, validators, AppLoader, export/deployment | Semantic application structure and deterministic artifact production | unresolved pending the semantic-compiler ADR | Journey execution consumes typed refs only and cannot embed these shapes or infer artifact families. | Compiler contract, reference-closure, materialization, loader, and generated-app acceptance tests defined by that ADR. No removal authorized here. |
+| Named `build_context` registries, projected context variables, prompt/system-message assembly, AG2 `KnowledgeStore` seam | Build inputs, workflow state, prompts, and agent memory | separate authority that ADR 0006 must not absorb | Pin `BuildContextBindingRef`; journey policy cannot rewrite catalogs, prompts, context authority, or knowledge contents. | Binding digest, context authority, prompt assembly, and tenant-isolation tests. No removal. |
+| `mozaiksai/control_plane` and `factory_app/refinement_harness` | Change classification, checkpoint routing, patch/staging/replay policy, attempt meaning | separate authority that ADR 0006 must not absorb | It requests a declared sequence and supplies `RefinementPatchRef`; journey execution counts starts and enforces stops only. | Existing refinement routing/staging/promotion tests plus bounded re-entry claims. No removal. |
+| `ArtifactStore`, content store, generated roots, AppReview and control-plane promotion | Artifact lineage, validation, review, retention, and promotion authority | separate authority that ADR 0006 must not absorb | Add scoped refs/quarantine checks. A completed journey is necessary but never sufficient for promotion. | Cross-journey cleanup, late-write quarantine, validation, review, and promotion authorization tests. No removal. |
+| `factory_app/eval/bundle_eval.py` and `bundle_scorers.py` | Deterministic artifact scoring, local result persistence and comparison | separate authority that ADR 0006 must not absorb | Evaluators call `wait_settled`; journey execution supplies evidence but never selects scorers, thresholds, or verdicts. | Existing scorer/diff tests plus settled-result and isolated-root integration tests. No removal. |
+| `RuntimeUsageLedger`, `TokenManager`, and token watchdog | Factual post-call usage/cost observation and advisory alerts | retained unchanged | Add scoped IDs and reconcile evidence into the journey reservation owner; these stores do not become reservation authority. | Duplicate/missing/late usage and ledger compatibility tests. No removal. |
+| `TokenUsageGuard`, token wallet, subscriptions/entitlements, `usage_limits`, and MozaiksPay facade | Commercial eligibility, balances, quotas, and provider-neutral billing contracts | separate authority that ADR 0006 must not absorb | Commercial checks remain independent and may deny before journey reservation; journey settlement never debits or grants them. | Existing entitlement/wallet/idempotency tests plus proof either authority can deny independently. No removal. |
+| `UserPrincipal`, tenant/workspace claims, app/chat scope validation | Authentication and current request authorization | separate authority that ADR 0006 must not absorb | `ExecutionAccess` adapts the authenticated principal into an immutable creation-scope ref; it does not create tenant/workspace identity. | Cross-tenant, pre-app, reassociation, app/chat mismatch, and unauthorized observation/cancel tests. No removal. |
+| Build-events outbox and reaction idempotency stores | Domain-specific event delivery/idempotency | separate authority that ADR 0006 must not absorb | Do not reuse them as journey lifecycle or dispatch stores; correlate by opaque refs only. | Existing outbox/reaction tests plus proof journey replay does not redeliver domain events. No removal. |
+
+### Deferred Deletion Candidates
+
+This ADR authorizes no deletion. The only current behavior identified for later
+removal is behavior whose authority moves into the durable journey path:
+
+| Candidate | Replacement | Migration prerequisite and proof | Rollback consideration |
+|---|---|---|---|
+| `SessionState.journey_instance_id`, `journey_key`, `journey_position`, and `journey_total_steps` | Durable journey identity, pinned sequence ref, and stage records | All entrypoints bounded; active transitional sessions drained; migration tests prove bounded reads never consult old fields. | Roll back before field deletion; do not restore dual-write after deletion. |
+| `JourneyOrchestrator._inflight` and bounded use of `SimpleTransport._background_tasks` | Durable child claim, journey outbox, queue delivery, and fencing | Restart, duplicate delivery, cancelled-intent, and multi-worker tests pass; operational drain is proven. | Disable new starts and drain with the durable version; never fall back in flight. |
+| `OrchestrationPort.cancel(run_id: str)` where `run_id` means `chat_id` | Typed `WorkflowCancelRequest` | Every caller supplies workflow/chat/journey scope and authorization tests pass. | Keep the old signature only inside explicit transitional mode until slice 7, then remove directly. |
+| `legacy_unbounded` public compatibility mode | `bounded_only_v1` | Every supported start/resume/refinement/evaluation caller advertises and requires the bounded capabilities. | Deployment rollback is permitted before removal; per-request fallback or dual execution is not. |
 
 ## OSS And Proprietary Boundary
 
@@ -658,38 +754,30 @@ Existing `RunRequest`/`ResumeRequest` callers remain unchanged initially when
 `journey_scope` is absent. This explicit temporary `legacy_unbounded` mode has
 no journey handle or journey-wide guarantee and must be observable so new
 public entrypoints do not adopt it. `JourneyExecutionPort.start` always requires
-a bounded policy and all capabilities that policy and journey require. A later
-pre-1.0 decision may remove compatibility mode after all journey entrypoints migrate.
+a bounded policy and all capabilities that policy and journey require.
 
-### Phase 1: lifecycle, deadline, observation, and cancellation
+Compatibility is selected once per request, before work starts. A bounded
+journey uses only durable journey advancement; a transitional call uses only the
+existing process-local path. There is no dual-write, shadow advancement, or
+failover from a failed bounded journey into transitional execution. Rollback may
+disable new bounded starts and drain/cancel existing bounded records with the
+same implementation version; it may not re-run them through transitional mode.
 
-Add identity/policy/snapshot/outcome/settlement/store contracts, typed
-propagation, start and resume idempotency, pinned sequence validation, atomic
-lifecycle/stage claims, durable dispatch intents, public port operations,
-deadline enforcement, bounded cooperative cancellation, restart leases,
-sanitized artifacts, and execution-outcome persistence. This phase advertises
-only the capabilities it proves and does not authorize public live-model starts
-or claim token-bounded execution.
+The slices below are sequential promotion gates. “Tests” means those tests pass
+before the slice advertises its capability or the next slice begins. Every new
+public record and capability is versioned.
 
-### Phase 2: shared token reservation
-
-Add adapter preflight estimation, atomic concurrent reservation, retry/repair
-accounting, invocation propagation, and reconciliation of actual, missing,
-malformed, duplicate, late, and over-reservation usage.
-
-### Phase 3: evaluation integration
-
-Make the raw-prompt evaluator a caller of `JourneyExecutionPort`, with explicit
-live opt-in, model configuration, deadline/token budget, isolated artifact
-roots, local sanitized results, and production validators/export/loading. The
-live evaluator cannot use `legacy_unbounded` mode and remains disabled until the
-lifecycle and shared token-reservation phases are implemented and proven.
-
-### Phase 4: optional operator surfaces
-
-Add authorized CLI/Studio/API projections only when requested. Keep threshold
-selection, model routing, hosted dashboards, and fleet analytics outside the
-OSS mechanism. Hard cost reservation remains a later decision.
+| Slice and exact production components | Contracts introduced; old behavior replaced; compatibility | Required tests and advertised capability | Migration, rollback, deletion, live-model permission, compiler dependency |
+|---|---|---|---|
+| **0. Semantic-compiler prerequisite** — future compiler owner plus `workflow.pack.schema/config` | Accept the semantic-compiler ADR; implement the typed refs named above; define a canonical digest for the fully resolved sequence/transition/dependency view. No journey runtime yet. | Compiler reference-closure, digest stability, overlay, manifest/graph/plan/materializer/promotion tests. Advertises no journey capability. | No migration or live calls. Mandatory before production slice 1; test-only lifecycle prototypes remain non-production. |
+| **1. Lifecycle/store/identity foundations** — new `mozaiksai/core/ports/journey_execution.py` and narrow `mozaiksai/core/journey_execution/` owner; `session/model.py`, `session/persistence.py`, `session/router.py`; registry resolver | Add versioned policy/scope/access/snapshot/outcome/settlement/reason contracts, immutable creation scope, idempotent start/input keys, pinned refs, CAS lifecycle, leases, counters, and accounting deadline. Bounded records are authoritative; transitional session fields are read only by transitional mode. | New lifecycle model/store tests cover duplicate starts, input conflicts, CAS races, terminal precedence, unknown reasons, authorization, reassociation, leases, and partial capabilities. Advertises `durable_lifecycle`, `pinned_definition`, and `durable_observation` only. | Backfill is unnecessary for old chats; they remain transitional. Rollback disables new bounded starts and drains records. Delete nothing yet. No live models. Requires slice 0. |
+| **2. Durable child dispatch and recovery** — `workflow/pack/journey_orchestrator.py`, `workflow/queue.py`, `transport/workflow_bridge.py`, `SimpleTransport._background_tasks` | Add durable parent/stage/child claims and journey outbox records; project deterministic items into `WorkflowQueue`; suppress stopped intents. For bounded journeys, replace process-local advancement rather than wrapping it. | Crash-before-dispatch, duplicate delivery, expired lease, stale fencing token, parent replay, stopped-intent, queue-disabled, and process-restart tests plus existing queue/journey tests. Advertises `durable_dispatch` and `restart_recovery`. | Feature flag may stop dispatch while preserving records; same-version workers drain or cancel. Delete bounded use of `_background_tasks` only after recovery proof. No live models. Requires slice 1 and compiler refs. |
+| **3. Typed run/resume/task-batch propagation** — `ports/orchestration.py`, `adapters/ag2_orchestration.py`, `adapters/ag2_network_runner.py`, `transport/workflow_bridge.py`, `workflow/task_batches.py`, `adapters/ag2_task_batch_runner.py` | Add `JourneyScope` to run/resume/task requests and results; replace string cancel with `WorkflowCancelRequest`; add stable workflow, checkpoint, task-attempt, and invocation IDs. Transitional requests omit scope; bounded requests fail if any boundary drops it. | Existing port/AG2/task-batch tests plus end-to-end scope, duplicate resume, task identity, parent lineage, serialization, and missing-scope fail-closed tests. Advertises `typed_scope_propagation`. | Roll back by blocking new bounded starts, never by stripping scope in flight. Delete chat-as-run-ID semantics after compatibility retirement. No live models. Requires slices 1–2 and compiler refs. |
+| **4. Deadline and cooperative cancellation** — journey owner, `ag2_orchestration.py`, `ag2_network_runner.py`, `orchestration_patterns.py`, `workflow_bridge.py`, task batches, structured-output correction, repair/refinement entry adapters, artifact/export checkpoints | Add persisted UTC/derived monotonic deadlines, cancellation grace, provider/task signals, quarantine fences, and atomic completion recheck. Replace process-task cancellation as authority; retain it only as a signal. | Deadline/cancel/completion race matrix; provider ignores cancel; late output; human review expiry; restart; repair/correction retry; artifact/export quarantine; cleanup retry tests. Advertises `deadline_enforcement` and `cooperative_cancellation`. | Rollback blocks starts and lets same-version workers reach terminal state. Remove bounded reliance on transport task maps after proof. No live models. Requires slices 1–3 and compiler refs. |
+| **5. Shared token reservation and settlement** — journey reservation store, `usage/middleware.py`, `tokens/manager.py`, `usage/ledger.py`, `workflow/agents/factory.py`, AG2 run/task adapters | Add invocation reservation state machine, conservative estimator/max-output contract, atomic journey counters, transmission fence, idempotent reconciliation, ambiguous-transmission rule, and finite settlement. Existing ledgers remain observational/commercially separate. | Concurrent reservations/task batches; crash before/after transmission; provider idempotency; missing/malformed/duplicate/late/over usage; settlement timeout; deadline/cancel/budget races; wallet/quota separation tests. Advertises `shared_token_reservation` and `accounting_settlement`. | Rollback blocks new bounded starts; outstanding reservations settle with the same version. No reservation record is converted to wallet state. Public live starts become eligible only after all slices 1–5 pass and an operator explicitly opts in; never through `NoOpWorkflowQueue` or a non-durable store. Requires compiler refs. |
+| **6. Evaluator integration** — `factory_app/eval/bundle_eval.py`, `bundle_scorers.py`, a new bounded raw-prompt runner, validators/export/loading; `scripts/run_live_workflow_smoke.py` remains a one-workflow diagnostic | Add versioned evaluation-run/result refs over `wait_terminal` and `wait_settled`, isolated journey/artifact roots, explicit model/policy input, sanitized local evidence, and comparison keys. Do not copy scorer policy into the journey port. | Fake-port evaluator tests; terminal-vs-settled; settlement failure; isolation/cleanup; production validator/export/load; result persistence/comparison; deterministic scorer regression. Advertises `bounded_evaluation_input`. | Disable evaluator without affecting journey execution. No transitional failover. Explicitly opted-in live evaluation is permitted only with slices 1–5 capabilities; default remains offline/fake. Requires compiler refs and canonical artifact revisions. |
+| **7. Compatibility-mode retirement** — `session/model.py`, `session/persistence.py`, `session/router.py`, `journey_orchestrator.py`, `workflow_bridge.py`, public workflow entrypoints | Migrate every supported entrypoint to bounded start; remove `legacy_unbounded`, old journey fields, ambiguous `journey_id`/`journey_key`/`journey_instance_id`, string cancel, and process-local auto-advancement. There is one orchestration path after this slice. | Repository search/hygiene guard, all workflow launch/resume/transition/refinement tests, migration fixtures, generated-app acceptance, restart and rollback rehearsal. Advertises `bounded_only_v1`. | Cutover only when no supported caller needs transitional fields and all active transitional chats are completed or explicitly abandoned. Rollback is deployment rollback before deletion; no dual-read shim is added. Live models follow slice 5 policy. Requires slices 1–6 and compiler refs. |
+| **8. Optional operator surfaces** — authorized runtime/Studio routers, CLI, and Studio UI only if separately requested | Project start/snapshot/list/wait/cancel and diagnostics through existing auth/scope adapters. Do not add operator policy, scorer selection, model routing, or hosted dashboards to the port. | API/CLI/UI authorization, pagination, schema-version, sanitization, unknown-reason, and tenant-isolation tests. Advertises only the surfaces actually shipped. | Surfaces can be removed without changing durable execution. They do not themselves authorize live calls. Requires the capabilities each surface exposes. |
 
 ## Acceptance Criteria For Implementation
 
@@ -707,6 +795,8 @@ OSS mechanism. Hard cost reservation remains a later decision.
 - Reservation recovery distinguishes crashes before and after durable
   transmission; missing/malformed usage is charged conservatively and duplicate
   invocation events do not double-count.
+- An ambiguously transmitted invocation is never retried unless non-transmission
+  is proved or the provider enforces idempotency for the same `invocation_id`.
 - A crash after child-advancement commit but before dispatch is recovered from
   its durable intent; duplicate outbox delivery cannot create a second child.
 - Every policy counter stops at its exact configured maximum under concurrency
@@ -716,6 +806,8 @@ OSS mechanism. Hard cost reservation remains a later decision.
   after any generated app is associated.
 - A journey uses its pinned workflow-sequence version despite later registry
   changes, and invalid entrypoint/route combinations fail before persistence.
+- Later route choices are validated and idempotently claimed against the pinned
+  transition definition and stable pending input request.
 - Resume after an expired human-review wait returns `timed_out` and does not
   extend the deadline.
 - Partial artifacts are scoped, sanitized, retained/removed by policy, and
@@ -723,6 +815,10 @@ OSS mechanism. Hard cost reservation remains a later decision.
 - Existing workflow callers remain compatible in temporary compatibility mode.
 - A raw-prompt evaluation can await the complete build rather than the first
   workflow, but live evaluation cannot start through compatibility mode.
+- Session/chat identity, sequence/transition routing, semantic application
+  structure, build contexts, refinement, scoring, promotion, commercial
+  accounting, tenant authorization, and AG2 execution retain the single owners
+  named in the authority matrix.
 
 ## Consequences
 
