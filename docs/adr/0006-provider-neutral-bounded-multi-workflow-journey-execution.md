@@ -101,8 +101,8 @@ The canonical identities are:
 | `parent_workflow_run_id` | Optional link to the workflow run that spawned a child through advancement, repair, or decomposition. |
 | `chat_id` | Workflow conversation/session identity; not a journey or run identity. |
 | provider run ID | Adapter-private AG2/provider identity; never a public journey identity. |
-| `invocation_id` | One logical provider/model call intent. Server-generated before any transmission. Owns call idempotency, the reservation record, retry grouping, and usage reconciliation. |
-| `transmission_id` | One physical provider transmission attempt of a logical invocation. Server-generated and durably claimed before the request may leave the adapter. Owns the `transmitted` fence and the provider-retry attempt claim. |
+| `invocation_id` | One logical provider/model call intent. Server-generated before any transmission. Owns call idempotency, reservation lineage and aggregation, retry grouping, and usage reconciliation. |
+| `transmission_id` | One physical provider transmission attempt of a logical invocation. Server-generated and durably claimed with its own per-transmission reservation before the request may leave the adapter. Owns the reservation record, the `transmitted` fence, and the provider-retry attempt claim. |
 | provider response ID | Optional provider-observed identity returned after a call. Owns nothing authoritative; retained as provider-response correlation evidence alongside the server-generated identities. |
 
 `journey_id` and `workflow_run_id` are server-generated, opaque, immutable, and
@@ -400,8 +400,12 @@ dispatching work.
 
 ## Token Budget And Reservation Semantics
 
-The contract distinguishes journey counters from per-invocation reservations.
-Each reservation has a versioned lifecycle:
+The contract distinguishes journey counters from per-transmission
+reservations. Reservation records are children of one logical invocation:
+every physical transmission has its own reservation record, conservative
+amount, and state; invocation accounting aggregates its transmissions; and
+journey totals count every reconciled or conservatively expired physical
+transmission. Each reservation record has a versioned lifecycle:
 
 ```text
 reserved
@@ -418,13 +422,13 @@ Allowed transitions are `reserved → transmitted | released_untransmitted`,
 `expired_conservatively` is provisional until accounting reaches its final
 status and immutable thereafter.
 
-`reserved` records `journey_id`, unique `invocation_id`, conservative amount,
-owner/lease identity, lease expiry, and creation version before external
-transmission. Duplicate reservation of the same invocation returns the same
-record and amount or fails an input-hash conflict; it never reserves twice.
-Transmission is made durable by atomically recording a new `transmission_id`
-claim and changing the reservation to `transmitted` before the provider
-request can leave the adapter boundary.
+`reserved` records `journey_id`, the logical `invocation_id`, its unique
+`transmission_id`, that transmission's conservative amount, owner/lease
+identity, lease expiry, and creation version before external transmission.
+Duplicate claim of the same `transmission_id` returns the same record and
+amount or fails an input-hash conflict; it never reserves twice. Transmission
+is made durable by atomically changing that transmission's reservation to
+`transmitted` before the provider request can leave the adapter boundary.
 
 A crash while still `reserved` proves no request was transmitted: recovery
 moves it to `released_untransmitted` immediately or when its lease expires,
@@ -447,14 +451,32 @@ replica-set transactions are an optional strengthening, never an assumed
 capability.
 
 `transmitted` is also the ambiguity boundary for retries. Recovery must not
-automatically retransmit an invocation merely because no response was recorded.
-Retransmission is permitted only when the adapter proves the prior attempt did
-not leave the process, or when the provider offers an authoritative idempotency
-contract keyed by the same `invocation_id`. Every permitted retransmission
-claims a new durable `transmission_id` under the same reservation and consumes
-the provider-retry counter. Otherwise the invocation is charged
-conservatively, its output remains quarantined, and execution fails with the
-stable `provider_transmission_ambiguous` terminal reason. When ambiguous
+automatically retransmit an invocation merely because no response was
+recorded. A successor transmission of the same logical invocation may be
+claimed only when the prior transmission has a known disposition:
+
+- proven untransmitted — a crash while still `reserved`, or an in-process
+  authoritative transport failure before any request left the adapter —
+  resolves it to `released_untransmitted` or reconciles it with zero usage;
+- an authoritative provider terminal response was received, so it is
+  reconciled with reported usage or, when usage is missing or malformed,
+  charged conservatively; or
+- the provider offers an authoritative idempotency contract keyed by the same
+  `invocation_id`. Sibling transmissions under such a contract form an
+  idempotent group whose worst-case exposure and conservative charge is the
+  maximum single-transmission amount in the group, never the sum, because the
+  provider guarantees at most one execution. Without that contract,
+  reconciliation of one provider response settles only the transmission it
+  belongs to.
+
+Every successor transmission claims its own reservation through the same
+atomic journey budget check before it may leave the adapter; a retry that
+cannot reserve additional capacity fails the budget check instead of
+transmitting uncovered exposure. Each permitted retransmission also consumes
+the provider-retry counter. Absent one of these dispositions the invocation is
+ambiguous: it is charged conservatively, its output remains quarantined, and
+execution fails with the stable `provider_transmission_ambiguous` terminal
+reason. When ambiguous
 transmission terminates execution, the outcome is `failed` with that reason;
 if another terminal state has already won under the documented precedence, the
 conservative charge and quarantine still apply without changing that immutable
@@ -470,9 +492,11 @@ every physical transmission. Current agent construction in
 after the usage middleware, so a retry layer beneath a naive reservation hook
 could retransmit without a new durable claim. Bounded execution therefore
 requires that no retry layer below the reservation boundary can issue a
-transmission lacking its own durable `transmission_id` claim; if AG2
-middleware ordering cannot guarantee that, bounded execution replaces or wraps
-provider retry with a Mozaiks-owned retry/reservation boundary. Logical
+transmission lacking its own durable per-transmission reservation and
+`transmission_id` claim; if AG2 middleware ordering cannot guarantee that,
+bounded execution replaces or wraps provider retry with a Mozaiks-owned
+retry/reservation boundary — a hard requirement of the
+`shared_token_reservation` capability, not optional guidance. Logical
 invocations and physical transmissions are never conflated. Accounting
 semantics are selected with the execution mode, once per request: transitional
 calls keep today's observational accounting, and a bounded request that cannot
@@ -485,10 +509,10 @@ Accounting cannot remain pending forever. A terminal execution persists an
 deadline, every still-`transmitted` reservation becomes
 `expired_conservatively` and is charged fully. Accounting status is decided by
 final reservation dispositions at settlement: it becomes `settled` only when
-every invocation's final state is `reconciled` or `released_untransmitted` — a
-reservation that expired conservatively and was later authoritatively
+every transmission's final state is `reconciled` or `released_untransmitted` —
+a reservation that expired conservatively and was later authoritatively
 reconciled before settlement finalized counts as `reconciled` — and it becomes
-`settlement_failed` when any reservation finishes `expired_conservatively` or
+`settlement_failed` when any transmission finishes `expired_conservatively` or
 its usage is known missing or malformed. Either final accounting status may be
 reached early when all reservations have a final disposition.
 
@@ -514,17 +538,21 @@ satisfy this contract's estimator requirement. No shared atomic journey
 reservation exists today; that is the gap this contract closes, and the
 commercial wallet lane remains a separate authority from journey safety.
 
-V1 chooses pre-call reservation. Before every model call, the adapter computes
-a conservative prompt-token upper bound and adds the configured maximum output
-tokens. The lifecycle store atomically permits the call only when:
+V1 chooses pre-call reservation. Before every physical transmission, the
+adapter computes a conservative prompt-token upper bound and adds the
+configured maximum output tokens. The lifecycle store atomically permits the
+transmission only when:
 
 ```text
 reconciled_tokens + outstanding_reserved_tokens + requested_reservation
     <= max_total_tokens
 ```
 
-All concurrent workflows and AppGenerator task-batch workers contend on the
-same journey reservation authority.
+`outstanding_reserved_tokens` sums every outstanding per-transmission
+reservation, counting an authoritative idempotent group once at its maximum
+member amount, so the formula bounds actual physical transmission exposure
+rather than logical call count. All concurrent workflows and AppGenerator
+task-batch workers contend on the same journey reservation authority.
 
 After a call, reported actual usage is committed and unused reservation is
 released. Missing or malformed usage moves the reservation to
@@ -586,7 +614,10 @@ their existing contracts. An operation is permitted only when its local limit
 and every applicable journey counter both allow it; exhaustion of either is
 fail-closed. Each counted operation carries a stable operation/attempt ID, so
 duplicate delivery returns the existing claim and can neither consume another
-claim nor bypass a local limit.
+claim nor bypass a local limit. A structured-output correction attempt is a
+new logical invocation with its own reservation lineage, counted by the
+correction counter; a provider retry is a successor transmission of the same
+invocation, counted by the provider-retry counter.
 
 ## Cost And Commercial Separation
 
@@ -866,7 +897,7 @@ public record and capability is versioned.
 | **2. Durable child dispatch and recovery** — `workflow/pack/journey_orchestrator.py`, `workflow/queue.py`, `transport/workflow_bridge.py`, `SimpleTransport._background_tasks` | Add durable parent/stage/child claims and journey outbox records; project deterministic items into `WorkflowQueue`; suppress stopped intents. For bounded journeys, replace process-local advancement rather than wrapping it. | Crash-before-dispatch, duplicate delivery, expired lease, stale fencing token, parent replay, stopped-intent, queue-disabled, and process-restart tests plus existing queue/journey tests. Advertises `durable_dispatch` and `restart_recovery`. | Feature flag may stop dispatch while preserving records; same-version workers drain or cancel. Delete bounded use of `_background_tasks` only after recovery proof. No live models. Requires slice 1 and compiler refs. |
 | **3. Typed run/resume/task-batch propagation** — `ports/orchestration.py`, `adapters/ag2_orchestration.py`, `adapters/ag2_network_runner.py`, `transport/workflow_bridge.py`, `workflow/task_batches.py`, `adapters/ag2_task_batch_runner.py` | Add `JourneyScope` to run/resume/task requests and results; replace string cancel with `WorkflowCancelRequest`; add stable workflow, checkpoint, task-attempt, and invocation IDs. Transitional requests omit scope; bounded requests fail if any boundary drops it. | Existing port/AG2/task-batch tests plus end-to-end scope, duplicate resume, task identity, parent lineage, serialization, and missing-scope fail-closed tests. Advertises `typed_scope_propagation`. | Roll back by blocking new bounded starts, never by stripping scope in flight. Delete chat-as-run-ID semantics after compatibility retirement. No live models. Requires slices 1–2 and compiler refs. |
 | **4. Deadline and cooperative cancellation** — journey owner, `ag2_orchestration.py`, `ag2_network_runner.py`, `orchestration_patterns.py`, `workflow_bridge.py`, task batches, structured-output correction, repair/refinement entry adapters, artifact/export checkpoints | Add persisted UTC/derived monotonic deadlines, cancellation grace, provider/task signals, quarantine fences, and atomic completion recheck. Replace process-task cancellation as authority; retain it only as a signal. | Deadline/cancel/completion race matrix; provider ignores cancel; late output; human review expiry; restart; repair/correction retry; artifact/export quarantine; cleanup retry tests. Advertises `deadline_enforcement` and `cooperative_cancellation`. | Rollback blocks starts and lets same-version workers reach terminal state. Remove bounded reliance on transport task maps after proof. No live models. Requires slices 1–3 and compiler refs. |
-| **5. Shared token reservation and settlement** — journey reservation store, `usage/middleware.py`, `tokens/manager.py`, `usage/ledger.py`, `workflow/agents/factory.py`, AG2 run/task adapters | Add invocation reservation state machine, conservative estimator/max-output contract, atomic journey counters, transmission fence, idempotent reconciliation, ambiguous-transmission rule, and finite settlement. Existing ledgers remain observational/commercially separate. | Concurrent reservations/task batches; crash before/after transmission; provider idempotency; missing/malformed/duplicate/late/over usage; settlement timeout; deadline/cancel/budget races; wallet/quota separation tests. Advertises `shared_token_reservation` and `accounting_settlement`. | Rollback blocks new bounded starts; outstanding reservations settle with the same version. No reservation record is converted to wallet state. Public live starts become eligible only after all slices 1–5 pass and an operator explicitly opts in; never through `NoOpWorkflowQueue` or a non-durable store. Requires compiler refs. |
+| **5. Shared token reservation and settlement** — journey reservation store, `usage/middleware.py`, `tokens/manager.py`, `usage/ledger.py`, `workflow/agents/factory.py`, AG2 run/task adapters | Add the per-transmission reservation state machine, conservative estimator/max-output contract, atomic journey counters, transmission fence, idempotent reconciliation, ambiguous-transmission rule, and finite settlement. Existing ledgers remain observational/commercially separate. | Concurrent reservations/task batches; crash before/after transmission; provider idempotency; missing/malformed/duplicate/late/over usage; settlement timeout; deadline/cancel/budget races; wallet/quota separation tests. Advertises `shared_token_reservation` and `accounting_settlement`. | Rollback blocks new bounded starts; outstanding reservations settle with the same version. No reservation record is converted to wallet state. Public live starts become eligible only after all slices 1–5 pass and an operator explicitly opts in; never through `NoOpWorkflowQueue` or a non-durable store. Requires compiler refs. |
 | **6. Evaluator integration** — `factory_app/eval/bundle_eval.py`, `bundle_scorers.py`, a new bounded raw-prompt runner, validators/export/loading; `scripts/run_live_workflow_smoke.py` remains a one-workflow diagnostic | Add versioned evaluation-run/result refs over `wait_terminal` and `wait_settled`, isolated journey/artifact roots, explicit model/policy input, sanitized local evidence, and comparison keys. Do not copy scorer policy into the journey port. | Fake-port evaluator tests; terminal-vs-settled; settlement failure; isolation/cleanup; production validator/export/load; result persistence/comparison; deterministic scorer regression. Advertises `bounded_evaluation_input`. | Disable evaluator without affecting journey execution. No transitional failover. Explicitly opted-in live evaluation is permitted only with slices 1–5 capabilities; default remains offline/fake. Requires compiler refs and canonical artifact revisions. |
 | **7. Compatibility-mode retirement** — `session/model.py`, `session/persistence.py`, `session/router.py`, `journey_orchestrator.py`, `workflow_bridge.py`, public workflow entrypoints | Migrate every supported entrypoint to bounded start; remove `legacy_unbounded`, old journey fields, ambiguous `journey_id`/`journey_key`/`journey_instance_id`, string cancel, and process-local auto-advancement. There is one orchestration path after this slice. | Repository search/hygiene guard, all workflow launch/resume/transition/refinement tests, migration fixtures, generated-app acceptance, restart and rollback rehearsal. Advertises `bounded_only_v1`. | Cutover only when no supported caller needs transitional fields and all active transitional chats are completed or explicitly abandoned. Rollback is deployment rollback before deletion; no dual-read shim is added. Live models follow slice 5 policy. Requires slices 1–6 and compiler refs. |
 | **8. Optional operator surfaces** — authorized runtime/Studio routers, CLI, and Studio UI only if separately requested | Project start/snapshot/list/wait/cancel and diagnostics through existing auth/scope adapters. Do not add operator policy, scorer selection, model routing, or hosted dashboards to the port. | API/CLI/UI authorization, pagination, schema-version, sanitization, unknown-reason, and tenant-isolation tests. Advertises only the surfaces actually shipped. | Surfaces can be removed without changing durable execution. They do not themselves authorize live calls. Requires the capabilities each surface exposes. |
@@ -889,8 +920,10 @@ public record and capability is versioned.
   invocation events do not double-count.
 - An ambiguously transmitted invocation is never retried unless non-transmission
   is proved or the provider enforces idempotency for the same `invocation_id`.
-- Every physical provider transmission is preceded by a durable reservation and
-  `transmission_id` claim, including transmissions issued by any retry layer.
+- Every physical provider transmission is preceded by its own per-transmission
+  reservation and `transmission_id` claim that passes the atomic journey budget
+  check, including transmissions issued by any retry layer; an authoritative
+  idempotent group is charged at its maximum member amount, never the sum.
 - A crash after child-advancement commit but before dispatch is recovered from
   its durable intent; duplicate outbox delivery cannot create a second child.
 - Every policy counter stops at its exact configured maximum under concurrency
