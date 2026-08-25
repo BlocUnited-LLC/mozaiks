@@ -12,6 +12,9 @@ from fastapi.testclient import TestClient
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
 )
+from factory_app.workflows.AppGenerator.tools.module_api_template import (
+    get_module_api_template,
+)
 from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
 from mozaiksai.core.validation import (
     GeneratedAppValidationRequest,
@@ -580,6 +583,98 @@ def _prepare_platform_test_runtime(platform: Any, monkeypatch: pytest.MonkeyPatc
 
 def test_functional_scanner_accepts_basic_authenticated_crud_bundle() -> None:
     assert scan_functional_generated_app(_basic_crud_files()) == []
+
+
+def test_functional_scanner_ignores_canonical_module_api_documentation_example() -> None:
+    files = _basic_crud_files()
+    files["ui/lib/moduleApi.js"] = get_module_api_template()
+
+    assert scan_functional_generated_app(files) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["ui/lib/moduleApi.js", "ui/lib/copied/moduleApi.js"],
+)
+def test_functional_scanner_validates_executable_calls_in_module_api_files(path: str) -> None:
+    files = _basic_crud_files()
+    files[path] = get_module_api_template() + "\nmoduleAction('inventory', 'missing_action', {})\n"
+
+    diagnostics = scan_functional_generated_app(files)
+
+    assert any(
+        item.code == "MISSING_MODULE_ACTION" and item.path == path
+        for item in diagnostics
+    )
+
+
+def test_functional_scanner_handles_javascript_comment_and_string_boundaries() -> None:
+    files = _basic_crud_files()
+    files["ui/pages/custom/orders.jsx"] = r'''
+// moduleAction('inventory', 'line_comment', {})
+/* moduleAction('inventory', 'block_comment', {}) */
+const url = "https://example.test/a//b"
+const quotedDocs = "moduleAction('inventory', 'quoted_docs', {}) // text"
+const escapedQuote = "say \"// moduleAction('inventory', 'escaped_docs', {})\""
+const templateDocs = `// moduleAction('inventory', 'template_docs', {})`
+const expression = `${/* moduleAction('inventory', 'expression_docs', {}) */ "ok"}`
+const endpoint = "https://example.test/api/modules/orders/create_order"
+await moduleAction('orders', 'create_order', {})
+'''
+
+    assert scan_functional_generated_app(files) == []
+
+
+def test_functional_scanner_validates_module_action_in_template_expression() -> None:
+    files = _basic_crud_files()
+    files["ui/pages/custom/orders.jsx"] = (
+        "const result = `${await moduleAction('inventory', 'missing_action', {})}`\n"
+    )
+
+    diagnostics = scan_functional_generated_app(files)
+
+    assert any(item.code == "MISSING_MODULE_ACTION" for item in diagnostics)
+
+
+def test_functional_scanner_handles_nested_template_expression_boundaries() -> None:
+    files = _basic_crud_files()
+    files["ui/pages/custom/orders.jsx"] = r'''
+const docs = `outer ${`inner moduleAction('inventory', 'template_docs', {})`}`
+const strings = `outer ${"moduleAction('inventory', 'string_docs', {})"}`
+const comments = `outer ${/* moduleAction('inventory', 'comment_docs', {}) */ "ok"}`
+const result = `outer ${`inner ${await moduleAction('orders', 'create_order', {})}`}`
+'''
+
+    assert scan_functional_generated_app(files) == []
+
+
+def test_functional_scanner_finds_action_in_nested_template_expression() -> None:
+    files = _basic_crud_files()
+    files["ui/pages/custom/orders.jsx"] = (
+        "const result = `outer ${`inner ${await "
+        "moduleAction('inventory', 'missing_action', {})}`}`\n"
+    )
+
+    diagnostics = scan_functional_generated_app(files)
+
+    assert any(item.code == "MISSING_MODULE_ACTION" for item in diagnostics)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const docs = 'moduleAction(\\\"inventory\\\", \\\"string_docs\\\", {})\\\\",
+        'const docs = "moduleAction(\\\'inventory\\\', \\\'string_docs\\\', {})\\\\',
+        "const docs = `moduleAction('inventory', 'template_docs', {})\\\\",
+        "/* moduleAction('inventory', 'block_docs', {})",
+        "// moduleAction('inventory', 'line_docs', {})",
+    ],
+)
+def test_functional_scanner_terminates_on_unterminated_javascript(source: str) -> None:
+    files = _basic_crud_files()
+    files["ui/pages/custom/orders.jsx"] = source
+
+    assert scan_functional_generated_app(files) == []
 
 
 def test_public_generated_app_validation_runs_functional_completeness() -> None:

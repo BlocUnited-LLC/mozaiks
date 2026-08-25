@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Generated SaaS plan limits now survive AppGenerator assembly and export**:
+  `usage_limits` and `token_allowances` are preserved in
+  `config/subscriptions.yaml`, and the canonical module API helper no longer
+  creates a false missing-action failure during export acceptance.
 - **Ask-mode messages now render immediately**: optimistic user messages and
   live assistant frames retain their general-chat provenance, so the active
   chat no longer hides either side until the persisted transcript is reloaded.

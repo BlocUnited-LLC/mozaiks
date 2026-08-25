@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
     _apply_entitlement_gates,
@@ -11,6 +14,7 @@ from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts i
     _materialize_subscriptions_yaml,
     materialize_app_config_contracts,
 )
+from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 
 
 class _Context:
@@ -116,9 +120,34 @@ def _saas_subscription_config_file() -> dict:
                 "plan_id": "pro",
                 "label": "Pro",
                 "capabilities": ["analytics.view", "exports.download"],
+                "usage_limits": [
+                    {
+                        "meter_id": "exports",
+                        "label": "Exports",
+                        "unit": "requests",
+                        "monthly_limit": 500,
+                        "capability_id": "exports.download",
+                    }
+                ],
+                "token_allowances": [
+                    {
+                        "wallet_id": "ai_tokens",
+                        "amount": 1000,
+                        "cadence": "monthly",
+                        "label": "Monthly AI tokens",
+                    }
+                ],
             },
         ],
-        "token_wallets": [],
+        "token_wallets": [
+            {
+                "wallet_id": "ai_tokens",
+                "label": "AI tokens",
+                "unit": "tokens",
+                "usage_meter_id": "ai_tokens",
+                "scope": "user",
+            }
+        ],
         "top_up_products": [],
         "add_on_products": [
             {
@@ -159,8 +188,8 @@ def test_materialize_subscriptions_yaml_returns_none_for_non_saas() -> None:
     assert result is None
 
 
-def test_materialize_subscriptions_yaml_returns_none_for_wrong_schema() -> None:
-    """Contract with wrong schema_version is ignored."""
+def test_materialize_subscriptions_yaml_rejects_unknown_schema() -> None:
+    """A present future contract fails closed instead of disappearing."""
     context = _Context(
         {
             "subscription_contract": {
@@ -171,12 +200,13 @@ def test_materialize_subscriptions_yaml_returns_none_for_wrong_schema() -> None:
             }
         }
     )
-    result = _materialize_subscriptions_yaml(context_variables=context)
-    assert result is None
+    with pytest.raises(ValidationError, match="schema_version"):
+        _materialize_subscriptions_yaml(context_variables=context)
 
 
 def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app() -> None:
     cfg = _saas_subscription_config_file()
+    original = deepcopy(cfg)
     context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
 
     result = _materialize_subscriptions_yaml(context_variables=context)
@@ -191,8 +221,175 @@ def test_materialize_subscriptions_yaml_emits_valid_yaml_for_saas_app() -> None:
     assert len(doc["plans"]) == 2
     assert doc["plans"][1]["plan_id"] == "pro"
     assert doc["plans"][1]["capabilities"] == ["analytics.view", "exports.download"]
+    assert doc["plans"][1]["usage_limits"][0]["monthly_limit"] == 500
+    assert doc["plans"][1]["token_allowances"][0]["amount"] == 1000
     assert doc["add_on_products"][0]["add_on_id"] == "priority_review"
     assert doc["pricing_catalog"]["groups"][0]["add_on_ids"] == ["priority_review"]
+    assert doc["plans"][0]["capabilities"] == []
+    assert doc["top_up_products"] == []
+    assert doc["usage_charge_policies"] == []
+    assert "products" not in doc
+    assert "tenant_id_field" not in doc["assignment_store"]
+    assert "usage_limits" not in doc["plans"][0]
+    assert "token_allowances" not in doc["plans"][0]
+    assert cfg == original
+    assert SubscriptionsConfig.model_validate(doc) == SubscriptionsConfig.model_validate(cfg)
+
+    reordered = dict(reversed(list(cfg.items())))
+    reordered_context = _Context(
+        {"subscription_contract": {"subscription_config_file": reordered}}
+    )
+    assert _materialize_subscriptions_yaml(context_variables=reordered_context) == result
+
+
+def test_materialize_subscriptions_yaml_preserves_v2_multi_product_plans() -> None:
+    cfg = {
+        "schema_version": "mozaiks.subscriptions.v2",
+        "label": "Workspace Products",
+        "default_product_id": "research",
+        "products": [
+            {
+                "product_id": "research",
+                "label": "Research",
+                "default_plan_id": "free",
+                "assignment_store": {
+                    "data_alias": "research.subscriptions",
+                    "tenant_id_field": None,
+                },
+                "token_wallets": [],
+                "top_up_products": [],
+                "usage_charge_policies": [],
+                "pricing_catalog_group": {
+                    "group_id": "research",
+                    "label": "Research",
+                    "plan_ids": ["free", "pro"],
+                    "capability_groups": [],
+                    "add_on_ids": [],
+                },
+                "plans": [
+                    {
+                        "plan_id": "free",
+                        "label": "Free",
+                        "capabilities": ["research.execute"],
+                        "usage_limits": [
+                            {
+                                "meter_id": "research_executions",
+                                "unit": "requests",
+                                "monthly_limit": 20,
+                                "capability_id": "research.execute",
+                            }
+                        ],
+                    },
+                    {
+                        "plan_id": "pro",
+                        "label": "Pro",
+                        "capabilities": ["research.execute"],
+                        "usage_limits": [
+                            {
+                                "meter_id": "research_executions",
+                                "unit": "requests",
+                                "monthly_limit": 500,
+                                "capability_id": "research.execute",
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "product_id": "collaboration",
+                "label": "Collaboration",
+                "default_plan_id": "team",
+                "plans": [
+                    {
+                        "plan_id": "team",
+                        "label": "Team",
+                        "capabilities": ["workspace.share"],
+                    }
+                ],
+            },
+        ],
+    }
+    original = deepcopy(cfg)
+    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+
+    result = _materialize_subscriptions_yaml(context_variables=context)
+
+    assert result is not None
+    doc = yaml.safe_load(result)
+    assert doc["schema_version"] == "mozaiks.subscriptions.v2"
+    assert doc["default_product_id"] == "research"
+    assert [product["product_id"] for product in doc["products"]] == [
+        "research",
+        "collaboration",
+    ]
+    research_plans = doc["products"][0]["plans"]
+    assert [plan["usage_limits"][0]["monthly_limit"] for plan in research_plans] == [20, 500]
+    assert "plans" not in doc
+    assert doc["products"][0]["assignment_store"]["tenant_id_field"] is None
+    assert doc["products"][0]["token_wallets"] == []
+    assert doc["products"][0]["top_up_products"] == []
+    assert doc["products"][0]["usage_charge_policies"] == []
+    assert doc["products"][0]["pricing_catalog_group"]["capability_groups"] == []
+    assert cfg == original
+    assert SubscriptionsConfig.model_validate(doc) == SubscriptionsConfig.model_validate(cfg)
+
+
+def test_materialize_subscriptions_yaml_preserves_explicit_false_and_zero() -> None:
+    cfg = _saas_subscription_config_file()
+    cfg["add_on_products"][0]["active"] = False
+    cfg["usage_charge_policies"] = [
+        {
+            "meter_id": "ai_tokens",
+            "markup_percent": 0,
+            "minimum_charge_usd": 0,
+        }
+    ]
+    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+
+    result = _materialize_subscriptions_yaml(context_variables=context)
+
+    assert result is not None
+    doc = yaml.safe_load(result)
+    assert doc["add_on_products"][0]["active"] is False
+    assert doc["usage_charge_policies"][0]["markup_percent"] == 0
+    assert doc["usage_charge_policies"][0]["minimum_charge_usd"] == 0
+
+
+def test_materialize_subscriptions_yaml_preserves_explicit_null_over_default() -> None:
+    cfg = _saas_subscription_config_file()
+    cfg["assignment_store"]["tenant_id_field"] = None
+    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+
+    result = _materialize_subscriptions_yaml(context_variables=context)
+
+    assert result is not None
+    doc = yaml.safe_load(result)
+    assert "tenant_id_field" in doc["assignment_store"]
+    assert doc["assignment_store"]["tenant_id_field"] is None
+
+
+def test_materialize_subscriptions_yaml_preserves_explicit_empty_mapping() -> None:
+    cfg = _saas_subscription_config_file()
+    cfg["assignment_store"] = {}
+    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+
+    result = _materialize_subscriptions_yaml(context_variables=context)
+
+    assert result is not None
+    doc = yaml.safe_load(result)
+    assert doc["assignment_store"] == {}
+    assert SubscriptionsConfig.model_validate(doc) == SubscriptionsConfig.model_validate(cfg)
+
+
+def test_materialize_subscriptions_yaml_rejects_unknown_plan_fields() -> None:
+    cfg = _saas_subscription_config_file()
+    cfg["plans"][0]["future_allowance"] = {"amount": 12}
+    context = _Context({"subscription_contract": {"subscription_config_file": cfg}})
+
+    with pytest.raises(ValidationError, match="future_allowance") as exc_info:
+        _materialize_subscriptions_yaml(context_variables=context)
+
+    assert exc_info.value.errors()[0]["loc"] == ("plans", 0, "future_allowance")
 
 
 def test_materialize_subscriptions_yaml_reads_artifact_fallback() -> None:
