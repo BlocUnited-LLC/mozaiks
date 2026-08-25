@@ -9,10 +9,10 @@ def _read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def test_readme_uses_plain_tool_framing() -> None:
+def test_readme_uses_concise_setup_guidance() -> None:
     readme = _read("README.md")
 
-    assert "### Which Tool To Use" in readme
+    assert "If setup fails, check three things first:" in readme
     assert "Mozaiks is not published as a public PyPI package yet." in readme
     assert 'python -m pip install -e ".[dev]"' in readme
     assert "python -m mozaiks quickstart --dir .\\mozaiks-workspace" in readme
@@ -22,8 +22,7 @@ def test_readme_uses_plain_tool_framing() -> None:
     assert "pipx" not in readme
     assert "python -m venv .venv" not in readme
     assert "python -m pip install mozaiks" not in readme
-    assert "The **CLI** is just how you set up the" in readme
-    assert "Most users can start from Studio" in readme
+    assert "set an LLM API key before running builds." in readme
     assert "developer entrypoint" not in readme
     assert "internal host name" not in readme
 
