@@ -326,7 +326,7 @@ there concurrently and will switch branches or sweep in unrelated edits.
 ```bash
 git checkout main && git reset --hard origin/main
 git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
-# ... work, commit ...
+# ... work, commit -s ...
 git push -u origin cc/<description>
 gh pr create --title "..." --body "..."
 gh pr merge <number> --squash --delete-branch --auto   # auto-merge is enabled repo-wide; request it right away, don't wait on CI
@@ -337,6 +337,14 @@ the worktree. If a check still fails, confirm via `git show origin/main:<path>`
 whether it's pre-existing on `main` before assuming it's your bug — and if a
 check fails identically across multiple unrelated PRs, it's a repo-wide `main`
 regression blocking everyone; fix it first with a small isolated hotfix PR.
+
+**Every commit must carry a DCO sign-off — use `git commit -s`, never plain
+`-m`.** See [DCO.md](DCO.md). A commit without a `Signed-off-by:` trailer
+fails the `dco` check, and that check is *not* in `main`'s required-checks
+list — `--auto` can merge right past a failing `dco` check, so a green
+auto-merge is not proof you signed off. Forgot on the last commit? Fix it
+before pushing with `git commit --amend -s --no-edit`; for several unsigned
+commits, `git rebase --signoff origin/main`.
 
 Primary repo ownership (avoids overlap by default):
 
