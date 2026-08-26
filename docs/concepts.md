@@ -100,6 +100,12 @@ ValueEngine → DesignDocs → AppGenerator → AgentGenerator
 In-progress builds are saved automatically. You can pick up where you left off
 at any time from the **Apps** page.
 
+The first complete run of this sequence is your app's **Genesis Build** — the
+build that establishes the app's first authoritative version. Every change
+after that is a **Refinement Run**. See
+[Genesis Builds and Refinement Runs](concepts/genesis-builds-and-refinement-runs.md)
+for how the two fit together.
+
 ## Generate and Promote
 
 **Generate** is the AI process of producing app files. Generated output lands
