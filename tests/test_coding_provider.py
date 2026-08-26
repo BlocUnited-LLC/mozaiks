@@ -21,8 +21,8 @@ from pydantic import ValidationError
 from mozaiksai.control_plane import (
     CodingWorkerPlan,
     CodingWorkerRequest,
-    ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
+    ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
     ControlPlaneManifest,
     ControlPlanePromptDefinition,
@@ -95,7 +95,7 @@ class _FakeToolExecutor:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCapabilityConfig(enabled=True, llm_config={"model": "gpt-5.2-codex"}),
+        coding=ControlPlaneCodingCapabilityConfig(enabled=True, llm_config={"model": "gpt-5.2-codex"}),
     )
 
 

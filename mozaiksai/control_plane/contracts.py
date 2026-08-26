@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class RefinementLane(StrEnum):
+    """Canonical refinement lanes — the second classification dimension.
+
+    ``ChangeClass`` (patch|design|feature|core) decides the route; the lane
+    describes what kind of work the request is, and drives promotion policy,
+    context-freshness policy, validation requirements, and (future) coding
+    provider selection. These were previously bare string literals scattered
+    across dry_run, promotion_policy, app_context_policy, and
+    validation_runner; every lane comparison must reference this enum.
+    """
+
+    UI_PATCH = "ui_patch"
+    EXPERIENCE_DESIGN = "experience_design"
+    FEATURE_ADDITION = "feature_addition"
+    INTEGRATION = "integration"
+    MANAGED_CAPABILITY_CHANGE = "managed_capability_change"
+    DATA_MODEL_MIGRATION = "data_model_migration"
+    ARCHITECTURE_REPLAN = "architecture_replan"
+    CONCEPTUAL_REFRAME = "conceptual_reframe"
 
 # ---------------------------------------------------------------------------
 # Contract surface types

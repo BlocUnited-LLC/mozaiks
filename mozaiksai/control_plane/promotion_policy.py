@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mozaiksai.control_plane.contracts import RefinementLane
 from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.review import RefinementReviewRecord
 from mozaiksai.control_plane.scoped_execution import (
@@ -58,7 +59,7 @@ _SOURCE_OF_TRUTH_GENERATED_PATTERNS = (
     "brand/theme_config.json",
     "workflows/*/*.yaml",
 )
-_REPLAN_LANES = {"conceptual_reframe", "architecture_replan"}
+_REPLAN_LANES = {RefinementLane.CONCEPTUAL_REFRAME.value, RefinementLane.ARCHITECTURE_REPLAN.value}
 _VALIDATION_ALIASES: dict[str, set[str]] = {
     "route_component_validation": {"route_component_validation"},
     "ui_theme_primitive_validation": {"ui_theme_primitive_validation"},
@@ -129,14 +130,14 @@ def _is_module_internal_managed_path(path: str) -> bool:
 
 def _required_validation_names(*, lane: str, path: str) -> list[str]:
     required: list[str] = []
-    if lane == "experience_design":
+    if lane == RefinementLane.EXPERIENCE_DESIGN.value:
         return [
             "experience_spec_update",
             "app_bundle_validation",
             "route_component_validation",
             "ui_theme_primitive_validation",
         ]
-    if lane == "managed_capability_change":
+    if lane == RefinementLane.MANAGED_CAPABILITY_CHANGE.value:
         if _is_ui_leaf_path(path):
             return [
                 "managed_facade_boundary_validation",
@@ -174,7 +175,7 @@ def _missing_validation_names(required_names: list[str], completed_names: set[st
 
 
 def _required_artifacts_for(*, lane: str, path: str) -> list[str]:
-    if lane == "experience_design":
+    if lane == RefinementLane.EXPERIENCE_DESIGN.value:
         return ["experience_spec"]
     if _matches_any(path, _DATA_MODEL_BACKEND_PATTERNS):
         return ["data/contract.json", "data/migrations/*.json"]
@@ -313,7 +314,7 @@ def evaluate_refinement_promotion_policy(
             reason="This generated artifact family should be promoted through an artifact-version path.",
         )
 
-    if lane == "experience_design":
+    if lane == RefinementLane.EXPERIENCE_DESIGN.value:
         required_artifacts = _required_artifacts_for(lane=lane, path=normalized_path)
         required_validation = _required_validation_names(lane=lane, path=normalized_path)
         if not _has_required_artifact_evidence(required_artifacts, artifact_names):
@@ -356,9 +357,9 @@ def evaluate_refinement_promotion_policy(
             required_validation=required_validation,
         )
 
-    if _matches_any(normalized_path, _DATA_MODEL_BACKEND_PATTERNS) or lane == "data_model_migration":
-        required_artifacts = _required_artifacts_for(lane="data_model_migration", path=normalized_path)
-        required_validation = _required_validation_names(lane="data_model_migration", path=normalized_path)
+    if _matches_any(normalized_path, _DATA_MODEL_BACKEND_PATTERNS) or lane == RefinementLane.DATA_MODEL_MIGRATION.value:
+        required_artifacts = _required_artifacts_for(lane=RefinementLane.DATA_MODEL_MIGRATION.value, path=normalized_path)
+        required_validation = _required_validation_names(lane=RefinementLane.DATA_MODEL_MIGRATION.value, path=normalized_path)
         if not _has_required_artifact_evidence(required_artifacts, artifact_names):
             return _build_blocked_decision(
                 path=normalized_path,
@@ -390,7 +391,7 @@ def evaluate_refinement_promotion_policy(
             required_validation=required_validation,
         )
 
-    if lane == "managed_capability_change":
+    if lane == RefinementLane.MANAGED_CAPABILITY_CHANGE.value:
         required_validation = _required_validation_names(lane=lane, path=normalized_path)
         if evidence_failed:
             return _build_blocked_decision(
@@ -420,8 +421,8 @@ def evaluate_refinement_promotion_policy(
             required_validation=required_validation,
         )
 
-    if _matches_any(normalized_path, _INTEGRATION_PATTERNS) or lane == "integration":
-        required_validation = _required_validation_names(lane="integration", path=normalized_path)
+    if _matches_any(normalized_path, _INTEGRATION_PATTERNS) or lane == RefinementLane.INTEGRATION.value:
+        required_validation = _required_validation_names(lane=RefinementLane.INTEGRATION.value, path=normalized_path)
         if evidence_failed:
             return _build_blocked_decision(
                 path=normalized_path,
@@ -444,7 +445,7 @@ def evaluate_refinement_promotion_policy(
         )
 
     if _matches_any(normalized_path, _MODULE_GENERATED_PATTERNS):
-        required_validation = _required_validation_names(lane="feature_addition", path=normalized_path)
+        required_validation = _required_validation_names(lane=RefinementLane.FEATURE_ADDITION.value, path=normalized_path)
         if evidence_failed:
             return _build_blocked_decision(
                 path=normalized_path,
@@ -467,7 +468,7 @@ def evaluate_refinement_promotion_policy(
         )
 
     if _is_ui_leaf_path(normalized_path):
-        required_validation = _required_validation_names(lane="ui_patch", path=normalized_path)
+        required_validation = _required_validation_names(lane=RefinementLane.UI_PATCH.value, path=normalized_path)
         if evidence_failed:
             return _build_blocked_decision(
                 path=normalized_path,
@@ -482,7 +483,7 @@ def evaluate_refinement_promotion_policy(
                 reason="Promotion is missing required validation evidence.",
                 required_validation=required_validation,
             )
-        if lane == "ui_patch" or (change_class == "patch" and _is_ui_only_scope(list(plan.affected_bundle_paths))):
+        if lane == RefinementLane.UI_PATCH.value or (change_class == "patch" and _is_ui_only_scope(list(plan.affected_bundle_paths))):
             return _build_allowed_decision(
                 path=normalized_path,
                 mode="direct_leaf_patch",

@@ -33,8 +33,8 @@ import pytest
 from mozaiksai.control_plane import (
     CodingWorkerPlan,
     CodingWorkerRequest,
-    ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
+    ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
     ControlPlaneManifest,
     ControlPlanePromptDefinition,
@@ -178,7 +178,7 @@ def _pack() -> LoadedControlPlanePack:
 def _config() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCapabilityConfig(
+        coding=ControlPlaneCodingCapabilityConfig(
             enabled=True,
             llm_config={"model": "gpt-4o", "temperature": 0.1},
         ),

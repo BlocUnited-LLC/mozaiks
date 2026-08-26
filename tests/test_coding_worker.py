@@ -8,8 +8,8 @@ import pytest
 from mozaiksai.control_plane import (
     CodingWorkerPlan,
     CodingWorkerRequest,
-    ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
+    ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
     ControlPlaneManifest,
     ControlPlanePromptDefinition,
@@ -112,7 +112,7 @@ class _FakeArtifactStore:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCapabilityConfig(
+        coding=ControlPlaneCodingCapabilityConfig(
             enabled=True,
             llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
         ),
