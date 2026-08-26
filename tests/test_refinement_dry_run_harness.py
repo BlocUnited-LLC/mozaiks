@@ -52,7 +52,7 @@ def test_ui_request_returns_app_surface_revision_and_ui_paths() -> None:
 
     assert plan.workflow_sequence == "app_surface_revision"
     assert plan.next_step == "app_surface_revision"
-    assert "experience_spec" in plan.affected_declarative_families
+    assert "design_docs" in plan.affected_declarative_families
     assert "ui/pages/dashboard.yaml" in plan.affected_bundle_paths
     assert "ui/route_manifest.json" in plan.affected_bundle_paths
 

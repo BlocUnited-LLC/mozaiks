@@ -91,6 +91,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **ADR 0007 Slice 0 closes proven generator and refinement defects**:
+  generated app/workflow writers now use the canonical build-scoped staging
+  roots, required artifact and DesignDocs persistence fails closed, lineage
+  queries and dependency families match persisted build-record fields, and
+  launch-context authority failures no longer admit unvalidated context.
 - **Generated SaaS plan limits now survive AppGenerator assembly and export**:
   `usage_limits` and `token_allowances` are preserved in
   `config/subscriptions.yaml`, and the canonical module API helper no longer
@@ -2186,6 +2191,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Removed the unreachable ValueEngine `save_build_plan` branch and the orphaned
+  event-envelope guard that targeted a nonexistent schema directory.
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
   workflow transition conditions now use AG2-native `ContextEquals` and
   `ToolCalled`, wrapped by `SourceScopedContextEquals` and

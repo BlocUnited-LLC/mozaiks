@@ -40,6 +40,12 @@ def test_production_readiness_gate_includes_core_offline_targets() -> None:
     assert "tests/test_module_executor_permission_enforcement.py" in targets
 
 
+def test_dead_event_envelope_guard_is_not_present() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+
+    assert not (workspace / "scripts" / "check_event_envelope_protocol_guard.py").exists()
+
+
 def test_production_readiness_gate_includes_core_monetization_targets() -> None:
     gate = _load_gate_module()
 

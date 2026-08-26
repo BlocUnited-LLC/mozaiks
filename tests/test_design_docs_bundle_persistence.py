@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from tests.import_utils import import_module_directly
 
 design_docs_module = import_module_directly(
@@ -206,8 +208,51 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
     )
     assert data_contracts_collection.updates[0][1]["$set"]["data_contract"]["artifact_version_id"] == "artifact_123"
     assert summary_artifact["artifact_kind"] == "design_docs"
-    assert summary_artifact["input_artifact_kinds"] == ("concept", "build_plan")
+    assert summary_artifact["input_artifact_kinds"] == ("concept",)
     assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"
     assert summary_artifact["summary_payload"]["experience_spec"]["pages"][0]["name"] == "Users"
     assert result["page_count"] == 1
+
+
+def test_save_design_docs_bundle_propagates_summary_persistence_failure(monkeypatch) -> None:
+    monkeypatch.setattr(design_docs_module, "AG2PersistenceManager", _FakePersistenceManager)
+
+    async def _fail_summary(**_kwargs):
+        raise RuntimeError("summary store unavailable")
+
+    monkeypatch.setattr(design_docs_module, "persist_summary_artifact", _fail_summary)
+    context = _Context(
+        {
+            "app_id": "app_failure",
+            "chat_id": "chat_failure",
+            "build_id": "build_failure",
+            "structured_output": _bundle(),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="summary store unavailable"):
+        asyncio.run(design_docs_module.save_design_docs_bundle(context_variables=context))
+
+    assert "frontend_design_document" not in context.data
+
+
+def test_save_design_doc_propagates_status_persistence_failure(monkeypatch) -> None:
+    async def _fail_status(**_kwargs):
+        raise RuntimeError("status store unavailable")
+
+    async def _unexpected_upsert(**_kwargs):
+        raise AssertionError("document write continued after status persistence failed")
+
+    monkeypatch.setattr(design_docs_module, "_mark_design_docs_status", _fail_status)
+    monkeypatch.setattr(design_docs_module, "_upsert_design_doc", _unexpected_upsert)
+
+    with pytest.raises(RuntimeError, match="status store unavailable"):
+        asyncio.run(
+            design_docs_module.save_design_doc(
+                kind="frontend",
+                stage="draft",
+                content="# Frontend",
+                context_variables=_Context({"app_id": "app_failure"}),
+            )
+        )
 

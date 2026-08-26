@@ -99,9 +99,15 @@ def validate_context_for_workflow(
             if definitions
             else None
         )
-    except Exception:
-        declared_keys = set()
-        policy = None
+    except Exception as exc:
+        logger.error(
+            "SESSION_LAUNCH_CONTEXT_AUTHORITY_LOAD_FAILED: workflow=%s error=%s",
+            workflow_id,
+            exc,
+        )
+        raise ContextAuthorityError(
+            f"Unable to load context authority for workflow '{workflow_id}'"
+        ) from exc
 
     for key, value in merged_context.items():
         if not isinstance(key, str) or not key.strip():

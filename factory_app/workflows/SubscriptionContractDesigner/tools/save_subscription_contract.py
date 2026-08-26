@@ -363,7 +363,7 @@ async def save_subscription_contract(
             source_chat_id=str(chat_id) if chat_id else None,
             author_user_id=str(user_id) if user_id else None,
             revision_mode=str(build_mode or "").strip().lower() == "revision",
-            input_artifact_kinds=("concept", "build_plan", "design_docs"),
+            input_artifact_kinds=("concept", "design_docs"),
         )
         _cv_set(context_variables, "subscription_contract_artifact_version_id", artifact.id)
     except Exception as exc:

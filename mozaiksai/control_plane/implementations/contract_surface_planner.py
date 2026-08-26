@@ -75,7 +75,7 @@ class _SurfaceEntry(BaseModel):
     generation_hint: str
 
 
-class _ContractSurfaceClassification(BaseModel):
+class ContractSurfaceClassification(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     surfaces: list[_SurfaceEntry]
@@ -196,7 +196,7 @@ class ContractSurfacePlanner:
                 system_prompt=prompt.content,
                 user_prompt=user_prompt,
                 llm_config=llm_config,
-                response_schema=_ContractSurfaceClassification,
+                response_schema=ContractSurfaceClassification,
             )
         except Exception as exc:
             _logger.warning("Contract surface classification failed: %s", exc)
@@ -259,7 +259,7 @@ class ContractSurfacePlanner:
     @staticmethod
     def _resolve_surfaces(
         *,
-        classification: _ContractSurfaceClassification,
+        classification: ContractSurfaceClassification,
         context_graph_catalog: dict[str, Any] | None,
     ) -> list[ContractSurfaceUpdate]:
         """Resolve each classified surface to canonical file paths and order by dependency."""

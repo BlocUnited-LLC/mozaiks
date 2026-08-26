@@ -32,9 +32,9 @@ _logger = logging.getLogger("mozaiksai.control_plane.implementations.refinement_
 # Topological order for stale-family priority: earliest dependency restarts first.
 _STALE_PRIORITY: list[str] = [
     "concept",
-    "brand",
+    "theme_capture",
     "design_docs",
-    "experience_spec",
+    "subscription_contract",
     "workflow_bundle",
     "app_bundle",
 ]
@@ -42,9 +42,9 @@ _STALE_PRIORITY: list[str] = [
 # Maps a stale artifact family to the canonical sequence that rebuilds it and its dependents.
 _STALE_SEQUENCE_MAP: dict[str, str] = {
     "concept": "full_rebuild",
-    "brand": "theme_revision",
+    "theme_capture": "theme_revision",
     "design_docs": "design_revision",
-    "experience_spec": "app_surface_revision",
+    "subscription_contract": "subscription_revision",
     "workflow_bundle": "workflow_revision",
     "app_bundle": "app_revision",
 }
@@ -1325,11 +1325,11 @@ class RefinementTriggerRouteResolver:
         families: list[str],
     ) -> list[str]:
         family_set = set(families)
-        if "experience_spec" not in family_set and "app_bundle" not in family_set:
+        if "design_docs" not in family_set and "app_bundle" not in family_set:
             return []
         manifest_paths = await self._manifest_paths_for_request(request)
         paths: list[str] = []
-        if "experience_spec" in family_set:
+        if "design_docs" in family_set and intent.change_class == ChangeClass.DESIGN:
             paths.extend(
                 self._experience_spec_bundle_paths(
                     request=request,
@@ -1778,7 +1778,7 @@ class RefinementTriggerRouteResolver:
             context_seed["preserve_families"] = (
                 list(preserve_families)
                 if isinstance(preserve_families, list)
-                else ["brand"]
+                else ["theme_capture"]
             )
             previous_brand_ref = request.extra.get("previous_brand_ref")
             if isinstance(previous_brand_ref, str) and previous_brand_ref.strip():

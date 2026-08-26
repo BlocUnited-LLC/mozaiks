@@ -4,13 +4,15 @@ generate_and_download - Bundle generated app code and present AppWorkbench + Dow
 This tool:
 1) Collects latest agent JSON outputs for the chat/app
 2) Extracts `code_files` from any agent output
-3) Writes files to disk under generated_apps/<app_id>/<chat_id>/<bundle_name>/
+3) Writes files under generated/apps/<app_id>/<build_id>/app/
 4) Creates a ZIP bundle
 5) Presents AppWorkbench export actions and (optionally) triggers export_to_github
 """
 
 
 import json
+import os
+import re
 import uuid
 import zipfile
 from datetime import UTC, datetime
@@ -55,6 +57,38 @@ except Exception:  # pragma: no cover
 
 BuilderArtifactStore = None
 AG2PersistenceManager = None
+
+
+def _repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in [here] + list(here.parents):
+        if (parent / "mozaiksai").is_dir():
+            return parent
+    return here.parents[-1]
+
+
+def _resolve_generated_artifacts_root() -> Path:
+    raw = os.getenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", "generated").strip()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = _repo_root() / candidate
+    return candidate.resolve()
+
+
+def _safe_path_segment(value: Any, *, fallback: str) -> str:
+    text = str(value or "").strip() or fallback
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip(".-")
+    return text or fallback
+
+
+def _resolve_app_output_dir(*, app_id: Any, build_id: Any) -> Path:
+    return (
+        _resolve_generated_artifacts_root()
+        / "apps"
+        / _safe_path_segment(app_id, fallback="local-app")
+        / _safe_path_segment(build_id, fallback="local-build")
+        / "app"
+    )
 
 
 def _builder_artifact_store():
@@ -718,7 +752,7 @@ async def _register_app_bundle_artifact_version(
     artifact_store = get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
-        artifact_kinds=("concept", "build_plan", "design_docs", "workflow_bundle", "theme_capture"),
+        artifact_kinds=("concept", "design_docs", "workflow_bundle", "theme_capture"),
         artifact_store=artifact_store,
     )
     artifact_version = await artifact_store.create_build_record(
@@ -947,8 +981,8 @@ async def generate_and_download(
     # Normalize bundle name to a safe folder name
     bundle_name = "".join(ch for ch in bundle_name if ch.isalnum() or ch in {"-", "_"}).strip() or "GeneratedApp"
 
-    base_dir = Path("generated_apps") / str(app_id) / str(chat_id)
-    app_dir = base_dir / bundle_name
+    app_dir = _resolve_app_output_dir(app_id=app_id, build_id=build_id or chat_id)
+    base_dir = app_dir.parent
     app_dir.mkdir(parents=True, exist_ok=True)
 
     if tlog and _log_tool_event:  # type: ignore[truthy-function]
@@ -964,19 +998,15 @@ async def generate_and_download(
         out_path.write_text(str(content), encoding="utf-8")
         written_paths.append(safe)
 
-    migration_record = None
-    try:
-        migration_record = await _persist_pending_schema_migration(
-            pending_migration=pending_migration,
-            app_id=str(app_id),
-            build_id=str(build_id or chat_id),
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            context_variables=context_variables,
-            generated_app_dir=str(app_dir.resolve()),
-        )
-    except Exception as exc:
-        wf_logger.warning("Failed to persist pending schema migration: %s", exc)
+    migration_record = await _persist_pending_schema_migration(
+        pending_migration=pending_migration,
+        app_id=str(app_id),
+        build_id=str(build_id or chat_id),
+        workflow_name=workflow_name,
+        chat_id=chat_id,
+        context_variables=context_variables,
+        generated_app_dir=str(app_dir.resolve()),
+    )
 
     resolved_bundle_path = str(app_dir.resolve())
 
@@ -988,21 +1018,17 @@ async def generate_and_download(
                 zipf.write(file_path, arcname=f"{bundle_name}/{rel_path}")
 
     zip_size = zip_path.stat().st_size
-    artifact_version = None
-    try:
-        artifact_version = await _register_app_bundle_artifact_version(
-            app_id=str(app_id),
-            user_id=user_id,
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            bundle_name=bundle_name,
-            zip_path=zip_path,
-            app_dir=app_dir,
-            written_paths=written_paths,
-            context_variables=context_variables,
-        )
-    except Exception as artifact_err:
-        wf_logger.warning("Failed to register app bundle artifact version: %s", artifact_err)
+    artifact_version = await _register_app_bundle_artifact_version(
+        app_id=str(app_id),
+        user_id=user_id,
+        workflow_name=workflow_name,
+        chat_id=chat_id,
+        bundle_name=bundle_name,
+        zip_path=zip_path,
+        app_dir=app_dir,
+        written_paths=written_paths,
+        context_variables=context_variables,
+    )
 
     artifact_version_id = artifact_version.id if artifact_version else None
     workflow_sequence = str(_context_get(context_variables, "workflow_sequence") or "build")

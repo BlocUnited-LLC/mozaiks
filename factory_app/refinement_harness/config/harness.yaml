@@ -57,7 +57,7 @@ routing:
           workflow_sequence: app_revision
         core:
           workflow_sequence: full_rebuild
-    - build_family: theme_config
+    - build_family: theme_capture
       label: theme config
       routes:
         patch:

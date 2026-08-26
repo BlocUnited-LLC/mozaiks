@@ -11,7 +11,7 @@ v1 policy:
   request.
 - The ACP provider is selected only when all of these hold: it is enabled in
   ``refinement_policy.yaml``, the ``ag2[acp]`` extra is importable, the
-  artifact kind is ``app_bundle`` or ``theme_config``, and the scope spans
+  artifact kind is ``app_bundle`` or ``theme_capture``, and the scope spans
   more than one file while staying inside the ACP file budget. Single-file
   patches stay on the cheaper deterministic provider.
 
@@ -32,7 +32,7 @@ from mozaiksai.control_plane.contracts import CodingWorkerRequest
 
 CodingProviderChoice = Literal["structured_output", "acp"]
 
-_ACP_ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "theme_config"}
+_ACP_ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "theme_capture"}
 
 # ACP proposal statuses that permit one structured-provider fallback attempt.
 # "rejected_scope" is deliberately absent: a provider that edited outside its

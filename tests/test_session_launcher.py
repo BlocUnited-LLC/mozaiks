@@ -125,6 +125,19 @@ def test_validate_context_for_workflow_keeps_refinement_launch_keys_for_appgener
     }
 
 
+def test_validate_context_for_workflow_fails_closed_when_config_load_raises(monkeypatch) -> None:
+    def _raise_config_error(_workflow_id):
+        raise RuntimeError("workflow config unavailable")
+
+    monkeypatch.setattr(_workflow_manager.workflow_manager, "get_config", _raise_config_error)
+
+    with pytest.raises(_session_launcher.ContextAuthorityError, match="AppGenerator"):
+        _session_launcher.validate_context_for_workflow(
+            "AppGenerator",
+            {"artifact_kind": "app_bundle"},
+        )
+
+
 @pytest.mark.asyncio
 async def test_apply_launch_context_provider_invokes_env_provider(monkeypatch) -> None:
     provider_module = types.ModuleType("_test_launch_context_provider")

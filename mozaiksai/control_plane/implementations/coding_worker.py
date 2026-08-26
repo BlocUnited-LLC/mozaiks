@@ -44,7 +44,7 @@ from mozaiksai.core.artifacts import (
 from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
-_ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
+_ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_capture"}
 # Deliberately excludes "e2b": this worker validates via local subprocesses
 # (run_current_app_source_validation) and has no sandbox execution path, so a
 # plan claiming e2b would stamp a strategy onto build records that never ran.
@@ -52,12 +52,12 @@ _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
 # integration tracked in docs/architecture/workflows/ag2-update-watchpoints.md.
 _VALIDATION_STRATEGIES = {"skip", "local"}
 
-# theme_config files live inside the app_bundle workspace. We alias the artifact
+# Theme files live inside the app_bundle workspace. We alias the theme_capture artifact
 # kind so the coding worker can locate and patch these files without requiring a
-# separate theme_config artifact store entry. Workspace scope tools fall back to
-# the app_bundle artifact when a theme_config entry does not yet exist.
+# separate staged theme workspace. Workspace scope tools fall back to the app_bundle
+# artifact while theme_capture remains the persisted semantic input record.
 _ARTIFACT_KIND_ALIASES: dict[str, str] = {
-    "theme_config": "app_bundle",
+    "theme_capture": "app_bundle",
 }
 
 
@@ -180,7 +180,7 @@ class ScopedRefinementCodingWorker:
         merged_files.update(applied_files)
 
         # Resolve aliased artifact kinds so validation and persistence use the
-        # backing store kind (e.g. theme_config → app_bundle).
+        # backing store kind (e.g. theme_capture → app_bundle).
         resolved_artifact_kind = _ARTIFACT_KIND_ALIASES.get(request.build_family, request.build_family)
 
         validation_result = None

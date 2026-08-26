@@ -323,18 +323,14 @@ async def save_design_doc(
     store = BuilderArtifactStore(pm=pm)
     normalized_stage = str(stage or "draft")
 
-    # Best-effort stage status tracking: mark running on first doc, succeeded on last.
-    try:
-        if normalized_kind == _FIRST_DOC:
-            await _mark_design_docs_status(
-                store=store,
-                app_id=app_id,
-                user_id=str(user_id) if user_id else None,
-                stage=normalized_stage,
-                status="running",
-            )
-    except Exception:
-        pass
+    if normalized_kind == _FIRST_DOC:
+        await _mark_design_docs_status(
+            store=store,
+            app_id=app_id,
+            user_id=str(user_id) if user_id else None,
+            stage=normalized_stage,
+            status="running",
+        )
 
     await _upsert_design_doc(
         store=store,
@@ -347,18 +343,14 @@ async def save_design_doc(
         source_chat_id=str(chat_id) if chat_id else None,
     )
 
-    # Best-effort: mark succeeded when the final doc (ui_schema) is saved.
-    try:
-        if normalized_kind == _LAST_DOC:
-            await _mark_design_docs_status(
-                store=store,
-                app_id=app_id,
-                user_id=str(user_id) if user_id else None,
-                stage=normalized_stage,
-                status="succeeded",
-            )
-    except Exception:
-        pass
+    if normalized_kind == _LAST_DOC:
+        await _mark_design_docs_status(
+            store=store,
+            app_id=app_id,
+            user_id=str(user_id) if user_id else None,
+            stage=normalized_stage,
+            status="succeeded",
+        )
 
     return {
         "ok": True,
@@ -415,16 +407,13 @@ async def save_design_docs_bundle(
     store = BuilderArtifactStore(pm=pm)
     normalized_stage = "draft"
 
-    try:
-        await _mark_design_docs_status(
-            store=store,
-            app_id=app_id,
-            user_id=str(user_id) if user_id else None,
-            stage=normalized_stage,
-            status="running",
-        )
-    except Exception:
-        pass
+    await _mark_design_docs_status(
+        store=store,
+        app_id=app_id,
+        user_id=str(user_id) if user_id else None,
+        stage=normalized_stage,
+        status="running",
+    )
 
     docs = (
         (DesignDocKinds.FRONTEND, frontend_markdown, None),
@@ -459,38 +448,32 @@ async def save_design_docs_bundle(
         source_chat_id=str(chat_id) if chat_id else None,
     )
 
-    try:
-        await persist_summary_artifact(
-            app_id=app_id,
-            artifact_kind="design_docs",
-            artifact_key="design_docs",
-            summary_payload={
-                "frontend_markdown": frontend_markdown,
-                "backend_markdown": backend_markdown,
-                "database_markdown": database_markdown,
-                "experience_spec": experience_spec,
-                "surface_map": surface_map,
-                "data_contract": data_contract,
-            },
-            source_workflow="DesignDocs",
-            source_chat_id=str(chat_id) if chat_id else None,
-            author_user_id=str(user_id) if user_id else None,
-            revision_mode=str(build_mode or "").strip().lower() == "revision",
-            input_artifact_kinds=("concept", "build_plan"),
-        )
-    except Exception as exc:
-        logger.warning("[DesignDocs] Generic design-doc artifact persistence failed: %s", exc)
+    await persist_summary_artifact(
+        app_id=app_id,
+        artifact_kind="design_docs",
+        artifact_key="design_docs",
+        summary_payload={
+            "frontend_markdown": frontend_markdown,
+            "backend_markdown": backend_markdown,
+            "database_markdown": database_markdown,
+            "experience_spec": experience_spec,
+            "surface_map": surface_map,
+            "data_contract": data_contract,
+        },
+        source_workflow="DesignDocs",
+        source_chat_id=str(chat_id) if chat_id else None,
+        author_user_id=str(user_id) if user_id else None,
+        revision_mode=str(build_mode or "").strip().lower() == "revision",
+        input_artifact_kinds=("concept",),
+    )
 
-    try:
-        await _mark_design_docs_status(
-            store=store,
-            app_id=app_id,
-            user_id=str(user_id) if user_id else None,
-            stage=normalized_stage,
-            status="succeeded",
-        )
-    except Exception:
-        pass
+    await _mark_design_docs_status(
+        store=store,
+        app_id=app_id,
+        user_id=str(user_id) if user_id else None,
+        stage=normalized_stage,
+        status="succeeded",
+    )
 
     _cv_set(context_variables, "frontend_design_document", frontend_markdown)
     _cv_set(context_variables, "backend_design_document", backend_markdown)

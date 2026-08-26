@@ -151,6 +151,7 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
         {
             "chat_id": "chat-1",
             "app_id": "app-1",
+            "build_id": "build-1",
             "workflow_name": "AgentGenerator",
             "user_id": "user-1",
             "pack_name": "ReviewWorkflow",
@@ -194,6 +195,8 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
 
     zip_path = Path(zip_entry["path"])
     assert zip_path.exists()
+    assert zip_path.parent == tmp_path / "generated" / "workflows" / "app-1" / "build-1"
+    assert (zip_path.parent / "ReviewWorkflow" / "orchestrator.yaml").exists()
     with zipfile.ZipFile(zip_path) as zf:
         names = zf.namelist()
     assert any("orchestrator.yaml" in n for n in names)
