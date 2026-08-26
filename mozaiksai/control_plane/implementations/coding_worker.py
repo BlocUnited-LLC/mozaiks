@@ -17,13 +17,16 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerResult,
     FileUpdate,
     StagedPatchProposal,
-    safe_artifact_relpath,
 )
 from mozaiksai.control_plane.implementations.structured_coding_provider import (
     StructuredOutputCodingProvider,
 )
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.ports import CodingExecutionProvider
+from mozaiksai.control_plane.workspace import (
+    harvest_coding_workspace,
+    materialize_coding_workspace,
+)
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
@@ -336,23 +339,20 @@ class ScopedRefinementCodingWorker:
         # land alongside app_bundle artifacts, not in a separate tree.
         bundle_root = self._output_root / request.app_id / resolved_artifact_kind / build_key / bundle_token
         workspace_dir = bundle_root / "workspace"
-        workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        written_paths: list[str] = []
-        for raw_path, content in merged_files.items():
-            safe = safe_artifact_relpath(raw_path)
-            if not safe:
-                continue
-            out_path = workspace_dir / safe
-            try:
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_text(str(content), encoding="utf-8")
-            except OSError as exc:
-                raise RuntimeError(
-                    f"STAGING_WRITE_FAILED: could not write '{safe}' to staging workspace "
-                    f"at {workspace_dir} — {exc}"
-                ) from exc
-            written_paths.append(safe)
+        try:
+            staged_workspace = materialize_coding_workspace(merged_files, workspace_root=workspace_dir)
+        except OSError as exc:
+            raise RuntimeError(
+                f"STAGING_WRITE_FAILED: could not write staging workspace at {workspace_dir} — {exc}"
+            ) from exc
+        harvest = harvest_coding_workspace(staged_workspace)
+        if not harvest.clean:
+            details = "; ".join(f"{violation.path} ({violation.kind})" for violation in harvest.violations)
+            raise RuntimeError(
+                f"STAGING_VERIFICATION_FAILED: workspace harvest found scope violations: {details}"
+            )
+        written_paths = sorted(staged_workspace.editable_manifest)
 
         zip_path = bundle_root / "artifact.zip"
         try:
@@ -379,6 +379,7 @@ class ScopedRefinementCodingWorker:
             "source_validation_result": validation_result,
             "validation_result": validation_result,
             "source_surface": request.source_surface,
+            "staged_file_sha256": dict(staged_workspace.editable_manifest),
         }
         content_store = get_artifact_content_store()
         if content_store.backend_name != "local":

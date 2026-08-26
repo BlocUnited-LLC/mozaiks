@@ -167,6 +167,14 @@ from .staged_coding_worker import (
     select_staged_coding_worker_reason,
 )
 from .tools import get_revision_context
+from .workspace import (
+    HarvestedFile,
+    StagedCodingWorkspace,
+    WorkspaceHarvest,
+    WorkspaceScopeViolation,
+    harvest_coding_workspace,
+    materialize_coding_workspace,
+)
 
 __all__ = [
     "APP_INTELLIGENCE_INDEX_SOURCE_WORKFLOW",
@@ -251,10 +259,16 @@ __all__ = [
     "RefinementTriggerRouteResolver",
     "RoutingPolicyPort",
     "REVIEW_PACKAGE_SCHEMA_VERSION",
+    "HarvestedFile",
     "ScopeProposal",
     "ScopeProposalPort",
     "ScopedRefinementCodingWorker",
+    "StagedCodingWorkspace",
     "StructuredOutputCodingProvider",
+    "WorkspaceHarvest",
+    "WorkspaceScopeViolation",
+    "harvest_coding_workspace",
+    "materialize_coding_workspace",
     "safe_artifact_relpath",
     "build_selected_control_plane_harness",
     "build_refinement_review_package",

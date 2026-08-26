@@ -14,6 +14,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Coding workspace materializer and deterministic diff harvester**
+  (`mozaiksai/control_plane/workspace.py`): scoped files are written into a
+  disposable per-request workspace with pre-run sha256 manifests, and results
+  are harvested from the real tree — symlinks, files outside the editable
+  manifest, and deletions surface as typed scope violations instead of being
+  accepted. Refinement artifact persistence now writes through this module,
+  refuses secret-sensitive or unsafe scoped paths loudly instead of silently
+  skipping them, and records per-file content hashes in artifact commit
+  metadata. This is the enforcement layer ACP-backed coding providers will
+  execute inside. The secret-sensitive path policy previously duplicated
+  across staging, promotion, and scoped execution is now a single canonical
+  helper (`is_secret_sensitive_path`) — the unified term list is the union of
+  the old copies, so each call site is equal or stricter than before.
+
 - **`CodingExecutionProvider` boundary in the refinement control plane**: the
   scoped coding worker now delegates patch production to a provider behind a
   typed, provider-neutral `StagedPatchProposal` contract. The first provider,

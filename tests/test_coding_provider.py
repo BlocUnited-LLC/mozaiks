@@ -378,3 +378,51 @@ def test_safe_artifact_relpath_normalization() -> None:
     assert safe_artifact_relpath("app/../../outside.py") is None
     assert safe_artifact_relpath("") is None
     assert safe_artifact_relpath(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Workspace-backed persistence (PR-2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_persistence_records_staged_file_hashes(tmp_path: Path) -> None:
+    artifact_store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        source_validation_runner=_fake_source_validation_runner,
+        artifact_store=artifact_store,
+        output_root=tmp_path,
+        provider=_StubProvider(_completed_proposal()),
+    )
+    result = await worker.execute(_request(validation_strategy="local"))
+
+    assert result.status == "validated"
+    staged_hashes = artifact_store.calls[0]["commit_metadata"]["metadata"]["staged_file_sha256"]
+    assert set(staged_hashes) == {_SCOPED_PATH}
+    assert all(len(digest) == 64 for digest in staged_hashes.values())
+
+
+@pytest.mark.asyncio
+async def test_secret_scoped_file_fails_persistence_loudly(tmp_path: Path) -> None:
+    secret_path = "config/secrets.yaml"
+    proposal = _completed_proposal(
+        changed_files=[ProposedFileChange(path=secret_path, op="update", content="key: value")],
+        owned_paths=[secret_path],
+    )
+    worker = ScopedRefinementCodingWorker(
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        source_validation_runner=_fake_source_validation_runner,
+        artifact_store=_FakeArtifactStore(),
+        output_root=tmp_path,
+        provider=_StubProvider(proposal),
+    )
+    result = await worker.execute(
+        _request(files={secret_path: "key: old"}, validation_strategy="local")
+    )
+
+    assert result.status == "failed"
+    assert "ARTIFACT_PERSISTENCE_FAILED" in str(result.error)
+    assert "WORKSPACE_SECRET_PATH" in str(result.error)
