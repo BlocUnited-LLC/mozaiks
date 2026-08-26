@@ -302,3 +302,4 @@ nav:
       - adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md
       - adr/0004-mozaiks-mcp-contract-surface.md
       - adr/0006-provider-neutral-bounded-multi-workflow-journey-execution.md
+      - adr/0007-generalized-semantic-compiler.md
