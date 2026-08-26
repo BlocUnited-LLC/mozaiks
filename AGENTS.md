@@ -30,6 +30,18 @@ Before editing Mozaiks OSS:
 - architectural changes that contradict the frozen north star require an ADR or
   explicit architecture decision
 
+## ADR Authoring Context
+
+For an ADR that changes or extends app generation, semantic authority,
+compilation/materialization, or refinement, review
+[issue #411](https://github.com/BlocUnited-LLC/mozaiks/issues/411) and state
+explicitly whether the ADR adopts, modifies, rejects, or defers that direction.
+
+Issue #411 is a design prompt, not architecture authority. Current source and
+Accepted ADRs remain authoritative. Any ADR using the issue must verify its
+claims against the repository and must not make a typed decision ledger a
+second authority for application meaning.
+
 ## Deterministic Generation Rule
 
 Generated-app reliability takes precedence over maximum schema expressiveness.
