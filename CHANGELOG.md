@@ -14,6 +14,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Typed refinement lanes and coding provider policy**: the eight refinement
+  lanes (`ui_patch`, `experience_design`, `feature_addition`, `integration`,
+  `managed_capability_change`, `data_model_migration`, `architecture_replan`,
+  `conceptual_reframe`) are now a canonical `RefinementLane` enum consumed by
+  lane inference, promotion policy, context policy, and validation — replacing
+  unpinned string literals. `refinement_policy.yaml` gains a
+  `coding.providers` section declaring the opt-in ACP coding provider
+  (disabled by default) with hard execution budgets (`max_files`,
+  `max_diff_bytes`, `max_wall_seconds`, `max_retries`); credentials and
+  adapter connection details are rejected by schema.
+
 - **Coding workspace materializer and deterministic diff harvester**
   (`mozaiksai/control_plane/workspace.py`): scoped files are written into a
   disposable per-request workspace with pre-run sha256 manifests, and results

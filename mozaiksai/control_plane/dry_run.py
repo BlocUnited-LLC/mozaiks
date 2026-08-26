@@ -26,6 +26,7 @@ from mozaiksai.control_plane.app_context_policy import (
     evaluate_app_context_policy,
 )
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.contracts import RefinementLane
 from mozaiksai.control_plane.implementations.change_classifier import LLMChangeClassifier
 from mozaiksai.control_plane.implementations.refinement_router import (
     ChangeClass,
@@ -249,20 +250,20 @@ def infer_refinement_lane(
         or any(term in path_text for term in ("data_contract", "data_migrations"))
         or any(term in request_text for term in ("data model", "database", "migration", "migrate", "required field"))
     ):
-        return "data_model_migration"
+        return RefinementLane.DATA_MODEL_MIGRATION.value
     if re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) or "provider-backed" in text:
-        return "managed_capability_change"
+        return RefinementLane.MANAGED_CAPABILITY_CHANGE.value
     if any(term in text for term in ("connector", "integration", "adapter")):
-        return "integration"
+        return RefinementLane.INTEGRATION.value
     if change_class == ChangeClass.CORE.value:
         if "architecture" in text:
-            return "architecture_replan"
-        return "conceptual_reframe"
+            return RefinementLane.ARCHITECTURE_REPLAN.value
+        return RefinementLane.CONCEPTUAL_REFRAME.value
     if workflow_sequence == "app_surface_revision" or "experience_spec" in text:
-        return "experience_design"
+        return RefinementLane.EXPERIENCE_DESIGN.value
     if any(term in text for term in ("module", "api", "action")):
-        return "feature_addition"
-    return "ui_patch"
+        return RefinementLane.FEATURE_ADDITION.value
+    return RefinementLane.UI_PATCH.value
 
 
 def _dedupe(values: list[str]) -> list[str]:
@@ -316,7 +317,7 @@ def _path_text(paths: list[str]) -> str:
 def _has_ui_surface_impact(*, lane: str | None, paths: list[str], families: list[str]) -> bool:
     text = _path_text(paths)
     return (
-        lane in {"experience_design", "ui_patch", "managed_capability_change"}
+        lane in {RefinementLane.EXPERIENCE_DESIGN.value, RefinementLane.UI_PATCH.value, RefinementLane.MANAGED_CAPABILITY_CHANGE.value}
         or "experience_spec" in families
         or "ui/" in text
         or "route_manifest" in text
@@ -327,7 +328,7 @@ def _has_ui_surface_impact(*, lane: str | None, paths: list[str], families: list
 def _has_module_contract_impact(*, lane: str | None, paths: list[str]) -> bool:
     text = _path_text(paths)
     return (
-        lane in {"feature_addition", "managed_capability_change"}
+        lane in {RefinementLane.FEATURE_ADDITION.value, RefinementLane.MANAGED_CAPABILITY_CHANGE.value}
         or "modules/" in text
         or "/contracts/" in text
         or "/backend/handler.py" in text
@@ -337,7 +338,7 @@ def _has_module_contract_impact(*, lane: str | None, paths: list[str]) -> bool:
 
 def _has_integration_impact(*, lane: str | None, paths: list[str], scope_summary: str) -> bool:
     text = " ".join([_path_text(paths), str(scope_summary or "").lower()])
-    return lane == "integration" or any(term in text for term in ("integration", "integrations", "connector", "adapter"))
+    return lane == RefinementLane.INTEGRATION.value or any(term in text for term in ("integration", "integrations", "connector", "adapter"))
 
 
 def _has_database_review_impact(
@@ -351,7 +352,7 @@ def _has_database_review_impact(
     paths_text = _path_text(paths)
     scope_text = str(scope_summary or "").lower()
     return (
-        lane == "data_model_migration"
+        lane == RefinementLane.DATA_MODEL_MIGRATION.value
         or any(term in paths_text for term in ("data_contract", "data_migrations"))
         or "destructive changes require explicit review" in scope_text
         or any(
@@ -370,7 +371,7 @@ def _has_database_review_impact(
 def _has_managed_facade_impact(*, lane: str | None, paths: list[str], scope_summary: str) -> bool:
     text = " ".join([_path_text(paths), str(scope_summary or "").lower()])
     return (
-        lane == "managed_capability_change"
+        lane == RefinementLane.MANAGED_CAPABILITY_CHANGE.value
         or re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) is not None
         or "provider-backed" in text
     )
@@ -467,7 +468,7 @@ def requires_human_review(
     validation_ids = {item.id for item in validation_plan.items if item.required}
     return (
         change_class == ChangeClass.CORE.value
-        or refinement_lane == "data_model_migration"
+        or refinement_lane == RefinementLane.DATA_MODEL_MIGRATION.value
         or "database_migration_review" in validation_ids
         or "Destructive changes require explicit review." in scope_summary
     )
