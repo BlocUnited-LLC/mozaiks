@@ -57,6 +57,17 @@ gemini = [
 anthropic = [
     "ag2[anthropic]==1.0.2",
 ]
+# ACP-backed CLI coding provider (Codex, Claude Code, OpenCode) for the
+# refinement control plane. The adapter binaries (e.g. the
+# @agentclientprotocol/claude-agent-acp npm package) are deployment-time
+# dependencies and are NOT installed by this extra.
+acp-coding = [
+    "ag2[acp]==1.0.2",
+    # ag2 1.0.2 allows agent-client-protocol <0.13, but 0.12.1 removed
+    # acp.task.DefaultMessageDispatcher, which ag2's dispatch imports.
+    # Pin the last compatible version; re-check at every ag2 upgrade.
+    "agent-client-protocol==0.12.0",
+]
 azure = [
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.7.0",
@@ -71,6 +82,12 @@ dev = [
     "watchdog",
     "types-PyYAML>=6.0",
     "mypy>=1.5.0",
+    # dev installs the ACP extra so the fake-driven provider tests run in CI;
+    # extra-free installs skip them via importorskip. The
+    # agent-client-protocol pin matches the acp-coding extra (0.12.1 breaks
+    # ag2 1.0.2's dispatcher import).
+    "ag2[acp]==1.0.2",
+    "agent-client-protocol==0.12.0",
 ]
 docs = [
     "mkdocs>=1.6.1,<2.0",

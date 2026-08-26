@@ -14,6 +14,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **ACP-backed CLI coding provider (dark)**: `ACPCodingProvider` drives an
+  ACP-compatible coding agent (Claude Code, Codex, OpenCode) for one bounded
+  turn inside a disposable staged workspace, then accepts only what the
+  deterministic hash harvest verifies — out-of-scope edits, timeouts, empty
+  results, and budget overruns all fail closed with typed statuses. Headless
+  hardening is explicit: allowlisted subprocess env (provider API keys only),
+  `expose_tools=False`, terminal capability not advertised,
+  `elicitation_policy="decline"`. Disabled by default in refinement policy,
+  packaged behind the new optional `mozaiks[acp-coding]` extra
+  (`agent-client-protocol` pinned to 0.12.0 — 0.12.1 breaks ag2 1.0.2's
+  dispatcher import), and not yet reachable from any production path:
+  provider selection ships separately.
+
 - **Typed refinement lanes and coding provider policy**: the eight refinement
   lanes (`ui_patch`, `experience_design`, `feature_addition`, `integration`,
   `managed_capability_change`, `data_model_migration`, `architecture_replan`,

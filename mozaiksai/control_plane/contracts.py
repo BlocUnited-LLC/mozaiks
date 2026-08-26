@@ -400,7 +400,16 @@ class StagedPatchProposal(BaseModel):
     proposal_id: str = Field(min_length=1)
     provider_id: str = Field(min_length=1)
     provider_model: str | None = None
-    status: Literal["completed", "failed"]
+    status: Literal[
+        "completed",
+        "failed",
+        "empty",
+        "rejected_scope",
+        "timeout",
+        "budget_exceeded",
+        "unavailable",
+    ]
+    usage: dict[str, int] | None = None
     summary: str = ""
     rationale: str = ""
     changed_files: list[ProposedFileChange] = Field(default_factory=list)
