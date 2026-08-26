@@ -72,15 +72,18 @@ $env:MONGO_URI="<your MongoDB connection string>"
 
 ### 3. Set an LLM key
 
-Builds call an LLM, so set a key before running real builds. The default
-provider is Google Gemini, which has a free tier (no credit card required):
+Builds call an LLM, but you do not need to begin with a paid provider. The
+default example uses Google Gemini because the Gemini API offers a free tier
+([current pricing and limits](https://ai.google.dev/gemini-api/docs/pricing)):
 
 ```powershell
 $env:GEMINI_API_KEY="your-key-here"
 ```
 
-OpenAI and Anthropic work too — set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
-instead and select the provider in Studio or via `--provider`.
+Mozaiks is not tied to Gemini. OpenAI and Anthropic work too — set
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` instead and select the provider in
+Studio or via `--provider`. Each provider sets its own pricing and usage
+limits.
 
 ### 4. Create your workspace and open Studio
 
@@ -101,6 +104,16 @@ want to build. The workflow walks you through the build steps and stages the
 generated artifacts for review. In-progress builds stay in **Apps**, so you can
 always pick up where you left off.
 
+This first creation is your app's **Genesis Build**: Mozaiks turns your
+plain-language idea into the first validated version of your app. After that,
+you do not start over when you want something changed. You simply describe the
+change, and Mozaiks handles it as a **Refinement Run** against the app you
+already have. It prepares the smallest safe change, validates it, and lets you
+review it before it becomes active.
+
+See [Build your first app, then keep improving it](https://docs.mozaiks.ai/getting-started/genesis-builds-and-refinement-runs/)
+for examples ranging from a typo fix to a major product rethink.
+
 ### Troubleshooting
 
 If setup fails, check three things first: use `python -m mozaiks` if the
@@ -112,6 +125,7 @@ MongoDB instance, and set an LLM API key before running builds.
 | Guide | What it covers |
 |---|---|
 | [Use Studio](https://docs.mozaiks.ai/studio/) | The workspace and app-dashboard pages |
+| [Build and Improve Your App](https://docs.mozaiks.ai/getting-started/genesis-builds-and-refinement-runs/) | Create the first version, then make safe changes without starting over |
 | [Add a Workflow](https://docs.mozaiks.ai/guides/adding-workflows/01-overview/) | Extend an app with a custom AI workflow |
 | [Add a Module](https://docs.mozaiks.ai/guides/adding-modules/01-overview/) | Add a self-contained backend capability |
 | [Add a Page](https://docs.mozaiks.ai/guides/adding-pages/01-overview/) | Add new pages and routes to your app workspace |
