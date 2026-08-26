@@ -342,6 +342,18 @@ def _validation_override_required(version) -> bool:  # noqa: ANN001
     return version.validation_status in {ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED}
 
 
+def _is_coding_produced_artifact(version) -> bool:  # noqa: ANN001
+    """True when this artifact version was produced by the refinement coding lane.
+
+    Covers both the coding worker's staged bundles (``bundle_mode``) and
+    staged-refinement artifacts carrying a ``refinement`` metadata envelope.
+    """
+    metadata = _version_metadata(version)
+    if str(metadata.get("bundle_mode") or "").strip() == "staged_refinement_bundle":
+        return True
+    return isinstance(metadata.get("refinement"), dict)
+
+
 def _enforce_artifact_validation_gate(
     version,  # noqa: ANN001
     *,
@@ -356,6 +368,17 @@ def _enforce_artifact_validation_gate(
     if version.validation_status == ArtifactValidationStatus.PASSED:
         return
     if allow_validation_override and _validation_override_required(version):
+        # Coding-produced artifacts (structured or ACP provider output) must
+        # pass real validation; an override would let unvalidated model output
+        # into acceptance/promotion, so it is refused outright.
+        if _is_coding_produced_artifact(version):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Artifact cannot be {action}; coding-produced artifacts require "
+                    "validation_status='passed' and do not accept a validation override."
+                ),
+            )
         return
     raise HTTPException(
         status_code=409,
@@ -1831,6 +1854,7 @@ class BuildArtifactPromotionRequest(BaseModel):
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
 async def promote_build_artifact_version(
     artifact_version_id: str,
+    background_tasks: BackgroundTasks,
     body: BuildArtifactPromotionRequest | None = None,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
@@ -1921,6 +1945,22 @@ async def promote_build_artifact_version(
             logger.warning("promote_build conflict app=%s build=%s: %s", app_id, promotion_build_registry_id, exc)
             raise HTTPException(status_code=409, detail="Conflict promoting build.") from exc
 
+    # A promoted bundle changes the live app root, so the App Intelligence
+    # context must be rebuilt or the next refinement cycle classifies, scopes,
+    # and validates against a stale snapshot. Enqueued best-effort: a refresh
+    # failure is logged and reported but never rolls back the promotion.
+    app_intelligence_refresh: dict[str, Any] | None = None
+    try:
+        app_intelligence_refresh = await _start_studio_app_intelligence_index_job(
+            app_id=app_id,
+            user_id=user_id,
+            body=AppIntelligenceIndexRequest(),
+            background_tasks=background_tasks,
+        )
+    except Exception as exc:
+        logger.warning("POST_PROMOTE_APP_INTELLIGENCE_REFRESH_FAILED app=%s: %s", app_id, exc)
+        app_intelligence_refresh = {"status": "failed", "error": str(exc)}
+
     payload = await _build_artifact_review_payload(
         app_id=app_id,
         version=version,
@@ -1947,6 +1987,7 @@ async def promote_build_artifact_version(
         "restored_files": restore_summary["restored"],
         "skipped_files": restore_summary["skipped"],
         "app_registry": app_registry_result,
+        "app_intelligence_refresh": app_intelligence_refresh,
         **payload,
     }
 

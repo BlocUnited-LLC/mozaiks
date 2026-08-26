@@ -14,6 +14,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Promotion now triggers an App Intelligence refresh**: promoting an
+  artifact into the live app root enqueues a context index job automatically
+  (best-effort, reported in the promote response as
+  `app_intelligence_refresh`) — previously the refresh was a manual three-step
+  operator flow, so every refinement cycle after a promotion classified,
+  scoped, and validated against a stale context snapshot.
+
+### Security
+
+- **Coding-produced artifacts can no longer be promoted or accepted with a
+  validation override**: artifacts created by the refinement coding lane
+  (structured or ACP provider output) require `validation_status='passed'`;
+  the `allow_validation_override` escape hatch now returns 409 for them
+  instead of letting unvalidated model output into the live app root.
+
 - **Deterministic coding-provider selection with a fail-closed fallback
   ladder**: the refinement coding worker now dispatches each approved patch to
   a provider via pure policy (`select_coding_provider`) — the ACP provider is
