@@ -63,11 +63,21 @@ Never push directly to `main`. Always:
 ```bash
 git checkout main && git reset --hard origin/main
 git checkout -b cc/<short-description>    # cc/ prefix = Claude Code
-# ... do work, commit ...
+# ... do work, commit -s ...
 git push -u origin cc/<short-description>
 gh pr create --title "..." --body "..."
 gh pr merge <number> --squash --delete-branch --auto
 ```
+
+**Every commit must be signed off (DCO) — always use `git commit -s`, never
+plain `git commit -m`.** This repo is under the Developer Certificate of
+Origin (see [DCO.md](../../DCO.md)); a commit without a `Signed-off-by:`
+trailer fails the `dco` check. That check is not yet in the `main` branch
+protection required-checks list, so `--auto` can still merge a PR with a
+failing `dco` check — do not treat a green auto-merge as proof you signed off
+correctly. If you forgot on the last commit, fix it before pushing (or before
+leaving a PR open) with `git commit --amend -s --no-edit && git push --force-with-lease`;
+for several unsigned commits use `git rebase --signoff origin/main` first.
 
 Auto-merge is enabled repo-wide. Request it right when you open the PR — do
 not wait around watching CI yourself. GitHub merges automatically once every
