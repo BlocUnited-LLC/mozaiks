@@ -16,6 +16,7 @@ from .refinement_router import (
     get_refinement_trigger_route_resolver,
 )
 from .scope_proposer import ArtifactScopeProposer, get_scope_proposer
+from .structured_coding_provider import StructuredOutputCodingProvider
 
 __all__ = [
     "ArtifactKind",
@@ -31,6 +32,7 @@ __all__ = [
     "RefinementRequest",
     "RefinementRoutingDecision",
     "RefinementTriggerRouteResolver",
+    "StructuredOutputCodingProvider",
     "get_change_classifier",
     "get_coding_worker",
     "get_harness_decision_policy",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -269,6 +270,28 @@ class HarnessDecision(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+def safe_artifact_relpath(raw: Any) -> str | None:
+    """Normalize a proposed artifact path to a safe bundle-relative POSIX path.
+
+    Returns ``None`` for anything that is not a plain relative path: non-string
+    values, empty strings, null bytes, POSIX-absolute and UNC paths,
+    drive-qualified Windows paths (which ``PurePosixPath`` would treat as
+    relative, letting ``workspace / path`` escape the workspace on Windows),
+    and any path with a ``..`` traversal component.
+    """
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.replace("\\", "/").strip()
+    if not normalized or "\x00" in normalized or normalized.startswith("/"):
+        return None
+    if ":" in normalized.split("/", 1)[0]:
+        return None
+    posix_path = PurePosixPath(normalized)
+    if posix_path.is_absolute() or any(part == ".." for part in posix_path.parts):
+        return None
+    return str(posix_path)
+
+
 class FileUpdate(BaseModel):
     """A single file path + full updated content pair in an LLM structured output.
 
@@ -294,6 +317,45 @@ class CodingWorkerPlan(BaseModel):
     start_preview: bool
     needs_human_review: bool
     rationale: str = Field(min_length=1)
+
+
+class ProposedFileChange(BaseModel):
+    """One staged file change proposed by a coding execution provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    op: Literal["create", "update"] = "update"
+    content: str
+
+
+class StagedPatchProposal(BaseModel):
+    """Durable, provider-neutral output of one coding execution attempt.
+
+    This is the Mozaiks-owned contract between the refinement coding worker and
+    whichever provider produced the scoped patch (the structured-output
+    provider today; ACP-backed CLI coding providers behind the same boundary
+    later). Provider-specific objects must never cross this boundary — the
+    worker consumes only this shape for validation, artifact persistence, and
+    review.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: str = Field(min_length=1)
+    provider_id: str = Field(min_length=1)
+    provider_model: str | None = None
+    status: Literal["completed", "failed"]
+    summary: str = ""
+    rationale: str = ""
+    changed_files: list[ProposedFileChange] = Field(default_factory=list)
+    owned_paths: list[str] = Field(default_factory=list)
+    validation_strategy_hint: str | None = None
+    validation_commands: list[str] = Field(default_factory=list)
+    start_preview: bool = False
+    needs_human_review: bool = False
+    tool_context_loaded: bool = False
+    error: str | None = None
 
 
 class CodingWorkerResult(BaseModel):
