@@ -18,6 +18,14 @@ from mozaiksai.control_plane.contracts import (
     FileUpdate,
     StagedPatchProposal,
 )
+from mozaiksai.control_plane.implementations.acp_coding_provider import (
+    ACPCodingProvider,
+    acp_available,
+)
+from mozaiksai.control_plane.implementations.coding_provider_selection import (
+    ACP_FALLBACK_STATUSES,
+    select_coding_provider,
+)
 from mozaiksai.control_plane.implementations.structured_coding_provider import (
     StructuredOutputCodingProvider,
 )
@@ -77,13 +85,17 @@ class ScopedRefinementCodingWorker:
         artifact_store: Any = None,
         output_root: Any = None,
         provider: CodingExecutionProvider | None = None,
+        acp_provider: CodingExecutionProvider | None = None,
     ) -> None:
-        self._provider: CodingExecutionProvider = provider or StructuredOutputCodingProvider(
+        self._structured_provider: CodingExecutionProvider = provider or StructuredOutputCodingProvider(
             agent_factory=agent_factory,
             agent_runner=agent_runner,
             config_loader=config_loader,
             pack_loader=pack_loader,
             tool_executor=tool_executor,
+        )
+        self._acp_provider: CodingExecutionProvider = acp_provider or ACPCodingProvider(
+            config_loader=config_loader,
         )
         self._config_loader = config_loader
         self._source_validation_runner = source_validation_runner
@@ -104,14 +116,42 @@ class ScopedRefinementCodingWorker:
                 metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
-        proposal = await self._provider.execute(request)
+        selection = select_coding_provider(request, self._load_config(), acp_importable=acp_available())
+        provider_attempts: list[dict[str, str]] = []
+
+        if selection.provider == "acp":
+            proposal = await self._acp_provider.execute(request)
+            provider_attempts.append(
+                {"provider": proposal.provider_id, "status": proposal.status, "reason": selection.reason}
+            )
+            if proposal.status in ACP_FALLBACK_STATUSES:
+                logger.warning(
+                    "ACP_CODING_ATTEMPT_FELL_BACK app=%s status=%s: %s",
+                    request.app_id,
+                    proposal.status,
+                    proposal.error,
+                )
+                proposal = await self._structured_provider.execute(request)
+                provider_attempts.append(
+                    {"provider": proposal.provider_id, "status": proposal.status, "reason": "acp_fallback"}
+                )
+        else:
+            proposal = await self._structured_provider.execute(request)
+            provider_attempts.append(
+                {"provider": proposal.provider_id, "status": proposal.status, "reason": selection.reason}
+            )
+
         if proposal.status != "completed":
             return CodingWorkerResult(
                 eligible=True,
                 status="failed",
                 provider=proposal.provider_id,
                 error=proposal.error or "coding provider failed without an error message",
-                metadata={"build_family": request.build_family, "change_class": request.change_class},
+                metadata={
+                    "build_family": request.build_family,
+                    "change_class": request.change_class,
+                    "coding_provider_attempts": provider_attempts,
+                },
             )
 
         resolved_strategy = self._resolve_validation_strategy(
@@ -130,7 +170,11 @@ class ScopedRefinementCodingWorker:
                 status="failed",
                 provider=proposal.provider_id,
                 error=str(exc),
-                metadata={"build_family": request.build_family, "change_class": request.change_class},
+                metadata={
+                    "build_family": request.build_family,
+                    "change_class": request.change_class,
+                    "coding_provider_attempts": provider_attempts,
+                },
             )
         merged_files = dict(request.files)
         merged_files.update(applied_files)
@@ -159,6 +203,7 @@ class ScopedRefinementCodingWorker:
         metadata = {
             "build_family": request.build_family,
             "change_class": request.change_class,
+            "coding_provider_attempts": provider_attempts,
             "tool_context_loaded": proposal.tool_context_loaded,
             "applied_paths": sorted(applied_files.keys()),
             "applied_file_count": len(applied_files),

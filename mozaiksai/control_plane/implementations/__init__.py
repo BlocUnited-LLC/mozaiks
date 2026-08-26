@@ -1,5 +1,6 @@
 from .acp_coding_provider import ACPCodingProvider, acp_available
 from .change_classifier import ChangeClassifierResult, LLMChangeClassifier, get_change_classifier
+from .coding_provider_selection import CodingProviderSelection, select_coding_provider
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
 from .harness_decision import FirstPartyHarnessDecisionPolicy, get_harness_decision_policy
 from .orchestration_control import (
@@ -26,6 +27,7 @@ __all__ = [
     "ChangeClass",
     "ChangeClassifierResult",
     "ChangeIntent",
+    "CodingProviderSelection",
     "FirstPartyHarnessDecisionPolicy",
     "ImpactSet",
     "LLMChangeClassifier",
@@ -42,4 +44,5 @@ __all__ = [
     "get_orchestration_control_harness",
     "get_refinement_trigger_route_resolver",
     "get_scope_proposer",
+    "select_coding_provider",
 ]

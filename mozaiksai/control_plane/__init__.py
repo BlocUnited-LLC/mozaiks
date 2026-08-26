@@ -89,6 +89,7 @@ from .implementations import (
     ChangeClass,
     ChangeClassifierResult,
     ChangeIntent,
+    CodingProviderSelection,
     FirstPartyHarnessDecisionPolicy,
     ImpactSet,
     LLMChangeClassifier,
@@ -105,6 +106,7 @@ from .implementations import (
     get_orchestration_control_harness,
     get_refinement_trigger_route_resolver,
     get_scope_proposer,
+    select_coding_provider,
 )
 from .invalidation import ArtifactInvalidationService, get_artifact_invalidation_service
 from .loader import (
@@ -214,6 +216,7 @@ __all__ = [
     "ChangeClassifierResult",
     "ChangeIntent",
     "CodingExecutionProvider",
+    "CodingProviderSelection",
     "CodingWorkerPlan",
     "CodingWorkerPort",
     "CodingWorkerRequest",
@@ -306,6 +309,7 @@ __all__ = [
     "get_revision_context",
     "get_refinement_trigger_route_resolver",
     "get_scope_proposer",
+    "select_coding_provider",
     "instantiate_control_plane_handler",
     "complete_context_refresh",
     "launch_context_refresh_plan",

@@ -37,7 +37,8 @@ class CodingExecutionProvider(Protocol):
     output is the provider-neutral :class:`StagedPatchProposal`.
     """
 
-    provider_id: str
+    @property
+    def provider_id(self) -> str: ...
 
     async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal: ...
 
