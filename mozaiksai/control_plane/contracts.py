@@ -270,6 +270,39 @@ class HarnessDecision(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+# Canonical secret-sensitive path policy for staged/coding write paths. This is
+# the union of the term lists previously duplicated across dry_run, staging,
+# promotion, and scoped_execution; it lives here (a leaf module) so write-path
+# modules can share it without import cycles.
+SECRET_SENSITIVE_PATH_TERMS = (
+    ".env",
+    ".key",
+    ".pem",
+    "apikey",
+    "api_key",
+    "credential",
+    "credentials",
+    "id_dsa",
+    "id_rsa",
+    "password",
+    "private-key",
+    "private_key",
+    "secret",
+    "secrets",
+    "token",
+    "vault",
+)
+
+
+def is_secret_sensitive_path(path: str) -> bool:
+    """True when a bundle-relative path matches the secret-path policy."""
+    normalized = str(path or "").replace("\\", "/").lower()
+    parts = [part for part in normalized.split("/") if part]
+    return any(term in normalized for term in SECRET_SENSITIVE_PATH_TERMS) or any(
+        part == ".env" for part in parts
+    )
+
+
 def safe_artifact_relpath(raw: Any) -> str | None:
     """Normalize a proposed artifact path to a safe bundle-relative POSIX path.
 

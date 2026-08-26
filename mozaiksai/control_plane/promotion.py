@@ -7,7 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mozaiksai.control_plane.dry_run import RefinementExecutionPlan, path_has_secret_marker
+from mozaiksai.control_plane.contracts import is_secret_sensitive_path
+from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.promotion_policy import (
     PromotionPolicyDecision,
     evaluate_refinement_promotion_policy,
@@ -32,20 +33,6 @@ PROMOTION_BACKUP_DIRNAME = "backups"
 
 RefinementPromotionFileStatus = Literal["promoted", "skipped", "blocked", "failed"]
 
-_SECRET_PATH_TERMS = (
-    ".env",
-    "secret",
-    "secrets",
-    "vault",
-    "credential",
-    "credentials",
-    "private_key",
-    "private-key",
-    "id_rsa",
-    "id_dsa",
-    ".pem",
-    ".key",
-)
 _GLOB_CHARS = ("*", "?", "[")
 
 
@@ -119,8 +106,7 @@ def _normalize_bundle_path(path: str) -> tuple[str | None, RefinementPromotionFi
         return None, "skipped", "Path traversal is not allowed."
 
     relative_path = "/".join(parts)
-    lowered = relative_path.lower()
-    if path_has_secret_marker(relative_path) or any(term in lowered for term in _SECRET_PATH_TERMS):
+    if is_secret_sensitive_path(relative_path):
         return relative_path, "skipped", "Secret-sensitive paths are not promoted."
     if any(char in relative_path for char in _GLOB_CHARS):
         return relative_path, "skipped", "Glob paths are not promoted."
