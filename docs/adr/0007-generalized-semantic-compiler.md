@@ -32,7 +32,9 @@ Because that semantic authority is missing, safety became path-shaped:
 `mozaiksai/control_plane/dry_run.py`,
 `mozaiksai/control_plane/promotion_policy.py`, and
 `mozaiksai/control_plane/validation_runner.py` each maintain an independent
-path→artifact-family glob taxonomy, while the canonical typed answer —
+path→artifact-family taxonomy (glob patterns in three; substring and lane
+inference rules in `dry_run.py` — "glob taxonomies" below refers to all
+four), while the canonical typed answer —
 `mozaiksai/core/runtime/app/layout_registry.py`, the repo's only
 machine-readable, self-digesting artifact-family registry
 (`mozaiks.app_layout.v1`) — is not consumed by any control-plane module.
@@ -389,7 +391,8 @@ structured output compiled at runtime, has no Python class, and the active path
 keeps it in a context variable only. A generic persistence helper does exist at
 `mozaiksai/core/data/persistence/artifact_store.py` as
 `BuilderArtifactStore.save_build_plan`, but its only production call site is
-the non-auto, transition-unreachable ValueEngine `save_build_plan` tool; that
+the non-auto ValueEngine `save_build_plan` tool, which no agent prompt ever
+invokes even though its owning agent is transition-reachable; that
 tool persists ValueEngine's different upstream `BuildPlan`, not AppGenerator's
 `AppBuildPlan`. AppGenerator's normalization in
 `factory_app/workflows/AppGenerator/tools/app_build_plan.py` silently drops
@@ -501,8 +504,9 @@ Agents may propose stub bodies only within declared stub kinds and ownership
 boundaries. The existing `ModulePythonStub`/`ModuleJsStub` declarations in
 `factory_app/workflows/AppGenerator/structured_outputs.yaml` and the module
 contract lane's entrypoint validation are the boundary to keep — today
-enforced for handler and runtime-extension entrypoints but not for
-admin/profile/settings hooks; this ADR adds the missing enforcement. Every
+enforced for handler and runtime-extension entrypoints, only weakly (format
+shape, no safety guards) for admin hooks, and not at all for profile/settings
+hooks; this ADR adds the missing enforcement. Every
 stub declaration specifies:
 
 - stable stub identity;
@@ -531,9 +535,10 @@ compiler in `mozaiksai/core/workflow/outputs/structured.py` builds models via
 `create_model` with no `model_config`, so unknown fields are ignored at
 runtime. `_patch_model_schema` makes the provider JSON-schema projection look
 strict, but provider/runtime validation therefore disagree. Open-ended dict
-fields have two current behaviors: the older `get_llm_for_workflow` helper
-logs a warning and falls back to a plain LLM configuration, while the active
-agent factory rejects an unsupported dict-bearing schema when
+fields have two current behaviors that stack on the same live agent-creation
+path: the `get_llm_for_workflow` helper (still called by the agent factory
+for every agent) logs a warning and falls back to a plain LLM configuration,
+while the agent factory additionally rejects an unsupported dict-bearing schema when
 `structured_outputs_required: true` and omits provider response-schema
 enforcement for an optional structured agent. Runtime validation failure in
 `mozaiksai/core/workflow/outputs/runtime_events.py` is logged and returned as
@@ -610,7 +615,9 @@ found by the audit:
   config loading fails — it becomes fail-closed; and
 - `projections`/`values` payloads, today mapping-only checks in
   `mozaiksai/core/session/build_context_schema.py`, become schema-validated
-  with observable failure instead of DEBUG-level swallows.
+  in both lanes: the merge lane already fails closed on invalid payloads,
+  while the prompt-projection lane swallows failures at DEBUG level — that
+  swallow becomes an observable failure.
 
 The typed context-variable surface — `ContextVariablesPlan`, the writer
 authority policy in `mozaiksai/core/workflow/context/authority.py`, and the
@@ -722,7 +729,8 @@ The refinement harness (`mozaiksai/control_plane/` plus
 `factory_app/refinement_harness/config/harness.yaml`) remains the policy and
 control surface — classification, routing, checkpoints, staging, review, and
 promotion policy. It must not become a second semantic compiler. The current
-five LLM checkpoints survive with re-typed output schemas: typed edits
+four LLM checkpoints and the LLM-backed surface-regeneration
+worker survive with re-typed output schemas: typed edits
 replace the whole-file `FileUpdate{path, content}` bodies the coding worker
 emits today (`mozaiksai/control_plane/implementations/coding_worker.py`,
 `mozaiksai/control_plane/contracts.py`). The four control-plane glob
@@ -762,13 +770,18 @@ That prerequisite is satisfied only when all hold:
    (`ApplicationManifestRef`, `SemanticGraphRef`, `TaxonomyNamespaceRef`,
    `ImplementationBindingRef`, `CompilationPlanRef`,
    `BuildContextBindingRef`, `RefinementPatchRef`, `ArtifactRevisionRef`, and
-   the typed child-contract references) with
+   the typed child-contract references — ADR 0006's named roster plus
+   `ImplementationBindingRef`, which this ADR adds under ADR 0006's delegation
+   of reference-level decisions to the compiler ADR) with
    canonical serialization, stable digests, closure validation, versioning,
    and passing contract tests; and
 3. only after both slices pass, the compiler/runtime advertises the exact
    versioned prerequisite capabilities `semantic_taxonomy_v1` and
-   `semantic_reference_contracts_v1`, and ADR 0006's journey
-   `required_capabilities` pins both. They are derived from registered,
+   `semantic_reference_contracts_v1` — capability ids introduced by this ADR —
+   and every bounded journey pins both through ADR 0006's derived
+   required-capability mechanism (required capabilities are derived
+   deterministically from the pinned journey definition and cannot be weakened
+   by callers). They are derived from registered,
    self-tested implementations rather than independently configurable booleans.
    A class existing in source, an advisory registry mode, or one advertised
    capability without the other does not unlock start.
