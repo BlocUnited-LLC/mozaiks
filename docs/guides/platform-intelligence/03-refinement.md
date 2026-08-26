@@ -6,6 +6,11 @@ Initial generation creates the app. Refinement keeps it alive and editable.
 When a user asks for a change, Mozaiks classifies the request and then chooses
 the smallest safe next step.
 
+!!! tip "New to these concepts?"
+    For the product-level introduction to how the first build and later changes
+    fit together, start with
+    [Genesis Builds and Refinement Runs](../../concepts/genesis-builds-and-refinement-runs.md).
+
 ## The Four Change Classes
 
 Mozaiks classifies every refinement request as one of four classes:

@@ -98,7 +98,9 @@ validation:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Key Concepts: concepts.md
+  - Key Concepts:
+      - Overview: concepts.md
+      - Genesis Builds & Refinement Runs: concepts/genesis-builds-and-refinement-runs.md
 
   - Guides:
       - guides/index.md

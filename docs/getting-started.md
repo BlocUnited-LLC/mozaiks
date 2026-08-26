@@ -102,6 +102,10 @@ Studio in your browser at `http://localhost:3000`.
 
 In-progress builds stay in **Apps** so you can always pick up where you left off.
 
+This first build is your app's **Genesis Build**; after that, every change you
+ask for is a **Refinement Run** against the app you already have. See
+[Genesis Builds and Refinement Runs](concepts/genesis-builds-and-refinement-runs.md).
+
 ## Code Context Infrastructure
 
 Mozaiks indexes app source into a `SourceContextBundle`, `AppContextGraph`, and
