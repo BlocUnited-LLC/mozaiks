@@ -219,9 +219,16 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
     assert store.updated_sessions[-1]["status"] == RefinementSessionStatus.PROMOTED
     assert body["app_registry"] is None
     assert body["review"]["review_status"] == "promoted"
+    # promotion changes the live app root, so an App Intelligence refresh is
+    # always attempted and reported (best-effort: failure never blocks promote)
+    assert "app_intelligence_refresh" in body
+    assert body["app_intelligence_refresh"] is not None
 
 
-def test_promote_requires_override_for_skipped_validation(monkeypatch, tmp_path: Path) -> None:
+def test_promote_refuses_override_for_coding_produced_artifacts(monkeypatch, tmp_path: Path) -> None:
+    # Artifacts produced by the refinement coding lane must pass real
+    # validation; the override escape hatch would let unvalidated model output
+    # into the live app root, so the gate refuses it outright.
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(
         bundle_zip,
@@ -249,8 +256,39 @@ def test_promote_requires_override_for_skipped_validation(monkeypatch, tmp_path:
     assert "validation_status='passed' is required" in blocked.json()["detail"]
     assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
 
-    allowed = client.post(
+    overridden = client.post(
         "/api/studio/build/artifacts/av_skipped_validation_1/promote",
+        json={"allow_validation_override": True},
+    )
+
+    assert overridden.status_code == 409
+    assert "coding-produced" in overridden.json()["detail"]
+    assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+
+
+def test_promote_allows_override_for_non_coding_artifacts(monkeypatch, tmp_path: Path) -> None:
+    bundle_zip = tmp_path / "bundle.zip"
+    _write_bundle_zip(
+        bundle_zip,
+        {
+            "GeneratedApp/src/App.jsx": "export default function App() { return <div>Promoted</div>; }\n",
+        },
+    )
+    version = _version(
+        artifact_version_id="av_skipped_plain_1",
+        zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.SKIPPED,
+        files_manifest=[
+            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
+        ],
+    )
+    runtime_root = tmp_path / "runtime_app"
+    store = _PromoteStore(version)
+    _, client = _promote_client(monkeypatch, runtime_root, store)
+
+    allowed = client.post(
+        "/api/studio/build/artifacts/av_skipped_plain_1/promote",
         json={"allow_validation_override": True},
     )
 
