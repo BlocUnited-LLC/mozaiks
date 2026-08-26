@@ -200,9 +200,17 @@ class ScopedRefinementCodingWorker:
             else:
                 status = "planned"
 
+        provider_execution: dict[str, Any] = {
+            "provider_id": proposal.provider_id,
+            "provider_model": proposal.provider_model,
+            "usage": proposal.usage,
+            "attempts": provider_attempts,
+            "events": [event.model_dump(mode="json") for event in proposal.provider_events],
+        }
         metadata = {
             "build_family": request.build_family,
             "change_class": request.change_class,
+            "coding_provider": provider_execution,
             "coding_provider_attempts": provider_attempts,
             "tool_context_loaded": proposal.tool_context_loaded,
             "applied_paths": sorted(applied_files.keys()),
@@ -227,6 +235,7 @@ class ScopedRefinementCodingWorker:
                         merged_files=merged_files,
                         plan=resolved_plan,
                         validation_result=validation_result or {},
+                        provider_execution=provider_execution,
                     )
                 )
             except Exception as exc:
@@ -377,6 +386,7 @@ class ScopedRefinementCodingWorker:
         merged_files: dict[str, str],
         plan: CodingWorkerPlan,
         validation_result: dict[str, Any],
+        provider_execution: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         build_key = str(request.build_key or resolved_artifact_kind or "artifact").strip() or "artifact"
         bundle_token = uuid.uuid4().hex[:12]
@@ -425,6 +435,7 @@ class ScopedRefinementCodingWorker:
             "validation_result": validation_result,
             "source_surface": request.source_surface,
             "staged_file_sha256": dict(staged_workspace.editable_manifest),
+            "coding_provider": provider_execution,
         }
         content_store = get_artifact_content_store()
         if content_store.backend_name != "local":

@@ -37,6 +37,7 @@ from mozaiksai.control_plane.config import (
 from mozaiksai.control_plane.contracts import (
     CodingWorkerRequest,
     ProposedFileChange,
+    ProviderEventRecord,
     StagedPatchProposal,
 )
 from mozaiksai.control_plane.workspace import (
@@ -59,6 +60,32 @@ except Exception as _import_exc:  # ImportError or missing-optional stub errors
     _ACP_IMPORT_ERROR = _import_exc
 
 DEFAULT_ACP_STAGING_ROOT = Path(".refinement_staging") / "acp_workspaces"
+
+_MAX_PROVIDER_EVENTS = 200
+
+
+def record_provider_event(event: Any, records: list[ProviderEventRecord]) -> None:
+    """Translate one AG2 stream event into a bounded operational record.
+
+    Captures plan updates, tool invocations, and mode changes as short
+    summaries. Model reasoning (``ModelReasoning``) and raw message chunks are
+    deliberately never recorded — operational events only, no chain of
+    thought. Silently drops anything once the bound is reached.
+    """
+    if len(records) >= _MAX_PROVIDER_EVENTS:
+        return
+    from ag2.acp.events import ACPModeChange, ACPPlan
+    from ag2.events.tool_events import BuiltinToolCallEvent
+
+    if isinstance(event, ACPPlan):
+        summary = "; ".join(f"[{entry.status}] {entry.content}" for entry in event.entries)
+        if summary:
+            records.append(ProviderEventRecord(kind="plan", summary=summary[:500]))
+    elif isinstance(event, BuiltinToolCallEvent):
+        name = str(getattr(event, "name", "") or "tool")
+        records.append(ProviderEventRecord(kind="tool_call", summary=name[:500]))
+    elif isinstance(event, ACPModeChange):
+        records.append(ProviderEventRecord(kind="mode_change", summary=str(event.mode_id)[:500]))
 
 # The only host environment variables that may reach the CLI agent subprocess.
 # Everything else — including the Mozaiks runtime's own provider keys, Mongo
@@ -242,11 +269,13 @@ class ACPCodingProvider:
         finish_reason: str | None = None
         usage: dict[str, int] | None = None
         provider_model: str | None = None
+        events: list[ProviderEventRecord] = []
 
         async with acp_config:
             agent = _AG2Agent("MozaiksACPCodingProvider", config=acp_config)
             prompt = build_provider_prompt(request, workspace)
             async with agent.run(prompt) as run:
+                run.stream.subscribe(lambda event: record_provider_event(event, events))
                 reply = await run.result()
             response = reply.response
             message = getattr(response, "message", None)
@@ -273,6 +302,7 @@ class ACPCodingProvider:
                 provider_id=provider_id,
                 provider_model=provider_model,
                 usage=usage,
+                provider_events=events,
                 error=(
                     f"ACP turn exceeded the provider budget max_wall_seconds="
                     f"{provider_config.budget.max_wall_seconds}; no changes were accepted."
@@ -285,6 +315,7 @@ class ACPCodingProvider:
                 provider_id=provider_id,
                 provider_model=provider_model,
                 usage=usage,
+                provider_events=events,
                 error=f"workspace harvest found out-of-scope modifications: {details}",
             )
 
@@ -293,6 +324,7 @@ class ACPCodingProvider:
             provider_id=provider_id,
             provider_model=provider_model,
             usage=usage,
+            events=events,
             summary_text=summary_text,
             max_diff_bytes=provider_config.budget.max_diff_bytes,
         )
@@ -304,6 +336,7 @@ class ACPCodingProvider:
         provider_id: str,
         provider_model: str | None,
         usage: dict[str, int] | None,
+        events: list[ProviderEventRecord],
         summary_text: str,
         max_diff_bytes: int,
     ) -> StagedPatchProposal:
@@ -314,6 +347,7 @@ class ACPCodingProvider:
                 provider_id=provider_id,
                 provider_model=provider_model,
                 usage=usage,
+                provider_events=events,
                 error="ACP agent completed the turn without modifying any scoped file.",
             )
 
@@ -324,6 +358,7 @@ class ACPCodingProvider:
                 provider_id=provider_id,
                 provider_model=provider_model,
                 usage=usage,
+                provider_events=events,
                 error=(
                     f"harvested diff of {diff_bytes} bytes exceeds the ACP provider budget "
                     f"max_diff_bytes={max_diff_bytes}; no changes were accepted."
@@ -336,6 +371,7 @@ class ACPCodingProvider:
             provider_id=provider_id,
             provider_model=provider_model,
             usage=usage,
+            provider_events=events,
             summary=summary[:2000],
             rationale=summary[:2000],
             changed_files=[
@@ -354,6 +390,7 @@ class ACPCodingProvider:
 
 __all__ = [
     "ACPCodingProvider",
+    "record_provider_event",
     "DEFAULT_ACP_STAGING_ROOT",
     "acp_available",
     "build_acp_agent_config",

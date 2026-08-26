@@ -14,6 +14,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Coding provider observability**: ACP provider executions now capture a
+  bounded list of operational events (plan updates, tool invocations, mode
+  changes — model reasoning is never recorded) on the
+  `StagedPatchProposal`, and the coding worker persists a
+  `coding_provider` execution record (provider id, model, token usage,
+  dispatch attempts, events) into both the worker result metadata and the
+  artifact commit metadata, making provider activity reviewable and
+  auditable from the artifact record. Token-usage *ledger* wiring is
+  deferred: AG2 middleware owns token accounting, and attaching it to the
+  provider's agent is tracked as an AG2 upgrade watchpoint rather than a
+  parallel Mozaiks accounting path.
 - **Promotion now triggers an App Intelligence refresh**: promoting an
   artifact into the live app root enqueues a context index job automatically
   (best-effort, reported in the promote response as
