@@ -14,6 +14,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Deterministic coding-provider selection with a fail-closed fallback
+  ladder**: the refinement coding worker now dispatches each approved patch to
+  a provider via pure policy (`select_coding_provider`) — the ACP provider is
+  chosen only for multi-file scopes on `app_bundle`/`theme_config` artifacts
+  within its configured budget, and only when it is enabled and installed;
+  everything else stays on the structured-output provider. Operational ACP
+  failures (unavailable, failed, empty, timeout, budget exceeded) fall back to
+  the structured provider exactly once; an out-of-scope ACP result
+  (`rejected_scope`) surfaces as a failure and never retries. Every attempt is
+  recorded in result metadata (`coding_provider_attempts`). With the ACP
+  provider disabled (the default), dispatch is byte-identical to before.
+
 - **ACP-backed CLI coding provider (dark)**: `ACPCodingProvider` drives an
   ACP-compatible coding agent (Claude Code, Codex, OpenCode) for one bounded
   turn inside a disposable staged workspace, then accepts only what the
