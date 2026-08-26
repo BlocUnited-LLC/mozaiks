@@ -66,7 +66,8 @@ def test_docs_homepage_uses_plain_summary_language() -> None:
 def test_mkdocs_nav_uses_plain_user_facing_labels() -> None:
     nav = _read("mkdocs.yml")
 
-    assert "- Getting Started: getting-started.md" in nav
+    assert "- Getting Started:" in nav
+    assert "- getting-started.md" in nav
     assert "- Use Studio: guides/studio/01-overview.md" in nav
     assert "- Local Setup: local-setup.md" in nav
 
