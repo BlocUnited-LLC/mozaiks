@@ -107,7 +107,7 @@ generation:
 
 ```text
 ApplicationManifest
-  → immutable SemanticGraph
+  → immutable SemanticGraph + immutable ImplementationBinding
   → derived CompilationPlan
   → deterministic renderer registry
   → YAML / JSON / Jinja / contracted Python and JavaScript artifacts
@@ -124,9 +124,10 @@ validation, promotion, and retention. Unsupported customization fails closed
 at compile time: out-of-namespace names, undeclared stub kinds, unresolvable
 references, and unknown fields are rejected, never silently accepted.
 
-`ArtifactRevision` is immutable artifact lineage and promotion evidence only.
-It records which graph and derived plan produced which bytes; it cannot author
-or reconcile semantic facts. `CompilationPlan` likewise contains only derived
+`ArtifactRevision` is immutable candidate-byte and lineage evidence only. It
+records which graph, binding, and derived plan produced which bytes; the
+current-manifest publication commit records promotion. Neither can author or
+reconcile semantic facts. `CompilationPlan` likewise contains only derived
 execution detail. The only generation-time semantic author is the pinned
 `SemanticGraph`.
 
@@ -148,6 +149,7 @@ versioned as `mozaiks.app_manifest.v1`. It contains:
 - mode — `greenfield`, `brownfield`, or `hybrid` — reusing the
   `AppContextVersion` vocabulary in `mozaiksai/core/app_context/models.py`;
 - the current `SemanticGraphRef`;
+- the current `ImplementationBindingRef`;
 - pinned `TaxonomyNamespaceRef` versions;
 - the `BuildContextBindingRef` for the active build;
 - the current `ArtifactRevisionRef` where one exists; and
@@ -160,6 +162,25 @@ manifest content. Growth happens by adding node types and artifact families to
 their registries, not by widening the manifest. Manifest versions are immutable,
 and every manifest/graph/revision read or write is checked against the pinned
 execution-access scope before content is returned or changed.
+
+### Reference identity and resolution
+
+Every compiler reference is a strict, immutable reference rather than a
+mutable "latest" lookup. A scoped ref carries its ref schema version, typed
+subject identifier, immutable subject version, content digest, and
+`ExecutionAccessScopeRef`; an unscoped registry ref carries the same identity,
+version, and digest fields without inventing tenant scope. Resolution verifies
+all fields, the referenced document type, digest, and scope before returning
+content. A missing field, mutable alias, digest mismatch, type mismatch, or
+scope mismatch fails closed.
+
+In particular, `ApplicationManifestRef`, `SemanticGraphRef`,
+`ImplementationBindingRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
+`RefinementPatchRef`, and `ArtifactRevisionRef` pin immutable versions and
+digests. `TaxonomyNamespaceRef` pins namespace identifier, version, and digest.
+Typed child-contract refs additionally pin artifact family, canonical relative
+path, contract schema version, and content digest. No ref may resolve by a bare
+application id, path, artifact-family name, or database "current" query.
 
 ## SemanticGraph
 
@@ -290,15 +311,33 @@ implementation seed — extended, not replaced.
 ## Child Contracts
 
 Existing strict runtime contracts remain the normative artifact formats their
-loaders consume: the module contract family loaded by
-`mozaiksai/core/runtime/app/module_loader.py`, `AppPageSchema` in
-`mozaiksai/core/runtime/app/page_schema.py`, `SubscriptionsConfig` in
-`mozaiksai/core/runtime/app/subscriptions_loader.py`, data contracts under
-`app/data/`, workflow bundle files, and module `contracts/events.yaml` and
-`contracts/reactions.yaml`. The deployment manifest remains the normative
-deployment handoff format for its hosted-product consumer; it has no OSS
-runtime consumer today. Nothing in this ADR changes what each current consumer
-loads or how it validates.
+loaders consume. The complete compiler coverage inventory is every
+non-prohibited family registered by `layout_registry`, not only the examples
+with a single Pydantic loader. Each applicable row is explicitly classified as
+a pinned input (for example build-context assets), an unowned hand-authored
+surface to preserve, a compiler-managed output, or an external handoff; none
+may disappear from coverage by omission. Compiler-managed output families
+include app identity/config/auth/shell/integrations/targets/refinement,
+subscriptions, provenance, brand, data and secret-reference contracts; route
+manifests, declarative pages, custom routes and extension barrels; the module
+manifest/companion/runtime-extension/backend family; workflow bundles; and
+deployment/export artifacts. This includes the
+module contract family loaded by `mozaiksai/core/runtime/app/module_loader.py`,
+`AppPageSchema` in `mozaiksai/core/runtime/app/page_schema.py`,
+`SubscriptionsConfig` in `mozaiksai/core/runtime/app/subscriptions_loader.py`,
+data contracts under `app/data/`, workflow bundle files, and module
+`contracts/events.yaml` and `contracts/reactions.yaml`. The deployment manifest
+remains the normative deployment handoff format for its hosted-product
+consumer; it has no OSS runtime consumer today. Nothing in this ADR changes
+what each current consumer loads or how it validates.
+
+Layout classification alone is insufficient for executable UI closure. The
+compiler must also prove that every `route_manifest.json` component resolves
+to either a canonical shell component or the matching app/module extension
+barrel export, and that every schema-page API binding resolves through the
+module/action closure already enforced by `AppPageSchema`. A path-valid custom
+route with an unregistered component is a compile error, not a loader or
+browser fallback.
 
 What changes is generation-time authority: the semantic content of those
 artifacts is **derived from the SemanticGraph** during compilation. Child
@@ -365,9 +404,9 @@ authority blend this ADR separates.
 - the pinned `SemanticGraphRef`;
 - resolved taxonomy versions;
 - the `BuildContextBindingRef`;
+- the pinned `ImplementationBindingRef`;
 - the renderer-registry version;
-- the target runtime/deployment profile; and
-- the selected capability packs.
+- and the target runtime/deployment intent recorded in the graph.
 
 It may contain tasks, dependency ordering (from graph edges), owned paths
 (from registry family path templates), renderer selections, validation
@@ -376,6 +415,13 @@ meaning: any fact a renderer needs must be a graph node or a registry
 declaration, never a plan-only invention. Task-level owned-path enforcement
 continues to use the existing mechanism in
 `mozaiksai/core/workflow/task_batches.py`.
+
+Capability-pack selection and deployment/provider choice are not loose plan
+inputs. When a choice changes application meaning, required surfaces, facades,
+contracts, or deployment intent, that choice is authored in the graph. The
+implementation binding may resolve that authored requirement to a verified
+pack/renderer/adapter version, but cannot add a page, action, entitlement,
+provider obligation, or other semantic fact that is absent from the graph.
 
 Plan derivation must prove coverage of every execution concern consumed today:
 task-batch dependencies and owned paths; page/surface bindings; capability-pack
@@ -418,6 +464,14 @@ confined beneath the registered output root. Extensions cannot claim a core or
 another extension's path. Every output passes the row's validator/loader before
 it can enter an `ArtifactRevision`; no renderer or extension has a validation-
 bypass path.
+
+Path identity is normalized once before collision checks and writes: POSIX
+separators, Unicode normalization, and target-filesystem case semantics are
+part of the versioned rule. Absolute, drive-qualified/UNC, traversal, glob,
+reserved, empty-segment, and normalization-colliding paths fail closed. Render
+occurs in a fresh staging root; symlink/reparse-point ancestors and other link
+escapes are rejected before an atomic file write. A lexical `relative_to`
+check alone is not sufficient path confinement.
 
 Deterministic rendering per format:
 
@@ -524,7 +578,7 @@ non-graph input, including:
 - context-variable projection;
 - schema asset;
 - workflow/agent/prompt configuration revision;
-- selected strategy/configuration and model/provider selection parameters; and
+- selected reasoning strategy/configuration and reasoning-model/provider parameters; and
 - public or private extension input.
 
 The existing `mozaiks.pack_digest.v1` mechanism is extended from packs to all
@@ -533,8 +587,9 @@ record. The binding provides provenance for candidate reasoning; it does not
 claim that a stochastic model will recreate the same candidate graph from
 prompts alone. Deterministic compilation is reproducible from the closed tuple
 of immutable `ApplicationManifestRef`, `SemanticGraphRef`, pinned taxonomy
-refs, `BuildContextBindingRef`, compiler/renderer-registry versions, and target
-profile. The graph records the accepted result of any agent reasoning.
+refs, `BuildContextBindingRef`, `ImplementationBindingRef`, and
+compiler/renderer-registry versions. The graph records the accepted result of
+any agent reasoning.
 
 Prompts, context variables, and knowledge stores may influence candidate
 reasoning only through declared, versioned inputs; they cannot bypass graph or
@@ -563,6 +618,23 @@ repo-wide compile guard `tests/test_workflow_context_authority_compile.py` —
 is the strongest existing input discipline and is the pattern the unified
 loader follows.
 
+## ImplementationBindingRef
+
+`ImplementationBindingRef` is the immutable, versioned, digested resolution of
+graph-authored requirements to concrete compiler inputs: capability-pack id and
+content digest, renderer/adapter id and version, and the implementation profile
+for each graph-declared deployment target. It is produced deterministically
+from the graph, taxonomy grants, installed verified inputs in the
+`BuildContextBindingRef`, and explicit operator policy.
+
+The binding may choose only among implementations that satisfy the same typed
+graph requirement. If selecting a pack introduces required pages, facades,
+actions, events, entitlements, data, or provider obligations, those facts must
+first be represented in a new graph version. A binding cannot silently widen
+the graph, and a `BuildContextBindingRef` proves which inputs were available
+but cannot itself select output semantics. This keeps private strategy and
+provider resolution injectable without making either a second semantic author.
+
 ## OSS And Proprietary Intelligence
 
 Per the boundary ADR 0005 reserves (PR #394) and
@@ -586,10 +658,28 @@ thresholds beyond the OSS reference gates; historical build intelligence; and
 hosted analytics.
 
 Cloud intelligence enters only through the same public
-`BuildContextBindingRef` and semantic contracts — better catalogs, packs, and
-declared configuration delivered as digested build-context assets, and policy
-that calls the same public contracts. It cannot require an OSS fork, a hidden
-service call, or a hidden Cloud dependency.
+`BuildContextBindingRef`, `ImplementationBindingRef`, and semantic contracts —
+better catalogs, packs, declared configuration, and provider-neutral binding
+policy delivered as digested inputs that call the same public contracts. It
+cannot require an OSS fork, a hidden service call, or a hidden Cloud dependency.
+
+## ArtifactRevisionRef And Atomic Publication
+
+An `ArtifactRevision` is an immutable candidate byte set and provenance record.
+Its ref pins revision id, immutable version, digest, execution-access scope,
+`SemanticGraphRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
+`ImplementationBindingRef`, renderer-registry version/digest, and a canonical
+files manifest. Promotion never mutates those fields or turns a mismatched
+candidate into a valid one.
+
+The single publication authority is an ownership-scoped compare-and-swap of
+the current `ApplicationManifestRef`. A successful commit publishes one new
+immutable manifest version containing the new graph/revision pair. It compares
+the expected prior manifest, graph, and revision refs immediately before the
+swap; a stale base or partial-store failure publishes neither ref and leaves
+the new revision unpromoted. Retry of the same commit is idempotent. Rollback
+uses the same operation to select a previously consistent manifest/graph/
+revision tuple, so there are never two independently current authorities.
 
 ## RefinementPatchRef
 
@@ -602,11 +692,18 @@ mutation of derived artifacts. A `RefinementPatch` declares:
 - expected base digests; and
 - the permitted ownership regions it may touch.
 
-Patch application compares both expected base digests immediately before
-write. A mismatch is a typed conflict: the patch is rejected and must be
-replanned or explicitly rebased against new refs; it is never merged by last
-writer wins. Patch validation also proves that every affected node and stub
-region belongs to the declared ownership boundary.
+The patch has a schema version, owning `ExecutionAccessScopeRef`, stable patch
+id, and canonical content digest over its base refs, typed operations, affected
+nodes, and ownership regions. `RefinementPatchRef` pins those values. Applying
+the same patch ref twice returns the same resulting graph/revision or the same
+terminal conflict; reuse of a patch id with different content fails closed.
+An explicit rebase creates a new patch identity and lineage edge.
+
+Patch application compares the expected current manifest and both base digests
+immediately before the publication CAS. A mismatch is a typed conflict: the
+patch is rejected and must be replanned or explicitly rebased against new refs;
+it is never merged by last writer wins. Patch validation also proves that every
+affected node and stub region belongs to the declared ownership boundary.
 
 The flow:
 
@@ -663,13 +760,18 @@ That prerequisite is satisfied only when all hold:
 2. rollout slices 1 and 2 below are implemented and proven — the taxonomy
    registry plus the typed reference contracts
    (`ApplicationManifestRef`, `SemanticGraphRef`, `TaxonomyNamespaceRef`,
-   `CompilationPlanRef`, `BuildContextBindingRef`, `RefinementPatchRef`,
-   `ArtifactRevisionRef`, and the typed child-contract references) with
+   `ImplementationBindingRef`, `CompilationPlanRef`,
+   `BuildContextBindingRef`, `RefinementPatchRef`, `ArtifactRevisionRef`, and
+   the typed child-contract references) with
    canonical serialization, stable digests, closure validation, versioning,
    and passing contract tests; and
-3. the runtime advertises explicit capability identifiers for those implemented
-   contracts and ADR 0006's journey `required_capabilities` pins them. A class
-   existing in source without capability advertisement does not unlock start.
+3. only after both slices pass, the compiler/runtime advertises the exact
+   versioned prerequisite capabilities `semantic_taxonomy_v1` and
+   `semantic_reference_contracts_v1`, and ADR 0006's journey
+   `required_capabilities` pins both. They are derived from registered,
+   self-tested implementations rather than independently configurable booleans.
+   A class existing in source, an advisory registry mode, or one advertised
+   capability without the other does not unlock start.
 
 Acceptance of ADR 0007 alone does **not** unlock production
 `JourneyExecutionPort.start`, a bounded live-model journey, or public journey
@@ -713,12 +815,13 @@ compiler may reference or consume it but does not become its source of truth.
 | `extension_registry.json` + `mozaiksai/core/workflow/pack/schema.py` and `config.py` | Workflow sequences, entrypoints, transitions | separate authority, retained unchanged | Compiler pins `WorkflowSequenceRef`; never redefines sequence content. |
 | Runtime loaders (`module_loader.py`, `page_schema.py`, `subscriptions_loader.py`, `loader.py`) | Normative artifact validation at load | retained as child-contract authority | Rendered views must pass them unchanged; generation-time mirrors retire. |
 | `layout_registry.py` | Artifact families, paths, validators, security classes | **extended** into the renderer registry | Gains renderer/stub/dependency declarations; becomes the single path→family authority repo-wide. |
+| Capability-pack/deployment/provider selection currently spread across `AppBuildPlan`, context variables, pack resolvers, and download renderers | Mix of semantic choice and concrete implementation resolution | **split by authority** | Semantic requirements move into graph nodes; deterministic concrete resolution becomes `ImplementationBindingRef`; no loose selection input survives. |
 | `AppBuildPlan` (structured output + `app_build_plan.py`) | Agent-authored build plan | **replaced** by derived `CompilationPlan` | Offline equivalence fixture during migration; retired at cutover. |
 | Generator YAML mirrors in `structured_outputs.yaml` (module/page families, AgentGenerator per-file models) | Generation-time re-declaration of runtime contracts | **replaced** | Agents emit graph-node payloads validated against runtime models (per `module_contract_executor.py` pattern). |
 | `save_app_schema.py` hand validators | Parallel page/manifest validation | **replaced** | Collapse onto runtime models once the renderer path lands. |
 | Control-plane glob taxonomies (`refinement_router.py`, `dry_run.py`, `promotion_policy.py`, `validation_runner.py`) | Path→family inference | **replaced** | Graph-region queries over the renderer registry. |
 | `AppContextGraph` / `AppContextVersion` | Observed/indexed artifact view | separate authority, retained | Gains `semantic_graph_ref` sibling; stays downstream. |
-| `mozaiksai/core/artifacts/store.py` (`BuildRecordStore`) + `mozaiksai/control_plane/artifact_promotion.py` | Build records, lineage, promotion evidence | retained, extended | `ArtifactRevision` binds to existing lineage; revisions record graph/plan/binding digests. |
+| `mozaiksai/core/artifacts/store.py` (`BuildRecordStore`) + `mozaiksai/control_plane/artifact_promotion.py` | Build records, lineage, promotion evidence | retained, extended | `ArtifactRevision` binds to existing lineage; revisions record graph/plan/binding digests; one current-manifest CAS publishes or rolls back a consistent graph/revision pair. |
 | `mozaiksai/core/data/persistence/artifact_store.py` (`BuilderArtifactStore`) | Typed builder artifact collections | direction decided at slice 5 | Becomes a projection of graph/artifact records or a typed view; no dual authority retained. |
 | Validation and acceptance gates (`app_validation.py`, `validation_runner.py`, bundle scanner) | Deterministic artifact validation | retained | Consume registry/graph instead of private path predicates. |
 | `factory_app/eval/` | Deterministic bundle scoring | separate authority, retained | Scores rendered output; gains archetype-corpus equivalence fixtures. |
@@ -795,12 +898,12 @@ delete only its own obsolete path.
 | Slice | Components; authority before → after | Tests and proof gate | Deletions; rollback; live models; ADR 0006 |
 |---|---|---|---|
 | **0. Ground-truth repair** — generator path writers, save tools, launcher, `context_variables.yaml` query, invalidation family names, dead branches/scripts | Defect repair only; no authority change | Path-contract tests; failure-injection tests proving fail-closed persistence; lineage resolution on the archetype corpus; per-family staleness-propagation tests | In separate PRs, delete the dead ValueEngine `save_build_plan` branch, dead guard script, and only helpers individually proven unreachable. Retain active `promote_generated_workflow` and Studio staged-draft acceptance. Rollback: revert the individual repair PR. No live models. No ADR 0006 dependency; allowed under the verification freeze as defect fixes. |
-| **1. Taxonomy and artifact-family registry** — new `mozaiks.taxonomy.v1`; consumers: module loader, subscriptions loader, `layout_registry`, event dispatcher | Five event registries and two capability grammars → one versioned registry (existing names grandfathered by explicit entries) | Closure property tests; unknown-name fail-closed tests behind a test/development flag; envelope schema-version guard revived as a real check | No deletions yet. Rollback: remove the test/development advisory mode; it is never a supported runtime mode and is deleted at cutover. No live models. No ADR 0006 dependency. |
-| **2. Manifest/graph/reference contracts** — `ApplicationManifest`, `SemanticGraph`, all refs, canonical serialization + digests, **test-only seams** per ADR 0006's non-production-prototype rule | No production authority; contracts exist behind test seams | Byte-identical double-serialization; digest stability across key order; no-dangling-edge; unknown-field rejection; cross-tenant scoping tests | No deletions. Rollback: delete the seam. No live models. **This slice (with slice 1) is the implementation half of ADR 0006's slice-0 prerequisite.** |
+| **1. Taxonomy and artifact-family registry** — new `mozaiks.taxonomy.v1`; consumers: module loader, subscriptions loader, `layout_registry`, event dispatcher | Five event registries and two capability grammars → one versioned registry (existing names grandfathered by explicit entries) | Closure property tests; unknown-name fail-closed tests behind a test/development flag; envelope schema-version guard revived as a real check | No deletions yet and no production compiler capability advertisement. Rollback: remove the test/development advisory mode; it is never a supported runtime mode and is deleted at cutover. No live models. No ADR 0006 dependency. |
+| **2. Manifest/graph/binding/reference contracts** — `ApplicationManifest`, `SemanticGraph`, `ImplementationBinding`, all refs, canonical serialization + digests, **test-only seams** per ADR 0006's non-production-prototype rule | No production authority; contracts exist behind test seams | Byte-identical double-serialization; digest stability across key order; ref type/version/digest resolution; no-dangling-edge; unknown-field rejection; cross-tenant scoping tests | No deletions. After slices 1 and 2 both pass outside advisory mode, advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together. Rollback removes both advertisements and blocks bounded starts. No live models. **This slice (with slice 1) is the implementation half of ADR 0006's slice-0 prerequisite.** |
 | **3. Offline projection adapters** — deterministic builders projecting current stage outputs into candidate graph nodes, run against the archetype corpus and recorded builds | No authority change; comparison only | Closure of every page action/capability/event across the corpus; re-extraction equivalence | Adapters are offline-test-only and deleted at cutover. Rollback: delete builders. No live models. No ADR 0006 interaction. |
-| **4. Derived CompilationPlan + renderer registry** — plan derivation from graph; `layout_registry` extended as the single path/family/renderer authority; AgentGenerator regains a renderer layer | No production authority change: agent-produced `AppBuildPlan` remains current while a derived `CompilationPlan` is selected only in offline tests/development after equivalence proof | Derived-vs-produced equivalence on the corpus; registry-extension invariants (digest, no monolith edit); stable renderer-order and path-confinement tests; generated-root path contracts | Begin identifying generator plan mirrors and dead converter normalizers for cutover; retain active promotion copying. Rollback: delete the candidate path/flag. No live models. No ADR 0006 dependency. |
-| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph version + build record become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view | Agent-produced plan and four representations → one authored graph, derived plan, and rendered views in a single cutover | Offline corpus regeneration equivalence; the strictness compatibility report published **before** the flip; data-reference consumer tests through a test/development-only comparison window that closes inside the slice | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Rollback: per-workflow test/development flag only until cutover completes, then removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
-| **6. Refinement on the graph** — typed `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); promotion parity matrix against recorded cases; rollback rehearsal to prior graph version and revision | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback: prior graph/revision restore. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
+| **4. Derived CompilationPlan + renderer registry** — deterministic implementation binding and plan derivation from graph; `layout_registry` extended as the single path/family/renderer authority; AgentGenerator regains a renderer layer | No production authority change: agent-produced `AppBuildPlan` remains current while a derived binding/`CompilationPlan` is selected only in offline tests/development after equivalence proof | Derived-vs-produced equivalence on the corpus; proof that binding cannot add graph semantics; registry-extension invariants; stable renderer order; Unicode/case collision, traversal, drive/UNC, and link-escape confinement tests; generated-root path contracts | Begin identifying generator plan mirrors and dead converter normalizers for cutover; retain active promotion copying. Rollback: delete the candidate path/flag. No live models. No ADR 0006 dependency. |
+| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph version + build record become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; current-manifest CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/manifest persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Rollback: per-workflow test/development flag only until cutover completes, then removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
+| **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected paired publication; rollback rehearsal through the current-manifest CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent manifest/graph/revision tuple. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
 | **7. Retirement** — remove obsolete schemas, glob taxonomies, aliases, converter paths, transitional adapters, comparison fixtures, and development flags | One semantic authority; one registry per concern | Repository hygiene guard extended to ban retired names (pattern: `scripts/production_readiness_gate.py`); full suite; generated-app acceptance | Deletions complete. Rollback: deployment rollback before deletion only; no dual-read shim reintroduced. No live-model change. ADR 0006 slice interleaving agreed before this point. |
 
 ## Acceptance Criteria For Implementation
@@ -820,15 +923,21 @@ delete only its own obsolete path.
   after a patch changes only the affected families.
 - Adding an artifact family requires only a registry extension and cannot
   bypass validator, security-class, or digest declarations.
-- Every rendered child contract passes its existing runtime loader unchanged
-  (module, page, subscriptions, data, workflow bundle, deployment manifest).
+- Every non-prohibited `layout_registry` family has an explicit input,
+  preserved-unowned, rendered-output, external-handoff, or inapplicable
+  disposition. Every compiler-managed output passes its bound loader/consumer
+  unchanged. Route-manifest components resolve through canonical or
+  extension-barrel registration, and page endpoints close over declared module
+  actions.
+- Normalized output paths are unique under target-filesystem Unicode/case
+  semantics and cannot escape through absolute/traversal/drive/UNC/link paths.
 - Event and reaction references close over the taxonomy: every emitted type
   and consumed reaction resolves; unknown names fail closed at compile.
 - Stub content exists only inside declared stub regions; undeclared files and
   out-of-region code are rejected; `contract_refs` resolve.
 - Compilation is reproducible from the complete pinned input tuple (manifest,
-  semantic graph, taxonomy refs, build-context binding, compiler/renderer
-  registry, and target profile): identical closed inputs and digests yield
+  semantic graph, taxonomy refs, build-context binding, implementation binding,
+  and compiler/renderer registry): identical closed inputs and digests yield
   byte-identical outputs. `BuildContextBindingRef` alone is provenance for
   candidate reasoning, not a promise to replay stochastic model output.
 - Graph stores, manifests, and revisions are tenant-scoped; cross-tenant
@@ -837,10 +946,13 @@ delete only its own obsolete path.
   0006's quarantine rules).
 - Each `ArtifactRevision` records consistent
   (`semantic_graph_ref`, `compilation_plan_digest`, `build_context_binding`,
-  files manifest); a revision cannot cite a graph it was not compiled from.
+  `implementation_binding_ref`, files manifest); a revision cannot cite a
+  graph it was not compiled from.
 - A refinement updates the semantic graph version and the artifact revision
-  together, atomically from the caller's perspective; artifact mutation
-  without a semantic update is impossible outside declared stub regions.
+  through one current-manifest compare-and-swap; fault or retry cannot publish
+  only one side. Patch retries are idempotent, stale writers conflict, and
+  artifact mutation without a semantic update is impossible outside declared
+  stub regions.
 - After cutover, the old canonical path is removed: no generator YAML mirror,
   glob taxonomy, or transitional adapter remains, enforced by the hygiene
   guard.
@@ -848,6 +960,9 @@ delete only its own obsolete path.
   any compiler path.
 - No second orchestration system exists: the compiler adds no scheduler,
   queue, or journey machinery beyond what ADR 0006 owns.
+- Production journey start remains unavailable unless both
+  `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` are truthfully
+  advertised and required by the pinned journey definition.
 
 ## Non-Goals
 
