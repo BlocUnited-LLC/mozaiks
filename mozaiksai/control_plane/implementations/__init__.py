@@ -1,3 +1,4 @@
+from .acp_coding_provider import ACPCodingProvider, acp_available
 from .change_classifier import ChangeClassifierResult, LLMChangeClassifier, get_change_classifier
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
 from .harness_decision import FirstPartyHarnessDecisionPolicy, get_harness_decision_policy
@@ -19,6 +20,7 @@ from .scope_proposer import ArtifactScopeProposer, get_scope_proposer
 from .structured_coding_provider import StructuredOutputCodingProvider
 
 __all__ = [
+    "ACPCodingProvider",
     "ArtifactKind",
     "ArtifactScopeProposer",
     "ChangeClass",
@@ -33,6 +35,7 @@ __all__ = [
     "RefinementRoutingDecision",
     "RefinementTriggerRouteResolver",
     "StructuredOutputCodingProvider",
+    "acp_available",
     "get_change_classifier",
     "get_coding_worker",
     "get_harness_decision_policy",

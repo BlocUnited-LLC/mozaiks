@@ -83,6 +83,7 @@ from .executor import (
     resolve_control_plane_tool_entrypoint,
 )
 from .implementations import (
+    ACPCodingProvider,
     ArtifactKind,
     ArtifactScopeProposer,
     ChangeClass,
@@ -97,6 +98,7 @@ from .implementations import (
     RefinementTriggerRouteResolver,
     ScopedRefinementCodingWorker,
     StructuredOutputCodingProvider,
+    acp_available,
     get_change_classifier,
     get_coding_worker,
     get_harness_decision_policy,
@@ -222,6 +224,7 @@ __all__ = [
     "ControlPlaneArtifactChangeRoutesManifest",
     "ControlPlaneArtifactRoutingManifest",
     "ControlPlaneChangeRouteManifest",
+    "ACPCodingProvider",
     "ControlPlaneACPProviderConfig",
     "ControlPlaneCapabilityConfig",
     "ControlPlaneCodingCapabilityConfig",
@@ -279,6 +282,7 @@ __all__ = [
     "WorkspaceScopeViolation",
     "harvest_coding_workspace",
     "materialize_coding_workspace",
+    "acp_available",
     "safe_artifact_relpath",
     "build_selected_control_plane_harness",
     "build_refinement_review_package",
