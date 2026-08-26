@@ -12,6 +12,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **`CodingExecutionProvider` boundary in the refinement control plane**: the
+  scoped coding worker now delegates patch production to a provider behind a
+  typed, provider-neutral `StagedPatchProposal` contract. The first provider,
+  `StructuredOutputCodingProvider`, preserves today's single-shot
+  structured-output behavior exactly; the boundary is where ACP-backed CLI
+  coding providers (Codex, Claude Code, OpenCode) plug in later without
+  gaining routing, scope, acceptance, or promotion authority. The shared
+  `safe_artifact_relpath` helper now also rejects drive-qualified and UNC
+  paths, aligning the coding path with the staging module's path policy.
+
 ### Fixed
 
 - **Generated SaaS plan limits now survive AppGenerator assembly and export**:

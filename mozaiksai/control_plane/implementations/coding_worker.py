@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import uuid
 import zipfile
 
 logger = logging.getLogger(__name__)
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, cast
 
 from mozaiksai.control_plane.app_validation import run_current_app_source_validation
@@ -16,13 +15,15 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
     CodingWorkerRequest,
     CodingWorkerResult,
-    ControlPlaneToolCall,
-    ControlPlaneToolContext,
     FileUpdate,
+    StagedPatchProposal,
+    safe_artifact_relpath,
 )
-from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
+from mozaiksai.control_plane.implementations.structured_coding_provider import (
+    StructuredOutputCodingProvider,
+)
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
-from mozaiksai.control_plane.schema import LoadedControlPlanePack
+from mozaiksai.control_plane.ports import CodingExecutionProvider
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
@@ -39,8 +40,6 @@ _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
 # Sandbox-backed worker validation is an AG2 SandboxCodeTool/SandboxPort
 # integration tracked in docs/architecture/workflows/ag2-update-watchpoints.md.
 _VALIDATION_STRATEGIES = {"skip", "local"}
-_CHECKPOINT_EVENT = "coding_requested"
-_MODEL_VALIDATION_COMMAND_MAX_LENGTH = 240
 
 # theme_config files live inside the app_bundle workspace. We alias the artifact
 # kind so the coding worker can locate and patch these files without requiring a
@@ -56,6 +55,11 @@ class ScopedRefinementCodingWorker:
 
     This worker is intentionally conservative in v1. It is only eligible for
     scoped patch-style refinements and operates on explicit file payloads.
+
+    The worker owns eligibility, validation, artifact persistence, and the
+    checkpoint result shape. Producing the staged file changes is delegated to
+    a :class:`~mozaiksai.control_plane.ports.CodingExecutionProvider`; the
+    default provider is the single-shot structured-output provider.
     """
 
     def __init__(
@@ -69,11 +73,16 @@ class ScopedRefinementCodingWorker:
         source_validation_runner: Any = run_current_app_source_validation,
         artifact_store: Any = None,
         output_root: Any = None,
+        provider: CodingExecutionProvider | None = None,
     ) -> None:
-        self._agent_runner = agent_runner or AG2StructuredAgentRunner(agent_factory=agent_factory)
+        self._provider: CodingExecutionProvider = provider or StructuredOutputCodingProvider(
+            agent_factory=agent_factory,
+            agent_runner=agent_runner,
+            config_loader=config_loader,
+            pack_loader=pack_loader,
+            tool_executor=tool_executor,
+        )
         self._config_loader = config_loader
-        self._pack_loader = pack_loader
-        self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
         self._source_validation_runner = source_validation_runner
         self._artifact_store = artifact_store
         self._output_root = Path(output_root) if output_root is not None else Path("generated_refinements")
@@ -92,46 +101,34 @@ class ScopedRefinementCodingWorker:
                 metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
-        try:
-            llm_config = self._load_config().resolve_capability_llm_config("coding") or {}
-            system_prompt = self._load_system_prompt()
-            control_plane_context = await self._load_control_plane_context(request)
-            user_prompt = self._build_user_prompt(request=request, control_plane_context=control_plane_context)
-            plan = await self._agent_runner.run(
-                agent_name="CodingWorker",
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                llm_config=llm_config,
-                response_schema=CodingWorkerPlan,
-            )
-        except Exception as exc:
+        proposal = await self._provider.execute(request)
+        if proposal.status != "completed":
             return CodingWorkerResult(
                 eligible=True,
                 status="failed",
-                error=str(exc),
-                metadata={"build_family": request.build_family, "change_class": request.change_class},
-            )
-
-        try:
-            resolved_plan = self._normalize_plan(plan)
-            applied_files = self._resolve_updated_files(request=request, plan=resolved_plan)
-        except Exception as exc:
-            return CodingWorkerResult(
-                eligible=True,
-                status="failed",
-                error=str(exc),
+                provider=proposal.provider_id,
+                error=proposal.error or "coding provider failed without an error message",
                 metadata={"build_family": request.build_family, "change_class": request.change_class},
             )
 
         resolved_strategy = self._resolve_validation_strategy(
-            request.validation_strategy or resolved_plan.validation_strategy or "skip"
+            request.validation_strategy or proposal.validation_strategy_hint or "skip"
         )
-        resolved_plan = resolved_plan.model_copy(
-            update={
-                "validation_strategy": resolved_strategy,
-                "start_preview": bool(request.start_preview or resolved_plan.start_preview),
-            }
-        )
+        try:
+            resolved_plan = self._plan_from_proposal(
+                request=request,
+                proposal=proposal,
+                resolved_strategy=resolved_strategy,
+            )
+            applied_files = {change.path: change.content for change in proposal.changed_files}
+        except Exception as exc:
+            return CodingWorkerResult(
+                eligible=True,
+                status="failed",
+                provider=proposal.provider_id,
+                error=str(exc),
+                metadata={"build_family": request.build_family, "change_class": request.change_class},
+            )
         merged_files = dict(request.files)
         merged_files.update(applied_files)
 
@@ -159,7 +156,7 @@ class ScopedRefinementCodingWorker:
         metadata = {
             "build_family": request.build_family,
             "change_class": request.change_class,
-            "tool_context_loaded": bool(control_plane_context),
+            "tool_context_loaded": proposal.tool_context_loaded,
             "applied_paths": sorted(applied_files.keys()),
             "applied_file_count": len(applied_files),
             "selected_file_paths": list((request.metadata or {}).get("selected_file_paths") or []),
@@ -198,6 +195,7 @@ class ScopedRefinementCodingWorker:
         return CodingWorkerResult(
             eligible=True,
             status=status,  # type: ignore[arg-type]
+            provider=proposal.provider_id,
             plan=resolved_plan,
             applied_files=applied_files,
             validation_result=validation_result,
@@ -210,116 +208,26 @@ class ScopedRefinementCodingWorker:
         config = self._config_loader()
         return config if isinstance(config, ControlPlaneConfig) else ControlPlaneConfig.model_validate(config)
 
-    def _load_pack(self) -> LoadedControlPlanePack:
-        pack = self._pack_loader()
-        return pack if isinstance(pack, LoadedControlPlanePack) else LoadedControlPlanePack.model_validate(pack)
-
-    def _load_system_prompt(self) -> str:
-        pack = self._load_pack()
-        checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
-        if checkpoint is None or not checkpoint.prompt_id:
-            raise RuntimeError(
-                f"Selected refinement harness does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
-            )
-        prompt = pack.prompt_by_id(checkpoint.prompt_id)
-        if prompt is None:
-            raise RuntimeError(f"Coding prompt '{checkpoint.prompt_id}' was not found in prompts.yaml")
-        return prompt.content
-
-    async def _load_control_plane_context(self, request: CodingWorkerRequest) -> dict[str, Any]:
-        pack = self._load_pack()
-        checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
-        if checkpoint is None or not checkpoint.tool_ids:
-            return {}
-
-        context = ControlPlaneToolContext(
-            checkpoint=_CHECKPOINT_EVENT,
-            app_id=request.app_id,
-            user_id=request.user_id,
-            build_family=request.build_family,
-            build_key=request.build_key,
-            build_record_id=request.build_record_id,
-            requested_workflow_id=request.requested_workflow_id,
-            source_surface=request.source_surface,
-            raw_user_request=request.raw_user_request,
-            extra=dict(request.metadata or {}),
-        )
-        results: dict[str, Any] = {}
-        for tool_id in checkpoint.tool_ids:
-            result = await self._tool_executor.execute_tool(
-                ControlPlaneToolCall(tool_id=tool_id, target=_CHECKPOINT_EVENT),
-                context=context,
-            )
-            if result.success:
-                results[tool_id] = result.output
-            else:
-                results[tool_id] = {"error": result.error or "tool_execution_failed"}
-        return results
-
     @staticmethod
-    def _normalize_plan(plan: CodingWorkerPlan) -> CodingWorkerPlan:
-        owned_paths = []
-        seen_owned: set[str] = set()
-        for raw_path in plan.owned_paths:
-            safe = ScopedRefinementCodingWorker._safe_relpath(raw_path)
-            if safe and safe not in seen_owned:
-                owned_paths.append(safe)
-                seen_owned.add(safe)
-
-        seen_updated: set[str] = set()
-        normalized_files: list[FileUpdate] = []
-        for file_update in plan.updated_files or []:
-            safe = ScopedRefinementCodingWorker._safe_relpath(file_update.path)
-            if not safe or safe in seen_updated:
-                continue
-            normalized_files.append(FileUpdate(path=safe, content=str(file_update.content)))
-            seen_updated.add(safe)
-            if safe not in seen_owned:
-                owned_paths.append(safe)
-                seen_owned.add(safe)
-
-        commands = []
-        for raw_command in plan.validation_commands or []:
-            command = str(raw_command or "").strip()
-            if command and ScopedRefinementCodingWorker._safe_model_validation_command_hint(command):
-                commands.append(command)
-            elif command:
-                logger.warning(
-                    "CODING_WORKER: discarded unsafe model validation_command hint: %r",
-                    command,
-                )
-
-        return plan.model_copy(
-            update={
-                "owned_paths": owned_paths,
-                "updated_files": normalized_files,
-                "validation_commands": commands,
-            }
+    def _plan_from_proposal(
+        *,
+        request: CodingWorkerRequest,
+        proposal: StagedPatchProposal,
+        resolved_strategy: str,
+    ) -> CodingWorkerPlan:
+        """Reconstruct the checkpoint-facing plan from a provider proposal."""
+        return CodingWorkerPlan(
+            summary=proposal.summary,
+            owned_paths=list(proposal.owned_paths),
+            updated_files=[
+                FileUpdate(path=change.path, content=change.content) for change in proposal.changed_files
+            ],
+            validation_strategy=cast(Any, resolved_strategy),
+            validation_commands=list(proposal.validation_commands),
+            start_preview=bool(request.start_preview or proposal.start_preview),
+            needs_human_review=proposal.needs_human_review,
+            rationale=proposal.rationale,
         )
-
-    @staticmethod
-    def _resolve_updated_files(*, request: CodingWorkerRequest, plan: CodingWorkerPlan) -> dict[str, str]:
-        if not plan.updated_files:
-            raise ValueError("coding worker returned no updated_files for the scoped refinement")
-
-        files_as_dict = {fu.path: fu.content for fu in plan.updated_files}
-        allowed_paths = set(request.files.keys())
-        invalid_paths = [path for path in files_as_dict if path not in allowed_paths]
-        if invalid_paths:
-            raise ValueError(
-                "coding worker attempted to edit paths outside the explicit scoped files: "
-                + ", ".join(sorted(invalid_paths))
-            )
-
-        if plan.owned_paths:
-            outside_owned = [path for path in files_as_dict if path not in set(plan.owned_paths)]
-            if outside_owned:
-                raise ValueError(
-                    "coding worker returned updated_files outside the declared owned_paths: "
-                    + ", ".join(sorted(outside_owned))
-                )
-
-        return {path: str(content) for path, content in files_as_dict.items()}
 
     @staticmethod
     def _resolve_validation_strategy(raw: str) -> str:
@@ -339,57 +247,6 @@ class ScopedRefinementCodingWorker:
         if not isinstance(request.files, dict) or not request.files:
             return False, "coding worker requires explicit scoped files in v1"
         return True, None
-
-    @staticmethod
-    def _safe_relpath(raw: Any) -> str | None:
-        if not isinstance(raw, str):
-            return None
-        normalized = raw.replace("\\", "/").strip()
-        if not normalized or normalized.startswith("/"):
-            return None
-        posix_path = PurePosixPath(normalized)
-        if posix_path.is_absolute() or any(part == ".." for part in posix_path.parts):
-            return None
-        return str(posix_path)
-
-    @staticmethod
-    def _build_user_prompt(
-        *,
-        request: CodingWorkerRequest,
-        control_plane_context: dict[str, Any],
-    ) -> str:
-        payload = {
-            "build_family": request.build_family,
-            "build_key": request.build_key,
-            "build_record_id": request.build_record_id,
-            "requested_workflow_id": request.requested_workflow_id,
-            "change_class": request.change_class,
-            "source_surface": request.source_surface,
-            "request": request.raw_user_request,
-            "file_paths": sorted(request.files.keys()),
-            "input_files": request.files,
-            "validation_strategy_hint": request.validation_strategy or "auto",
-            "start_preview_requested": bool(request.start_preview),
-            "context_seed": request.context_seed,
-            "metadata": request.metadata,
-            "refinement_context": control_plane_context,
-        }
-        lines = [
-            "Plan a scoped coding refinement for this Mozaiks artifact request.",
-            "Return JSON only.",
-            "payload_json:",
-            json.dumps(payload, indent=2, sort_keys=True, default=str),
-            "",
-            "Return a JSON object with this exact shape:",
-            (
-                '{"summary":"...","owned_paths":["..."],'
-                '"updated_files":[{"path":"relative/path","content":"full file content"}],'
-                '"validation_strategy":"skip|local",'
-                '"validation_commands":["..."],"start_preview":false,'
-                '"needs_human_review":false,"rationale":"..."}'
-            ),
-        ]
-        return "\n".join(lines)
 
     async def _run_source_validation(
         self,
@@ -483,7 +340,7 @@ class ScopedRefinementCodingWorker:
 
         written_paths: list[str] = []
         for raw_path, content in merged_files.items():
-            safe = self._safe_relpath(raw_path)
+            safe = safe_artifact_relpath(raw_path)
             if not safe:
                 continue
             out_path = workspace_dir / safe
@@ -603,14 +460,6 @@ class ScopedRefinementCodingWorker:
         if isinstance(errors, list) and errors:
             return str(errors[0])
         return None
-
-    @staticmethod
-    def _safe_model_validation_command_hint(command: str) -> bool:
-        if not command or "\x00" in command:
-            return False
-        if len(command) > _MODEL_VALIDATION_COMMAND_MAX_LENGTH:
-            return False
-        return not any(char in command for char in "\r\n")
 
     @staticmethod
     def _string_list(value: Any) -> list[str]:

@@ -247,15 +247,21 @@ explicitly selected and validated as in-scope.
 
 ### Coding Execution
 
-The current first-party path is `ScopedRefinementCodingWorker`, which uses
-`AG2StructuredAgentRunner` to produce a typed `CodingWorkerPlan`.
+The current first-party path is `ScopedRefinementCodingWorker`. The worker owns
+eligibility, validation, artifact persistence, and the checkpoint result shape;
+patch production is delegated through the `CodingExecutionProvider` protocol
+(`mozaiksai/control_plane/ports.py`), whose durable output is the
+provider-neutral `StagedPatchProposal` contract. The first implementation is
+`StructuredOutputCodingProvider`, which uses `AG2StructuredAgentRunner` to
+produce a typed `CodingWorkerPlan` in a single structured-output turn.
 
-The target provider model should introduce a narrow coding provider boundary:
+The provider boundary `implemented`:
 
 ```text
 CodingExecutionProvider
-  input: scoped request, files, AppContext refs, validation policy
-  output: staged patch proposal, changed files, validation plan, review notes
+  input: scoped CodingWorkerRequest (explicit files, validation policy hints)
+  output: StagedPatchProposal — staged file changes, validation hints,
+          provider identity, review notes
 ```
 
 Provider implementations may include:
