@@ -153,18 +153,39 @@ def test_record_context_and_artifacts_keeps_optional_projections_best_effort(
     monkeypatch,
     optional_writer: str,
 ) -> None:
-    registration = AsyncMock(return_value=type("BuildRecord", (), {"id": "av_1"})())
+    events: list[str] = []
+
+    async def register_bundle(*args, **kwargs):
+        events.append("canonical_registration")
+        return type("BuildRecord", (), {"id": "av_1"})()
+
+    async def write_export(*args, **kwargs):
+        events.append("workflow_export")
+        if optional_writer == "record_workflow_export":
+            raise RuntimeError("optional store unavailable")
+
+    async def write_artifacts(*args, **kwargs):
+        events.append("workflow_artifacts")
+        if optional_writer == "record_workflow_artifacts":
+            raise RuntimeError("optional store unavailable")
+
+    registration = AsyncMock(side_effect=register_bundle)
+    export_write = AsyncMock(side_effect=write_export)
+    artifact_projection = AsyncMock(side_effect=write_artifacts)
     monkeypatch.setattr(
         generate_and_download_module,
         "_register_workflow_bundle_artifact_version",
         registration,
     )
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", AsyncMock())
-    monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
     monkeypatch.setattr(
         generate_and_download_module,
-        optional_writer,
-        AsyncMock(side_effect=RuntimeError("optional store unavailable")),
+        "record_workflow_export",
+        export_write,
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "record_workflow_artifacts",
+        artifact_projection,
     )
     monkeypatch.setattr(
         generate_and_download_module,
@@ -189,5 +210,12 @@ def test_record_context_and_artifacts_keeps_optional_projections_best_effort(
         )
     )
 
+    assert events == [
+        "canonical_registration",
+        "workflow_export",
+        "workflow_artifacts",
+    ]
     registration.assert_awaited_once()
+    export_write.assert_awaited_once()
+    artifact_projection.assert_awaited_once()
 
