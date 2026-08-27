@@ -4,14 +4,14 @@
 
 Accepted
 
-Proposed supersession: ADR 0005, in part
+Partially superseded by Accepted ADR 0005
 
 ## Context
 
-> If accepted, ADR 0005 would preserve a capable OSS reference AppGenerator but
-> supersede any interpretation that all future baseline or optimized strategy is
+> Accepted ADR 0005 preserves a capable OSS reference AppGenerator but
+> supersedes any interpretation that all future baseline or optimized strategy is
 > automatically approved for publication. Strategy provenance and information
-> content would govern that future publication review.
+> content govern that future publication review.
 
 `factory_app/workflows/AppGenerator/agents.yaml` and companion build-context files
 under `factory_app/build_context/AppGenerator/` encode the generation strategy the

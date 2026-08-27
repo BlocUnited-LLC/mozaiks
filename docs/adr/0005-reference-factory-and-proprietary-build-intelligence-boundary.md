@@ -2,20 +2,18 @@
 
 Date: 2026-08-24
 
-Status: Proposed
+Status: Accepted
 
-Proposes to supersede: ADR 0002 in part; ADR 0003 in part
+Supersedes: ADR 0002 in part; ADR 0003 in part
 
-Until this ADR is accepted, ADR 0002 and ADR 0003 remain the governing accepted
-decisions. The conditional supersession described below records the intended
-effect of acceptance; it does not exercise publication authority while this ADR
-is proposed.
+ADR 0002 and ADR 0003 remain accepted historical decisions and are partially
+superseded only as described below.
 
-## Proposed Decision
+## Decision
 
-If accepted, Mozaiks OSS will remain a complete, independently useful AI app
-factory with a capable reference generation and refinement strategy. BlocUnited
-will keep customer-derived, fleet-derived, learned, internally optimized, or
+Mozaiks OSS remains a complete, independently useful AI app factory with a
+capable reference generation and refinement strategy. BlocUnited keeps
+customer-derived, fleet-derived, learned, internally optimized, or
 otherwise commercially differentiating build intelligence private by default.
 
 The governing rule is:
@@ -46,7 +44,7 @@ Mozaiks now needs a durable boundary that permits a strong public reference
 factory without automatically publishing every optimization BlocUnited learns
 from operating builds, refinements, deployments, and commercial applications.
 
-This ADR does not determine that any current file must be removed. It proposes
+This ADR does not determine that any current file must be removed. It establishes
 the classification and review rule for a separate exact-file inventory.
 
 Accepted ADR 0007 subsequently defined the generalized semantic compiler's
@@ -54,7 +52,7 @@ taxonomy, manifest, graph, reference, binding, plan, renderer-registry, patch,
 revision, validation, and promotion contracts as versioned public framework
 surfaces. Completed ADR 0007 Slice 0 repaired prerequisite defects without
 implementing later compiler slices or changing this public/proprietary boundary.
-This proposal must be read consistently with both facts.
+This decision must be read consistently with both facts.
 
 ## Classification
 
@@ -104,8 +102,8 @@ authority that the OSS reference factory requires for correctness.
 
 ## Private-by-Default Build Intelligence
 
-If this ADR is accepted, the following require an ADR explicitly approving
-publication before entering the public repository:
+The following require an ADR explicitly approving publication before entering
+the public repository:
 
 - corrections or heuristics derived from customer or fleet outcomes;
 - learned prompt variants, routing weights, rankings, and model-selection policy;
@@ -122,8 +120,8 @@ inspectable inputs or declared ports.
 
 ## Publication Test for Strategy Content
 
-If this ADR is accepted, before publishing a material prompt, workflow, scorer,
-heuristic, routing rule, or build-context pack, reviewers must record:
+Before publishing a material prompt, workflow, scorer, heuristic, routing rule,
+or build-context pack, reviewers must record:
 
 1. provenance: whether it is generic, authored from public knowledge, or derived
    from BlocUnited/customer operations;
@@ -139,7 +137,7 @@ Material uncertainty routes to publication review, not automatic publication.
 
 ## Later Exact-File Inventory
 
-If this ADR is accepted, a follow-up exact-file audit must classify content under:
+A follow-up exact-file audit must classify content under:
 
 - `factory_app/workflows/`;
 - `factory_app/build_context/`;
@@ -149,20 +147,20 @@ If this ADR is accepted, a follow-up exact-file audit must classify content unde
 
 That later audit must identify exact files, provenance, replacement requirements,
 compatibility impact, license implications, and whether any action is
-forward-only. This ADR and its six-file documentation proposal do not perform that
+forward-only. This ADR and its six-file documentation changes do not perform that
 inventory and do not claim that source extraction, repository cleansing, package
-removal, tag or release deletion, or history rewriting has occurred. None of those
-actions is authorized merely by this ADR.
+removal, tag or release deletion, or history rewriting has occurred. None of
+those actions is authorized merely by this ADR.
 
 ## History and Release Decision
 
 Existing ADRs remain in the repository as decision history.
 
-If this ADR is accepted, ADR 0002 will be partially superseded only where
-"baseline strategy" could be read to approve every future strategy optimization.
-A capable reference AppGenerator remains OSS.
+ADR 0002 is partially superseded only where "baseline strategy" could be read to
+approve every future strategy optimization. A capable reference AppGenerator
+remains OSS.
 
-If this ADR is accepted, ADR 0003 will be partially superseded in these areas:
+ADR 0003 is partially superseded in these areas:
 
 - the historical "Current OSS extraction candidates: NONE" finding will not be
   treated as prospective approval for future content;
@@ -171,18 +169,15 @@ If this ADR is accepted, ADR 0003 will be partially superseded in these areas:
 - prompt catalogs and refinement strategy require information-content and
   provenance review, not directory-only classification.
 
-ADR 0003 remains accepted while this proposal is under review. If this ADR is
-accepted, ADR 0003 will still govern the canonical-model, generic-mechanism, App
-Zero no-fork, hosted-provider, commercial-policy, and evidence-based
-history-retention decisions.
+ADR 0003 remains accepted and continues to govern the canonical-model,
+generic-mechanism, App Zero no-fork, hosted-provider, commercial-policy, and
+evidence-based history-retention decisions.
 
 This ADR does not authorize rewriting Git history. Public MIT-licensed material
 is treated as a one-way door. Historical remediation requires a separate,
 evidence-based decision explaining the benefit, disruption, and limitations.
 
 ## Enforcement
-
-On acceptance:
 
 - Update `OSS_PUBLICATION_POLICY.md` to make provenance and information content
   authoritative over directory placement.
@@ -219,8 +214,6 @@ recalled.
 
 ## Consequences
 
-If accepted:
-
 - Mozaiks OSS remains a real AI app factory rather than a hollow SDK.
 - BlocUnited can compound a private moat from build, repair, deployment, and
   commercial outcomes.
@@ -247,9 +240,9 @@ artifacts default to private review.
 
 ## OSS Boundary
 
-If accepted, keep OSS: canonical contracts, generic engines, deterministic
-validation, extension seams, ADR 0007's public semantic-compiler surfaces, and a
-capable reference factory.
+Keep OSS: canonical contracts, generic engines, deterministic validation,
+extension seams, ADR 0007's public semantic-compiler surfaces, and a capable
+reference factory.
 
 Keep private by default: learned, customer-derived, fleet-derived, optimized
 build intelligence whose provenance or information content is sensitive, and

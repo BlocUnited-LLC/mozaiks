@@ -5,11 +5,12 @@ OSS repository. It records which code families must remain OSS, which
 categories are private by default, and the governing rule for distinguishing
 mechanisms from artifacts.
 
-The governing decision is
-[ADR 0003: Pre-1.0 OSS / Proprietary Boundary Freeze](../../adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md).
-[Proposed ADR 0005: Reference Factory and Proprietary Build Intelligence Boundary](../../adr/0005-reference-factory-and-proprietary-build-intelligence-boundary.md)
-would partially supersede ADR 0003's prospective directory-based publication
-default if accepted. It does not exercise that authority while proposed.
+The governing decisions are
+[ADR 0003: Pre-1.0 OSS / Proprietary Boundary Freeze](../../adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md)
+and
+[Accepted ADR 0005: Reference Factory and Proprietary Build Intelligence Boundary](../../adr/0005-reference-factory-and-proprietary-build-intelligence-boundary.md).
+ADR 0005 partially supersedes ADR 0003's prospective directory-based publication
+default while preserving its historical findings and remaining decisions.
 
 ---
 
@@ -26,8 +27,8 @@ what BlocUnited learns from understanding or operating many applications.
 
 DO-NOT-MOVE protects the public architecture and self-hosting promise. It does
 not authorize every prompt, policy, heuristic, scorer, routing rule, or context
-asset placed within these directories. Proposed ADR 0005 would classify material
-strategy content by provenance and information content if accepted. A capable reference
+asset placed within these directories. Accepted ADR 0005 classifies material
+strategy content by provenance and information content. A capable reference
 implementation remains OSS; learned, customer-derived, fleet-derived, internally
 optimized, or otherwise commercially differentiating intelligence is private by
 default pending publication review.
@@ -135,8 +136,7 @@ When `mozaiks-app` needs new generic framework behavior, it opens a PR against
    DO-NOT-MOVE family follows the OSS fast path.
 2. Adding material prompt, workflow, scorer, repair, routing, or build-context
    strategy requires provenance and information-content classification under
-   the publication policy and, if accepted, ADR 0005; directory placement alone
-   is insufficient.
+   the publication policy and ADR 0005; directory placement alone is insufficient.
 3. Learned, customer-derived, fleet-derived, internally optimized, or otherwise
    commercially differentiating intelligence requires ADR review and is private
    by default.

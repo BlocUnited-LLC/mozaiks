@@ -4,13 +4,13 @@ Date: 2026-08-11
 
 Status: Accepted
 
-Proposed supersession: ADR 0005, in part
+Partially superseded by Accepted ADR 0005
 
 ## Decision
 
-> If accepted, ADR 0005 would supersede this ADR's directory-based publication
+> Accepted ADR 0005 supersedes this ADR's directory-based publication
 > default and any prospective blanket approval of future prompt or refinement
-> strategy. It would not rewrite the historical finding that the August 2026 audit
+> strategy. It does not rewrite the historical finding that the August 2026 audit
 > identified no extraction candidates. The canonical-model, generic-mechanism,
 > App Zero no-fork, hosted-provider, commercial-policy, and evidence-based
 > history-retention decisions remain accepted.
@@ -180,8 +180,8 @@ Keep OSS: foundational. The boundary families listed in
 `docs/architecture/foundations/oss-boundary-families.md` are the canonical OSS
 surface. Directory placement does not approve publication. Canonical contracts,
 generic engines, and a capable reference strategy remain OSS; material strategy
-content would be classified by provenance and information content under proposed
-ADR 0005. Learned, customer-derived, fleet-derived, or commercially
+content is classified by provenance and information content under Accepted ADR
+0005. Learned, customer-derived, fleet-derived, or commercially
 differentiating intelligence requires publication review and is private by
 default.
 

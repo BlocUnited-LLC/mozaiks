@@ -21,8 +21,7 @@ framework authority proprietary. Accepted ADR 0007's taxonomy, semantic-referenc
 graph, binding, compilation, rendering, validation, revision, and refinement
 contracts and generic deterministic engines remain public framework surfaces.
 
-Proposed ADR 0005 would refine the reference-factory and build-intelligence
-boundary if accepted.
+Accepted ADR 0005 governs the reference-factory and build-intelligence boundary.
 
 ## Fast Path
 
