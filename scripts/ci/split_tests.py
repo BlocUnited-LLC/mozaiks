@@ -11,11 +11,13 @@ Which top-level files count as test files is taken from the repository's
 active pytest configuration: the ``python_files`` patterns in
 ``pyproject.toml`` ``[tool.pytest.ini_options]``, falling back to pytest's
 built-in default (``test_*.py`` and ``*_test.py``) when the key is unset.
-There is deliberately no second hardcoded pattern list here.  If a pytest
-config file that would take precedence over ``pyproject.toml`` appears
-(``pytest.ini``, ``setup.cfg`` with a ``[tool:pytest]`` section, or
-``tox.ini`` with a ``[pytest]`` section), this script fails closed so the
-shard selection can never silently diverge from what pytest collects.
+There is deliberately no second hardcoded pattern list here.  If another
+supported pytest config source appears (``pytest.ini``, ``setup.cfg`` with a
+``[tool:pytest]`` section, or ``tox.ini`` with a ``[pytest]`` section), this
+script fails closed rather than reproducing pytest's config-discovery rules.
+``pytest.ini`` takes precedence over ``pyproject.toml``; ``tox.ini`` and
+``setup.cfg`` are lower-precedence at the same root but are rejected as
+competing configuration sources so selection cannot silently drift later.
 
 Why round-robin over a *sorted* list: each shard then executes an alphabetical
 subsequence of the full serial collection order, preserving the relative
@@ -52,9 +54,10 @@ def _fail(message: str) -> None:
 def python_file_patterns(repo_root: Path) -> tuple[str, ...]:
     """Return the active pytest ``python_files`` patterns for repo_root.
 
-    Fails closed on config layouts this script does not read, since those
-    would take precedence over ``pyproject.toml`` and could make the shard
-    selection silently diverge from ``pytest tests/``.
+    Fails closed on competing config layouts this script does not read.
+    ``pytest.ini`` takes precedence over ``pyproject.toml``; ``tox.ini`` and
+    ``setup.cfg`` are currently lower-precedence at the same root but are
+    rejected conservatively so shard selection cannot silently diverge later.
     """
     if (repo_root / "pytest.ini").exists():
         _fail(
@@ -68,8 +71,8 @@ def python_file_patterns(repo_root: Path) -> tuple[str, ...]:
             parser.read(path, encoding="utf-8")
             if parser.has_section(section):
                 _fail(
-                    f"{candidate} has a [{section}] section: it takes precedence "
-                    "over pyproject.toml and this script does not read it. "
+                    f"{candidate} has a competing [{section}] pytest section "
+                    "that this script does not read. "
                     "Update scripts/ci/split_tests.py first."
                 )
 
