@@ -7,6 +7,21 @@ from pathlib import Path
 from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
 
+def _delenv_restoring(monkeypatch, name: str) -> None:
+    """Delete ``name`` from the environment and guarantee it is restored.
+
+    ``monkeypatch.delenv(name, raising=False)`` records nothing when the key
+    is already absent, so a value written afterwards by production code
+    (``configure_repo_host_defaults`` sets ``PLATFORM_PATH`` and
+    ``MOZAIKS_WORKFLOWS_PATH``) would survive teardown and leak the temporary
+    workspace into every later test in the process.  Setting the key first
+    forces monkeypatch to record a restore entry for it; undo replays in
+    reverse, ending at the original value or original absence.
+    """
+    monkeypatch.setenv(name, "")
+    monkeypatch.delenv(name)
+
+
 def test_host_composition_contract_documents_supported_app_local_studio_composition() -> None:
     doc = Path("docs/architecture/hosts/host-composition-contract.md").read_text(encoding="utf-8")
 
@@ -28,7 +43,7 @@ def test_host_composition_contract_resolves_workspace_environment(monkeypatch, t
     (app_root / "app.json").write_text('{"appName":"Contract App","appId":"contract-app"}', encoding="utf-8")
 
     monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace))
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "PLATFORM_PATH")
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
 
     configure_repo_host_defaults("studio")
