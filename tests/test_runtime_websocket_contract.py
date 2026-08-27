@@ -355,6 +355,7 @@ async def test_runtime_websocket_endpoint_emits_chat_error_when_prereqs_fail(mon
     assert websocket.accepted is True
     assert websocket.sent == [
         {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.error",
             "data": {
                 "message": "Studio setup is incomplete.",
@@ -415,6 +416,7 @@ async def test_runtime_websocket_endpoint_emits_validation_error_when_prereq_che
     assert websocket.accepted is True
     assert websocket.sent == [
         {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.error",
             "data": {
                 "message": "Failed to validate workflow prerequisites. Please try again.",
