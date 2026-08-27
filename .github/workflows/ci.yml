@@ -114,8 +114,31 @@ jobs:
           merge-multiple: true
 
       - name: Combine coverage and enforce threshold
+        # Fails closed on incomplete coverage evidence: exactly one artifact
+        # per shard must exist, and each must combine cleanly. Combining one
+        # input per invocation is load-bearing — a multi-file `coverage
+        # combine` skips an unreadable data file with only a warning, while a
+        # single unreadable input leaves the invocation with no usable data,
+        # which is a hard error.
         run: |
-          coverage combine coverage-data-shard-*
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(coverage-data-shard-*)
+          if [ "${#artifacts[@]}" -ne 4 ]; then
+            echo "expected exactly 4 shard coverage artifacts, found ${#artifacts[@]}: ${artifacts[*]-none}" >&2
+            exit 1
+          fi
+          for k in 0 1 2 3; do
+            # -s: a zero-byte artifact must fail too — coverage combine
+            # silently treats an empty data file as "no data yet".
+            if [ ! -s "coverage-data-shard-$k" ]; then
+              echo "missing or empty coverage data artifact for shard $k" >&2
+              exit 1
+            fi
+          done
+          for k in 0 1 2 3; do
+            coverage combine --append "coverage-data-shard-$k"
+          done
           coverage xml -o coverage.xml
           coverage report --fail-under=70
 
