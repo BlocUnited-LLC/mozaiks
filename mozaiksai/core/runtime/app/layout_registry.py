@@ -424,6 +424,37 @@ def validate_registered_path(
     return default_app_layout_registry().validate_registered_path(path, assignment_kind, scope)
 
 
+def resolve_taxonomy_artifact_family(
+    identifier: str,
+    *,
+    taxonomy_registry: Any = None,
+    layout_registry: AppLayoutRegistry | None = None,
+) -> tuple[ArtifactFamily, ...]:
+    """Resolve a taxonomy name to authoritative layout rows.
+
+    The taxonomy supplies only the ``ArtifactKind`` identifier. Every path,
+    validator, consumer, owner, and security classification returned here
+    comes from this layout registry.
+    """
+    from mozaiksai.core.taxonomy import SemanticCategory, default_taxonomy_registry
+
+    taxonomy = taxonomy_registry or default_taxonomy_registry()
+    entry = taxonomy.resolve(SemanticCategory.ARTIFACT_FAMILY, identifier)
+    try:
+        kind = ArtifactKind(entry.identifier)
+    except ValueError as exc:
+        raise ValueError(
+            f"taxonomy artifact-family {entry.identifier!r} has no ArtifactKind"
+        ) from exc
+    registry = layout_registry or default_app_layout_registry()
+    rows = tuple(family for family in registry.families if family.kind is kind)
+    if not rows:
+        raise ValueError(
+            f"taxonomy artifact-family {entry.identifier!r} has no layout_registry row"
+        )
+    return rows
+
+
 def default_app_layout_registry() -> AppLayoutRegistry:
     return build_app_layout_registry()
 
@@ -934,4 +965,5 @@ __all__ = [
     "kinds_for_assignment",
     "match_path",
     "validate_registered_path",
+    "resolve_taxonomy_artifact_family",
 ]

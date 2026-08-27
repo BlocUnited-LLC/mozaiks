@@ -7,12 +7,15 @@ and UI layer import from this module. Wire-format strings are stable.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 # Deterministic event ID namespace
 NAMESPACE_MOZAIKS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # uuid.NAMESPACE_URL
+EVENT_ENVELOPE_SCHEMA_VERSION: Literal["mozaiks.ui.event.v1"] = "mozaiks.ui.event.v1"
 
 
 class MozaiksEventType(StrEnum):
@@ -90,14 +93,27 @@ class MozaiksEventEnvelope(BaseModel):
 
     model_config = {"extra": "allow"}
 
+    schema_version: Literal["mozaiks.ui.event.v1"]
     type: MozaiksEventType
     event_id: str | None = None
     corr: str | None = None  # correlation / trace ID
 
 
+def validate_event_envelope_schema_version(envelope: Mapping[str, Any]) -> None:
+    """Fail closed when an outbound envelope omits or changes its wire version."""
+    version = envelope.get("schema_version")
+    if version != EVENT_ENVELOPE_SCHEMA_VERSION:
+        raise ValueError(
+            "event envelope schema_version must be "
+            f"{EVENT_ENVELOPE_SCHEMA_VERSION!r}, got {version!r}"
+        )
+
+
 __all__ = [
     "NAMESPACE_MOZAIKS",
+    "EVENT_ENVELOPE_SCHEMA_VERSION",
     "MozaiksEventType",
     "MozaiksEventEnvelope",
     "compute_event_id",
+    "validate_event_envelope_schema_version",
 ]
