@@ -162,6 +162,23 @@ class TaxonomyRegistry(TaxonomyModel):
         if len(identities) != len(set(identities)):
             raise ValueError("duplicate namespace/version identity")
 
+        namespace_ids: dict[str, TaxonomyNamespace] = {}
+        for namespace in self.namespaces:
+            previous = namespace_ids.get(namespace.namespace_id)
+            if previous is not None:
+                raise ValueError(
+                    f"namespace id {namespace.namespace_id!r} is already owned by "
+                    f"{previous.kind.value} namespace version {previous.version}"
+                )
+            namespace_ids[namespace.namespace_id] = namespace
+
+        protected_core_roots = {
+            (entry.category, entry.identifier.split(".", 1)[0])
+            for namespace in self.namespaces
+            if namespace.kind is NamespaceKind.CORE
+            for entry in namespace.entries
+        }
+
         seen_entries: dict[tuple[SemanticCategory, str], TaxonomyNamespace] = {}
         grants: list[tuple[str, NamespaceKind, str]] = []
         for namespace in self.namespaces:
@@ -178,6 +195,15 @@ class TaxonomyRegistry(TaxonomyModel):
                             )
                 grants.append((grant, namespace.kind, namespace.namespace_id))
             for entry in namespace.entries:
+                if (
+                    namespace.kind is NamespaceKind.EXTENSION
+                    and (entry.category, entry.identifier.split(".", 1)[0])
+                    in protected_core_roots
+                ):
+                    raise ValueError(
+                        f"extension namespace {namespace.namespace_id!r} cannot occupy protected "
+                        f"core {entry.category.value} root {entry.identifier.split('.', 1)[0]!r}"
+                    )
                 key = (entry.category, entry.identifier)
                 previous = seen_entries.get(key)
                 if previous is not None:
@@ -260,6 +286,11 @@ _CORE_EVENTS = (
     "workflow.completed",
     "chat.tool_call_complete",
     "chat.transition_requested",
+    "chat.revision_requested",
+    "chat.deployment_started",
+    "chat.deployment_progress",
+    "chat.deployment_completed",
+    "chat.deployment_failed",
     "ui.dismiss",
     "ui.render",
     "ui.update",
@@ -356,6 +387,8 @@ _CORE_CAPABILITIES = (
     "operator_readiness.evidence.local",
     "operator_readiness.launch.check",
     "operator_readiness.profile.select",
+    "reports.export",
+    "reports.view",
     "social.feed.read",
     "social.friends.connect",
     "social.friends.list",

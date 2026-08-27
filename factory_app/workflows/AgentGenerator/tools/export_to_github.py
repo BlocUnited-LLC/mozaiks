@@ -566,7 +566,11 @@ async def _emit_deployment_event(
 
         transport = await SimpleTransport.get_instance()
         await transport.send_event_to_ui(
-            {"type": f"chat.deployment_{status}", "data": {"timestamp": datetime.now(UTC).isoformat(), **data}},
+            {
+                "schema_version": "mozaiks.ui.event.v1",
+                "type": f"chat.deployment_{status}",
+                "data": {"timestamp": datetime.now(UTC).isoformat(), **data},
+            },
             chat_id,
         )
     except Exception:

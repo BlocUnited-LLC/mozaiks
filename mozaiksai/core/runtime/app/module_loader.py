@@ -1445,6 +1445,15 @@ class ModuleLoader:
             declared_permission_ids = {permission.id for permission in definition.permissions}
             for reaction in manifests.reactions.reactions:
                 event_type = str(reaction.event_type or "").strip()
+                if self._taxonomy_advisory and event_type:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.EVENT, event_type, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"reactions.yaml references unknown event {event_type!r}: {exc}"
+                        ) from exc
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"reactions.yaml references non-canonical event {event_type!r}"
@@ -1455,10 +1464,29 @@ class ModuleLoader:
                             f"reactions.yaml reaction {reaction.id!r} references undeclared "
                             f"permission {permission_id!r}; add it to the module-level permissions block"
                         )
+                capability_id = reaction.target.capability_id
+                if self._taxonomy_advisory and capability_id:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.CAPABILITY, capability_id, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"reactions.yaml references unknown capability {capability_id!r}: {exc}"
+                        ) from exc
 
         if manifests.notifications is not None:
             for notification in manifests.notifications.notifications:
                 event_type = str(getattr(notification, "event_type", "") or "").strip()
+                if self._taxonomy_advisory and event_type:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.EVENT, event_type, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"notifications.yaml references unknown event {event_type!r}: {exc}"
+                        ) from exc
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"notifications.yaml references non-canonical event {event_type!r}"

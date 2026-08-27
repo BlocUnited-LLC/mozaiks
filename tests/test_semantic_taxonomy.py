@@ -109,9 +109,16 @@ def test_registry_validation_does_not_mutate_inputs() -> None:
         (SemanticCategory.EVENT, "build.started"),
         (SemanticCategory.EVENT, "build.completed"),
         (SemanticCategory.EVENT, "build.failed"),
+        (SemanticCategory.EVENT, "chat.revision_requested"),
+        (SemanticCategory.EVENT, "chat.deployment_started"),
+        (SemanticCategory.EVENT, "chat.deployment_progress"),
+        (SemanticCategory.EVENT, "chat.deployment_completed"),
+        (SemanticCategory.EVENT, "chat.deployment_failed"),
         (SemanticCategory.CAPABILITY, "commerce.checkout.start"),
         (SemanticCategory.CAPABILITY, "messaging.messages.send"),
         (SemanticCategory.CAPABILITY, "mozaikspay.subscription_status"),
+        (SemanticCategory.CAPABILITY, "reports.view"),
+        (SemanticCategory.CAPABILITY, "reports.export"),
     ],
 )
 def test_grandfathered_current_identifiers_resolve(
@@ -126,8 +133,9 @@ def test_all_shipped_module_event_and_capability_names_are_grandfathered() -> No
     event_names: set[str] = set()
     capability_names: set[str] = set()
 
-    for path in (ROOT / "factory_app").rglob("*.yaml"):
-        if path.name not in {"events.yaml", "module.yaml"}:
+    shipped_roots = (ROOT / "factory_app", ROOT / "examples" / "canonical-apps")
+    for path in (path for root in shipped_roots for path in root.rglob("*.yaml")):
+        if path.name not in {"events.yaml", "module.yaml", "subscriptions.yaml"}:
             continue
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
@@ -143,6 +151,15 @@ def test_all_shipped_module_event_and_capability_names_are_grandfathered() -> No
             for action in raw.get("actions") or []:
                 if isinstance(action, dict) and isinstance(action.get("entitlement_gate"), str):
                     capability_names.add(action["entitlement_gate"])
+        if (
+            path.name == "subscriptions.yaml"
+            and raw.get("schema_version") == "mozaiks.subscriptions.v1"
+        ):
+            for plan in raw.get("plans") or []:
+                if isinstance(plan, dict):
+                    capability_names.update(
+                        item for item in plan.get("capabilities") or [] if isinstance(item, str)
+                    )
 
     assert event_names
     assert capability_names
@@ -236,6 +253,28 @@ def test_extension_namespace_isolation_and_core_protection() -> None:
     with pytest.raises(ValueError, match="conflicts|duplicate or conflicting"):
         build_taxonomy_registry((core, redefining))
 
+    core_registry = default_taxonomy_registry()
+    core_events = next(
+        namespace for namespace in core_registry.namespaces if namespace.namespace_id == "mozaiks.events"
+    )
+    reused_core_id = _namespace(
+        "mozaiks.events",
+        _entry(SemanticCategory.EVENT, "vendor.changed"),
+        kind=NamespaceKind.EXTENSION,
+        grants=("vendor",),
+    ).model_copy(update={"version": 2})
+    with pytest.raises(ValueError, match="namespace id.*already owned"):
+        build_taxonomy_registry((core_events, reused_core_id))
+
+    commerce_extension = _namespace(
+        "vendor.capabilities",
+        _entry(SemanticCategory.CAPABILITY, "commerce.vendor_extra"),
+        kind=NamespaceKind.EXTENSION,
+        grants=("commerce",),
+    )
+    with pytest.raises(ValueError, match="protected core capability root"):
+        build_taxonomy_registry((*core_registry.namespaces, commerce_extension))
+
 
 def test_event_reference_closure_fails_on_unknown_name() -> None:
     registry = default_taxonomy_registry()
@@ -311,6 +350,67 @@ def test_module_event_advisory_rejects_unknown_registered_prefix_name(tmp_path: 
         event_type="domain.unknown.changed",
     )
     with pytest.raises(ModuleLoadError, match="unknown event"):
+        ModuleLoader(str(tmp_path), taxonomy_advisory=True).load("sample")
+
+
+@pytest.mark.parametrize("manifest_name", ["reactions.yaml", "notifications.yaml"])
+def test_module_advisory_closes_companion_event_references(
+    tmp_path: Path, manifest_name: str
+) -> None:
+    _write_module(
+        tmp_path,
+        capability_id="commerce.checkout.start",
+        event_type="domain.commerce.checkout.requested",
+    )
+    contracts = tmp_path / "modules" / "sample" / "contracts"
+    if manifest_name == "reactions.yaml":
+        content = """schema_version: mozaiks.reactions.v1
+reactions:
+  - id: unknown_event
+    event_type: domain.not_registered
+    target:
+      kind: capability
+      capability_id: commerce.checkout.start
+"""
+    else:
+        content = """schema_version: mozaiks.notifications.v1
+notifications:
+  - id: unknown_event
+    event_type: domain.not_registered
+    channels: [in_app]
+    audience: {}
+    template:
+      title: Unknown
+      body: Unknown
+"""
+    (contracts / manifest_name).write_text(content, encoding="utf-8")
+
+    assert ModuleLoader(str(tmp_path)).load("sample").name == "sample"
+    with pytest.raises(ModuleLoadError, match="unknown event"):
+        ModuleLoader(str(tmp_path), taxonomy_advisory=True).load("sample")
+
+
+def test_module_advisory_closes_reaction_capability_target(tmp_path: Path) -> None:
+    _write_module(
+        tmp_path,
+        capability_id="commerce.checkout.start",
+        event_type="domain.commerce.checkout.requested",
+    )
+    reactions = tmp_path / "modules" / "sample" / "contracts" / "reactions.yaml"
+    reactions.write_text(
+        """schema_version: mozaiks.reactions.v1
+reactions:
+  - id: unknown_capability
+    event_type: domain.commerce.checkout.requested
+    target:
+      kind: capability
+      capability_id: commerce.not_registered
+""",
+        encoding="utf-8",
+    )
+
+    assert ModuleLoader(str(tmp_path)).load("sample").name == "sample"
+    with pytest.raises(ModuleLoadError, match="unknown capability"):
         ModuleLoader(str(tmp_path), taxonomy_advisory=True).load("sample")
 
 

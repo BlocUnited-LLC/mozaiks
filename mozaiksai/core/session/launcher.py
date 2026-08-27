@@ -465,6 +465,7 @@ async def emit_workflow_launch_navigation(
         transport = await SimpleTransport.get_instance()
         await transport.send_event_to_ui(
             {
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.navigate",
                 "data": {
                     "chat_id": workflow_launch.chat_id,

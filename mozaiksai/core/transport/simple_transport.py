@@ -584,10 +584,20 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         Serializes and sends a raw AG2 event to the UI.
         This is the primary method for forwarding AG2 native events.
         """
+        is_transport_envelope = (
+            isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event
+        )
+        if is_transport_envelope:
+            from mozaiksai.core.transport.event_contract import (
+                validate_event_envelope_schema_version,
+            )
+
+            validate_event_envelope_schema_version(event)
+
         try:
             # Allow callers to provide a fully-formed transport envelope (e.g., ack.tool_call_response)
             # without forcing another serialization pass through the dispatcher.
-            if isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event:
+            if is_transport_envelope:
                 logger.debug(
                     "TRANSPORT_ENVELOPE_PASSTHROUGH type=%s",
                     event.get('type')
