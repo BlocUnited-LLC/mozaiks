@@ -2,9 +2,18 @@
 
 Date: 2026-08-11
 
-Status: accepted
+Status: Accepted
+
+Partially superseded by Accepted ADR 0005
 
 ## Decision
+
+> Accepted ADR 0005 supersedes this ADR's directory-based publication
+> default and any prospective blanket approval of future prompt or refinement
+> strategy. It does not rewrite the historical finding that the August 2026 audit
+> identified no extraction candidates. The canonical-model, generic-mechanism,
+> App Zero no-fork, hosted-provider, commercial-policy, and evidence-based
+> history-retention decisions remain accepted.
 
 **DIFFERENT INTELLIGENCE, SAME CANONICAL APP.**
 
@@ -58,7 +67,8 @@ The audit confirmed:
   self-host.
 - Extract `factory_app/refinement_harness/` to proprietary: rejected. The
   harness is the OSS mechanism. BlocUnited's learned refinement policies and
-  eval data are already private (in `mozaiks-app/build_intelligence/`). Only
+  eval data are already private (in
+  `mozaiks-app/app/modules/build_intelligence/`). Only
   the mechanism belongs in OSS.
 - Extract `factory_app/workflows/ExistingAppDiscovery/`: rejected. Brownfield
   discovery is a generic OSS framework feature. No proprietary discovery
@@ -76,8 +86,9 @@ The audit confirmed:
 ## Consequences
 
 - `factory_app/`, `mozaiksai/`, `mozaiks_cli/`, `web_shell/`, `chat-ui/` stay
-  OSS. The DO-NOT-MOVE registry in `oss-boundary-families.md` is the
-  authoritative list.
+  OSS. The DO-NOT-MOVE registry in
+  `docs/architecture/foundations/oss-boundary-families.md` is the authoritative
+  list.
 - New content that belongs in private families (eval data, learned strategy,
   cross-app corrections, operator-scoped intelligence) must stay in
   `mozaiks-app` or a new private repo — not enter `mozaiks/`.
@@ -94,7 +105,7 @@ The audit confirmed:
 `mozaiks-app` must consume public OSS seams rather than maintaining a private
 framework fork. The pre-1.0 audit confirmed zero framework duplication across
 all `mozaiks-app` Python modules. The 22 declared public seams in
-`oss_reuse_contract.yaml` are the correct integration surface.
+`mozaiks-app/app/oss_reuse_contract.yaml` are the correct integration surface.
 
 When `mozaiks-app` needs new generic framework behavior, it opens a PR against
 `mozaiks/` rather than duplicating the logic privately.
@@ -110,8 +121,9 @@ Examples:
   loaded into it = artifact (private).
 - Evaluation framework / scoring interface = mechanism (OSS). BlocUnited's eval
   corpus and correction datasets = artifact (private).
-- Telemetry schema in `telemetry.py` = mechanism (OSS, narrowly bounded). Raw
-  telemetry collected from BlocUnited customers = artifact (private).
+- Telemetry schema in `mozaiksai/core/telemetry.py` = mechanism (OSS, narrowly
+  bounded). Raw telemetry collected from BlocUnited customers = artifact
+  (private).
 - Capability routing interface = mechanism (OSS, future). BlocUnited's learned
   routing weights = artifact (private).
 
@@ -121,9 +133,9 @@ separately. Publish mechanisms; require ADR review for artifacts.
 ## History Decision
 
 **KEEP.** Historical contamination is low and non-material. The
-`OSS_PUBLICATION_POLICY.md` One-Way Door Standard and `governance_guardrails.py`
-protect the forward boundary. Future commits that would introduce private
-content are caught by static scan before merge.
+`OSS_PUBLICATION_POLICY.md` One-Way Door Standard and
+`scripts/governance_guardrails.py` protect the forward boundary. Future commits
+that would introduce private content are caught by static scan before merge.
 
 ## Release Boundary
 
@@ -165,9 +177,13 @@ breaking change requiring a major version and community communication.
 ## OSS Boundary
 
 Keep OSS: foundational. The boundary families listed in
-`oss-boundary-families.md` are the canonical OSS surface. New content entering
-those families is OSS by default. New content that derives from BlocUnited
-operational data requires publication review.
+`docs/architecture/foundations/oss-boundary-families.md` are the canonical OSS
+surface. Directory placement does not approve publication. Canonical contracts,
+generic engines, and a capable reference strategy remain OSS; material strategy
+content is classified by provenance and information content under Accepted ADR
+0005. Learned, customer-derived, fleet-derived, or commercially
+differentiating intelligence requires publication review and is private by
+default.
 
 ## Validation
 

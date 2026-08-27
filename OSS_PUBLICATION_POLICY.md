@@ -6,6 +6,23 @@ This repository is MIT-published framework infrastructure. Publication should be
 
 Open the ability to understand and build one application. Deliberately review what BlocUnited learns from understanding or operating many applications.
 
+## Provenance Over Path
+
+A file is not approved for publication merely because it lives in an OSS family.
+Classify prompts, workflow YAML, scorer policy, repair heuristics, routing rules,
+build-context packs, and agent instructions by provenance and information content.
+Canonical contracts, generic engines, and a capable reference strategy belong in
+OSS. Learned, customer-derived, fleet-derived, internally optimized, or otherwise
+commercially differentiating intelligence is private by default unless an ADR
+records sufficient ecosystem justification for publication.
+
+Value, sophistication, or directory placement alone does not make generic
+framework authority proprietary. Accepted ADR 0007's taxonomy, semantic-reference,
+graph, binding, compilation, rendering, validation, revision, and refinement
+contracts and generic deterministic engines remain public framework surfaces.
+
+Accepted ADR 0005 governs the reference-factory and build-intelligence boundary.
+
 ## Fast Path
 
 Changes are normally safe for the public repository when they improve:
@@ -13,13 +30,13 @@ Changes are normally safe for the public repository when they improve:
 - runtime and canonical app contracts
 - validators and deterministic contract checks
 - generated-app portability and self-hosting
-- baseline generation, discovery, and refinement
+- capable provider-neutral reference generation, discovery, and refinement
 - generic App Intelligence that works from one app's source and public contracts
 - public extension contracts
 - provider-neutral deployment, secret, payment, data, and integration contracts
 - local Studio, CLI, and developer tooling needed to operate OSS Mozaiks
 
-These changes do not need an ADR unless they create a new public contract, expose a new authority surface, or publish substantial generation or operations intelligence.
+These changes do not need an ADR unless they create a new public contract, expose a new authority surface, publish substantial generation or operations intelligence, or contain strategy whose provenance or competitive significance is uncertain.
 
 ## Publication Review Path
 

@@ -5,8 +5,12 @@ OSS repository. It records which code families must remain OSS, which
 categories are private by default, and the governing rule for distinguishing
 mechanisms from artifacts.
 
-The governing ADR is
-[ADR 0003: Pre-1.0 OSS / Proprietary Boundary Freeze](../../adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md).
+The governing decisions are
+[ADR 0003: Pre-1.0 OSS / Proprietary Boundary Freeze](../../adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md)
+and
+[Accepted ADR 0005: Reference Factory and Proprietary Build Intelligence Boundary](../../adr/0005-reference-factory-and-proprietary-build-intelligence-boundary.md).
+ADR 0005 partially supersedes ADR 0003's prospective directory-based publication
+default while preserving its historical findings and remaining decisions.
 
 ---
 
@@ -18,6 +22,23 @@ Open the ability to understand and build one application. Deliberately review
 what BlocUnited learns from understanding or operating many applications.
 
 ---
+
+## Directory Placement Is Not Publication Approval
+
+DO-NOT-MOVE protects the public architecture and self-hosting promise. It does
+not authorize every prompt, policy, heuristic, scorer, routing rule, or context
+asset placed within these directories. Accepted ADR 0005 classifies material
+strategy content by provenance and information content. A capable reference
+implementation remains OSS; learned, customer-derived, fleet-derived, internally
+optimized, or otherwise commercially differentiating intelligence is private by
+default pending publication review.
+
+Accepted ADR 0007's taxonomy, manifest, semantic graph and references,
+implementation binding, compilation plan, renderer registry, validation,
+refinement patch, artifact revision, and promotion contracts are public framework
+mechanisms. Their role in generation does not make them proprietary, and private
+operator strategy must not become a substitute authority for their generic OSS
+implementations.
 
 ## DO-NOT-MOVE Families
 
@@ -75,8 +96,8 @@ is the specific content, dataset, or learned result that fills a mechanism.
 | `KnowledgeStore` interface | Mechanism | OSS (`mozaiksai/`) |
 | BlocUnited knowledge content loaded into `KnowledgeStore` | Artifact | Private |
 | Evaluation framework interface / scoring contract | Mechanism | OSS |
-| BlocUnited eval corpus and correction datasets | Artifact | Private (`mozaiks-app/build_intelligence/`) |
-| Telemetry schema (`telemetry.py`, narrow bounded fields) | Mechanism | OSS |
+| BlocUnited eval corpus and correction datasets | Artifact | Private (`mozaiks-app/app/modules/build_intelligence/`) |
+| Telemetry schema (`mozaiksai/core/telemetry.py`, narrow bounded fields) | Mechanism | OSS |
 | Raw telemetry collected from BlocUnited customers | Artifact | Private |
 | Capability routing interface (future seam) | Mechanism | OSS (future, no implementation yet) |
 | BlocUnited's learned routing weights | Artifact | Private |
@@ -101,7 +122,8 @@ confirms the artifact boundary is preserved.
 rather than maintaining a private framework fork. The pre-1.0 audit confirmed:
 
 - Zero framework duplication across `mozaiks-app` Python modules.
-- 22 declared public seams consumed correctly via `oss_reuse_contract.yaml`.
+- 22 declared public seams consumed correctly via
+  `mozaiks-app/app/oss_reuse_contract.yaml`.
 
 When `mozaiks-app` needs new generic framework behavior, it opens a PR against
 `mozaiks/` rather than duplicating the logic privately.
@@ -110,10 +132,15 @@ When `mozaiks-app` needs new generic framework behavior, it opens a PR against
 
 ## Change Discipline
 
-1. Adding content to a DO-NOT-MOVE family: OSS by default. No ADR needed.
-2. Adding content derived from BlocUnited operational data to any family:
-   requires ADR review before the content enters this repository.
-3. Moving any DO-NOT-MOVE family to a private repo: requires ADR review and
+1. Adding canonical contracts, generic engines, or ordinary maintenance to a
+   DO-NOT-MOVE family follows the OSS fast path.
+2. Adding material prompt, workflow, scorer, repair, routing, or build-context
+   strategy requires provenance and information-content classification under
+   the publication policy and ADR 0005; directory placement alone is insufficient.
+3. Learned, customer-derived, fleet-derived, internally optimized, or otherwise
+   commercially differentiating intelligence requires ADR review and is private
+   by default.
+4. Moving a DO-NOT-MOVE generic family to a private repo requires ADR review and
    would be a breaking change after 1.0 publication.
-4. Adding a new public mechanism or interface: follow the
+5. Adding a new public mechanism or interface: follow the
    [One-Way Door Standard](https://github.com/BlocUnited-LLC/mozaiks/blob/main/OSS_PUBLICATION_POLICY.md).

@@ -4,7 +4,14 @@
 
 Accepted
 
+Partially superseded by Accepted ADR 0005
+
 ## Context
+
+> Accepted ADR 0005 preserves a capable OSS reference AppGenerator but
+> supersedes any interpretation that all future baseline or optimized strategy is
+> automatically approved for publication. Strategy provenance and information
+> content govern that future publication review.
 
 `factory_app/workflows/AppGenerator/agents.yaml` and companion build-context files
 under `factory_app/build_context/AppGenerator/` encode the generation strategy the
@@ -82,7 +89,7 @@ private by default under `OSS_PUBLICATION_POLICY.md`.
   review ADR before they enter this repository.
 - Future eval-derived generator optimizers, correction datasets, or cross-customer
   repair data must be committed to `mozaiks-app` or a private artifact store, not
-  to this repo.  `governance_guardrails.py` enforces learned-artifact directory
+  to this repo.  `scripts/governance_guardrails.py` enforces learned-artifact directory
   quarantine at the source level; `scripts/package_content_guard.py` enforces it at
   the package level.
 - This ADR must be updated if the content character changes — for example if
