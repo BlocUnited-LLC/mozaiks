@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
+from mozaiksai.core.transport.event_contract import send_event_envelope
 from mozaiksai.core.transport.session_registry import session_registry
 
 from .base import logger, utc_timestamp
@@ -55,7 +56,7 @@ async def handle_user_input_submit(
                 user_message=text,
                 ui_context=ui_context_payload,
             )
-            await websocket.send_json({
+            await send_event_envelope(websocket, {
                 "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.input_ack",
                 "data": {"chat_id": chat_id, "status": "accepted"},
@@ -130,7 +131,7 @@ async def handle_user_input_submit(
                 source='ws'
             )
 
-        await websocket.send_json({
+        await send_event_envelope(websocket, {
             "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.input_ack",
             "data": {"chat_id": target_chat_id, "status": "accepted"},
@@ -155,7 +156,7 @@ async def handle_tool_call_response(
     try:
         ok = await transport.submit_tool_call_response(event_id, response_data)
         logger.debug("TOOL_CALL_RESPONSE_RECEIVED event=%s accepted=%s", event_id, ok)
-        await websocket.send_json({
+        await send_event_envelope(websocket, {
             "schema_version": "mozaiks.ui.event.v1",
             "type": "ack.tool_call_response",
             "data": {"tool_call_id": event_id, "status": "accepted" if ok else "rejected"},

@@ -3397,6 +3397,7 @@ async def websocket_endpoint(
             user_id,
         )
 
+    from mozaiksai.core.transport.event_contract import send_event_envelope
     from mozaiksai.core.transport.session_registry import session_registry
 
     ws_id = id(websocket)
@@ -3411,7 +3412,7 @@ async def websocket_endpoint(
         if not is_valid:
             try:
                 await websocket.accept()
-                await websocket.send_json({
+                await send_event_envelope(websocket, {
                     "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
@@ -3430,7 +3431,7 @@ async def websocket_endpoint(
         logger.error("WS_PREREQ_VALIDATION_FAILED: %s", dep_err, exc_info=True)
         try:
             await websocket.accept()
-            await websocket.send_json({
+            await send_event_envelope(websocket, {
                 "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",
                 "data": {

@@ -19,6 +19,7 @@ EVENT_ENVELOPE_SCHEMA_VERSION: Literal["mozaiks.ui.event.v1"] = "mozaiks.ui.even
 
 
 class MozaiksEventType(StrEnum):
+    ERROR = "error"  # Grandfathered pre-namespaced application error envelope.
     # ── Outbound: AG2 chat stream events ──────────────────────────────────────
     CHAT_TEXT = "chat.text"
     CHAT_PRINT = "chat.print"
@@ -109,11 +110,18 @@ def validate_event_envelope_schema_version(envelope: Mapping[str, Any]) -> None:
         )
 
 
+async def send_event_envelope(websocket: Any, envelope: Mapping[str, Any]) -> None:
+    """Validate an application event envelope at the direct WebSocket boundary."""
+    validate_event_envelope_schema_version(envelope)
+    await websocket.send_json(dict(envelope))
+
+
 __all__ = [
     "NAMESPACE_MOZAIKS",
     "EVENT_ENVELOPE_SCHEMA_VERSION",
     "MozaiksEventType",
     "MozaiksEventEnvelope",
     "compute_event_id",
+    "send_event_envelope",
     "validate_event_envelope_schema_version",
 ]

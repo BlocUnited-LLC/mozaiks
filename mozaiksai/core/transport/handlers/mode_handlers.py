@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
+from mozaiksai.core.transport.event_contract import send_event_envelope
 from mozaiksai.core.transport.session_registry import session_registry
 
 from .base import logger, utc_timestamp
@@ -37,7 +38,7 @@ async def handle_enter_general_mode(
 
     logger.debug("GENERAL_MODE_ENTERED ws_id=%s general_chat=%s", ws_id, general_chat_id)
 
-    await websocket.send_json({
+    await send_event_envelope(websocket, {
         "schema_version": "mozaiks.ui.event.v1",
         "type": "chat.mode_changed",
         "data": {
@@ -64,7 +65,7 @@ async def handle_start_general_chat(
     session_registry.enter_general_mode(ws_id)
     general_ctx = await transport._ensure_general_chat_context(chat_id=chat_id, force_new=True)
 
-    await websocket.send_json({
+    await send_event_envelope(websocket, {
         "schema_version": "mozaiks.ui.event.v1",
         "type": "chat.general_session_created",
         "data": {

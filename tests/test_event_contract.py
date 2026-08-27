@@ -1,16 +1,19 @@
 """Tests for the mozaiks.ui.event.v1 canonical event contract."""
+import pytest
+
 from mozaiksai.core.transport.event_contract import (
     EVENT_ENVELOPE_SCHEMA_VERSION,
     MozaiksEventEnvelope,
     MozaiksEventType,
     compute_event_id,
+    send_event_envelope,
 )
 
 
 def test_event_type_strings_are_namespaced():
     """All event types must have a dot-namespaced format."""
     for et in MozaiksEventType:
-        assert "." in et, f"{et} is not namespaced"
+        assert "." in et or et is MozaiksEventType.ERROR, f"{et} is not namespaced"
 
 
 def test_ui_event_types_present():
@@ -85,6 +88,25 @@ def test_envelope_type_compares_as_string():
     )
     assert env.type == "ui.render"
     assert env.type == MozaiksEventType.UI_RENDER
+
+
+def test_envelope_accepts_grandfathered_error_type():
+    env = MozaiksEventEnvelope(
+        schema_version=EVENT_ENVELOPE_SCHEMA_VERSION,
+        type=MozaiksEventType.ERROR,
+        data={"message": "failed"},
+    )
+    assert env.type == "error"
+
+
+@pytest.mark.asyncio
+async def test_direct_websocket_boundary_rejects_missing_schema_version():
+    class _WebSocket:
+        async def send_json(self, _payload):  # noqa: ANN001
+            raise AssertionError("invalid envelope reached socket")
+
+    with pytest.raises(ValueError, match="schema_version"):
+        await send_event_envelope(_WebSocket(), {"type": "chat.error", "data": {}})
 
 
 def test_ns_map_uses_canonical_types():
