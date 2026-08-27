@@ -426,3 +426,25 @@ async def test_secret_scoped_file_fails_persistence_loudly(tmp_path: Path) -> No
     assert result.status == "failed"
     assert "ARTIFACT_PERSISTENCE_FAILED" in str(result.error)
     assert "WORKSPACE_SECRET_PATH" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_provider_execution_metadata_is_persisted(tmp_path: Path) -> None:
+    artifact_store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        source_validation_runner=_fake_source_validation_runner,
+        artifact_store=artifact_store,
+        output_root=tmp_path,
+        provider=_StubProvider(_completed_proposal()),
+    )
+    result = await worker.execute(_request(validation_strategy="local"))
+
+    assert result.status == "validated"
+    execution = result.metadata["coding_provider"]
+    assert execution["provider_id"] == "stub_provider"
+    assert execution["attempts"] == result.metadata["coding_provider_attempts"]
+    assert execution["events"] == []
+    persisted = artifact_store.calls[0]["commit_metadata"]["metadata"]["coding_provider"]
+    assert persisted["provider_id"] == "stub_provider"

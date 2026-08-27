@@ -384,6 +384,20 @@ class ProposedFileChange(BaseModel):
     content: str
 
 
+class ProviderEventRecord(BaseModel):
+    """One operational event observed during a coding provider execution.
+
+    Deliberately coarse: plan updates, tool invocations, and mode changes are
+    recorded as short summaries for review and audit. Model reasoning is never
+    captured here — providers must drop it at the subscription boundary.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["plan", "tool_call", "mode_change"]
+    summary: str = Field(min_length=1, max_length=500)
+
+
 class StagedPatchProposal(BaseModel):
     """Durable, provider-neutral output of one coding execution attempt.
 
@@ -410,6 +424,7 @@ class StagedPatchProposal(BaseModel):
         "unavailable",
     ]
     usage: dict[str, int] | None = None
+    provider_events: list[ProviderEventRecord] = Field(default_factory=list, max_length=200)
     summary: str = ""
     rationale: str = ""
     changed_files: list[ProposedFileChange] = Field(default_factory=list)

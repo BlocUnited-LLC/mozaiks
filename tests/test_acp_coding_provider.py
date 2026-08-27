@@ -310,3 +310,59 @@ def test_provider_prompt_lists_only_editable_files(tmp_path: Path) -> None:
     assert _SCOPED_PATH in prompt
     assert "Make the dashboard return 1" in prompt
     assert "changes anywhere else are discarded" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Provider event capture (PR-6 observability)
+# ---------------------------------------------------------------------------
+
+
+def test_record_provider_event_captures_operational_events_only() -> None:
+    from ag2.acp.events import ACPModeChange, ACPPlan, ACPPlanEntry
+    from ag2.events import ModelReasoning
+    from ag2.events.tool_events import BuiltinToolCallEvent
+
+    from mozaiksai.control_plane.implementations.acp_coding_provider import record_provider_event
+
+    records: list = []
+    record_provider_event(ACPPlan([ACPPlanEntry(content="analyze files", status="in_progress")]), records)
+    record_provider_event(BuiltinToolCallEvent(name="write_file", arguments="{}"), records)
+    record_provider_event(ACPModeChange("edit"), records)
+    # chain of thought must never be recorded
+    record_provider_event(ModelReasoning("secret internal reasoning"), records)
+
+    assert [(r.kind, r.summary) for r in records] == [
+        ("plan", "[in_progress] analyze files"),
+        ("tool_call", "write_file"),
+        ("mode_change", "edit"),
+    ]
+    assert all("secret" not in r.summary for r in records)
+
+
+def test_record_provider_event_enforces_bound() -> None:
+    from ag2.acp.events import ACPModeChange
+
+    from mozaiksai.control_plane.implementations.acp_coding_provider import (
+        _MAX_PROVIDER_EVENTS,
+        record_provider_event,
+    )
+
+    records: list = []
+    for index in range(_MAX_PROVIDER_EVENTS + 25):
+        record_provider_event(ACPModeChange(f"mode-{index}"), records)
+
+    assert len(records) == _MAX_PROVIDER_EVENTS
+
+
+@pytest.mark.asyncio
+async def test_happy_path_proposal_carries_event_list(tmp_path: Path) -> None:
+    factory_ref: list = []
+    factory = _FakeConfigFactory(_writing_turn(factory_ref, _SCOPED_PATH, _PATCHED))
+    factory_ref.append(factory)
+
+    proposal = await _provider(factory, tmp_path).execute(_request())
+
+    assert proposal.status == "completed"
+    # the fake turn emits only message chunks, which are deliberately not
+    # recorded as operational events
+    assert proposal.provider_events == []
