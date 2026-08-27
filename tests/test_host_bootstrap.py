@@ -6,10 +6,26 @@ from pathlib import Path
 from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
 
+def _delenv_restoring(monkeypatch, name: str) -> None:
+    """Delete ``name`` from the environment and guarantee it is restored.
+
+    ``monkeypatch.delenv(name, raising=False)`` records nothing when the key
+    is already absent, so a value written afterwards by
+    ``configure_repo_host_defaults`` (it sets ``PLATFORM_PATH`` and
+    ``MOZAIKS_WORKFLOWS_PATH``) would survive teardown and leak host
+    configuration into every later test in the process.  Setting the key first
+    forces monkeypatch to record a restore entry for it; undo replays in
+    reverse, ending at the original value or original absence.
+    """
+    monkeypatch.setenv(name, "")
+    monkeypatch.delenv(name)
+
+
+
 def test_runtime_host_does_not_inject_repo_defaults(monkeypatch) -> None:
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_FACTORY_APP_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "PLATFORM_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_FACTORY_APP_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_WORKFLOWS_PATH")
 
     configure_repo_host_defaults("runtime")
 
@@ -19,9 +35,9 @@ def test_runtime_host_does_not_inject_repo_defaults(monkeypatch) -> None:
 
 def test_studio_host_without_workspace_defaults_platform_path_to_factory_app_bundle(monkeypatch) -> None:
     """Repo-local Studio bootstrap should bind to the shared builder workflow root."""
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "PLATFORM_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_APP_WORKSPACE_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_WORKFLOWS_PATH")
 
     configure_repo_host_defaults("studio")
 
@@ -44,10 +60,10 @@ def test_studio_host_uses_external_workspace_root_when_provided(monkeypatch, tmp
     (workspace_root / "workflows").mkdir(parents=True)
     (app_root / "app.json").write_text('{"appName": "External App Zero"}', encoding="utf-8")
 
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_FACTORY_APP_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "PLATFORM_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_FACTORY_APP_PATH")
     monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace_root))
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "MOZAIKS_WORKFLOWS_PATH")
 
     configure_repo_host_defaults("studio")
 
@@ -67,9 +83,9 @@ def test_platform_host_uses_workspace_root_workflows_when_present(monkeypatch, t
     (app_root / "app.json").write_text('{"appName": "External App Zero"}', encoding="utf-8")
 
     monkeypatch.setenv("PLATFORM_PATH", str(workspace_root))
-    monkeypatch.delenv("MOZAIKS_FACTORY_APP_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "MOZAIKS_FACTORY_APP_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_APP_WORKSPACE_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_WORKFLOWS_PATH")
 
     configure_repo_host_defaults("platform")
 
@@ -79,8 +95,8 @@ def test_platform_host_uses_workspace_root_workflows_when_present(monkeypatch, t
 
 def test_studio_host_normalizes_repo_root_platform_path_to_factory_app_bundle(monkeypatch) -> None:
     monkeypatch.setenv("PLATFORM_PATH", str(Path.cwd().resolve()))
-    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    _delenv_restoring(monkeypatch, "MOZAIKS_APP_WORKSPACE_PATH")
+    _delenv_restoring(monkeypatch, "MOZAIKS_WORKFLOWS_PATH")
 
     configure_repo_host_defaults("studio")
 
