@@ -4,19 +4,11 @@
   "description": "Universal workflow routing layer. Defines workflow registry entries, dependencies, transition routes, and optional workflow sequence metadata. NOT agent routing; that lives in transition_graph.yaml.",
   "artifact_dependency_graph": {
     "concept": [],
-    "build_plan": [
-      "concept"
-    ],
-    "brand": [
+    "theme_capture": [
       "concept"
     ],
     "design_docs": [
-      "concept",
-      "build_plan"
-    ],
-    "experience_spec": [
-      "concept",
-      "design_docs"
+      "concept"
     ],
     "workflow_bundle": [
       "design_docs",
@@ -24,15 +16,13 @@
     ],
     "subscription_contract": [
       "concept",
-      "build_plan",
       "design_docs"
     ],
     "app_bundle": [
       "design_docs",
-      "experience_spec",
       "workflow_bundle",
       "subscription_contract",
-      "brand"
+      "theme_capture"
     ],
     "application_inventory": [],
     "ownership_boundary": [
@@ -199,10 +189,8 @@
       "description": "Full build pipeline: app path context -> value -> brand -> coding participation -> database setup intent -> design -> generation -> review and promote.",
       "affected_declarative_families": [
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle"
@@ -312,10 +300,8 @@
       "description": "Existing app Add AI Workflows path: ValueEngine plans app-aware AI improvements, then the scoped build stack generates approved workflow and app surfaces without replacing the existing app.",
       "affected_declarative_families": [
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle"
@@ -361,10 +347,8 @@
       "description": "Existing app Build App Features path: ValueEngine plans approved feature expansion, then the scoped build stack generates Mozaiks-owned features and extensions without rewriting the source repository.",
       "affected_declarative_families": [
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle"
@@ -410,10 +394,8 @@
       "description": "Revision pipeline for concept-level changes that need the full build stack refreshed without onboarding transitions.",
       "affected_declarative_families": [
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle"
@@ -459,10 +441,8 @@
       "description": "Concept-level pivot that re-plans from existing app context, preserving brand and reusable generic modules. Runs the same workflow chain as full_rebuild but is semantically distinct so later work can inject preservation context (pivot_description, preserve_families, carry_forward_modules).",
       "affected_declarative_families": [
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle"
@@ -507,8 +487,7 @@
       "id": "concept_patch",
       "description": "Scoped concept revision owned by ValueEngine.",
       "affected_declarative_families": [
-        "concept",
-        "build_plan"
+        "concept"
       ],
       "steps": [
         {
@@ -537,7 +516,6 @@
       "description": "Design-intent revision that refreshes downstream workflow and app artifacts.",
       "affected_declarative_families": [
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle"
@@ -569,7 +547,7 @@
       "id": "app_surface_revision",
       "description": "App-surface revision that reopens DesignDocs and regenerates app artifacts.",
       "affected_declarative_families": [
-        "experience_spec",
+        "design_docs",
         "app_bundle"
       ],
       "steps": [
@@ -683,7 +661,7 @@
       "id": "theme_revision",
       "description": "Theme revision pipeline: re-runs ThemeCapture to refresh brand tokens, then rebuilds the app bundle with the updated theme.",
       "affected_declarative_families": [
-        "brand",
+        "theme_capture",
         "app_bundle"
       ],
       "steps": [
@@ -703,7 +681,7 @@
       "id": "theme_patch",
       "description": "Scoped theme patch applied within AppGenerator without re-running ThemeCapture.",
       "affected_declarative_families": [
-        "brand",
+        "theme_capture",
         "app_bundle"
       ],
       "steps": [

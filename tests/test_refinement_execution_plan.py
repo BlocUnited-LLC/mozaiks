@@ -44,7 +44,7 @@ def test_ui_refinement_execution_plan_uses_app_surface_revision() -> None:
 
     assert plan.workflow_sequence == "app_surface_revision"
     assert plan.refinement_lane == "experience_design"
-    assert "experience_spec" in plan.affected_declarative_families
+    assert "design_docs" in plan.affected_declarative_families
     assert {"route_component_validation", "ui_theme_primitive_validation"} <= _required_validation_ids(plan)
 
 

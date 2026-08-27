@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
 
 
 def _load_generate_and_download_module():
@@ -43,7 +46,6 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
         "resolve_latest_artifact_version_refs",
         lambda **kwargs: asyncio.sleep(0, result={
             "concept": "av_concept_1",
-            "build_plan": "av_build_plan_1",
             "design_docs": "av_design_docs_1",
         }),
     )
@@ -88,7 +90,6 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
     assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_1",
-        "build_plan": "av_build_plan_1",
         "design_docs": "av_design_docs_1",
     }
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"
@@ -98,4 +99,123 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
         == workflow_integration_metadata
     )
     assert context.data["artifact_version_id"] == "av_workflow_bundle_1"
+
+
+def test_record_context_and_artifacts_propagates_artifact_registration_failure(
+    monkeypatch,
+) -> None:
+    export_write = AsyncMock()
+    artifact_projection = AsyncMock()
+    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", export_write)
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "record_workflow_artifacts",
+        artifact_projection,
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "_register_workflow_bundle_artifact_version",
+        AsyncMock(side_effect=RuntimeError("artifact store unavailable")),
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "resolve_agent_api_url",
+        lambda app_id: f"https://api.test/{app_id}",
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "resolve_agent_websocket_url",
+        lambda app_id: f"wss://ws.test/{app_id}",
+    )
+
+    with pytest.raises(RuntimeError, match="artifact store unavailable"):
+        asyncio.run(
+            generate_and_download_module._record_context_and_artifacts(
+                app_id="app_123",
+                user_id="user_123",
+                chat_id="chat_123",
+                pack_name="LeadWorkflow",
+                bundle_entries=[],
+                zip_path=None,
+                context_variables=_Context(),
+            )
+        )
+
+    export_write.assert_not_awaited()
+    artifact_projection.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "optional_writer",
+    ["record_workflow_export", "record_workflow_artifacts"],
+)
+def test_record_context_and_artifacts_keeps_optional_projections_best_effort(
+    monkeypatch,
+    optional_writer: str,
+) -> None:
+    events: list[str] = []
+
+    async def register_bundle(*args, **kwargs):
+        events.append("canonical_registration")
+        return type("BuildRecord", (), {"id": "av_1"})()
+
+    async def write_export(*args, **kwargs):
+        events.append("workflow_export")
+        if optional_writer == "record_workflow_export":
+            raise RuntimeError("optional store unavailable")
+
+    async def write_artifacts(*args, **kwargs):
+        events.append("workflow_artifacts")
+        if optional_writer == "record_workflow_artifacts":
+            raise RuntimeError("optional store unavailable")
+
+    registration = AsyncMock(side_effect=register_bundle)
+    export_write = AsyncMock(side_effect=write_export)
+    artifact_projection = AsyncMock(side_effect=write_artifacts)
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "_register_workflow_bundle_artifact_version",
+        registration,
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "record_workflow_export",
+        export_write,
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "record_workflow_artifacts",
+        artifact_projection,
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "resolve_agent_api_url",
+        lambda app_id: f"https://api.test/{app_id}",
+    )
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "resolve_agent_websocket_url",
+        lambda app_id: f"wss://ws.test/{app_id}",
+    )
+
+    asyncio.run(
+        generate_and_download_module._record_context_and_artifacts(
+            app_id="app_123",
+            user_id="user_123",
+            chat_id="chat_123",
+            pack_name="LeadWorkflow",
+            bundle_entries=[],
+            zip_path=None,
+            context_variables=_Context(),
+        )
+    )
+
+    assert events == [
+        "canonical_registration",
+        "workflow_export",
+        "workflow_artifacts",
+    ]
+    registration.assert_awaited_once()
+    export_write.assert_awaited_once()
+    artifact_projection.assert_awaited_once()
 

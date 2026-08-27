@@ -348,7 +348,7 @@ async def test_experience_spec_impact_uses_glob_hints_without_file_manifest() ->
     decision = await resolver.route(request)
 
     assert decision.workflow_sequence == "app_surface_revision"
-    assert decision.impact_set.affected_declarative_families == ["experience_spec", "app_bundle"]
+    assert decision.impact_set.affected_declarative_families == ["design_docs", "app_bundle"]
     assert decision.impact_set.affected_bundle_paths == [
         "ui/pages/*.yaml",
         "ui/route_manifest.json",
@@ -1460,9 +1460,10 @@ async def test_stale_route_prioritizes_concept_over_downstream_families(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_stale_route_handles_experience_spec_as_design_owned_surface(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When experience_spec is stale, route to DesignDocs via app_surface_revision."""
-    _patch_artifact_store(monkeypatch, ["experience_spec"])
+async def test_stale_route_handles_theme_capture_as_persisted_theme_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_artifact_store(monkeypatch, ["theme_capture"])
 
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
@@ -1475,11 +1476,11 @@ async def test_stale_route_handles_experience_spec_as_design_owned_surface(monke
     decision = await resolver.route(request)
 
     assert classifier.call_count == 0
-    assert decision.workflow_id == "DesignDocs"
-    assert decision.workflow_sequence == "app_surface_revision"
+    assert decision.workflow_id == "ThemeCapture"
+    assert decision.workflow_sequence == "theme_revision"
     assert decision.change_intent.source == "stale_upstream"
-    assert "experience_spec" in decision.change_intent.signals
-    assert decision.impact_set.affected_declarative_families == ["experience_spec", "app_bundle"]
+    assert "theme_capture" in decision.change_intent.signals
+    assert decision.impact_set.affected_declarative_families == ["theme_capture", "app_bundle"]
     assert decision.is_full_restart is False
 
 
@@ -1544,7 +1545,7 @@ async def test_conceptual_replan_context_seed_has_pivot_description() -> None:
 
 @pytest.mark.asyncio
 async def test_conceptual_replan_context_seed_has_default_preserve_families() -> None:
-    """conceptual_replan seeds preserve_families defaulting to ['brand'] when not in extra."""
+    """conceptual_replan defaults preservation to the persisted theme family."""
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="core",
@@ -1566,7 +1567,7 @@ async def test_conceptual_replan_context_seed_has_default_preserve_families() ->
     decision = await resolver.route(request)
 
     assert decision.workflow_sequence == "conceptual_replan"
-    assert decision.context_seed["preserve_families"] == ["brand"]
+    assert decision.context_seed["preserve_families"] == ["theme_capture"]
 
 
 @pytest.mark.asyncio
@@ -2665,7 +2666,7 @@ def test_every_persisted_refinable_family_has_a_harness_route() -> None:
         "subscription_contract",
         "workflow_bundle",
         "app_bundle",
-        "theme_config",
+        "theme_capture",
     }
     missing = expected - routed
     assert not missing, (

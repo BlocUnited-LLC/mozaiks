@@ -452,10 +452,8 @@ def test_registry_brownfield_sequences_affect_canonical_families() -> None:
         sequences["brownfield_overlay_generation"].get("affected_declarative_families") or []
     )
     assert "concept" in overlay_families
-    assert "build_plan" in overlay_families
-    assert "brand" in overlay_families
+    assert "theme_capture" in overlay_families
     assert "design_docs" in overlay_families
-    assert "experience_spec" in overlay_families
     assert "subscription_contract" in overlay_families
     assert "workflow_bundle" in overlay_families
     assert "app_bundle" in overlay_families
@@ -464,13 +462,14 @@ def test_registry_brownfield_sequences_affect_canonical_families() -> None:
         sequences["brownfield_module_generation"].get("affected_declarative_families") or []
     )
     assert "concept" in module_families
-    assert "build_plan" in module_families
-    assert "brand" in module_families
+    assert "theme_capture" in module_families
     assert "design_docs" in module_families
-    assert "experience_spec" in module_families
     assert "subscription_contract" in module_families
     assert "workflow_bundle" in module_families
     assert "app_bundle" in module_families
+    assert {"build_plan", "brand", "theme_config", "experience_spec"}.isdisjoint(
+        overlay_families | module_families
+    )
 
 
 def test_registry_brownfield_path_selector_routes_correctly() -> None:

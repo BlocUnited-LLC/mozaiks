@@ -424,8 +424,8 @@ definitions:
       collection: ArtifactVersions
       query_template:
         app_id: '{{runtime.app_id}}'
-        artifact_kind: subscription_contract
-        artifact_key: subscription_contract
+        build_family: subscription_contract
+        build_key: subscription_contract
         lifecycle_status: current
       fields:
       - commit_metadata

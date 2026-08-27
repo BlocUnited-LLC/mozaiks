@@ -85,3 +85,16 @@ def test_value_engine_existing_app_mode_overrides_greenfield_openers() -> None:
     assert "Do not ask the user to pick from detected opportunities before research." in agents_text
     assert "ValueEngine's downstream agents own that value analysis." in agents_text
     assert 'what would you suggest' in agents_text
+
+
+def test_value_engine_has_no_dead_build_plan_persistence_branch() -> None:
+    tools_config = yaml.safe_load((VALUE_ENGINE_DIR / "tools.yaml").read_text(encoding="utf-8"))
+    context_config = yaml.safe_load((VALUE_ENGINE_DIR / "context_variables.yaml").read_text(encoding="utf-8"))
+    decompose_source = (VALUE_ENGINE_DIR / "tools" / "decompose.py").read_text(encoding="utf-8")
+
+    tool_names = {tool["function"] for tool in tools_config["tools"]}
+    assert "save_build_plan" not in tool_names
+    assert "get_build_plan" not in tool_names
+    assert "build_plan" not in context_config["definitions"]
+    assert "save_build_plan" not in decompose_source
+    assert "get_build_plan" not in decompose_source

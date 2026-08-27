@@ -8,6 +8,7 @@ the task batch output stored in context_variables["workflow_bundle_results"].
 
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -48,6 +49,37 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in [here] + list(here.parents):
+        if (parent / "mozaiksai").is_dir():
+            return parent
+    return here.parents[-1]
+
+
+def _resolve_generated_artifacts_root() -> Path:
+    raw = os.getenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", "generated").strip()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = _repo_root() / candidate
+    return candidate.resolve()
+
+
+def _safe_path_segment(value: Any, *, fallback: str) -> str:
+    text = str(value or "").strip() or fallback
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip(".-")
+    return text or fallback
+
+
+def _resolve_workflow_output_root(*, app_id: Any, build_id: Any) -> Path:
+    return (
+        _resolve_generated_artifacts_root()
+        / "workflows"
+        / _safe_path_segment(app_id, fallback="local-app")
+        / _safe_path_segment(build_id, fallback="local-build")
+    )
 
 
 def _to_pascal_case(name: str) -> str:
@@ -177,7 +209,7 @@ async def _register_workflow_bundle_artifact_version(
     artifact_store = get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
-        artifact_kinds=("concept", "build_plan", "design_docs"),
+        artifact_kinds=("concept", "design_docs"),
         artifact_store=artifact_store,
     )
     artifact_version = await artifact_store.create_build_record(
@@ -224,47 +256,61 @@ async def _record_context_and_artifacts(
     context_variables: Any | None,
 ) -> None:
     """Record workflow export context and artifacts for downstream chaining."""
+    if not app_id:
+        raise ValueError("app_id is required to record workflow artifacts")
+
+    # Synthesize minimal workflow config from bundle entries.
+    workflow_names = [e.get("workflow_name", "") for e in bundle_entries if e.get("workflow_name")]
+    workflow_integration_metadata = extract_workflow_integration_metadata_from_bundle_entries(
+        bundle_entries,
+        bundle_name=pack_name,
+    )
+    primary_workflow = (
+        workflow_integration_metadata.get("primary_workflow")
+        if isinstance(workflow_integration_metadata, dict)
+        else None
+    )
+
+    websocket_url = resolve_agent_websocket_url(str(app_id))
+    api_url = resolve_agent_api_url(str(app_id))
+    capability_id = (
+        str(primary_workflow.get("capability_id"))
+        if isinstance(primary_workflow, dict) and primary_workflow.get("capability_id")
+        else (pack_name.lower().replace("_", "-").replace(" ", "-") if pack_name else None)
+    )
+    generated_workflow_name = (
+        str(primary_workflow.get("workflow_name"))
+        if isinstance(primary_workflow, dict) and primary_workflow.get("workflow_name")
+        else pack_name
+    )
+    generated_workflow_startup_mode = (
+        primary_workflow.get("startup_mode")
+        if isinstance(primary_workflow, dict)
+        else None
+    )
+    generated_workflow_trigger_events = (
+        primary_workflow.get("trigger_events") or []
+        if isinstance(primary_workflow, dict)
+        else []
+    )
+    if workflow_integration_metadata:
+        apply_workflow_integration_context(context_variables, workflow_integration_metadata)
+
+    # The canonical BuildRecord is the required persistence boundary. Register
+    # it before writing optional export/diagnostic projections so a required
+    # failure cannot leave those secondary records looking authoritative.
+    await _register_workflow_bundle_artifact_version(
+        app_id=str(app_id),
+        user_id=user_id,
+        workflow_name="AgentGenerator",
+        chat_id=chat_id,
+        bundle_name=pack_name,
+        zip_path=zip_path,
+        context_variables=context_variables,
+        workflow_integration_metadata=workflow_integration_metadata,
+    )
+
     try:
-        if not app_id:
-            return
-
-        # Synthesize minimal workflow config from bundle entries
-        workflow_names = [e.get("workflow_name", "") for e in bundle_entries if e.get("workflow_name")]
-        workflow_integration_metadata = extract_workflow_integration_metadata_from_bundle_entries(
-            bundle_entries,
-            bundle_name=pack_name,
-        )
-        primary_workflow = (
-            workflow_integration_metadata.get("primary_workflow")
-            if isinstance(workflow_integration_metadata, dict)
-            else None
-        )
-
-        websocket_url = resolve_agent_websocket_url(str(app_id))
-        api_url = resolve_agent_api_url(str(app_id))
-        capability_id = (
-            str(primary_workflow.get("capability_id"))
-            if isinstance(primary_workflow, dict) and primary_workflow.get("capability_id")
-            else (pack_name.lower().replace("_", "-").replace(" ", "-") if pack_name else None)
-        )
-        generated_workflow_name = (
-            str(primary_workflow.get("workflow_name"))
-            if isinstance(primary_workflow, dict) and primary_workflow.get("workflow_name")
-            else pack_name
-        )
-        generated_workflow_startup_mode = (
-            primary_workflow.get("startup_mode")
-            if isinstance(primary_workflow, dict)
-            else None
-        )
-        generated_workflow_trigger_events = (
-            primary_workflow.get("trigger_events") or []
-            if isinstance(primary_workflow, dict)
-            else []
-        )
-        if workflow_integration_metadata:
-            apply_workflow_integration_context(context_variables, workflow_integration_metadata)
-
         await record_workflow_export(
             app_id=str(app_id),
             user_id=user_id,
@@ -290,7 +336,10 @@ async def _record_context_and_artifacts(
                 "agent_api_url": api_url,
             },
         )
+    except Exception as exc:
+        _logger.warning("Optional workflow export persistence failed: %s", exc)
 
+    try:
         await record_workflow_artifacts(
             app_id=str(app_id),
             user_id=user_id,
@@ -303,34 +352,16 @@ async def _record_context_and_artifacts(
                 "workflow_integration_metadata": workflow_integration_metadata,
             },
         )
-
-        try:
-            await _register_workflow_bundle_artifact_version(
-                app_id=str(app_id),
-                user_id=user_id,
-                workflow_name="AgentGenerator",
-                chat_id=chat_id,
-                bundle_name=pack_name,
-                zip_path=zip_path,
-                context_variables=context_variables,
-                workflow_integration_metadata=workflow_integration_metadata,
-            )
-        except Exception as av_err:
-            _logger.warning("[ArtifactStore] Failed to register artifact version: %s", av_err)
-
-        if context_variables and hasattr(context_variables, "set"):
-            try:
-                context_variables.set("agent_websocket_url", websocket_url)
-                context_variables.set("agent_api_url", api_url)
-                context_variables.set("generated_workflow_name", generated_workflow_name)
-                context_variables.set("generated_workflow_capability_id", capability_id)
-                context_variables.set("generated_workflow_startup_mode", generated_workflow_startup_mode)
-                context_variables.set("generated_workflow_trigger_events", generated_workflow_trigger_events)
-            except Exception:
-                pass
-
     except Exception as exc:
-        _logger.debug("Failed to record workflow export context: %s", exc)
+        _logger.warning("Optional workflow artifact projection failed: %s", exc)
+
+    if context_variables and hasattr(context_variables, "set"):
+        context_variables.set("agent_websocket_url", websocket_url)
+        context_variables.set("agent_api_url", api_url)
+        context_variables.set("generated_workflow_name", generated_workflow_name)
+        context_variables.set("generated_workflow_capability_id", capability_id)
+        context_variables.set("generated_workflow_startup_mode", generated_workflow_startup_mode)
+        context_variables.set("generated_workflow_trigger_events", generated_workflow_trigger_events)
 
 
 # ---------------------------------------------------------------------------
@@ -358,12 +389,14 @@ async def generate_and_download(
     app_id: str | None = None
     workflow_name: str | None = None
     user_id: str | None = None
+    build_id: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
         chat_id = context_variables.get("chat_id")
         app_id = context_variables.get("app_id")
         workflow_name = context_variables.get("workflow_name")
         user_id = context_variables.get("user_id")
+        build_id = context_variables.get("build_id")
 
     wf_logger = get_workflow_logger(workflow_name=(workflow_name or "AgentGenerator"), chat_id=chat_id, app_id=app_id)
     tlog = None
@@ -464,8 +497,10 @@ async def generate_and_download(
     # ------------------------------------------------------------------
     # Resolve output directory
     # ------------------------------------------------------------------
-    generated_root = os.getenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", "generated").strip()
-    base_generated = Path(generated_root) / "workflows" / str(app_id)
+    base_generated = _resolve_workflow_output_root(
+        app_id=app_id,
+        build_id=build_id or chat_id,
+    )
     base_generated.mkdir(parents=True, exist_ok=True)
 
     ui_files: list[dict[str, Any]] = []

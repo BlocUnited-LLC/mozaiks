@@ -337,7 +337,7 @@ definitions:
     type: array
     description: >
       Artifact families that the conceptual_replan should preserve rather than
-      regenerate from scratch. Default is ["brand"] — ThemeCapture runs but
+      regenerate from scratch. Default is ["theme_capture"] — ThemeCapture runs but
       should use the existing brand as a starting point. Carry-forward behavior
       is future work; this variable is context plumbing only.
     source:
@@ -346,7 +346,7 @@ definitions:
   previous_brand_ref:
     type: string
     description: >
-      Artifact version id of the current brand/theme_config artifact at the
+      Artifact version id of the current theme_capture artifact at the
       time the conceptual_replan was triggered. Null when not available.
     source:
       type: state
@@ -411,12 +411,6 @@ definitions:
   generation_status:
     type: object
     description: Status of multi-pass feature generation (features_total, features_completed, current_feature, errors).
-    source:
-      type: computed
-      default: null
-  build_plan:
-    type: object
-    description: Capability-pack-aware build decomposition derived from the approved concept.
     source:
       type: computed
       default: null

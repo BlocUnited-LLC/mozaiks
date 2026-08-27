@@ -1865,8 +1865,8 @@ def save_app_schema(
         if context_variables and hasattr(context_variables, "set"):
             context_variables.set("generated_app_dir", str(output_dir))
     except Exception as exc:
-        # Log but don't fail — context_variables are already set; filesystem is best-effort
-        _logger.warning("Could not write schema files to disk: %s", exc)
+        _logger.exception("Could not write schema files to disk")
+        raise RuntimeError("Could not write schema files to disk") from exc
 
     msg = (agent_message or "App schema persisted.").strip()
     files_written = f"\nFiles written: {', '.join(written)}" if written else ""

@@ -253,7 +253,7 @@ def test_subscription_contract_designer_is_registered_before_generators() -> Non
     assert "SubscriptionContractDesigner" in workflow_ids
 
     graph = registry["artifact_dependency_graph"]
-    assert graph["subscription_contract"] == ["concept", "build_plan", "design_docs"]
+    assert graph["subscription_contract"] == ["concept", "design_docs"]
     assert "subscription_contract" in graph["workflow_bundle"]
     assert "subscription_contract" in graph["app_bundle"]
 
@@ -267,6 +267,23 @@ def test_subscription_contract_designer_is_registered_before_generators() -> Non
     assert ordered.index("SubscriptionContractDesigner") < ordered.index("AgentGenerator")
     assert ordered.index("SubscriptionContractDesigner") < ordered.index("AppGenerator")
     assert "subscription_contract" in build["affected_declarative_families"]
+
+
+def test_subscription_contract_fallback_queries_use_artifact_version_fields() -> None:
+    for workflow_name in ("AgentGenerator", "AppGenerator"):
+        context = yaml.safe_load(
+            (WORKFLOWS_ROOT / workflow_name / "context_variables.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        query = context["definitions"]["subscription_contract_artifact"]["source"][
+            "query_template"
+        ]
+
+        assert query["build_family"] == "subscription_contract"
+        assert query["build_key"] == "subscription_contract"
+        assert "artifact_kind" not in query
+        assert "artifact_key" not in query
 
 
 def test_subscription_contract_designer_pack_is_host_agnostic() -> None:
@@ -565,7 +582,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     assert persisted["artifact_kind"] == "subscription_contract"
     assert persisted["artifact_key"] == "subscription_contract"
-    assert persisted["input_artifact_kinds"] == ("concept", "build_plan", "design_docs")
+    assert persisted["input_artifact_kinds"] == ("concept", "design_docs")
 
 
 @pytest.mark.asyncio

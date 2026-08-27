@@ -1160,6 +1160,22 @@ def test_save_app_schema_defaults_generated_root_to_repo_generated(monkeypatch) 
     assert save_app_schema_module._resolve_generated_artifacts_root() == (workspace / "generated").resolve()
 
 
+def test_save_app_schema_propagates_filesystem_failure(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    monkeypatch.setattr(
+        save_app_schema_module,
+        "_persist_to_filesystem",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="Could not write schema files to disk"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            context_variables=_Context(),
+        )
+
+
 def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> None:
     source = tmp_path / "generated" / "apps" / "app-1" / "build-1" / "app"
     target = tmp_path / "active-app"

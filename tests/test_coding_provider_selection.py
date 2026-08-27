@@ -63,7 +63,7 @@ def _request(files: dict[str, str] | None = None, **overrides: Any) -> CodingWor
     ("files", "acp_enabled", "importable", "kind", "expected", "reason_prefix"),
     [
         ({_FILE_A: "a", _FILE_B: "b"}, True, True, "app_bundle", "acp", "multi_file_scope_within_budget"),
-        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "theme_config", "acp", "multi_file_scope_within_budget"),
+        ({_FILE_A: "a", _FILE_B: "b"}, True, True, "theme_capture", "acp", "multi_file_scope_within_budget"),
         ({_FILE_A: "a"}, True, True, "app_bundle", "structured_output", "single_file_scope"),
         ({_FILE_A: "a", _FILE_B: "b"}, False, True, "app_bundle", "structured_output", "acp_disabled"),
         ({_FILE_A: "a", _FILE_B: "b"}, True, False, "app_bundle", "structured_output", "acp_extra_not_installed"),
