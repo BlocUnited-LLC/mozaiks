@@ -44,12 +44,23 @@ _GRAMMARS: dict[SemanticCategory, re.Pattern[str]] = {
     SemanticCategory.ARTIFACT_FAMILY: re.compile(r"^[a-z][a-z0-9_]*$"),
 }
 
+_GRANDFATHERED_EVENT_IDENTIFIERS = frozenset({"error"})
+
 
 def validate_identifier_grammar(category: SemanticCategory | str, identifier: str) -> str:
     """Validate one category's canonical grammar and return a trimmed value."""
     resolved_category = SemanticCategory(category)
     value = str(identifier or "").strip()
-    if not value or _GRAMMARS[resolved_category].fullmatch(value) is None:
+    if (
+        not value
+        or (
+            _GRAMMARS[resolved_category].fullmatch(value) is None
+            and not (
+                resolved_category is SemanticCategory.EVENT
+                and value in _GRANDFATHERED_EVENT_IDENTIFIERS
+            )
+        )
+    ):
         if resolved_category is SemanticCategory.CAPABILITY:
             expected = "[a-z0-9_.]+"
         elif resolved_category is SemanticCategory.EVENT:
@@ -259,6 +270,7 @@ def build_taxonomy_registry(namespaces: Iterable[TaxonomyNamespace]) -> Taxonomy
 
 
 _CORE_EVENTS = (
+    "error",
     "ack.artifact_action",
     "ack.tool_call_response",
     "artifact.action.completed",

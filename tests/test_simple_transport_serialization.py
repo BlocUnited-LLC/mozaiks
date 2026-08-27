@@ -20,10 +20,15 @@ def test_pre_connection_buffer_overflow_logs_once_per_chat(monkeypatch):
     import asyncio
 
     async def _run() -> None:
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "one"}}, "chat-1")
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "two"}}, "chat-1")
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "three"}}, "chat-1")
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "four"}}, "chat-1")
+        for content in ("one", "two", "three", "four"):
+            await transport._broadcast_to_websockets(
+                {
+                    "schema_version": EVENT_ENVELOPE_SCHEMA_VERSION,
+                    "type": "chat.text",
+                    "data": {"content": content},
+                },
+                "chat-1",
+            )
 
     asyncio.run(_run())
 

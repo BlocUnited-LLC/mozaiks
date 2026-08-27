@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from copy import deepcopy
 from pathlib import Path
 
@@ -109,6 +110,7 @@ def test_registry_validation_does_not_mutate_inputs() -> None:
         (SemanticCategory.EVENT, "build.started"),
         (SemanticCategory.EVENT, "build.completed"),
         (SemanticCategory.EVENT, "build.failed"),
+        (SemanticCategory.EVENT, "error"),
         (SemanticCategory.EVENT, "chat.revision_requested"),
         (SemanticCategory.EVENT, "chat.deployment_started"),
         (SemanticCategory.EVENT, "chat.deployment_progress"),
@@ -462,3 +464,32 @@ def test_dispatcher_builds_versioned_envelopes_for_transport_consumer() -> None:
     )
     assert envelope is not None
     validate_event_envelope_schema_version(envelope)
+
+
+def test_literal_wire_event_producers_declare_schema_version() -> None:
+    wire_methods = {"send_json", "send_event_to_ui", "_broadcast_to_websockets"}
+    missing: list[str] = []
+    for source_root in (ROOT / "mozaiksai", ROOT / "factory_app"):
+        for path in source_root.rglob("*.py"):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                call = node.value if isinstance(node, ast.Await) else node
+                if not isinstance(call, ast.Call) or not call.args:
+                    continue
+                if not isinstance(call.func, ast.Attribute) or call.func.attr not in wire_methods:
+                    continue
+                payload = call.args[0]
+                if not isinstance(payload, ast.Dict):
+                    continue
+                keys = {
+                    key.value
+                    for key in payload.keys
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)
+                }
+                if {"type", "data"} <= keys and "schema_version" not in keys:
+                    missing.append(f"{path.relative_to(ROOT)}:{payload.lineno}")
+
+    assert missing == []

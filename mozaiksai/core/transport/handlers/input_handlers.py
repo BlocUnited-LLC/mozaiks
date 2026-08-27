@@ -56,6 +56,7 @@ async def handle_user_input_submit(
                 ui_context=ui_context_payload,
             )
             await websocket.send_json({
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.input_ack",
                 "data": {"chat_id": chat_id, "status": "accepted"},
                 "timestamp": utc_timestamp()
@@ -130,6 +131,7 @@ async def handle_user_input_submit(
             )
 
         await websocket.send_json({
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.input_ack",
             "data": {"chat_id": target_chat_id, "status": "accepted"},
             "timestamp": utc_timestamp()
@@ -154,6 +156,7 @@ async def handle_tool_call_response(
         ok = await transport.submit_tool_call_response(event_id, response_data)
         logger.debug("TOOL_CALL_RESPONSE_RECEIVED event=%s accepted=%s", event_id, ok)
         await websocket.send_json({
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "ack.tool_call_response",
             "data": {"tool_call_id": event_id, "status": "accepted" if ok else "rejected"},
             "timestamp": utc_timestamp()

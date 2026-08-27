@@ -939,6 +939,7 @@ async def websocket_endpoint(
             await websocket.accept()
             await websocket.send_json(
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": "Failed to validate workflow prerequisites. Please try again.",
@@ -956,6 +957,7 @@ async def websocket_endpoint(
             await websocket.accept()
             await websocket.send_json(
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": prereq_reason or "Workflow prerequisites are not met.",

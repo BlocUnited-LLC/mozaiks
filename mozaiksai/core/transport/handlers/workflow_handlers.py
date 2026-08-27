@@ -100,6 +100,7 @@ async def handle_switch_workflow(
 
     try:
         await websocket.send_json({
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.context_switched",
             "data": {
                 "from_chat_id": chat_id,
@@ -196,6 +197,7 @@ async def handle_switch_workflow(
                     text_payload.setdefault("sender", text_payload.get("agent", "user"))
                     text_payload.setdefault("replay", True)
                     envelope = {
+                        "schema_version": "mozaiks.ui.event.v1",
                         "type": "chat.text",
                         "data": text_payload,
                         "timestamp": utc_timestamp(),
@@ -204,6 +206,7 @@ async def handle_switch_workflow(
                 elif kind == "resume_boundary":
                     boundary = {k: v for k, v in event_dict.items() if k != "kind"}
                     envelope = {
+                        "schema_version": "mozaiks.ui.event.v1",
                         "type": "chat.resume_boundary",
                         "data": boundary,
                         "timestamp": utc_timestamp(),
@@ -212,6 +215,7 @@ async def handle_switch_workflow(
                 elif kind == "awaiting_reply":
                     awaiting = {k: v for k, v in event_dict.items() if k != "kind"}
                     envelope = {
+                        "schema_version": "mozaiks.ui.event.v1",
                         "type": "chat.awaiting_reply",
                         "data": awaiting,
                         "timestamp": utc_timestamp(),
@@ -273,6 +277,7 @@ async def handle_start_workflow(
     resolved_workflow = route_decision.workflow_id
     if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
         await websocket.send_json({
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.workflow_rerouted",
             "data": {
                 "requested_workflow_name": str(target_workflow),
@@ -327,6 +332,7 @@ async def handle_start_workflow(
     logger.debug("WORKFLOW_STARTED workflow=%s chat=%s ws_id=%s", resolved_workflow, new_chat_id, ws_id)
 
     await websocket.send_json({
+        "schema_version": "mozaiks.ui.event.v1",
         "type": "chat.workflow_started",
         "data": {
             "chat_id": new_chat_id,
@@ -456,6 +462,7 @@ async def handle_start_workflow_batch(
 
         if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
             await websocket.send_json({
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.workflow_rerouted",
                 "data": {
                     "requested_workflow_name": str(target_workflow),
@@ -468,6 +475,7 @@ async def handle_start_workflow_batch(
             })
 
         await websocket.send_json({
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.workflow_started",
             "data": {
                 "chat_id": new_chat_id,
@@ -500,6 +508,7 @@ async def handle_start_workflow_batch(
 
     # Summary ack
     await websocket.send_json({
+        "schema_version": "mozaiks.ui.event.v1",
         "type": "chat.workflow_batch_started",
         "data": {
             "count": len(started),

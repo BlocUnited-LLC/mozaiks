@@ -77,6 +77,7 @@ async def test_handle_user_input_submit_routes_general_mode_messages_to_general_
     assert transport.errors == []
     assert websocket.sent == [
         {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.input_ack",
             "data": {"chat_id": "chat-1", "status": "accepted"},
             "timestamp": websocket.sent[0]["timestamp"],
@@ -127,6 +128,7 @@ async def test_handle_user_input_submit_routes_workflow_mode_messages_back_to_or
     assert transport.errors == []
     assert websocket.sent == [
         {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.input_ack",
             "data": {"chat_id": "chat-1", "status": "accepted"},
             "timestamp": websocket.sent[0]["timestamp"],
