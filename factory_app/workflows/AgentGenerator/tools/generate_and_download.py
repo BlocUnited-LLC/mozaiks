@@ -296,45 +296,9 @@ async def _record_context_and_artifacts(
     if workflow_integration_metadata:
         apply_workflow_integration_context(context_variables, workflow_integration_metadata)
 
-    await record_workflow_export(
-        app_id=str(app_id),
-        user_id=user_id,
-        workflow_type="agent-generator",
-        repo_url=None,
-        job_id=None,
-        meta={
-            "bundle_workflow_name": pack_name,
-            "workflow_name": generated_workflow_name,
-            "capability_id": capability_id,
-            "workflow_names": workflow_names,
-            "workflow_integration_metadata": workflow_integration_metadata,
-        },
-        extra_fields={
-            "bundle_workflow_name": pack_name,
-            "workflow_name": generated_workflow_name,
-            "capability_id": capability_id,
-            "workflow_names": workflow_names,
-            "workflow_startup_mode": generated_workflow_startup_mode,
-            "workflow_trigger_events": generated_workflow_trigger_events,
-            "workflow_integration_metadata": workflow_integration_metadata,
-            "agent_websocket_url": websocket_url,
-            "agent_api_url": api_url,
-        },
-    )
-
-    await record_workflow_artifacts(
-        app_id=str(app_id),
-        user_id=user_id,
-        workflow_type="agent-generator",
-        workflow_name=pack_name,
-        artifacts={
-            "bundle_name": pack_name,
-            "workflow_names": workflow_names,
-            "bundle_entries": bundle_entries,
-            "workflow_integration_metadata": workflow_integration_metadata,
-        },
-    )
-
+    # The canonical BuildRecord is the required persistence boundary. Register
+    # it before writing optional export/diagnostic projections so a required
+    # failure cannot leave those secondary records looking authoritative.
     await _register_workflow_bundle_artifact_version(
         app_id=str(app_id),
         user_id=user_id,
@@ -345,6 +309,51 @@ async def _record_context_and_artifacts(
         context_variables=context_variables,
         workflow_integration_metadata=workflow_integration_metadata,
     )
+
+    try:
+        await record_workflow_export(
+            app_id=str(app_id),
+            user_id=user_id,
+            workflow_type="agent-generator",
+            repo_url=None,
+            job_id=None,
+            meta={
+                "bundle_workflow_name": pack_name,
+                "workflow_name": generated_workflow_name,
+                "capability_id": capability_id,
+                "workflow_names": workflow_names,
+                "workflow_integration_metadata": workflow_integration_metadata,
+            },
+            extra_fields={
+                "bundle_workflow_name": pack_name,
+                "workflow_name": generated_workflow_name,
+                "capability_id": capability_id,
+                "workflow_names": workflow_names,
+                "workflow_startup_mode": generated_workflow_startup_mode,
+                "workflow_trigger_events": generated_workflow_trigger_events,
+                "workflow_integration_metadata": workflow_integration_metadata,
+                "agent_websocket_url": websocket_url,
+                "agent_api_url": api_url,
+            },
+        )
+    except Exception as exc:
+        _logger.warning("Optional workflow export persistence failed: %s", exc)
+
+    try:
+        await record_workflow_artifacts(
+            app_id=str(app_id),
+            user_id=user_id,
+            workflow_type="agent-generator",
+            workflow_name=pack_name,
+            artifacts={
+                "bundle_name": pack_name,
+                "workflow_names": workflow_names,
+                "bundle_entries": bundle_entries,
+                "workflow_integration_metadata": workflow_integration_metadata,
+            },
+        )
+    except Exception as exc:
+        _logger.warning("Optional workflow artifact projection failed: %s", exc)
 
     if context_variables and hasattr(context_variables, "set"):
         context_variables.set("agent_websocket_url", websocket_url)
