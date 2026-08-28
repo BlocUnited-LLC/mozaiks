@@ -144,6 +144,12 @@ def test_studio_apps_endpoint_rejects_missing_bearer_and_accepts_authenticated_u
     get_auth_adapter(force_provider="none")
     register_adapter("studio-test", _TestStudioAuthAdapter)
 
+    from tests.import_utils import active_app_root
+
+    # Importing the Studio host is environment-inert; bind the workspace
+    # explicitly instead of relying on an import-time side effect.
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
+
     from mozaiksai.hosts import studio as studio_app
 
     monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: _AppRegistryService())

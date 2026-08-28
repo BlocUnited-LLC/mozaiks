@@ -987,9 +987,36 @@ def test_generated_monetized_saas_bundle_boots_and_serves_mozaikspay_runtime_sur
         assert request["headers"]["Authorization"] == "Bearer mzk_test_generated_saas"
 
 
+@pytest.fixture
+def _restore_global_workflow_catalog():
+    """Restore the process-global workflow catalog after a test reinitializes it.
+
+    ``initialize_workflows(root)`` rebuilds the singleton in place — it mutates
+    the existing manager's ``__dict__`` so callers holding a reference see the
+    new catalog. Without this restore, a test that points the catalog at a
+    temporary workspace leaves every later test in the process seeing only that
+    workspace's workflows (``KeyError: 'ValueEngine'`` in the workflow catalog
+    contract tests).
+    """
+    from mozaiksai.core.workflow import workflow_manager as workflow_manager_module
+
+    manager = workflow_manager_module.workflow_manager
+    catalog_snapshot = dict(manager.__dict__)
+    instance = workflow_manager_module.UnifiedWorkflowManager._instance
+    try:
+        yield
+    finally:
+        manager.__dict__.clear()
+        manager.__dict__.update(catalog_snapshot)
+        workflow_manager_module.UnifiedWorkflowManager._instance = instance
+        workflow_manager_module._unified_workflow_manager = manager
+        workflow_manager_module.workflow_manager = manager
+
+
 def test_generated_workflow_agent_bundle_loads_catalog_and_starts_runtime_session(
     tmp_path,
     monkeypatch,
+    _restore_global_workflow_catalog,
 ) -> None:
     files = _generated_workflow_agent_files()
     assert scan_functional_generated_app(files) == []

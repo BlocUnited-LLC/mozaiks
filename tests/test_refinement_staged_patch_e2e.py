@@ -1,5 +1,4 @@
 import json
-import sys
 import zipfile
 from pathlib import Path
 
@@ -277,7 +276,6 @@ def _studio_app(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
     from mozaiksai.hosts import studio as studio_app
 
     return studio_app

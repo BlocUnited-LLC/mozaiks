@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -145,8 +144,6 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     captured_prepare: dict = {}
@@ -435,8 +432,6 @@ def test_studio_trigger_endpoint_rejects_removed_top_level_refinement_fields(mon
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     client = TestClient(studio_app.app)
@@ -461,8 +456,6 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     monkeypatch.setattr(
@@ -501,8 +494,6 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     persisted_changes: list[dict] = []
@@ -689,8 +680,6 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     persisted_changes: list[dict] = []
@@ -828,8 +817,6 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     persisted_changes: list[dict] = []
@@ -1012,8 +999,6 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     async def fail_prepare(**kwargs):  # noqa: ANN003
@@ -1105,8 +1090,6 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     persisted_state = {
@@ -1283,8 +1266,6 @@ def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     staged_bundle_path = "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app"
@@ -1525,8 +1506,6 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
@@ -1554,8 +1533,6 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
@@ -1590,8 +1567,6 @@ def test_studio_artifact_review_marks_skipped_validation_as_override_required(mo
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(
@@ -1620,8 +1595,6 @@ def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monke
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
@@ -1644,8 +1617,6 @@ def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatc
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
@@ -1668,8 +1639,6 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.CURRENT)
@@ -1722,8 +1691,6 @@ def test_studio_trigger_endpoint_invokes_surface_regeneration_for_feature_change
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
-
     from mozaiksai.hosts import studio as studio_app
 
     _plan = ContractSurfacePlan(

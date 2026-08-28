@@ -4,7 +4,12 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_studio_shell_config_injects_studio_routes():
+async def test_studio_shell_config_injects_studio_routes(monkeypatch):
+    from tests.import_utils import active_app_root
+
+    # Importing the Studio host is environment-inert; bind the workspace
+    # explicitly instead of relying on an import-time side effect.
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
     from mozaiksai.hosts import studio as studio_app
 
     shell_config = await studio_app.get_studio_shell_config()
@@ -89,6 +94,11 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
 
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio as studio_app
+    from tests.import_utils import active_app_root
+
+    # Importing the Studio host is environment-inert; bind the workspace
+    # explicitly instead of relying on an import-time side effect.
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
 
     class _ArtifactStore:
         async def list_build_records(self, **_kwargs):

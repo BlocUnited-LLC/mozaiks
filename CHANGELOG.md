@@ -12,6 +12,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- **Importing `mozaiksai.hosts.studio` no longer mutates the process
+  environment.** Repo-local Studio defaults (`PLATFORM_PATH`,
+  `MOZAIKS_WORKFLOWS_PATH`) and OpenTelemetry configuration are now applied
+  exactly once at server startup — before runtime and platform startup run —
+  instead of at module import time. Because the global workflow catalog is
+  built when `mozaiksai.core.workflow.workflow_manager` is imported, Studio
+  startup now also rebinds that catalog to the workflow root its defaults
+  select, so `mozaiks serve <workspace> --host studio` still serves the shared
+  factory workflow catalog rather than the workspace's own `workflows/` root.
+  The `uvicorn mozaiksai.hosts.studio:app` entrypoint, `mozaiks serve`, and
+  app-local host composition keep their existing behavior; caller-provided
+  environment values keep precedence, and embedders that only import the host
+  module no longer see their environment rewritten.
+
 ### Added
 
 - **Semantic-compiler contract layer (ADR 0007 Slice 2)**: strict, immutable,
