@@ -43,8 +43,19 @@ _DOTTED_PATCH_VICTIM = "tests/test_check_workspace_integrations_tool.py"
 _WORKSPACE_GATED_VICTIM = "tests/test_config_consolidation.py"
 
 
-def _run_pytest(args: list[str]) -> subprocess.CompletedProcess[str]:
+def _child_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in _HOST_ENV_KEYS}
+    # pytest-cov's subprocess hook is driven by COV_CORE_* rather than by the
+    # outer run's --no-cov, so an inherited value makes every nested
+    # interpreter drop a stray .coverage.* file into the repo root that the
+    # shard's own coverage run would then combine.
+    for key in [k for k in env if k.startswith("COV_CORE_")]:
+        env.pop(key, None)
+    return env
+
+
+def _run_pytest(args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = _child_env()
     env.setdefault("ENV", "test")
     env.setdefault("AUTH_ENABLED", "false")
     return subprocess.run(
@@ -104,12 +115,15 @@ def test_workspace_gated_tests_run_without_a_prior_host_import() -> None:
     order-independent, so a run with no prior host import must produce zero
     skips.
     """
-    result = _run_pytest([_WORKSPACE_GATED_VICTIM])
-    summary = _summary_line(result)
+    result = _run_pytest(["-rs", _WORKSPACE_GATED_VICTIM])
     assert result.returncode == 0, f"victim run failed:\n{result.stdout}\n{result.stderr}"
-    assert "skipped" not in summary, (
-        f"workspace-gated tests skipped without a prior host import — "
-        f"resolution is order-dependent again: {summary}"
+    # Assert on the specific skip reason rather than the presence of any skip:
+    # these files also carry legitimate content guards ("Product-specific
+    # HomePage.jsx not present ..."), and a new one of those must not read as
+    # this regression.
+    assert "No active app workspace configured" not in result.stdout, (
+        "workspace-gated tests skipped for lack of a configured workspace without "
+        f"a prior host import — resolution is order-dependent again:\n{result.stdout}"
     )
 
 
@@ -166,13 +180,17 @@ def test_workspace_resolution_identical_before_and_after_host_import() -> None:
     probe = (
         "import json, sys\n"
         "sys.path.insert(0, 'tests')\n"
+        # Run the load_dotenv() import side effect before the first snapshot,
+        # so a developer .env that pins PLATFORM_PATH cannot masquerade as the
+        # host import changing the resolution.
+        "import mozaiksai.core.core_config  # noqa: F401\n"
         "from conftest import _resolve_active_app_root\n"
         "before = _resolve_active_app_root()\n"
         "import mozaiksai.hosts.studio  # noqa: F401\n"
         "after = _resolve_active_app_root()\n"
         "print(json.dumps({'before': str(before), 'after': str(after)}))\n"
     )
-    env = {k: v for k, v in os.environ.items() if k not in _HOST_ENV_KEYS}
+    env = _child_env()
     result = subprocess.run(
         [sys.executable, "-c", probe],
         cwd=str(REPO_ROOT),

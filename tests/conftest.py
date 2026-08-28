@@ -19,7 +19,18 @@ from pathlib import Path
 
 import pytest
 
-_REPO_FACTORY_APP_BUNDLE = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+
+def _repo_factory_app_bundle() -> Path:
+    """The first-party factory app bundle, honoring MOZAIKS_FACTORY_APP_PATH.
+
+    The host resolves the factory root through ``mozaiksai.resources``, which
+    consults that env var; matching it here keeps tests and host agreeing about
+    the active workspace in relocated or installed-package checkouts.
+    """
+    override = os.environ.get("MOZAIKS_FACTORY_APP_PATH", "").strip()
+    if override:
+        return (Path(override) / "app").resolve()
+    return (Path(__file__).resolve().parents[1] / "factory_app" / "app").resolve()
 
 
 def _resolve_active_app_root() -> Path | None:
@@ -43,8 +54,9 @@ def _resolve_active_app_root() -> Path | None:
         if (candidate / "app.json").exists():
             return candidate.resolve()
 
-    if (_REPO_FACTORY_APP_BUNDLE / "app.json").exists():
-        return _REPO_FACTORY_APP_BUNDLE.resolve()
+    factory_bundle = _repo_factory_app_bundle()
+    if (factory_bundle / "app.json").exists():
+        return factory_bundle
 
     return None
 

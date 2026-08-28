@@ -57,21 +57,18 @@ def _delenv_restoring(monkeypatch, name: str) -> None:
     monkeypatch.delenv(name)
 
 
-def _dotenv_preload() -> dict[str, str]:
-    """Values ``load_dotenv()`` (import side effect of mozaiksai.core.core_config)
-    would add, pre-injected so the subprocess env diff isolates host behavior."""
-    env_file = REPO_ROOT / ".env"
-    if not env_file.exists():
-        return {}
-    from dotenv import dotenv_values
-
-    return {k: v for k, v in dotenv_values(env_file).items() if v is not None}
-
-
 _IMPORT_PROBE = r"""
 import json
 import os
 import sys
+
+# Import the module whose import side effect is load_dotenv() FIRST, so the
+# snapshot below isolates what importing the host itself does. Compensating for
+# dotenv by pre-seeding the child environment instead would make this test
+# vacuous for any developer whose .env pins PLATFORM_PATH or
+# MOZAIKS_WORKFLOWS_PATH: the host's writes would land on identical values and
+# the diff would stay clean even with the import-time bootstrap restored.
+import mozaiksai.core.core_config  # noqa: F401
 
 before_env = dict(os.environ)
 before_path = list(sys.path)
@@ -97,19 +94,27 @@ report = {
     "bootstrap_hosts": sorted(
         getattr(mozaiksai.hosts.studio.app.state, "mozaiks_repo_host_bootstrap_hosts", ())
     ),
+    "platform_path_after": os.environ.get("PLATFORM_PATH"),
 }
 print(json.dumps(report))
 """
 
 
-def _run_import_probe(extra_env: dict[str, str] | None = None) -> dict:
+def _clean_child_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in _HOST_ENV_KEYS}
-    # Pre-inject the local .env values (including any host-path keys it holds)
-    # so the subprocess's own load_dotenv() import side effect becomes a no-op
-    # and the before/after diff isolates host-import behavior.
-    env.update(_dotenv_preload())
+    # pytest-cov's subprocess hook is driven by COV_CORE_* rather than by the
+    # outer run's --no-cov, so an inherited value makes every nested
+    # interpreter drop a stray .coverage.* file into the repo root that the
+    # shard's own coverage run would then combine.
+    for key in [k for k in env if k.startswith("COV_CORE_")]:
+        env.pop(key, None)
     if extra_env:
         env.update(extra_env)
+    return env
+
+
+def _run_import_probe(extra_env: dict[str, str] | None = None) -> dict:
+    env = _clean_child_env(extra_env)
     result = subprocess.run(
         [sys.executable, "-c", _IMPORT_PROBE],
         cwd=str(REPO_ROOT),
@@ -144,6 +149,13 @@ def test_studio_import_registers_startup_bootstrap_without_running_it() -> None:
 
 
 def test_caller_env_survives_studio_import_unchanged(tmp_path) -> None:
+    """A caller's own PLATFORM_PATH must come back out of the import verbatim.
+
+    ``PLATFORM_PATH`` is deliberately set to the *workspace root* rather than
+    the bundle directory: the bootstrap normalizes that to ``<workspace>/app``,
+    so this asserts a value the import-time bootstrap would visibly rewrite.
+    That keeps the check meaningful no matter what the developer's .env holds.
+    """
     workspace = tmp_path / "caller-workspace"
     app_root = workspace / "app"
     app_root.mkdir(parents=True)
@@ -152,6 +164,10 @@ def test_caller_env_survives_studio_import_unchanged(tmp_path) -> None:
     report = _run_import_probe({"PLATFORM_PATH": str(workspace)})
     assert report["env_added"] == [], report
     assert report["env_changed"] == [], report
+    assert report["platform_path_after"] == str(workspace), (
+        "the Studio import rewrote the caller's PLATFORM_PATH to the resolved "
+        f"bundle dir: {report['platform_path_after']}"
+    )
 
 
 def test_resolve_repo_host_defaults_is_pure_and_reads_provided_environ(tmp_path) -> None:
@@ -236,6 +252,89 @@ def test_configure_repo_host_defaults_is_idempotent(monkeypatch, tmp_path) -> No
     assert Path(first_pass["PLATFORM_PATH"]) == app_root.resolve()
 
 
+_REAL_STUDIO_BOOT_PROBE = r"""
+import json
+from fastapi.testclient import TestClient
+
+import mozaiksai.hosts.studio as studio
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+at_import = sorted(workflow_manager.get_all_workflow_names())
+with TestClient(studio.app):
+    after_first = sorted(workflow_manager.get_all_workflow_names())
+after_shutdown = sorted(workflow_manager.get_all_workflow_names())
+with TestClient(studio.app):
+    after_second = sorted(workflow_manager.get_all_workflow_names())
+
+print(json.dumps({
+    "at_import": at_import,
+    "after_first": after_first,
+    "after_shutdown": after_shutdown,
+    "after_second": after_second,
+}))
+"""
+
+
+def test_real_studio_boot_binds_factory_workflow_catalog_for_external_workspace(tmp_path) -> None:
+    """Booting the real Studio app must still load the factory workflow catalog.
+
+    ``mozaiksai.core.workflow.workflow_manager`` builds its global catalog at
+    module import, from whatever workflow root the environment named then.
+    Studio's defaults deliberately prefer the shared factory workflow root,
+    while bare root resolution prefers an app workspace's own ``workflows/``.
+    So for ``mozaiks serve <workspace> --host studio`` the import-time catalog
+    binds the (usually empty) workspace root, and only the startup bootstrap
+    can rebind it to the factory catalog.
+
+    This drives the real ASGI startup of the real Studio app rather than a
+    probe, because the defect this guards against is invisible to any test
+    that stubs the host or strips the workspace environment.
+    """
+    workspace = tmp_path / "external-workspace"
+    app_root = workspace / "app"
+    app_root.mkdir(parents=True)
+    (workspace / "workflows").mkdir()
+    (app_root / "app.json").write_text('{"appName": "External"}', encoding="utf-8")
+
+    env = _clean_child_env(
+        {
+            "PLATFORM_PATH": str(app_root),
+            "MOZAIKS_APP_WORKSPACE_PATH": str(app_root),
+            "AUTH_ENABLED": "false",
+            "RATE_LIMIT_ENABLED": "false",
+            "MOZAIKS_DATABASE_STARTUP_POLICY": "best_effort",
+            "ENV": "test",
+        }
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", _REAL_STUDIO_BOOT_PROBE],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert "AppGenerator" not in report["at_import"], (
+        "importing the Studio host resolved the factory catalog at import time — "
+        "the import is supposed to be inert"
+    )
+    assert "AppGenerator" in report["after_first"], (
+        "real Studio startup did not bind the factory workflow catalog; "
+        f"catalog was {report['after_first']}"
+    )
+    assert report["after_second"] == report["after_first"], (
+        "repeated Studio startup changed the workflow catalog"
+    )
+    assert report["after_shutdown"] == report["at_import"], (
+        "the startup workflow-catalog binding outlived the server; it must be "
+        "released on shutdown so one host's root cannot leak into the next"
+    )
+
+
 def test_registered_bootstrap_runs_before_inner_lifespans(monkeypatch, tmp_path) -> None:
     """The host bootstrap must apply defaults before runtime/platform startup."""
     from mozaiksai.hosts.runtime import register_app_lifespan
@@ -293,6 +392,9 @@ def test_register_repo_host_bootstrap_is_idempotent_per_host(monkeypatch, tmp_pa
     probe_app = FastAPI()
     register_repo_host_bootstrap(probe_app, "studio")
     register_repo_host_bootstrap(probe_app, "studio")
+    # Host names are normalized downstream, so registration must dedupe on the
+    # normalized name too — otherwise "Studio" stacks a second bootstrap layer.
+    register_repo_host_bootstrap(probe_app, "Studio")
 
     with TestClient(probe_app):
         pass

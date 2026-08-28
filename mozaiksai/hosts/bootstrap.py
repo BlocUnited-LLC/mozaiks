@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 _BOOTSTRAP_STATE_ATTR = "mozaiks_repo_host_bootstrap_hosts"
+_otel_configured = False
 
 
 def _resolve_app_bundle_dir(path_value: str | os.PathLike[str]) -> Path:
@@ -89,6 +90,23 @@ def resolve_repo_host_defaults(
     return updates
 
 
+def _configure_otel_once() -> None:
+    """Configure OpenTelemetry at most once per process.
+
+    ``configure_otel_from_env`` builds a fresh ``TracerProvider`` (and a
+    ``BatchSpanProcessor`` worker thread) on every call, while
+    ``trace.set_tracer_provider`` refuses to replace an installed provider. It
+    used to run once, at host import; the guard keeps that once-per-process
+    behavior now that bootstrap can run on each ASGI startup (``--reload``, or
+    a test that starts the app more than once).
+    """
+    global _otel_configured
+    if _otel_configured:
+        return
+    _otel_configured = True
+    configure_otel_from_env()
+
+
 def configure_repo_host_defaults(host: str) -> None:
     """Apply default app/workflow paths for a real Studio or platform startup.
 
@@ -103,39 +121,98 @@ def configure_repo_host_defaults(host: str) -> None:
     if normalized_host not in {"platform", "studio"}:
         return
 
-    configure_otel_from_env()
+    _configure_otel_once()
     os.environ.update(resolve_repo_host_defaults(normalized_host))
+
+
+def align_workflow_catalog_with_host_config() -> None:
+    """Rebind the global workflow catalog to the root host startup selected.
+
+    ``mozaiksai.core.workflow.workflow_manager`` constructs its global manager
+    at module import, binding whichever workflow root the environment named at
+    that moment. Host startup — not import order — is the authority on that
+    root, so when the two disagree the catalog is rebuilt against the resolved
+    root. The rebuild preserves manager object identity, so modules that
+    imported the manager by value keep working. When the roots already agree
+    (the repo-local and correctly pre-configured cases) this is a no-op.
+
+    Studio is the case that needs it: its defaults prefer the shared factory
+    workflow root, while bare root resolution prefers an app workspace's own
+    ``workflows/``. Without this, ``mozaiks serve <workspace> --host studio``
+    would bind Studio to the workspace's (usually empty) workflow root and lose
+    the entire factory build catalog.
+    """
+    from mozaiksai.core.workflow.paths import resolve_workflows_root
+    from mozaiksai.core.workflow.workflow_manager import initialize_workflows, workflow_manager
+
+    resolved_root = resolve_workflows_root()
+    current_root = getattr(workflow_manager, "workflows_base_path", None)
+    if current_root is not None and Path(str(current_root)) == resolved_root:
+        return
+    initialize_workflows(str(resolved_root))
+
+
+@contextmanager
+def _workflow_catalog_bound_to_host_config() -> Iterator[None]:
+    """Bind the workflow catalog to the host's root for the life of the server.
+
+    The binding is released on shutdown so it lasts exactly as long as the
+    running server does. A process that starts a host, stops it, and starts
+    another (``--reload``, or a test that drives more than one app) then gets
+    the same catalog it would have had on a fresh start, instead of inheriting
+    whichever root the previous server selected.
+    """
+    from mozaiksai.core.workflow import workflow_manager as workflow_manager_module
+
+    manager = workflow_manager_module.workflow_manager
+    catalog_snapshot = dict(manager.__dict__)
+    align_workflow_catalog_with_host_config()
+    if manager.__dict__ == catalog_snapshot:
+        yield
+        return
+    try:
+        yield
+    finally:
+        manager.__dict__.clear()
+        manager.__dict__.update(catalog_snapshot)
+        workflow_manager_module.UnifiedWorkflowManager._instance = manager
+        workflow_manager_module._unified_workflow_manager = manager
+        workflow_manager_module.workflow_manager = manager
 
 
 def register_repo_host_bootstrap(target_app: FastAPI, host: str) -> None:
     """Arrange for ``configure_repo_host_defaults(host)`` to run at server startup.
 
     Wraps the app's composed lifespan so the repo defaults are applied before
-    any lower-layer startup (runtime, platform) resolves app or workflow roots.
-    Importing a host module stays free of environment mutation; only actually
-    starting the server applies defaults. Registration is idempotent per
-    (app, host) so module reloads do not stack duplicate bootstrap layers.
+    any lower-layer startup (runtime, platform) runs, then rebinds the global
+    workflow catalog to the root those defaults selected. Importing a host
+    module stays free of environment mutation; only actually starting the
+    server applies defaults. Registration is idempotent per (app, host) so
+    module reloads do not stack duplicate bootstrap layers.
     """
+    normalized_host = str(host or "").strip().lower()
     registered_hosts = getattr(target_app.state, _BOOTSTRAP_STATE_ATTR, None)
     if registered_hosts is None:
         registered_hosts = set()
         setattr(target_app.state, _BOOTSTRAP_STATE_ATTR, registered_hosts)
-    if host in registered_hosts:
+    if normalized_host in registered_hosts:
         return
-    registered_hosts.add(host)
+    registered_hosts.add(normalized_host)
 
     existing_lifespan = target_app.router.lifespan_context
 
     @asynccontextmanager
     async def _bootstrap_lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
-        configure_repo_host_defaults(host)
-        async with existing_lifespan(app_instance):
-            yield
+        configure_repo_host_defaults(normalized_host)
+        with _workflow_catalog_bound_to_host_config():
+            async with existing_lifespan(app_instance):
+                yield
 
     target_app.router.lifespan_context = _bootstrap_lifespan
 
 
 __all__ = [
+    "align_workflow_catalog_with_host_config",
     "configure_repo_host_defaults",
     "register_repo_host_bootstrap",
     "resolve_repo_host_defaults",
