@@ -170,7 +170,12 @@ class SemanticReferenceResolver:
     def resolve_manifest_ref(
         self, ref: ApplicationManifestRef, *, requesting_scope: ExecutionAccessScopeRef
     ) -> ApplicationManifest:
-        return self.resolve(ref, requesting_scope=requesting_scope)
+        content = self.resolve(ref, requesting_scope=requesting_scope)
+        if not isinstance(content, ApplicationManifest):
+            raise ReferenceResolutionError(
+                f"subject {ref.subject_id!r} did not resolve to an ApplicationManifest"
+            )
+        return content
 
     def resolve_taxonomy_namespace(self, ref: TaxonomyNamespaceRef) -> TaxonomyNamespace:
         subject = self._subjects.get((ref.namespace_id, ref.namespace_version))
@@ -185,6 +190,10 @@ class SemanticReferenceResolver:
         if subject.digest != ref.content_digest:
             raise ReferenceResolutionError(
                 f"content digest mismatch for taxonomy namespace {ref.namespace_id!r}"
+            )
+        if not isinstance(subject.content, TaxonomyNamespace):
+            raise ReferenceResolutionError(
+                f"subject {ref.namespace_id!r} did not resolve to a TaxonomyNamespace"
             )
         return subject.content
 
