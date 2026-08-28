@@ -161,6 +161,12 @@ def _workflow_catalog_bound_to_host_config() -> Iterator[None]:
     another (``--reload``, or a test that drives more than one app) then gets
     the same catalog it would have had on a fresh start, instead of inheriting
     whichever root the previous server selected.
+
+    Snapshotting and restoring the manager's own state is sufficient:
+    ``initialize_workflows`` rebuilds the catalog into the existing manager
+    object rather than replacing it, precisely so modules that imported the
+    manager by value keep a live reference. The module globals therefore still
+    point at this same object afterwards and need no rebinding.
     """
     from mozaiksai.core.workflow import workflow_manager as workflow_manager_module
 
@@ -175,9 +181,6 @@ def _workflow_catalog_bound_to_host_config() -> Iterator[None]:
     finally:
         manager.__dict__.clear()
         manager.__dict__.update(catalog_snapshot)
-        workflow_manager_module.UnifiedWorkflowManager._instance = manager
-        workflow_manager_module._unified_workflow_manager = manager
-        workflow_manager_module.workflow_manager = manager
 
 
 def register_repo_host_bootstrap(target_app: FastAPI, host: str) -> None:
