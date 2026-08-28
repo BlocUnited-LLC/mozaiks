@@ -31,14 +31,14 @@ This project follows a practical pre-1.0 changelog format:
 ### Added
 
 - **Offline semantic projection comparison (ADR 0007 Slice 3)**: deterministic,
-  input-immutable adapters can now project existing AppGenerator, DesignDocs,
-  subscription, module, workflow, deployment, recorded-artifact, build-context,
-  and ownership evidence into candidate `SemanticGraph` documents for offline
-  corpus comparison. A machine-readable coverage report classifies every source
-  leaf as projected, deliberately non-semantic, or deferred and returns typed
-  gaps for unsupported facts. Production generators, hosts, loaders, Studio,
-  workflows, control-plane code, capability advertisement, and runtime authority
-  remain unchanged.
+  input-immutable adapters accept current AppGenerator, DesignDocs,
+  subscription, module, page/route, AgentGenerator bundle, deployment,
+  recorded-AppBuildPlan, build-context, and AppContext ownership shapes. They
+  project only graph-v1 facts and report every other source fact through typed,
+  machine-readable coverage and gaps; unresolved action, event, capability,
+  scope, and ownership references fail closed instead of creating graph facts.
+  Production generators, hosts, loaders, Studio, workflows, control-plane code,
+  capability advertisement, and runtime authority remain unchanged.
 
 - **Semantic-compiler contract layer (ADR 0007 Slice 2)**: strict, immutable,
   content-digested contracts for `ApplicationManifest`
