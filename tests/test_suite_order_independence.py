@@ -113,6 +113,54 @@ def test_workspace_gated_tests_run_without_a_prior_host_import() -> None:
     )
 
 
+def test_import_module_directly_leaves_no_fabricated_parent_stubs() -> None:
+    """The direct-import helper must not poison later real package imports.
+
+    Fabricated parent packages never execute their real ``__init__.py``. One
+    left in ``sys.modules`` made a later ``from mozaiksai.core.events import
+    get_event_dispatcher`` fail with "cannot import name ... (unknown
+    location)", degrading platform startup for any test that ran afterwards.
+    """
+    probe = (
+        "import sys\n"
+        "sys.path.insert(0, 'tests')\n"
+        "from import_utils import import_module_directly\n"
+        "mod = import_module_directly('mozaiksai.core.events.auto_tool_handler')\n"
+        "assert mod is not None\n"
+        "from mozaiksai.core.events import get_event_dispatcher\n"
+        "assert callable(get_event_dispatcher)\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert "OK" in result.stdout
+
+
+def test_global_workflow_catalog_survives_a_workspace_scoped_reinitialization() -> None:
+    """A test that repoints the workflow catalog must restore it afterwards.
+
+    ``initialize_workflows(tmp_root)`` rebuilds the singleton in place, so
+    without a restore every later test in the process saw only the temporary
+    workspace's workflows.
+    """
+    result = _run_pytest(
+        [
+            "tests/test_generated_app_functional_acceptance.py",
+            "tests/test_workflow_catalog_contract.py",
+        ]
+    )
+    assert result.returncode == 0, (
+        "the global workflow catalog leaked out of a workspace-scoped "
+        f"reinitialization:\n{result.stdout}\n{result.stderr}"
+    )
+
+
 def test_workspace_resolution_identical_before_and_after_host_import() -> None:
     """The resolved workspace root must not change when a host import precedes it."""
     probe = (
