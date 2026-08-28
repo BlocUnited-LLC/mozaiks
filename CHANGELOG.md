@@ -33,12 +33,20 @@ This project follows a practical pre-1.0 changelog format:
 - **Offline semantic projection comparison (ADR 0007 Slice 3)**: deterministic,
   input-immutable adapters accept current AppGenerator, DesignDocs,
   subscription, module, page/route, AgentGenerator bundle, deployment,
-  recorded-AppBuildPlan, build-context, and AppContext ownership shapes. They
-  project only graph-v1 facts and report every other source fact through typed,
+  recorded-AppBuildPlan, and AppContext ownership shapes. They project only
+  graph-v1 facts and report every other source fact through typed,
   machine-readable coverage and gaps; unresolved action, event, capability,
-  scope, and ownership references fail closed instead of creating graph facts.
-  Production generators, hosts, loaders, Studio, workflows, control-plane code,
-  capability advertisement, and runtime authority remain unchanged.
+  scope, and ownership references fail closed instead of creating graph facts,
+  as do duplicate canonical root aliases. Build-context and recorded workflow
+  envelopes are accepted as provenance and classified entirely as typed gaps —
+  they declare no graph-v1 identity and cannot by themselves produce a graph.
+  Page bindings outside `/api/modules/{module}/{action}` are retained as typed
+  gaps rather than invented action targets, so any valid AppPageSchema api path
+  projects. Projection requires an explicitly pinned Slice 1
+  `TaxonomyRegistry`, which keeps the call free of runtime, workflow, and
+  workflow-catalog side effects. Production generators, hosts, loaders, Studio,
+  workflows, control-plane code, capability advertisement, and runtime
+  authority remain unchanged.
 
 - **Semantic-compiler contract layer (ADR 0007 Slice 2)**: strict, immutable,
   content-digested contracts for `ApplicationManifest`

@@ -30,7 +30,6 @@ from mozaiksai.core.semantics.refs import ExecutionAccessScopeRef, SemanticsMode
 from mozaiksai.core.taxonomy import (
     SemanticCategory,
     TaxonomyRegistry,
-    default_taxonomy_registry,
     validate_identifier_grammar,
 )
 
@@ -332,8 +331,11 @@ _KNOWN_DEFERRED = frozenset(
         "ui_layout",
     }
 )
+_PROVENANCE_ROOTS = frozenset({"build_context", "workflows"})
 _SLUG = re.compile(r"[^a-z0-9_]+")
 _MODULE_ENDPOINT = re.compile(r"^/api/modules/([^/]+)/([^/]+)$")
+# Mirrors AppPageSchema's _API_PATH_RE (mozaiksai/core/runtime/app/page_schema.py).
+_PAGE_API_PATH = re.compile(r"^/api/[A-Za-z0-9_./-]+$")
 _PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
@@ -865,17 +867,37 @@ class _Builder:
                     and child.startswith("/api/")
                 ):
                     match = _MODULE_ENDPOINT.fullmatch(child)
-                    if match is None:
+                    if match is not None:
+                        self._bind_action(page, match.group(1), match.group(2), child_path)
+                    elif _PAGE_API_PATH.fullmatch(child):
+                        # AppPageSchema permits any /api/... path (page_schema.py
+                        # _API_PATH_RE); only /api/modules/{module}/{action} names a
+                        # declared module action. Other valid paths — the committed
+                        # /api/notifications route, for one — are real bindings that
+                        # graph v1 has no node kind for, so they are typed gaps
+                        # rather than a hard failure or an invented action target.
+                        self.gap(
+                            ProjectionGapKind.UNSUPPORTED,
+                            child_path,
+                            (
+                                "valid non-module page API binding has no SemanticGraph v1 "
+                                "target; only /api/modules/{module}/{action} names a declared action"
+                            ),
+                            adr_slice=5,
+                        )
+                    else:
                         raise ProjectionError(
                             [
                                 ProjectionGap(
                                     kind=ProjectionGapKind.AMBIGUOUS,
                                     source_path=child_path,
-                                    reason="API binding is not /api/modules/{module}/{action}",
+                                    reason=(
+                                        "API binding is not a valid AppPageSchema api path "
+                                        "(^/api/[A-Za-z0-9_./-]+$)"
+                                    ),
                                 )
                             ]
                         )
-                    self._bind_action(page, match.group(1), match.group(2), child_path)
                 else:
                     self._page_bindings(child, page, child_path)
         elif isinstance(value, list):
@@ -1325,6 +1347,25 @@ class _Builder:
                         group=f"{base}.orchestrator.triggers",
                     )
 
+    def project_provenance(self, value: Any, root: str) -> None:
+        """Classify accepted provenance roots that carry no graph-v1 identity.
+
+        ``build_context`` is declared pack provenance and ``workflows`` is
+        recorded execution metadata on an AppBuildPlan envelope. Both are real
+        parts of current recorded sources, so they are accepted rather than
+        rejected as unknown roots — but neither declares application semantics
+        that SemanticGraph v1 can hold, so every leaf becomes an explicit typed
+        gap instead of an invented node.
+        """
+        authority = _SOURCE_AUTHORITIES[root][2]
+        for leaf_path, _leaf in _iter_leaves(value, root):
+            self.gap(
+                ProjectionGapKind.UNSUPPORTED,
+                leaf_path,
+                f"{authority} is not SemanticGraph v1 application semantics",
+                adr_slice=5,
+            )
+
     def project_ownership(self, evidence: dict[str, Any], root: str) -> None:
         mode = str(evidence.get("mode") or "greenfield")
         boundaries = _as_list(evidence.get("ownership_boundaries"))
@@ -1415,7 +1456,11 @@ class _Builder:
                 reason = (
                     "source fact is not representable by Slice 2 identity-only nodes"
                     if gap_kind is ProjectionGapKind.UNSUPPORTED
-                    else "unclassified source field may be producer drift or a typo; projection refuses to guess"
+                    else (
+                        "field is not in this projection's classified set; it is reported "
+                        "rather than projected, and carries no SemanticGraph v1 identity "
+                        "until it is classified"
+                    )
                 )
                 disposition, fully, adr_slice = ProjectionDisposition.DEFERRED, False, 5
                 gap = ProjectionGap(kind=gap_kind, source_path=path, reason=reason, adr_slice=5)
@@ -1511,9 +1556,18 @@ def project_semantic_graph(
     graph_id: str,
     version: int,
     scope: ExecutionAccessScopeRef,
-    taxonomy_registry: TaxonomyRegistry | None = None,
+    taxonomy_registry: TaxonomyRegistry,
 ) -> ProjectionResult:
-    """Project current contracts without mutation, writes, network, models, or authority."""
+    """Project current contracts without mutation, writes, network, models, or authority.
+
+    ``taxonomy_registry`` is required and must be a pinned Slice 1 registry.
+    Constructing a default here would call ``default_taxonomy_registry()``,
+    which lazily imports the runtime layout registry and transport event
+    contract at call time — that pulls the workflow manager in, which reads
+    the workflow catalog from disk. An offline projection cannot own that side
+    effect, and Slice 1 remains the only taxonomy authority, so the caller
+    supplies the registry it has pinned.
+    """
     plain = _plain(source)
     if not isinstance(plain, dict) or not plain:
         raise ProjectionError(
@@ -1538,7 +1592,27 @@ def project_semantic_graph(
                 for root in unknown
             ]
         )
-    builder = _Builder(plain, scope, taxonomy_registry or default_taxonomy_registry())
+    duplicate_aliases = sorted(
+        f"{alias}/{canonical}"
+        for alias, canonical in _ROOT_ALIASES.items()
+        if alias in plain and canonical in plain
+    )
+    if duplicate_aliases:
+        raise ProjectionError(
+            [
+                ProjectionGap(
+                    kind=ProjectionGapKind.CONTRADICTORY,
+                    source_path=pair.split("/", 1)[0],
+                    reason=(
+                        f"both {pair.split('/')[0]!r} and its canonical name "
+                        f"{pair.split('/')[1]!r} are present; one envelope would be "
+                        "silently ignored, so duplicate roots fail closed"
+                    ),
+                )
+                for pair in duplicate_aliases
+            ]
+        )
+    builder = _Builder(plain, scope, taxonomy_registry)
     for source_name, raw_scope in sorted(_mapping(plain.get("source_scopes")).items()):
         source_scope = ExecutionAccessScopeRef.model_validate(raw_scope)
         path = f"source_scopes.{source_name}"
@@ -1604,7 +1678,31 @@ def project_semantic_graph(
         builder.project_ownership(_mapping(plain["app_context"]), "app_context")
     if _mapping(plain.get("ownership_evidence")):
         builder.project_ownership(_mapping(plain["ownership_evidence"]), "ownership_evidence")
+    for provenance_root in sorted(_PROVENANCE_ROOTS & set(plain)):
+        builder.project_provenance(plain[provenance_root], provenance_root)
     if not builder.nodes:
+        # Distinguish "this input carries only graph-v1-unrepresentable
+        # provenance" from "this input declares nothing at all". Reporting the
+        # former as a missing semantic identity misnames the cause.
+        provenance_only = bool(_PROVENANCE_ROOTS & set(plain)) and not (
+            set(plain) - _PROVENANCE_ROOTS - {"source_scopes"}
+        )
+        if provenance_only:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.UNSUPPORTED,
+                        source_path=root,
+                        reason=(
+                            f"{_SOURCE_AUTHORITIES[root][2]} carries no SemanticGraph v1 "
+                            "identity; it is accepted and classified as typed gaps but "
+                            "cannot by itself produce a graph"
+                        ),
+                        adr_slice=5,
+                    )
+                    for root in sorted(_PROVENANCE_ROOTS & set(plain))
+                ]
+            )
         raise ProjectionError(
             [
                 ProjectionGap(

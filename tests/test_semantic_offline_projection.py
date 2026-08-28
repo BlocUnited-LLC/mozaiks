@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import builtins
 import copy
 import json
-import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,9 +31,52 @@ from mozaiksai.core.semantics.offline_projection import (
 )
 from mozaiksai.core.semantics.refs import ExecutionAccessScopeRef
 from mozaiksai.core.session.build_context_schema import validate_pack_context
+from mozaiksai.core.taxonomy import (
+    NamespaceKind,
+    SemanticCategory,
+    TaxonomyEntry,
+    TaxonomyNamespace,
+    build_taxonomy_registry,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCOPE = ExecutionAccessScopeRef(tenant_id="tenant-1", workspace_id="workspace-1")
+
+
+def _pinned_registry():
+    """Build the corpus taxonomy from Slice 1 primitives only.
+
+    ``default_taxonomy_registry()`` lazily imports the runtime layout registry
+    and the transport event contract, which drags in the workflow manager and
+    a workflow-catalog read. Projection must not own that, so callers pin a
+    registry; ``build_taxonomy_registry`` itself performs no imports, which is
+    what makes the cold-cache purity proof below meaningful.
+    """
+    return build_taxonomy_registry(
+        [
+            TaxonomyNamespace(
+                namespace_id="slice3.corpus",
+                version=1,
+                kind=NamespaceKind.EXTENSION,
+                grants=("domain", "reports"),
+                entries=(
+                    TaxonomyEntry(
+                        identifier="domain.reports.generated", category=SemanticCategory.EVENT
+                    ),
+                    # Declared by the committed DesignDocs bundle fixture.
+                    TaxonomyEntry(
+                        identifier="domain.users.user_created", category=SemanticCategory.EVENT
+                    ),
+                    TaxonomyEntry(
+                        identifier="reports.export", category=SemanticCategory.CAPABILITY
+                    ),
+                    TaxonomyEntry(
+                        identifier="reports.view", category=SemanticCategory.CAPABILITY
+                    ),
+                ),
+            )
+        ]
+    )
 
 
 def _corpus_source() -> dict:
@@ -287,9 +329,13 @@ triggers:
     }
 
 
-def _project(source: dict | None = None, *, scope: ExecutionAccessScopeRef = SCOPE):
+def _project(source: dict | None = None, *, scope: ExecutionAccessScopeRef = SCOPE, registry=None):
     return project_semantic_graph(
-        source or _corpus_source(), graph_id="slice-3-corpus", version=1, scope=scope
+        source or _corpus_source(),
+        graph_id="slice-3-corpus",
+        version=1,
+        scope=scope,
+        taxonomy_registry=registry or _pinned_registry(),
     )
 
 
@@ -511,7 +557,10 @@ def test_recorded_appbuildplan_unknown_semantics_are_not_silently_omitted() -> N
         )
     )
     with pytest.raises(ProjectionError) as exc_info:
-        project_semantic_graph(recorded, graph_id="recorded-projects", version=1, scope=SCOPE)
+        project_semantic_graph(
+            recorded, graph_id="recorded-projects", version=1, scope=SCOPE,
+            taxonomy_registry=_pinned_registry(),
+        )
     assert exc_info.value.gaps[0].kind is ProjectionGapKind.MISSING
     assert "domain.projects" in exc_info.value.gaps[0].reason
 
@@ -522,7 +571,10 @@ def test_existing_recorded_saas_fixture_projects_with_explicit_gaps() -> None:
             encoding="utf-8"
         )
     )
-    result = project_semantic_graph(recorded, graph_id="recorded-saas", version=1, scope=SCOPE)
+    result = project_semantic_graph(
+        recorded, graph_id="recorded-saas", version=1, scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
+    )
     assert result.graph.nodes
     assert result.gaps
     assert all(gap.kind is ProjectionGapKind.UNSUPPORTED for gap in result.gaps)
@@ -668,6 +720,7 @@ triggers:
         graph_id="current-contracts",
         version=1,
         scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
     )
     assert result.source_facts == extract_semantic_facts(result.graph)
     assert any(gap.source_path == "agent_workflows[0].files" for gap in result.gaps)
@@ -680,6 +733,7 @@ triggers:
         graph_id="current-contracts",
         version=1,
         scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
     )
     assert mapped_result.graph.graph_digest == result.graph.graph_digest
     assert all(row.source_file != "unknown" for row in mapped_result.coverage)
@@ -740,6 +794,7 @@ def test_committed_design_docs_subscription_build_context_and_route_sources() ->
         graph_id="recorded-design-docs",
         version=1,
         scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
     )
     assert design_result.graph.nodes
     assert design_result.source_facts == design_result.represented_facts
@@ -750,6 +805,7 @@ def test_committed_design_docs_subscription_build_context_and_route_sources() ->
             graph_id="recorded-subscription",
             version=1,
             scope=SCOPE,
+            taxonomy_registry=_pinned_registry(),
         )
     assert exc_info.value.gaps[0].kind is ProjectionGapKind.MISSING
     assert "reports.generate" in exc_info.value.gaps[0].reason
@@ -773,6 +829,7 @@ def test_committed_design_docs_subscription_build_context_and_route_sources() ->
         graph_id="recorded-route-manifest",
         version=1,
         scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
     )
     assert {node.kind for node in route_result.graph.nodes} == {SemanticNodeKind.PAGE}
 
@@ -852,7 +909,8 @@ def test_unclassified_field_is_ambiguous_instead_of_generic_deferred() -> None:
     result = _project(source)
     gap = next(gap for gap in result.gaps if gap.source_path.endswith("capabilty_id"))
     assert gap.kind is ProjectionGapKind.AMBIGUOUS
-    assert "typo" in gap.reason
+    assert "not in this projection's classified set" in gap.reason
+    assert "typo" not in gap.reason
 
 
 def test_pre_app_scope_and_unowned_evidence_never_fabricate_identity_or_control() -> None:
@@ -883,23 +941,123 @@ def test_semantic_descriptions_pricing_and_data_shapes_are_typed_gaps() -> None:
     assert gap_paths == deferred
 
 
-def test_projection_has_no_process_or_external_side_effects(monkeypatch) -> None:
-    cwd = Path.cwd()
-    environment = dict(os.environ)
-    modules = set(sys.modules)
-    monkeypatch.setattr("socket.socket.connect", lambda *_args, **_kwargs: pytest.fail("network"))
-    monkeypatch.setattr(builtins, "open", lambda *_args, **_kwargs: pytest.fail("filesystem open"))
-    monkeypatch.setattr(
-        Path, "write_text", lambda *_args, **_kwargs: pytest.fail("filesystem write")
+_COLD_PURITY_PROBE = r'''
+import builtins, copy, json, os, socket, sys
+from pathlib import Path
+
+# Import ONLY the projection seam and Slice 1 primitives. Importing the runtime
+# model helpers this file uses elsewhere would warm the very modules this probe
+# exists to detect, which is what made the previous in-process assertion vacuous.
+from mozaiksai.core.semantics.offline_projection import project_semantic_graph
+from mozaiksai.core.semantics.refs import ExecutionAccessScopeRef
+from mozaiksai.core.taxonomy import (
+    NamespaceKind, SemanticCategory, TaxonomyEntry, TaxonomyNamespace, build_taxonomy_registry,
+)
+
+scope = ExecutionAccessScopeRef(tenant_id="tenant-1", workspace_id="workspace-1")
+registry = build_taxonomy_registry([
+    TaxonomyNamespace(
+        namespace_id="slice3.cold", version=1, kind=NamespaceKind.EXTENSION,
+        grants=("reports",),
+        entries=(
+            TaxonomyEntry(identifier="reports.export", category=SemanticCategory.CAPABILITY),
+        ),
     )
-    monkeypatch.setattr(
-        Path, "write_bytes", lambda *_args, **_kwargs: pytest.fail("filesystem write")
+])
+source = {
+    "modules": [
+        {
+            "manifest": {
+                "module": {"id": "reports"},
+                "actions": [{"id": "export_report", "entitlement_gate": "reports.export"}],
+                "capabilities": [{"capability_id": "reports.export"}],
+            }
+        }
+    ]
+}
+guarded = copy.deepcopy(source)
+
+failures = []
+def _boom(kind):
+    def _fail(*_a, **_k):
+        failures.append(kind)
+        raise AssertionError(kind)
+    return _fail
+
+# Guard every prohibited effect for the duration of the call itself.
+builtins.open = _boom("filesystem read/write")
+Path.open = _boom("filesystem read/write")
+Path.read_text = _boom("filesystem read")
+Path.read_bytes = _boom("filesystem read")
+Path.write_text = _boom("filesystem write")
+Path.write_bytes = _boom("filesystem write")
+Path.mkdir = _boom("filesystem write")
+os.chdir = _boom("cwd mutation")
+socket.socket.connect = _boom("network")
+socket.getaddrinfo = _boom("network")
+
+cwd, environment, modules = os.getcwd(), dict(os.environ), set(sys.modules)
+result = project_semantic_graph(
+    source, graph_id="cold", version=1, scope=scope, taxonomy_registry=registry
+)
+added = sorted(set(sys.modules) - modules)
+
+print(json.dumps({
+    "failures": failures,
+    "modules_added": added,
+    "cwd_changed": os.getcwd() != cwd,
+    "env_changed": dict(os.environ) != environment,
+    "input_mutated": source != guarded,
+    "node_count": len(result.graph.nodes),
+}))
+'''
+
+
+def test_projection_has_no_process_or_external_side_effects() -> None:
+    """Prove the projection seam is pure in a cold interpreter.
+
+    This runs in a fresh subprocess that imports only the projection seam and
+    Slice 1 primitives. The previous in-process form asserted
+    ``set(sys.modules) == modules`` after 22 earlier tests in this file had
+    already warmed the cache, so it asserted nothing where it passed and failed
+    outright when run alone. Nothing is imported here to make the measurement
+    succeed — a cold cache is the point.
+    """
+    completed = subprocess.run(
+        [sys.executable, "-c", _COLD_PURITY_PROBE],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
-    monkeypatch.setattr(os, "chdir", lambda *_args, **_kwargs: pytest.fail("cwd mutation"))
-    _project()
-    assert Path.cwd() == cwd
-    assert dict(os.environ) == environment
-    assert set(sys.modules) == modules
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    report = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert report["failures"] == [], report
+    assert report["cwd_changed"] is False
+    assert report["env_changed"] is False
+    assert report["input_mutated"] is False
+    assert report["node_count"] > 0
+    # No runtime, workflow, persistence, control-plane, host, or model modules
+    # may be pulled in by projecting.
+    forbidden = [
+        name
+        for name in report["modules_added"]
+        if any(
+            token in name
+            for token in (
+                "runtime",
+                "workflow",
+                "persistence",
+                "control_plane",
+                "hosts",
+                "ag2",
+                "openai",
+                "httpx",
+            )
+        )
+    ]
+    assert forbidden == [], f"projection imported prohibited modules: {forbidden}"
 
 
 def test_production_sources_do_not_import_offline_projection() -> None:
@@ -919,3 +1077,147 @@ def test_production_sources_do_not_import_offline_projection() -> None:
             if "offline_projection" in path.read_text(encoding="utf-8"):
                 offenders.append(relative.as_posix())
     assert offenders == []
+
+
+def test_provenance_roots_are_classified_not_falsely_reported_as_empty() -> None:
+    """build_context and workflows are accepted, classified, and honestly diagnosed.
+
+    Both are real parts of current recorded sources but carry no SemanticGraph
+    v1 identity. Previously they were listed as supported roots with no
+    projector, so a source containing only one of them failed with "source
+    contains no representable semantic identity" — which names the wrong cause.
+    """
+    build_context = yaml.safe_load(
+        (ROOT / "factory_app/build_context/AppGenerator/context.yaml").read_text(encoding="utf-8")
+    )
+    for root, payload in (
+        ("build_context", build_context),
+        ("workflows", [{"workflow_name": "report_builder", "status": "completed"}]),
+    ):
+        with pytest.raises(ProjectionError) as exc_info:
+            project_semantic_graph(
+                {root: payload},
+                graph_id=f"provenance-{root}",
+                version=1,
+                scope=SCOPE,
+                taxonomy_registry=_pinned_registry(),
+            )
+        gaps = exc_info.value.gaps
+        assert all(gap.kind is ProjectionGapKind.UNSUPPORTED for gap in gaps), gaps
+        assert all(gap.source_path == root for gap in gaps), gaps
+        assert "no SemanticGraph v1 identity" in gaps[0].reason
+        assert "no representable semantic identity" not in gaps[0].reason
+
+    # Alongside real semantic roots they contribute typed gaps, never nodes.
+    source = _corpus_source()
+    source["workflows"] = [{"workflow_name": "report_builder", "status": "completed"}]
+    result = _project(source)
+    workflow_gaps = [gap for gap in result.gaps if gap.source_path.startswith("workflows")]
+    assert workflow_gaps
+    assert all(gap.kind is ProjectionGapKind.UNSUPPORTED for gap in workflow_gaps)
+
+
+def test_committed_notifications_page_projects_with_explicit_non_module_binding_gap() -> None:
+    """The committed first-party page must project, not hard-fail.
+
+    AppPageSchema permits any /api/... path; only /api/modules/{module}/{action}
+    names a declared action. /api/notifications is valid and real, so it becomes
+    a typed gap rather than an error or an invented action target.
+    """
+    page = yaml.safe_load(
+        (ROOT / "factory_app/app/ui/pages/notifications.yaml").read_text(encoding="utf-8")
+    )
+    result = project_semantic_graph(
+        {"pages": [page]},
+        graph_id="committed-notifications",
+        version=1,
+        scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
+    )
+    assert any(node.kind is SemanticNodeKind.PAGE for node in result.graph.nodes)
+    binding_gaps = [
+        gap
+        for gap in result.gaps
+        if gap.source_path.endswith("api_endpoint")
+        and "non-module page API binding" in gap.reason
+    ]
+    assert binding_gaps, [gap.reason for gap in result.gaps]
+    assert all(gap.kind is ProjectionGapKind.UNSUPPORTED for gap in binding_gaps)
+    assert not any(node.kind is SemanticNodeKind.ACTION for node in result.graph.nodes)
+
+
+def test_invalid_api_path_still_fails_closed() -> None:
+    page = {
+        "name": "Broken",
+        "route": "/broken",
+        "sections": [
+            {"id": "s", "primitive": "Card", "config": {"api_endpoint": "/api/has spaces"}}
+        ],
+    }
+    with pytest.raises(ProjectionError) as exc_info:
+        project_semantic_graph(
+            {"pages": [page]},
+            graph_id="invalid-api",
+            version=1,
+            scope=SCOPE,
+            taxonomy_registry=_pinned_registry(),
+        )
+    assert exc_info.value.gaps[0].kind is ProjectionGapKind.AMBIGUOUS
+    assert "valid AppPageSchema api path" in exc_info.value.gaps[0].reason
+
+
+def test_duplicate_canonical_root_aliases_fail_closed() -> None:
+    """Supplying both an alias and its canonical name must not silently drop one."""
+    source = _corpus_source()
+    diverging = copy.deepcopy(source["app_build_plan"])
+    diverging["surface_map"]["surfaces"][0]["surface_id"] = "totally_different_surface"
+    source["AppBuildPlan"] = diverging
+    with pytest.raises(ProjectionError) as exc_info:
+        _project(source)
+    gap = exc_info.value.gaps[0]
+    assert gap.kind is ProjectionGapKind.CONTRADICTORY
+    assert "silently ignored" in gap.reason
+
+
+def test_entitlement_gate_requires_declared_capability_input_closure() -> None:
+    """Reproduce and pin the module-only entitlement coupling.
+
+    The committed OSS pattern grants an action's entitlement_gate capability
+    from subscriptions.yaml rather than the module's own capabilities[]. Alone,
+    the module cannot close that reference — projection returns a precise typed
+    missing-reference naming the entitlement_gate path, and never invents the
+    capability. Supplying the subscription catalog closes it.
+    """
+    module = {
+        "manifest": {
+            "module": {"id": "reports"},
+            "actions": [{"id": "export_report", "entitlement_gate": "reports.export"}],
+        }
+    }
+    with pytest.raises(ProjectionError) as exc_info:
+        project_semantic_graph(
+            {"modules": [module]},
+            graph_id="entitlement-open",
+            version=1,
+            scope=SCOPE,
+            taxonomy_registry=_pinned_registry(),
+        )
+    gap = exc_info.value.gaps[0]
+    assert gap.kind is ProjectionGapKind.MISSING
+    assert gap.source_path.endswith("entitlement_gate")
+    assert "does not resolve to a declared semantic node" in gap.reason
+
+    closed = project_semantic_graph(
+        {
+            "modules": [module],
+            "subscriptions": {
+                "plans": [{"plan_id": "pro", "capabilities": ["reports.export"]}]
+            },
+        },
+        graph_id="entitlement-closed",
+        version=1,
+        scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
+    )
+    assert any(node.kind is SemanticNodeKind.CAPABILITY for node in closed.graph.nodes)
+    assert any(edge.kind is SemanticEdgeKind.GATES for edge in closed.graph.edges)
