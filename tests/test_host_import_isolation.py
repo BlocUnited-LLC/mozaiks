@@ -25,6 +25,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -333,6 +334,57 @@ def test_real_studio_boot_binds_factory_workflow_catalog_for_external_workspace(
         "the startup workflow-catalog binding outlived the server; it must be "
         "released on shutdown so one host's root cannot leak into the next"
     )
+
+
+def test_failed_otel_configuration_stays_retryable_then_settles() -> None:
+    """A raising OTel configuration must not mark observability as configured.
+
+    ``_configure_otel_once`` guards against rebuilding a ``TracerProvider`` on
+    every ASGI startup. Setting its flag before the call would make a single
+    transient failure (an exporter that is not up yet) permanent for the life
+    of the process: the next startup would skip configuration and the host
+    would run silently untraced with no retry.
+
+    The monkeypatch context is exited inside the test so the restoration of
+    both patched attributes is asserted here rather than assumed — this test
+    mutates a module-global flag, and leaking it would disable or force OTel
+    configuration for every later test in the process.
+    """
+    attempts: list[str] = []
+    original_configure = host_bootstrap.configure_otel_from_env
+    original_flag = host_bootstrap._otel_configured
+
+    def _flaky_configure() -> bool:
+        attempts.append("call")
+        if len(attempts) == 1:
+            raise RuntimeError("otel exporter unavailable")
+        return True
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(host_bootstrap, "_otel_configured", False)
+        patcher.setattr(host_bootstrap, "configure_otel_from_env", _flaky_configure)
+
+        # 1. the first attempt raises, and leaves the flag false
+        with pytest.raises(RuntimeError, match="otel exporter unavailable"):
+            host_bootstrap._configure_otel_once()
+        assert host_bootstrap._otel_configured is False, (
+            "a failed configuration marked OTel configured, so no later startup can retry"
+        )
+        assert attempts == ["call"]
+
+        # 2. a later startup retries and succeeds
+        host_bootstrap._configure_otel_once()
+        assert host_bootstrap._otel_configured is True
+        assert attempts == ["call", "call"]
+
+        # 3. further startups are no-ops
+        host_bootstrap._configure_otel_once()
+        host_bootstrap._configure_otel_once()
+        assert attempts == ["call", "call"], "OTel was reconfigured after it had succeeded"
+
+    # 4. nothing leaks out of the test
+    assert host_bootstrap.configure_otel_from_env is original_configure
+    assert host_bootstrap._otel_configured is original_flag
 
 
 def test_registered_bootstrap_runs_before_inner_lifespans(monkeypatch, tmp_path) -> None:

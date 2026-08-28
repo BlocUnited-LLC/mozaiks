@@ -99,12 +99,16 @@ def _configure_otel_once() -> None:
     used to run once, at host import; the guard keeps that once-per-process
     behavior now that bootstrap can run on each ASGI startup (``--reload``, or
     a test that starts the app more than once).
+
+    The flag is set only after configuration returns, so a call that raises
+    leaves observability un-configured and retryable on the next startup
+    instead of permanently marking it done.
     """
     global _otel_configured
     if _otel_configured:
         return
-    _otel_configured = True
     configure_otel_from_env()
+    _otel_configured = True
 
 
 def configure_repo_host_defaults(host: str) -> None:
