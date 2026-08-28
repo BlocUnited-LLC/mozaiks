@@ -345,8 +345,32 @@ def test_opaque_registration_validates_immutable_identity() -> None:
         )
 
 
-def test_child_contract_registration_requires_and_pins_typed_identity() -> None:
+def _child_ref(**overrides) -> ChildContractRef:
+    fields = {
+        "subject_id": "child-1",
+        "subject_version": 1,
+        "content_digest": DIGEST,
+        "scope": SCOPE,
+        "artifact_family": "module_manifest",
+        "canonical_relative_path": "modules/users/module.yaml",
+        "contract_schema_version": "mozaiks.module.v1",
+    }
+    fields.update(overrides)
+    return ChildContractRef(**fields)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["artifact_family", "canonical_relative_path", "contract_schema_version"],
+)
+def test_child_contract_registration_requires_each_child_identity_field(missing: str) -> None:
     resolver = SemanticReferenceResolver()
+    fields = {
+        "artifact_family": "module_manifest",
+        "canonical_relative_path": "modules/users/module.yaml",
+        "contract_schema_version": "mozaiks.module.v1",
+    }
+    del fields[missing]
     with pytest.raises(pydantic.ValidationError):
         resolver.register_opaque_subject(
             kind=RefDocumentType.CHILD_CONTRACT,
@@ -354,8 +378,12 @@ def test_child_contract_registration_requires_and_pins_typed_identity() -> None:
             version=1,
             digest=DIGEST,
             scope=SCOPE,
+            **fields,
         )
 
+
+def test_child_contract_registration_and_matching_resolution_pin_typed_identity() -> None:
+    resolver = SemanticReferenceResolver()
     resolver.register_opaque_subject(
         kind=RefDocumentType.CHILD_CONTRACT,
         subject_id="child-1",
@@ -366,25 +394,113 @@ def test_child_contract_registration_requires_and_pins_typed_identity() -> None:
         canonical_relative_path="modules/users/module.yaml",
         contract_schema_version="mozaiks.module.v1",
     )
-    matching = ChildContractRef(
+    matching = _child_ref()
+    assert resolver.resolve(matching, requesting_scope=SCOPE) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "substitute", "error"),
+    [
+        ("artifact_family", "page_schema", "typed reference identity mismatch"),
+        (
+            "canonical_relative_path",
+            "modules/admin/module.yaml",
+            "typed reference identity mismatch",
+        ),
+        ("contract_schema_version", "mozaiks.module.v2", "typed reference identity mismatch"),
+        ("subject_id", "child-2", "no subject"),
+        ("subject_version", 2, "never fall back"),
+        ("content_digest", "1" * 64, "digest mismatch"),
+        ("scope", OTHER_SCOPE, "scope mismatch"),
+    ],
+)
+def test_child_contract_substitution_of_each_identity_field_fails_closed(
+    field: str, substitute, error: str
+) -> None:
+    resolver = SemanticReferenceResolver()
+    resolver.register_opaque_subject(
+        kind=RefDocumentType.CHILD_CONTRACT,
         subject_id="child-1",
-        subject_version=1,
-        content_digest=DIGEST,
+        version=1,
+        digest=DIGEST,
         scope=SCOPE,
         artifact_family="module_manifest",
         canonical_relative_path="modules/users/module.yaml",
         contract_schema_version="mozaiks.module.v1",
     )
-    assert resolver.resolve(matching, requesting_scope=SCOPE) is None
 
-    wrong_path = matching.model_copy(
-        update={"canonical_relative_path": "modules/admin/module.yaml"}
+    substituted = _child_ref(**{field: substitute})
+    with pytest.raises(ReferenceResolutionError, match=error):
+        resolver.resolve(substituted, requesting_scope=substituted.scope)
+
+
+def test_child_contract_document_type_substitution_fails_closed() -> None:
+    resolver = SemanticReferenceResolver()
+    resolver.register_opaque_subject(
+        kind=RefDocumentType.CHILD_CONTRACT,
+        subject_id="child-1",
+        version=1,
+        digest=DIGEST,
+        scope=SCOPE,
+        artifact_family="module_manifest",
+        canonical_relative_path="modules/users/module.yaml",
+        contract_schema_version="mozaiks.module.v1",
     )
-    with pytest.raises(ReferenceResolutionError, match="typed reference identity mismatch"):
-        resolver.resolve(wrong_path, requesting_scope=SCOPE)
+    substituted = CompilationPlanRef(
+        subject_id="child-1", subject_version=1, content_digest=DIGEST, scope=SCOPE
+    )
+    with pytest.raises(ReferenceResolutionError, match="document type mismatch"):
+        resolver.resolve(substituted, requesting_scope=SCOPE)
 
 
-def test_non_child_registration_rejects_child_identity_fields() -> None:
+def test_conflicting_child_identity_cannot_reuse_registered_base_identity() -> None:
+    resolver = SemanticReferenceResolver()
+    registration = {
+        "kind": RefDocumentType.CHILD_CONTRACT,
+        "subject_id": "child-1",
+        "version": 1,
+        "digest": DIGEST,
+        "scope": SCOPE,
+        "artifact_family": "module_manifest",
+        "canonical_relative_path": "modules/users/module.yaml",
+        "contract_schema_version": "mozaiks.module.v1",
+    }
+    resolver.register_opaque_subject(**registration)
+    registration["artifact_family"] = "page_schema"
+    with pytest.raises(ReferenceResolutionError, match="immutable.*already registered"):
+        resolver.register_opaque_subject(**registration)
+
+
+def test_child_resolution_is_deterministic_and_does_not_mutate_inputs() -> None:
+    resolver = SemanticReferenceResolver()
+    scope_before = SCOPE.model_dump(mode="json")
+    resolver.register_opaque_subject(
+        kind=RefDocumentType.CHILD_CONTRACT,
+        subject_id="child-1",
+        version=1,
+        digest=DIGEST,
+        scope=SCOPE,
+        artifact_family="module_manifest",
+        canonical_relative_path="modules/users/module.yaml",
+        contract_schema_version="mozaiks.module.v1",
+    )
+    ref = _child_ref()
+    ref_before = ref.model_dump(mode="json")
+    assert resolver.resolve(ref, requesting_scope=SCOPE) is None
+    assert resolver.resolve(ref, requesting_scope=SCOPE) is None
+    assert ref.model_dump(mode="json") == ref_before
+    assert SCOPE.model_dump(mode="json") == scope_before
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("artifact_family", "module_manifest"),
+        ("canonical_relative_path", "modules/users/module.yaml"),
+        ("contract_schema_version", "mozaiks.module.v1"),
+    ],
+)
+def test_non_child_registration_rejects_child_identity_fields(field: str, value: str) -> None:
     resolver = SemanticReferenceResolver()
     with pytest.raises(ReferenceResolutionError, match="only for child contracts"):
         resolver.register_opaque_subject(
@@ -393,5 +509,5 @@ def test_non_child_registration_rejects_child_identity_fields() -> None:
             version=1,
             digest=DIGEST,
             scope=SCOPE,
-            artifact_family="module_manifest",
+            **{field: value},
         )
