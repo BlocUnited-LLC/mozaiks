@@ -14,6 +14,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Semantic-compiler contract layer (ADR 0007 Slice 2)**: strict, immutable,
+  content-digested contracts for `ApplicationManifest`
+  (`mozaiks.app_manifest.v1`), `SemanticGraph` (`mozaiks.semantic_graph.v1`),
+  and `ImplementationBinding` (`mozaiks.implementation_binding.v1`), plus the
+  full typed reference roster (`ApplicationManifestRef`, `SemanticGraphRef`,
+  `ImplementationBindingRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
+  `TaxonomyNamespaceRef`, `RefinementPatchRef`, `ArtifactRevisionRef`, and
+  typed child-contract refs), one canonical serialization/digest contract
+  (`mozaiks.canonical_json.v1`), deterministic node/edge identity, and
+  fail-closed reference resolution and graph-closure validation in
+  `mozaiksai.core.semantics`. The package sits behind non-production/test
+  seams: no generator, runtime, or refinement code consumes it, and the ADR
+  0006/0007 compiler capabilities (`semantic_taxonomy_v1`,
+  `semantic_reference_contracts_v1`) remain unadvertised because Slice 1
+  taxonomy validation has not yet passed outside advisory mode.
+
 - **Advisory semantic taxonomy (`mozaiks.taxonomy.v1`)**: development and
   test callers can now validate registered event, capability, and artifact-
   family identifiers consistently across module loading, subscriptions,
