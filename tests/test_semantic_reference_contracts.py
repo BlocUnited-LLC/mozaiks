@@ -315,3 +315,83 @@ def test_content_bearing_kinds_cannot_register_opaque() -> None:
             digest=DIGEST,
             scope=SCOPE,
         )
+
+
+def test_opaque_registration_validates_immutable_identity() -> None:
+    resolver = SemanticReferenceResolver()
+    with pytest.raises(pydantic.ValidationError, match="mutable alias"):
+        resolver.register_opaque_subject(
+            kind=RefDocumentType.COMPILATION_PLAN,
+            subject_id="latest",
+            version=1,
+            digest=DIGEST,
+            scope=SCOPE,
+        )
+    with pytest.raises(pydantic.ValidationError, match="greater than or equal to 1"):
+        resolver.register_opaque_subject(
+            kind=RefDocumentType.COMPILATION_PLAN,
+            subject_id="plan-1",
+            version=0,
+            digest=DIGEST,
+            scope=SCOPE,
+        )
+    with pytest.raises(pydantic.ValidationError, match="lowercase hex"):
+        resolver.register_opaque_subject(
+            kind=RefDocumentType.COMPILATION_PLAN,
+            subject_id="plan-1",
+            version=1,
+            digest="Z" * 64,
+            scope=SCOPE,
+        )
+
+
+def test_child_contract_registration_requires_and_pins_typed_identity() -> None:
+    resolver = SemanticReferenceResolver()
+    with pytest.raises(pydantic.ValidationError):
+        resolver.register_opaque_subject(
+            kind=RefDocumentType.CHILD_CONTRACT,
+            subject_id="child-1",
+            version=1,
+            digest=DIGEST,
+            scope=SCOPE,
+        )
+
+    resolver.register_opaque_subject(
+        kind=RefDocumentType.CHILD_CONTRACT,
+        subject_id="child-1",
+        version=1,
+        digest=DIGEST,
+        scope=SCOPE,
+        artifact_family="module_manifest",
+        canonical_relative_path="modules/users/module.yaml",
+        contract_schema_version="mozaiks.module.v1",
+    )
+    matching = ChildContractRef(
+        subject_id="child-1",
+        subject_version=1,
+        content_digest=DIGEST,
+        scope=SCOPE,
+        artifact_family="module_manifest",
+        canonical_relative_path="modules/users/module.yaml",
+        contract_schema_version="mozaiks.module.v1",
+    )
+    assert resolver.resolve(matching, requesting_scope=SCOPE) is None
+
+    wrong_path = matching.model_copy(
+        update={"canonical_relative_path": "modules/admin/module.yaml"}
+    )
+    with pytest.raises(ReferenceResolutionError, match="typed reference identity mismatch"):
+        resolver.resolve(wrong_path, requesting_scope=SCOPE)
+
+
+def test_non_child_registration_rejects_child_identity_fields() -> None:
+    resolver = SemanticReferenceResolver()
+    with pytest.raises(ReferenceResolutionError, match="only for child contracts"):
+        resolver.register_opaque_subject(
+            kind=RefDocumentType.COMPILATION_PLAN,
+            subject_id="plan-1",
+            version=1,
+            digest=DIGEST,
+            scope=SCOPE,
+            artifact_family="module_manifest",
+        )

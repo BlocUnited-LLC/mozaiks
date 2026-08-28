@@ -17,8 +17,13 @@ from mozaiksai.core.semantics.graph import SemanticGraph
 from mozaiksai.core.semantics.manifest import ApplicationManifest
 from mozaiksai.core.semantics.refs import (
     ApplicationManifestRef,
+    ArtifactRevisionRef,
+    BuildContextBindingRef,
+    ChildContractRef,
+    CompilationPlanRef,
     ExecutionAccessScopeRef,
     RefDocumentType,
+    RefinementPatchRef,
     TaxonomyNamespaceRef,
     _ScopedRef,
 )
@@ -37,6 +42,7 @@ class _Subject:
     digest: str
     scope: ExecutionAccessScopeRef | None
     content: Any
+    reference_payload: dict[str, Any] | None = None
 
 
 class SemanticReferenceResolver:
@@ -99,12 +105,17 @@ class SemanticReferenceResolver:
         )
 
     def register_taxonomy_namespace(self, namespace: TaxonomyNamespace, digest: str) -> None:
+        ref = TaxonomyNamespaceRef(
+            namespace_id=namespace.namespace_id,
+            namespace_version=namespace.version,
+            content_digest=digest,
+        )
         self._register(
             _Subject(
                 kind=RefDocumentType.TAXONOMY_NAMESPACE,
-                subject_id=namespace.namespace_id,
-                version=namespace.version,
-                digest=digest,
+                subject_id=ref.namespace_id,
+                version=ref.namespace_version,
+                digest=ref.content_digest,
                 scope=None,
                 content=namespace,
             )
@@ -118,6 +129,9 @@ class SemanticReferenceResolver:
         version: int,
         digest: str,
         scope: ExecutionAccessScopeRef,
+        artifact_family: str | None = None,
+        canonical_relative_path: str | None = None,
+        contract_schema_version: str | None = None,
     ) -> None:
         if kind in {
             RefDocumentType.SEMANTIC_GRAPH,
@@ -128,14 +142,51 @@ class SemanticReferenceResolver:
             raise ReferenceResolutionError(
                 f"{kind.value} is content-bearing in this slice; register its document"
             )
+
+        fields: dict[str, Any] = {
+            "subject_id": subject_id,
+            "subject_version": version,
+            "content_digest": digest,
+            "scope": scope,
+        }
+        ref_types = {
+            RefDocumentType.COMPILATION_PLAN: CompilationPlanRef,
+            RefDocumentType.BUILD_CONTEXT_BINDING: BuildContextBindingRef,
+            RefDocumentType.REFINEMENT_PATCH: RefinementPatchRef,
+            RefDocumentType.ARTIFACT_REVISION: ArtifactRevisionRef,
+        }
+        if kind is RefDocumentType.CHILD_CONTRACT:
+            fields.update(
+                artifact_family=artifact_family,
+                canonical_relative_path=canonical_relative_path,
+                contract_schema_version=contract_schema_version,
+            )
+            ref: _ScopedRef = ChildContractRef(**fields)
+        else:
+            if any(
+                value is not None
+                for value in (
+                    artifact_family,
+                    canonical_relative_path,
+                    contract_schema_version,
+                )
+            ):
+                raise ReferenceResolutionError(
+                    "child-contract identity fields are valid only for child contracts"
+                )
+            ref_type = ref_types.get(kind)
+            if ref_type is None:
+                raise ReferenceResolutionError(f"unsupported opaque document type {kind!r}")
+            ref = ref_type(**fields)
         self._register(
             _Subject(
                 kind=kind,
-                subject_id=subject_id,
-                version=version,
-                digest=digest,
-                scope=scope,
+                subject_id=ref.subject_id,
+                version=ref.subject_version,
+                digest=ref.content_digest,
+                scope=ref.scope,
                 content=None,
+                reference_payload=ref.model_dump(mode="json"),
             )
         )
 
@@ -164,6 +215,13 @@ class SemanticReferenceResolver:
         if requesting_scope != subject.scope:
             raise ReferenceResolutionError(
                 f"cross-scope access to {ref.subject_id!r} fails closed"
+            )
+        if (
+            subject.reference_payload is not None
+            and ref.model_dump(mode="json") != subject.reference_payload
+        ):
+            raise ReferenceResolutionError(
+                f"typed reference identity mismatch for {ref.subject_id!r}"
             )
         return subject.content
 
