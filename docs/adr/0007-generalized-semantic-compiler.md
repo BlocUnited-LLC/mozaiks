@@ -136,6 +136,111 @@ execution detail. The only generation-time semantic author is the pinned
 This ADR approves the contract direction only. It implements no interface,
 changes no workflow, migrates no data, and authorizes no model spend.
 
+## Accepted Clarification — 2026-08-28
+
+This clarification settles two prerequisite contract decisions that the
+Accepted ADR delegated to implementation and fixes the remaining Slice 4
+sequence. It does not change current production authority, persistence,
+promotion, capability advertisement, workflow execution, or model policy.
+
+### Semantic payload authority
+
+`SemanticGraph` remains the sole generation-time semantic authority. The
+payload-bearing contract is versioned as `mozaiks.semantic_graph.v2` rather
+than changing the identity rules of `mozaiks.semantic_graph.v1` in place.
+Graph v2 is a Merkle-rooted authority: every node pins exactly one immutable,
+scoped, path-independent `SemanticPayloadRef`, and the graph's canonical
+identity and digest cover the complete payload-reference identity, including
+the payload version and content digest.
+
+The referenced payload document is:
+
+- a strict discriminated union selected by the node kind;
+- bound to one stable node identity and the same execution-access scope as the
+  graph;
+- immutable, independently versioned, and content-digested; and
+- authoritative only when reached through a pinned graph root.
+
+Unchanged node payloads may be reused by later graph versions for that same
+node and scope. A payload cannot be selected as independently current, reused
+for another node or scope, or resolved as a second semantic root. Descriptions,
+page and section intent, data shapes, plans and prices, request/response and
+event schemas, notification content, deployment intent, and bounded stub
+declarations must therefore have typed payload variants. An untyped attributes
+dictionary, arbitrary semantic blob, secondary decision ledger, or separately
+current payload authority is not permitted.
+
+`ChildContractRef` remains exclusively an identity for a rendered child
+artifact: artifact family, canonical relative output path, artifact contract
+schema, immutable version, scope, and content digest. It is not generalized
+into semantic input authority. One semantic payload may deterministically
+render multiple child artifacts, so semantic input identity remains
+path-independent and child contracts remain downstream views.
+
+This is a prerequisite extension of the Slice 2 reference, resolver, graph,
+binding, and canonical-serialization contracts. It extends their existing
+strict type/version/digest/scope verification; it does not create a parallel
+resolver, serializer, taxonomy, or binding authority. Implementation binding
+continues to select a verified implementation only for a requirement already
+present in the pinned graph and cannot add payload facts.
+
+### Aggregate CompilationPlan authority
+
+Exactly one aggregate `CompilationPlan` is authoritative for a bounded build.
+It pins the complete source tuple and embeds deterministic plans for each
+applicable artifact-family instance. Those embedded family plans provide cache
+keys, partial-regeneration boundaries, and failure isolation, but they are
+subdocuments of the aggregate rather than independently authoritative plans.
+
+An embedded family plan has no independent reference type, current state,
+publication, selection, or execution authority. It is valid only under the
+identity and digest of its aggregate plan. Every partial build still derives a
+complete aggregate disposition across applicable families: render,
+reuse-from-base with pinned file digests, preserve-unowned, input-only,
+external-handoff, or inapplicable. Omission is not an implicit preservation
+decision.
+
+`mozaiksai/core/workflow/task_batches.py`, compiled assignments, workflow
+sequences, queues, and workflow execution remain execution mechanisms. They
+may consume deterministic projections of the aggregate plan but cannot become
+competing planning authorities. The agent-produced `AppBuildPlan` remains the
+active operational plan throughout Slice 4 and is replaced only by the atomic
+Slice 5 authority cutover.
+
+### Registry, portable paths, and archive transport
+
+`layout_registry` remains the only registry for artifact-family identifiers,
+path templates, renderers, artifact loaders and validators, dependency
+families, ownership and security classes, allowed stub kinds, destinations,
+and output-digest behavior. Slice 4 evolves that authority rather than adding
+a renderer, materializer, path, or archive-family registry beside it.
+
+All compiler-owned output uses one host-independent
+`mozaiks.portable_path.v1` profile. It uses POSIX separators and NFC storage
+normalization, detects collisions with a conservative Unicode case-folded key,
+and applies Windows-compatible restrictions on every host. Absolute,
+drive-qualified, drive-relative, UNC/device, traversal, glob, reserved,
+empty-segment, control-character, alternate-data-stream, trailing-dot/space,
+Unicode-normalization, case, and file/directory-prefix collisions fail closed.
+Target-specific external handoffs may add restrictions but cannot weaken the
+portable profile. Fresh staging roots and symlink/reparse-point confinement
+remain mandatory at write time.
+
+ZIP is a deterministic transport envelope over registered files, not a
+semantic artifact family, graph input, or independently planned compiler
+output. Envelope bytes and manifests may be digested for transport and
+persistence evidence, but archive identity cannot author semantics. Entry
+names use the portable path profile; ordering, timestamps, platform metadata,
+permissions, compression settings, collision checks, and link rejection are
+deterministic and fail closed.
+
+Slice 4A may implement the registry, portable-path, and deterministic-archive
+substrate before graph-v2 payloads because that substrate introduces no
+semantic authority. Aggregate plan derivation and renderer equivalence wait
+for graph v2. Production semantic authority, persistence, promotion behavior,
+and capability advertisement remain unchanged until Slice 5. None of these
+decisions authorizes live models or relaxes the ADR 0006 interlock.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,
@@ -908,14 +1013,29 @@ Slice 0 is a gate composed of small, independently reviewable defect-repair
 PRs, not one cleanup mega-PR. Each repair must prove the cited defect and may
 delete only its own obsolete path.
 
+For the remaining compiler work, the settled sequence is: this documentation
+clarification; Slice 4A portable paths, registry v2, and deterministic archive
+substrate; the prerequisite Slice 2 typed-payload and graph-v2 extension; a
+fresh-main evolution of the Slice 3 adapters after the independently reviewed
+Slice 3 PR lands; Slice 4B aggregate-plan derivation; Slice 4C offline
+deterministic-renderer equivalence; then Slice 5 production cutover. The
+`2E` and `3E` labels below identify extensions to those slices' contract
+ownership; their table position is their required execution order. This
+compiler ordering does not begin an ADR 0006 journey slice or advertise a new
+journey capability.
+
 | Slice | Components; authority before → after | Tests and proof gate | Deletions; rollback; live models; ADR 0006 |
 |---|---|---|---|
 | **0. Ground-truth repair** — generator path writers, save tools, launcher, `context_variables.yaml` query, invalidation family names, dead branches/scripts | Defect repair only; no authority change | Path-contract tests; failure-injection tests proving fail-closed persistence; lineage resolution on the archetype corpus; per-family staleness-propagation tests | In separate PRs, delete the dead ValueEngine `save_build_plan` branch, dead guard script, and only helpers individually proven unreachable. Retain active `promote_generated_workflow` and Studio staged-draft acceptance. Rollback: revert the individual repair PR. No live models. No ADR 0006 dependency; allowed under the verification freeze as defect fixes. |
 | **1. Taxonomy and artifact-family registry** — new `mozaiks.taxonomy.v1`; consumers: module loader, subscriptions loader, `layout_registry`, event dispatcher | Five event registries and two capability grammars → one versioned registry (existing names grandfathered by explicit entries) | Closure property tests; unknown-name fail-closed tests behind a test/development flag; envelope schema-version guard revived as a real check | No deletions yet and no production compiler capability advertisement. Rollback: remove the test/development advisory mode; it is never a supported runtime mode and is deleted at cutover. No live models. No ADR 0006 dependency. |
-| **2. Manifest/graph/binding/reference contracts** — `ApplicationManifest`, `SemanticGraph`, `ImplementationBinding`, all refs, canonical serialization + digests, **test-only seams** per ADR 0006's non-production-prototype rule | No production authority; contracts exist behind test seams | Byte-identical double-serialization; digest stability across key order; ref type/version/digest resolution; no-dangling-edge; unknown-field rejection; cross-tenant scoping tests | No deletions. After slices 1 and 2 both pass outside advisory mode, advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together. Rollback removes both advertisements and blocks bounded starts. No live models. **This slice (with slice 1) is the implementation half of ADR 0006's slice-0 prerequisite.** |
-| **3. Offline projection adapters** — deterministic builders projecting current stage outputs into candidate graph nodes, run against the archetype corpus and recorded builds | No authority change; comparison only | Closure of every page action/capability/event across the corpus; re-extraction equivalence | Adapters are offline-test-only and deleted at cutover. Rollback: delete builders. No live models. No ADR 0006 interaction. |
-| **4. Derived CompilationPlan + renderer registry** — deterministic implementation binding and plan derivation from graph; `layout_registry` extended as the single path/family/renderer authority; AgentGenerator regains a renderer layer | No production authority change: agent-produced `AppBuildPlan` remains current while a derived binding/`CompilationPlan` is selected only in offline tests/development after equivalence proof | Derived-vs-produced equivalence on the corpus; proof that binding cannot add graph semantics; registry-extension invariants; stable renderer order; Unicode/case collision, traversal, drive/UNC, and link-escape confinement tests; generated-root path contracts | Begin identifying generator plan mirrors and dead converter normalizers for cutover; retain active promotion copying. Rollback: delete the candidate path/flag. No live models. No ADR 0006 dependency. |
-| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph version + build record become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; current-manifest CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/manifest persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Rollback: per-workflow test/development flag only until cutover completes, then removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
+| **2. Manifest/graph/binding/reference contracts** — `ApplicationManifest`, `SemanticGraph`, `ImplementationBinding`, all refs, canonical serialization + digests, **test-only seams** per ADR 0006's non-production-prototype rule | No production authority; contracts exist behind test seams | Byte-identical double-serialization; digest stability across key order; ref type/version/digest resolution; no-dangling-edge; unknown-field rejection; cross-tenant scoping tests | No deletions and no production capability-advertisement change before Slice 5. Rollback deletes the candidate contracts and keeps bounded starts blocked. No live models. **This slice (with slice 1) is the implementation half of ADR 0006's slice-0 prerequisite.** |
+| **3. Initial offline projection adapters** — deterministic builders project current stage outputs into candidate v1 graph nodes against the archetype corpus and recorded builds | No authority change; comparison only; incomplete semantics are explicit typed gaps rather than invented graph facts | Closure of every currently representable page action/capability/event across the corpus; re-extraction equivalence; stable typed-gap reporting | Adapters remain offline-test-only. They are evolved from fresh `main` in 3E after their independent review, and deleted at cutover. Rollback: delete builders. No live models. No ADR 0006 interaction. |
+| **4A. Portable path, registry v2, and deterministic archive substrate** — `layout_registry` evolves in place as the sole artifact-family/path/renderer authority; compiler-owned paths share `mozaiks.portable_path.v1`; ZIP is a transport envelope | No semantic or planning authority change; current generators, `AppBuildPlan`, workflow execution, persistence, and promotion remain authoritative | Registry self-digest and extension invariants; acyclic stable family ordering; Windows/POSIX parity; Unicode/case/prefix collisions; traversal, drive/UNC/device, reserved-name, symlink/reparse, and archive-entry confinement; byte-identical archive vectors; generated-root contracts | No compiler authority deletion. Retain active promotion copying. Rollback: revert the substrate and its bounded consumer migrations. No live models, capability advertisement, or ADR 0006 dependency. |
+| **2E. Typed semantic payload and graph-v2 contract extension** — add `SemanticPayloadRef`, strict payload documents, graph-v2 node pins, and content-bearing resolver closure using the Slice 2 serializer and scope rules | No production authority; graph v1 remains the existing test seam while graph v2 proves complete typed semantics offline | Payload discriminant/kind closure; node/scope/type/version/digest substitution; graph-root/payload Merkle vectors; unknown-field rejection; payload reuse for the same node and rejection across nodes/scopes; binding cannot add payload facts | No production dual read and no independently current payload store. Rollback: delete the graph-v2 candidate contracts and block later compiler slices. No live models or new capability advertisement. Preserves ADR 0006's compiler prerequisite. |
+| **3E. Fresh-main graph-v2 projection evolution** — after the independently reviewed Slice 3 change lands, evolve its offline adapters to emit typed payload documents and graph-v2 refs | No authority change; current stage outputs and `AppBuildPlan` remain comparison inputs | Every prior typed gap is either represented by a strict payload variant or remains an explicit blocking gap; graph/payload closure and re-extraction equivalence across the corpus | Do not branch from the unmerged Slice 3 PR. Rollback: delete the graph-v2 adapter evolution. No live models or ADR 0006 interaction. |
+| **4B. Aggregate CompilationPlan derivation** — derive one aggregate plan containing non-authoritative artifact-family-instance subplans; project assignments and task-batch inputs from it | No production authority change: agent-produced `AppBuildPlan` remains current and the aggregate plan is offline-only | Complete family dispositions; derived-vs-produced plan equivalence; global DAG and path ownership; stable aggregate and family digests; partial regeneration/reuse closure; proof that family plans cannot resolve or execute independently and binding cannot widen graph semantics | Begin identifying plan mirrors and dead converter normalizers for cutover, but delete no active authority. Rollback: delete the candidate plan path. No live models, capability advertisement, or ADR 0006 dependency. |
+| **4C. Offline deterministic renderer equivalence** — bind graph-v2 payloads and aggregate-plan family instances to registry renderers; AgentGenerator regains a renderer layer | No production authority change; candidate renderers run only against offline corpus fixtures and never beside a live build | Stable renderer order; byte-identical child contracts; loader/validator and route/component/action closure; AppGenerator and AgentGenerator equivalence; changed semantic closure changes only affected families | Retain current generation and promotion. Rollback: delete candidate renderers and comparison flag. No live models, capability advertisement, or ADR 0006 dependency. |
+| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph version + build record become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; current-manifest CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/manifest persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
 | **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected paired publication; rollback rehearsal through the current-manifest CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent manifest/graph/revision tuple. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
 | **7. Retirement** — remove obsolete schemas, glob taxonomies, aliases, converter paths, transitional adapters, comparison fixtures, and development flags | One semantic authority; one registry per concern | Repository hygiene guard extended to ban retired names (pattern: `scripts/production_readiness_gate.py`); full suite; generated-app acceptance | Deletions complete. Rollback: deployment rollback before deletion only; no dual-read shim reintroduced. No live-model change. ADR 0006 slice interleaving agreed before this point. |
 
@@ -1011,23 +1131,24 @@ This ADR explicitly does not:
   bypass channels (cwd precedence, arbitrary-import seams, fail-open
   validation) are closed on the canonical path.
 
-## Open Questions Deferred To Implementation
+## Remaining Open Questions Deferred To Implementation
 
-- Graph granularity: family/child-contract level is the recommendation; finer
-  granularity only where refinement targeting proves it necessary.
+Semantic payload authority, aggregate-plan granularity, portable path
+semantics, archive classification, and the remaining pre-cutover compiler
+sequence are settled by the 2026-08-28 Accepted clarification above. The
+remaining implementation questions are:
+
 - `BuilderArtifactStore` end state: projection of graph records versus merge
   into the build-record store — a data-migration decision at slice 5.
 - `AppLoader` subscriptions fail-open default for SaaS apps — separate
   product decision.
-- Joint sequencing of ADR 0006 journey slices and these compiler slices —
-  agreed explicitly before implementation begins.
 - Performance budget for graph validation/digesting on every save-tool call —
   corpus benchmarks in slice 3.
 - Per-surface ownership-boundary population for brownfield/hybrid apps.
 
 ## Validation
 
-For this Proposed ADR draft:
+For this Accepted ADR and its clarifications:
 
 - repository source-hygiene scan (`scripts/production_readiness_gate.py`
   offline gates and `tests/test_production_readiness_gate.py`)
@@ -1036,9 +1157,10 @@ For this Proposed ADR draft:
   the authoring commit
 - local Markdown-link verification
 - `git diff --check`
-- exact changed-file review (this document and its `mkdocs.yml` nav entry
-  only)
+- exact changed-file review; documentation-only clarification PRs do not
+  change the existing `mkdocs.yml` navigation entry
 
-Independent architecture, contract, and boundary review is required before
-accepting this ADR or beginning implementation. Acceptance of this document
-alone changes no runtime behavior and unlocks no production execution.
+Independent exact-head architecture, contract, and boundary review is required
+before beginning implementation from a clarification. Acceptance of this
+document alone changes no runtime behavior and unlocks no production
+execution.
