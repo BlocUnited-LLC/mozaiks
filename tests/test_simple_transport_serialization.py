@@ -1,5 +1,8 @@
+import pytest
+
 from mozaiksai.core.events import unified_event_dispatcher as _dispatcher_mod
 from mozaiksai.core.transport import simple_transport as _transport_mod
+from mozaiksai.core.transport.event_contract import EVENT_ENVELOPE_SCHEMA_VERSION
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 
 
@@ -17,16 +20,46 @@ def test_pre_connection_buffer_overflow_logs_once_per_chat(monkeypatch):
     import asyncio
 
     async def _run() -> None:
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "one"}}, "chat-1")
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "two"}}, "chat-1")
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "three"}}, "chat-1")
-        await transport._broadcast_to_websockets({"type": "chat.text", "data": {"content": "four"}}, "chat-1")
+        for content in ("one", "two", "three", "four"):
+            await transport._broadcast_to_websockets(
+                {
+                    "schema_version": EVENT_ENVELOPE_SCHEMA_VERSION,
+                    "type": "chat.text",
+                    "data": {"content": content},
+                },
+                "chat-1",
+            )
 
     asyncio.run(_run())
 
     assert len(warnings) == 1
     assert "suppressing repeated overflow logs" in warnings[0]
     assert transport._pre_connection_buffer_overflow_counts["chat-1"] == 2
+
+
+def test_transport_passthrough_requires_versioned_envelope(monkeypatch):
+    transport = SimpleTransport()
+    sent = []
+    monkeypatch.setattr(
+        transport,
+        "_broadcast_to_websockets",
+        lambda event, chat_id=None: _record_broadcast(sent, event, chat_id),
+    )
+
+    import asyncio
+
+    with pytest.raises(ValueError, match="schema_version"):
+        asyncio.run(
+            transport.send_event_to_ui({"type": "chat.deployment_started", "data": {}}, "chat-1")
+        )
+
+    event = {
+        "schema_version": EVENT_ENVELOPE_SCHEMA_VERSION,
+        "type": "chat.deployment_started",
+        "data": {},
+    }
+    asyncio.run(transport.send_event_to_ui(event, "chat-1"))
+    assert sent == [(event, "chat-1")]
 
 
 def test_chunk_text_for_stream_preserves_short_messages_word_level():

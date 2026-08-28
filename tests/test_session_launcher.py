@@ -677,8 +677,9 @@ async def test_emit_workflow_launch_navigation_sends_chat_navigate_envelope(monk
     assert sent is True
     assert captured == [
         (
-            {
-                "type": "chat.navigate",
+                {
+                    "schema_version": "mozaiks.ui.event.v1",
+                    "type": "chat.navigate",
                 "data": {
                     "chat_id": "chat_launched",
                     "workflow_name": "ValueEngine",

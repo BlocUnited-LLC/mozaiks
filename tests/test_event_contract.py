@@ -1,15 +1,19 @@
 """Tests for the mozaiks.ui.event.v1 canonical event contract."""
+import pytest
+
 from mozaiksai.core.transport.event_contract import (
+    EVENT_ENVELOPE_SCHEMA_VERSION,
     MozaiksEventEnvelope,
     MozaiksEventType,
     compute_event_id,
+    send_event_envelope,
 )
 
 
 def test_event_type_strings_are_namespaced():
     """All event types must have a dot-namespaced format."""
     for et in MozaiksEventType:
-        assert "." in et, f"{et} is not namespaced"
+        assert "." in et or et is MozaiksEventType.ERROR, f"{et} is not namespaced"
 
 
 def test_ui_event_types_present():
@@ -67,15 +71,42 @@ def test_compute_event_id_uses_session_when_no_run():
 
 
 def test_envelope_accepts_extra_fields():
-    env = MozaiksEventEnvelope(type=MozaiksEventType.CHAT_TEXT, text="hello", seq=5)
+    env = MozaiksEventEnvelope(
+        schema_version=EVENT_ENVELOPE_SCHEMA_VERSION,
+        type=MozaiksEventType.CHAT_TEXT,
+        text="hello",
+        seq=5,
+    )
     assert env.type == "chat.text"
 
 
 def test_envelope_type_compares_as_string():
     """MozaiksEventType is a StrEnum — it must compare equal to its string value."""
-    env = MozaiksEventEnvelope(type=MozaiksEventType.UI_RENDER)
+    env = MozaiksEventEnvelope(
+        schema_version=EVENT_ENVELOPE_SCHEMA_VERSION,
+        type=MozaiksEventType.UI_RENDER,
+    )
     assert env.type == "ui.render"
     assert env.type == MozaiksEventType.UI_RENDER
+
+
+def test_envelope_accepts_grandfathered_error_type():
+    env = MozaiksEventEnvelope(
+        schema_version=EVENT_ENVELOPE_SCHEMA_VERSION,
+        type=MozaiksEventType.ERROR,
+        data={"message": "failed"},
+    )
+    assert env.type == "error"
+
+
+@pytest.mark.asyncio
+async def test_direct_websocket_boundary_rejects_missing_schema_version():
+    class _WebSocket:
+        async def send_json(self, _payload):  # noqa: ANN001
+            raise AssertionError("invalid envelope reached socket")
+
+    with pytest.raises(ValueError, match="schema_version"):
+        await send_event_envelope(_WebSocket(), {"type": "chat.error", "data": {}})
 
 
 def test_ns_map_uses_canonical_types():
@@ -88,7 +119,7 @@ def test_ns_map_uses_canonical_types():
 
     from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
 
-    src = inspect.getsource(UnifiedEventDispatcher.build_outbound_event_envelope)
+    src = inspect.getsource(UnifiedEventDispatcher._build_outbound_event_envelope)
     # Extract string values that look like event type strings from the ns_map block.
     # We match 'MozaiksEventType.XYZ' patterns and verify they resolve correctly.
     enum_refs = re.findall(r"MozaiksEventType\.(\w+)", src)

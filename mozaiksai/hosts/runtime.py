@@ -883,6 +883,7 @@ async def websocket_endpoint(
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
         from mozaiksai.core.session.router import get_session_router
+        from mozaiksai.core.transport.event_contract import send_event_envelope
         from mozaiksai.core.transport.session_registry import session_registry
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -937,8 +938,9 @@ async def websocket_endpoint(
         except Exception as prereq_exc:
             logger.error("WS_PREREQ_VALIDATION_FAILED workflow=%s chat=%s: %s", resolved_workflow_name, chat_id, prereq_exc, exc_info=True)
             await websocket.accept()
-            await websocket.send_json(
+            await send_event_envelope(websocket,
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": "Failed to validate workflow prerequisites. Please try again.",
@@ -954,8 +956,9 @@ async def websocket_endpoint(
 
         if not prereqs_ok:
             await websocket.accept()
-            await websocket.send_json(
+            await send_event_envelope(websocket,
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": prereq_reason or "Workflow prerequisites are not met.",

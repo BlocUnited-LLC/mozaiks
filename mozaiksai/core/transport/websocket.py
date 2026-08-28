@@ -111,9 +111,15 @@ class WebSocketSessionManager:
         for idx, message in enumerate(messages_to_send):
             try:
                 if isinstance(message, dict) and "type" in message and "data" in message:
+                    from mozaiksai.core.transport.event_contract import (
+                        validate_event_envelope_schema_version,
+                    )
+
+                    validate_event_envelope_schema_version(message)
                     await websocket.send_json(message)
                 else:
                     await websocket.send_json({
+                        "schema_version": "mozaiks.ui.event.v1",
                         "type": "log",
                         "data": {"message": self._stringify_unknown(message)},
                     })
@@ -219,6 +225,7 @@ class WebSocketSessionManager:
             while chat_id in self.connections:
                 await asyncio.sleep(self._heartbeat_interval)
                 ping_data = {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "ping",
                     "timestamp": datetime.now(UTC).isoformat(),
                 }

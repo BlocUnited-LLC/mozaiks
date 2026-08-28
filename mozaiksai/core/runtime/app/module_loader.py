@@ -34,6 +34,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.taxonomy import SemanticCategory, validate_registered_identifier
 
 logger = get_workflow_logger("module_loader")
 
@@ -1152,8 +1153,9 @@ class ModuleLoader:
         "policy_hooks": ("policy_hooks.yaml", ModulePolicyHooksManifest),
     }
 
-    def __init__(self, base_path: str) -> None:
+    def __init__(self, base_path: str, *, taxonomy_advisory: bool = False) -> None:
         self._base = Path(base_path)
+        self._taxonomy_advisory = taxonomy_advisory
         import_roots = [self._base.parent, self._base] if self._base.name == "app" else [self._base]
         for root in import_roots:
             root_text = str(root.resolve())
@@ -1209,6 +1211,24 @@ class ModuleLoader:
             definition = ModuleDefinition.model_validate(_load_yaml_file(yaml_path))
         except Exception as exc:
             raise ModuleLoadError(f"Invalid module.yaml for {name!r}: {exc}") from exc
+
+        if self._taxonomy_advisory:
+            try:
+                for capability in definition.capabilities:
+                    validate_registered_identifier(
+                        SemanticCategory.CAPABILITY,
+                        capability.capability_id,
+                        advisory=True,
+                    )
+                for action in definition.actions:
+                    if action.entitlement_gate:
+                        validate_registered_identifier(
+                            SemanticCategory.CAPABILITY,
+                            action.entitlement_gate,
+                            advisory=True,
+                        )
+            except ValueError as exc:
+                raise ModuleLoadError(f"Invalid module.yaml taxonomy for {name!r}: {exc}") from exc
 
         if definition.name != name:
             raise ModuleLoadError(
@@ -1384,6 +1404,18 @@ class ModuleLoader:
 
         manifests = ModuleCompanionManifests.model_validate(parsed)
         declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
+        if self._taxonomy_advisory:
+            try:
+                for event_type in sorted(declared_events):
+                    validate_registered_identifier(
+                        SemanticCategory.EVENT,
+                        event_type,
+                        advisory=True,
+                    )
+            except ValueError as exc:
+                raise ModuleLoadError(
+                    f"Invalid events.yaml taxonomy for {definition.name!r}: {exc}"
+                ) from exc
         if manifests.events is not None:
             for event in manifests.events.events:
                 if event.producer != definition.name:
@@ -1413,6 +1445,15 @@ class ModuleLoader:
             declared_permission_ids = {permission.id for permission in definition.permissions}
             for reaction in manifests.reactions.reactions:
                 event_type = str(reaction.event_type or "").strip()
+                if self._taxonomy_advisory and event_type:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.EVENT, event_type, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"reactions.yaml references unknown event {event_type!r}: {exc}"
+                        ) from exc
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"reactions.yaml references non-canonical event {event_type!r}"
@@ -1423,10 +1464,29 @@ class ModuleLoader:
                             f"reactions.yaml reaction {reaction.id!r} references undeclared "
                             f"permission {permission_id!r}; add it to the module-level permissions block"
                         )
+                capability_id = reaction.target.capability_id
+                if self._taxonomy_advisory and capability_id:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.CAPABILITY, capability_id, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"reactions.yaml references unknown capability {capability_id!r}: {exc}"
+                        ) from exc
 
         if manifests.notifications is not None:
             for notification in manifests.notifications.notifications:
                 event_type = str(getattr(notification, "event_type", "") or "").strip()
+                if self._taxonomy_advisory and event_type:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.EVENT, event_type, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"notifications.yaml references unknown event {event_type!r}: {exc}"
+                        ) from exc
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"notifications.yaml references non-canonical event {event_type!r}"

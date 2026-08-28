@@ -34,7 +34,12 @@ from mozaiksai.core.events.runtime_events import (
 )
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
 from mozaiksai.core.ports.orchestration import DomainEvent
-from mozaiksai.core.transport.event_contract import MozaiksEventType
+from mozaiksai.core.taxonomy import SemanticCategory, validate_registered_identifier
+from mozaiksai.core.transport.event_contract import (
+    EVENT_ENVELOPE_SCHEMA_VERSION,
+    MozaiksEventType,
+    validate_event_envelope_schema_version,
+)
 from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 from mozaiksai.core.workflow.startup_messages import matches_hidden_initial_message
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -158,8 +163,9 @@ class UnifiedEventDispatcher:
     AG2 events flow: AG2 -> event_serialization.py -> WebSocket transport
     Business/UI events flow: Code -> UnifiedEventDispatcher -> Handlers
     """
-    def __init__(self):
+    def __init__(self, *, taxonomy_advisory: bool = False):
         self.handlers: list[EventHandler] = []
+        self._taxonomy_advisory = taxonomy_advisory
         self._event_handlers: dict[str, list[Callable[[dict[str, Any]], Awaitable[Any] | Any]]] = {}
         # Greeting echo dedup: tracks (chat_id, agent_name) pairs where
         # ws_protocol already sent the greeting before the workflow started.
@@ -226,6 +232,11 @@ class UnifiedEventDispatcher:
         self.register_handler(canonical_event_type, handler)
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+        validate_registered_identifier(
+            SemanticCategory.EVENT,
+            event_type,
+            advisory=self._taxonomy_advisory,
+        )
         listeners = list(self._event_handlers.get(event_type, []))
         if not listeners:
             logger.debug("No listeners registered for event_type=%s", event_type)
@@ -349,6 +360,26 @@ class UnifiedEventDispatcher:
         }
 
     def build_outbound_event_envelope(
+        self,
+        *,
+        raw_event: Any,
+        chat_id: str | None,
+        get_sequence_cb: Any | None = None,
+        workflow_name: str | None = None,
+    ) -> dict[str, Any] | None:
+        envelope = self._build_outbound_event_envelope(
+            raw_event=raw_event,
+            chat_id=chat_id,
+            get_sequence_cb=get_sequence_cb,
+            workflow_name=workflow_name,
+        )
+        if envelope is None:
+            return None
+        versioned = {"schema_version": EVENT_ENVELOPE_SCHEMA_VERSION, **envelope}
+        validate_event_envelope_schema_version(versioned)
+        return versioned
+
+    def _build_outbound_event_envelope(
         self,
         *,
         raw_event: Any,

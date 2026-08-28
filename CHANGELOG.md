@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Advisory semantic taxonomy (`mozaiks.taxonomy.v1`)**: development and
+  test callers can now validate registered event, capability, and artifact-
+  family identifiers consistently across module loading, subscriptions,
+  layout resolution, and event dispatch. Production name enforcement remains
+  unchanged while later ADR 0007 authority-cutover slices are pending, and
+  outbound dispatcher envelopes now declare `mozaiks.ui.event.v1` explicitly.
+
 - **Coding provider observability**: ACP provider executions now capture a
   bounded list of operational events (plan updates, tool invocations, mode
   changes — model reasoning is never recorded) on the

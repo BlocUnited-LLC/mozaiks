@@ -105,6 +105,11 @@ class WebSocketProtocolMixin:
                 try:
                     # Check if message is already in proper format for WebSocket
                     if isinstance(message, dict) and "type" in message and "data" in message:
+                        from mozaiksai.core.transport.event_contract import (
+                            validate_event_envelope_schema_version,
+                        )
+
+                        validate_event_envelope_schema_version(message)
                         # Ensure the 'data' payload is JSON-serializable (may contain AG2 objects)
                         try:
                             safe_message = message.copy()
@@ -235,6 +240,7 @@ class WebSocketProtocolMixin:
 
                 # Send ping
                 ping_data = {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "ping",
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
