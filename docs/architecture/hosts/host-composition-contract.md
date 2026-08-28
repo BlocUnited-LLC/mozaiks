@@ -8,15 +8,24 @@ The supported pattern is:
 ```python
 from importlib import import_module
 
-# Configure workspace environment before importing the Studio host.
+# Configure workspace environment before starting the composed server.
 studio_app = import_module("mozaiksai.hosts.studio")
 app = studio_app.app
 
 # App-local hosts may register product-specific routes on `app`.
 ```
 
-The app-local host must configure workspace paths before importing
-`mozaiksai.hosts.studio`:
+Importing `mozaiksai.hosts.studio` is environment-inert: it composes routes on
+the shared host app but does not mutate `os.environ`, `sys.path`, or the
+working directory. Repo-local defaults (`PLATFORM_PATH`,
+`MOZAIKS_WORKFLOWS_PATH`) are applied exactly once at server startup, before
+runtime and platform startup resolve app/workflow roots, by the Studio host's
+registered bootstrap (`mozaiksai.hosts.bootstrap.configure_repo_host_defaults`).
+Caller-provided environment values always keep precedence over those defaults.
+
+The app-local host must configure workspace paths before the composed server
+starts (setting them before importing `mozaiksai.hosts.studio` remains
+supported and sufficient):
 
 - `MOZAIKS_APP_WORKSPACE_PATH`
 - `PLATFORM_PATH`

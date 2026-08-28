@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import sys
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -35,7 +34,6 @@ def _studio_app(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
     from mozaiksai.hosts import studio as studio_app
 
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: object())

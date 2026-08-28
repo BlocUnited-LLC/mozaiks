@@ -28,11 +28,23 @@ def _clean_factory_app_syspath():
 
     yield
 
-    # Remove only workflow-namespace modules added during the test to avoid cross-test pollution.
-    # Do NOT remove mozaiksai.* modules — other tests in the suite depend on them staying cached.
+    # Remove only workflow-namespace modules ADDED during the test to avoid
+    # cross-test pollution, including the top-level "workflows"/"factory_app"
+    # package entries themselves — leaving a top-level package cached with a
+    # __path__ resolved through the temporary sys.path entry would let later
+    # tests import through it after the path is removed. Never delete entries
+    # that existed before the test (that breaks dotted-path monkeypatch in
+    # other files), and do NOT remove mozaiksai.* modules — other tests in the
+    # suite depend on them staying cached.
     added_keys = [
         k for k in sys.modules
-        if k not in before and (k.startswith("workflows.") or k.startswith("factory_app."))
+        if k not in before
+        and (
+            k == "workflows"
+            or k == "factory_app"
+            or k.startswith("workflows.")
+            or k.startswith("factory_app.")
+        )
     ]
     for k in added_keys:
         del sys.modules[k]

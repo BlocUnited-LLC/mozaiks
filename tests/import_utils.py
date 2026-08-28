@@ -45,7 +45,12 @@ def import_module_directly(module_name: str):
 
 
 def active_app_root() -> Path:
-    """Return the active app workspace root. Skips the calling test if not configured."""
+    """Return the active app workspace root. Skips the calling test if not configured.
+
+    Env vars win when set; the repo's first-party ``factory_app/app`` bundle is
+    the deterministic fallback so resolution never depends on whether an
+    earlier test imported a host module.
+    """
     platform_path = os.environ.get("PLATFORM_PATH", "").strip()
     if platform_path:
         candidate = Path(platform_path)
@@ -64,6 +69,10 @@ def active_app_root() -> Path:
             return nested.resolve()
         if (candidate / "app.json").exists():
             return candidate.resolve()
+
+    repo_factory_bundle = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    if (repo_factory_bundle / "app.json").exists():
+        return repo_factory_bundle.resolve()
 
     pytest.skip(
         "No active app workspace configured. "

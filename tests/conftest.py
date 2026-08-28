@@ -1,10 +1,14 @@
 """Shared test fixtures and helpers.
 
-Tests that require an active app workspace (PLATFORM_PATH or
-MOZAIKS_APP_WORKSPACE_PATH) are skipped automatically when neither env var
-is set.  This allows the framework CI to run without a bundled product app.
+Tests that require an active app workspace resolve it explicitly:
+``PLATFORM_PATH`` or ``MOZAIKS_APP_WORKSPACE_PATH`` win when set, and the
+repo's first-party ``factory_app/app`` bundle is the deterministic fallback in
+a repo checkout. The fallback keeps the resolution order-independent — it must
+never depend on whether an earlier test happened to import a host module.
+Only when neither an env var nor the repo bundle resolves (framework CI
+without a bundled app) are workspace-dependent tests skipped.
 
-To run workspace-dependent tests locally:
+To run workspace-dependent tests against another workspace locally:
 
     MOZAIKS_APP_WORKSPACE_PATH=/path/to/mozaiks-app pytest
 """
@@ -15,9 +19,11 @@ from pathlib import Path
 
 import pytest
 
+_REPO_FACTORY_APP_BUNDLE = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+
 
 def _resolve_active_app_root() -> Path | None:
-    """Return the active app root from env vars, or None if not configured."""
+    """Return the active app root: env vars first, then the repo factory bundle."""
     platform_path = os.environ.get("PLATFORM_PATH", "").strip()
     if platform_path:
         candidate = Path(platform_path)
@@ -36,6 +42,9 @@ def _resolve_active_app_root() -> Path | None:
             return nested.resolve()
         if (candidate / "app.json").exists():
             return candidate.resolve()
+
+    if (_REPO_FACTORY_APP_BUNDLE / "app.json").exists():
+        return _REPO_FACTORY_APP_BUNDLE.resolve()
 
     return None
 

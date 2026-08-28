@@ -20,10 +20,6 @@ from fastapi import BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
-
-configure_repo_host_defaults("studio")
-
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleBuildRecordError,
@@ -113,6 +109,7 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import platform as platform_app
+from mozaiksai.hosts.bootstrap import register_repo_host_bootstrap
 from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
@@ -120,6 +117,7 @@ from mozaiksai.hosts.platform import (
 from mozaiksai.hosts.routers.sandbox import router as _sandbox_router
 
 app = platform_app.app
+register_repo_host_bootstrap(app, "studio")
 app.include_router(_sandbox_router)
 logger = get_workflow_logger("studio_app")
 
