@@ -30,6 +30,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Offline semantic projection comparison (ADR 0007 Slice 3)**: deterministic,
+  input-immutable adapters can now project existing AppGenerator, DesignDocs,
+  subscription, module, workflow, deployment, recorded-artifact, build-context,
+  and ownership evidence into candidate `SemanticGraph` documents for offline
+  corpus comparison. A machine-readable coverage report classifies every source
+  leaf as projected, deliberately non-semantic, or deferred and returns typed
+  gaps for unsupported facts. Production generators, hosts, loaders, Studio,
+  workflows, control-plane code, capability advertisement, and runtime authority
+  remain unchanged.
+
 - **Semantic-compiler contract layer (ADR 0007 Slice 2)**: strict, immutable,
   content-digested contracts for `ApplicationManifest`
   (`mozaiks.app_manifest.v1`), `SemanticGraph` (`mozaiks.semantic_graph.v1`),
