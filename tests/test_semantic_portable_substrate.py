@@ -253,6 +253,136 @@ def test_archive_verification_rejects_noncanonical_envelopes() -> None:
         read_archive_manifest(b"not a zip")
 
 
+def _canonical_except(mutate=None, archive_comment: bytes = b"") -> bytes:
+    """Build an envelope canonical in every field except the one mutated.
+
+    Mirrors the Slice 4A writer field-for-field so each rejection test isolates
+    exactly one non-canonical metadata field on the second entry.
+    """
+    import io
+    import stat as stat_module
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
+        for path, content in (("app/a.txt", b"alpha"), ("app/b.txt", b"beta")):
+            info = zipfile.ZipInfo(filename=path, date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.external_attr = (stat_module.S_IFREG | 0o644) << 16
+            info.compress_type = zipfile.ZIP_STORED
+            if mutate is not None and path == "app/b.txt":
+                mutate(info)
+            archive.writestr(info, content)
+        if archive_comment:
+            archive.comment = archive_comment
+    return buffer.getvalue()
+
+
+def _archive_metadata_mutants() -> list[tuple[str, bytes, str]]:
+    import stat as stat_module
+    import zipfile
+
+    return [
+        (
+            "compression_method",
+            _canonical_except(lambda i: setattr(i, "compress_type", zipfile.ZIP_DEFLATED)),
+            "non-canonical compression method",
+        ),
+        (
+            "create_system",
+            _canonical_except(lambda i: setattr(i, "create_system", 0)),
+            "non-canonical create_system",
+        ),
+        (
+            "executable_permissions",
+            _canonical_except(
+                lambda i: setattr(i, "external_attr", (stat_module.S_IFREG | 0o755) << 16)
+            ),
+            "executable permission bits",
+        ),
+        (
+            "non_regular_type_bits",
+            _canonical_except(
+                lambda i: setattr(i, "external_attr", (stat_module.S_IFIFO | 0o644) << 16)
+            ),
+            "non-regular-file type bits",
+        ),
+        (
+            "missing_type_bits",
+            _canonical_except(lambda i: setattr(i, "external_attr", 0o644 << 16)),
+            "non-regular-file type bits",
+        ),
+        (
+            "noncanonical_permissions",
+            _canonical_except(
+                lambda i: setattr(i, "external_attr", (stat_module.S_IFREG | 0o600) << 16)
+            ),
+            "non-canonical permissions",
+        ),
+        (
+            "entry_extra_field",
+            _canonical_except(lambda i: setattr(i, "extra", b"\xfe\xca\x04\x00abcd")),
+            "extra field not permitted",
+        ),
+        (
+            "entry_comment",
+            _canonical_except(lambda i: setattr(i, "comment", b"x")),
+            "comment not permitted",
+        ),
+        (
+            "archive_comment",
+            _canonical_except(archive_comment=b"x"),
+            "archive comment not permitted",
+        ),
+        (
+            "internal_attributes",
+            _canonical_except(lambda i: setattr(i, "internal_attr", 1)),
+            "non-canonical internal attributes",
+        ),
+        (
+            "prepended_bytes",
+            b"garbage!" + _canonical_except(),
+            "not the canonical serialization",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "reason_fragment"),
+    [pytest.param(name, data, fragment, id=name) for name, data, fragment in _archive_metadata_mutants()],
+)
+def test_archive_verification_rejects_each_noncanonical_metadata_field(
+    name: str, data: bytes, reason_fragment: str
+) -> None:
+    """Fail-closed per metadata field the canonical writer never produces.
+
+    Each mutant differs from the writer's output in exactly one field, so a
+    verifier that merely accepts whatever :mod:`zipfile` can read fails here.
+    """
+    with pytest.raises(ArchiveError, match=reason_fragment):
+        read_archive_manifest(data)
+
+
+def test_archive_verification_baseline_for_mutants_is_canonical() -> None:
+    """The unmutated twin of every metadata mutant verifies cleanly."""
+    manifest = read_archive_manifest(_canonical_except())
+    assert [entry.path for entry in manifest.entries] == ["app/a.txt", "app/b.txt"]
+
+
+def test_archive_verification_rejects_local_header_desync() -> None:
+    """Central-directory checks alone are insufficient: mutating only the
+    local header must still fail the canonical-serialization closure."""
+    data = bytearray(_canonical_except())
+    assert data[0:4] == b"PK\x03\x04"
+    # Local-header mod-time field (offset 10-11) of the first entry: the DOS
+    # epoch encodes as zero, so any nonzero value desyncs it from the
+    # still-canonical central directory.
+    assert data[10:12] == b"\x00\x00"
+    data[10:12] = b"\x00\x08"
+    with pytest.raises(ArchiveError, match="not the canonical serialization"):
+        read_archive_manifest(bytes(data))
+
+
 def test_archive_inputs_are_immutable_frozen_models() -> None:
     from pydantic import ValidationError
 

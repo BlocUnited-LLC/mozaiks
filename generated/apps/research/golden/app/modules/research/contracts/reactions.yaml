@@ -1,7 +1,0 @@
-schema_version: mozaiks.reactions.v1
-reactions:
-  - id: run_research_workflow
-    event_type: domain.research.requested
-    target:
-      kind: capability
-      capability_id: research.execute

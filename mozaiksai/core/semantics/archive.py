@@ -44,7 +44,7 @@ _EXTERNAL_ATTR = (stat.S_IFREG | _FILE_MODE) << 16
 # STORED, not DEFLATED: deflate output may vary across zlib builds, and the
 # envelope's byte-identity guarantee must not depend on compressor internals.
 _COMPRESSION = zipfile.ZIP_STORED
-_LINK_MODE_MASK = 0o170000
+_UTF8_NAME_FLAG = 0x800
 
 
 class ArchiveError(ValueError):
@@ -103,11 +103,56 @@ def archive_digest(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
+def _verify_entry_metadata(info: zipfile.ZipInfo) -> None:
+    """Reject any entry metadata the canonical writer does not produce.
+
+    Each field is checked independently so a violation names the exact
+    non-canonical field rather than a generic mismatch.
+    """
+    if info.is_dir():
+        raise ArchiveError(f"directory entry not permitted: {info.filename!r}")
+    if info.compress_type != _COMPRESSION:
+        raise ArchiveError(f"non-canonical compression method on entry: {info.filename!r}")
+    if info.create_system != _CREATE_SYSTEM_UNIX:
+        raise ArchiveError(f"non-canonical create_system on entry: {info.filename!r}")
+    if info.external_attr != _EXTERNAL_ATTR:
+        mode = info.external_attr >> 16
+        if stat.S_ISLNK(mode):
+            raise ArchiveError(f"link entry not permitted: {info.filename!r}")
+        if not stat.S_ISREG(mode):
+            raise ArchiveError(
+                f"missing or non-regular-file type bits on entry: {info.filename!r}"
+            )
+        if mode & 0o111:
+            raise ArchiveError(f"executable permission bits on entry: {info.filename!r}")
+        raise ArchiveError(
+            f"non-canonical permissions or attributes on entry: {info.filename!r}"
+        )
+    if info.extra != b"":
+        raise ArchiveError(f"extra field not permitted on entry: {info.filename!r}")
+    if info.comment != b"":
+        raise ArchiveError(f"comment not permitted on entry: {info.filename!r}")
+    if info.internal_attr != 0:
+        raise ArchiveError(f"non-canonical internal attributes on entry: {info.filename!r}")
+    expected_flags = _UTF8_NAME_FLAG if any(ord(char) > 0x7F for char in info.filename) else 0
+    if info.flag_bits != expected_flags:
+        raise ArchiveError(f"non-canonical name-encoding flags on entry: {info.filename!r}")
+    if info.date_time != _DOS_EPOCH:
+        raise ArchiveError(f"non-canonical timestamp on entry: {info.filename!r}")
+
+
 def read_archive_manifest(data: bytes) -> ArchiveManifest:
     """Verify envelope conformance and return its transport manifest.
 
-    Fails closed on directory entries, link entries, non-portable or colliding
-    entry names, out-of-order entries, and non-canonical envelope metadata.
+    Verification is fail-closed against the canonical writer, not merely
+    against what :mod:`zipfile` can read: every identity-affecting entry field
+    (compression, create_system, permissions and type bits, extra fields,
+    comments, name-encoding flags, internal attributes, timestamps), the
+    archive comment, entry names, ordering, and collisions are checked
+    independently, and the envelope bytes must equal the canonical
+    re-serialization of their own entries, so an archive the Slice 4A writer
+    could not have produced never verifies. Archive identity remains transport
+    evidence only — verification never grants semantic authority.
     """
     try:
         archive = zipfile.ZipFile(io.BytesIO(data), mode="r")
@@ -115,31 +160,32 @@ def read_archive_manifest(data: bytes) -> ArchiveManifest:
         raise ArchiveError(f"not a readable archive: {exc}") from exc
 
     with archive:
+        if archive.comment != b"":
+            raise ArchiveError("archive comment not permitted")
         infos = archive.infolist()
         if not infos:
             raise ArchiveError("empty archive envelope")
 
         texts: list[str] = []
+        entries: list[ArchiveEntry] = []
         manifest_entries: list[ArchiveManifestEntry] = []
         previous_key: bytes | None = None
         for info in infos:
-            if info.is_dir():
-                raise ArchiveError(f"directory entry not permitted: {info.filename!r}")
-            mode = (info.external_attr >> 16) & _LINK_MODE_MASK
-            if mode == stat.S_IFLNK:
-                raise ArchiveError(f"link entry not permitted: {info.filename!r}")
+            _verify_entry_metadata(info)
             try:
                 portable = validate_portable_path(info.filename)
             except PortablePathError as exc:
                 raise ArchiveError(f"non-portable entry name: {exc.reason}: {info.filename!r}") from exc
-            if info.date_time != _DOS_EPOCH:
-                raise ArchiveError(f"non-canonical timestamp on entry: {portable.text!r}")
             encoded = portable.text.encode("utf-8")
             if previous_key is not None and encoded <= previous_key:
                 raise ArchiveError(f"entries out of canonical order at: {portable.text!r}")
             previous_key = encoded
-            content = archive.read(info.filename)
+            try:
+                content = archive.read(info.filename)
+            except zipfile.BadZipFile as exc:
+                raise ArchiveError(f"unreadable entry: {portable.text!r}: {exc}") from exc
             texts.append(portable.text)
+            entries.append(ArchiveEntry(path=portable.text, content=content))
             manifest_entries.append(
                 ArchiveManifestEntry(
                     path=portable.text,
@@ -149,6 +195,12 @@ def read_archive_manifest(data: bytes) -> ArchiveManifest:
             )
 
         detect_collisions(texts)
+
+    # Closure check: the bytes must be exactly what the canonical writer
+    # produces for this entry set, so no field outside the independent checks
+    # (local headers, prepended data, zip64 records) can smuggle variance.
+    if build_deterministic_archive(entries) != data:
+        raise ArchiveError("archive bytes are not the canonical serialization of their entries")
 
     return ArchiveManifest(
         entries=tuple(manifest_entries),

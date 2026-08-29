@@ -1,1 +1,0 @@
-{"version": "1", "app_id": "research", "surfaces": [{"surface_id": "research", "surface_kind": "module", "collections": [{"name": "research_results", "ownership": {"surface_id": "research", "surface_kind": "module"}}]}], "shared_collections": [{"name": "subscription_assignments", "data_alias": "billing.subscriptions"}]}
