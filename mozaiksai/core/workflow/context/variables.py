@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -334,7 +335,7 @@ async def _load_data_reference_value(
     context: Any,
 ) -> Any:
     source = definition.source
-    
+
     adapter = get_db_adapter(source)
     if not adapter:
         business_logger.warning(
@@ -345,9 +346,9 @@ async def _load_data_reference_value(
     try:
         query = _materialize_query_template(source.query_template, context, app_id)
         projection = {field: 1 for field in (source.fields or [])} or None
-        
+
         business_logger.debug("[DATA_REFERENCE] Resolved query for '%s': query=%s, projection=%s, app_id=%s", name, query, projection, app_id)
-        
+
         doc = await adapter.fetch_one(source, query, projection)
 
         if doc is None:
@@ -431,6 +432,29 @@ def _load_workflow_plan(workflow_name: str) -> tuple[ContextVariablesPlan, dict[
 # Schema utilities shared by context loading and inspection paths
 # ---------------------------------------------------------------------------
 
+def _json_safe(value: Any) -> Any:
+    """Recursively convert Mongo-native values (datetime, ObjectId, Decimal128,
+    etc.) into JSON-safe primitives.
+
+    This is required before handing raw Mongo documents to AG2 context
+    variables: pymongo happily returns ``datetime`` objects (and other BSON
+    types) that Python's stdlib ``json`` module cannot serialize. Left
+    unconverted, these values eventually blow up with
+    ``TypeError: Object of type datetime is not JSON serializable`` once the
+    context is serialized (e.g. inside workflow ``knobs``).
+    """
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    # Catches ObjectId, Decimal128, and any other non-JSON-safe Mongo/BSON type.
+    return str(value)
+
+
 async def _get_all_collections_first_docs(database_name: str) -> dict[str, Any]:
     from mozaiksai.core.core_config import get_mongo_client  # local import
 
@@ -450,7 +474,7 @@ async def _get_all_collections_first_docs(database_name: str) -> dict[str, Any]:
                     result[cname] = {"_note": "empty_collection"}
                 else:
                     cleaned = {k: v for k, v in doc.items() if k != "_id"}
-                    result[cname] = cleaned
+                    result[cname] = _json_safe(cleaned)
             except Exception as ce:
                 result[cname] = {"_error": str(ce)}
     except Exception as outer:
