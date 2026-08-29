@@ -1,0 +1,41 @@
+schema_version: mozaiks.app_page.v1
+name: Billing
+route: /billing
+title: Billing
+page_type: analytics_dashboard
+layout: full-width
+shell_mode: workspace
+navigation:
+  id: billing
+  label: Billing
+  icon: CreditCard
+  scope: global
+  order: 70
+  visible: true
+sections:
+  - id: billing-status
+    primitive: DataTable
+    title: Current Plan
+    config:
+      api_endpoint: /api/modules/billing_portal/get_subscription_status
+      columns:
+        - key: plan_name
+          label: Plan
+        - key: status
+          label: Status
+  - id: billing-catalog
+    primitive: PricingCatalog
+    title: Plans and Token Packs
+    config:
+      api_endpoint: /api/modules/billing_portal/list_plans
+      plans_key: plans
+      add_ons_key: top_up_products
+  - id: manage-billing
+    primitive: ActionButton
+    title: Manage Billing
+    config:
+      actions:
+        - label: Manage Billing
+          action_type: submit
+          href: /api/modules/billing_portal/open_billing_portal
+roles: null

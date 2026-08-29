@@ -1,0 +1,246 @@
+name: readiness
+
+# Provider-neutral environment staging gate for generated apps.
+# Artifact review staging happens inside Mozaiks/Studio before promotion;
+# this workflow proves the promoted/exported app can run in a real environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_container_gate:
+        description: "Build and smoke the generated app image"
+        required: true
+        default: true
+        type: boolean
+      run_remote_health:
+        description: "Check a deployed staging URL"
+        required: true
+        default: false
+        type: boolean
+      run_entitlement_gate:
+        description: "Mint optional OIDC smoke token for app-owned entitlement checks"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      HEALTH_PATH: /api/health
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      APP_IMAGE_SMOKE_VERIFIED_AT: ${{ vars.APP_IMAGE_SMOKE_VERIFIED_AT }}
+      APP_HEALTHCHECK_VERIFIED_AT: ${{ vars.APP_HEALTHCHECK_VERIFIED_AT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Validate readiness contract
+        shell: bash
+        run: |
+          missing=()
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            missing+=("OPENAI_API_KEY")
+          fi
+          if [ -z "${MONGO_URI:-}" ]; then
+            missing+=("MONGO_URI")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing required staging environment names: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Install runtime preflight dependencies
+        run: python -m pip install --disable-pip-version-check "pymongo>=4.5.0"
+
+      - name: Preflight runtime dependencies
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, sys, urllib.parse, urllib.request
+          results = []
+          def host(url):
+              try:
+                  return urllib.parse.urlparse(url or '').hostname
+              except Exception:
+                  return None
+          def add(check_id, status, message, **details):
+              results.append({'id': check_id, 'status': status, 'message': message, 'safe_details': {k: v for k, v in details.items() if v is not None}})
+          mongo_uri = os.getenv('MONGO_URI', '').strip()
+          if not mongo_uri:
+              add('mongo', 'failed', 'MONGO_URI is required.')
+          else:
+              try:
+                  from pymongo import MongoClient
+                  client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000, socketTimeoutMS=5000)
+                  try:
+                      client.admin.command('ping')
+                  finally:
+                      client.close()
+                  add('mongo', 'passed', 'MongoDB ping passed.', mongo_host=host(mongo_uri))
+              except Exception as exc:
+                  add('mongo', 'failed', 'MongoDB ping failed.', mongo_host=host(mongo_uri), exception_type=type(exc).__name__)
+          auth_enabled = os.getenv('AUTH_ENABLED', 'false').strip().lower() not in {'0', 'false', 'no', 'off'}
+          auth_provider = os.getenv('AUTH_PROVIDER', 'jwt').strip().lower()
+          if not auth_enabled or auth_provider in {'none', 'disabled', 'false'}:
+              add('oidc', 'skipped', 'Auth is disabled for this environment.')
+          else:
+              discovery_url = os.getenv('MOZAIKS_OIDC_DISCOVERY_URL', '').strip()
+              if not discovery_url:
+                  authority = os.getenv('MOZAIKS_OIDC_AUTHORITY', '').strip().rstrip('/')
+                  tenant_id = os.getenv('MOZAIKS_OIDC_TENANT_ID', '').strip()
+                  if authority and tenant_id:
+                      discovery_url = f'{authority}/{tenant_id}/v2.0/.well-known/openid-configuration'
+                  elif authority:
+                      discovery_url = f'{authority}/.well-known/openid-configuration'
+              issuer = os.getenv('AUTH_ISSUER', '').strip()
+              jwks_url = os.getenv('AUTH_JWKS_URL', '').strip()
+              try:
+                  if issuer and jwks_url:
+                      request = urllib.request.Request(jwks_url, headers={'Accept': 'application/json'})
+                      with urllib.request.urlopen(request, timeout=10) as response:
+                          jwks = json.loads(response.read(1024 * 1024).decode('utf-8'))
+                      if not isinstance(jwks.get('keys'), list):
+                          raise RuntimeError('jwks_missing_keys')
+                      add('oidc', 'passed', 'OIDC explicit issuer/JWKS check passed.', jwks_host=host(jwks_url))
+                  elif discovery_url:
+                      request = urllib.request.Request(discovery_url, headers={'Accept': 'application/json'})
+                      with urllib.request.urlopen(request, timeout=10) as response:
+                          discovery = json.loads(response.read(1024 * 1024).decode('utf-8'))
+                      missing = [name for name in ('issuer', 'jwks_uri', 'authorization_endpoint', 'token_endpoint') if not discovery.get(name)]
+                      if missing:
+                          raise RuntimeError('discovery_missing_' + '_'.join(missing))
+                      add('oidc', 'passed', 'OIDC discovery check passed.', discovery_host=host(discovery_url), issuer_host=host(discovery.get('issuer')))
+                  else:
+                      add('oidc', 'failed', 'OIDC discovery or explicit issuer/JWKS is required when auth is enabled.')
+              except Exception as exc:
+                  add('oidc', 'failed', 'OIDC provider preflight failed.', discovery_host=host(discovery_url), jwks_host=host(jwks_url), exception_type=type(exc).__name__)
+          payload = {'ok': all(item['status'] in {'passed', 'skipped'} for item in results), 'checks': results}
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          if not payload['ok']:
+              sys.exit(1)
+          PY
+
+      - name: Build generated app image
+        if: ${{ inputs.run_container_gate }}
+        run: docker build -t generated-app:readiness .
+
+      - name: Smoke generated app image
+        if: ${{ inputs.run_container_gate }}
+        shell: bash
+        run: |
+          docker run --rm -d \
+            --name generated-app-readiness \
+            -p 8000:8000 \
+            -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            -e MONGO_URI="${MONGO_URI}" \
+            generated-app:readiness
+          cleanup() { docker stop generated-app-readiness >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 12); do
+            if curl -sf "http://localhost:8000/api/health"; then
+              date -u +%Y-%m-%dT%H:%M:%SZ > APP_IMAGE_SMOKE_VERIFIED_AT.txt
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Container smoke failed." >&2
+          exit 1
+
+      - name: Check deployed staging health
+        if: ${{ inputs.run_remote_health }}
+        shell: bash
+        run: |
+          if [ -z "${APP_URL:-}" ]; then
+            echo "APP_URL environment variable is required for remote health." >&2
+            exit 1
+          fi
+          curl --fail --show-error --silent "${APP_URL}${HEALTH_PATH}" | tee health.json
+          date -u +%Y-%m-%dT%H:%M:%SZ > APP_HEALTHCHECK_VERIFIED_AT.txt
+
+      - name: Mint OIDC smoke token
+        if: ${{ inputs.run_entitlement_gate }}
+        env:
+          OIDC_SMOKE_TOKEN_URL: ${{ vars.OIDC_SMOKE_TOKEN_URL || secrets.OIDC_SMOKE_TOKEN_URL }}
+          OIDC_SMOKE_TOKEN_SCOPE: ${{ vars.OIDC_SMOKE_TOKEN_SCOPE || secrets.OIDC_SMOKE_TOKEN_SCOPE }}
+          OIDC_SMOKE_CLIENT_ID: ${{ vars.OIDC_SMOKE_CLIENT_ID || secrets.OIDC_SMOKE_CLIENT_ID }}
+          OIDC_SMOKE_CLIENT_SECRET: ${{ secrets.OIDC_SMOKE_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${OIDC_SMOKE_TOKEN_URL:-}" ] || \
+             [ -z "${OIDC_SMOKE_TOKEN_SCOPE:-}" ] || \
+             [ -z "${OIDC_SMOKE_CLIENT_ID:-}" ] || \
+             [ -z "${OIDC_SMOKE_CLIENT_SECRET:-}" ]; then
+            echo "OIDC smoke client credentials not configured; using ENTITLEMENT_SMOKE_TOKEN if supplied."
+            exit 0
+          fi
+          RESPONSE=$(curl -sf -X POST "$OIDC_SMOKE_TOKEN_URL" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=${OIDC_SMOKE_CLIENT_ID}" \
+            --data-urlencode "client_secret=${OIDC_SMOKE_CLIENT_SECRET}" \
+            --data-urlencode "scope=${OIDC_SMOKE_TOKEN_SCOPE}")
+          TOKEN=$(python -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))" <<< "$RESPONSE")
+          if [ -z "$TOKEN" ]; then
+            echo "OIDC smoke token response did not include access_token." >&2
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "OIDC_MINTED_ENTITLEMENT_SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Run app-owned entitlement smoke
+        if: ${{ inputs.run_entitlement_gate }}
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          ENTITLEMENT_SMOKE_TOKEN: ${{ secrets.ENTITLEMENT_SMOKE_TOKEN }}
+          ENTITLEMENT_SMOKE_USER_ID: ${{ vars.ENTITLEMENT_SMOKE_USER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${OIDC_MINTED_ENTITLEMENT_SMOKE_TOKEN:-}" ]; then
+            export ENTITLEMENT_SMOKE_TOKEN="$OIDC_MINTED_ENTITLEMENT_SMOKE_TOKEN"
+          fi
+          if [ -f scripts/smoke_entitlement_api.py ]; then
+            python scripts/smoke_entitlement_api.py --json | tee entitlement-smoke.json
+          else
+            echo "No entitlement smoke script found; checking health/readiness only."
+            if [ -z "${APP_URL:-}" ]; then
+              echo '{"skipped": true, "reason": "APP_URL_NOT_CONFIGURED"}' | tee entitlement-smoke.json
+            else
+              curl --fail --show-error --silent "${APP_URL}${HEALTH_PATH}" | tee entitlement-smoke.json
+            fi
+          fi
+
+      - name: Summarize readiness evidence
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          evidence = {}
+          path = pathlib.Path('APP_IMAGE_SMOKE_VERIFIED_AT.txt')
+          evidence['APP_IMAGE_SMOKE_VERIFIED_AT'] = path.read_text().strip() if path.exists() else None
+          path = pathlib.Path('APP_HEALTHCHECK_VERIFIED_AT.txt')
+          evidence['APP_HEALTHCHECK_VERIFIED_AT'] = path.read_text().strip() if path.exists() else None
+          pathlib.Path('readiness-evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: readiness-${{ github.run_id }}
+          path: |
+            health.json
+            entitlement-smoke.json
+            readiness-evidence.json
+            *_VERIFIED_AT.txt
+          if-no-files-found: ignore

@@ -1,0 +1,384 @@
+{
+  "schema_version": "mozaiks.deployment.manifest.v1",
+  "app_id": "research",
+  "deployment_profile": "generic_container",
+  "generated_files": [
+    ".env.example",
+    ".env.production.example",
+    ".env.staging.example",
+    ".github/workflows/deploy.yml",
+    ".github/workflows/readiness.yml",
+    "Dockerfile",
+    "docker-compose.yml"
+  ],
+  "required_env": [
+    "OPENAI_API_KEY",
+    "MONGO_URI"
+  ],
+  "secret_env": [
+    "OPENAI_API_KEY",
+    "MONGO_URI",
+    "INTERNAL_API_KEY",
+    "MOZAIKSPAY_CLIENT_SECRET",
+    "MOZAIKSPAY_API_KEY"
+  ],
+  "public_env": [
+    "VITE_APP_ID",
+    "VITE_API_URL",
+    "VITE_WS_URL",
+    "VITE_CORE_URL",
+    "VITE_AGENT_WEBSOCKET_URL",
+    "VITE_AGENT_API_URL",
+    "VITE_OIDC_AUTHORITY",
+    "VITE_OIDC_DISCOVERY_URL",
+    "VITE_OIDC_CLIENT_ID",
+    "VITE_OIDC_SCOPE",
+    "VITE_OIDC_REDIRECT_URI"
+  ],
+  "auth": {
+    "required": false,
+    "provider": "jwt",
+    "runtime_required_variables": [],
+    "runtime_optional_variables": [
+      "AUTH_AUDIENCE",
+      "AUTH_REQUIRED_SCOPE",
+      "AUTH_ISSUER",
+      "AUTH_JWKS_URL",
+      "MOZAIKS_OIDC_AUTHORITY",
+      "MOZAIKS_OIDC_TENANT_ID",
+      "MOZAIKS_OIDC_DISCOVERY_URL",
+      "AUTH_USER_ID_CLAIM",
+      "AUTH_EMAIL_CLAIM",
+      "AUTH_NAME_CLAIM",
+      "AUTH_ROLES_CLAIM",
+      "AUTH_SCOPES_CLAIM",
+      "AUTH_SCOPES_FORMAT",
+      "AUTH_APP_ID_CLAIM",
+      "AUTH_CHAT_ID_CLAIM",
+      "AUTH_TENANT_ID_CLAIM",
+      "AUTH_WORKSPACE_ID_CLAIM",
+      "AUTH_ALGORITHMS"
+    ],
+    "public_variables": [
+      "VITE_OIDC_AUTHORITY",
+      "VITE_OIDC_DISCOVERY_URL",
+      "VITE_OIDC_CLIENT_ID",
+      "VITE_OIDC_SCOPE",
+      "VITE_OIDC_REDIRECT_URI"
+    ],
+    "notes": "Auth uses the OSS provider-neutral adapter. For AUTH_PROVIDER=jwt, configure MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or provide both AUTH_ISSUER and AUTH_JWKS_URL. Frontend OIDC values are public build-time vars."
+  },
+  "exposed_ports": [
+    8000
+  ],
+  "healthcheck": {
+    "path": "/api/health",
+    "port": 8000
+  },
+  "ci_workflow": ".github/workflows/deploy.yml",
+  "readiness_workflow": ".github/workflows/readiness.yml",
+  "ci_secret_requirements": {
+    "required": [
+      {
+        "name": "REGISTRY_PUSH_TOKEN",
+        "purpose": "Allows the generated CI workflow to authenticate a publish-ready registry step.",
+        "used_by": "build_workflow"
+      }
+    ],
+    "optional": [
+      {
+        "name": "BUILD_CALLBACK_SECRET",
+        "purpose": "Allows an external host adapter to verify an optional build callback.",
+        "used_by": "build_workflow"
+      }
+    ],
+    "workflow_inputs": [
+      {
+        "name": "deployment_id",
+        "required": true,
+        "purpose": "Deployment correlation identifier supplied by an external host or adapter."
+      },
+      {
+        "name": "build_result_id",
+        "required": true,
+        "purpose": "Build result correlation identifier supplied by an external host or adapter."
+      },
+      {
+        "name": "build_callback_url",
+        "required": false,
+        "purpose": "Optional callback URL for hosts that collect build completion events."
+      },
+      {
+        "name": "app_url",
+        "required": false,
+        "purpose": "Live application base URL used by the deploy job for the post-deploy health check."
+      }
+    ]
+  },
+  "readiness_requirements": {
+    "checks": [
+      {
+        "id": "runtime_environment",
+        "category": "runtime",
+        "label": "Runtime environment configured",
+        "implemented_score": 7,
+        "required_env": [
+          "OPENAI_API_KEY",
+          "MONGO_URI"
+        ],
+        "required_evidence": [],
+        "canonical_paths": [
+          ".env.example",
+          "deployment.manifest.json"
+        ],
+        "notes": "Host or operator must provide required runtime variables before deploy."
+      },
+      {
+        "id": "container_smoke",
+        "category": "deployment",
+        "label": "Container build and smoke check",
+        "implemented_score": 7,
+        "required_env": [],
+        "required_evidence": [
+          "APP_IMAGE_SMOKE_VERIFIED_AT"
+        ],
+        "canonical_paths": [
+          "Dockerfile",
+          "deployment.manifest.json"
+        ],
+        "notes": "Evidence stamp should reference a CI run, artifact, or change record."
+      },
+      {
+        "id": "healthcheck",
+        "category": "deployment",
+        "label": "Health endpoint check",
+        "implemented_score": 7,
+        "required_env": [],
+        "required_evidence": [
+          "APP_HEALTHCHECK_VERIFIED_AT"
+        ],
+        "canonical_paths": [
+          "deployment.manifest.json"
+        ],
+        "notes": "Evidence stamp should be set only after the configured health path succeeds."
+      }
+    ]
+  },
+  "dockerfile": "Dockerfile",
+  "compose": "docker-compose.yml",
+  "validation_status": "valid",
+  "deploy_target_spec": {
+    "target_id": "generic_container",
+    "target_kind": "compose",
+    "runtime": {
+      "container_port": 8000,
+      "health_path": "/api/health",
+      "start_command": null
+    },
+    "artifact_outputs": [
+      ".env.example",
+      ".env.staging.example",
+      ".env.production.example",
+      "deployment.manifest.json",
+      "Dockerfile",
+      "docker-compose.yml",
+      ".github/workflows/readiness.yml",
+      ".github/workflows/deploy.yml"
+    ],
+    "auth": {
+      "required": false,
+      "provider": "jwt",
+      "runtime_required_variables": [],
+      "runtime_optional_variables": [
+        "AUTH_AUDIENCE",
+        "AUTH_REQUIRED_SCOPE",
+        "AUTH_ISSUER",
+        "AUTH_JWKS_URL",
+        "MOZAIKS_OIDC_AUTHORITY",
+        "MOZAIKS_OIDC_TENANT_ID",
+        "MOZAIKS_OIDC_DISCOVERY_URL",
+        "AUTH_USER_ID_CLAIM",
+        "AUTH_EMAIL_CLAIM",
+        "AUTH_NAME_CLAIM",
+        "AUTH_ROLES_CLAIM",
+        "AUTH_SCOPES_CLAIM",
+        "AUTH_SCOPES_FORMAT",
+        "AUTH_APP_ID_CLAIM",
+        "AUTH_CHAT_ID_CLAIM",
+        "AUTH_TENANT_ID_CLAIM",
+        "AUTH_WORKSPACE_ID_CLAIM",
+        "AUTH_ALGORITHMS"
+      ],
+      "public_variables": [
+        "VITE_OIDC_AUTHORITY",
+        "VITE_OIDC_DISCOVERY_URL",
+        "VITE_OIDC_CLIENT_ID",
+        "VITE_OIDC_SCOPE",
+        "VITE_OIDC_REDIRECT_URI"
+      ],
+      "notes": "Auth uses the OSS provider-neutral adapter. For AUTH_PROVIDER=jwt, configure MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or provide both AUTH_ISSUER and AUTH_JWKS_URL. Frontend OIDC values are public build-time vars."
+    },
+    "environment": {
+      "required_variables": [
+        "OPENAI_API_KEY",
+        "MONGO_URI"
+      ],
+      "optional_variables": [
+        "MOZAIKS_APP_ID",
+        "MOZAIKS_BACKEND_URL",
+        "INTERNAL_API_KEY",
+        "AUTH_AUDIENCE",
+        "AUTH_REQUIRED_SCOPE",
+        "AUTH_ISSUER",
+        "AUTH_JWKS_URL",
+        "MOZAIKS_OIDC_AUTHORITY",
+        "MOZAIKS_OIDC_TENANT_ID",
+        "MOZAIKS_OIDC_DISCOVERY_URL",
+        "AUTH_USER_ID_CLAIM",
+        "AUTH_EMAIL_CLAIM",
+        "AUTH_NAME_CLAIM",
+        "AUTH_ROLES_CLAIM",
+        "AUTH_SCOPES_CLAIM",
+        "AUTH_SCOPES_FORMAT",
+        "AUTH_APP_ID_CLAIM",
+        "AUTH_CHAT_ID_CLAIM",
+        "AUTH_TENANT_ID_CLAIM",
+        "AUTH_WORKSPACE_ID_CLAIM",
+        "AUTH_ALGORITHMS",
+        "MOZAIKS_APP_URL",
+        "MOZAIKSPAY_API_BASE",
+        "MOZAIKSPAY_CLIENT_ID",
+        "MOZAIKSPAY_CLIENT_SECRET",
+        "MOZAIKSPAY_API_KEY"
+      ],
+      "secret_variables": [
+        "OPENAI_API_KEY",
+        "MONGO_URI",
+        "INTERNAL_API_KEY",
+        "MOZAIKSPAY_CLIENT_SECRET",
+        "MOZAIKSPAY_API_KEY"
+      ],
+      "public_variables": [
+        "VITE_APP_ID",
+        "VITE_API_URL",
+        "VITE_WS_URL",
+        "VITE_CORE_URL",
+        "VITE_AGENT_WEBSOCKET_URL",
+        "VITE_AGENT_API_URL",
+        "VITE_OIDC_AUTHORITY",
+        "VITE_OIDC_DISCOVERY_URL",
+        "VITE_OIDC_CLIENT_ID",
+        "VITE_OIDC_SCOPE",
+        "VITE_OIDC_REDIRECT_URI"
+      ]
+    },
+    "image": {
+      "image_name": "research-runtime",
+      "tag_strategy": "commit_sha"
+    },
+    "checks": {
+      "build": true,
+      "smoke": true,
+      "health": true
+    },
+    "provider_profile": {
+      "name": "generic",
+      "description": "Provider-neutral defaults for container deployment targets.",
+      "metadata": {}
+    },
+    "deployment_profile": "generic_container",
+    "deployment_profile_kind": "generic",
+    "deploy_environments": {
+      "staging": "staging",
+      "production": "production"
+    },
+    "ci_secret_requirements": {
+      "required": [
+        {
+          "name": "REGISTRY_PUSH_TOKEN",
+          "purpose": "Allows the generated CI workflow to authenticate a publish-ready registry step.",
+          "used_by": "build_workflow"
+        }
+      ],
+      "optional": [
+        {
+          "name": "BUILD_CALLBACK_SECRET",
+          "purpose": "Allows an external host adapter to verify an optional build callback.",
+          "used_by": "build_workflow"
+        }
+      ],
+      "workflow_inputs": [
+        {
+          "name": "deployment_id",
+          "required": true,
+          "purpose": "Deployment correlation identifier supplied by an external host or adapter."
+        },
+        {
+          "name": "build_result_id",
+          "required": true,
+          "purpose": "Build result correlation identifier supplied by an external host or adapter."
+        },
+        {
+          "name": "build_callback_url",
+          "required": false,
+          "purpose": "Optional callback URL for hosts that collect build completion events."
+        },
+        {
+          "name": "app_url",
+          "required": false,
+          "purpose": "Live application base URL used by the deploy job for the post-deploy health check."
+        }
+      ]
+    },
+    "readiness_requirements": {
+      "checks": [
+        {
+          "id": "runtime_environment",
+          "category": "runtime",
+          "label": "Runtime environment configured",
+          "implemented_score": 7,
+          "required_env": [
+            "OPENAI_API_KEY",
+            "MONGO_URI"
+          ],
+          "required_evidence": [],
+          "canonical_paths": [
+            ".env.example",
+            "deployment.manifest.json"
+          ],
+          "notes": "Host or operator must provide required runtime variables before deploy."
+        },
+        {
+          "id": "container_smoke",
+          "category": "deployment",
+          "label": "Container build and smoke check",
+          "implemented_score": 7,
+          "required_env": [],
+          "required_evidence": [
+            "APP_IMAGE_SMOKE_VERIFIED_AT"
+          ],
+          "canonical_paths": [
+            "Dockerfile",
+            "deployment.manifest.json"
+          ],
+          "notes": "Evidence stamp should reference a CI run, artifact, or change record."
+        },
+        {
+          "id": "healthcheck",
+          "category": "deployment",
+          "label": "Health endpoint check",
+          "implemented_score": 7,
+          "required_env": [],
+          "required_evidence": [
+            "APP_HEALTHCHECK_VERIFIED_AT"
+          ],
+          "canonical_paths": [
+            "deployment.manifest.json"
+          ],
+          "notes": "Evidence stamp should be set only after the configured health path succeeds."
+        }
+      ]
+    }
+  },
+  "build_output_contract": null
+}

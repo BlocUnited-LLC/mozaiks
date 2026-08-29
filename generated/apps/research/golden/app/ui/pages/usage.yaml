@@ -1,0 +1,35 @@
+schema_version: mozaiks.app_page.v1
+name: Usage
+route: /usage
+title: Usage
+page_type: analytics_dashboard
+layout: full-width
+shell_mode: workspace
+navigation:
+  id: usage
+  label: Usage
+  icon: Gauge
+  scope: global
+  order: 75
+  visible: true
+sections:
+  - id: usage-status
+    primitive: DataTable
+    title: Usage
+    config:
+      api_endpoint: /api/modules/billing_portal/get_usage_status
+      columns:
+        - key: runtime_ai_usage.totals.total_tokens
+          label: Total Tokens
+        - key: runtime_ai_usage.totals.llm_calls
+          label: LLM Calls
+  - id: token-status
+    primitive: SummaryStrip
+    title: Token Balance
+    config:
+      items:
+        - label: Wallets
+          value_key: token_wallets
+        - label: Top Ups
+          value_key: top_up_products
+roles: null

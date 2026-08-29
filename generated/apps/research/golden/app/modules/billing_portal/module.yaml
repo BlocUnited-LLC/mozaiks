@@ -1,0 +1,184 @@
+schema_version: mozaiks.module.v1
+module:
+  id: billing_portal
+  display_name: Billing Portal
+  version: 1.0.0
+  description: >
+    App-owned facade for subscription status, usage display, and customer
+    billing portal redirects through the MozaiksPay managed capability client.
+  owner: app
+  visibility: private
+  handler: backend.handler:BillingPortalHandler
+
+permissions:
+  - id: billing_portal.read
+    description: Read safe subscription and usage status summaries.
+  - id: billing_portal.manage
+    description: Create customer billing portal redirect sessions.
+
+actions:
+  - id: get_subscription_status
+    description: >
+      Return safe current plan display fields through MozaiksPayClient.
+      Never returns hosted subscription ids, payment provider customer ids, or granted
+      managed-capability capabilities.
+    handler_method: get_subscription_status
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        found: {type: boolean}
+        plan_id: {type: string, nullable: true}
+        plan_name: {type: string, nullable: true}
+        status: {type: string, nullable: true}
+        starts_at: {type: string, nullable: true}
+        expires_at: {type: string, nullable: true}
+        on_free_plan: {type: boolean}
+    permissions: [billing_portal.read]
+
+  - id: get_usage_status
+    description: >
+      Return runtime AI token usage through MozaiksPayClient. Plan limit
+      metadata comes from app/config/subscriptions.yaml via /api/me/usage.
+    handler_method: get_usage_status
+    input_schema:
+      type: object
+      properties:
+        limit: {type: integer, default: 500}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        runtime_ai_usage: {type: object}
+        source: {type: string}
+    permissions: [billing_portal.read]
+
+  - id: get_token_status
+    description: >
+      Return runtime AI token usage plus provider-neutral token wallet and top-up
+      product metadata declared in app/config/subscriptions.yaml.
+    handler_method: get_token_status
+    input_schema:
+      type: object
+      properties:
+        limit: {type: integer, default: 500}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        runtime_ai_usage: {type: object}
+        token_wallets: {type: array}
+        top_up_products: {type: array}
+        source: {type: string}
+    permissions: [billing_portal.read]
+
+  - id: list_plans
+    description: >
+      Return the available plan catalog declared in app/config/subscriptions.yaml.
+      Safe plan display fields only — never exposes managed-capability internals
+      or granted capability identifiers. Public so the /pricing landing page can
+      render the catalog without authentication.
+    handler_method: list_plans
+    api_surface: public_readonly
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        plans:
+          type: array
+          items:
+            type: object
+            properties:
+              plan_id: {type: string}
+              label: {type: string}
+              description: {type: string}
+              capabilities: {type: array, items: {type: string}}
+              usage_limits: {type: object}
+              token_allowances: {type: array}
+        top_up_products: {type: array}
+        pricing_catalog: {type: object}
+    permissions: []
+
+  - id: start_subscription_checkout
+    description: >
+      Create a hosted subscription checkout session through MozaiksPayClient and
+      return checkout_url for immediate redirect. The app must not store the URL.
+    handler_method: start_subscription_checkout
+    input_schema:
+      type: object
+      required: [plan_id, success_url, cancel_url]
+      properties:
+        plan_id: {type: string}
+        success_url: {type: string}
+        cancel_url: {type: string}
+        customer_email: {type: string, nullable: true}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        checkout_url: {type: string, nullable: true}
+        success_url: {type: string, nullable: true}
+        cancel_url: {type: string, nullable: true}
+        plan_id: {type: string, nullable: true}
+        error: {type: string, nullable: true}
+    permissions: [billing_portal.manage]
+
+  - id: start_token_top_up
+    description: >
+      Create a hosted token top-up checkout session through MozaiksPayClient for
+      a provider-neutral top_up_products entry declared in subscriptions.yaml.
+      The payment provider must confirm payment before tokens are credited.
+    handler_method: start_token_top_up
+    input_schema:
+      type: object
+      required: [product_id, success_url, cancel_url]
+      properties:
+        product_id: {type: string}
+        success_url: {type: string}
+        cancel_url: {type: string}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        checkout_url: {type: string, nullable: true}
+        success_url: {type: string, nullable: true}
+        cancel_url: {type: string, nullable: true}
+        product_id: {type: string, nullable: true}
+        wallet_id: {type: string, nullable: true}
+        token_amount: {type: integer, nullable: true}
+        amount_cents: {type: integer, nullable: true}
+        currency: {type: string, nullable: true}
+        error: {type: string, nullable: true}
+    permissions: [billing_portal.manage]
+
+  - id: open_billing_portal
+    description: >
+      Create a hosted billing portal session through MozaiksPayClient and
+      return the portal_url for immediate redirect. The app must not store the URL.
+    handler_method: open_billing_portal
+    input_schema:
+      type: object
+      required: [return_url]
+      properties:
+        return_url: {type: string}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        portal_url: {type: string, nullable: true}
+        return_url: {type: string, nullable: true}
+        error: {type: string, nullable: true}
+    permissions: [billing_portal.manage]

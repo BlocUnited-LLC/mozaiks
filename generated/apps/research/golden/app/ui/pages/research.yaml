@@ -1,0 +1,25 @@
+schema_version: mozaiks.app_page.v1
+name: Research
+route: /research
+title: Research
+page_type: record_list
+layout: full-width
+shell_mode: workspace
+roles: null
+navigation:
+  id: research
+  label: Research
+  icon: null
+  scope: global
+  order: 10
+  visible: true
+  placement: null
+sections:
+- id: research-header
+  primitive: PageHeader
+  title: null
+  config:
+    title: Research
+    subtitle: Run AI research and inspect saved results.
+  event_triggers: []
+  roles: null

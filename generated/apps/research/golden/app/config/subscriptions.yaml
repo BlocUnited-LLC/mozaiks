@@ -1,0 +1,43 @@
+schema_version: mozaiks.subscriptions.v1
+label: AI Research Workspace Plans
+default_plan_id: free
+assignment_store:
+  data_alias: billing.subscriptions
+  app_id_field: app_id
+  tenant_id_field: tenant_id
+  user_id_field: user_id
+  plan_id_field: plan_id
+  status_field: status
+  starts_at_field: starts_at
+  expires_at_field: expires_at
+  capabilities_field: granted_capabilities
+  plan_snapshot_field: plan_snapshot
+  active_statuses:
+  - active
+  - trialing
+products: []
+plans:
+- plan_id: free
+  label: Free
+  description: Explore the research workspace.
+  capabilities:
+  - research.view
+  - research.execute
+  usage_limits:
+  - meter_id: research_executions
+    label: Research executions
+    unit: requests
+    monthly_limit: 20
+    capability_id: research.execute
+- plan_id: pro
+  label: Pro
+  description: Higher-volume AI research.
+  capabilities:
+  - research.view
+  - research.execute
+  usage_limits:
+  - meter_id: research_executions
+    label: Research executions
+    unit: requests
+    monthly_limit: 500
+    capability_id: research.execute

@@ -1,0 +1,20 @@
+{
+  "app_id": "research",
+  "deployment": {
+    "allowed_lanes": [
+      "self_hosted"
+    ],
+    "preferred_lane": "self_hosted",
+    "profile": "self_hosted_container"
+  },
+  "domains": {
+    "custom_domain_supported": false,
+    "managed_dns_preferred": false
+  },
+  "runtime": {
+    "container_port": 8000,
+    "health_path": "/health",
+    "kind": "web"
+  },
+  "schema_version": "mozaiks.targets.v1"
+}

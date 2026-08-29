@@ -1,0 +1,38 @@
+schema_version: mozaiks.app_page.v1
+name: Pricing
+route: /pricing
+title: Pricing
+page_type: landing
+layout: full-width
+shell_mode: standard
+navigation:
+  id: pricing
+  label: Pricing
+  icon: CreditCard
+  scope: global
+  order: 90
+  visible: false
+sections:
+  - id: plan-catalog
+    primitive: PricingCatalog
+    config:
+      title: Plans
+      subtitle: Choose the plan that matches the app usage you need.
+      api_endpoint: /api/modules/billing_portal/list_plans
+      plans_key: plans
+      groups_key: pricing_catalog.groups
+      default_group_key: pricing_catalog.default_group_id
+      plan_action_label: Manage billing
+      plan_action:
+        label: Manage billing
+        action_type: navigate
+        href: /billing
+  - id: upgrade-cta
+    primitive: ActionButton
+    title: Upgrade
+    config:
+      actions:
+        - label: Manage Billing
+          action_type: submit
+          href: /api/modules/billing_portal/open_billing_portal
+roles: null

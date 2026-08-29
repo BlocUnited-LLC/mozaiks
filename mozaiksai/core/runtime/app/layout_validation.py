@@ -1,4 +1,4 @@
-"""Validation facade for ``mozaiks.app_layout.v1`` file-map classification.
+"""Validation facade for ``mozaiks.app_layout.v2`` file-map classification.
 
 The layout registry is the typed authority. This module adds scanner-friendly
 classification and diagnostics without changing runtime discovery or
@@ -376,7 +376,7 @@ def _diagnostic_for(classification: LayoutFileClassification) -> LayoutValidatio
             scope=classification.scope,
             message=(
                 f"{classification.normalized_path}: removed app paths are explicitly "
-                "prohibited by mozaiks.app_layout.v1."
+                "prohibited by mozaiks.app_layout.v2."
             ),
         )
     if classification.status == LayoutClassificationStatus.AMBIGUOUS:

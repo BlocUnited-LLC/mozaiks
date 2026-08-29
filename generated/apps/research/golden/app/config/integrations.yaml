@@ -1,0 +1,31 @@
+schema_version: mozaiks.integrations.v1
+app_id: research
+requirements:
+- integration_id: mozaikspay
+  service: mozaikspay
+  provider: mozaiks_pay
+  display_name: MozaiksPay
+  kind: api_key
+  purpose: Connect this generated SaaS app to the managed MozaiksPay subscription
+    provider.
+  required_at: runtime
+  optional: false
+  preferred_setup_lane: bring_your_own_key
+  allowed_setup_lanes:
+  - bring_your_own_key
+  required_fields:
+  - name: api_base
+    label: MozaiksPay API Base URL
+    type: url
+    required: true
+    frontend_safe: true
+  - name: api_key
+    label: MozaiksPay API Key
+    type: secret
+    required: true
+    frontend_safe: false
+  required_by:
+  - source: capability_pack
+    capability_pack_id: mozaikspay
+  - source: capability_pack
+    capability_pack_id: billing_portal

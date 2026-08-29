@@ -1,4 +1,4 @@
-"""Tests for mozaiks.app_layout.v1."""
+"""Tests for mozaiks.app_layout.v2."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class TestRegistryContract:
         first = _registry()
         second = _registry()
 
-        assert first.schema_version == SCHEMA_VERSION == "mozaiks.app_layout.v1"
+        assert first.schema_version == SCHEMA_VERSION == "mozaiks.app_layout.v2"
         assert first.registry_digest == second.registry_digest
         assert [family.identity_payload for family in first.families] == [
             family.identity_payload for family in second.families

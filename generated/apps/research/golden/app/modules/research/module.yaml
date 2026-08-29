@@ -1,0 +1,64 @@
+schema_version: mozaiks.module.v1
+module:
+  id: research
+  display_name: Research
+  version: 1.0.0
+  description: Saved AI research results and workflow launches.
+  owner: app
+  visibility: private
+  handler: backend.handler:ResearchHandler
+permissions:
+- id: research.read
+  description: Read saved research results.
+- id: research.execute
+  description: Start AI research.
+actions:
+- id: list_results
+  description: List saved research results.
+  handler_method: list_results
+  input_schema:
+    type: object
+    properties: {}
+  output_schema:
+    type: object
+    required:
+    - results
+    properties:
+      results:
+        type: array
+  permissions:
+  - research.read
+- id: execute_research
+  description: Save a research request and start the AI research workflow.
+  handler_method: execute_research
+  emits:
+  - domain.research.requested
+  input_schema:
+    type: object
+    required:
+    - query
+    properties:
+      query:
+        type: string
+  output_schema:
+    type: object
+    required:
+    - research_id
+    - status
+    properties:
+      research_id:
+        type: string
+      status:
+        type: string
+  permissions:
+  - research.execute
+  entitlement_gate: research.execute
+capabilities:
+- capability_id: research.view
+  kind: action
+  target: list_results
+  title: View research
+- capability_id: research.execute
+  kind: workflow
+  target: ResearchWorkflow
+  title: Execute research
