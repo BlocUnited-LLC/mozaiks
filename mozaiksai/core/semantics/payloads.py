@@ -38,6 +38,7 @@ from mozaiksai.core.semantics.refs import (
     _validate_digest,
     validate_node_id_grammar,
 )
+from mozaiksai.core.stub_kinds import StubKind
 from mozaiksai.core.taxonomy import SemanticCategory, validate_identifier_grammar
 
 SEMANTIC_PAYLOAD_SCHEMA_VERSION: Literal["mozaiks.semantic_payload.v1"] = (
@@ -47,7 +48,23 @@ SEMANTIC_PAYLOAD_SCHEMA_VERSION: Literal["mozaiks.semantic_payload.v1"] = (
 _MAX_TEXT_CHARS = 4000
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENTRYPOINT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_CURRENCY = re.compile(r"^[A-Z]{3}$")
+# ISO 4217 Maintenance Agency List One (current currencies and funds),
+# captured for this schema version on 2026-08-29.  Shape validation alone is
+# insufficient: unassigned uppercase triples such as ``ZZZ`` fail closed.
+_ISO_4217_LIST_ONE_CODES = frozenset(
+    """
+    AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BOV BRL
+    BSD BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK
+    DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD
+    HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD
+    KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK
+    MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR
+    RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL
+    THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED VES
+    VND VUV WST XAD XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT
+    XSU XTS XUA XXX YER ZAR ZMW ZWG
+    """.split()
+)
 
 #: Validation-context key used exclusively by :func:`build_semantic_payload`
 #: to defer the digest check while computing the digest.  It is a validation
@@ -137,13 +154,6 @@ class DeploymentTargetKind(StrEnum):
     CONTAINER = "container"
     STATIC_SITE = "static_site"
     SERVERLESS = "serverless"
-
-
-#: Mirror of ``layout_registry.StubKind`` values.  The registry lives in the
-#: runtime layer and imports workflow modules, so the semantics contract layer
-#: mirrors the closed value set as a Literal instead of importing it; a test
-#: pins the two sets equal so they cannot drift.
-StubKindLiteral = Literal["python_backend", "js_frontend"]
 
 
 # ---------------------------------------------------------------------------
@@ -258,8 +268,8 @@ class PriceSpec(SemanticsModel):
     @classmethod
     def _currency(cls, value: str) -> str:
         text = str(value or "").strip()
-        if _CURRENCY.fullmatch(text) is None:
-            raise ValueError(f"currency must be a 3-letter uppercase code, got {value!r}")
+        if text not in _ISO_4217_LIST_ONE_CODES:
+            raise ValueError(f"currency must be a current ISO-4217 code, got {value!r}")
         return text
 
 
@@ -726,7 +736,7 @@ class DeploymentTargetPayload(SemanticPayloadBase):
 
 class StubDeclarationPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.STUB_DECLARATION] = SemanticNodeKind.STUB_DECLARATION
-    stub_kind: StubKindLiteral
+    stub_kind: StubKind
     path: str
     entrypoint: str
 
@@ -821,8 +831,20 @@ def validate_semantic_graph_v2_payload_closure(
     (node_id, kind, version, digest, scope); every supplied payload must be
     pinned.  Missing, mismatched, duplicate, and extra payloads fail closed.
     """
+    try:
+        verified_graph = SemanticGraphV2.model_validate(graph.model_dump(mode="json"))
+    except (TypeError, ValueError) as exc:
+        raise SemanticPayloadError(f"semantic graph v2 failed cold validation: {exc}") from exc
+
     supplied: dict[tuple[str, int], SemanticPayloadBase] = {}
     for payload in payloads:
+        try:
+            verified_payload = parse_semantic_payload(payload.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise SemanticPayloadError(
+                f"semantic payload failed cold validation: {exc}"
+            ) from exc
+        payload = verified_payload
         key = (payload.node_id, payload.payload_version)
         if key in supplied:
             raise SemanticPayloadError(
@@ -832,7 +854,7 @@ def validate_semantic_graph_v2_payload_closure(
         supplied[key] = payload
 
     pinned: set[tuple[str, int]] = set()
-    for node in graph.nodes:
+    for node in verified_graph.nodes:
         ref = node.payload_ref
         key = (ref.node_id, ref.payload_version)
         pinned.add(key)

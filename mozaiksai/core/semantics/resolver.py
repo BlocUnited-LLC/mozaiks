@@ -15,7 +15,7 @@ from typing import Any
 from mozaiksai.core.semantics.binding import ImplementationBinding
 from mozaiksai.core.semantics.graph import SemanticGraph, SemanticGraphV2
 from mozaiksai.core.semantics.manifest import ApplicationManifest
-from mozaiksai.core.semantics.payloads import SemanticPayloadBase
+from mozaiksai.core.semantics.payloads import SemanticPayloadBase, parse_semantic_payload
 from mozaiksai.core.semantics.refs import (
     ApplicationManifestRef,
     ArtifactRevisionRef,
@@ -114,14 +114,20 @@ class SemanticReferenceResolver:
         cross-scope reuse is impossible because resolution re-verifies the
         node binding and scope.
         """
+        try:
+            verified = parse_semantic_payload(payload.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"semantic payload failed cold validation: {exc}"
+            ) from exc
         self._register(
             _Subject(
                 kind=RefDocumentType.SEMANTIC_PAYLOAD,
-                subject_id=payload.node_id,
-                version=payload.payload_version,
-                digest=payload.payload_digest,
-                scope=payload.scope,
-                content=payload,
+                subject_id=verified.node_id,
+                version=verified.payload_version,
+                digest=verified.payload_digest,
+                scope=verified.scope,
+                content=verified,
             )
         )
 
@@ -173,16 +179,22 @@ class SemanticReferenceResolver:
         there is no partial registration and no "current"/latest payload
         lookup anywhere; resolution is by full identity only.
         """
-        for node in graph.nodes:
-            self.resolve_semantic_payload(node.payload_ref, requesting_scope=graph.scope)
+        try:
+            verified = SemanticGraphV2.model_validate(graph.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"semantic graph v2 failed cold validation: {exc}"
+            ) from exc
+        for node in verified.nodes:
+            self.resolve_semantic_payload(node.payload_ref, requesting_scope=verified.scope)
         self._register(
             _Subject(
                 kind=RefDocumentType.SEMANTIC_GRAPH,
-                subject_id=graph.graph_id,
-                version=graph.version,
-                digest=graph.graph_digest,
-                scope=graph.scope,
-                content=graph,
+                subject_id=verified.graph_id,
+                version=verified.version,
+                digest=verified.graph_digest,
+                scope=verified.scope,
+                content=verified,
             )
         )
 

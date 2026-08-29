@@ -17,13 +17,15 @@ This project follows a practical pre-1.0 changelog format:
 - **Typed semantic payloads + Merkle-rooted graph v2 (ADR 0007 Slice 2E)**:
   every semantic node kind now has exactly one strict payload variant
   (`mozaiks.semantic_payload.v1` — titles/intent text, typed field shapes,
-  integer minor-unit prices, explicit dense-position ordering, taxonomy-
+  integer minor-unit prices with ISO-4217 codes, explicit dense-position ordering, taxonomy-
   validated event/capability ids, portable-path-validated paths; no untyped
   dicts), pinned into `mozaiks.semantic_graph.v2` nodes by a full-identity
   `SemanticPayloadRef` so the graph digest is a Merkle root — any payload byte
-  change re-roots the graph. The reference resolver registers payloads as
-  immutable content-bearing subjects and requires complete payload closure
-  before a v2 graph registers; there is no "current"/latest payload lookup.
+  change re-roots the graph. The reference resolver cold-validates payload and
+  graph model instances before mutation, registers payloads as immutable
+  content-bearing subjects, and requires complete payload closure before a v2
+  graph registers; there is no "current"/latest payload lookup. Semantic
+  payloads and the layout registry consume one shared leaf `StubKind` authority.
   Graph v1 is byte-for-byte unchanged (golden vectors), no production code
   consumes the new symbols, and no compiler capability is advertised.
 

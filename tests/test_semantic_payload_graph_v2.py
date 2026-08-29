@@ -8,11 +8,11 @@ immutability, binding non-authority, and no capability advertisement.
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import get_args
 
 import pytest
 from pydantic import ValidationError
@@ -83,6 +83,7 @@ from mozaiksai.core.semantics.resolver import (
     ReferenceResolutionError,
     SemanticReferenceResolver,
 )
+from mozaiksai.core.stub_kinds import StubKind
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -369,11 +370,10 @@ def test_union_rejects_kind_content_mismatch() -> None:
         parse_semantic_payload(document)
 
 
-def test_stub_kind_literal_mirrors_layout_registry_enum() -> None:
-    from mozaiksai.core.runtime.app.layout_registry import StubKind
-    from mozaiksai.core.semantics.payloads import StubKindLiteral
+def test_stub_kind_has_one_shared_leaf_authority() -> None:
+    from mozaiksai.core.runtime.app.layout_registry import StubKind as LayoutStubKind
 
-    assert set(get_args(StubKindLiteral)) == {kind.value for kind in StubKind}
+    assert LayoutStubKind is StubKind
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +499,39 @@ def test_digest_tampering_fails_closed() -> None:
     with pytest.raises(ValidationError, match="payload_digest does not match"):
         parse_semantic_payload(document)
 
+
+def test_forged_frozen_model_copies_fail_cold_validation_before_registration() -> None:
+    graph, payloads = _corpus_graph()
+    page = next(p for p in payloads if p.node_id == "mozaiks.page.home")
+    forged_page = page.model_copy(update={"title": "Forged"})
+    resolver = SemanticReferenceResolver()
+
+    with pytest.raises(ReferenceResolutionError, match="cold validation"):
+        resolver.register_semantic_payload(forged_page)
+    resolver.register_semantic_payload(page)  # failed registration did not mutate the store
+    for payload in payloads:
+        if payload is not page:
+            resolver.register_semantic_payload(payload)
+
+    forged_graph = graph.model_copy(update={"graph_digest": "f" * 64})
+    with pytest.raises(ReferenceResolutionError, match="cold validation"):
+        resolver.register_semantic_graph_v2(forged_graph)
+    resolver.register_semantic_graph_v2(graph)  # failed registration did not mutate the store
+
+
+def test_payload_closure_cold_validates_frozen_model_copies() -> None:
+    graph, payloads = _corpus_graph()
+    page = next(p for p in payloads if p.node_id == "mozaiks.page.home")
+    forged_payloads = [
+        page.model_copy(update={"title": "Forged"}) if payload is page else payload
+        for payload in payloads
+    ]
+    with pytest.raises(SemanticPayloadError, match="payload failed cold validation"):
+        validate_semantic_graph_v2_payload_closure(graph, forged_payloads)
+
+    forged_graph = graph.model_copy(update={"graph_digest": "f" * 64})
+    with pytest.raises(SemanticPayloadError, match="graph v2 failed cold validation"):
+        validate_semantic_graph_v2_payload_closure(forged_graph, payloads)
 
 def test_duplicate_identity_fails_closed() -> None:
     resolver, graph, payloads = _registered_resolver()
@@ -740,6 +773,8 @@ def test_prices_are_integer_minor_units_never_floats() -> None:
         PriceSpec(amount_minor_units=19.99, currency="USD", period=BillingPeriod.MONTHLY)
     with pytest.raises(ValidationError, match="currency"):
         PriceSpec(amount_minor_units=1900, currency="usd", period=BillingPeriod.MONTHLY)
+    with pytest.raises(ValidationError, match="ISO-4217"):
+        PriceSpec(amount_minor_units=1900, currency="ZZZ", period=BillingPeriod.MONTHLY)
 
 
 def test_ordering_permutations_do_not_change_digests() -> None:
@@ -757,6 +792,41 @@ def test_ordering_permutations_do_not_change_digests() -> None:
     assert [entry.section_node_id for entry in permuted.sections] == [
         entry.section_node_id for entry in base.sections
     ]
+
+
+def test_meaningful_order_changes_identity_and_invalid_positions_fail_closed() -> None:
+    base = _corpus_payloads()[SemanticNodeKind.PAGE]
+    reordered = build_semantic_payload(
+        PagePayload,
+        node_id=base.node_id,
+        payload_version=base.payload_version,
+        scope=base.scope,
+        title=base.title,
+        intent=base.intent,
+        sections=tuple(
+            entry.model_copy(update={"position": 1 - entry.position})
+            for entry in base.sections
+        ),
+    )
+    assert reordered.payload_digest != base.payload_digest
+    assert [entry.section_node_id for entry in reordered.sections] == list(
+        reversed([entry.section_node_id for entry in base.sections])
+    )
+
+    for positions in ((0, 0), (0, 2), (-1, 0)):
+        with pytest.raises(ValidationError, match="position"):
+            build_semantic_payload(
+                PagePayload,
+                node_id=base.node_id,
+                payload_version=base.payload_version,
+                scope=base.scope,
+                title=base.title,
+                intent=base.intent,
+                sections=tuple(
+                    entry.model_copy(update={"position": position})
+                    for entry, position in zip(base.sections, positions, strict=True)
+                ),
+            )
 
 
 def test_payloads_and_v2_nodes_are_frozen() -> None:
@@ -807,22 +877,90 @@ def test_production_sources_do_not_import_payloads_or_v2_symbols() -> None:
         Path("mozaiksai/core/semantics/resolver.py"),
         Path("tests/test_semantic_payload_graph_v2.py"),
     }
-    markers = (
-        "semantics.payloads",
+    forbidden_modules = {"mozaiksai.core.semantics.payloads"}
+    forbidden_symbols = {
         "SemanticGraphV2",
         "SemanticNodeV2",
         "SemanticPayloadRef",
-        "semantic_payload",
-    )
-    roots = [ROOT / "mozaiksai", ROOT / "factory_app"]
-    for root in roots:
-        for path in root.rglob("*.py"):
-            relative = path.relative_to(ROOT)
-            if relative in excluded:
-                continue
-            text = path.read_text(encoding="utf-8")
-            if any(marker in text for marker in markers):
+        "parse_semantic_payload",
+        "register_semantic_payload",
+        "resolve_semantic_payload",
+        "semantic_payload_ref",
+        "validate_semantic_graph_v2_payload_closure",
+    }
+
+    def constant_string(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = constant_string(node.left)
+            right = constant_string(node.right)
+            if left is not None and right is not None:
+                return left + right
+        return None
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "*.py", "*.pyi"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    for relative_text in tracked:
+        relative = Path(relative_text)
+        if relative in excluded or "tests" in relative.parts:
+            continue
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source, filename=relative_text)
+        except SyntaxError:
+            # Tracked generator templates may contain contract placeholders
+            # that become Python only after rendering.  They still receive a
+            # direct string-access scan rather than disappearing from proof.
+            if any(marker in source for marker in forbidden_modules | forbidden_symbols):
                 offenders.append(relative.as_posix())
+            continue
+        for node in ast.walk(tree):
+            resolved_string = constant_string(node)
+            if resolved_string in forbidden_modules | forbidden_symbols:
+                offenders.append(relative.as_posix())
+            if isinstance(node, ast.Import):
+                if any(alias.name in forbidden_modules for alias in node.names):
+                    offenders.append(relative.as_posix())
+            elif isinstance(node, ast.ImportFrom):
+                if node.module in forbidden_modules or any(
+                    alias.name == "*" or alias.name in forbidden_symbols
+                    for alias in node.names
+                    if node.module in {
+                        "mozaiksai.core.semantics",
+                        "mozaiksai.core.semantics.graph",
+                        "mozaiksai.core.semantics.refs",
+                        "mozaiksai.core.semantics.resolver",
+                    }
+                ):
+                    offenders.append(relative.as_posix())
+            elif isinstance(node, ast.Call) and node.args:
+                target = constant_string(node.args[0])
+                if target in forbidden_modules:
+                    offenders.append(relative.as_posix())
+            elif isinstance(node, ast.Attribute) and node.attr in forbidden_symbols:
+                offenders.append(relative.as_posix())
+            elif isinstance(node, ast.Name) and node.id in forbidden_symbols:
+                offenders.append(relative.as_posix())
+    declarative = subprocess.run(
+        ["git", "ls-files", "--", "*.json", "*.toml", "*.yaml", "*.yml"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    for relative_text in declarative:
+        relative = Path(relative_text)
+        if "tests" in relative.parts:
+            continue
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        if any(marker in source for marker in forbidden_modules | forbidden_symbols):
+            offenders.append(relative.as_posix())
     assert offenders == []
 
 
