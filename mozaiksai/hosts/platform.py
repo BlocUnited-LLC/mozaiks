@@ -2989,6 +2989,7 @@ async def _invoke_workflow_capability(
             "status": {
                 "replay": "replay_suppressed",
                 "rate": "rate_limited",
+                "rate_authority": "failed_closed",
                 "persistence": "failed_closed",
             }.get(decision.reason, "rejected"),
             "reason": decision.reason,
@@ -3033,6 +3034,8 @@ async def _invoke_workflow_capability(
                 "payload": result,
                 "visibility": "internal",
             }
+            if isinstance(decision.trace, dict):
+                diagnostic[WORKFLOW_TRIGGER_TRACE_KEY] = dict(decision.trace)
             await _maybe_await(
                 event_emitter(
                     "platform.workflow_capability_trigger_rejected",
@@ -3103,6 +3106,7 @@ async def _invoke_workflow_capability(
             "correlation": source_event.get("correlation") if isinstance(source_event.get("correlation"), dict) else {},
             "payload": {**result, "source_event_id": source_event.get("id")},
             "visibility": "internal",
+            WORKFLOW_TRIGGER_TRACE_KEY: dict(decision.trace or {}),
         }
         await _maybe_await(event_emitter("platform.workflow_capability_started", event))
     return result

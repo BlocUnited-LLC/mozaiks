@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from copy import deepcopy
 from typing import Any
 
 import pytest
@@ -54,15 +55,31 @@ class _AtomicClaimStore:
 
 
 class _TenantRateLimiter:
-    def __init__(self, limit: int = 100) -> None:
+    def __init__(
+        self,
+        limit: int = 100,
+        *,
+        fail_ready: bool = False,
+        fail_hit: bool = False,
+        cancel_hit: bool = False,
+    ) -> None:
         self.limit = limit
         self.hits: dict[str, int] = defaultdict(int)
         self._lock = asyncio.Lock()
+        self.fail_ready = fail_ready
+        self.fail_hit = fail_hit
+        self.cancel_hit = cancel_hit
 
     async def ensure_ready(self) -> None:
+        if self.fail_ready:
+            raise ConnectionError("rate database unavailable")
         return None
 
     async def hit(self, tenant_key: str) -> bool:
+        if self.cancel_hit:
+            raise asyncio.CancelledError
+        if self.fail_hit:
+            raise ConnectionError("rate database unavailable")
         async with self._lock:
             self.hits[tenant_key] += 1
             return self.hits[tenant_key] <= self.limit
@@ -103,10 +120,23 @@ def _routes() -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def _guard(*, rate_limit: int = 100, fail_ready: bool = False, max_depth: int = 8):
+def _guard(
+    *,
+    rate_limit: int = 100,
+    fail_ready: bool = False,
+    fail_rate_ready: bool = False,
+    fail_rate_hit: bool = False,
+    cancel_rate_hit: bool = False,
+    max_depth: int = 8,
+):
     return WorkflowTriggerGuard(
         claim_store=_AtomicClaimStore(fail_ready=fail_ready),  # type: ignore[arg-type]
-        rate_limiter=_TenantRateLimiter(rate_limit),
+        rate_limiter=_TenantRateLimiter(
+            rate_limit,
+            fail_ready=fail_rate_ready,
+            fail_hit=fail_rate_hit,
+            cancel_hit=cancel_rate_hit,
+        ),
         max_depth=max_depth,
     )
 
@@ -164,6 +194,8 @@ async def test_concurrent_double_delivery_spawns_exactly_one_workflow() -> None:
         "platform.workflow_capability_started",
         "platform.workflow_capability_trigger_rejected",
     }
+    for _event_type, payload in emitted:
+        assert payload[WORKFLOW_TRIGGER_TRACE_KEY]["capability_ids"] == ["tasks.review"]
 
 
 @pytest.mark.asyncio
@@ -256,6 +288,127 @@ async def test_rate_limit_is_tenant_scoped() -> None:
     assert tenant_a_first.allowed is True
     assert tenant_a_second.reason == "rate"
     assert tenant_b_first.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_is_shared_across_one_tenants_workspaces() -> None:
+    guard = _guard(rate_limit=1)
+
+    first = await guard.authorize(
+        capability_id="tasks.review",
+        source_event=_event("evt-workspace-1", tenant_id="tenant-a"),
+        app_id="app-1",
+        tenant_id="tenant-a",
+        workspace_id="workspace-1",
+    )
+    second = await guard.authorize(
+        capability_id="tasks.review",
+        source_event=_event("evt-workspace-2", tenant_id="tenant-a"),
+        app_id="app-1",
+        tenant_id="tenant-a",
+        workspace_id="workspace-2",
+    )
+
+    assert first.allowed is True
+    assert second.reason == "rate"
+
+
+@pytest.mark.asyncio
+async def test_rate_scope_encoding_cannot_collide_across_app_and_tenant_boundaries() -> None:
+    guard = _guard(rate_limit=1)
+
+    first = await guard.authorize(
+        capability_id="tasks.review",
+        source_event=_event("evt-scope-1", app_id="app:a", tenant_id="b"),
+        app_id="app:a",
+        tenant_id="b",
+        workspace_id=None,
+    )
+    second = await guard.authorize(
+        capability_id="tasks.review",
+        source_event=_event("evt-scope-2", app_id="app", tenant_id="a:b"),
+        app_id="app",
+        tenant_id="a:b",
+        workspace_id=None,
+    )
+
+    assert first.allowed is True
+    assert second.allowed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["ready", "hit"])
+async def test_rate_authority_failure_fails_closed_before_spawn(failure: str) -> None:
+    from mozaiksai.hosts import platform
+
+    created = 0
+
+    async def create_session(**_kwargs: Any) -> str:
+        nonlocal created
+        created += 1
+        return "must-not-exist"
+
+    result = await platform._invoke_workflow_capability(
+        capability_id="tasks.review",
+        source_event=_event(f"evt-rate-{failure}"),
+        subscription={"id": "reaction-1", "module_id": "tasks"},
+        routes=_routes(),
+        create_session=create_session,
+        trigger_guard=_guard(
+            fail_rate_ready=failure == "ready",
+            fail_rate_hit=failure == "hit",
+        ),
+        auto_start=False,
+    )
+
+    assert result["status"] == "failed_closed"
+    assert result["reason"] == "rate_authority"
+    assert result["detail"] == "ConnectionError: rate authority failed"
+    assert created == 0
+
+
+@pytest.mark.asyncio
+async def test_cancellation_propagates_without_mutating_the_source_event() -> None:
+    event = _event("evt-cancel")
+    original = deepcopy(event)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _guard(cancel_rate_hit=True).authorize(
+            capability_id="tasks.review",
+            source_event=event,
+            app_id="app-1",
+            tenant_id="tenant-1",
+            workspace_id=None,
+        )
+
+    assert event == original
+
+
+@pytest.mark.asyncio
+async def test_rejection_diagnostic_uses_registered_taxonomy_and_preserves_lineage() -> None:
+    from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
+    from mozaiksai.hosts import platform
+
+    dispatcher = UnifiedEventDispatcher()
+    emitted: list[dict[str, Any]] = []
+    dispatcher.register_handler(
+        "platform.workflow_capability_trigger_rejected",
+        emitted.append,
+    )
+
+    result = await platform._invoke_workflow_capability(
+        capability_id="tasks.review",
+        source_event=_event("evt-rate-diagnostic"),
+        subscription={"id": "reaction-1", "module_id": "tasks"},
+        routes=_routes(),
+        event_emitter=dispatcher.emit,
+        trigger_guard=_guard(rate_limit=0),
+        auto_start=False,
+    )
+
+    assert result["reason"] == "rate"
+    assert len(emitted) == 1
+    assert emitted[0][WORKFLOW_TRIGGER_TRACE_KEY]["capability_ids"] == ["tasks.review"]
 
 
 @pytest.mark.asyncio

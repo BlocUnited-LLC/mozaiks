@@ -294,6 +294,7 @@ _CORE_EVENTS = (
     "notification.count_changed",
     "notification.created",
     "platform.workflow_capability_started",
+    "platform.workflow_capability_trigger_rejected",
     "user.input.submit",
     "workflow.completed",
     "chat.tool_call_complete",

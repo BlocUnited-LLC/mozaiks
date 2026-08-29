@@ -31,6 +31,7 @@ TriggerDecisionReason = Literal[
     "cycle",
     "depth",
     "rate",
+    "rate_authority",
     "persistence",
 ]
 
@@ -39,6 +40,10 @@ class WorkflowTriggerRateLimiter(Protocol):
     async def ensure_ready(self) -> None: ...
 
     async def hit(self, tenant_key: str) -> bool: ...
+
+
+class _WorkflowTriggerRateAuthorityError(RuntimeError):
+    """Raised when the distributed rate authority cannot be verified."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +157,28 @@ class WorkflowTriggerGuard:
 
         try:
             await self._ensure_ready()
+        except _WorkflowTriggerRateAuthorityError as exc:
+            return WorkflowTriggerDecision(
+                allowed=False,
+                reason="rate_authority",
+                invocation_id=invocation_id,
+                event_identity=event_identity,
+                depth=depth,
+                trace=trace,
+                detail=f"{type(exc.__cause__ or exc).__name__}: rate authority failed",
+            )
+        except Exception as exc:
+            return WorkflowTriggerDecision(
+                allowed=False,
+                reason="persistence",
+                invocation_id=invocation_id,
+                event_identity=event_identity,
+                depth=depth,
+                trace=trace,
+                detail=f"{type(exc).__name__}: durable trigger claim failed",
+            )
+
+        try:
             key = f"workflow_trigger:{invocation_id}"
             claim = await self._claim_store.claim(
                 app_id=app_id,
@@ -183,18 +210,6 @@ class WorkflowTriggerGuard:
             )
             if not completed:
                 raise RuntimeError("workflow trigger claim could not be finalized")
-
-            tenant_key = ":".join([app_id, tenant_id or app_id, workspace_id or ""])
-            if not await self._rate_limiter.hit(tenant_key):
-                return WorkflowTriggerDecision(
-                    allowed=False,
-                    reason="rate",
-                    invocation_id=invocation_id,
-                    event_identity=event_identity,
-                    depth=depth,
-                    trace=trace,
-                    detail="per-tenant workflow trigger rate limit exceeded",
-                )
         except Exception as exc:
             return WorkflowTriggerDecision(
                 allowed=False,
@@ -203,7 +218,31 @@ class WorkflowTriggerGuard:
                 event_identity=event_identity,
                 depth=depth,
                 trace=trace,
-                detail=f"{type(exc).__name__}: trigger authority failed",
+                detail=f"{type(exc).__name__}: durable trigger claim failed",
+            )
+
+        tenant_key = sha256(f"{app_id}\x00{tenant_id or app_id}".encode()).hexdigest()
+        try:
+            rate_allowed = await self._rate_limiter.hit(tenant_key)
+        except Exception as exc:
+            return WorkflowTriggerDecision(
+                allowed=False,
+                reason="rate_authority",
+                invocation_id=invocation_id,
+                event_identity=event_identity,
+                depth=depth,
+                trace=trace,
+                detail=f"{type(exc).__name__}: rate authority failed",
+            )
+        if not rate_allowed:
+            return WorkflowTriggerDecision(
+                allowed=False,
+                reason="rate",
+                invocation_id=invocation_id,
+                event_identity=event_identity,
+                depth=depth,
+                trace=trace,
+                detail="per-tenant workflow trigger rate limit exceeded",
             )
 
         return WorkflowTriggerDecision(
@@ -224,7 +263,10 @@ class WorkflowTriggerGuard:
             if self._claim_store is None or self._rate_limiter is None:
                 raise RuntimeError("workflow trigger authority is unavailable")
             await self._claim_store.ensure_indexes()
-            await self._rate_limiter.ensure_ready()
+            try:
+                await self._rate_limiter.ensure_ready()
+            except Exception as exc:
+                raise _WorkflowTriggerRateAuthorityError from exc
             self._ready = True
 
 
@@ -296,6 +338,12 @@ def _next_trace(
         )
 
     next_depth = parent_depth + 1
+    current_trace = {
+        "root_event_id": root_event_id,
+        "depth": parent_depth,
+        "capability_ids": list(capabilities),
+        "invocation_ids": list(invocations),
+    }
     if capability_id in capabilities:
         return WorkflowTriggerDecision(
             allowed=False,
@@ -303,6 +351,7 @@ def _next_trace(
             invocation_id=invocation_id,
             event_identity=event_identity,
             depth=next_depth,
+            trace=current_trace,
             detail="capability already exists in the trigger ancestry",
         )
     if next_depth > max_depth:
@@ -312,6 +361,7 @@ def _next_trace(
             invocation_id=invocation_id,
             event_identity=event_identity,
             depth=next_depth,
+            trace=current_trace,
             detail=f"workflow trigger depth exceeds {max_depth}",
         )
 
