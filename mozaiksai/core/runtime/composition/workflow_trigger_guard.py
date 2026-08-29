@@ -144,7 +144,7 @@ class WorkflowTriggerGuard:
             return trace_result
         depth, trace = trace_result
 
-        if self._claim_store is None or self._rate_limiter is None:
+        if self._claim_store is None:
             return WorkflowTriggerDecision(
                 allowed=False,
                 reason="persistence",
@@ -152,7 +152,17 @@ class WorkflowTriggerGuard:
                 event_identity=event_identity,
                 depth=depth,
                 trace=trace,
-                detail="durable trigger claim or rate-limit authority is unavailable",
+                detail="durable trigger claim authority is unavailable",
+            )
+        if self._rate_limiter is None:
+            return WorkflowTriggerDecision(
+                allowed=False,
+                reason="rate_authority",
+                invocation_id=invocation_id,
+                event_identity=event_identity,
+                depth=depth,
+                trace=trace,
+                detail="rate-limit authority is unavailable",
             )
 
         try:
@@ -221,7 +231,12 @@ class WorkflowTriggerGuard:
                 detail=f"{type(exc).__name__}: durable trigger claim failed",
             )
 
-        tenant_key = sha256(f"{app_id}\x00{tenant_id or app_id}".encode()).hexdigest()
+        rate_scope = (
+            f"tenant\x00{tenant_id}"
+            if tenant_id
+            else f"app\x00{app_id}"
+        )
+        tenant_key = sha256(rate_scope.encode()).hexdigest()
         try:
             rate_allowed = await self._rate_limiter.hit(tenant_key)
         except Exception as exc:
@@ -260,8 +275,12 @@ class WorkflowTriggerGuard:
         async with self._ready_lock:
             if self._ready:
                 return
-            if self._claim_store is None or self._rate_limiter is None:
-                raise RuntimeError("workflow trigger authority is unavailable")
+            if self._claim_store is None:
+                raise RuntimeError("durable trigger claim authority is unavailable")
+            if self._rate_limiter is None:
+                raise _WorkflowTriggerRateAuthorityError(
+                    "rate-limit authority is unavailable"
+                )
             await self._claim_store.ensure_indexes()
             try:
                 await self._rate_limiter.ensure_ready()

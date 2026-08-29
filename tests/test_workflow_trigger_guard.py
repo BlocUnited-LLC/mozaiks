@@ -314,6 +314,29 @@ async def test_rate_limit_is_shared_across_one_tenants_workspaces() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_is_shared_across_one_tenants_apps() -> None:
+    guard = _guard(rate_limit=1)
+
+    first = await guard.authorize(
+        capability_id="tasks.review",
+        source_event=_event("evt-app-1", app_id="app-1", tenant_id="tenant-a"),
+        app_id="app-1",
+        tenant_id="tenant-a",
+        workspace_id=None,
+    )
+    second = await guard.authorize(
+        capability_id="tasks.publish",
+        source_event=_event("evt-app-2", app_id="app-2", tenant_id="tenant-a"),
+        app_id="app-2",
+        tenant_id="tenant-a",
+        workspace_id=None,
+    )
+
+    assert first.allowed is True
+    assert second.reason == "rate"
+
+
+@pytest.mark.asyncio
 async def test_rate_scope_encoding_cannot_collide_across_app_and_tenant_boundaries() -> None:
     guard = _guard(rate_limit=1)
 
@@ -334,6 +357,64 @@ async def test_rate_scope_encoding_cannot_collide_across_app_and_tenant_boundari
 
     assert first.allowed is True
     assert second.allowed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("missing_authority", "expected_reason", "expected_detail"),
+    [
+        (
+            "claim",
+            "persistence",
+            "durable trigger claim authority is unavailable",
+        ),
+        (
+            "rate",
+            "rate_authority",
+            "rate-limit authority is unavailable",
+        ),
+    ],
+)
+async def test_missing_authorities_fail_closed_with_distinct_diagnostics(
+    missing_authority: str,
+    expected_reason: str,
+    expected_detail: str,
+) -> None:
+    from mozaiksai.hosts import platform
+
+    claim_store = None if missing_authority == "claim" else _AtomicClaimStore()
+    rate_limiter = None if missing_authority == "rate" else _TenantRateLimiter()
+    created = 0
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    async def create_session(**_kwargs: Any) -> str:
+        nonlocal created
+        created += 1
+        return "must-not-exist"
+
+    async def emit(event_type: str, payload: dict[str, Any]) -> None:
+        emitted.append((event_type, payload))
+
+    result = await platform._invoke_workflow_capability(
+        capability_id="tasks.review",
+        source_event=_event(f"evt-missing-{missing_authority}"),
+        subscription={"id": "reaction-1", "module_id": "tasks"},
+        routes=_routes(),
+        event_emitter=emit,
+        create_session=create_session,
+        trigger_guard=WorkflowTriggerGuard(
+            claim_store=claim_store,
+            rate_limiter=rate_limiter,
+        ),
+        auto_start=False,
+    )
+
+    assert result["status"] == "failed_closed"
+    assert result["reason"] == expected_reason
+    assert result["detail"] == expected_detail
+    assert created == 0
+    assert emitted[0][0] == "platform.workflow_capability_trigger_rejected"
+    assert emitted[0][1]["payload"]["reason"] == expected_reason
 
 
 @pytest.mark.asyncio
