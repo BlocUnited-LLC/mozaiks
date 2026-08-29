@@ -332,6 +332,17 @@ _KNOWN_DEFERRED = frozenset(
     }
 )
 _PROVENANCE_ROOTS = frozenset({"build_context", "workflows"})
+_SURFACE_KINDS = frozenset(
+    {
+        "module",
+        "workflow",
+        "app_policy",
+        "refinement",
+        "external_integration",
+        "ui_only",
+    }
+)
+_GRAPH_V1_SURFACE_KINDS = frozenset({"module", "workflow"})
 _SLUG = re.compile(r"[^a-z0-9_]+")
 _MODULE_ENDPOINT = re.compile(r"^/api/modules/([^/]+)/([^/]+)$")
 # Mirrors AppPageSchema's _API_PATH_RE (mozaiksai/core/runtime/app/page_schema.py).
@@ -639,15 +650,33 @@ class _Builder:
                 group=f"{root}.surface_map.surfaces",
             )
             kind = str(item.get("surface_kind") or "")
+            if not kind:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.MISSING,
+                            source_path=f"{base}.surface_kind",
+                            reason="surface_kind is required by the current producer contract",
+                        )
+                    ]
+                )
+            if kind not in _SURFACE_KINDS:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.UNSUPPORTED,
+                            source_path=f"{base}.surface_kind",
+                            reason=(
+                                f"surface_kind {kind!r} is not in the current producer "
+                                f"taxonomy {sorted(_SURFACE_KINDS)!r}"
+                            ),
+                        )
+                    ]
+                )
             self.observe(
                 "surface", sid, "surface_kind", item.get("surface_kind"), f"{base}.surface_kind"
             )
             self.observe("surface", sid, "owner", item.get("owner"), f"{base}.owner")
-            self.mark(
-                f"{base}.surface_kind",
-                node=SemanticNodeKind.SURFACE,
-                identity="surface classification; graph-v1 payload deferred",
-            )
             owner: str | None = None
             if kind == "module":
                 owner = self.node(
@@ -662,6 +691,16 @@ class _Builder:
                     sid,
                     path=f"{base}.surface_kind",
                     group=f"{root}.surface_workflows",
+                )
+            elif kind not in _GRAPH_V1_SURFACE_KINDS:
+                self.gap(
+                    ProjectionGapKind.UNSUPPORTED,
+                    f"{base}.surface_kind",
+                    (
+                        f"surface_kind {kind!r} is current application semantics but "
+                        "SemanticGraph v1 cannot retain that realization classification"
+                    ),
+                    adr_slice=5,
                 )
             if owner:
                 self.edge(
@@ -924,16 +963,32 @@ class _Builder:
         )
 
     def project_route_manifest(self, manifest: dict[str, Any], root: str) -> None:
-        entries = manifest.get("pages", manifest.get("route_manifest", []))
+        present_keys = [key for key in ("pages", "route_manifest") if key in manifest]
+        if len(present_keys) > 1:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.CONTRADICTORY,
+                        source_path=root,
+                        reason=(
+                            "route manifest contains both runtime 'pages' and AppSchema "
+                            "'route_manifest' entry collections"
+                        ),
+                    )
+                ]
+            )
+        entries_key = present_keys[0] if present_keys else "pages"
+        entries = manifest.get(entries_key, [])
         for i, raw in enumerate(_as_list(entries)):
             item = _mapping(raw)
+            base = f"{root}.{entries_key}[{i}]"
             identity = item.get("id") or item.get("path")
             if not identity:
                 raise ProjectionError(
                     [
                         ProjectionGap(
                             kind=ProjectionGapKind.MISSING,
-                            source_path=f"{root}.pages[{i}]",
+                            source_path=base,
                             reason="route identity is required",
                         )
                     ]
@@ -942,8 +997,8 @@ class _Builder:
             page = self.node(
                 SemanticNodeKind.PAGE,
                 identity,
-                path=f"{root}.pages[{i}].{key}",
-                group=f"{root}.pages",
+                path=f"{base}.{key}",
+                group=f"{root}.{entries_key}",
             )
             auth = _mapping(_mapping(item.get("meta")).get("routeAuth"))
             if auth:
@@ -951,7 +1006,7 @@ class _Builder:
                     page,
                     auth.get("module"),
                     auth.get("action"),
-                    f"{root}.pages[{i}].meta.routeAuth",
+                    f"{base}.meta.routeAuth",
                 )
 
     def project_data_contract(self, contract: dict[str, Any], root: str) -> None:

@@ -785,6 +785,35 @@ def test_projection_field_access_is_pinned_to_current_structured_outputs() -> No
     assert "triggers" in agent["OrchestrationConfigOutput"]["fields"]
 
 
+def test_appschema_custom_route_identity_uses_current_producer_path() -> None:
+    result = project_semantic_graph(
+        {
+            "app_schema": {
+                "custom_route_bundle": {
+                    "route_manifest": [
+                        {
+                            "id": "checkout_success",
+                            "path": "/checkout/success",
+                            "component": "CheckoutSuccessPage",
+                        }
+                    ],
+                    "page_files": [],
+                }
+            }
+        },
+        graph_id="custom-route",
+        version=1,
+        scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
+    )
+    path = "app_schema.custom_route_bundle.route_manifest[0].id"
+    row = next(row for row in result.coverage if row.source_path == path)
+    assert row.disposition is ProjectionDisposition.PROJECTED
+    assert row.target_node_kind is SemanticNodeKind.PAGE
+    assert row.fully_representable is True
+    assert not any(gap.source_path == path for gap in result.gaps)
+
+
 def test_committed_design_docs_subscription_build_context_and_route_sources() -> None:
     from tests.test_design_docs_bundle_persistence import _bundle
     from tests.test_subscription_contract_designer import _sample_contract
@@ -939,6 +968,70 @@ def test_semantic_descriptions_pricing_and_data_shapes_are_typed_gaps() -> None:
         if row.disposition is ProjectionDisposition.DEFERRED
     }
     assert gap_paths == deferred
+
+
+@pytest.mark.parametrize(
+    "surface_kind",
+    ["app_policy", "refinement", "external_integration", "ui_only"],
+)
+def test_non_graph_v1_surface_kinds_are_precise_typed_gaps(surface_kind: str) -> None:
+    result = project_semantic_graph(
+        {
+            "app_build_plan": {
+                "surface_map": {
+                    "surfaces": [
+                        {
+                            "surface_id": "special_surface",
+                            "surface_kind": surface_kind,
+                            "owner": "app",
+                        }
+                    ]
+                }
+            }
+        },
+        graph_id=f"surface-{surface_kind}",
+        version=1,
+        scope=SCOPE,
+        taxonomy_registry=_pinned_registry(),
+    )
+    path = "app_build_plan.surface_map.surfaces[0].surface_kind"
+    gap = next(gap for gap in result.gaps if gap.source_path == path)
+    row = next(row for row in result.coverage if row.source_path == path)
+    assert gap.kind is ProjectionGapKind.UNSUPPORTED
+    assert surface_kind in gap.reason
+    assert "cannot retain" in gap.reason
+    assert row.disposition is ProjectionDisposition.DEFERRED
+    assert row.fully_representable is False
+    assert not any(
+        node.kind in {SemanticNodeKind.MODULE, SemanticNodeKind.WORKFLOW}
+        for node in result.graph.nodes
+    )
+
+
+@pytest.mark.parametrize(
+    ("surface", "expected_kind"),
+    [
+        ({"surface_id": "missing"}, ProjectionGapKind.MISSING),
+        (
+            {"surface_id": "invented", "surface_kind": "invented_kind"},
+            ProjectionGapKind.UNSUPPORTED,
+        ),
+    ],
+)
+def test_missing_or_unknown_surface_kind_fails_closed(
+    surface: dict[str, str], expected_kind: ProjectionGapKind
+) -> None:
+    with pytest.raises(ProjectionError) as exc_info:
+        project_semantic_graph(
+            {"app_build_plan": {"surface_map": {"surfaces": [surface]}}},
+            graph_id="invalid-surface-kind",
+            version=1,
+            scope=SCOPE,
+            taxonomy_registry=_pinned_registry(),
+        )
+    gap = exc_info.value.gaps[0]
+    assert gap.kind is expected_kind
+    assert gap.source_path.endswith("surface_kind")
 
 
 _COLD_PURITY_PROBE = r'''

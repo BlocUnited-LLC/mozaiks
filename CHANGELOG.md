@@ -42,7 +42,10 @@ This project follows a practical pre-1.0 changelog format:
   they declare no graph-v1 identity and cannot by themselves produce a graph.
   Page bindings outside `/api/modules/{module}/{action}` are retained as typed
   gaps rather than invented action targets, so any valid AppPageSchema api path
-  projects. Projection requires an explicitly pinned Slice 1
+  projects. Surface realization kinds that graph v1 cannot retain are likewise
+  precise typed gaps rather than falsely reported as represented, and custom
+  route identities retain their current AppSchema producer paths. Projection
+  requires an explicitly pinned Slice 1
   `TaxonomyRegistry`, which keeps the call free of runtime, workflow, and
   workflow-catalog side effects. Production generators, hosts, loaders, Studio,
   workflows, control-plane code, capability advertisement, and runtime
