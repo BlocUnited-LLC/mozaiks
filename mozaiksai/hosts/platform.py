@@ -65,6 +65,11 @@ from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
     ReactionIdempotencyStore,
 )
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_KEY,
+    MongoWorkflowTriggerRateLimiter,
+    WorkflowTriggerGuard,
+)
 from mozaiksai.core.runtime.persistence import (
     DatabaseStartupPolicyError,
     apply_data_migrations,
@@ -346,6 +351,14 @@ async def _platform_startup() -> None:
             workflow_capability_routes = _load_workflow_capability_routes(app_root)
             app.state.workflow_capability_routes = workflow_capability_routes
 
+            mongo_uri = str(os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or "").strip()
+            _reaction_idempotency_store = ReactionIdempotencyStore() if mongo_uri else None
+            workflow_trigger_guard = WorkflowTriggerGuard(
+                claim_store=_reaction_idempotency_store,
+                rate_limiter=(MongoWorkflowTriggerRateLimiter(mongo_uri) if mongo_uri else None),
+            )
+            app.state.workflow_trigger_guard = workflow_trigger_guard
+
             async def invoke_capability(
                 capability_id: str,
                 source_event: dict[str, Any],
@@ -357,11 +370,9 @@ async def _platform_startup() -> None:
                     subscription=subscription,
                     routes=workflow_capability_routes,
                     event_emitter=dispatcher.emit,
+                    trigger_guard=workflow_trigger_guard,
                 )
 
-            _reaction_idempotency_store: ReactionIdempotencyStore | None = None
-            if os.getenv("MONGO_URI") or os.getenv("MONGODB_URI"):
-                _reaction_idempotency_store = ReactionIdempotencyStore()
             module_event_router = ModuleEventRouter(
                 load_result.modules,
                 event_emitter=dispatcher.emit,
@@ -2932,6 +2943,7 @@ async def _invoke_workflow_capability(
     routes: dict[str, list[dict[str, Any]]],
     event_emitter: Callable[[str, dict[str, Any]], Any] | None = None,
     create_session: Callable[..., Any] | None = None,
+    trigger_guard: WorkflowTriggerGuard | None = None,
     auto_start: bool = True,
 )-> dict[str, Any]:
     route = _select_workflow_capability_route(
@@ -2955,13 +2967,90 @@ async def _invoke_workflow_capability(
     tenant = source_event.get("tenant") if isinstance(source_event.get("tenant"), dict) else {}
     actor = source_event.get("actor") if isinstance(source_event.get("actor"), dict) else {}
     app_id = str(tenant.get("app_id") or source_event.get("app_id") or "default")
+    tenant_id = str(tenant.get("tenant_id") or source_event.get("tenant_id") or "").strip() or None
+    workspace_id = (
+        str(tenant.get("workspace_id") or source_event.get("workspace_id") or "").strip() or None
+    )
     user_id = str(actor.get("id") or source_event.get("user_id") or "system")
+    if trigger_guard is None:
+        trigger_guard = WorkflowTriggerGuard(
+            claim_store=None,
+            rate_limiter=None,
+        )
+    decision = await trigger_guard.authorize(
+        capability_id=capability_id,
+        source_event=source_event,
+        app_id=app_id,
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
+    )
+    if not decision.allowed:
+        result = {
+            "status": {
+                "replay": "replay_suppressed",
+                "rate": "rate_limited",
+                "rate_authority": "failed_closed",
+                "persistence": "failed_closed",
+            }.get(decision.reason, "rejected"),
+            "reason": decision.reason,
+            "detail": decision.detail,
+            "capability_id": capability_id,
+            "workflow_id": workflow_id,
+            "event_type": source_event.get("type"),
+            "source_event_id": source_event.get("id") or source_event.get("event_id"),
+            "invocation_id": decision.invocation_id,
+            "trigger_depth": decision.depth,
+            "app_id": app_id,
+            "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
+        }
+        logger.warning(
+            "WORKFLOW_CAPABILITY_TRIGGER_REJECTED: reason=%s invocation=%s "
+            "capability=%s event=%s app=%s tenant=%s",
+            decision.reason,
+            decision.invocation_id,
+            capability_id,
+            source_event.get("type"),
+            app_id,
+            tenant_id,
+        )
+        if event_emitter is not None:
+            diagnostic = {
+                "id": f"evt_{uuid4().hex}",
+                "type": "platform.workflow_capability_trigger_rejected",
+                "version": 1,
+                "occurred_at": datetime.now(UTC).isoformat(),
+                "source": {
+                    "layer": "platform",
+                    "capability_id": capability_id,
+                    "workflow_id": workflow_id,
+                },
+                "tenant": tenant,
+                "correlation": (
+                    source_event.get("correlation")
+                    if isinstance(source_event.get("correlation"), dict)
+                    else {}
+                ),
+                "payload": result,
+                "visibility": "internal",
+            }
+            if isinstance(decision.trace, dict):
+                diagnostic[WORKFLOW_TRIGGER_TRACE_KEY] = dict(decision.trace)
+            await _maybe_await(
+                event_emitter(
+                    "platform.workflow_capability_trigger_rejected",
+                    diagnostic,
+                )
+            )
+        return result
+
     context_seed = _build_workflow_trigger_context(
         capability_id=capability_id,
         source_event=source_event,
         trigger=route.get("trigger") if isinstance(route.get("trigger"), dict) else {},
     )
     context_variables = validate_context_for_workflow(workflow_id, context_seed)
+    context_variables[WORKFLOW_TRIGGER_TRACE_KEY] = decision.trace
     trigger_meta = {
         "trigger_source": "module_event",
         "event_type": source_event.get("type"),
@@ -2970,6 +3059,8 @@ async def _invoke_workflow_capability(
         "workflow_id": workflow_id,
         "subscription_id": subscription.get("id"),
         "module_id": subscription.get("module_id"),
+        "invocation_id": decision.invocation_id,
+        "trigger_depth": decision.depth,
     }
     session_creator = create_session or create_routed_chat_session
     chat_id = await _maybe_await(
@@ -2998,6 +3089,8 @@ async def _invoke_workflow_capability(
         "chat_id": str(chat_id),
         "app_id": app_id,
         "user_id": user_id,
+        "invocation_id": decision.invocation_id,
+        "trigger_depth": decision.depth,
         "started": started,
         "websocket_url": f"/ws/{workflow_id}/{app_id}/{chat_id}/{user_id}",
     }
@@ -3013,6 +3106,7 @@ async def _invoke_workflow_capability(
             "correlation": source_event.get("correlation") if isinstance(source_event.get("correlation"), dict) else {},
             "payload": {**result, "source_event_id": source_event.get("id")},
             "visibility": "internal",
+            WORKFLOW_TRIGGER_TRACE_KEY: dict(decision.trace or {}),
         }
         await _maybe_await(event_emitter("platform.workflow_capability_started", event))
     return result

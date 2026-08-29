@@ -6,8 +6,10 @@ These types explain where an event reaction came from. They are evidence for
 application/operator policy, not production authority.
 """
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -189,6 +191,31 @@ def normalize_module_event_provenance(
         envelope_shape=envelope_shape,
         trust_shape=trust_shape,
     )
+
+
+def module_event_identity(
+    event_type: str,
+    envelope: dict[str, Any],
+    provenance: ModuleEventProvenance | None = None,
+) -> str:
+    """Return the canonical identity used by module-event admission ledgers."""
+
+    normalized = provenance or normalize_module_event_provenance(event_type, envelope)
+    if normalized.event_id:
+        return normalized.event_id
+    return sha256(
+        json.dumps(
+            {
+                "event_type": event_type,
+                "tenant_id": normalized.tenant_id,
+                "app_id": normalized.app_id,
+                "actor_id": normalized.actor_id,
+                "payload": envelope.get("payload", envelope),
+            },
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def normalize_module_reaction_provenance(reaction: dict[str, Any]) -> ModuleReactionProvenance:

@@ -139,7 +139,7 @@ class HttpAppBackendAdapter:
         try:
             from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
             dispatcher = get_event_dispatcher()
-            await dispatcher.dispatch(event_type, data)  # type: ignore[arg-type,call-arg]
+            await dispatcher.emit(event_type, data)
             logger.debug("Emitted event '%s'", event_type)
             return True
         except Exception as exc:

@@ -97,13 +97,20 @@ def test_http_app_backend_adapter_satisfies_protocol() -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_app_backend_emit_returns_bool_without_raising() -> None:
-    """emit() must never raise — it falls back to False when no dispatcher."""
+async def test_http_app_backend_emit_reaches_registered_event_listeners(monkeypatch) -> None:
     from mozaiksai.core.adapters.http_app_backend import HttpAppBackendAdapter
+    from mozaiksai.core.events import unified_event_dispatcher
+    from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
 
+    dispatcher = UnifiedEventDispatcher(taxonomy_advisory=True)
+    emitted = []
+    event_type = "platform.workflow_capability_started"
+    dispatcher.register_handler(event_type, emitted.append)
+    monkeypatch.setattr(unified_event_dispatcher, "get_event_dispatcher", lambda: dispatcher)
     adapter = HttpAppBackendAdapter(base_url="http://localhost:9999")
-    result = await adapter.emit("test.event", {"key": "value"})
-    assert isinstance(result, bool)
+    result = await adapter.emit(event_type, {"key": "value"})
+    assert result is True
+    assert emitted == [{"key": "value"}]
 
 
 def test_backend_response_defaults() -> None:

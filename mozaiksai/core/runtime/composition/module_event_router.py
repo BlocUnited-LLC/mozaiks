@@ -13,13 +13,11 @@ This keeps module event meaning above the runtime kernel.
 
 import importlib
 import inspect
-import json
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
-from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
@@ -30,6 +28,7 @@ from mozaiksai.core.runtime.composition.module_event_provenance import (
     ModuleReactionAudit,
     ModuleReactionProvenance,
     build_module_reaction_audit,
+    module_event_identity,
     normalize_module_event_provenance,
     normalize_module_reaction_provenance,
 )
@@ -551,21 +550,11 @@ class ModuleEventRouter:
             return None
         reaction_id = str(reaction.get("id") or "").strip()
         module_id = str(reaction.get("module_id") or "").strip()
-        event_identity = str(event_provenance.event_id or "").strip()
-        if not event_identity:
-            event_identity = sha256(
-                json.dumps(
-                    {
-                        "event_type": event_type,
-                        "tenant_id": event_provenance.tenant_id,
-                        "app_id": event_provenance.app_id,
-                        "actor_id": event_provenance.actor_id,
-                        "payload": envelope.get("payload", envelope),
-                    },
-                    sort_keys=True,
-                    default=str,
-                ).encode("utf-8")
-            ).hexdigest()
+        event_identity = module_event_identity(
+            event_type,
+            envelope,
+            event_provenance,
+        )
         return (module_id, reaction_id, event_type, declared, event_identity)
 
     async def _durable_complete(
