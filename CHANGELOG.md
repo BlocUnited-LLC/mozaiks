@@ -167,6 +167,12 @@ This project follows a practical pre-1.0 changelog format:
   `detail` envelope, so HTTP 402 responses reach the app's upgrade flow while
   flat object responses remain compatible. Declarative page rendering is
   unchanged.
+- **Module-event workflow triggers now fail closed instead of amplifying**:
+  each event/capability invocation is durably claimed before session creation,
+  concurrent replay is suppressed, workflow-trigger lineage carries bounded
+  depth and cycle ancestry, and Mongo-backed per-tenant admission limits reject
+  runaway unique events without affecting other tenants. Replay, cycle/depth,
+  rate, and persistence rejections emit distinct platform diagnostics.
 - **ADR 0007 Slice 0 closes proven generator and refinement defects**:
   generated app/workflow writers now use the canonical build-scoped staging
   roots, required artifact and DesignDocs persistence fails closed, lineage

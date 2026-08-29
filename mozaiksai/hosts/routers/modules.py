@@ -6,6 +6,7 @@ Routes:
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, cast
@@ -24,6 +25,10 @@ from mozaiksai.core.runtime.composition.module_authority import (
 )
 from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_HEADER,
+    WORKFLOW_TRIGGER_TRACE_KEY,
+)
 
 router = APIRouter(tags=["modules"])
 logger = logging.getLogger(__name__)
@@ -50,6 +55,21 @@ def _extract_bearer_token(request: Request) -> str | None:
     if auth_header.lower().startswith("bearer "):
         return auth_header[7:].strip() or None
     return auth_header.strip() or None
+
+
+def _workflow_trigger_trace(request: Request) -> dict[str, Any] | None:
+    raw = str(request.headers.get(WORKFLOW_TRIGGER_TRACE_HEADER) or "").strip()
+    if not raw:
+        return None
+    if len(raw) > 4096:
+        raise HTTPException(status_code=400, detail="Workflow trigger trace header is too large.")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Workflow trigger trace header is invalid.") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="Workflow trigger trace header is invalid.")
+    return parsed
 
 
 def _module_action_api_surface(request: Request, module_name: str, action_name: str) -> str | None:
@@ -346,6 +366,11 @@ async def _execute_module_action(
         provenance=ModuleDispatchProvenance(
             surface="http_module_dispatch",
             correlation_id=str(correlation_id) if correlation_id else None,
+            metadata=(
+                {WORKFLOW_TRIGGER_TRACE_KEY: trigger_trace}
+                if (trigger_trace := _workflow_trigger_trace(request)) is not None
+                else {}
+            ),
         ),
     )
 

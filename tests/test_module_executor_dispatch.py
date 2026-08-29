@@ -12,11 +12,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mozaiksai.core.ports.entitlement import EntitlementResult
-from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.composition.module_executor import (
     ModuleExecutor,
     ModuleRequest,
     _validate_schema,
+)
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_KEY,
 )
 from tests.module_authority_test_helpers import enforce_authority, trusted_framework_authority
 
@@ -57,6 +63,7 @@ def _request(
     tenant_id: str | None = None,
     workspace_id: str | None = None,
     authority: ModuleDispatchAuthority | None = None,
+    provenance: ModuleDispatchProvenance | None = None,
 ) -> ModuleRequest:
     return ModuleRequest(
         module=module,
@@ -67,6 +74,7 @@ def _request(
         tenant_id=tenant_id,
         workspace_id=workspace_id,
         authority=authority if authority is not None else trusted_framework_authority(),
+        provenance=provenance,
     )
 
 
@@ -472,6 +480,39 @@ class TestEventEmitterEnvelope:
         req = _request(action="do_action", user_id=None)
         await ex.execute(req)
         assert "actor" not in emitted[0]
+
+    @pytest.mark.asyncio
+    async def test_event_emitter_preserves_workflow_trigger_lineage(self):
+        emitted: list[dict] = []
+
+        async def fake_emitter(_event_type: str, envelope: dict) -> None:
+            emitted.append(envelope)
+
+        ex = ModuleExecutor(event_emitter=fake_emitter)
+
+        class _EmittingHandler:
+            async def do_action(self, ctx) -> dict:
+                await ctx.emit("tasks.completed", {"task_id": "task-1"})
+                return {}
+
+        trace = {
+            "root_event_id": "evt-root",
+            "depth": 1,
+            "capability_ids": ["tasks.review"],
+            "invocation_ids": ["wti-parent"],
+        }
+        ex.register("contacts", _EmittingHandler())
+        await ex.execute(
+            _request(
+                action="do_action",
+                provenance=ModuleDispatchProvenance(
+                    surface="http_module_dispatch",
+                    metadata={WORKFLOW_TRIGGER_TRACE_KEY: trace},
+                ),
+            )
+        )
+
+        assert emitted[0][WORKFLOW_TRIGGER_TRACE_KEY] == trace
 
 
 # ---------------------------------------------------------------------------

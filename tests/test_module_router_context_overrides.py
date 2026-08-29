@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from mozaiksai.core.runtime.composition.module_executor import ModuleResult
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_HEADER,
+)
 from mozaiksai.hosts.routers import modules as module_router
 
 
@@ -16,6 +20,20 @@ class _FakeModuleExecutor:
     async def execute(self, request, context=None):
         self.requests.append(request)
         return ModuleResult(success=True, data={"ok": True, "user_id": request.user_id})
+
+
+def test_workflow_trigger_trace_header_decodes_into_runtime_metadata() -> None:
+    trace = {
+        "root_event_id": "evt-root",
+        "depth": 1,
+        "capability_ids": ["tasks.review"],
+        "invocation_ids": ["wti-parent"],
+    }
+    request = SimpleNamespace(
+        headers={WORKFLOW_TRIGGER_TRACE_HEADER: json.dumps(trace)},
+    )
+
+    assert module_router._workflow_trigger_trace(request) == trace
 
 
 @pytest.mark.asyncio

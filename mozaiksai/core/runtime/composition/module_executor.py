@@ -55,6 +55,9 @@ from mozaiksai.core.runtime.composition.schema_validation import (
     normalize_nullable_schema,
     validate_json_schema,
 )
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_KEY,
+)
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
@@ -750,6 +753,13 @@ class ModuleExecutor:
             }
             if request.user_id:
                 envelope["actor"] = {"type": "user", "id": request.user_id}
+            trigger_trace = (
+                request.provenance.metadata.get(WORKFLOW_TRIGGER_TRACE_KEY)
+                if request.provenance is not None
+                else None
+            )
+            if isinstance(trigger_trace, dict):
+                envelope[WORKFLOW_TRIGGER_TRACE_KEY] = dict(trigger_trace)
 
             result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
             if inspect.isawaitable(result):
