@@ -867,20 +867,23 @@ cannot interpret or rewrite them — exactly as ADR 0006 states from its side.
 ADR 0006 blocks production `JourneyExecutionPort.start`, production capability
 advertisement, and any public live-model journey entrypoint until the
 semantic-compiler ADR is accepted **and** the typed references it names exist.
-That prerequisite is satisfied only when all hold:
+That prerequisite remains blocked until all hold:
 
 1. this ADR is Accepted; and
-2. rollout slices 1 and 2 below are implemented and proven — the taxonomy
-   registry plus the typed reference contracts
+2. rollout slices 1, 2, and 2E below are implemented and proven — the taxonomy
+   registry plus the complete typed reference contracts
    (`ApplicationManifestRef`, `SemanticGraphRef`, `TaxonomyNamespaceRef`,
    `ImplementationBindingRef`, `CompilationPlanRef`,
    `BuildContextBindingRef`, `RefinementPatchRef`, `ArtifactRevisionRef`, and
-   the typed child-contract references — ADR 0006's named roster plus
+   the typed semantic-payload and child-contract references — ADR 0006's named
+   roster plus
    `ImplementationBindingRef`, which this ADR adds under ADR 0006's delegation
    of reference-level decisions to the compiler ADR) with
    canonical serialization, stable digests, closure validation, versioning,
    and passing contract tests; and
-3. only after both slices pass, the compiler/runtime advertises the exact
+3. Slice 5's atomic authority-cutover proof has made those taxonomy and
+   reference contracts production-complete. Only then does the compiler/runtime
+   advertise together the exact
    versioned prerequisite capabilities `semantic_taxonomy_v1` and
    `semantic_reference_contracts_v1` — capability ids introduced by this ADR —
    and every bounded journey pins both through ADR 0006's derived
