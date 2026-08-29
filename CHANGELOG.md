@@ -162,6 +162,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Generated custom-route clients now recognize real entitlement denials**:
+  module-action and workflow-start failures unwrap FastAPI's structured
+  `detail` envelope, so HTTP 402 responses reach the app's upgrade flow while
+  flat object responses remain compatible. Declarative page rendering is
+  unchanged.
 - **ADR 0007 Slice 0 closes proven generator and refinement defects**:
   generated app/workflow writers now use the canonical build-scoped staging
   roots, required artifact and DesignDocs persistence fails closed, lineage

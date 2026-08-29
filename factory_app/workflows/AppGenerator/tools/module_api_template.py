@@ -108,6 +108,13 @@ export function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+function parseErrorPayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const detail = body.detail
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) return detail
+  return body
+}
+
 function tokenRecoveryMetadata(err) {
   const data = err?.data || {}
   return data.extra_data || data.metadata || data
@@ -134,10 +141,15 @@ export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
 }
 
 export function isEntitlementRequiredError(err) {
+  // HTTP 402 is the canonical signal — the backend maps ENTITLEMENT_REQUIRED to
+  // it in one place. Checking status as well as error_code means a denial is
+  // still recognised if the body is unreadable or reshaped in transit.
   return (
+    err?.status === 402 ||
     err?.error_code === 'ENTITLEMENT_REQUIRED' ||
     err?.code === 'ENTITLEMENT_REQUIRED' ||
-    err?.data?.error_code === 'ENTITLEMENT_REQUIRED'
+    err?.data?.error_code === 'ENTITLEMENT_REQUIRED' ||
+    err?.data?.detail?.error_code === 'ENTITLEMENT_REQUIRED'
   )
 }
 
@@ -167,17 +179,21 @@ export async function moduleAction(moduleName, actionName, input = {}) {
     // backend error fields such as error_code, code, and action-specific data.
     let body = null
     try { body = await response.json() } catch { /* non-JSON body — ignore */ }
+    // FastAPI serializes HTTPException(detail={...}) as {"detail": {...}}, so
+    // the structured fields live one level down. Fall back to the raw body for
+    // responses that are already flat (proxies, non-FastAPI intermediaries).
+    const payload = parseErrorPayload(body)
     const err = new Error(
-      body?.error || body?.message ||
+      payload?.error || payload?.message ||
       `Module action failed: ${moduleName}.${actionName} ${response.status}`
     )
     // Attach structured fields so catch blocks can branch on backend states.
-    if (body?.error_code) err.error_code = body.error_code
-    if (body?.code)       err.code       = body.code
+    if (payload?.error_code) err.error_code = payload.error_code
+    if (payload?.code)       err.code       = payload.code
     err.status = response.status
-    // Preserve the full body for callers that need additional context fields.
-    // Do not attach secrets or provider credentials here.
-    if (body != null) err.data = body
+    // Preserve the unwrapped payload for callers that need additional context
+    // fields. Do not attach secrets or provider credentials here.
+    if (payload != null) err.data = payload
     throw err
   }
 
@@ -199,13 +215,16 @@ export async function startWorkflow(workflowName, contextVariables = {}) {
   if (!response.ok) {
     let body = null
     try { body = await response.json() } catch { /* non-JSON */ }
+    // Use the same strict envelope parser as moduleAction so workflow and
+    // module errors cannot drift or accept arrays/primitive JSON as payloads.
+    const payload = parseErrorPayload(body)
     const err = new Error(
-      body?.error || body?.message ||
+      payload?.error || payload?.message ||
       `Failed to start ${workflowName}: ${response.status}`
     )
-    if (body?.error_code) err.error_code = body.error_code
+    if (payload?.error_code) err.error_code = payload.error_code
     err.status = response.status
-    if (body != null) err.data = body
+    if (payload != null) err.data = payload
     throw err
   }
   return response.json()
