@@ -12,6 +12,30 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **Portable path, registry v2, and deterministic archive substrate (ADR 0007
+  Slice 4A)**: compiler-owned outputs now share one host-independent
+  `mozaiks.portable_path.v1` profile (POSIX separators, NFC normalization,
+  Windows-compatible restrictions on every host, case-folded duplicate and
+  file/directory-prefix collision detection, fail-closed rejection of
+  absolute/drive/UNC/traversal/glob/reserved/control-character/trailing-dot
+  paths). ZIP becomes a deterministic transport envelope — STORED entries in
+  canonical byte order with pinned timestamps and permissions, byte-identical
+  across hosts and processes, verified fail-closed against every non-canonical
+  metadata field (compression method, create_system, permissions and type
+  bits, extra fields, comments, name-encoding flags, timestamps) plus
+  link/directory/out-of-order/non-portable entries, with a closing check that
+  the bytes equal the canonical serialization of their own entries — and is
+  never a semantic authority. The
+  application layout registry evolves in place to `mozaiks.app_layout.v2`:
+  artifact families gain bounded stub-kind and dependency-family declarations,
+  the registry self-digest covers them, dependency closure is validated
+  acyclic, and `ordered_families()` provides a deterministic
+  dependency-respecting total order. No semantic or planning authority
+  changes: generators, `AppBuildPlan`, workflow execution, persistence, and
+  promotion remain exactly as before, and no capability is advertised.
+
 ### Changed
 
 - **Importing `mozaiksai.hosts.studio` no longer mutates the process

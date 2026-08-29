@@ -700,6 +700,10 @@ async def test_ai_research_workspace_offline_golden_path(
         return {"action": "download", "status": "confirmed"}
 
     monkeypatch.chdir(tmp_path)
+    # The download tool anchors its default artifacts root at the repository
+    # root, not the cwd, so an explicit override is required to keep this
+    # test's bundle output inside tmp_path instead of the checkout.
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
     monkeypatch.setattr(download_module, "AG2PersistenceManager", lambda: _Persistence())
     monkeypatch.setattr(download_module, "get_latest_workflow_export", no_op)
     monkeypatch.setattr(download_module, "_register_app_bundle_artifact_version", no_op)

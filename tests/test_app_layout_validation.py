@@ -1,4 +1,4 @@
-"""Tests for generated-file layout validation through mozaiks.app_layout.v1."""
+"""Tests for generated-file layout validation through mozaiks.app_layout.v2."""
 
 from __future__ import annotations
 
