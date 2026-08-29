@@ -42,11 +42,18 @@ def _run_serve_with_captured_log_level(tmp_path, monkeypatch, log_level_env: str
     else:
         monkeypatch.setenv("LOG_LEVEL", log_level_env)
 
-    # serve.run() sets PLATFORM_PATH and MOZAIKS_APP_WORKSPACE_PATH as side effects.
-    # Register them with monkeypatch so teardown restores the originals and prevents
-    # test-order-dependent failures in workspace-dependent tests downstream.
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    # serve.run() writes PLATFORM_PATH, MOZAIKS_APP_WORKSPACE_PATH, and (via
+    # setdefault) MOZAIKS_HOST into os.environ as side effects. A bare
+    # ``monkeypatch.delenv(name, raising=False)`` records NO restore entry when
+    # the key is already absent, so the values serve.run() writes afterwards
+    # survived teardown — leaking this test's tmp workspace into every later
+    # test in the process (a later Studio smoke test 500'd because
+    # MOZAIKS_APP_WORKSPACE_PATH still named this test's minimal bundle).
+    # Setting each key first forces monkeypatch to record a restore entry;
+    # undo then replays back to the original value or original absence.
+    for name in ("PLATFORM_PATH", "MOZAIKS_APP_WORKSPACE_PATH", "MOZAIKS_HOST"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
 
     captured: dict = {}
 
