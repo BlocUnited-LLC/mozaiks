@@ -99,7 +99,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - getting-started.md
-      - Genesis Builds & Refinement Runs: getting-started/genesis-builds-and-refinement-runs.md
+      - Genesis Builds & Revision Runs: getting-started/genesis-builds-and-revision-runs.md
   - Key Concepts: concepts.md
 
   - Guides:

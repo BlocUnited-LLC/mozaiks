@@ -541,7 +541,7 @@ generated files directly. The target state is for those checks to be graph
 queries against the post-build `AppContextGraph`, making them:
 
 - domain-agnostic (any domain's generated files can be indexed and checked)
-- reusable across initial build and refinement runs
+- reusable across Genesis Builds and Revision Runs
 - available to Studio's inspection UX as annotated graph nodes
 
 This is tracked as open work below.

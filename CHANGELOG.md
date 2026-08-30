@@ -38,6 +38,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- **App lifecycle terminology now centers Genesis Builds and Revision Runs.**
+  Public docs use Genesis Build for an app's first canonical build journey and
+  Revision Run for every later change in that app lineage, while Refinement
+  Engine remains the internal routing and contract term.
+
 - **Importing `mozaiksai.hosts.studio` no longer mutates the process
   environment.** Repo-local Studio defaults (`PLATFORM_PATH`,
   `MOZAIKS_WORKFLOWS_PATH`) and OpenTelemetry configuration are now applied

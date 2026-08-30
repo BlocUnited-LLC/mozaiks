@@ -1,8 +1,8 @@
-# Genesis Builds and Refinement Runs
+# Genesis Builds and Revision Runs
 
 Every Mozaiks app begins with a **Genesis Build**, which transforms the
 builder's intent into the app's first canonical, validated artifact lineage.
-Every subsequent change happens through a **Refinement Run**, where Mozaiks
+Every subsequent change happens through a **Revision Run**, where Mozaiks
 understands the current app, chooses the smallest safe path for the requested
 change, stages and validates the result, and lets the builder review it before
 it becomes the new app state.
@@ -15,7 +15,7 @@ it to change.
 flowchart LR
     A([Idea]) --> B[Genesis Build]
     B --> C([First App Version])
-    C --> D[Refinement Run]
+    C --> D[Revision Run]
     D --> E([New App Version])
     E -.->|next change| D
 ```
@@ -51,12 +51,12 @@ change is measured against, and the start of your app's revision history.
 If you want to see the individual build workflows behind these stages, they are
 described in [The Build Sequence](../concepts.md#the-build-sequence).
 
-## Refinement Runs
+## Revision Runs
 
 Once your app exists, you never start over. Every change — from fixing a label
-to rethinking the whole product — is a **Refinement Run**.
+to rethinking the whole product — is a **Revision Run**.
 
-A Refinement Run always follows the same shape:
+A Revision Run always follows the same shape:
 
 1. Mozaiks loads what it knows about your app — its current artifacts, design
    intent, and history — rather than guessing from the request alone.
@@ -83,7 +83,7 @@ appropriate part of the Genesis Build — and only that part.
 
 ### Your app is always safe
 
-A Refinement Run never edits your live app in place:
+A Revision Run never edits your live app in place:
 
 - **The existing app is preserved.** The current version keeps running and
   remains untouched while changes are prepared.
@@ -107,7 +107,7 @@ A Refinement Run never edits your live app in place:
   weekly summaries." → Mozaiks plans an inspections capability, an AI workflow
   for the summaries, generates the app, and stages it for promotion.
 
-**Refinement Runs:**
+**Revision Runs:**
 
 - "The dashboard title says 'Ivoices' — fix the typo." → classified as a
   patch; one file is edited, validated, and staged for your approval.
@@ -125,12 +125,16 @@ A Refinement Run never edits your live app in place:
 
 The practical takeaway: treat your app as a living product. Ask for the change
 you actually want, at whatever size it is, and Mozaiks will scale the work to
-match. The Genesis Build happens once; everything after it is refinement of the
-same continuously evolving app.
+match. The Genesis Build happens once; everything after it is a Revision Run
+within the same continuously evolving app lineage.
 
 ## Going deeper
 
 For technical readers who want the machinery behind these concepts:
+
+Revision Run is the product-facing term. The architecture uses `refinement`
+for the internal engine, routing policy, workers, and contracts that execute a
+Revision Run.
 
 - [Refinement](../guides/platform-intelligence/03-refinement.md) — the builder-facing
   guide to change classes and opting an app into refinement
