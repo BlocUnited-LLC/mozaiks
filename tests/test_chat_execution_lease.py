@@ -491,3 +491,77 @@ async def test_bridge_reports_confirmed_lease_loss_as_aborted_run(monkeypatch) -
     assert result["route"] == "chat_lock_lost"
     assert transport.errors == [{"error_code": "CHAT_LOCK_LOST", "chat_id": "chat-1"}]
     assert len(adapter.run_requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# Correction round 2 — consumed-cancellation loss and newly guarded seams
+# ---------------------------------------------------------------------------
+
+class _FakeAuthorityCollection:
+    """Acquisition succeeds by clean insert; every renewal finds the lease gone."""
+
+    async def find_one_and_update(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return None
+
+    async def insert_one(self, document):  # noqa: ANN001
+        return object()
+
+    async def delete_one(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return object()
+
+
+async def test_consumed_cancellation_after_loss_still_fails_the_real_lease(monkeypatch) -> None:
+    """AG2-style shutdown may consume the loss cancellation; the real context
+    manager must still refuse to report success."""
+    dl.configure_chat_lock(dl.ChatLockMode.REQUIRED)
+    monkeypatch.setattr(dl, "_get_lock_collection", lambda: _FakeAuthorityCollection())
+    monkeypatch.setattr(dl, "_acquisition_indexes_verified", True)
+
+    consumed = False
+    with pytest.raises(dl.ChatLeaseLostError):
+        async with dl.chat_execution_lease(app_id="app-1", chat_id="chat-consumed") as lease:
+            try:
+                await lease._renew_once()  # confirmed loss cancels this owner task
+                await asyncio.sleep(30)
+                pytest.fail("execution continued after confirmed lease loss")
+            except asyncio.CancelledError:
+                consumed = True  # the protected op swallowed its cancellation
+    assert consumed
+    assert dl._process_leases == {}
+
+
+async def test_confirmed_loss_guards_session_creation_and_cache_seed(monkeypatch) -> None:
+    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+
+    _register_lease(dl.chat_lock_resource("app-1", "chat-1"), lost=True)
+    manager = AG2PersistenceManager()
+
+    async def _unexpected_collection_access():
+        pytest.fail("guard must reject before reaching Mongo")
+
+    monkeypatch.setattr(manager, "_coll", _unexpected_collection_access)
+    with pytest.raises(dl.ChatLeaseLostError):
+        await manager.create_chat_session(
+            chat_id="chat-1", app_id="app-1", workflow_name="wf", user_id="user"
+        )
+    with pytest.raises(dl.ChatLeaseLostError):
+        await manager.get_or_assign_cache_seed(chat_id="chat-1", app_id="app-1")
+
+
+async def test_confirmed_loss_guards_injected_context_before_resume() -> None:
+    from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
+    from mozaiksai.core.ports.orchestration import ResumeRequest
+
+    _register_lease(dl.chat_lock_resource("app-1", "chat-1"), lost=True)
+    adapter = AG2OrchestrationAdapter.__new__(AG2OrchestrationAdapter)
+    request = ResumeRequest(
+        workflow_name="wf",
+        app_id="app-1",
+        chat_id="chat-1",
+        user_id="user",
+        injected_context={"key": "value"},
+    )
+    # The guard sits before the persistence import/warning path: loss must
+    # abort the resume, never degrade into the logged-warning branch.
+    with pytest.raises(dl.ChatLeaseLostError):
+        await adapter._inject_context_before_resume(request)

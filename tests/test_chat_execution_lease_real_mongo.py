@@ -432,3 +432,23 @@ async def test_cancellation_releases_lease() -> None:
         assert await collection.find_one({"resource": resource}) is None
     finally:
         await _cleanup_resource(resource)
+
+
+async def test_real_driver_outage_is_unavailable_not_busy(monkeypatch) -> None:
+    """A real driver error against an unreachable authority must surface as
+    ChatLockAuthorityUnavailableError — never as normal lock contention."""
+    from pymongo import AsyncMongoClient
+
+    dead_client: AsyncMongoClient = AsyncMongoClient(
+        "mongodb://127.0.0.1:1/", serverSelectionTimeoutMS=200, connectTimeoutMS=200
+    )
+    try:
+        collection = dead_client["mozaiksai_outage_probe"]["distributed_locks"]
+        monkeypatch.setattr(dl, "_get_lock_collection", lambda: collection)
+        monkeypatch.setattr(dl, "_acquisition_indexes_verified", True)
+        dl.configure_chat_lock(dl.ChatLockMode.REQUIRED)
+        with pytest.raises(dl.ChatLockAuthorityUnavailableError):
+            async with dl.chat_execution_lease(app_id="app-outage", chat_id="chat-outage"):
+                pytest.fail("acquisition must fail closed when the authority is unreachable")
+    finally:
+        await dead_client.close()

@@ -340,6 +340,7 @@ class AG2PersistenceManager:
         and persisted to the ChatSessions document under "cache_seed" for visibility and reuse.
         """
         resolved_app_id = coalesce_app_id(app_id=app_id)
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         coll = await self._coll()
         # Include app_id in the filter for defense-in-depth tenant isolation.
         _seed_filter: dict = {"_id": chat_id}
@@ -401,6 +402,7 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
             # Scope the duplicate check to this app to maintain tenant isolation.
