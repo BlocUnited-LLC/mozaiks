@@ -47,6 +47,24 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Projection emits graph v2 + typed payloads (ADR 0007 Slice 3E)**: the
+  offline source projection now produces `mozaiks.semantic_projection.v2` —
+  a Merkle-rooted `mozaiks.semantic_graph.v2` with one typed payload per node
+  and bijective payload closure validated at build. Former "not representable
+  by SemanticGraph v1" gap families become projected content: page/section
+  ordering as explicit dense positions, plan/limit/meter/product facts
+  (integer minor-unit prices, ISO-4217 currency), module/action/permission/
+  event descriptions, and endpoint trigger bindings. Content is never
+  invented — payload content fields are required-nullable (`None` when the
+  source carries no such fact, omission is invalid), and absent collections
+  remain distinct from explicitly empty collections while structural rules
+  stay strict. Facts
+  owned by edges or taxonomy are never duplicated into payloads. Navigation
+  ordering, plan catalog ordering, intra-section binding composition, and
+  renderer file lists remain explicit typed gaps. The source/graph fact
+  equivalence proof now covers payload content digests, so projection honesty
+  extends to content, not just identity.
+
 - **Typed semantic payloads + Merkle-rooted graph v2 (ADR 0007 Slice 2E)**:
   every semantic node kind now has exactly one strict payload variant
   (`mozaiks.semantic_payload.v1` — titles/intent text, typed field shapes,

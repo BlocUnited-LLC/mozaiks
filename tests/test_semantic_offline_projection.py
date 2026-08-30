@@ -445,7 +445,11 @@ def test_independent_source_expectations_equal_every_graph_fact() -> None:
             ("renders", "page_reports", "section"),
         }
     }
-    assert set(result.represented_facts.nodes) == expected_nodes
+    identity_facts = {(nid, kind, refs) for nid, kind, refs, _digest in result.represented_facts.nodes}
+    assert identity_facts == expected_nodes
+    payload_digest_by_node = {payload.node_id: payload.payload_digest for payload in result.payloads}
+    for nid, _kind, _refs, digest in result.represented_facts.nodes:
+        assert digest == payload_digest_by_node[nid]
     assert set(result.represented_facts.edges) == expected_edges
 
 
@@ -501,7 +505,7 @@ def test_machine_readable_coverage_classifies_every_source_leaf() -> None:
     for path in coverage_paths:
         _lookup_path(canonical_source, path)
     assert (
-        json.loads(result.model_dump_json())["schema_version"] == "mozaiks.semantic_projection.v1"
+        json.loads(result.model_dump_json())["schema_version"] == "mozaiks.semantic_projection.v2"
     )
 
 
@@ -999,7 +1003,7 @@ def test_non_graph_v1_surface_kinds_are_precise_typed_gaps(surface_kind: str) ->
     row = next(row for row in result.coverage if row.source_path == path)
     assert gap.kind is ProjectionGapKind.UNSUPPORTED
     assert surface_kind in gap.reason
-    assert "cannot retain" in gap.reason
+    assert "no typed payload field retains" in gap.reason
     assert row.disposition is ProjectionDisposition.DEFERRED
     assert row.fully_representable is False
     assert not any(
@@ -1198,7 +1202,7 @@ def test_provenance_roots_are_classified_not_falsely_reported_as_empty() -> None
         gaps = exc_info.value.gaps
         assert all(gap.kind is ProjectionGapKind.UNSUPPORTED for gap in gaps), gaps
         assert all(gap.source_path == root for gap in gaps), gaps
-        assert "no SemanticGraph v1 identity" in gaps[0].reason
+        assert "no semantic-graph identity" in gaps[0].reason
         assert "no representable semantic identity" not in gaps[0].reason
 
     # Alongside real semantic roots they contribute typed gaps, never nodes.
@@ -1314,3 +1318,165 @@ def test_entitlement_gate_requires_declared_capability_input_closure() -> None:
     )
     assert any(node.kind is SemanticNodeKind.CAPABILITY for node in closed.graph.nodes)
     assert any(edge.kind is SemanticEdgeKind.GATES for edge in closed.graph.edges)
+
+
+# ---------------------------------------------------------------------------
+# Slice 3E: typed payload content projection over graph v2
+# ---------------------------------------------------------------------------
+
+
+def _payload_for(result, kind: SemanticNodeKind, identity_fragment: str):
+    matches = [
+        payload
+        for payload in result.payloads
+        if payload.payload_kind is kind and identity_fragment in payload.node_id
+    ]
+    assert len(matches) == 1, (kind, identity_fragment, [p.node_id for p in result.payloads])
+    return matches[0]
+
+
+def test_projection_emits_v2_graph_with_bijective_payload_closure() -> None:
+    from mozaiksai.core.semantics.payloads import validate_semantic_graph_v2_payload_closure
+    from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
+
+    result = _project()
+    assert result.schema_version == "mozaiks.semantic_projection.v2"
+    assert result.graph.schema_version == "mozaiks.semantic_graph.v2"
+    assert {payload.node_id for payload in result.payloads} == {
+        node.node_id for node in result.graph.nodes
+    }
+    validate_semantic_graph_v2_payload_closure(result.graph, result.payloads)
+    resolver = SemanticReferenceResolver()
+    for payload in result.payloads:
+        resolver.register_semantic_payload(payload)
+    resolver.register_semantic_graph_v2(result.graph)
+    for node in result.graph.nodes:
+        resolved = resolver.resolve_semantic_payload(
+            node.payload_ref, requesting_scope=result.graph.scope
+        )
+        assert resolved.payload_digest == node.payload_ref.content_digest
+
+
+def test_section_ordering_is_projected_as_dense_positions() -> None:
+    source = _corpus_source()
+    page = source["app_schema"]["pages"][0]
+    page["sections"] = [
+        {"id": "hero", "primitive": "Hero"},
+        {"id": "report_table", "primitive": "DataTable"},
+        {"id": "footer", "primitive": "Footer"},
+    ]
+    result = _project(source)
+    page_payload = _payload_for(result, SemanticNodeKind.PAGE, "reports")
+    ordered = [entry.section_node_id for entry in page_payload.sections]
+    assert [entry.position for entry in page_payload.sections] == [0, 1, 2]
+    assert [fragment.split(".")[2].rsplit("_", 1)[0] for fragment in ordered] == [
+        "reports_hero",
+        "reports_report_table",
+        "reports_footer",
+    ]
+    # The former "ordered page-section semantics" gap is gone: sections are
+    # projected content now, not a deferred container.
+    assert not any(
+        "page-section" in gap.reason for gap in result.gaps
+    )
+
+    # Reversing the declared section order is a SEMANTIC change: payload and
+    # graph digests must both move (ordering is content, not serialization).
+    reversed_source = _corpus_source()
+    reversed_source["app_schema"]["pages"][0]["sections"] = list(reversed(page["sections"]))
+    reversed_result = _project(reversed_source)
+    reversed_page = _payload_for(reversed_result, SemanticNodeKind.PAGE, "reports")
+    assert reversed_page.payload_digest != page_payload.payload_digest
+    assert reversed_result.graph.graph_digest != result.graph.graph_digest
+
+
+def test_plan_limit_meter_and_product_content_is_projected() -> None:
+    result = _project()
+    plan = _payload_for(result, SemanticNodeKind.PLAN, "pro")
+    assert plan.title == "Pro"
+    limit = _payload_for(result, SemanticNodeKind.LIMIT, "pro_report_exports")
+    assert limit.limit_value == 100
+    assert limit.period is not None and limit.period.value == "monthly"
+    meter = _payload_for(result, SemanticNodeKind.METER, "report_exports")
+    assert meter.unit == "exports"
+    product = _payload_for(result, SemanticNodeKind.PRODUCT, "extra_exports")
+    assert product.title == "Extra exports"
+    assert product.prices is None  # corpus declares no price: absence stays explicit
+
+
+def test_prices_project_as_integer_minor_units_with_iso_currency() -> None:
+    source = _corpus_source()
+    source["subscriptions"]["top_up_products"][0]["price"] = {
+        "amount_cents": 500,
+        "currency": "usd",
+        "display": "$5",
+    }
+    result = _project(source)
+    product = _payload_for(result, SemanticNodeKind.PRODUCT, "extra_exports")
+    assert len(product.prices) == 1
+    spec = product.prices[0]
+    assert spec.amount_minor_units == 500
+    assert spec.currency == "USD"
+    assert spec.period.value == "one_time"
+
+
+def test_descriptions_are_projected_but_never_invented() -> None:
+    result = _project()
+    permission = _payload_for(result, SemanticNodeKind.PERMISSION, "reports_reports_read")
+    assert permission.description == "Read reports"
+    module = _payload_for(result, SemanticNodeKind.MODULE, "reports")
+    assert module.description is None  # corpus module declares none
+
+
+def test_residual_gaps_are_typed_and_never_claim_v1_limits() -> None:
+    result = _project()
+    reasons = [gap.reason for gap in result.gaps]
+    assert any("navigation ordering has no typed semantic payload field" in r for r in reasons)
+    assert any(
+        "beyond graph identity, trigger relationships, and typed workflow payload content" in r
+        for r in reasons
+    )
+    for text in reasons + [row.reason for row in result.coverage] + [
+        row.stable_identity_derivation for row in result.coverage
+    ]:
+        assert "SemanticGraph v1" not in text and "graph v1" not in text, text
+
+
+def test_payload_byte_change_reroots_the_projected_graph() -> None:
+    baseline = _project()
+    changed_source = _corpus_source()
+    changed_source["modules"][0]["manifest"]["permissions"][0]["description"] = "Read all reports"
+    changed = _project(changed_source)
+    base_perm = _payload_for(baseline, SemanticNodeKind.PERMISSION, "reports_reports_read")
+    changed_perm = _payload_for(changed, SemanticNodeKind.PERMISSION, "reports_reports_read")
+    assert base_perm.payload_digest != changed_perm.payload_digest
+    assert baseline.graph.graph_digest != changed.graph.graph_digest
+    # Untouched nodes keep identical payload digests: the re-root is exactly
+    # the Merkle chain, not a wholesale rebuild difference.
+    base_plan = _payload_for(baseline, SemanticNodeKind.PLAN, "pro")
+    changed_plan = _payload_for(changed, SemanticNodeKind.PLAN, "pro")
+    assert base_plan.payload_digest == changed_plan.payload_digest
+
+
+def test_endpoint_trigger_binding_is_payload_content() -> None:
+    source = _corpus_source()
+    content = source["agent_workflows"][0]["files"][0]["content"]
+    source["agent_workflows"][0]["files"][0]["content"] = content + (
+        "  - type: endpoint\n"
+        "    endpoint: /api/hooks/report\n"
+    )
+    result = _project(source)
+    trigger = _payload_for(result, SemanticNodeKind.TRIGGER, "api_hooks_report")
+    assert trigger.trigger_kind is not None and trigger.trigger_kind.value == "endpoint"
+    assert trigger.endpoint_path == "/api/hooks/report"
+    # Event triggers keep their binding in CONSUMES edges only — the payload
+    # never duplicates an edge-owned fact.
+    event_trigger = _payload_for(result, SemanticNodeKind.TRIGGER, "domain_reports_generated")
+    assert event_trigger.trigger_kind is None and event_trigger.event_id is None
+
+
+def test_conflicting_payload_content_fails_closed() -> None:
+    source = _corpus_source()
+    source["subscription_contract"]["subscription_config_file"]["plans"][0]["label"] = "Premium"
+    with pytest.raises(ProjectionError, match="conflicting payload content"):
+        _project(source)

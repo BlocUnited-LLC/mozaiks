@@ -94,6 +94,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         Path("mozaiksai/core/semantics/graph.py"),
         Path("mozaiksai/core/semantics/refs.py"),
         Path("mozaiksai/core/semantics/resolver.py"),
+        # Slice 3E: the offline projection emits graph v2 + typed payloads.
+        # It stays outside production imports itself (proven by the Slice 3
+        # hygiene test scanning for offline_projection references).
+        Path("mozaiksai/core/semantics/offline_projection.py"),
     }
 )
 _FORBIDDEN_PRODUCTION_MODULES = frozenset({"mozaiksai.core.semantics.payloads"})
@@ -472,6 +476,66 @@ def test_each_kind_round_trips_through_the_discriminated_union(
     parsed = parse_semantic_payload(json.loads(json.dumps(payload.model_dump(mode="json"))))
     assert type(parsed) is PAYLOAD_MODEL_BY_KIND[kind]
     assert parsed == payload
+
+
+def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
+    required_nullable = {
+        SurfacePayload: ("description",),
+        PagePayload: ("title", "intent"),
+        SectionPayload: ("title", "intent"),
+        ModulePayload: ("description",),
+        ActionPayload: ("description",),
+        CapabilityPayload: ("description",),
+        PermissionPayload: ("description",),
+        EventPayload: ("description",),
+        ReactionPayload: ("description", "consumed_event"),
+        NotificationPayload: ("template_text", "channel"),
+        DataCollectionPayload: ("description", "fields"),
+        DataAliasPayload: ("alias", "collection", "owner_node_id"),
+        WorkflowPayload: ("description", "startup_mode"),
+        TriggerPayload: ("description", "trigger_kind"),
+        PlanPayload: ("title", "prices"),
+        ProductPayload: ("title", "description", "prices"),
+        MeterPayload: ("description", "unit"),
+        LimitPayload: ("description", "limit_value", "period"),
+        DeploymentTargetPayload: ("target_kind", "profile_id"),
+    }
+    for model, field_names in required_nullable.items():
+        for field_name in field_names:
+            field = model.model_fields[field_name]
+            assert field.is_required(), f"{model.__name__}.{field_name} must reject omission"
+
+    common = {
+        "node_id": "mozaiks.product.unpriced_addon",
+        "payload_version": 1,
+        "scope": _SCOPE,
+        "title": "Unpriced add-on",
+        "description": None,
+    }
+    with pytest.raises(ValidationError, match="prices"):
+        build_semantic_payload(ProductPayload, **common)
+
+    absent = build_semantic_payload(ProductPayload, prices=None, **common)
+    empty = build_semantic_payload(ProductPayload, prices=(), **common)
+    assert absent.prices is None
+    assert empty.prices == ()
+    assert absent.payload_digest != empty.payload_digest
+
+    with pytest.raises(ValidationError, match="description"):
+        build_semantic_payload(
+            ModulePayload,
+            node_id="mozaiks.module.incomplete",
+            payload_version=1,
+            scope=_SCOPE,
+        )
+    explicit_absence = build_semantic_payload(
+        ModulePayload,
+        node_id="mozaiks.module.explicit_absence",
+        payload_version=1,
+        scope=_SCOPE,
+        description=None,
+    )
+    assert explicit_absence.description is None
 
 
 def test_union_rejects_kind_content_mismatch() -> None:

@@ -345,24 +345,28 @@ class SemanticPayloadBase(SemanticsModel):
 
 class SurfacePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.SURFACE] = SemanticNodeKind.SURFACE
-    description: str
+    description: str | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
 
 class PagePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PAGE] = SemanticNodeKind.PAGE
-    title: str
-    intent: str
+    title: str | None
+    intent: str | None
     layout_id: str | None = None
     sections: tuple[PageSectionEntry, ...] = Field(default_factory=tuple)
 
     @field_validator("title", "intent")
     @classmethod
-    def _texts(cls, value: str, info: ValidationInfo) -> str:
+    def _texts(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name=str(info.field_name))
 
     @field_validator("layout_id")
@@ -384,13 +388,15 @@ class PagePayload(SemanticPayloadBase):
 
 class SectionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.SECTION] = SemanticNodeKind.SECTION
-    title: str
-    intent: str
+    title: str | None
+    intent: str | None
     entries: tuple[SectionContentEntry, ...] = Field(default_factory=tuple)
 
     @field_validator("title", "intent")
     @classmethod
-    def _texts(cls, value: str, info: ValidationInfo) -> str:
+    def _texts(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name=str(info.field_name))
 
     @field_validator("entries")
@@ -401,17 +407,19 @@ class SectionPayload(SemanticPayloadBase):
 
 class ModulePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.MODULE] = SemanticNodeKind.MODULE
-    description: str
+    description: str | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
 
 class ActionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.ACTION] = SemanticNodeKind.ACTION
-    description: str
+    description: str | None
     request_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
     response_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
     emits: tuple[str, ...] = Field(default_factory=tuple)
@@ -419,7 +427,9 @@ class ActionPayload(SemanticPayloadBase):
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
     @field_validator("request_fields", "response_fields")
@@ -448,32 +458,38 @@ class ActionPayload(SemanticPayloadBase):
 
 class CapabilityPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.CAPABILITY] = SemanticNodeKind.CAPABILITY
-    description: str
+    description: str | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
 
 class PermissionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PERMISSION] = SemanticNodeKind.PERMISSION
-    description: str
+    description: str | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
 
 class EventPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.EVENT] = SemanticNodeKind.EVENT
-    description: str
+    description: str | None
     payload_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
     @field_validator("payload_fields")
@@ -488,45 +504,57 @@ class EventPayload(SemanticPayloadBase):
 
 class ReactionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.REACTION] = SemanticNodeKind.REACTION
-    description: str
-    consumed_event: str
+    description: str | None
+    consumed_event: str | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
     @field_validator("consumed_event")
     @classmethod
-    def _event(cls, value: str) -> str:
+    def _event(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return validate_identifier_grammar(SemanticCategory.EVENT, value)
 
 
 class NotificationPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.NOTIFICATION] = SemanticNodeKind.NOTIFICATION
-    template_text: str
-    channel: NotificationChannel
+    template_text: str | None
+    channel: NotificationChannel | None
 
     @field_validator("template_text")
     @classmethod
-    def _template(cls, value: str) -> str:
+    def _template(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="template_text")
 
 
 class DataCollectionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.DATA_COLLECTION] = SemanticNodeKind.DATA_COLLECTION
-    description: str
-    fields: tuple[TypedFieldSpec, ...] = Field(min_length=1)
+    description: str | None
+    fields: tuple[TypedFieldSpec, ...] | None
     indexes: tuple[IndexSpec, ...] = Field(default_factory=tuple)
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
     @field_validator("fields")
     @classmethod
-    def _fields(cls, value: tuple[TypedFieldSpec, ...]) -> tuple[TypedFieldSpec, ...]:
+    def _fields(
+        cls, value: tuple[TypedFieldSpec, ...] | None
+    ) -> tuple[TypedFieldSpec, ...] | None:
+        if value is None:
+            return None
         ordered = tuple(sorted(value, key=lambda item: item.name))
         names = [item.name for item in ordered]
         if len(names) != len(set(names)):
@@ -544,7 +572,7 @@ class DataCollectionPayload(SemanticPayloadBase):
 
     @model_validator(mode="after")
     def _index_closure(self) -> DataCollectionPayload:
-        declared = {field.name for field in self.fields}
+        declared = {field.name for field in self.fields or ()}
         for index in self.indexes:
             for name in index.field_names:
                 if name not in declared:
@@ -554,43 +582,51 @@ class DataCollectionPayload(SemanticPayloadBase):
 
 class DataAliasPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.DATA_ALIAS] = SemanticNodeKind.DATA_ALIAS
-    alias: str
-    collection: str
-    owner_node_id: str
+    alias: str | None
+    collection: str | None
+    owner_node_id: str | None
 
     @field_validator("alias", "collection")
     @classmethod
-    def _names(cls, value: str, info: ValidationInfo) -> str:
+    def _names(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return _field_name(value, field_name=str(info.field_name))
 
     @field_validator("owner_node_id")
     @classmethod
-    def _owner(cls, value: str) -> str:
+    def _owner(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return validate_node_id_grammar(value)
 
 
 class WorkflowPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.WORKFLOW] = SemanticNodeKind.WORKFLOW
-    description: str
-    startup_mode: WorkflowStartupMode
+    description: str | None
+    startup_mode: WorkflowStartupMode | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
 
 class TriggerPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.TRIGGER] = SemanticNodeKind.TRIGGER
-    description: str
-    trigger_kind: TriggerKind
+    description: str | None
+    trigger_kind: TriggerKind | None
     event_id: str | None = None
     endpoint_path: str | None = None
     capability_id: str | None = None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
     @field_validator("event_id")
@@ -624,6 +660,13 @@ class TriggerPayload(SemanticPayloadBase):
             TriggerKind.ENDPOINT: (self.endpoint_path, "endpoint_path"),
             TriggerKind.CAPABILITY: (self.capability_id, "capability_id"),
         }
+        if self.trigger_kind is None:
+            set_names = [name for value, name in bindings.values() if value is not None]
+            if set_names:
+                raise ValueError(
+                    f"trigger bindings {set_names} require an explicit trigger_kind"
+                )
+            return self
         required_value, required_name = bindings[self.trigger_kind]
         if required_value is None:
             raise ValueError(
@@ -639,18 +682,22 @@ class TriggerPayload(SemanticPayloadBase):
 
 class PlanPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PLAN] = SemanticNodeKind.PLAN
-    title: str
-    prices: tuple[PriceSpec, ...] = Field(min_length=1)
+    title: str | None
+    prices: tuple[PriceSpec, ...] | None
     granted_capabilities: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator("title")
     @classmethod
-    def _title(cls, value: str) -> str:
+    def _title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="title")
 
     @field_validator("prices")
     @classmethod
-    def _prices(cls, value: tuple[PriceSpec, ...]) -> tuple[PriceSpec, ...]:
+    def _prices(cls, value: tuple[PriceSpec, ...] | None) -> tuple[PriceSpec, ...] | None:
+        if value is None:
+            return None
         return _sorted_prices(value)
 
     @field_validator("granted_capabilities")
@@ -671,58 +718,70 @@ class PlanPayload(SemanticPayloadBase):
 
 class ProductPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PRODUCT] = SemanticNodeKind.PRODUCT
-    title: str
-    description: str
-    prices: tuple[PriceSpec, ...] = Field(min_length=1)
+    title: str | None
+    description: str | None
+    prices: tuple[PriceSpec, ...] | None
 
     @field_validator("title", "description")
     @classmethod
-    def _texts(cls, value: str, info: ValidationInfo) -> str:
+    def _texts(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name=str(info.field_name))
 
     @field_validator("prices")
     @classmethod
-    def _prices(cls, value: tuple[PriceSpec, ...]) -> tuple[PriceSpec, ...]:
+    def _prices(cls, value: tuple[PriceSpec, ...] | None) -> tuple[PriceSpec, ...] | None:
+        if value is None:
+            return None
         return _sorted_prices(value)
 
 
 class MeterPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.METER] = SemanticNodeKind.METER
-    description: str
-    unit: str
+    description: str | None
+    unit: str | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
     @field_validator("unit")
     @classmethod
-    def _unit(cls, value: str) -> str:
+    def _unit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _field_name(value, field_name="unit")
 
 
 class LimitPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.LIMIT] = SemanticNodeKind.LIMIT
-    description: str
-    limit_value: int = Field(ge=0, strict=True)
-    period: BillingPeriod | None = None
+    description: str | None
+    limit_value: int | None = Field(ge=0, strict=True)
+    period: BillingPeriod | None
 
     @field_validator("description")
     @classmethod
-    def _description(cls, value: str) -> str:
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _text(value, field_name="description")
 
 
 class DeploymentTargetPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.DEPLOYMENT_TARGET] = SemanticNodeKind.DEPLOYMENT_TARGET
-    target_kind: DeploymentTargetKind
-    profile_id: str
+    target_kind: DeploymentTargetKind | None
+    profile_id: str | None
     output_hints: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator("profile_id")
     @classmethod
-    def _profile(cls, value: str) -> str:
+    def _profile(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _field_name(value, field_name="profile_id")
 
     @field_validator("output_hints")
