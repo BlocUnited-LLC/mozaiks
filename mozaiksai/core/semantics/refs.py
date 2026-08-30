@@ -21,6 +21,7 @@ from mozaiksai.core.taxonomy import SemanticCategory, validate_identifier_gramma
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _PATH_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_NODE_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
 
 #: Mutable-alias identifiers that must never masquerade as immutable identity.
 MUTABLE_ALIASES = frozenset({"latest", "current", "head", "tip", "newest"})
@@ -52,6 +53,18 @@ def _validate_digest(value: str, *, field_name: str) -> str:
     return text
 
 
+def validate_node_id_grammar(value: str) -> str:
+    """Shared semantic-graph node-id grammar (used by graph v1/v2 and payload refs)."""
+    text = str(value or "").strip()
+    if _NODE_ID.fullmatch(text) is None:
+        raise ValueError(
+            f"node_id must be a namespace-qualified lowercase dotted identifier, got {value!r}"
+        )
+    if text.split(".", 1)[0] in MUTABLE_ALIASES:
+        raise ValueError(f"node_id namespace must be immutable identity, got {text!r}")
+    return text
+
+
 class RefDocumentType(StrEnum):
     """The document type a reference expects its subject to be."""
 
@@ -64,6 +77,7 @@ class RefDocumentType(StrEnum):
     ARTIFACT_REVISION = "artifact_revision"
     CHILD_CONTRACT = "child_contract"
     TAXONOMY_NAMESPACE = "taxonomy_namespace"
+    SEMANTIC_PAYLOAD = "semantic_payload"
 
 
 class ExecutionAccessScopeRef(SemanticsModel):
@@ -213,6 +227,58 @@ class ChildContractRef(_ScopedRef):
         return text
 
 
+class SemanticPayloadRef(SemanticsModel):
+    """Typed reference pinning one node's semantic payload by full identity.
+
+    Node ids are dotted, so this is a sibling of :class:`_ScopedRef` (whose
+    ``subject_id`` grammar has no namespace qualification), not a subclass.  It
+    still carries the complete identity quartet plus the payload kind: node id,
+    payload kind, immutable payload version, content digest, and owning scope.
+    Path independence is by construction — no storage locator field exists.
+    """
+
+    document_type: ClassVar[RefDocumentType] = RefDocumentType.SEMANTIC_PAYLOAD
+    ref_schema_version: Literal["mozaiks.semantic_payload_ref.v1"] = (
+        "mozaiks.semantic_payload_ref.v1"
+    )
+    node_id: str
+    payload_kind: str
+    payload_version: int = Field(ge=1, strict=True)
+    content_digest: str
+    scope: ExecutionAccessScopeRef
+
+    @field_validator("node_id")
+    @classmethod
+    def _node_id(cls, value: str) -> str:
+        return validate_node_id_grammar(value)
+
+    @field_validator("payload_kind")
+    @classmethod
+    def _payload_kind(cls, value: str) -> str:
+        # Deferred import: graph.py imports this module at top level, so the
+        # closed node-kind set is resolved lazily rather than creating a cycle.
+        from mozaiksai.core.semantics.graph import SemanticNodeKind
+
+        try:
+            return SemanticNodeKind(str(value or "").strip()).value
+        except ValueError as exc:
+            raise ValueError(f"payload_kind must be a semantic node kind, got {value!r}") from exc
+
+    @field_validator("content_digest")
+    @classmethod
+    def _digest(cls, value: str) -> str:
+        return _validate_digest(value, field_name="content_digest")
+
+    @property
+    def identity_payload(self) -> dict[str, object]:
+        """Identity contribution pinned into a graph-v2 node (Merkle leaf)."""
+        return {
+            "payload_kind": self.payload_kind,
+            "payload_version": self.payload_version,
+            "content_digest": self.content_digest,
+        }
+
+
 class TaxonomyNamespaceRef(SemanticsModel):
     """Unscoped registry reference pinning namespace identifier, version, digest."""
 
@@ -252,7 +318,9 @@ __all__ = [
     "RefDocumentType",
     "RefinementPatchRef",
     "SemanticGraphRef",
+    "SemanticPayloadRef",
     "SemanticRefError",
     "SemanticsModel",
     "TaxonomyNamespaceRef",
+    "validate_node_id_grammar",
 ]

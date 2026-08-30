@@ -30,7 +30,9 @@ from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.refs import (
     MUTABLE_ALIASES,
     ExecutionAccessScopeRef,
+    SemanticPayloadRef,
     SemanticsModel,
+    validate_node_id_grammar,
 )
 from mozaiksai.core.taxonomy import (
     SemanticCategory,
@@ -39,11 +41,13 @@ from mozaiksai.core.taxonomy import (
 )
 
 SEMANTIC_GRAPH_SCHEMA_VERSION: Literal["mozaiks.semantic_graph.v1"] = "mozaiks.semantic_graph.v1"
+SEMANTIC_GRAPH_V2_SCHEMA_VERSION: Literal["mozaiks.semantic_graph.v2"] = (
+    "mozaiks.semantic_graph.v2"
+)
 
 #: Core namespace root; nodes outside it must sit inside a granted namespace.
 CORE_NODE_NAMESPACE_ROOT = "mozaiks"
 
-_NODE_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
 _GRAPH_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 
@@ -105,15 +109,45 @@ class TaxonomyReference(SemanticsModel):
         return {"category": self.category.value, "identifier": self.identifier}
 
 
-def _validate_node_id(value: str) -> str:
+# The node-id grammar is shared contract state: graph v1/v2 nodes and
+# SemanticPayloadRef validate through the single helper in refs.py.
+_validate_node_id = validate_node_id_grammar
+
+
+def _normalize_taxonomy_references(
+    value: tuple[TaxonomyReference, ...],
+) -> tuple[TaxonomyReference, ...]:
+    ordered = tuple(sorted(value, key=lambda item: (item.category.value, item.identifier)))
+    identities = [(item.category, item.identifier) for item in ordered]
+    if len(identities) != len(set(identities)):
+        raise ValueError("duplicate taxonomy references on one node")
+    return ordered
+
+
+def _normalize_node_references(value: tuple[str, ...]) -> tuple[str, ...]:
+    normalized = tuple(sorted(_validate_node_id(item) for item in value))
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("duplicate node references on one node")
+    return normalized
+
+
+def _validate_graph_id(value: str) -> str:
     text = str(value or "").strip()
-    if _NODE_ID.fullmatch(text) is None:
-        raise ValueError(
-            f"node_id must be a namespace-qualified lowercase dotted identifier, got {value!r}"
-        )
-    if text.split(".", 1)[0] in MUTABLE_ALIASES:
-        raise ValueError(f"node_id namespace must be immutable identity, got {text!r}")
+    if _GRAPH_ID.fullmatch(text) is None:
+        raise ValueError(f"graph_id must be a lowercase identifier, got {value!r}")
+    if text in MUTABLE_ALIASES:
+        raise ValueError(f"graph_id must be immutable identity, got {text!r}")
     return text
+
+
+def _normalize_namespace_grants(value: tuple[str, ...]) -> tuple[str, ...]:
+    normalized = tuple(sorted({str(item or "").strip() for item in value}))
+    for item in normalized:
+        if re.fullmatch(r"[a-z][a-z0-9_]*", item) is None:
+            raise ValueError(f"namespace grant must be a lowercase root identifier, got {item!r}")
+        if item == CORE_NODE_NAMESPACE_ROOT:
+            raise ValueError("the core namespace root cannot be granted to extensions")
+    return normalized
 
 
 class SemanticNode(SemanticsModel):
@@ -132,19 +166,12 @@ class SemanticNode(SemanticsModel):
     def _taxonomy_references(
         cls, value: tuple[TaxonomyReference, ...]
     ) -> tuple[TaxonomyReference, ...]:
-        ordered = tuple(sorted(value, key=lambda item: (item.category.value, item.identifier)))
-        identities = [(item.category, item.identifier) for item in ordered]
-        if len(identities) != len(set(identities)):
-            raise ValueError("duplicate taxonomy references on one node")
-        return ordered
+        return _normalize_taxonomy_references(value)
 
     @field_validator("node_references")
     @classmethod
     def _node_references(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        normalized = tuple(sorted(_validate_node_id(item) for item in value))
-        if len(normalized) != len(set(normalized)):
-            raise ValueError("duplicate node references on one node")
-        return normalized
+        return _normalize_node_references(value)
 
     @property
     def namespace_root(self) -> str:
@@ -196,6 +223,47 @@ class SemanticEdge(SemanticsModel):
         return canonical_digest(self.identity_payload)
 
 
+def _validate_graph_structure(graph: SemanticGraph | SemanticGraphV2) -> None:
+    """Shared structural validation for graph v1 and v2 (identical rules)."""
+    node_ids = [node.node_id for node in graph.nodes]
+    if len(node_ids) != len(set(node_ids)):
+        duplicates = sorted({item for item in node_ids if node_ids.count(item) > 1})
+        raise ValueError(f"duplicate node identities: {duplicates}")
+    known = set(node_ids)
+
+    for node in graph.nodes:
+        root = node.namespace_root
+        if root != CORE_NODE_NAMESPACE_ROOT and root not in graph.namespace_grants:
+            raise ValueError(
+                f"node {node.node_id!r} is outside the core namespace and the "
+                f"granted namespaces {list(graph.namespace_grants)!r}"
+            )
+        for reference in node.node_references:
+            if reference not in known:
+                raise ValueError(
+                    f"node {node.node_id!r} references unknown node {reference!r}"
+                )
+
+    edge_identities: dict[str, SemanticEdge] = {}
+    for edge in graph.edges:
+        if edge.source_node_id not in known:
+            raise ValueError(
+                f"edge {edge.kind.value} has dangling source {edge.source_node_id!r}"
+            )
+        if edge.target_node_id not in known:
+            raise ValueError(
+                f"edge {edge.kind.value} has dangling target {edge.target_node_id!r}"
+            )
+        identity = edge.edge_identity
+        if identity in edge_identities:
+            raise ValueError(
+                f"duplicate edge identity for {edge.kind.value} "
+                f"{edge.source_node_id!r} -> {edge.target_node_id!r} "
+                f"(discriminator {edge.discriminator!r})"
+            )
+        edge_identities[identity] = edge
+
+
 class SemanticGraph(SemanticsModel):
     schema_version: Literal["mozaiks.semantic_graph.v1"] = SEMANTIC_GRAPH_SCHEMA_VERSION
     graph_id: str
@@ -209,23 +277,12 @@ class SemanticGraph(SemanticsModel):
     @field_validator("graph_id")
     @classmethod
     def _graph_id(cls, value: str) -> str:
-        text = str(value or "").strip()
-        if _GRAPH_ID.fullmatch(text) is None:
-            raise ValueError(f"graph_id must be a lowercase identifier, got {value!r}")
-        if text in MUTABLE_ALIASES:
-            raise ValueError(f"graph_id must be immutable identity, got {text!r}")
-        return text
+        return _validate_graph_id(value)
 
     @field_validator("namespace_grants")
     @classmethod
     def _grants(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        normalized = tuple(sorted({str(item or "").strip() for item in value}))
-        for item in normalized:
-            if re.fullmatch(r"[a-z][a-z0-9_]*", item) is None:
-                raise ValueError(f"namespace grant must be a lowercase root identifier, got {item!r}")
-            if item == CORE_NODE_NAMESPACE_ROOT:
-                raise ValueError("the core namespace root cannot be granted to extensions")
-        return normalized
+        return _normalize_namespace_grants(value)
 
     @field_validator("nodes")
     @classmethod
@@ -239,44 +296,7 @@ class SemanticGraph(SemanticsModel):
 
     @model_validator(mode="after")
     def _validate_graph(self) -> SemanticGraph:
-        node_ids = [node.node_id for node in self.nodes]
-        if len(node_ids) != len(set(node_ids)):
-            duplicates = sorted({item for item in node_ids if node_ids.count(item) > 1})
-            raise ValueError(f"duplicate node identities: {duplicates}")
-        known = set(node_ids)
-
-        for node in self.nodes:
-            root = node.namespace_root
-            if root != CORE_NODE_NAMESPACE_ROOT and root not in self.namespace_grants:
-                raise ValueError(
-                    f"node {node.node_id!r} is outside the core namespace and the "
-                    f"granted namespaces {list(self.namespace_grants)!r}"
-                )
-            for reference in node.node_references:
-                if reference not in known:
-                    raise ValueError(
-                        f"node {node.node_id!r} references unknown node {reference!r}"
-                    )
-
-        edge_identities: dict[str, SemanticEdge] = {}
-        for edge in self.edges:
-            if edge.source_node_id not in known:
-                raise ValueError(
-                    f"edge {edge.kind.value} has dangling source {edge.source_node_id!r}"
-                )
-            if edge.target_node_id not in known:
-                raise ValueError(
-                    f"edge {edge.kind.value} has dangling target {edge.target_node_id!r}"
-                )
-            identity = edge.edge_identity
-            if identity in edge_identities:
-                raise ValueError(
-                    f"duplicate edge identity for {edge.kind.value} "
-                    f"{edge.source_node_id!r} -> {edge.target_node_id!r} "
-                    f"(discriminator {edge.discriminator!r})"
-                )
-            edge_identities[identity] = edge
-
+        _validate_graph_structure(self)
         expected = canonical_digest(self.canonical_payload(include_digest=False))
         if self.graph_digest != expected:
             raise ValueError("graph_digest does not match graph content")
@@ -349,16 +369,192 @@ def validate_semantic_graph_taxonomy_closure(
             registry.resolve(reference.category, reference.identifier)
 
 
+class SemanticNodeV2(SemanticsModel):
+    """Graph-v2 node: v1 identity plus a required pinned semantic payload.
+
+    Not a subclass of :class:`SemanticNode` — frozen models with distinct
+    identity payloads stay independent; both validate through the shared
+    module helpers so the grammars cannot diverge.
+    """
+
+    node_id: str
+    kind: SemanticNodeKind
+    taxonomy_references: tuple[TaxonomyReference, ...] = Field(default_factory=tuple)
+    node_references: tuple[str, ...] = Field(default_factory=tuple)
+    payload_ref: SemanticPayloadRef
+
+    @field_validator("node_id")
+    @classmethod
+    def _node_id(cls, value: str) -> str:
+        return _validate_node_id(value)
+
+    @field_validator("taxonomy_references")
+    @classmethod
+    def _taxonomy_references(
+        cls, value: tuple[TaxonomyReference, ...]
+    ) -> tuple[TaxonomyReference, ...]:
+        return _normalize_taxonomy_references(value)
+
+    @field_validator("node_references")
+    @classmethod
+    def _node_references(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _normalize_node_references(value)
+
+    @model_validator(mode="after")
+    def _payload_pin(self) -> SemanticNodeV2:
+        if self.payload_ref.node_id != self.node_id:
+            raise ValueError(
+                f"payload_ref pins node {self.payload_ref.node_id!r} but the node is "
+                f"{self.node_id!r}"
+            )
+        if self.payload_ref.payload_kind != self.kind.value:
+            raise ValueError(
+                f"payload_ref kind {self.payload_ref.payload_kind!r} does not match "
+                f"node kind {self.kind.value!r} on {self.node_id!r}"
+            )
+        return self
+
+    @property
+    def namespace_root(self) -> str:
+        return self.node_id.split(".", 1)[0]
+
+    @property
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "kind": self.kind.value,
+            "taxonomy_references": [item.identity_payload for item in self.taxonomy_references],
+            "node_references": list(self.node_references),
+            "payload_ref": self.payload_ref.identity_payload,
+        }
+
+
+class SemanticGraphV2(SemanticsModel):
+    """Graph v2: every node pins its typed payload; ``graph_digest`` is the
+    Merkle root — any payload byte change flows payload digest → node identity
+    → graph digest."""
+
+    schema_version: Literal["mozaiks.semantic_graph.v2"] = SEMANTIC_GRAPH_V2_SCHEMA_VERSION
+    graph_id: str
+    version: int = Field(ge=1, strict=True)
+    scope: ExecutionAccessScopeRef
+    namespace_grants: tuple[str, ...] = Field(default_factory=tuple)
+    nodes: tuple[SemanticNodeV2, ...] = Field(min_length=1)
+    edges: tuple[SemanticEdge, ...] = Field(default_factory=tuple)
+    graph_digest: str = Field(min_length=64, max_length=64)
+
+    @field_validator("graph_id")
+    @classmethod
+    def _graph_id(cls, value: str) -> str:
+        return _validate_graph_id(value)
+
+    @field_validator("namespace_grants")
+    @classmethod
+    def _grants(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _normalize_namespace_grants(value)
+
+    @field_validator("nodes")
+    @classmethod
+    def _nodes(cls, value: tuple[SemanticNodeV2, ...]) -> tuple[SemanticNodeV2, ...]:
+        return tuple(sorted(value, key=lambda item: item.node_id))
+
+    @field_validator("edges")
+    @classmethod
+    def _edges(cls, value: tuple[SemanticEdge, ...]) -> tuple[SemanticEdge, ...]:
+        return tuple(sorted(value, key=lambda item: item.edge_identity))
+
+    @model_validator(mode="after")
+    def _validate_graph(self) -> SemanticGraphV2:
+        _validate_graph_structure(self)
+        for node in self.nodes:
+            if node.payload_ref.scope != self.scope:
+                raise ValueError(
+                    f"payload_ref on {node.node_id!r} is pinned in a different scope "
+                    "than the graph"
+                )
+        expected = canonical_digest(self.canonical_payload(include_digest=False))
+        if self.graph_digest != expected:
+            raise ValueError("graph_digest does not match graph content")
+        return self
+
+    def canonical_payload(self, *, include_digest: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "schema_version": self.schema_version,
+            "graph_id": self.graph_id,
+            "version": self.version,
+            "scope": self.scope.model_dump(mode="json"),
+            "namespace_grants": list(self.namespace_grants),
+            "nodes": [node.identity_payload for node in self.nodes],
+            "edges": [edge.identity_payload for edge in self.edges],
+        }
+        if include_digest:
+            payload["graph_digest"] = self.graph_digest
+        return payload
+
+    def node(self, node_id: str) -> SemanticNodeV2:
+        for candidate in self.nodes:
+            if candidate.node_id == node_id:
+                return candidate
+        raise SemanticGraphError(f"unknown node {node_id!r}")
+
+
+def build_semantic_graph_v2(
+    *,
+    graph_id: str,
+    version: int,
+    scope: ExecutionAccessScopeRef,
+    nodes: tuple[SemanticNodeV2, ...] | list[SemanticNodeV2],
+    edges: tuple[SemanticEdge, ...] | list[SemanticEdge] = (),
+    namespace_grants: tuple[str, ...] | list[str] = (),
+) -> SemanticGraphV2:
+    """Construct a v2 graph with its Merkle-root digest computed canonically."""
+    ordered_nodes = tuple(sorted(tuple(nodes), key=lambda item: item.node_id))
+    ordered_edges = tuple(sorted(tuple(edges), key=lambda item: item.edge_identity))
+    ordered_grants = tuple(sorted({str(item).strip() for item in namespace_grants}))
+    payload = {
+        "schema_version": SEMANTIC_GRAPH_V2_SCHEMA_VERSION,
+        "graph_id": str(graph_id).strip(),
+        "version": version,
+        "scope": scope.model_dump(mode="json"),
+        "namespace_grants": list(ordered_grants),
+        "nodes": [node.identity_payload for node in ordered_nodes],
+        "edges": [edge.identity_payload for edge in ordered_edges],
+    }
+    return SemanticGraphV2(
+        graph_id=graph_id,
+        version=version,
+        scope=scope,
+        namespace_grants=ordered_grants,
+        nodes=ordered_nodes,
+        edges=ordered_edges,
+        graph_digest=canonical_digest(payload),
+    )
+
+
+def validate_semantic_graph_v2_taxonomy_closure(
+    graph: SemanticGraphV2, registry: TaxonomyRegistry
+) -> None:
+    """Fail closed unless every v2 taxonomy reference resolves in ``registry``."""
+    for node in graph.nodes:
+        for reference in node.taxonomy_references:
+            registry.resolve(reference.category, reference.identifier)
+
+
 __all__ = [
     "CORE_NODE_NAMESPACE_ROOT",
     "SEMANTIC_GRAPH_SCHEMA_VERSION",
+    "SEMANTIC_GRAPH_V2_SCHEMA_VERSION",
     "SemanticEdge",
     "SemanticEdgeKind",
     "SemanticGraph",
     "SemanticGraphError",
+    "SemanticGraphV2",
     "SemanticNode",
     "SemanticNodeKind",
+    "SemanticNodeV2",
     "TaxonomyReference",
     "build_semantic_graph",
+    "build_semantic_graph_v2",
     "validate_semantic_graph_taxonomy_closure",
+    "validate_semantic_graph_v2_taxonomy_closure",
 ]

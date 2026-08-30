@@ -280,12 +280,15 @@ def test_resolver_has_no_bare_id_lookup_surface() -> None:
     public = [name for name in dir(resolver) if not name.startswith("_")]
     assert set(public) == {
         "register_semantic_graph",
+        "register_semantic_graph_v2",
+        "register_semantic_payload",
         "register_application_manifest",
         "register_implementation_binding",
         "register_taxonomy_namespace",
         "register_opaque_subject",
         "resolve",
         "resolve_manifest_ref",
+        "resolve_semantic_payload",
         "resolve_taxonomy_namespace",
     }
 

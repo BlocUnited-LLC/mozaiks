@@ -13,8 +13,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from mozaiksai.core.semantics.binding import ImplementationBinding
-from mozaiksai.core.semantics.graph import SemanticGraph
+from mozaiksai.core.semantics.graph import SemanticGraph, SemanticGraphV2
 from mozaiksai.core.semantics.manifest import ApplicationManifest
+from mozaiksai.core.semantics.payloads import SemanticPayloadBase, parse_semantic_payload
 from mozaiksai.core.semantics.refs import (
     ApplicationManifestRef,
     ArtifactRevisionRef,
@@ -24,6 +25,7 @@ from mozaiksai.core.semantics.refs import (
     ExecutionAccessScopeRef,
     RefDocumentType,
     RefinementPatchRef,
+    SemanticPayloadRef,
     TaxonomyNamespaceRef,
     _ScopedRef,
 )
@@ -104,6 +106,98 @@ class SemanticReferenceResolver:
             )
         )
 
+    def register_semantic_payload(self, payload: SemanticPayloadBase) -> None:
+        """Register one typed payload as an immutable content-bearing subject.
+
+        Identity is (node_id, payload_version); re-registration fails closed.
+        Many graph versions may pin one registered payload; cross-node or
+        cross-scope reuse is impossible because resolution re-verifies the
+        node binding and scope.
+        """
+        try:
+            verified = parse_semantic_payload(payload.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"semantic payload failed cold validation: {exc}"
+            ) from exc
+        self._register(
+            _Subject(
+                kind=RefDocumentType.SEMANTIC_PAYLOAD,
+                subject_id=verified.node_id,
+                version=verified.payload_version,
+                digest=verified.payload_digest,
+                scope=verified.scope,
+                content=verified,
+            )
+        )
+
+    def resolve_semantic_payload(
+        self, ref: SemanticPayloadRef, *, requesting_scope: ExecutionAccessScopeRef
+    ) -> SemanticPayloadBase:
+        """Verify document type, node binding, kind, version, digest, and scope."""
+        subject = self._subjects.get((ref.node_id, ref.payload_version))
+        if subject is None:
+            raise ReferenceResolutionError(
+                f"no semantic payload for node {ref.node_id!r} at immutable version "
+                f"{ref.payload_version}; refs never fall back to another version"
+            )
+        if subject.kind is not RefDocumentType.SEMANTIC_PAYLOAD:
+            raise ReferenceResolutionError(
+                f"document type mismatch: ref expects semantic_payload, "
+                f"stored subject is {subject.kind.value!r}"
+            )
+        if subject.digest != ref.content_digest:
+            raise ReferenceResolutionError(
+                f"content digest mismatch for payload of node {ref.node_id!r} "
+                f"version {ref.payload_version}"
+            )
+        if subject.scope != ref.scope:
+            raise ReferenceResolutionError(
+                f"scope mismatch: ref scope does not own payload of node {ref.node_id!r}"
+            )
+        if requesting_scope != subject.scope:
+            raise ReferenceResolutionError(
+                f"cross-scope access to payload of node {ref.node_id!r} fails closed"
+            )
+        payload = subject.content
+        if not isinstance(payload, SemanticPayloadBase):
+            raise ReferenceResolutionError(
+                f"subject for node {ref.node_id!r} did not resolve to a semantic payload"
+            )
+        kind = getattr(payload, "payload_kind", None)
+        if getattr(kind, "value", None) != ref.payload_kind:
+            raise ReferenceResolutionError(
+                f"payload kind mismatch for node {ref.node_id!r}: ref expects "
+                f"{ref.payload_kind!r}"
+            )
+        return payload
+
+    def register_semantic_graph_v2(self, graph: SemanticGraphV2) -> None:
+        """Register a v2 graph only after its complete payload closure resolves.
+
+        Every pinned payload reference must already resolve in this store —
+        there is no partial registration and no "current"/latest payload
+        lookup anywhere; resolution is by full identity only.
+        """
+        try:
+            verified = SemanticGraphV2.model_validate(graph.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"semantic graph v2 failed cold validation: {exc}"
+            ) from exc
+        for node in verified.nodes:
+            self.resolve_semantic_payload(node.payload_ref, requesting_scope=verified.scope)
+        self._register(
+            _Subject(
+                kind=RefDocumentType.SEMANTIC_GRAPH,
+                subject_id=verified.graph_id,
+                version=verified.version,
+                digest=verified.graph_digest,
+                scope=verified.scope,
+                content=verified,
+            )
+        )
+
     def register_taxonomy_namespace(self, namespace: TaxonomyNamespace, digest: str) -> None:
         ref = TaxonomyNamespaceRef(
             namespace_id=namespace.namespace_id,
@@ -138,6 +232,7 @@ class SemanticReferenceResolver:
             RefDocumentType.APPLICATION_MANIFEST,
             RefDocumentType.IMPLEMENTATION_BINDING,
             RefDocumentType.TAXONOMY_NAMESPACE,
+            RefDocumentType.SEMANTIC_PAYLOAD,
         }:
             raise ReferenceResolutionError(
                 f"{kind.value} is content-bearing in this slice; register its document"

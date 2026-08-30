@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mozaiksai.core.stub_kinds import StubKind
 from mozaiksai.core.workflow.assignment_kinds import AssignmentKind
 
 SCHEMA_VERSION: Literal["mozaiks.app_layout.v2"] = "mozaiks.app_layout.v2"
@@ -222,19 +223,6 @@ class ExtensionSlot(StrEnum):
     SERVICE_ADAPTER = "service_adapter"
     SERVICE_ROUTE = "service_route"
     BUILD_CONTEXT_PACK = "build_context_pack"
-
-
-class StubKind(StrEnum):
-    """Bounded customization stub kinds a family may reference.
-
-    Mirrors the contract-declared customization rule: Python stubs extend
-    backend/runtime-adjacent behavior; JS/TS stubs extend UI, admin, or
-    workflow-facing frontend behavior. A family with an empty tuple admits no
-    stubs at all.
-    """
-
-    PYTHON_BACKEND = "python_backend"
-    JS_FRONTEND = "js_frontend"
 
 
 class ArtifactFamily(LayoutModel):
