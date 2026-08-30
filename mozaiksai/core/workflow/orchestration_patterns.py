@@ -17,7 +17,7 @@ import asyncio
 import inspect
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import Any, cast
 
@@ -661,6 +661,8 @@ async def _run_ag2_network_phase(
     agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
     knowledge_store: Any = None,
     context_authority_policy: Any = None,
+    resume_existing_only: bool = False,
+    resume_context_updates: Mapping[str, Any] | None = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -670,13 +672,15 @@ async def _run_ag2_network_phase(
             agents=agents,
             transition_rules=transition_rules,
             initial_agent_name=initial_agent_name,
-            initial_message=initial_message,
+            initial_message=None if resume_existing_only else initial_message,
             context_variables=context_variables,
             structured_registry=structured_registry,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
+            resume_existing_only=resume_existing_only,
+            resume_context_updates=dict(resume_context_updates or {}),
         )
     )
 
@@ -739,6 +743,7 @@ async def run_workflow_orchestration(
     agents_factory: Callable | None = None,
     context_factory: Callable | None = None,
     knowledge_store: Any = None,
+    resume_existing_only: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     start_time = perf_counter()
@@ -793,6 +798,7 @@ async def run_workflow_orchestration(
             initial_message=initial_message,
             initial_agent_name=initial_agent_name,
             wf_logger=wf_logger,
+            resume_existing_only=resume_existing_only,
         )
         resumed_mode = bool(has_persisted_events)
 
@@ -1146,6 +1152,8 @@ async def run_workflow_orchestration(
                 agent_text_context_deriver=agent_text_context_deriver,
                 knowledge_store=knowledge_store,
                 context_authority_policy=context_authority_policy,
+                resume_existing_only=resume_existing_only,
+                resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
             )
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
@@ -1217,6 +1225,8 @@ async def run_workflow_orchestration(
                         agent_text_context_deriver=agent_text_context_deriver,
                         knowledge_store=knowledge_store,
                         context_authority_policy=context_authority_policy,
+                        resume_existing_only=resume_existing_only,
+                        resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
                     )
                 else:
                     runner_result = first_phase_result
@@ -1236,6 +1246,8 @@ async def run_workflow_orchestration(
                 agent_text_context_deriver=agent_text_context_deriver,
                 knowledge_store=knowledge_store,
                 context_authority_policy=context_authority_policy,
+                resume_existing_only=resume_existing_only,
+                resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
             )
 
         structured_validation_failed = _structured_output_validation_failed(runner_result)

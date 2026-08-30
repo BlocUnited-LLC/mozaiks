@@ -13,7 +13,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,11 @@ from ag2.network import (
     EV_PACKET,
     EV_TEXT,
     AgentTarget,
+    ChannelState,
     Envelope,
     Hub,
     HubClient,
+    HumanClient,
     LocalLink,
     Passport,
     Resume,
@@ -137,6 +139,41 @@ def _authorized_context_updates(
     return safe
 
 
+async def _attach_human_client(
+    *,
+    hub: Hub,
+    hub_client: HubClient,
+    name: str,
+) -> HumanClient:
+    """Reconnect AG2's durable human identity to a freshly opened Hub client.
+
+    AG2 exposes ``HubClient.attach`` for Agents but has no public human-client
+    counterpart yet. Keep this compatibility seam localized until AG2 adds it.
+    """
+    attach_human = getattr(hub_client, "attach_human", None)
+    if callable(attach_human):
+        return cast(HumanClient, await attach_human(name))
+
+    agent_id = hub.find_agent_id(name)
+    if agent_id is None:
+        raise RuntimeError(f"AG2 human identity {name!r} was not hydrated")
+    client_link = await hub_client._ensure_connected_async()  # noqa: SLF001
+    passport = await hub.get_agent(agent_id)
+    resume = await hub.get_resume(agent_id)
+    rule = await hub.get_rule(agent_id)
+    hub.bind_endpoint(client_link.endpoint_id, agent_id)
+    hub_client._cache_passport(passport)  # noqa: SLF001
+    human = HumanClient(
+        passport=passport,
+        resume=resume,
+        rule=rule,
+        hub=hub,
+        hub_client=hub_client,
+    )
+    hub_client._clients[agent_id] = human  # type: ignore[assignment]  # noqa: SLF001
+    return human
+
+
 @dataclass(slots=True)
 class AG2NetworkRunnerRequest:
     """Already-loaded workflow execution inputs for the AG2 Network runner."""
@@ -147,7 +184,7 @@ class AG2NetworkRunnerRequest:
     agents: Mapping[str, Any]
     transition_rules: Sequence[Mapping[str, Any]]
     initial_agent_name: str
-    initial_message: str
+    initial_message: str | None
     context_variables: Mapping[str, Any] = field(default_factory=dict)
     structured_registry: Mapping[str, Any] = field(default_factory=dict)
     max_turns: int | None = None
@@ -160,7 +197,8 @@ class AG2NetworkRunnerRequest:
     # ---------------------------------------------------------------------------
     # Accepts an AG2-native KnowledgeStore instance (ag2.knowledge.KnowledgeStore
     # protocol). When None the runner creates a fresh MemoryKnowledgeStore per
-    # Hub — the safe default for local development and test isolation.
+    # Hub — the safe default for direct local/test use. The runtime adapter
+    # supplies the chat-scoped Mongo implementation for durable continuation.
     #
     # Lifecycle notes:
     #   - One Hub is created per workflow run (or per live session, kept alive for
@@ -182,6 +220,8 @@ class AG2NetworkRunnerRequest:
     #     tenant or platform data; AG2 memory/knowledge controls are engine-level,
     #     not Mozaiks-level authority.
     knowledge_store: KnowledgeStore | None = None
+    resume_existing_only: bool = False
+    resume_context_updates: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -240,12 +280,37 @@ class AG2NetworkRunner:
         keep_live_run = False
 
         try:
+            active_channels = [
+                metadata
+                for metadata in await hub.list_channels(state=ChannelState.ACTIVE)
+                if str((getattr(metadata, "labels", {}) or {}).get("workflow_name") or "")
+                in {"", request.workflow_name}
+            ]
+            if len(active_channels) > 1:
+                raise RuntimeError("multiple_active_ag2_network_channels")
+            existing_channel = active_channels[0] if active_channels else None
+            if request.resume_existing_only and existing_channel is None:
+                return AG2NetworkRunnerResult(
+                    status=RunStatus.FAILED,
+                    workflow_name=request.workflow_name,
+                    chat_id=request.chat_id,
+                    app_id=request.app_id,
+                    error="ag2_network_channel_not_found",
+                )
+
             initiator_hc = HubClient(link, hub=hub)
             hub_clients.append(initiator_hc)
-            initiator = await initiator_hc.register_human(
-                Passport(name=_INITIATOR_NAME),
-                resume=Resume(claimed_capabilities=["workflow_start"]),
-            )
+            if hub.find_agent_id(_INITIATOR_NAME) is None:
+                initiator = await initiator_hc.register_human(
+                    Passport(name=_INITIATOR_NAME),
+                    resume=Resume(claimed_capabilities=["workflow_start"]),
+                )
+            else:
+                initiator = await _attach_human_client(
+                    hub=hub,
+                    hub_client=initiator_hc,
+                    name=_INITIATOR_NAME,
+                )
 
             agent_clients = {}
             agent_id_by_name: dict[str, str] = {
@@ -258,10 +323,11 @@ class AG2NetworkRunner:
                     continue
                 hub_client = HubClient(link, hub=hub)
                 hub_clients.append(hub_client)
-                client = await hub_client.register(
+                client = await hub_client.attach(
                     agent,
-                    Passport(name=name),
-                    Resume(claimed_capabilities=[name]),
+                    name,
+                    passport=Passport(name=name),
+                    resume=Resume(claimed_capabilities=[name]),
                     attach_plugin=request.attach_network_plugin,
                 )
                 _install_context_update_handler(
@@ -277,33 +343,33 @@ class AG2NetworkRunner:
             if initial_agent_name not in agent_clients:
                 raise ValueError(f"initial agent {initial_agent_name!r} did not register")
 
-            graph = self._compile_graph_with_initiator(
-                transition_rules=request.transition_rules,
-                initial_agent_name=initial_agent_name,
-                agent_id_by_name=agent_id_by_name,
-                max_turns=request.max_turns,
-                context_authority_policy=request.context_authority_policy,
-            )
-
-            safe_context_vars = _json_safe_dict(request.context_variables)
-
-            channel = await initiator.open(
-                type="workflow",
-                target=[client.agent_id for client in agent_clients.values()],
-                knobs={
-                    "graph": graph.to_dict(),
-                    "context_vars": safe_context_vars,
-                },
-            )
+            channel: Any
+            if existing_channel is None:
+                graph = self._compile_graph_with_initiator(
+                    transition_rules=request.transition_rules,
+                    initial_agent_name=initial_agent_name,
+                    agent_id_by_name=agent_id_by_name,
+                    max_turns=request.max_turns,
+                    context_authority_policy=request.context_authority_policy,
+                )
+                channel = await initiator.open(
+                    type="workflow",
+                    target=[client.agent_id for client in agent_clients.values()],
+                    knobs={
+                        "graph": graph.to_dict(),
+                        "context_vars": _json_safe_dict(request.context_variables),
+                    },
+                    labels={"workflow_name": request.workflow_name},
+                )
+            else:
+                channel = existing_channel
             channel_id = channel.channel_id
-            await channel.send(
-                request.initial_message or ".",
-                audience=[agent_clients[initial_agent_name].agent_id],
-            )
-            failure_task = asyncio.create_task(
-                turn_failure_listener.wait_for_failure(channel.channel_id)
-            )
-
+            if existing_channel is None:
+                await initiator.send(
+                    channel.channel_id,
+                    request.initial_message or ".",
+                    audience=[agent_clients[initial_agent_name].agent_id],
+                )
             def _agent_names() -> dict[str, str]:
                 return {
                     initiator.agent_id: "user",
@@ -352,6 +418,38 @@ class AG2NetworkRunner:
                     error=error,
                 )
 
+            if existing_channel is not None:
+                live_run = _AG2LiveWorkflowRun(
+                    workflow_name=request.workflow_name,
+                    chat_id=request.chat_id,
+                    app_id=request.app_id,
+                    hub=hub,
+                    hub_clients=tuple(hub_clients),
+                    initiator=initiator,
+                    channel_id=channel.channel_id,
+                    turn_failure_listener=turn_failure_listener,
+                    snapshot_result=_snapshot_result,
+                    close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
+                    context_authority_policy=request.context_authority_policy,
+                )
+                keep_live_run = True
+                if request.initial_message:
+                    return await live_run.continue_with_user_message(
+                        request.initial_message,
+                        context_updates=request.resume_context_updates,
+                    )
+                if request.resume_context_updates:
+                    await live_run.apply_context_updates(request.resume_context_updates)
+                result = await _snapshot_result(
+                    status=RunStatus.PAUSED,
+                    close_reason="awaiting_user_input",
+                )
+                result.live_run = live_run
+                return result
+
+            failure_task = asyncio.create_task(
+                turn_failure_listener.wait_for_failure(channel.channel_id)
+            )
             loop = asyncio.get_running_loop()
             deadline = loop.time() + float(request.close_timeout_seconds or 120.0)
 
@@ -430,7 +528,7 @@ class AG2NetworkRunner:
                         hub=hub,
                         hub_clients=tuple(hub_clients),
                         initiator=initiator,
-                        channel=channel,
+                        channel_id=channel.channel_id,
                         turn_failure_listener=turn_failure_listener,
                         snapshot_result=_snapshot_result,
                         close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
@@ -546,7 +644,7 @@ class _AG2LiveWorkflowRun:
         hub: Any,
         hub_clients: Sequence[Any],
         initiator: Any,
-        channel: Any,
+        channel_id: str,
         turn_failure_listener: _TurnFailureListener,
         snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]],
         close_timeout_seconds: float,
@@ -555,11 +653,10 @@ class _AG2LiveWorkflowRun:
         self.workflow_name = workflow_name
         self.chat_id = chat_id
         self.app_id = app_id
-        self.channel_id = str(channel.channel_id)
+        self.channel_id = str(channel_id)
         self._hub = hub
         self._hub_clients = tuple(hub_clients)
         self._initiator = initiator
-        self._channel = channel
         self._turn_failure_listener = turn_failure_listener
         self._snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]] = snapshot_result
         self._close_timeout_seconds = close_timeout_seconds
@@ -593,18 +690,13 @@ class _AG2LiveWorkflowRun:
             }
 
             if context_updates:
-                safe_updates = _authorized_context_updates(
-                    context_updates,
-                    writer_id=LIVE_USER_CONTEXT_WRITER,
-                    context_authority_policy=self._context_authority_policy,
-                )
-                await self._channel.send(
-                    "",
-                    event_type=EV_CONTEXT_SET,
-                    event_data={"set": _json_safe_dict(safe_updates), "delete": []},
-                )
+                await self._apply_context_updates(context_updates)
             audience = self._next_agent_audience_for_user_text(str(message or "."))
-            await self._channel.send(str(message or "."), audience=audience)
+            await self._initiator.send(
+                self.channel_id,
+                str(message or "."),
+                audience=audience,
+            )
 
             result = await self._wait_for_settlement(seen_envelope_ids=seen_envelope_ids)
             result.wal = list(result.wal[self._wal_cursor :])
@@ -614,6 +706,28 @@ class _AG2LiveWorkflowRun:
             else:
                 await self.close()
             return result
+
+    async def apply_context_updates(self, updates: Mapping[str, Any]) -> None:
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("live_ag2_channel_closed")
+            await self._apply_context_updates(updates)
+
+    async def _apply_context_updates(self, updates: Mapping[str, Any]) -> None:
+        safe_updates = _authorized_context_updates(
+            updates,
+            writer_id=LIVE_USER_CONTEXT_WRITER,
+            context_authority_policy=self._context_authority_policy,
+        )
+        await self._initiator.post_envelope(
+            Envelope(
+                channel_id=self.channel_id,
+                sender_id=self._initiator.agent_id,
+                audience=[],
+                event_type=EV_CONTEXT_SET,
+                event_data={"set": _json_safe_dict(safe_updates), "delete": []},
+            )
+        )
 
     async def _wait_for_settlement(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from ag2.events.input_events import TextInput
 
 from mozaiksai.core.workflow.execution.run_bootstrap import (
     bootstrap_run_messages as _bootstrap_run_messages,
@@ -134,7 +135,7 @@ async def test_run_bootstrap_propagates_required_session_creation_failure() -> N
 @pytest.mark.asyncio
 async def test_run_bootstrap_uses_latest_user_event_as_trigger_without_reinjecting_config_seed() -> None:
     pm = _StubPersistenceManager(
-        run_events=[object()],
+        run_events=[TextInput("Polymarket for AI startups")],
         event_messages=[
             {
                 "role": "assistant",
