@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mozaiksai.core.semantics.binding import ImplementationBinding
+from mozaiksai.core.semantics.compilation_plan import CompilationPlan
 from mozaiksai.core.semantics.graph import SemanticGraph, SemanticGraphV2
 from mozaiksai.core.semantics.manifest import ApplicationManifest
 from mozaiksai.core.semantics.payloads import SemanticPayloadBase, parse_semantic_payload
@@ -21,7 +22,6 @@ from mozaiksai.core.semantics.refs import (
     ArtifactRevisionRef,
     BuildContextBindingRef,
     ChildContractRef,
-    CompilationPlanRef,
     ExecutionAccessScopeRef,
     RefDocumentType,
     RefinementPatchRef,
@@ -198,6 +198,29 @@ class SemanticReferenceResolver:
             )
         )
 
+    def register_compilation_plan(self, plan: CompilationPlan) -> None:
+        """Register the aggregate plan as an immutable content-bearing subject.
+
+        Only the aggregate registers: embedded family-instance plans have no
+        document type and no registration surface of their own.
+        """
+        try:
+            verified = CompilationPlan.model_validate(plan.model_dump(mode="json"))
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"compilation plan failed cold validation: {exc}"
+            ) from exc
+        self._register(
+            _Subject(
+                kind=RefDocumentType.COMPILATION_PLAN,
+                subject_id=verified.graph_id,
+                version=verified.graph_version,
+                digest=verified.plan_digest,
+                scope=verified.scope,
+                content=verified,
+            )
+        )
+
     def register_taxonomy_namespace(self, namespace: TaxonomyNamespace, digest: str) -> None:
         ref = TaxonomyNamespaceRef(
             namespace_id=namespace.namespace_id,
@@ -233,6 +256,7 @@ class SemanticReferenceResolver:
             RefDocumentType.IMPLEMENTATION_BINDING,
             RefDocumentType.TAXONOMY_NAMESPACE,
             RefDocumentType.SEMANTIC_PAYLOAD,
+            RefDocumentType.COMPILATION_PLAN,
         }:
             raise ReferenceResolutionError(
                 f"{kind.value} is content-bearing in this slice; register its document"
@@ -245,7 +269,6 @@ class SemanticReferenceResolver:
             "scope": scope,
         }
         ref_types = {
-            RefDocumentType.COMPILATION_PLAN: CompilationPlanRef,
             RefDocumentType.BUILD_CONTEXT_BINDING: BuildContextBindingRef,
             RefDocumentType.REFINEMENT_PATCH: RefinementPatchRef,
             RefDocumentType.ARTIFACT_REVISION: ArtifactRevisionRef,
