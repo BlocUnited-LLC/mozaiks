@@ -28,11 +28,14 @@ This project follows a practical pre-1.0 changelog format:
   released at a durably persisted terminal or human-waiting boundary
   (including on exceptions and cancellation), and a stale holder can never
   delete a successor's lease. After confirmed lease loss (failed or
-  unprovable renewal), further durable session/WAL writes for that chat are
-  refused in-process. Operating modes are explicit: `required`
+  unprovable renewal), the protected execution is cancelled and further
+  durable session, workflow UI, AG2 stream, and AG2 Network knowledge/WAL
+  writes for that chat are refused in-process. A still-running local holder
+  cannot be hidden by a same-process successor. Operating modes are explicit: `required`
   (fail-closed distributed exclusion whenever database persistence is
-  enabled; acquisition also fails closed if the unique lock index cannot be
-  verified, instead of degrading to a cosmetic lock) and `local` (explicit
+  enabled; index or acquisition-authority failures remain distinct from
+  ordinary contention and fail closed instead of degrading to a cosmetic
+  lock) and `local` (explicit
   single-process serialization only), overridable via
   `MOZAIKS_CHAT_LOCK_MODE`. Contention, unavailable authority, renewal loss,
   and release failure each emit distinct diagnostics (`CHAT_LOCK_BUSY`,

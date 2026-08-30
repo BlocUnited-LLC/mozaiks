@@ -10,6 +10,7 @@ tests/test_chat_execution_lease_real_mongo.py.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -178,6 +179,25 @@ async def test_required_mode_fails_closed_without_unique_index(monkeypatch) -> N
             pytest.fail("must not enter the protected section without index-backed atomicity")
 
 
+class _UnavailableAcquireCollection:
+    async def find_one_and_update(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("lock authority disconnected during acquire")
+
+
+async def test_required_mode_distinguishes_authority_failure_from_contention(monkeypatch) -> None:
+    dl.configure_chat_lock(dl.ChatLockMode.REQUIRED)
+    monkeypatch.setenv("DISTRIBUTED_LOCK_MAX_RETRIES", "0")
+    monkeypatch.setattr(dl, "_get_lock_collection", lambda: _UnavailableAcquireCollection())
+
+    async def _verified(_collection) -> None:  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(dl, "_verify_acquisition_indexes", _verified)
+    with pytest.raises(dl.ChatLockAuthorityUnavailableError, match="disconnected during acquire"):
+        async with dl.chat_execution_lease(app_id="app-1", chat_id="chat-1"):
+            pytest.fail("must not report an authority outage as lock contention")
+
+
 # ---------------------------------------------------------------------------
 # Lease-loss write guard
 # ---------------------------------------------------------------------------
@@ -236,6 +256,75 @@ async def test_renewal_miss_marks_lease_lost() -> None:
     assert not lease.lost
     await lease._renew_once()
     assert lease.lost
+
+
+async def test_confirmed_renewal_loss_cancels_protected_owner() -> None:
+    lease = dl.ChatLease(
+        resource="chat:app-1:chat-1",
+        holder_id="holder-1",
+        mode=dl.ChatLockMode.REQUIRED,
+        collection=_FakeRenewCollection(),
+        ttl_seconds=60,
+    )
+
+    async def _protected_execution() -> None:
+        lease._owner_task = asyncio.current_task()
+        await asyncio.create_task(lease._renew_once())
+        await asyncio.sleep(0)
+        pytest.fail("execution continued after confirmed lease loss")
+
+    with pytest.raises(asyncio.CancelledError):
+        await _protected_execution()
+    assert lease.lost
+
+
+async def test_same_process_successor_cannot_hide_existing_holder(monkeypatch) -> None:
+    dl.configure_chat_lock(dl.ChatLockMode.REQUIRED)
+    resource = dl.chat_lock_resource("app-1", "chat-1")
+    incumbent = _register_lease(resource, lost=False)
+    monkeypatch.setattr(dl, "_get_lock_collection", lambda: object())
+
+    async def _verified(_collection) -> None:  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(dl, "_verify_acquisition_indexes", _verified)
+    with pytest.raises(dl.LockAcquisitionError):
+        async with dl.chat_execution_lease(app_id="app-1", chat_id="chat-1"):
+            pytest.fail("a same-process successor must not replace the incumbent registry entry")
+    assert dl._process_leases[resource] is incumbent
+
+
+async def test_confirmed_loss_guards_all_session_ui_mutation_seams(monkeypatch) -> None:
+    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+
+    _register_lease(dl.chat_lock_resource("app-1", "chat-1"), lost=True)
+    manager = AG2PersistenceManager()
+
+    async def _unexpected_collection_access():
+        pytest.fail("guard must reject before reaching Mongo")
+
+    monkeypatch.setattr(manager, "_coll", _unexpected_collection_access)
+    calls = (
+        manager.update_last_artifact(
+            chat_id="chat-1", app_id="app-1", artifact={"tool_name": "test"}
+        ),
+        manager.attach_tool_call_metadata(
+            chat_id="chat-1", app_id="app-1", event_id="event-1", metadata={}
+        ),
+        manager.update_tool_call_state(
+            chat_id="chat-1", app_id="app-1", event_id="event-1", status="completed"
+        ),
+        manager.save_pending_input_request(
+            chat_id="chat-1",
+            app_id="app-1",
+            request_id="request-1",
+            agent="agent",
+            prompt="prompt",
+        ),
+    )
+    for call in calls:
+        with pytest.raises(dl.ChatLeaseLostError):
+            await call
 
 
 # ---------------------------------------------------------------------------
@@ -373,3 +462,32 @@ async def test_bridge_fails_closed_when_authority_unavailable(monkeypatch) -> No
     assert transport.persisted_messages == []
     assert adapter.run_requests == []
     assert adapter.resume_requests == []
+
+
+async def test_bridge_reports_confirmed_lease_loss_as_aborted_run(monkeypatch) -> None:
+    resource = dl.chat_lock_resource("app-1", "chat-1")
+
+    @asynccontextmanager
+    async def _lost_after_execution(**_kwargs):  # noqa: ANN003
+        yield SimpleNamespace(lost=False)
+        raise dl.ChatLeaseLostError(resource)
+
+    monkeypatch.setattr(_bridge_mod, "chat_execution_lease", _lost_after_execution)
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
+    pm = _FakePersistenceManager()
+    transport = _DummyTransport(pm)
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1",
+        user_id="u1",
+        workflow_name="AppGenerator",
+        message="go",
+        app_id="app-1",
+    )
+
+    assert result["status"] == "error"
+    assert result["route"] == "chat_lock_lost"
+    assert transport.errors == [{"error_code": "CHAT_LOCK_LOST", "chat_id": "chat-1"}]
+    assert len(adapter.run_requests) == 1

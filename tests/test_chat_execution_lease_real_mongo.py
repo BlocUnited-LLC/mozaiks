@@ -315,13 +315,16 @@ async def test_stale_owner_cannot_release_successor_lease() -> None:
 # 7. Confirmed lease loss refuses further durable session/WAL writes
 # ---------------------------------------------------------------------------
 
-async def test_lease_loss_blocks_durable_writes(monkeypatch) -> None:
+async def test_lease_loss_cancels_protected_execution(monkeypatch) -> None:
     monkeypatch.setenv("DISTRIBUTED_LOCK_TTL_SECONDS", "2")
     from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
     app_id, chat_id = _ids()
     resource = dl.chat_lock_resource(app_id, chat_id)
     pm = AG2PersistenceManager()
+    captured_lease: dl.ChatLease | None = None
+    version_healthy: int | None = None
+    continued_after_loss = False
 
     try:
         await pm.create_chat_session(
@@ -329,42 +332,31 @@ async def test_lease_loss_blocks_durable_writes(monkeypatch) -> None:
         )
         version_before = await pm.get_session_version(chat_id, app_id)
 
-        async with dl.chat_execution_lease(app_id=app_id, chat_id=chat_id) as lease:
-            # Writes are allowed while the lease is healthy.
-            await pm.append_run_user_message(
-                chat_id=chat_id, app_id=app_id, content="healthy write"
-            )
-            assert len(await pm.load_run_history(chat_id=chat_id, app_id=app_id)) == 1
-            await pm.clear_pending_input_request(chat_id=chat_id, app_id=app_id)
-            version_healthy = await pm.get_session_version(chat_id, app_id)
-            assert version_healthy == (version_before or 0) + 1
-
-            # Simulate a successor stealing the lease: the doc disappears.
-            collection = dl._get_lock_collection()
-            await collection.delete_many({"resource": resource})
-            for _ in range(80):  # renewal tick (~1s) confirms the loss
-                if lease.lost:
-                    break
-                await asyncio.sleep(0.1)
-            assert lease.lost
-
-            with pytest.raises(dl.ChatLeaseLostError):
-                await pm.persist_context_variables(
-                    chat_id=chat_id, app_id=app_id,
-                    variables={"step": "two"}, workflow_name="AppGenerator",
-                )
-            with pytest.raises(dl.ChatLeaseLostError):
+        async def _protected_execution() -> None:
+            nonlocal captured_lease, continued_after_loss, version_healthy
+            async with dl.chat_execution_lease(app_id=app_id, chat_id=chat_id) as lease:
+                captured_lease = lease
+                # Writes are allowed while the lease is healthy.
                 await pm.append_run_user_message(
-                    chat_id=chat_id, app_id=app_id, content="stale write"
+                    chat_id=chat_id, app_id=app_id, content="healthy write"
                 )
-            with pytest.raises(dl.ChatLeaseLostError):
-                await pm.append_run_assistant_message(
-                    chat_id=chat_id, app_id=app_id, content="stale write"
-                )
-            with pytest.raises(dl.ChatLeaseLostError):
+                assert len(await pm.load_run_history(chat_id=chat_id, app_id=app_id)) == 1
                 await pm.clear_pending_input_request(chat_id=chat_id, app_id=app_id)
+                version_healthy = await pm.get_session_version(chat_id, app_id)
+                assert version_healthy == (version_before or 0) + 1
 
-        # No durable write landed after the confirmed loss.
+                # Simulate expiry/takeover. The renewal task must cancel this
+                # protected owner rather than merely setting a diagnostic bit.
+                collection = dl._get_lock_collection()
+                await collection.delete_many({"resource": resource})
+                await asyncio.Event().wait()
+                continued_after_loss = True
+
+        with pytest.raises(dl.ChatLeaseLostError):
+            await asyncio.wait_for(_protected_execution(), timeout=10)
+
+        assert captured_lease is not None and captured_lease.lost
+        assert not continued_after_loss
         assert await pm.get_session_version(chat_id, app_id) == version_healthy
         history = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
         assert len(history) == 1

@@ -789,6 +789,7 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
             now = datetime.now(UTC)
@@ -1544,6 +1545,7 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             history = await self.load_run_history(chat_id=chat_id, app_id=str(resolved_app_id))
             last_assistant_idx = None
@@ -1601,6 +1603,7 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
             now = datetime.now(UTC).isoformat()
@@ -1671,6 +1674,7 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
             await coll.update_one(

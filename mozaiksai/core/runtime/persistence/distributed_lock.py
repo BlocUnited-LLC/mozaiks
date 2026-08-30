@@ -32,10 +32,10 @@
 #
 # Known residual window (documented, not fenced in this slice): a holder that
 # stalls past its TTL without a failed renewal can have at most one in-flight
-# write land after a successor acquires. Confirmed lease loss (failed or
-# unprovable renewal) stops all further guarded durable writes via
-# assert_chat_mutable(). Storage-level fencing tokens are a later sub-slice
-# of issue #426.
+# write land after a successor acquires. Confirmed lease loss cancels the
+# protected execution and stops all further guarded durable writes via
+# assert_chat_mutable(). Storage-level fencing tokens are a later sub-slice of
+# issue #426.
 #
 # Configuration (env vars):
 #   MOZAIKS_CHAT_LOCK_MODE         — "required" | "local" explicit override
@@ -54,6 +54,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
+
+from pymongo.errors import DuplicateKeyError
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.multitenant.app_ids import normalize_app_id
@@ -294,45 +296,42 @@ async def _try_acquire(collection: Any, resource: str, holder_id: str, ttl_secon
     """Attempt a single atomic lock acquisition. Returns True on success."""
     now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=ttl_seconds)
-    try:
-        # Steal an expired lease, or re-assert one this holder already owns.
-        result = await collection.find_one_and_update(
-            {
-                "resource": resource,
-                "$or": [
-                    {"expires_at": {"$lt": now}},
-                    {"holder_id": holder_id},
-                ],
-            },
-            {
-                "$set": {
-                    "resource": resource,
-                    "holder_id": holder_id,
-                    "expires_at": expires_at,
-                    "acquired_at": now.isoformat(),
-                }
-            },
-            upsert=False,
-            return_document=True,
-        )
-        if result is not None:
-            return True
-
-        # No expired lease exists — try a clean insert; the unique index on
-        # `resource` makes exactly one concurrent inserter win.
-        try:
-            await collection.insert_one({
+    # Steal an expired lease, or re-assert one this holder already owns.
+    result = await collection.find_one_and_update(
+        {
+            "resource": resource,
+            "$or": [
+                {"expires_at": {"$lt": now}},
+                {"holder_id": holder_id},
+            ],
+        },
+        {
+            "$set": {
                 "resource": resource,
                 "holder_id": holder_id,
                 "expires_at": expires_at,
                 "acquired_at": now.isoformat(),
-            })
-            return True
-        except Exception:
-            # DuplicateKeyError or similar — lease is held by another owner.
-            return False
-    except Exception as exc:
-        logger.debug("Lock acquisition attempt failed resource=%s: %s", resource, exc)
+            }
+        },
+        upsert=False,
+        return_document=True,
+    )
+    if result is not None:
+        return True
+
+    # No expired lease exists — try a clean insert; the unique index on
+    # `resource` makes exactly one concurrent inserter win. Only a proven
+    # uniqueness race is contention; authority failures must use the distinct
+    # unavailable diagnostic.
+    try:
+        await collection.insert_one({
+            "resource": resource,
+            "holder_id": holder_id,
+            "expires_at": expires_at,
+            "acquired_at": now.isoformat(),
+        })
+        return True
+    except DuplicateKeyError:
         return False
 
 
@@ -364,6 +363,7 @@ class ChatLease:
         self._ttl_seconds = ttl_seconds
         self._expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
         self._lost = False
+        self._owner_task: asyncio.Task[Any] | None = None
         self._renew_task: asyncio.Task[None] | None = None
 
     @property
@@ -374,11 +374,14 @@ class ChatLease:
         if not self._lost:
             self._lost = True
             logger.error(
-                "CHAT_LOCK_RENEWAL_LOST resource=%s holder=%s: %s — durable writes for this chat are now refused in this process",
+                "CHAT_LOCK_RENEWAL_LOST resource=%s holder=%s: %s — cancelling protected execution and refusing durable writes",
                 self.resource,
                 self.holder_id,
                 reason,
             )
+            owner = self._owner_task
+            if owner is not None and not owner.done():
+                owner.cancel(f"chat execution lease lost: {self.resource}")
 
     async def _renew_once(self) -> None:
         """Extend the lease; mark lost when ownership can no longer be proven."""
@@ -419,6 +422,7 @@ class ChatLease:
 
     def start_renewal(self) -> None:
         if self._collection is not None and self._renew_task is None:
+            self._owner_task = asyncio.current_task()
             self._renew_task = asyncio.create_task(
                 self._renew_loop(), name=f"chat-lease-renew:{self.resource}"
             )
@@ -557,12 +561,28 @@ async def chat_execution_lease(
 
     await _verify_acquisition_indexes(collection)
 
+    # Never replace a still-running holder in the process registry. Mongo
+    # remains the cross-process authority, while this check closes the local
+    # expiry/takeover window in which a successor could otherwise hide the
+    # stale holder's lost state from assert_chat_mutable().
+    if resource in _process_leases:
+        logger.warning("CHAT_LOCK_BUSY resource=%s mode=required local_holder=true", resource)
+        raise LockAcquisitionError(resource)
+
     effective_holder = holder_id or _default_holder_id()
     ttl = _ttl()
 
     acquired = False
     for attempt in range(max_retries + 1):
-        acquired = await _try_acquire(collection, resource, effective_holder, ttl)
+        try:
+            acquired = await _try_acquire(collection, resource, effective_holder, ttl)
+        except Exception as exc:
+            logger.error(
+                "CHAT_LOCK_AUTHORITY_UNAVAILABLE resource=%s during acquisition: %s",
+                resource,
+                exc,
+            )
+            raise ChatLockAuthorityUnavailableError(resource, str(exc)) from exc
         if acquired:
             break
         if attempt < max_retries:
@@ -587,7 +607,17 @@ async def chat_execution_lease(
     lease.start_renewal()
     logger.debug("LOCK_ACQUIRED resource=%s holder=%s", resource, effective_holder)
     try:
-        yield lease
+        try:
+            yield lease
+        except asyncio.CancelledError as exc:
+            if lease.lost:
+                raise ChatLeaseLostError(resource) from exc
+            raise
+        if lease.lost:
+            # The protected operation may have consumed cancellation as part
+            # of its own shutdown protocol. Never let that turn confirmed
+            # lease loss into an apparent successful run.
+            raise ChatLeaseLostError(resource)
     finally:
         if _process_leases.get(resource) is lease:
             _process_leases.pop(resource, None)

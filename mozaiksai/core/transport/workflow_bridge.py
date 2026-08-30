@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
 from mozaiksai.core.runtime.persistence.distributed_lock import (
+    ChatLeaseLostError,
     ChatLockAuthorityUnavailableError,
     LockAcquisitionError,
     chat_execution_lease,
@@ -285,6 +286,10 @@ class WorkflowBridgeMixin:
                     if lock_err.resource != chat_lock_resource(app_id, chat_id):
                         raise
                     return await self._reject_chat_locked(chat_id=chat_id, busy=False)
+                except ChatLeaseLostError as lock_err:
+                    if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                        raise
+                    return await self._reject_chat_lease_lost(chat_id=chat_id)
 
             if has_active_session and active_callbacks:
                 # Route to existing AG2 session via WebSocket callback mechanism
@@ -360,6 +365,10 @@ class WorkflowBridgeMixin:
                 if lock_err.resource != chat_lock_resource(app_id, chat_id):
                     raise
                 return await self._reject_chat_locked(chat_id=chat_id, busy=False)
+            except ChatLeaseLostError as lock_err:
+                if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                    raise
+                return await self._reject_chat_lease_lost(chat_id=chat_id)
 
         except Exception as e:
             # Surface token denial before the generic failure path so the UI
@@ -459,6 +468,21 @@ class WorkflowBridgeMixin:
             "chat_id": chat_id,
             "message": "Chat lock authority unavailable.",
             "route": "chat_lock_unavailable",
+        }
+
+    async def _reject_chat_lease_lost(self, *, chat_id: str) -> dict[str, Any]:
+        """Report a run aborted after its distributed lease was lost."""
+        logger.error("CHAT_LOCK_RENEWAL_LOST chat=%s — protected execution aborted", chat_id)
+        await self.send_error(
+            error_message="Chat execution ownership was lost. Please retry shortly.",
+            error_code="CHAT_LOCK_LOST",
+            chat_id=chat_id,
+        )
+        return {
+            "status": "error",
+            "chat_id": chat_id,
+            "message": "Chat execution lease lost.",
+            "route": "chat_lock_lost",
         }
 
     async def _launch_workflow_run_locked(
