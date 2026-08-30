@@ -178,7 +178,7 @@ export class ApiAdapter {
     throw new Error('sendMessageToWorkflow must be implemented');
   }
 
-  createWebSocketConnection(_appId, _userId, _callbacks, _workflowname = null, _chatId = null) {
+  createWebSocketConnection(_appId, _userId, _callbacks, _workflowname = null, _chatId = null, _options = {}) {
     throw new Error('createWebSocketConnection must be implemented');
   }
 
@@ -228,7 +228,7 @@ export class ApiAdapter {
           : [];
       return { ...payload, sessions };
     } catch (error) {
-      console.warn('General chats endpoint unavailable, continuing without list.', error?.message || error);
+      console.warn('⚠️ General chats endpoint unavailable, continuing without list.', error?.message || error);
       if (error?.status === 404 || String(error?.message || '').includes('HTTP 404')) {
         this._generalChatsApiUnavailable = true;
       }
@@ -299,7 +299,7 @@ export class ApiAdapter {
       }
       return await response.json();
     } catch (error) {
-      console.warn('General chat transcript endpoint unavailable.', error?.message || error);
+      console.warn('⚠️ General chat transcript endpoint unavailable.', error?.message || error);
       if (error?.status === 404 || String(error?.message || '').includes('HTTP 404')) {
         this._generalChatsTranscriptUnavailable = true;
       }
@@ -349,13 +349,13 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const actualworkflowname = resolveWorkflow(workflowname);
 
     if (!chatId) {
-      console.error('Chat ID is required for sending message to workflow');
+      console.error('❌ Chat ID is required for sending message to workflow');
       return false;
     }
 
     const connection = this._chatConnections.get(chatId);
     if (!connection || typeof connection.send !== 'function') {
-      console.error('WebSocket connection not available for chat', chatId);
+      console.error('❌ WebSocket connection not available for chat', chatId);
       return false;
     }
 
@@ -378,17 +378,17 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const actualworkflowname = resolveWorkflow(workflowname);
     
     if (!chatId) {
-      console.error('Chat ID is required for sending message to workflow');
+      console.error('❌ Chat ID is required for sending message to workflow');
       return { success: false, error: 'Chat ID is required' };
     }
-    
+
     try {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/chat/${appId}/${chatId}/${userId}/input`, {
         method: 'POST',
         headers: buildAuthHeaders(undefined, this.config),
-        body: JSON.stringify({ 
-          message, 
+        body: JSON.stringify({
+          message,
           workflow_name: actualworkflowname,
           app_id: appId,
           user_id: userId,
@@ -400,35 +400,59 @@ export class WebSocketApiAdapter extends ApiAdapter {
         const result = await response.json();
         return result;
       } else {
-        console.error('Failed to send message:', response.status, response.statusText);
+        console.error('❌ Failed to send message:', response.status, response.statusText);
         return { success: false, error: `HTTP ${response.status}` };
       }
     } catch (error) {
-      console.error('Failed to send message to workflow:', error);
+      console.error('❌ Failed to send message to workflow:', error);
       return { success: false, error: error.message };
     }
   }
 
-  createWebSocketConnection(appId, userId, callbacks = {}, workflowname = null, chatId = null) {
+  createWebSocketConnection(appId, userId, callbacks = {}, workflowname = null, chatId = null, options = {}) {
     const actualworkflowname = resolveWorkflow(workflowname);
     
     
     if (!chatId) {
-      console.error('Chat ID is required for WebSocket connection');
+      console.error('❌ Chat ID is required for WebSocket connection');
       return null;
     }
     
     const wsBase = this.getWsBaseUrl();
-    
-    // Build WebSocket URL with access_token query param for authentication
-    let wsUrl = `${wsBase}/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`;
-    const token = getAccessToken(this.config);
-    if (token) {
-      wsUrl += `?access_token=${encodeURIComponent(token)}`;
-    } else {
+    const existingConnection = this._chatConnections.get(chatId);
+    const existingSocket = existingConnection?.socket;
+    if (
+      existingConnection
+      && existingConnection.workflowName === actualworkflowname
+      && existingSocket
+      && (existingSocket.readyState === WebSocket.CONNECTING || existingSocket.readyState === WebSocket.OPEN)
+    ) {
+      return existingConnection;
+    }
+    if (
+      existingConnection
+      && existingSocket
+      && existingSocket.readyState !== WebSocket.CLOSING
+      && existingSocket.readyState !== WebSocket.CLOSED
+    ) {
+      try {
+        existingConnection.close?.();
+      } catch (_) {}
     }
     
-    const socket = new WebSocket(wsUrl);
+    // Build WebSocket URL with access_token query param for authentication
+    const wsUrl = new URL(`/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`, wsBase);
+    const token = getAccessToken(this.config);
+    if (token) {
+      wsUrl.searchParams.set('access_token', token);
+    }
+    if (options?.suppressHistoryReplay) {
+      wsUrl.searchParams.set('suppress_history_replay', '1');
+    }
+    
+    const socket = new WebSocket(wsUrl.toString());
+    let closedByClient = false;
+    let hasOpened = false;
     
     // F7/F8: Sequence tracking and resume capability (strict canonical key)
     let lastSequence = parseInt(platform.storage.getItem(`ws_idx_${chatId}`) || '0');
@@ -447,6 +471,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     socket.onopen = () => {
+      hasOpened = true;
       
       // If we have a previous sequence, request resume first
       if (lastSequence > 0) {
@@ -482,12 +507,15 @@ export class WebSocketApiAdapter extends ApiAdapter {
         if (callbacks.onMessage) callbacks.onMessage(data);
         
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        console.error('❌ Failed to parse WebSocket message:', error);
       }
     };
 
     socket.onerror = (error) => {
-      console.error("WebSocket error:", error);
+      if (closedByClient && !hasOpened) {
+        return;
+      }
+      console.error('❌ WebSocket error:', error);
       if (callbacks.onError) callbacks.onError(error);
     };
 
@@ -498,6 +526,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
 
     const connection = {
       chatId,
+      workflowName: actualworkflowname,
       socket,
       send: (message) => {
         if (socket.readyState === WebSocket.OPEN) {
@@ -509,7 +538,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
               socket.send(message);
             }
           } catch (e) {
-            console.error('Failed to send WS message', e);
+            console.error('❌ Failed to send WS message', e);
             return false;
           }
           return true;
@@ -517,8 +546,11 @@ export class WebSocketApiAdapter extends ApiAdapter {
         return false;
       },
       close: () => {
+        closedByClient = true;
         try {
-          socket.close();
+          if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
         } finally {
           this._chatConnections.delete(chatId);
         }
@@ -538,7 +570,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('Failed to fetch message history:', error);
+      console.error('❌ Failed to fetch message history:', error);
     }
     return [];
   }
@@ -568,7 +600,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('File upload failed:', error);
+      console.error('❌ File upload failed:', error);
     }
 
     return { success: false, error: 'Upload failed' };
@@ -582,7 +614,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('Failed to get workflow transport:', error);
+      console.error('❌ Failed to get workflow transport:', error);
     }
     return null;
   }
@@ -632,11 +664,11 @@ export class WebSocketApiAdapter extends ApiAdapter {
             }
           }
 
-          console.error('Failed to start chat:', response.status, response.statusText, detail);
+          console.error('❌ Failed to start chat:', response.status, response.statusText, detail);
           return { success: false, error: `HTTP ${response.status}`, status: response.status, detail };
         }
       } catch (error) {
-        console.error('Failed to start chat:', error);
+        console.error('❌ Failed to start chat:', error);
         return { success: false, error: error.message };
       }
     });
@@ -664,7 +696,7 @@ export class RestApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('❌ Failed to send message:', error);
     }
 
     return { success: false, error: 'Failed to send message' };
@@ -672,12 +704,12 @@ export class RestApiAdapter extends ApiAdapter {
 
   async sendMessageToWorkflow(message, appId, userId, workflowname = null, chatId = null, context = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
-    
+
     if (!chatId) {
-      console.error('Chat ID is required for sending message to workflow');
+      console.error('❌ Chat ID is required for sending message to workflow');
       return { success: false, error: 'Chat ID is required' };
     }
-    
+
     try {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/chat/${appId}/${chatId}/${userId}/input`, {
@@ -696,18 +728,18 @@ export class RestApiAdapter extends ApiAdapter {
         const result = await response.json();
         return result;
       } else {
-        console.error('Failed to send message:', response.status, response.statusText);
+        console.error('❌ Failed to send message:', response.status, response.statusText);
         return { success: false, error: `HTTP ${response.status}` };
       }
     } catch (error) {
-      console.error('Failed to send message to workflow:', error);
+      console.error('❌ Failed to send message to workflow:', error);
       return { success: false, error: error.message };
     }
   }
 
   createWebSocketConnection() {
     // REST API adapter doesn't support WebSocket connections
-    console.warn('WebSocket not supported in REST API adapter');
+    console.warn('⚠️ WebSocket not supported in REST API adapter');
     return null;
   }
 
@@ -721,7 +753,7 @@ export class RestApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('Failed to fetch messages:', error);
+      console.error('❌ Failed to fetch messages:', error);
     }
     return [];
   }
@@ -753,7 +785,7 @@ export class RestApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('File upload failed:', error);
+      console.error('❌ File upload failed:', error);
     }
 
     return { success: false, error: 'Upload failed' };
@@ -767,7 +799,7 @@ export class RestApiAdapter extends ApiAdapter {
         return await response.json();
       }
     } catch (error) {
-      console.error('Failed to get workflow transport:', error);
+      console.error('❌ Failed to get workflow transport:', error);
     }
     return null;
   }
@@ -804,11 +836,11 @@ export class RestApiAdapter extends ApiAdapter {
           const result = await response.json();
           return result;
         } else {
-          console.error('Failed to start chat:', response.status, response.statusText);
+          console.error('❌ Failed to start chat:', response.status, response.statusText);
           return { success: false, error: `HTTP ${response.status}` };
         }
       } catch (error) {
-        console.error('Failed to start chat:', error);
+        console.error('❌ Failed to start chat:', error);
         return { success: false, error: error.message };
       }
     });

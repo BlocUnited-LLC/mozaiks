@@ -173,12 +173,12 @@ The runtime stores sequence metadata on chat sessions using the current
 
 Configuration intent:
 - Build sequence: `app_type_selector -> ValueEngine -> ThemeCapture -> coding_journey_selector -> database_setup_selector -> DesignDocs -> AgentGenerator -> AppGenerator`
-- Brownfield adoption sequence: `app_type_selector -> ExistingAppDiscovery`
+- Brownfield adoption sequence: `app_type_selector -> brownfield_path_selector -> brownfield_repo_input -> ExistingAppDiscovery`
 - Dependencies: `DesignDocs` requires `ValueEngine`; generators require `DesignDocs`
 - Entry transition: `/create` points directly at `app_type_selector`
 
 UX outcome:
-- The user picks a route before any workflow starts.
+- The user picks a route before any workflow starts, then picks the repo to analyze.
 - The greenfield and brownfield choices can bind different authored sequences from the same entry transition.
 - The runtime enforces prerequisites before each workflow start.
 - Completion of one build phase can auto-advance to the next phase.

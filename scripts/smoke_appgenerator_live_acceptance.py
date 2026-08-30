@@ -240,24 +240,42 @@ def build_appgenerator_acceptance_files(
             }
         ),
         "ui/pages/support_tickets.yaml": """
+schema_version: mozaiks.app_page.v1
 name: SupportTickets
 route: /support-tickets
 title: Support Tickets
+page_type: record_list
+layout: full-width
 sections:
   - id: ticket-list
-    type: record_list
+    primitive: DataTable
     config:
+      columns:
+        - key: ticket_id
+          label: Ticket
       api_endpoint: /api/modules/support_tickets/list_tickets
   - id: ticket-create
-    type: form
+    primitive: Form
     config:
+      fields:
+        - name: customer_name
+          label: Customer
+          type: text
       submit_action:
-        api_endpoint: /api/modules/support_tickets/create_ticket
+        label: Create Ticket
+        action_type: submit
+        href: /api/modules/support_tickets/create_ticket
   - id: batch-triage
-    type: form
+    primitive: Form
     config:
+      fields:
+        - name: batch_id
+          label: Batch
+          type: text
       submit_action:
-        api_endpoint: /api/modules/support_tickets/request_batch_triage
+        label: Request Triage
+        action_type: submit
+        href: /api/modules/support_tickets/request_batch_triage
 """,
         "data/contract.json": json.dumps(data_contract),
         "security/secrets.yaml": """

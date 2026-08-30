@@ -178,6 +178,84 @@ models:
         - str
         - 'null'
         description: Optional implementation note.
+  AppDemoFixtureRecordGroup:
+    type: model
+    fields:
+      module_id:
+        type: str
+        description: Module or facade id that owns the seeded record family.
+      entity_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional entity name or collection hint for the fixture group.
+      route_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Primary route or browser surface that consumes the fixture group.
+      record_role:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Stable semantic role for the record family, such as app, subscription, domain, request, or summary.
+      record_count:
+        type: integer
+        description: Number of records the demo seed should create for this group.
+      required_states:
+        type: optional_list
+        items: str
+        description: Required states or lifecycle values for the records.
+      stable_keys:
+        type: optional_list
+        items: str
+        description: Deterministic field names that should be populated with stable sample values.
+      notes:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional implementation note for local/demo seeding.
+  AppDemoFixtureSet:
+    type: model
+    fields:
+      fixture_id:
+        type: str
+        description: Stable fixture-set id.
+      purpose:
+        type: str
+        description: Why the fixture set exists.
+      scope:
+        type: literal
+        values:
+        - local_smoke
+        - browser_demo
+        - staging_preview
+        - replay_fixture
+        description: Fixture scope. Use local_smoke or browser_demo for no-spend validation data.
+      routes:
+        type: optional_list
+        items: str
+        description: Routes that should be satisfied by the fixture set.
+      record_groups:
+        type: optional_list
+        items: AppDemoFixtureRecordGroup
+        description: Declarative record families that should be seeded for this fixture set.
+      cleanup_strategy:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: How local/demo seeds should be reset between runs.
+      notes:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional additional guidance for the seed tool.
   WorkspaceCatalogCheck:
     type: model
     fields:
@@ -243,9 +321,23 @@ models:
         type: optional_str
         description: Human-readable connector label shown in inline credential prompts and the app-scoped integrations surface.
       kind:
-        type: str
-        description: Integration type such as payments, email, analytics, agent-backend,
-          storage, or external-api.
+        type: literal
+        values:
+        - payments
+        - email
+        - analytics
+        - agent-backend
+        - storage
+        - external-api
+        - auth
+        - messaging
+        - database
+        description: >
+          Canonical integration category. payments = billing/subscription provider;
+          email = transactional or marketing email; analytics = event tracking/reporting;
+          agent-backend = LLM/AI API; storage = blob/file/object store; external-api =
+          third-party REST/GraphQL API; auth = identity/SSO provider; messaging =
+          SMS/push/real-time channel; database = external data store.
       purpose:
         type: str
         description: Why the integration exists in the product.
@@ -785,10 +877,6 @@ models:
         - page_bundle
         - agent_backend_integration
         - refinement_harness
-        - ai_disclosure_docs
-        - legal_docs
-        - infra_scaffold
-        - auth_adapter
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -831,15 +919,6 @@ models:
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
-          `infra_scaffold` emits Dockerfile, .github/workflows/readiness.yml,
-          .github/workflows/deploy.yml, and scripts/provision.sh from infra
-          templates. Emitted once at generation time; InfraScaffoldAgent owns
-          these files and skips regeneration if Dockerfile already exists unless
-          --force-infra is set.
-          `auth_adapter` emits config/auth.yaml and ui/auth/authAdapter.js from
-          the webapp_builder auth templates when an authenticated generated app
-          needs a real OIDC provider. Re-emitted on auth config changes.
-          AppSchemaAgent owns this task.
       capability_pack_id:
         type: union
         variants:
@@ -945,6 +1024,18 @@ models:
           quotas, credits, token allowances, or token wallets. Custom money-flow
           apps set this to not_required unless they also sell app access tiers,
           quotas, credits, or token allowances.
+      monetization_provider:
+        type: literal
+        values:
+        - mozaiks_pay
+        - entitlement_dispatch
+        - 'null'
+        description: >
+          Explicit subscription assignment owner when subscription_contract_requirement
+          is required. Use mozaiks_pay only when the user explicitly selects the
+          managed MozaiksPay provider. Use entitlement_dispatch for the self-managed
+          OSS path. Null when subscription_contract_requirement is not_required.
+          Do not emit custom or decorative provider ids.
       primary_payer:
         type: union
         variants:
@@ -1022,6 +1113,12 @@ models:
       agent_message:
         type: str
         description: Short planning summary for the build plan.
+      app_kind:
+        type: str
+        description: >
+          Product/domain classification used by planning and readiness inference,
+          such as saas, marketplace, or a brownfield build-path kind. This is
+          intentionally open-ended and is not the closed AppProvenanceKind taxonomy.
       pages:
         type: optional_list
         items: AppBuildPage
@@ -1105,6 +1202,25 @@ models:
         type: optional_list
         items: AppCapabilityPack
         description: Canonical product capability packs selected before deriving pages, entities, and build tasks.
+      readiness_profile:
+        type: literal
+        values:
+        - none
+        - basic_app
+        - saas_app
+        - host_operator_platform
+        - marketplace_platform
+        default: none
+        description: >
+          Deterministic launch/readiness classification for platform-style apps.
+          Use none for ordinary customer apps. Use basic_app for lightweight
+          apps that still want a local no-spend readiness wrapper. Use saas_app
+          for subscription products that need launch evidence but not a full
+          host-operator matrix. Use host_operator_platform when the app runs
+          hosted apps, launch gates, compliance checks, or evidence stamping.
+          Use marketplace_platform when the app manages multi-party platform
+          operations and needs the same deterministic evidence pattern. This is
+          a planning signal only; it does not enable runtime behavior by itself.
       revenue_model:
         type: union
         variants:
@@ -1135,6 +1251,20 @@ models:
           not free. It records whether config/subscriptions.yaml is required or
           whether the app should route to custom app/operator capabilities
           without a subscription contract.
+      monetization_provider:
+        type: literal
+        values:
+        - mozaiks_pay
+        - entitlement_dispatch
+        - 'null'
+        default: null
+        description: >
+          Explicit subscription assignment owner. Required when build_tasks include
+          task_type='subscription_config'. mozaiks_pay materializes the selected
+          mozaikspay managed capability pack and app-owned billing_portal facade;
+          entitlement_dispatch materializes the self-managed OSS assignment writer.
+          Unknown values fail before materialization, and the two providers must
+          never be selected together.
       external_integrations:
         type: optional_list
         items: AppBuildIntegration
@@ -1156,6 +1286,12 @@ models:
         type: optional_list
         items: AppWorkflowTouchpoint
         description: Persistent page entry points that launch or resume workflow sessions from the app UI.
+      demo_fixture_sets:
+        type: optional_list
+        items: AppDemoFixtureSet
+        description: >
+          Declarative demo/local-smoke fixture planning for deterministic browser previews or seeded validation records.
+          These are test/demo planning artifacts only — do not treat them as runtime module behavior or production data.
       agent_backend_required:
         type: bool
         description: Whether this app must integrate with an upstream generated agent backend.
@@ -1989,10 +2125,10 @@ models:
         - billing
         - membership
         - entitlement_dispatch
-        - file_storage
-        - notification_preferences
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
+          Must stay aligned with the runtime ModuleIdentity.type Literal in
+          mozaiksai/core/runtime/app/module_loader.py.
           standard = request/response CRUD (default).
           messaging = stateful communication with read/unread tracking using canonical module contracts only.
           workflow = named lifecycle/state behavior implemented through canonical module contracts and backend policy helpers.
@@ -2001,8 +2137,6 @@ models:
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
           membership = resource-scoped user classes, collaborators, invitations, access summaries, and deterministic policy inputs for app-owned participation flows; consuming modules own any decision records or freeze semantics.
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
-          file_storage = metadata-only file record module; blobs are stored externally via services/adapters/storage/{provider}.py; emits file_uploaded and file_deleted events; always user_data_scope=true.
-          notification_preferences = user notification opt-in preferences module; external delivery via services/adapters/notifications/; triggered by reactions.yaml observing domain events; always user_data_scope=true.
       description:
         type: str
         description: Short module summary.
@@ -2116,14 +2250,19 @@ models:
         type: str
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
       api_surface:
-        type: optional_str
+        type: literal
         default: null
+        values:
+        - public
+        - public_readonly
+        - internal
+        - admin_internal
+        - 'null'
         description: >
           External HTTP exposure posture for this action. Use public or
-          public_readonly only for anonymous-safe HTTP actions. Omit it or use
+          public_readonly only for anonymous-safe HTTP actions. Omit (null) or use
           internal/admin_internal for actions that require an authenticated token
-          when AUTH_ENABLED=true. This does not bypass permissions or
-          entitlement_gate checks.
+          when AUTH_ENABLED=true. Does not bypass permissions or entitlement_gate checks.
       input_schema:
         type: JsonSchemaContract
         description: Typed JSON-schema-like input contract.
@@ -4492,30 +4631,6 @@ models:
     - AppActionButtonConfig
     - AppFileListConfig
 
-  AppPageSlotExtension:
-    type: model
-    fields:
-      slot:
-        type: literal
-        values:
-        - header
-        - empty_state
-        - hero
-        - sidebar
-        - actions_bar
-        description: >
-          Named UI zone this extension replaces within an otherwise declarative page.
-          header replaces the page header area; empty_state replaces the empty state of
-          the main data section; hero replaces the above-fold hero for gallery/landing
-          pages; sidebar provides custom sidebar content; actions_bar replaces the
-          actions zone above the main content section.
-      component:
-        type: str
-        description: >
-          Component registry key registered in ui/index.js. Must match a custom React
-          component under ui/pages/custom/. Use PascalCase matching the registerComponent
-          call in ui/index.js.
-
   AppPageSection:
     type: model
     fields:
@@ -4693,6 +4808,11 @@ models:
   AppPageSchema:
     type: model
     fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.app_page.v1
+        description: Must be mozaiks.app_page.v1.
       name:
         type: str
         description: Page name in PascalCase — used as the component registration key.
@@ -4776,15 +4896,6 @@ models:
         type: list
         items: AppPageSection
         description: Ordered primitive sections composing the page.
-      extensions:
-        type: optional_list
-        items: AppPageSlotExtension
-        description: >
-          Declared custom slot overrides for specific UI zones. Use only when a named
-          zone (header, empty_state, hero, sidebar, actions_bar) cannot be expressed
-          with primitives. Each extension names a bounded slot and the registered custom
-          React component that replaces it. The rest of the page stays declarative.
-          Null for most pages — do not use as a general React escape hatch.
 
   AppBackendAdminPanel:
     type: model
@@ -5361,7 +5472,8 @@ models:
     type: literal
     values:
     - studio
-    - app_studio
+    - app
+    - user
     - workflow_session
     - transition
     - public

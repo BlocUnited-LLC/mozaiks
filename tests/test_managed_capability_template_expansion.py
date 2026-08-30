@@ -48,11 +48,13 @@ def _write_pack(root: Path, pack_id: str, files: dict[str, str], *, status: str 
         yaml.safe_dump(
             {
                 "context_id": pack_id,
+                "applies_to_workflows": ["AppGenerator"],
                 "assets": [
                     {"path": "templates/", "kind": "templates"},
                 ],
                 "pack": {
                     "id": pack_id,
+                    "version": "0.1.0",
                     "status": status,
                     "capability_source": "managed_capability",
                 },
@@ -87,10 +89,44 @@ def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> N
         [{"id": "wallet", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
     )
 
-    files = {item["filename"]: item["content"] for item in result}
+    files = {item["filename"]: item["content"] for item in result
+             if item["filename"] != ".mozaiks/pack_provenance.json"}
     assert files == {
         "modules/billing/module.yaml": "module:\n  id: billing\n",
         "services/integrations/wallet_client.py": "# wallet client\n",
+    }
+
+
+def test_selected_pack_renders_jinja_templates_and_strips_suffix(resolver, tmp_path: Path) -> None:
+    pack_root = _write_pack(
+        tmp_path,
+        "operator_readiness",
+        {
+            "config/operator_readiness.yaml.j2": "profile: {{ readiness_profile }}\nledger: {{ evidence_ledger_path }}\n",
+        },
+    )
+
+    result = resolver.resolve_managed_capability_templates(
+        [
+            {
+                "id": "operator_readiness",
+                "capability_source": "config_file",
+                "pack_source_path": str(pack_root),
+            }
+        ],
+        context_variables={
+            "readiness_profile": "host_operator_platform",
+            "evidence_ledger_path": "docs/operations/evidence-log.json",
+        },
+    )
+
+    files = {item["filename"]: item["content"] for item in result
+             if item["filename"] != ".mozaiks/pack_provenance.json"}
+    assert files == {
+        "config/operator_readiness.yaml": (
+            "profile: host_operator_platform\n"
+            "ledger: docs/operations/evidence-log.json"
+        )
     }
 
 
@@ -117,7 +153,8 @@ def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path
         [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
     )
 
-    assert result == [
+    template_files = [f for f in result if f["filename"] != ".mozaiks/pack_provenance.json"]
+    assert template_files == [
         {"filename": "services/integrations/mozaikspay_client.py", "content": "# client\n"}
     ]
 

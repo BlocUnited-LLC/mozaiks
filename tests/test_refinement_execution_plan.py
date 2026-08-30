@@ -44,7 +44,7 @@ def test_ui_refinement_execution_plan_uses_app_surface_revision() -> None:
 
     assert plan.workflow_sequence == "app_surface_revision"
     assert plan.refinement_lane == "experience_design"
-    assert "experience_spec" in plan.affected_declarative_families
+    assert "design_docs" in plan.affected_declarative_families
     assert {"route_component_validation", "ui_theme_primitive_validation"} <= _required_validation_ids(plan)
 
 
@@ -139,7 +139,7 @@ def test_live_classifier_fixture_cases_convert_to_execution_plans() -> None:
     plans = [
         dry_run.build_refinement_execution_plan_from_route(
             request=case["request"],
-            artifact_kind="app_bundle",
+            build_family="app_bundle",
             change_class=case["classifier"]["change_class"],
             workflow_id=case["route"]["workflow_id"],
             workflow_sequence=case["route"]["workflow_sequence"],

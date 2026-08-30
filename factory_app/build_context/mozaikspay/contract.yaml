@@ -1,5 +1,23 @@
 contract_id: mozaikspay
 contract_type: build_pack_instructions
+canonical_provider:
+  provider_id: mozaiks_pay
+  provider_pack_id: mozaikspay
+  display_name: MozaiksPay
+  api_contract_version: mozaiks.provider_api_contract.v1
+  provider_api_contract_id: mozaikspay_provider_api
+  connector_file: services/integrations/mozaikspay_client.py
+  callback_event_namespace: mozaikspay.billing
+  fulfillment_boundary: BillingFulfillmentCommand
+  entitlement_boundary: EntitlementPort
+  secret_references:
+    - MOZAIKSPAY_API_BASE
+    - MOZAIKSPAY_API_KEY
+    - MOZAIKSPAY_CLIENT_ID
+    - MOZAIKSPAY_CLIENT_SECRET
+  activation_requires_explicit_selection: false
+  activation_requires_credentials: true
+  self_managed_replacement_provider_id: entitlement_dispatch
 
 # Declares capabilities this pack provides to the OSS planning system.
 # subscription_write_path: this managed pack owns the subscription assignment
@@ -40,7 +58,7 @@ recommended_domains:
 
 required_integrations:
   - service: mozaikspay
-    provider: mozaikspay
+    provider: mozaiks_pay
     display_name: MozaiksPay
     kind: api_key
     purpose: Connect this generated SaaS app to the managed MozaiksPay subscription provider.
@@ -134,8 +152,17 @@ facades:
       - create_token_top_up_session
       - start_token_top_up
     pages:
+      - name: Pricing
+        route: /pricing
+        page_type_hint: landing
+        primary_entities:
+          - subscription
+        primary_actions:
+          - list_plans
+          - open_billing_portal
       - name: Billing
         route: /billing
+        page_type_hint: analytics_dashboard
         primary_entities:
           - subscription
         primary_actions:
@@ -145,6 +172,7 @@ facades:
           - open_billing_portal
       - name: Usage
         route: /usage
+        page_type_hint: analytics_dashboard
         primary_entities:
           - runtime_usage
           - token_wallet
@@ -156,9 +184,10 @@ facades:
 provider_api_response_contract:
   spec_file: provider_api_contract.yaml
   description: >
-    The MozaiksPay hosted platform serves provider API endpoints consumed by generated apps.
-    Response shapes are pinned in provider_api_contract.yaml. Any change to field
-    names or types on either side is a breaking change requiring coordinated release.
+    A MozaiksPay-compatible provider serves the provider API endpoints consumed
+    by generated apps. Response shapes are pinned in provider_api_contract.yaml.
+    Any change to field names or types on either side is a breaking change
+    requiring coordinated release.
   subscription_status_required_fields:
     - success
     - found
@@ -196,45 +225,92 @@ provider_api_response_contract:
     - client_secret_hash
     - session_id
 
+runtime_connector_contract:
+  connector_id: mozaikspay
+  canonical_provider_id: mozaiks_pay
+  selection_field: AppBuildPlan.monetization_provider
+  selection_value: mozaiks_pay
+  required_selected_pack_id: mozaikspay
+  mutually_exclusive_with:
+    - entitlement_dispatch
+  operations:
+    - subscription_status
+    - billing_portal_session
+    - subscription_checkout_session
+    - token_top_up_session
+  auth_secret_refs:
+    primary:
+      - MOZAIKSPAY_API_KEY
+    compatibility:
+      - MOZAIKSPAY_CLIENT_ID
+      - MOZAIKSPAY_CLIENT_SECRET
+    public:
+      - MOZAIKSPAY_API_BASE
+      - MOZAIKS_APP_URL
+  idempotency:
+    required_for_provider_fulfillment: true
+    command_id_source: provider_event_id
+    replay_boundary: BillingFulfillmentService
+  callback_verification:
+    required: true
+    fail_closed: true
+    unsigned_callbacks: reject
+    malformed_callbacks: reject
+    accepted_event_shapes:
+      - subscription_activated
+      - subscription_updated
+      - subscription_cancelled
+      - token_top_up_paid
+  retry_policy:
+    retryable_errors:
+      - timeout
+      - rate_limited
+      - service_unavailable
+    terminal_errors:
+      - invalid_credentials
+      - invalid_scope
+      - contract_version_mismatch
+      - malformed_callback
+      - unsigned_callback
+  readiness:
+    health_operation: provider_readiness
+    required_config:
+      - api_base
+      - api_key
+    offline_behavior: not_ready
+  entitlement_sync:
+    source: verified_provider_fulfillment
+    normalized_command: BillingFulfillmentCommand
+    assignment_store_authority: config/subscriptions.yaml
+    enforcement_adapter: ConfiguredEntitlementAdapter
+
 inactive_surfaces:
   - checkout
   - creator_earnings
   - wallet_connection
 
 # ---------------------------------------------------------------------------
-# Platform hooks — lifecycle responsibilities owned by the hosted platform,
-# not by the generated app.  Generated apps never implement these; the
-# platform reacts to well-known events and performs the corresponding work.
+# Provider lifecycle boundary — responsibilities owned by the selected
+# MozaiksPay-compatible provider, not by the generated app. Generated apps never
+# implement payment-provider provisioning, hosted billing modules, wallet
+# engines, payout engines, settlement logic, or provider credential handling.
 # ---------------------------------------------------------------------------
-platform_hooks:
-  # When a hosted app is deployed the platform reads the app bundle's
-  # app/config/subscriptions.yaml, provisions Stripe products and prices
-  # for each paid plan (amount > 0), and persists the resulting price_ids in
-  # hosted_billing.app_billing_plans keyed by app_id.
-  # The checkout flow looks up these price_ids at runtime.
-  # Plans without a price.amount field are treated as contact-sales and
-  # skipped — no Stripe price is created.
-  - id: billing_plan_provisioning
-    trigger_event: hosted.hosting.app.deployed
-    responsible_module: hosted_billing
-    responsible_action: provision_app_billing_plans
+provider_lifecycle_boundary:
+  - id: plan_catalog_mapping
+    provider_role: mozaikspay_compatible_provider
     description: >
-      On deployment the platform provisions Stripe billing products and prices
-      for paid plans declared in the app bundle's app/config/subscriptions.yaml.
-      This is idempotent — existing Stripe prices are reused via lookup_key.
-      Emits hosted.billing.app_billing_plans.provisioned on success.
-      Skips silently when MozaiksPay billing is not configured or when the
-      app bundle contains no paid plans.
+      The selected provider may read the app bundle's app/config/subscriptions.yaml
+      catalog to map paid plans and top-up products to provider-owned billing
+      objects. Mapping, provisioning, idempotency, provider IDs, payment
+      processor objects, and hosted operational records remain provider-owned and
+      are not generated into the canonical app bundle.
     app_requirements:
-      # The app bundle's subscriptions.yaml plan entries may carry an optional
-      # price block.  When present, the platform provisions Stripe billing for
-      # that plan automatically.  When absent, the plan is free or requires
-      # manual pricing configuration through the platform admin UI.
       subscriptions_yaml_price_block:
         description: >
           Optional price metadata on each plan entry in app/config/subscriptions.yaml.
-          When present on a plan, the platform will provision a Stripe product
-          and price for that plan on app deployment.
+          When present on a plan, a compatible provider may use this metadata to
+          map or provision provider-owned billing objects. When absent, the plan
+          is free or requires provider/operator-side pricing configuration.
         example: |
           plans:
             - plan_id: pro
@@ -244,6 +320,6 @@ platform_hooks:
                 currency: usd
                 interval: month   # month | year
               billing:
-                lookup_key: my_app_pro_monthly   # optional; defaults to {app_id}_{plan_id}_{interval}
+                lookup_key: my_app_pro_monthly   # optional stable provider mapping key
                 allow_promotion_codes: true
               capabilities: [...]

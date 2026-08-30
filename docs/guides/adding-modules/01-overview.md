@@ -132,8 +132,9 @@ the external HTTP module route** (`/api/modules/{name}/{action}`). The runtime
 rejects those requests with 404 regardless of authentication status. This
 prevents external callers from triggering event-bus reaction handlers directly.
 Use these surfaces for event reactions and trusted internal runtime calls; invoke
-them through `ModuleExecutor` with `granted_permissions=None` when needed from
-trusted code paths.
+them through `ModuleExecutor` with an explicitly constructed server-owned
+`ModuleDispatchAuthority` (for example `framework_internal`, or
+`event_reaction` built via `event_reaction_authority`) from trusted code paths.
 
 ## module.yaml Schema Rules
 

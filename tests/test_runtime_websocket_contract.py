@@ -6,10 +6,11 @@ import pytest
 
 
 class _FakeWebSocket:
-    def __init__(self) -> None:
+    def __init__(self, *, query_params: dict | None = None) -> None:
         self.accepted = False
         self.sent: list[dict] = []
         self.closed: list[tuple[int | None, str | None]] = []
+        self.query_params: dict = query_params or {}
 
     async def accept(self) -> None:
         self.accepted = True
@@ -273,6 +274,7 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.added_workflows == [
@@ -353,6 +355,7 @@ async def test_runtime_websocket_endpoint_emits_chat_error_when_prereqs_fail(mon
     assert websocket.accepted is True
     assert websocket.sent == [
         {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.error",
             "data": {
                 "message": "Studio setup is incomplete.",
@@ -413,6 +416,7 @@ async def test_runtime_websocket_endpoint_emits_validation_error_when_prereq_che
     assert websocket.accepted is True
     assert websocket.sent == [
         {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.error",
             "data": {
                 "message": "Failed to validate workflow prerequisites. Please try again.",
@@ -574,6 +578,7 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events == [
@@ -655,6 +660,7 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events == [
@@ -762,6 +768,7 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
+            "suppress_history_replay": False,
         }
     ]
     assert harness.transport.ui_events == [
@@ -790,4 +797,77 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
         )
     ]
     assert harness.transport.api_calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_with_resume_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _patch_runtime_websocket_harness(
+        monkeypatch,
+        chat_docs=[],
+        resume_resolution={
+            "chat_id": "chat_value_engine",
+            "workflow_id": "ValueEngine",
+            "session_state": {
+                "current_workflow_id": "ValueEngine",
+                "current_chat_id": "chat_value_engine",
+            },
+        },
+        workflow_startup_mode="Manual",
+        workflow_names=["ExistingAppDiscovery", "ValueEngine"],
+    )
+    websocket = _FakeWebSocket()
+
+    await harness.runtime_app.websocket_endpoint(
+        websocket=websocket,
+        workflow_name="ExistingAppDiscovery",
+        app_id="app_1",
+        chat_id="chat_requested",
+        user_id="user_1",
+    )
+    await _drain_scheduled_coroutines(harness.scheduled_coroutines)
+
+    assert websocket.closed == []
+    assert harness.created_sessions == [
+        {
+            "chat_id": "chat_requested",
+            "app_id": "app_1",
+            "workflow_name": "ExistingAppDiscovery",
+            "user_id": "user_1",
+            "extra_fields": {},
+        },
+        {
+            "chat_id": "chat_value_engine",
+            "app_id": "app_1",
+            "workflow_name": "ValueEngine",
+            "user_id": "user_1",
+            "extra_fields": {},
+        },
+    ]
+    assert harness.session_router.bind_calls == [
+        {
+            "app_id": "app_1",
+            "user_id": "user_1",
+            "workflow_id": "ValueEngine",
+            "chat_id": "chat_value_engine",
+        }
+    ]
+    assert harness.transport.handle_websocket_calls == [
+        {
+            "websocket": websocket,
+            "chat_id": "chat_value_engine",
+            "user_id": "user_1",
+            "workflow_name": "ValueEngine",
+            "app_id": "app_1",
+            "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
+            "token_exp": 0,
+            "suppress_history_replay": False,
+        }
+    ]
+    assert harness.transport.ui_events[0][0]["workflow_name"] == "ValueEngine"
+    assert harness.transport.ui_events[0][0]["session_state"] == {
+        "current_workflow_id": "ValueEngine",
+        "current_chat_id": "chat_value_engine",
+    }
 

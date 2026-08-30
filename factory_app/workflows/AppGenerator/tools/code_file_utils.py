@@ -27,14 +27,18 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 
 
-def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
+def extract_code_file_map_from_payload(
+    payload: Any,
+    *,
+    build_timestamp: str | None = None,
+) -> dict[str, str]:
     """Materialize all code files from an AppGenerator structured output payload.
 
     Calls the runtime's generic extraction, then layers in AppGenerator-specific
     typed surfaces. Typed configs win over conflicting raw code_files entries
     for their canonical paths.
     """
-    file_map = _base_extract(payload)
+    file_map = _base_extract(payload, build_timestamp=build_timestamp)
 
     if not isinstance(payload, dict):
         return file_map
@@ -60,8 +64,15 @@ def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
     return file_map
 
 
-def extract_code_file_entries_from_payload(payload: Any) -> list[dict[str, str]]:
-    file_map = extract_code_file_map_from_payload(payload)
+def extract_code_file_entries_from_payload(
+    payload: Any,
+    *,
+    build_timestamp: str | None = None,
+) -> list[dict[str, str]]:
+    file_map = extract_code_file_map_from_payload(
+        payload,
+        build_timestamp=build_timestamp,
+    )
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 

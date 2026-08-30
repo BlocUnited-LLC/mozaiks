@@ -71,8 +71,13 @@ def test_support_context_registers_active_appgenerator_pack() -> None:
 
 def test_support_contract_requires_messaging_pack() -> None:
     contract = _read_yaml(SUPPORT / "contract.yaml")
-    required_packs = contract.get("required_packs") or []
-    assert "messaging" in required_packs, (
+    # Machine-readable dependency is declared under requires.packs (canonical format)
+    requires = contract.get("requires") or {}
+    pack_ids = [
+        (entry.get("pack_id") if isinstance(entry, dict) else entry)
+        for entry in (requires.get("packs") or [])
+    ]
+    assert "messaging" in pack_ids, (
         "support pack must declare messaging as a required pack — "
         "conversations are persisted through the messages pack"
     )
@@ -303,6 +308,27 @@ def test_appgenerator_selection_wiring_includes_support_pack() -> None:
     }
     assert "support" in packs
     assert packs["support"]["capability_kind"] == "operator_pack"
+
+
+def test_support_module_declares_user_data_scope() -> None:
+    """Support stores user-linked request records — user_data_scope must be true."""
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "support" / "module.yaml")
+    assert module_yaml["module"].get("user_data_scope") is True, (
+        "support/module.yaml must declare user_data_scope: true — "
+        "support requests carry requester_id (user-owned PII)"
+    )
+
+
+def test_support_backend_ships_account_data_handler() -> None:
+    """user_data_scope: true requires a matching account_data_handler.py."""
+    handler = TEMPLATES / "modules" / "support" / "backend" / "account_data_handler.py"
+    assert handler.exists(), (
+        "support/backend/account_data_handler.py is missing — "
+        "module declares user_data_scope: true but ships no GDPR handler"
+    )
+    src = handler.read_text(encoding="utf-8")
+    assert "delete_user_data" in src
+    assert "export_user_data" in src
 
 
 def test_support_pack_does_not_generate_messaging_module() -> None:

@@ -14,7 +14,9 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunnerRequest,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
 
+from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
@@ -25,6 +27,7 @@ from .generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
 )
+from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
 
 
@@ -336,12 +339,13 @@ async def execute_task_batches_for_trigger(
     wf_logger: Any | None = None,
     fresh_agents_per_task: bool = True,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+    context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> dict[str, Any]:
     """Execute workflow-local task batches triggered by an agent turn.
 
-    Each task item runs through its own AG2 workflow channel. Normalized outputs
-    are written back to context, then the parent AG2 Network channel continues
-    from the next declared transition.
+    Each task item runs as a Mozaiks-scheduled worker turn wrapped in AG2 Task
+    lifecycle evidence. Normalized outputs are written back to context, then the
+    parent AG2 Network channel continues from the next declared transition.
     """
 
     if not batches_config or not batches_config.batches:
@@ -389,7 +393,7 @@ async def execute_task_batches_for_trigger(
                 resolved_task_model,
             )
         _validate_batch_owned_paths(batch, task_items)
-        await _emit_task_batch_activity(
+        await _emit_task_batch_status(
             transport,
             chat_id,
             {
@@ -414,6 +418,7 @@ async def execute_task_batches_for_trigger(
                 wf_logger=wf_logger,
                 fresh_agents_per_task=fresh_agents_per_task,
                 agents_factory=agents_factory,
+                context_authority_policy=context_authority_policy,
             )
         except Exception:
             context_variables[batch.result.status_key] = "failed"
@@ -422,7 +427,7 @@ async def execute_task_batches_for_trigger(
         context_variables[batch.result.context_key] = batch_output["outputs"]
         context_variables[batch.result.status_key] = batch_output["status"]
         results[batch.id] = batch_output
-        await _emit_task_batch_activity(
+        await _emit_task_batch_status(
             transport,
             chat_id,
             {
@@ -451,8 +456,17 @@ async def _execute_one_batch(
     wf_logger: Any | None,
     fresh_agents_per_task: bool,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
+    context_authority_policy: ContextAuthorityPolicy | None,
 ) -> dict[str, Any]:
     pending = {str(item["task_id"]): item for item in task_items}
+    try:
+        deterministic_topological_order(
+            pending.values(),
+            item_id=lambda item: str(item.get("task_id") or ""),
+            dependencies=lambda item: _task_dependencies(item, batch.execution.dependency_field),
+        )
+    except ValueError as exc:
+        raise ValueError(f"task batch {batch.id!r} has unresolved or cyclic dependencies: {exc}") from exc
     completed: dict[str, dict[str, Any]] = {}
     failed: dict[str, dict[str, Any]] = {}
 
@@ -523,6 +537,7 @@ async def _execute_one_batch(
                     semaphore=semaphore,
                     fresh_agents_per_task=fresh_agents_per_task,
                     agents_factory=agents_factory,
+                    context_authority_policy=context_authority_policy,
                 )
                 for item in ready
             ],
@@ -601,6 +616,7 @@ async def _run_one_task(
     semaphore: asyncio.Semaphore,
     fresh_agents_per_task: bool,
     agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
+    context_authority_policy: ContextAuthorityPolicy | None,
 ) -> dict[str, Any]:
     agent_name = str(task.get(batch.worker.agent_field) or "").strip()
     prompt = str(task.get(batch.worker.prompt_field) or "").strip()
@@ -663,6 +679,7 @@ async def _run_one_task(
                     prompt=scoped_prompt,
                     context_variables=task_context,
                     structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                    context_authority_policy=context_authority_policy,
                     timeout_seconds=batch.execution.timeout_seconds,
                 )
             )
@@ -671,7 +688,7 @@ async def _run_one_task(
             last_error = runner_result.error or runner_result.status.value
         if runner_result is None or runner_result.status is not RunStatus.COMPLETED:
             raise RuntimeError(
-                f"AG2 task channel failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
+        f"AG2 task lifecycle failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
             )
 
     output = _normalize_agent_reply(runner_result.output)
@@ -699,8 +716,14 @@ async def _run_one_task(
     output.setdefault("_worker_agent", agent_name)
     output.setdefault("_owned_paths", list(task.get("owned_paths") or []))
     output.setdefault(
-        "_ag2_task_channel",
+        "_ag2_task_lifecycle",
         {
+            "task_id": runner_result.task_id,
+            "capability": runner_result.capability,
+            "status": runner_result.lifecycle_status,
+            "events": list(runner_result.lifecycle_events),
+            "started_at": runner_result.started_at,
+            "completed_at": runner_result.completed_at,
             "channel_id": runner_result.channel_id,
             "close_reason": runner_result.close_reason,
         },
@@ -825,22 +848,14 @@ def _normalize_owned_page_files_from_plan(
 
 
 def _normalize_owned_paths(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    paths: list[str] = []
-    for item in value:
-        safe = safe_relpath(str(item or ""))
-        if safe and safe not in paths:
-            paths.append(safe)
-    return paths
+    return list(normalize_owned_paths(value))
 
 
 def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: list[dict[str, Any]]) -> None:
     if not batch.result.require_owned_paths:
         return
 
-    owner_by_path: dict[str, str] = {}
-    duplicate_paths: dict[str, list[str]] = {}
+    owner_paths: dict[str, tuple[str, ...]] = {}
     for task in task_items:
         task_id = str(task.get("task_id") or "").strip()
         owned_paths = _normalize_owned_paths(task.get("owned_paths"))
@@ -848,17 +863,13 @@ def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: list[dict[str,
             raise ValueError(
                 f"task batch {batch.id!r} requires owned_paths, but task {task_id!r} declares none"
             )
-        for path in owned_paths:
-            previous_owner = owner_by_path.get(path)
-            if previous_owner and previous_owner != task_id:
-                duplicate_paths.setdefault(path, [previous_owner]).append(task_id)
-            else:
-                owner_by_path[path] = task_id
+        owner_paths[task_id] = tuple(owned_paths)
 
-    if duplicate_paths:
+    collision_report = detect_owned_path_collisions(owner_paths)
+    if collision_report.has_collisions:
         details = {
-            path: sorted(set(owners))
-            for path, owners in sorted(duplicate_paths.items())
+            collision.path: list(collision.owner_ids)
+            for collision in collision_report.collisions
         }
         raise ValueError(
             f"task batch {batch.id!r} has owned_paths declared by multiple tasks: {details}"
@@ -1063,21 +1074,39 @@ def _to_plain_data(value: Any) -> Any:
     return value
 
 
-async def _emit_task_batch_activity(
+async def _emit_task_batch_status(
     transport: Any | None,
     chat_id: str | None,
     payload: dict[str, Any],
 ) -> None:
     if not transport or not chat_id:
         return
+    batch_id = str(payload.get("batch_id") or "task_batch").strip() or "task_batch"
+    phase = str(payload.get("phase") or "working").strip() or "working"
+    status = "complete" if phase in {"completed", "complete", "success", "succeeded", "done"} else phase
+    message = f"Task batch {batch_id} {phase}."
     try:
-        await transport.send_event_to_ui(
-            {
-                "kind": "activity",
-                "activity_type": "task_batch",
+        await transport.send_tool_call_event(
+            event_id=f"task-batch-{batch_id}",
+            chat_id=chat_id,
+            tool_name="SystemStatusCard",
+            component_name="SystemStatusCard",
+            display_type="inline",
+            awaiting_response=False,
+            agent_name="System",
+            payload={
                 **payload,
+                "schema_version": "mozaiks.system_status.ui.v1",
+                "workflow_name": payload.get("workflow_name"),
+                "agent": "System",
+                "status": status,
+                "message": message,
+                "display": "inline",
+                "mode": "inline",
+                "interaction_type": "ui_surface",
+                "awaiting_response": False,
+                "component_type": "SystemStatusCard",
             },
-            chat_id,
         )
     except Exception:
         return

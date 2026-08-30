@@ -1,0 +1,80 @@
+schema_version: mozaiks.module.v1
+module:
+  id: cloud_domain
+  label: Cloud Domain Management
+  description: >
+    Facade module for Mozaiks Cloud domain operations. Connects, verifies,
+    activates, and disconnects custom domains with normalized DNS and TLS
+    status display. All operations are app-owned; provider DNS/TLS internals
+    (Cloudflare zone IDs, certificate material, registrar configuration) are
+    never exposed to the generated app.
+  capability_source: managed_capability
+  provider: mozaiks_cloud
+
+permissions:
+  - id: cloud_domain.read
+    label: View domain status and DNS instructions
+  - id: cloud_domain.manage
+    label: Connect, activate, and disconnect domains
+
+actions:
+  - id: connect_domain
+    label: Connect Domain
+    handler_method: connect_domain
+    api_surface: internal
+    permissions:
+      - cloud_domain.manage
+    description: >
+      Connect an existing domain to the app via Mozaiks Cloud.
+      Requires cloud_domain.manage permission.
+
+  - id: get_domain_verification
+    label: Get Domain Verification
+    handler_method: get_domain_verification
+    api_surface: public_readonly
+    permissions:
+      - cloud_domain.read
+    description: >
+      Request ownership verification status and verification records for display.
+      Each record has type, name, value, and optional ttl.
+
+  - id: get_dns_instructions
+    label: Get DNS Instructions
+    handler_method: get_dns_instructions
+    api_surface: public_readonly
+    permissions:
+      - cloud_domain.read
+    description: >
+      Retrieve DNS configuration instructions for the domain.
+      Records are for display only; the Mozaiks Cloud provider applies DNS changes.
+
+  - id: request_domain_activation
+    label: Activate Domain
+    handler_method: request_domain_activation
+    api_surface: internal
+    permissions:
+      - cloud_domain.manage
+    description: >
+      Request domain activation after ownership verification.
+      Requires cloud_domain.manage permission.
+
+  - id: get_domain_status
+    label: Get Domain Status
+    handler_method: get_domain_status
+    api_surface: public_readonly
+    permissions:
+      - cloud_domain.read
+    description: >
+      Retrieve DNS and TLS status for a connected domain.
+      Domain status: pending_verification | verified | activating | active | failed | disconnected
+      TLS status: pending | provisioning | active | failed
+
+  - id: disconnect_domain
+    label: Disconnect Domain
+    handler_method: disconnect_domain
+    api_surface: internal
+    permissions:
+      - cloud_domain.manage
+    description: >
+      Disconnect a domain from the app.
+      Requires cloud_domain.manage permission.

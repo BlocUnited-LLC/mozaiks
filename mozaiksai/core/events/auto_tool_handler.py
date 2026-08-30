@@ -21,6 +21,10 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.events.event_serialization import serialize_event_content
 from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.context.authority import (
+    DETERMINISTIC_TOOL_WRITER,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.declarative import parse_tools_config
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -151,21 +155,34 @@ class AutoToolEventHandler:
 
             # Write back context changes to pattern context if available
             container = kwargs.get("context_variables")
-            if pattern_context_ref and container and hasattr(container, "data"):
+            if pattern_context_ref and container:
                 try:
+                    if hasattr(container, "snapshot") and callable(getattr(container, "snapshot", None)):
+                        container_snapshot = container.snapshot()
+                    elif hasattr(container, "to_dict") and callable(getattr(container, "to_dict", None)):
+                        container_snapshot = container.to_dict()
+                    else:
+                        container_snapshot = {}
+                    if not isinstance(container_snapshot, dict):
+                        container_snapshot = {}
                     # Copy changes from tool's container back to the shared pattern context
-                    for key, value in container.data.items():
+                    for key, value in container_snapshot.items():
                         try:
                             pattern_context_ref.set(key, value)
                         except Exception as _set_err:
                             logger.debug("[AUTO_TOOL] Context write-back failed key=%s: %s", key, _set_err)
-                    logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(container.data), binding.tool_name)
+                    logger.debug(
+                        "[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution",
+                        len(container_snapshot),
+                        binding.tool_name,
+                    )
                 except Exception as wb_err:
                     logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
 
             await self._persist_context_variables(
                 chat_id=chat_id,
                 app_id=context.get("app_id"),
+                workflow_name=workflow_name,
                 context_variables=container,
             )
 
@@ -354,10 +371,24 @@ class AutoToolEventHandler:
             else:
                 # Fallback: create ephemeral container from snapshot
                 snapshot = context.get("context_variables") if isinstance(context.get("context_variables"), dict) else None
+                authority_policy = None
+                workflow_name = context.get("workflow_name")
+                if workflow_name:
+                    try:
+                        workflow_config = workflow_manager.get_config(str(workflow_name)) or {}
+                        authority_policy = build_context_authority_policy(
+                            workflow_name=str(workflow_name),
+                            definitions=(workflow_config.get("context_variables") or {}).get("definitions") or {},
+                            transition_rules=(workflow_config.get("transition_graph") or {}).get("transition_rules") or [],
+                        )
+                    except Exception as policy_err:
+                        logger.debug("[AUTO_TOOL] Context authority policy unavailable for %s: %s", workflow_name, policy_err)
                 container = create_context_container(
                     snapshot,
                     chat_id=context.get("chat_id"),
                     app_id=context.get("app_id"),
+                    authority_policy=authority_policy,
+                    writer_id=DETERMINISTIC_TOOL_WRITER,
                 )
                 for key in ("chat_id", "app_id", "workflow_name", "turn_idempotency_key", "agent_name"):
                     value = context.get(key)
@@ -390,6 +421,7 @@ class AutoToolEventHandler:
         *,
         chat_id: str | None,
         app_id: str | None,
+        workflow_name: str | None,
         context_variables: Any,
     ) -> None:
         if not chat_id or not app_id or context_variables is None:
@@ -398,10 +430,16 @@ class AutoToolEventHandler:
         snapshot: dict[str, Any] | None = None
         if isinstance(context_variables, dict):
             snapshot = context_variables
-        else:
-            data = getattr(context_variables, "data", None)
+        elif hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+            data = context_variables.snapshot()
             if isinstance(data, dict):
                 snapshot = data
+        elif hasattr(context_variables, "to_dict") and callable(getattr(context_variables, "to_dict", None)):
+            data = context_variables.to_dict()
+            if isinstance(data, dict):
+                snapshot = data
+        else:
+            snapshot = None
 
         if not isinstance(snapshot, dict) or not snapshot:
             return
@@ -411,6 +449,7 @@ class AutoToolEventHandler:
             await pm.persist_context_variables(
                 chat_id=chat_id,
                 app_id=app_id,
+                workflow_name=workflow_name,
                 variables=snapshot,
             )
         except Exception as exc:

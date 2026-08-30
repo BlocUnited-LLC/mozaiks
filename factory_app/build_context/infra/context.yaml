@@ -1,18 +1,33 @@
 context_id: infra
-pack_id: infra
-label: Infra Scaffold
-version: 1
+description: Provider-neutral deployment scaffold templates.
 
 applies_to_workflows:
   - AppGenerator
 
 # Template variables substituted by InfraScaffoldAgent's save_infra_scaffold tool:
-#   APP_NAME / APP_SLUG   — app slug used in image tags and storage key prefix
-#   TOKEN_KEY_PREFIX      — sessionStorage key prefix (defaults to APP_SLUG)
-#   OIDC_CLIENT_ID        — OIDC client_id baked into the Vite bundle
-#   MOZAIKS_VERSION       — pinned mozaiks version from requirements.txt
-#   REGISTRY              — container registry prefix (e.g. ghcr.io/your-org)
-#   DEPLOY_TARGET         — azure_container_apps | fly | render | generic
+#   APP_NAME / APP_SLUG        — app slug used in image tags and storage key prefix
+#   TOKEN_KEY_PREFIX           — sessionStorage key prefix (defaults to APP_SLUG)
+#   OIDC_CLIENT_ID             — OIDC client_id baked into the Vite bundle
+#   MOZAIKS_VERSION            — pinned mozaiks version from requirements.txt
+#   REGISTRY                   — container registry prefix (e.g. ghcr.io/your-org)
+#   DEPLOY_TARGET              — azure_container_apps | fly | render | generic
+#
+# Cron script template variables (templates/scripts/cron_tick.py):
+#   ACTION_LABEL               — human-readable name (e.g. "Placement lifecycle")
+#   ACTION_DESCRIPTION         — one-line description of what the tick does
+#   CRON_INTERVAL_MINUTES      — tick frequency in minutes (e.g. 5)
+#   CRON_SCRIPT_NAME           — output filename without .py (e.g. cron_placement_lifecycle)
+#   MODULE_ID                  — module directory name (e.g. investor_marketplace)
+#   SERVICE_CLASS              — service class name (e.g. InvestorMarketplaceService)
+#   TICK_METHOD                — service method name (e.g. run_placement_lifecycle_tick)
+#   ACTION_ID                  — log prefix identifier (e.g. placement_lifecycle)
+#
+# For azure_container_apps deploy targets, InfraScaffoldAgent should emit a
+# Microsoft.App/jobs resource (triggerType: Schedule) alongside the Container App
+# for each state_machine module that uses an external cron script. The job uses
+# the same container image and managed identity, with only the secrets the tick
+# needs (typically MONGO_URI). The deploy workflow must update the job image on
+# every push alongside the main Container App.
 
 assets:
   - path: templates
@@ -23,3 +38,6 @@ assets:
       The readiness workflow is an environment-staging gate for the promoted or
       exported app. It is separate from Mozaiks artifact review staging, where
       generated files wait for validation, review, and promotion.
+      templates/scripts/cron_tick.py is emitted once per state_machine module
+      that requires an external cron entry point; each copy is renamed to
+      scripts/cron_<entity>_lifecycle.py in the generated app bundle.

@@ -43,6 +43,7 @@ def test_agent_spec_sandbox_shell_accepted() -> None:
 
     spec = AgentSpec.model_validate({
         "name": "CodingAgent",
+        "structured_outputs_required": False,
         "system_message": "You generate code.",
         "sandbox_shell": True,
     })
@@ -55,6 +56,7 @@ def test_agent_spec_sandbox_shell_defaults_false() -> None:
 
     spec = AgentSpec.model_validate({
         "name": "CodingAgent",
+        "structured_outputs_required": False,
         "system_message": "You generate code.",
     })
 
@@ -66,6 +68,7 @@ def test_agent_spec_ag2_search_flags_accepted() -> None:
 
     spec = AgentSpec.model_validate({
         "name": "ResearchAgent",
+        "structured_outputs_required": False,
         "system_message": "You research the market.",
         "web_search": True,
         "web_fetch": True,
@@ -82,6 +85,7 @@ def test_agent_spec_ag2_search_flags_default_false() -> None:
 
     spec = AgentSpec.model_validate({
         "name": "ResearchAgent",
+        "structured_outputs_required": False,
         "system_message": "You research the market.",
     })
 
@@ -98,6 +102,7 @@ def test_agent_spec_unknown_field_still_rejected() -> None:
     with pytest.raises(ValidationError):
         AgentSpec.model_validate({
             "name": "CodingAgent",
+            "structured_outputs_required": False,
             "system_message": "You generate code.",
             "unknown_field": True,
         })

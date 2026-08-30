@@ -39,11 +39,9 @@ def test_commerce_context_registers_active_appgenerator_pack() -> None:
 
     assert context["context_id"] == "commerce"
     assert "AppGenerator" in context["applies_to_workflows"]
-    assert context["pack"] == {
-        "id": "commerce",
-        "status": "active",
-        "capability_source": "generated_module",
-    }
+    assert context["pack"]["id"] == "commerce"
+    assert context["pack"]["status"] == "active"
+    assert context["pack"]["capability_source"] == "generated_module"
     assert {asset["kind"] for asset in context["assets"]} == {"contract", "templates"}
 
     capability_ids = {capability["capability_id"] for capability in context["capabilities"]}
@@ -215,7 +213,7 @@ def test_commerce_page_templates_use_canonical_primitives_and_app_owned_endpoint
 
     for path in (TEMPLATES / "ui" / "pages").glob("*.yaml"):
         page = _read_yaml(path)
-        assert page["schema_version"] == "mozaiks.page.v1"
+        assert page["schema_version"] == "mozaiks.app_page.v1"
         assert page["page_type"] in valid_page_types
         assert page["layout"] in {"grid", "sidebar", "full-width", "split"}
 
@@ -252,6 +250,27 @@ def test_appgenerator_selection_wiring_includes_commerce_pack() -> None:
     app_outputs = _read_yaml(WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "structured_outputs.yaml")
     assert "commerce_pack" in value_outputs["models"]["CapabilityPackSpec"]["fields"]["pack_type"]["values"]
     assert "commerce_pack" in app_outputs["models"]["AppCapabilityPack"]["fields"]["pack_type"]["values"]
+
+
+def test_commerce_module_declares_user_data_scope() -> None:
+    """Commerce stores user-linked carts and orders — user_data_scope must be true."""
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "commerce" / "module.yaml")
+    assert module_yaml["module"].get("user_data_scope") is True, (
+        "commerce/module.yaml must declare user_data_scope: true — "
+        "carts (actor_id) and orders (actor_id) are user-owned PII"
+    )
+
+
+def test_commerce_backend_ships_account_data_handler() -> None:
+    """user_data_scope: true requires a matching account_data_handler.py."""
+    handler = TEMPLATES / "modules" / "commerce" / "backend" / "account_data_handler.py"
+    assert handler.exists(), (
+        "commerce/backend/account_data_handler.py is missing — "
+        "module declares user_data_scope: true but ships no GDPR handler"
+    )
+    src = handler.read_text(encoding="utf-8")
+    assert "delete_user_data" in src
+    assert "export_user_data" in src
 
 
 def test_commerce_pack_does_not_generate_payment_provider_or_marketplace_modules() -> None:

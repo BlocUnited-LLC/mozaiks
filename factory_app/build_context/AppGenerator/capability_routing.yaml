@@ -94,6 +94,12 @@ layers:
         use_when: App needs to deliver domain-event alerts outside the app through provider-backed channels such as email, push, or SMS
         avoid_when: You only need in-app alerts, unread badge counts, and a notification center — declare contracts/notifications.yaml on the event-producing module instead
 
+      - id: operator_readiness
+        covers: deterministic launch/readiness evidence packs for host/operator platforms, SaaS workspaces, and platform-style apps
+        capability_kind: operator_pack
+        use_when: App needs reproducible no-spend launch gates, evidence stamping, or an operator readiness wrapper for staging-like validation
+        avoid_when: App is a normal customer app, a brochure site, or a single-purpose UI without launch/evidence gates
+
     rule: >
       For these domains declare capability_kind as operator_pack.
       Generate the app-specific wiring (pages, façade module actions, event flows)
@@ -257,15 +263,18 @@ layers:
           - event: hosted.billing.subscription.cancelled
             reaction: revoke gated capabilities
         operator_pack_note: >
-          When the managed mozaikspay pack is available in capability_packs, use it
-          as the default SaaS monetization provider. Generate only the app-owned
+          When the build resolves monetization_provider=mozaiks_pay — the
+          default for SaaS builds unless the user explicitly selects the
+          self-managed OSS path — and the managed mozaikspay pack is available
+          in capability_packs, use it as the SaaS monetization provider.
+          Generate only the app-owned
           billing_portal facade, MozaiksPay client, subscriptions.yaml plan contract,
           pricing/billing/usage pages, and entitlement gates. The generated app calls
           the hosted MozaiksPay API for subscription status and billing portal sessions.
           Do not regenerate checkout, webhook handlers, invoice logic, customer/payment
           provider mapping, refunds, wallet, payout, or provider credential handling.
-          If the user explicitly names another provider or the mozaikspay pack is not
-          available, fall back to a provider-neutral external_adapter facade.
+          If the user selects the self-managed OSS path, use entitlement_dispatch.
+          Do not emit decorative custom provider ids for subscription assignment.
 
       - revenue_model: usage_based
         capability_pack: usage_metering
@@ -350,12 +359,43 @@ layers:
            declare the app-specific module as custom_owned with the same
            interface contract instead of inventing provider internals.
         7. For SaaS subscriptions, paid tiers, seats, credits, usage limits, or
-           billing portal requests, prioritize the managed mozaikspay capability pack
-           when it is available and the user has not explicitly requested a different
-           billing provider.
+           billing portal requests, default to the managed mozaikspay capability
+           pack when the user has not selected another path. Set
+           AppBuildPlan.monetization_provider=mozaiks_pay. Use
+           entitlement_dispatch only for an explicit self-managed OSS choice.
       Never generate payment provider, payment provider internals, or raw payment credentials
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).
+
+  cloud_hosting:
+    description: >
+      Optional Mozaiks Cloud managed deployment and domain management. Requires
+      explicit user selection; never auto-selected. Self-hosted and portable apps
+      work without this layer.
+    capabilities:
+      - Mozaiks Cloud managed deployment submission, status, rollback
+      - Mozaiks Cloud normalized environment endpoints
+      - Mozaiks Cloud custom domain connection, verification, activation, DNS instructions
+    rule: >
+      When the mozaiks_cloud pack is explicitly selected:
+        1. Generate app-owned facade modules (cloud_deployment, cloud_domain) with
+           bounded actions: submit_deployment, get_deployment_status,
+           get_environment_endpoints, request_rollback, connect_domain,
+           get_domain_verification, get_dns_instructions, request_domain_activation,
+           get_domain_status, disconnect_domain.
+        2. Generate the four thin client files:
+           services/integrations/mozaiks_cloud_client.py (transport + auth)
+           services/integrations/mozaiks_cloud_deployment_client.py
+           services/integrations/mozaiks_cloud_environment_client.py
+           services/integrations/mozaiks_cloud_domain_client.py
+        3. Declare MOZAIKS_CLOUD_API_BASE (optional) and MOZAIKS_CLOUD_API_KEY (secret)
+           in the deployment env; never include raw credential values.
+        4. Pages must bind through app-owned facade module actions, not directly to
+           Mozaiks Cloud API endpoints.
+        5. Never generate Azure SDK, Cloudflare SDK, or GitHub SDK imports.
+        6. When the mozaiks_cloud pack is NOT selected, produce zero cloud connector
+           artifacts, imports, API URLs, secret declarations, callback routes, or
+           Mozaiks Cloud-branded events.
 
   custom_owned:
     description: >

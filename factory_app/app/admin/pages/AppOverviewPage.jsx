@@ -26,7 +26,7 @@ import {
   getPlanStateLabel,
   normalizeAppStatus,
 } from './appStudioModel.js'
-import { API_BASE } from './studioApi.js'
+import { studioFetch } from './studioApi.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
@@ -397,7 +397,7 @@ function ActivityPanel({ snapshot, latestRun, totalRuns, appId }) {
             variant="outline"
             size="sm"
           >
-            View build history →
+            Review builds →
           </LinkButton>
         </>
       )}
@@ -427,7 +427,7 @@ function AppIntelligencePanel({ context, appId }) {
     setValidationRunning(true)
     setValidationError(null)
     try {
-      const response = await fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(appId)}/context/validation/run`, {
+      const response = await studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context/validation/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm_execution: true }),

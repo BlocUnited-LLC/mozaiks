@@ -31,6 +31,12 @@ class _ContextVariables:
     def set(self, key: str, value: object) -> None:
         self.data[key] = value
 
+    def snapshot(self) -> dict[str, object]:
+        return dict(self.data)
+
+    def to_dict(self) -> dict[str, object]:
+        return self.snapshot()
+
 
 async def _consume_task_batch_state(
     summary: str,
@@ -98,6 +104,7 @@ async def test_handle_tool_dispatch_persists_updated_context(monkeypatch):
     persisted = persist_mock.await_args.kwargs
     assert persisted["chat_id"] == "chat-1"
     assert persisted["app_id"] == "app-1"
+    assert persisted["workflow_name"] == "SmokeParent"
     assert persisted["variables"]["app_task_batch_status"] == "consumed"
     assert persisted["variables"]["app_task_batch_consumed_nonce"] == "nonce-123"
     assert persisted["variables"]["smoke_presented_summary"] == "Smoke path summarized."
@@ -221,18 +228,39 @@ async def test_handle_tool_dispatch_runs_multiple_bindings_in_order(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_persist_context_variables_filters_canonical_fields():
+async def test_persist_context_variables_filters_canonical_fields(monkeypatch):
+    authority_mod = import_module_directly("mozaiksai.core.workflow.context.authority")
+    policy = authority_mod.build_context_authority_policy(
+        workflow_name="SmokeParent",
+        definitions={
+            "app_task_batch_status": {
+                "type": "string",
+                "source": {"type": "state", "default": None},
+            },
+        },
+        transition_rules=[],
+    )
+    monkeypatch.setattr(
+        _persistence_mod,
+        "_context_authority_policy_for_workflow",
+        lambda _workflow_name: policy,
+    )
+
     manager = AG2PersistenceManager.__new__(AG2PersistenceManager)
     fake_coll = MagicMock()
-    fake_coll.update_one = AsyncMock()
+    fake_coll.update_one = AsyncMock(
+        return_value=MagicMock(acknowledged=True, matched_count=1, modified_count=1)
+    )
     manager._coll = AsyncMock(return_value=fake_coll)
 
     await manager.persist_context_variables(
         chat_id="chat-1",
         app_id="app-1",
+        workflow_name="SmokeParent",
         variables={
             "chat_id": "override-me",
             "workflow_name": "override-me",
+            "session_version": 44,
             "app_task_batch_status": "consumed",
             "smoke_presented_summary": "Smoke path summarized.",
         },
@@ -242,9 +270,12 @@ async def test_persist_context_variables_filters_canonical_fields():
     filter_doc, update_doc = fake_coll.update_one.await_args.args
     assert filter_doc["_id"] == "chat-1"
     assert filter_doc["app_id"] == "app-1"
+    assert filter_doc["workflow_name"] == "SmokeParent"
     assert "chat_id" not in update_doc["$set"]
     assert "workflow_name" not in update_doc["$set"]
+    assert "session_version" not in update_doc["$set"]
+    assert update_doc["$inc"] == {"session_version": 1}
     assert update_doc["$set"]["app_task_batch_status"] == "consumed"
-    assert update_doc["$set"]["smoke_presented_summary"] == "Smoke path summarized."
+    assert "smoke_presented_summary" not in update_doc["$set"]
     assert isinstance(update_doc["$set"]["last_updated_at"], datetime)
 

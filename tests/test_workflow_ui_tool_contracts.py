@@ -228,6 +228,9 @@ def test_ui_docs_define_page_customization_boundary() -> None:
     assert "literal font-family names" in surface_contract
     assert "`theme.*` is the compact" in surface_contract
     assert "expanded runtime shell token layer" in surface_contract
+    assert "framework-owned shared workflow primitives live in `chat-ui/src/core/ui/`" in surface_contract
+    assert "factory-owned reusable workflow components live under `factory_app/workflows/_shared/ui/`" in surface_contract
+    assert "they are not auto-registered" in surface_contract
     assert "Local fonts live only under `app/brand/fonts/`" in surface_contract
     assert "Google Fonts are declared in `theme_config.json`" in surface_contract
     assert "theme_config_patch" in assembly_contract
@@ -278,13 +281,13 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
 
 def test_repo_owned_workflow_ui_surfaces_use_shared_bridges() -> None:
     style_files = [
-        "factory_app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
+        "factory_app/workflows/_shared/ui/AgentAPIKeysBundleInput.js",
         "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
         "factory_app/workflows/ValueEngine/ui/ValueEngine/components/ConceptBlueprint.js",
     ]
     runtime_files = [
         "factory_app/workflows/AgentGenerator/ui/ActionPlan.js",
-        "factory_app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
+        "factory_app/workflows/_shared/ui/AgentAPIKeysBundleInput.js",
     ]
 
     for relative_path in style_files:
@@ -298,14 +301,34 @@ def test_repo_owned_workflow_ui_surfaces_use_shared_bridges() -> None:
         assert "core/toolsLogger" not in content
 
 
+def test_workflow_ui_router_uses_real_error_boundary() -> None:
+    router = _read("chat-ui/src/core/WorkflowUIRouter.js")
+
+    assert "class WorkflowUIErrorBoundary extends React.Component" in router
+    assert "static getDerivedStateFromError(error)" in router
+    assert "componentDidCatch(error, info)" in router
+    assert "componentDidUpdate(previousProps)" in router
+    assert "<WorkflowUIErrorBoundary" in router
+    assert "resetKey={toolCallId || `${sourceWorkflowName}-${componentType}`}" in router
+    assert "WorkflowUIRenderError" in router
+    assert "Component Render Error" in router
+    assert "try {\n    return (" not in router
+
+
 def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
     agent_index = _read("factory_app/workflows/AgentGenerator/ui/index.js")
     app_index = _read("factory_app/workflows/AppGenerator/ui/index.js")
+    smoke_index = _read("factory_app/workflows/RuntimeToolCallSmoke/ui/index.js")
     value_index = _read("factory_app/workflows/ValueEngine/ui/index.js")
     app_workbench = _read("factory_app/workflows/AppGenerator/ui/AppWorkbench.js")
     export_actions = _read("factory_app/workflows/AppGenerator/ui/ExportActions.js")
 
     assert "AgentAPIKeysBundleInput" in agent_index
+    assert "../../_shared/ui/AgentAPIKeysBundleInput.js" in agent_index
+    assert "../../_shared/ui/AgentAPIKeysBundleInput.js" in app_index
+    assert "../../_shared/ui/AgentAPIKeysBundleInput.js" in smoke_index
+    assert "../../AgentGenerator/ui/AgentAPIKeysBundleInput.js" not in app_index
+    assert "../../AgentGenerator/ui/AgentAPIKeysBundleInput.js" not in smoke_index
     assert "ActionPlan" in agent_index
     assert "AppWorkbench" in app_index
     assert "ConceptBlueprint" in value_index
@@ -314,11 +337,27 @@ def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
     assert "@mozaiks/chat-ui/core/ui/DownloadCenter.js" in export_actions
 
 
+def test_shared_workflow_ui_contract_is_documented() -> None:
+    shared_doc = _read("docs/architecture/builder/shared-workflow-infrastructure.md")
+    workflow_arch = _read("docs/architecture/workflows/workflow-architecture.md")
+    authoring_contract = _read("docs/architecture/workflows/workflow-authoring-contracts.md")
+    adding_workflows = _read("docs/guides/adding-workflows/01-overview.md")
+
+    for content in (shared_doc, workflow_arch, authoring_contract, adding_workflows):
+        assert "factory_app/workflows/_shared/ui" in content
+        assert "ui/index.js" in content
+
+    assert "Shared workflow UI is implementation only" in shared_doc
+    assert "Do not import React components from a sibling workflow folder" in shared_doc
+    assert "consuming workflows must re-export/register them from their own `ui/index.js`" in workflow_arch
+    assert "Generated workflow bundles should not depend on `workflows/_shared`" in adding_workflows
+    assert "[Shared Workflow Infrastructure]" in adding_workflows
+
+
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
         "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
         "factory_app/workflows/ValueEngine/tools/manifest.py",
-        "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 
@@ -520,9 +559,8 @@ def test_core_ui_index_exports_shipped_workflow_components() -> None:
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
     files = [
-        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceInlineBrief.jsx",
+        "factory_app/workflows/ExistingAppDiscovery/ui/RepoAccessRecoveryCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
-        "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
         "factory_app/workflows/AgentGenerator/ui/ActionPlan.js",
     ]
@@ -530,21 +568,6 @@ def test_workflow_ui_components_use_payload_prop_contract() -> None:
         content = _read(relative_path)
         assert "({ data" not in content
         assert "payload" in content
-
-
-def test_brownfield_repo_input_shows_extraction_state_while_starting_workflow() -> None:
-    content = _read("factory_app/workflows/extended_orchestration/ui/transitions/BrownfieldRepoInput.js")
-    transition_screen = _read("chat-ui/src/ui/screens/TransitionScreen.jsx")
-    route_renderer = _read("chat-ui/src/components/RouteRenderer.jsx")
-
-    assert "function ExtractionProgress(" in content
-    assert "Indexing App Intelligence" in content
-    assert "Building AppContext graph" in content
-    assert "Creating App Intelligence snapshot" in content
-    assert "Preparing agent overview" in content
-    assert "Promise.resolve(onResolve(option.id, contextVariables))" in content
-    assert "return onNavigate?.(option_id, contextVariables);" in transition_screen
-    assert "return true;" in route_renderer
 
 
 def test_transition_shell_screens_stay_workflow_agnostic() -> None:
@@ -651,6 +674,20 @@ def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:
     assert "`renderItem`" not in content
 
 
+def test_agent_generator_artifact_prompts_prioritize_user_facing_view_models() -> None:
+    content = _read("factory_app/workflows/AgentGenerator/agents.yaml")
+
+    assert "Artifact-mode UI must lead with user-facing meaning" in content
+    assert "Map raw tool payloads into a presentation view model" in content
+    assert "Default artifact views should answer what the user should understand" in content
+    assert "Hide ids, file paths, language counts, raw metrics, scanner warnings" in content
+    assert "Avoid status/readiness pills, priority badges, and repeated per-card CTAs" in content
+    assert "use at most 2-3 plain tabs with user-facing labels" in content
+    assert "dedicated response-required artifact" in content
+    assert "diagnostics footers" in content
+    assert "consumable in about 30 seconds" in content
+
+
 def test_form_primitive_uses_static_tailwind_grid_column_classes() -> None:
     content = _read("chat-ui/src/ui/primitives/Form.jsx")
     assert "GRID_COL_CLASS" in content
@@ -663,6 +700,8 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
 
     assert "CodingJourneySelector" in index_content
     assert "AppTypeSelector" in index_content
+    assert "BrownfieldPathSelector" in index_content
+    assert "BrownfieldRepoInput" in index_content
     assert "DatabaseSetupSelector" in index_content
 
     transition_components = {
@@ -673,6 +712,8 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
     assert {
         "CodingJourneySelector",
         "AppTypeSelector",
+        "BrownfieldPathSelector",
+        "BrownfieldRepoInput",
         "DatabaseSetupSelector",
     }.issubset(transition_components)
 

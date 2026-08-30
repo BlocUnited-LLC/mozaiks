@@ -20,6 +20,7 @@ const DEFAULT_NAVIGATION = {
   version: '1.0.0',
   appName: null,
   appId: null,
+  surface: 'platform',
   landing_spot: '/',
   pages: [],
   header: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, pages: [], actions: [] },
@@ -199,6 +200,7 @@ const normalizeChromeConfig = (chrome = {}) => {
 const normalizeNavigationConfig = (navigation = {}) => ({
   ...DEFAULT_NAVIGATION,
   ...navigation,
+  surface: typeof navigation.surface === 'string' ? navigation.surface : DEFAULT_NAVIGATION.surface,
   pages: Array.isArray(navigation.pages) ? navigation.pages : DEFAULT_NAVIGATION.pages,
   header: normalizeHeaderConfig(navigation.header),
   profile: normalizeProfileConfig(navigation.profile),
@@ -291,7 +293,7 @@ export const NavigationProvider = ({
         } else {
         }
       } catch (err) {
-        console.error('[NavigationProvider] Error loading shell config:', err);
+        console.error('❌ [NavigationProvider] Error loading shell config:', err);
         onErrorRef.current(err);
       }
 
@@ -329,6 +331,7 @@ export const NavigationProvider = ({
     version: navigation.version,
     appName: navigation.appName || null,
     appId: navigation.appId || null,
+    surface: navigation.surface || DEFAULT_NAVIGATION.surface,
     landing_spot: navigation.landing_spot || '/',
     chat_startup_mode: navigation.chat_startup_mode || 'ask',  // "ask" or "workflow"
     entry_point: navigation.entry_point || null,

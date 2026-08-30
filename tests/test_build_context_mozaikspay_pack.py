@@ -134,6 +134,59 @@ def test_mozaikspay_provider_api_contract_ships() -> None:
     content = _read_yaml(api_contract)
     assert content.get("schema_version") == "mozaiks.provider_api_contract.v1"
     assert content.get("contract_id") == "mozaikspay_provider_api"
+    assert content.get("contract_version", {}).get("current") == "mozaiks.provider_api_contract.v1"
+    assert any(endpoint.get("id") == "provider_readiness" for endpoint in content["endpoints"])
+    assert content.get("callbacks", {}).get("verification", {}).get("fail_closed") is True
+
+
+def test_mozaikspay_provider_api_contract_is_provider_compatible() -> None:
+    """The machine-readable contract must not imply only BlocUnited's hosted service can satisfy it."""
+    api_contract = MOZAIKSPAY / "provider_api_contract.yaml"
+    text = api_contract.read_text(encoding="utf-8")
+
+    assert "selected MozaiksPay-compatible provider" in text
+    assert "self-hosted or alternative" in text
+    assert "Served by the MozaiksPay hosted platform" not in text
+    assert "hosted billing webhook" not in text
+
+
+def test_mozaikspay_public_provider_contract_doc_ships() -> None:
+    """The public docs must explain how a compatible provider replaces MozaiksPay."""
+    doc = WORKSPACE / "docs" / "architecture" / "modules-systems" / "mozaikspay-provider-contract.md"
+    assert doc.exists(), "MozaiksPay provider replacement contract doc must ship"
+
+    text = doc.read_text(encoding="utf-8")
+    assert "MozaiksPay is the recommended managed monetization provider" in text
+    assert "compatible provider can replace" in text
+    assert "provider_api_contract.yaml" in text
+    assert "GET /api/mozaikspay/v1/subscription/status" in text
+    assert "POST /api/mozaikspay/v1/billing-portal/session" in text
+    assert "POST /api/mozaikspay/v1/subscription/checkout-session" in text
+    assert "POST /api/mozaikspay/v1/tokens/top-up-session" in text
+    assert "GET /api/mozaikspay/v1/health" in text
+    assert "wallet, payout, settlement" in text
+
+
+def test_mozaikspay_pack_contract_avoids_hosted_implementation_topology() -> None:
+    """The OSS pack can describe provider lifecycle needs without naming App Zero internals."""
+    text = (MOZAIKSPAY / "contract.yaml").read_text(encoding="utf-8")
+
+    forbidden_hosted_details = (
+        "hosted.hosting.app.deployed",
+        "hosted_billing",
+        "provision_app_billing_plans",
+        "Stripe products",
+        "Stripe prices",
+        "price_ids",
+        "hosted.billing.app_billing_plans",
+    )
+    for detail in forbidden_hosted_details:
+        assert detail not in text
+
+    contract = _read_yaml(MOZAIKSPAY / "contract.yaml")
+    boundary = contract.get("provider_lifecycle_boundary") or []
+    assert boundary
+    assert boundary[0]["provider_role"] == "mozaikspay_compatible_provider"
 
 
 def test_mozaikspay_provider_api_contract_declares_required_response_fields() -> None:
@@ -202,12 +255,21 @@ def test_billing_portal_module_permissions_are_declared() -> None:
 
 def test_billing_portal_read_actions_require_read_permission() -> None:
     module_yaml = _read_yaml(TEMPLATES / "modules" / "billing_portal" / "module.yaml")
-    read_actions = {"get_subscription_status", "get_usage_status", "get_token_status", "list_plans"}
+    # list_plans is excluded: it is the anonymous public catalog behind /pricing
+    # (api_surface public_readonly, no permissions).
+    read_actions = {"get_subscription_status", "get_usage_status", "get_token_status"}
     for action in (module_yaml.get("actions") or []):
         if action["id"] in read_actions:
             assert "billing_portal.read" in action.get("permissions", []), (
                 f"{action['id']} must require billing_portal.read"
             )
+
+
+def test_billing_portal_list_plans_is_public_catalog() -> None:
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "billing_portal" / "module.yaml")
+    list_plans = next(a for a in module_yaml["actions"] if a["id"] == "list_plans")
+    assert list_plans.get("api_surface") == "public_readonly"
+    assert not list_plans.get("permissions")
 
 
 def test_billing_portal_manage_actions_require_manage_permission() -> None:
@@ -282,7 +344,8 @@ def test_mozaikspay_billing_page_template_ships() -> None:
     assert billing.exists()
     content = _read_yaml(billing)
     assert content.get("route") == "/billing"
-    assert content.get("schema_version") == "mozaiks.page.v1"
+    assert content.get("schema_version") == "mozaiks.app_page.v1"
+    assert content.get("page_type") == "analytics_dashboard"
 
 
 def test_mozaikspay_usage_page_template_ships() -> None:
@@ -290,7 +353,30 @@ def test_mozaikspay_usage_page_template_ships() -> None:
     assert usage.exists()
     content = _read_yaml(usage)
     assert content.get("route") == "/usage"
-    assert content.get("schema_version") == "mozaiks.page.v1"
+    assert content.get("schema_version") == "mozaiks.app_page.v1"
+    assert content.get("page_type") == "analytics_dashboard"
+
+
+def test_mozaikspay_contract_declares_every_shipped_page() -> None:
+    """The bundle scanner hard-requires the Pricing page, so the pack contract
+    must declare it: contract.yaml facades[].pages is the single source of
+    truth for the pack's page surface and must not drift from the shipped
+    templates."""
+    contract = _read_yaml(MOZAIKSPAY / "contract.yaml")
+    declared_routes = {
+        page.get("route")
+        for facade in contract.get("facades") or []
+        for page in facade.get("pages") or []
+    }
+    template_routes = {
+        _read_yaml(page_file).get("route")
+        for page_file in (TEMPLATES / "ui" / "pages").glob("*.yaml")
+    }
+    assert template_routes <= declared_routes, (
+        f"pack templates ship pages {sorted(template_routes - declared_routes)} "
+        "that contract.yaml facades[].pages does not declare"
+    )
+    assert "/pricing" in declared_routes
 
 
 def test_mozaikspay_pages_bind_through_billing_portal_facade() -> None:

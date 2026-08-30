@@ -1,4 +1,4 @@
-schema_version: mozaiks.page.v1
+schema_version: mozaiks.app_page.v1
 name: product_detail
 route: /products/:productId
 title: Product
@@ -68,4 +68,3 @@ sections:
             product_id: "{product_id}"
             quantity: 1
 roles: null
-extensions: null

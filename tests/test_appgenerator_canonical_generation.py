@@ -348,6 +348,13 @@ class TestStaticContractChecks:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
         assert "task_type: module_contract" in source
 
+    def test_agents_yaml_keeps_redis_operator_owned_and_opt_in(self) -> None:
+        source = _read("factory_app/workflows/AppGenerator/agents.yaml")
+
+        assert "Do not add `redis` for generic production readiness" in source
+        assert "Redis is BYOK/operator-owned" in source
+        assert "must not be planned as paid managed infrastructure by default" in source
+
     def test_agents_yaml_has_no_flat_states_yaml_references(self) -> None:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
         assert "states.yaml" not in source
@@ -406,6 +413,17 @@ class TestStaticContractChecks:
         assert not missing, (
             f"AppSchemaAgent guidance in agents.yaml is missing page_type values: {missing}"
         )
+
+    def test_app_build_plan_includes_demo_fixture_sets(self) -> None:
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        assert "demo_fixture_sets" in so["models"]["AppBuildPlan"]["fields"]
+        assert "AppDemoFixtureSet" in so["models"]
+        assert "AppDemoFixtureRecordGroup" in so["models"]
+
+    def test_app_plan_agent_mentions_demo_fixture_sets(self) -> None:
+        agents_text = _read("factory_app/workflows/AppGenerator/agents.yaml")
+        assert "demo_fixture_sets" in agents_text
+        assert "browser/demo/preview records" in agents_text
 
 
 # ---------------------------------------------------------------------------
@@ -890,6 +908,178 @@ class TestRuntimeLoadFixture:
         assert "tasks" in module_names
 
 
+# ---------------------------------------------------------------------------
+# Level E: Taxonomy alignment — derived from actual source, no hardcoded lists
+# ---------------------------------------------------------------------------
 
 
+class TestTaxonomyAlignment:
+    """Prove that structured_outputs.yaml, the build-plan validator, the bundle
+    scanner, and the runtime loader all agree on shared taxonomy values.
+
+    Every set used in assertions is derived from the authoritative source at
+    import time — no hardcoded duplicate lists.
+    """
+
+    # -- task_type alignment ------------------------------------------------
+
+    def test_task_type_structured_outputs_matches_allowed_task_types(self) -> None:
+        """structured_outputs.yaml AppBuildTask.task_type values must be exactly
+        the set accepted by _ALLOWED_TASK_TYPES in app_build_plan.py.
+
+        If they diverge the LLM can plan tasks that the validator silently
+        rejects, or the validator gate has dead entries.
+        """
+        from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+            _ALLOWED_TASK_TYPES,
+        )
+
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        so_task_types = set(
+            so["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
+        )
+        assert so_task_types == _ALLOWED_TASK_TYPES, (
+            f"task_type drift.\n"
+            f"  Only in structured_outputs.yaml: {so_task_types - _ALLOWED_TASK_TYPES}\n"
+            f"  Only in _ALLOWED_TASK_TYPES:      {_ALLOWED_TASK_TYPES - so_task_types}"
+        )
+
+    def test_allowed_task_types_have_canonical_initial_agents(self) -> None:
+        """Every allowed task_type except agent_backend_integration must map to
+        a canonical initial agent for execution planning.
+        """
+        from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+            _ALLOWED_TASK_TYPES,
+            _CANONICAL_INITIAL_AGENTS,
+        )
+
+        # agent_backend_integration is exempt — it does not require a
+        # canonical initial agent mapping.
+        need_agents = _ALLOWED_TASK_TYPES - {"agent_backend_integration"}
+        missing = need_agents - set(_CANONICAL_INITIAL_AGENTS)
+        assert not missing, (
+            f"task_types without _CANONICAL_INITIAL_AGENTS entry: {missing}"
+        )
+
+    # -- module type alignment ----------------------------------------------
+
+    def test_module_type_structured_outputs_matches_runtime_loader(self) -> None:
+        """structured_outputs.yaml ModuleIdentity.type values must be exactly
+        the Literal accepted by the runtime ModuleIdentity model.
+
+        If they diverge the LLM can generate modules that the runtime rejects
+        at boot.
+        """
+        from typing import get_args, get_type_hints
+
+        from mozaiksai.core.runtime.app.module_loader import ModuleIdentity
+
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        so_module_types = set(
+            so["models"]["ModuleIdentity"]["fields"]["type"]["values"]
+        )
+        runtime_module_types = set(get_args(get_type_hints(ModuleIdentity)["type"]))
+        assert so_module_types == runtime_module_types, (
+            f"ModuleIdentity.type drift.\n"
+            f"  Only in structured_outputs.yaml: {so_module_types - runtime_module_types}\n"
+            f"  Only in runtime Literal:          {runtime_module_types - so_module_types}"
+        )
+
+    def test_module_archetypes_match_runtime_module_types(self) -> None:
+        """Runtime archetypes are exactly module.type values; advisory behavior
+        patterns live separately so useful generator guidance does not become a
+        false runtime promise.
+        """
+        from typing import get_args, get_type_hints
+
+        from mozaiksai.core.runtime.app.module_loader import ModuleIdentity
+
+        module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
+        runtime_module_types = set(get_args(get_type_hints(ModuleIdentity)["type"]))
+        archetype_keys = set(module_archetypes["archetypes"])
+        assert archetype_keys == runtime_module_types
+
+    def test_behavior_patterns_do_not_expand_module_type_taxonomy(self) -> None:
+        """State-machine, file-storage, and notification-preference guidance are
+        supported behavior/capability patterns, not accepted module.type literals.
+        """
+        from typing import get_args, get_type_hints
+
+        from mozaiksai.core.runtime.app.module_loader import ModuleIdentity
+
+        module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
+        patterns = module_archetypes["behavior_patterns"]
+        runtime_module_types = set(get_args(get_type_hints(ModuleIdentity)["type"]))
+        assert {"state_machine", "file_storage", "notification_preferences"} <= set(patterns)
+        assert set(patterns).isdisjoint(runtime_module_types)
+        for name, pattern in patterns.items():
+            canonical_type = pattern.get("canonical_module_type")
+            assert canonical_type in runtime_module_types, (
+                f"behavior pattern {name!r} maps to unsupported module type {canonical_type!r}"
+            )
+            assert f"`{name}` as module.type" in "\n".join(pattern.get("hard_constraints", []))
+
+    # -- reaction target kind alignment -------------------------------------
+
+    def test_reaction_target_kind_runtime_is_superset_of_structured_outputs(self) -> None:
+        """The runtime ModuleReactionTarget.kind Literal and the bundle scanner
+        _CANONICAL_REACTION_TARGET_KINDS must both be supersets of the
+        structured_outputs.yaml ModuleReactionTarget.kind values.
+
+        service_adapter is intentionally absent from structured_outputs.yaml
+        (pack-only extension) but must be present in both the runtime and the
+        scanner.
+        """
+        from typing import get_args, get_type_hints
+
+        from mozaiksai.core.runtime.app.module_loader import ModuleReactionTarget
+
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        so_kinds = set(
+            so["models"]["ModuleReactionTarget"]["fields"]["kind"]["values"]
+        )
+        runtime_kinds = set(get_args(get_type_hints(ModuleReactionTarget)["kind"]))
+
+        # Runtime must accept everything the LLM can produce
+        assert so_kinds <= runtime_kinds, (
+            f"structured_outputs defines kinds the runtime rejects: {so_kinds - runtime_kinds}"
+        )
+        # service_adapter must be in the runtime but not in structured_outputs
+        assert "service_adapter" in runtime_kinds
+        assert "service_adapter" not in so_kinds
+
+    def test_scanner_reaction_target_kinds_match_runtime(self) -> None:
+        """The bundle scanner's _CANONICAL_REACTION_TARGET_KINDS must exactly
+        match the runtime ModuleReactionTarget.kind Literal.
+        """
+        from typing import get_args, get_type_hints
+
+        from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+            _CANONICAL_REACTION_TARGET_KINDS,
+        )
+        from mozaiksai.core.runtime.app.module_loader import ModuleReactionTarget
+
+        runtime_kinds = set(get_args(get_type_hints(ModuleReactionTarget)["kind"]))
+        assert _CANONICAL_REACTION_TARGET_KINDS == runtime_kinds, (
+            f"Scanner/runtime reaction target kind drift.\n"
+            f"  Only in scanner: {_CANONICAL_REACTION_TARGET_KINDS - runtime_kinds}\n"
+            f"  Only in runtime: {runtime_kinds - _CANONICAL_REACTION_TARGET_KINDS}"
+        )
+
+    # -- page schema alignment (scanner uses runtime validator) -------------
+
+    def test_scanner_page_schema_uses_runtime_validator(self) -> None:
+        """The scanner must not own page-type or primitive copies."""
+        source = (
+            _workspace()
+            / "factory_app"
+            / "workflows"
+            / "AppGenerator"
+            / "tools"
+            / "generated_bundle_scanner.py"
+        ).read_text(encoding="utf-8")
+
+        assert "validate_page_schema" in source
+        assert "_CANONICAL_PAGE_TYPES" not in source
+        assert "_CANONICAL_SECTION_PRIMITIVES" not in source
 

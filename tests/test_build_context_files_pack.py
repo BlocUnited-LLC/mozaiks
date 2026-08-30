@@ -267,6 +267,19 @@ def test_appgenerator_capability_directory_has_files_pack_entry() -> None:
 # No wrong module names generated
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Account-data (GDPR) contract
+# ---------------------------------------------------------------------------
+
+def test_files_backend_ships_account_data_handler() -> None:
+    handler = TEMPLATES / "modules" / "files" / "backend" / "account_data_handler.py"
+    assert handler.exists(), "account_data_handler.py must exist alongside user_data_scope=true"
+    source = handler.read_text(encoding="utf-8")
+    assert "class AccountDataHandler" in source
+    assert "async def delete_user_data" in source
+    assert "async def export_user_data" in source
+
+
 def test_files_pack_does_not_generate_wrong_module_names() -> None:
     """Module must be named 'files', not storage, media, or uploads."""
     generated_paths = {

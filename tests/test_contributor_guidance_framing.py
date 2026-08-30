@@ -41,6 +41,35 @@ def test_build_guidance_states_workflow_sequence_truth() -> None:
     assert "sequence-driven" in builder_execution
 
 
+def test_top_level_guidance_documents_shared_workflow_ui_lane() -> None:
+    architecture = _read("ARCHITECTURE.md")
+    agents = _read("AGENTS.md")
+    claude = _read("CLAUDE.md")
+
+    for text in (architecture, agents, claude):
+        assert "factory_app/workflows/_shared/" in text
+        assert "reusable workflow UI components" in text
+
+    assert "factory_app/workflows/_shared/ui/" in agents
+    assert "each consuming workflow must re-export/register them from its own" in agents
+    assert "Do not import UI from a sibling workflow folder" in agents
+
+
+def test_agent_guidance_requires_architecture_first_review() -> None:
+    agents = _read("AGENTS.md")
+    quick_reference = _read("docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md")
+
+    for text in (agents, quick_reference):
+        assert "Required Pre-Edit Architecture Check" in text
+        assert "ARCHITECTURE_QUICK_REFERENCE.md" in text or "read this quick reference" in text
+        assert "MOZAIKS_OSS_SOFTWARE_DESIGN.md" in text
+        assert "current source" in text.lower()
+        assert "final authority" in text.lower()
+        assert "parallel subsystem" in text
+
+    assert "architectural changes that contradict the frozen north star require an ADR" in agents
+
+
 def test_refinement_guidance_states_checkpoint_reentry_truth() -> None:
     architecture = _read("ARCHITECTURE.md")
     refinement_harness = _read("docs/architecture/workflows/refinement-harness-architecture.md")

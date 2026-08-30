@@ -10,7 +10,7 @@ global_rules:
   - If a recommended pack is selected, use app-owned facade modules and thin service clients.
   - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, token usage measurement, and token wallet accounting are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
 app_agnostic_rules:
-  - Default managed adapters are recommendation-only and must not become runtime requirements.
+  - Default managed adapters must remain replaceable and must not become runtime requirements.
   - A selected managed adapter must cross runtime state changes through provider-neutral commands, events, or configured records.
   - Generated app pages must call app-owned facade modules; they must not call hosted product internals or payment provider SDKs directly.
   - Any default managed adapter must declare an external_adapter replacement path so user-selected providers can satisfy the same app-facing contract.
@@ -47,7 +47,7 @@ capabilities:
       - subscriptions
       - saas monetization
     generator_notes:
-      - Prioritize the mozaikspay capability pack for SaaS monetization when it is available and the user has not explicitly named a different billing provider.
+      - Default to the mozaikspay capability pack for SaaS subscriptions when no different provider path is explicitly selected. Preserve monetization_provider=entitlement_dispatch as the self-managed OSS override.
       - Generate the app-owned billing_portal facade, thin services/integrations/mozaikspay_client.py client, billing/usage pages, pricing page, and app/config/subscriptions.yaml plan contract.
       - Do not generate provider-specific billing module internals or hosted service code.
       - Do not generate checkout, webhook handlers, invoice logic, customer/payment provider mapping, refunds, wallet, payout, or provider credential handling.
@@ -57,10 +57,51 @@ capabilities:
     alternatives:
       - id: custom_payments_provider
         capability_kind: external_adapter
-        use_when: User brings a custom payment processor, wallet rail, or billing service.
+        use_when: User brings a custom payment processor, wallet rail, or billing service outside the first-class subscription assignment providers.
         generator_notes:
           - Generate strict app-owned facade contracts and adapter stubs only.
           - Keep provider-specific mechanics under app/services/adapters/payments/.
+
+  - id: mozaiks_cloud
+    label: Mozaiks Cloud Deployment and Domain Management
+    capability_kind: operator_pack
+    recommendation_rank: 10
+    adapter_contract:
+      role: optional_managed_adapter
+      app_facing_facades:
+        - cloud_deployment
+        - cloud_domain
+      replacement_kind: external_adapter
+      runtime_effect_boundary: CloudDeploymentOperation
+      runtime_read_boundary: CloudDomainStatus
+    domains:
+      - deployments
+      - hosting
+      - domains
+      - environments
+    intent_signals:
+      - App needs managed deployment to Mozaiks Cloud.
+      - App needs custom domain management with DNS and TLS through Mozaiks Cloud.
+      - User explicitly asks for Mozaiks Cloud hosting.
+    selection_rule: require_explicit_user_confirmation
+    generator_notes:
+      - Never auto-select this pack from generic deployment intent.
+        Mozaiks Cloud is opt-in; self-hosted apps work without it.
+      - When selected, generate app-owned facade modules (cloud_deployment,
+        cloud_domain) and thin services/integrations/mozaiks_cloud_*_client.py clients.
+      - Do not generate Azure SDK, Cloudflare SDK, GitHub SDK, or any provider
+        SDK imports in the app bundle.
+      - Pages must bind through app-owned facade module actions, not directly
+        to Mozaiks Cloud API endpoints.
+      - Secret env handles only (MOZAIKS_CLOUD_API_KEY, MOZAIKS_CLOUD_API_BASE);
+        never generate raw credential values.
+    alternatives:
+      - id: custom_hosting_provider
+        capability_kind: external_adapter
+        use_when: User brings their own hosting platform or deployment target.
+        generator_notes:
+          - Generate provider-neutral Dockerfile and deployment manifest only.
+          - Keep provider-specific mechanics under app/services/adapters/deployment/.
 
   - id: messaging_pack
     label: Messaging
@@ -240,9 +281,35 @@ capabilities:
       - The OSS runtime provides installTour() and the tour overlay. Do not generate a custom React tour component or a separate /welcome page.
       - The user_onboarding state module follows the standard archetype. Step ids in its complete_step enum must match config/onboarding.yaml step ids exactly.
     capabilities_provided:
-      - onboarding.tour.show
-      - onboarding.tour.dismiss
-      - onboarding.tour.progress.read
+      - onboarding.read
+      - onboarding.write
+
+  - id: operator_readiness
+    label: Operator Readiness
+    capability_kind: operator_pack
+    recommendation_rank: 9
+    domains:
+      - platform
+      - launch
+      - readiness
+      - hosting
+      - compliance
+    intent_signals:
+      - App is a host-operator platform or SaaS workspace that needs reproducible no-spend launch gates.
+      - Product spec mentions launch readiness, evidence stamping, staging verification, or operator readiness.
+      - App manages hosted customer apps, release gates, compliance approvals, or platform launch checklists.
+    selection_aliases:
+      - operator readiness
+      - launch readiness
+      - readiness gate
+      - evidence ledger
+      - no-spend launch
+      - staging verification
+    generator_notes:
+      - Select this pack only for platform-style apps that need a deterministic launch/evidence workflow. Do not select it for ordinary customer apps or simple brochure sites.
+      - AppPlanAgent must emit a readiness_profile and the generated files must be rendered from the pack templates, not scraped from freeform agent prose.
+      - The primary generated output is config/operator_readiness.yaml. The pack also emits a local wrapper script and a short operator guide for reproducible no-spend checks.
+      - Keep the generated outputs generic. Do not bake App Zero-specific env var names, provider ids, or paid-service defaults into this pack.
 
   - id: files_pack
     label: Files & Media Storage
@@ -288,8 +355,6 @@ capabilities:
       - sms
       - alerts
     capabilities_provided:
-      - notifications.email.send
-      - notifications.push.send
       - notifications.preferences.read
       - notifications.preferences.write
     intent_signals:

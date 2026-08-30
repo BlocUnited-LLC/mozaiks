@@ -57,9 +57,13 @@ reusable behavior into a framework-owned `mozaiksai.core.*` API with a
 documented contract.
 
 Factory-owned builder infrastructure is different: shared builder-only Python
-modules may live under `factory_app/workflows/_shared/` when multiple factory
-workflows consume them. That path is for the factory repo itself, not for
-generated workflow bundle output.
+modules and reusable workflow React components may live under
+`factory_app/workflows/_shared/` when multiple factory workflows consume them.
+Reusable workflow React components use the concrete
+`factory_app/workflows/_shared/ui/` lane.
+Shared workflow UI remains explicit: each consuming factory workflow imports
+and re-exports/registers the shared component from its own `ui/index.js`. That
+path is for the factory repo itself, not for generated workflow bundle output.
 
 ## Generation vs Refinement
 
@@ -104,8 +108,8 @@ The target workflow input contract is:
 - `build_mode` — `initial` or `revision`
 - `revision_scope` — `patch`, `design`, `feature`, or `core`
 - `change_request_id` — stable revision lineage id
-- `artifact_kind`
-- `artifact_version_id`
+- `build_family` — canonical name for the build record category (e.g. `app_bundle`); `artifact_kind` is also seeded for workflow compat during the naming transition
+- `build_record_id` — canonical name for the target build record ID; `artifact_version_id` is also seeded for workflow compat during the naming transition
 - `refinement_request`
 - `refinement_request_meta`
 - `change_intent`

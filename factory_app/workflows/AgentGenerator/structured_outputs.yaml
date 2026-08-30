@@ -448,6 +448,7 @@ models:
     - choice_picker
     - confirmation_summary
     - form_card
+    - progress_stepper
     - record_picker
     - file_upload_prompt
     - diff_review
@@ -466,6 +467,7 @@ models:
     - choice_picker
     - confirmation_summary
     - form_card
+    - progress_stepper
     - record_picker
     - file_upload_prompt
     - diff_review
@@ -515,6 +517,24 @@ models:
           is the canonical shared workflow component, `workflow_wrapper` when a workflow-local
           wrapper sits on top of a shipped component, `generated_component` for true workflow-local
           custom React, and `shell_builtin` only for planning-time `composer_reply`.
+  PayloadSchemaSpec:
+    type: model
+    fields:
+      type:
+        type: str
+        description: JSON Schema type string for the payload root (e.g. "object", "string", "array").
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional human-readable description of the payload shape.
+      required:
+        type: union
+        variants:
+        - list
+        - 'null'
+        description: Optional list of required property names when type is "object".
   UIToolAction:
     type: model
     fields:
@@ -546,8 +566,8 @@ models:
         - 'null'
         description: Optional approval semantic used by approval-style shared primitives.
       payload_schema:
-        type: dict
-        description: JSON-schema-like object describing expected payload shape for this action.
+        type: PayloadSchemaSpec
+        description: Typed payload schema spec describing the expected payload shape for this action.
   UIToolContract:
     type: model
     fields:
@@ -557,8 +577,8 @@ models:
         - agent_tool
         description: UI surface family. UI_Tool entries must use agent_tool.
       payload_schema:
-        type: dict
-        description: JSON-schema-like object describing the payload pushed from backend tool to UI component.
+        type: PayloadSchemaSpec
+        description: Typed payload schema spec describing the payload pushed from backend tool to UI component.
       actions_schema:
         type: list
         items: UIToolAction
@@ -938,7 +958,7 @@ models:
           name is semantic drift.
       concurrency:
         type: int
-        description: Maximum concurrent AG2 task channels for ready tasks.
+        description: Maximum concurrent AG2 task lifecycle-wrapped worker turns for ready tasks.
       failure_policy:
         type: literal
         values:
@@ -1242,7 +1262,7 @@ models:
           "composer" — shell-owned free-text reply lane using the main chat composer.
             Use for plain natural-language answers or clarifications.
           "inline" — agent-driven output rendered conversationally in the chat flow.
-            Use for status updates, single stats, short confirmations, streaming text.
+            Use for status updates, progress steppers, single stats, short confirmations, streaming text.
           "artifact" — agent-driven output rendered in a side tray or modal panel.
             Use for complex interactive UIs: approval wizards, multi-field forms,
             data tables with actions, diagrams, streaming action plans.
@@ -1777,6 +1797,24 @@ models:
     - UserDriven
     - AgentDriven
     - BackendOnly
+  PackGraphInteractionMode:
+    type: literal
+    values:
+    - agent_directed
+    - user_guided
+    - backend_only
+  PackGraphLaunchBehavior:
+    type: literal
+    values:
+    - auto_start
+    - wait_for_user
+    - none
+  PackGraphHandoffStyle:
+    type: literal
+    values:
+    - continuous_chat
+    - separate_chat
+    - background
 
   PackGraphWorkflow:
     type: model
@@ -1802,6 +1840,41 @@ models:
           triggered exclusively by domain events; MUST NOT appear in workflow_sequences
           or entrypoints. Read from the workflow bundle's orchestrator.yaml workflow_startup_mode
           field. Leave null only when startup mode is genuinely ambiguous.
+      interaction_mode:
+        type: union
+        variants:
+        - PackGraphInteractionMode
+        - 'null'
+        default: null
+        description: >
+          First-party Mozaiks conversation taxonomy. user_guided means the user
+          participates directly in the workflow conversation. agent_directed means
+          the workflow usually starts from an upstream sequence or transition.
+          backend_only means the workflow runs from domain events without a chat
+          entrypoint. Leave null only when the default mapping from startup_mode is
+          sufficient.
+      launch_behavior:
+        type: union
+        variants:
+        - PackGraphLaunchBehavior
+        - 'null'
+        default: null
+        description: >
+          Controls whether an empty workflow chat starts immediately. Use auto_start
+          for user-reachable workflow sessions and sequence handoffs, including
+          UserDriven workflows reached after a transition. Use wait_for_user only
+          for an intentionally blank chat. Use none only for BackendOnly workflows.
+      handoff_style:
+        type: union
+        variants:
+        - PackGraphHandoffStyle
+        - 'null'
+        default: null
+        description: >
+          Defines how the workflow should feel when reached from a transition or
+          sequence. continuous_chat keeps the build journey feeling like one
+          conversation. separate_chat is for deliberate standalone workflow starts.
+          background is only for BackendOnly workflows.
       dependencies:
         type: list
         items: PackGraphDependency

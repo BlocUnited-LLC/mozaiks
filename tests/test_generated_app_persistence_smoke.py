@@ -17,6 +17,7 @@ from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
     load_data_migrations,
 )
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 
 class FakePersistenceCollection:
@@ -95,6 +96,19 @@ class FakePersistenceCollection:
 
     async def count(self, query: Mapping[str, Any]) -> int:
         return len(await self.find_many(query, limit=100))
+
+    def list_indexes(self):
+        return FakeCursor(
+            [
+                {"name": name, "key": dict(index["keys"]), **{k: v for k, v in index.items() if k not in {"name", "keys"}}}
+                for name, index in self.indexes.items()
+            ]
+        )
+
+    async def create_index(self, keys: list[tuple[str, int]], **kwargs: Any) -> str:
+        name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
+        self.indexes[name] = {"name": name, "keys": list(keys), **{k: v for k, v in kwargs.items() if k != "name"}}
+        return name
 
     async def ensure_indexes(self, indexes: Sequence[Mapping[str, Any]]) -> None:
         for index in indexes:
@@ -190,7 +204,9 @@ class FakeHistoryCollection:
 
     async def create_index(self, keys, **kwargs):
         name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
-        self.index_rows.append({"name": name, "key": dict(keys)})
+        self.index_rows.append(
+            {"name": name, "key": dict(keys), **{key: value for key, value in kwargs.items() if key != "name"}}
+        )
         return name
 
     async def find_one(self, query: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -611,7 +627,8 @@ async def test_indexes_and_migrations_apply_with_fake_persistence(tmp_path: Path
         history_client=FakeHistoryClient(),
     )
 
-    assert applied_indexes == 2
+    assert applied_indexes.created == 2
+    assert applied_indexes.verified == 2
     assert applied_migrations == 1
     assert "project_owner_created_at" in persistence.collection("projects", "projects").indexes
     assert "task_project_status" in persistence.collection("tasks", "tasks").indexes
@@ -647,11 +664,11 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
             app_id="app_a",
             tenant_id="tenant_1",
             user_id="user_1",
-            params={"name": "Launch Plan", "project_id": "project_1"},
+            params={"name": "Launch Plan", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={}, authority=trusted_framework_authority())
     )
     created_task = await executor.execute(
         ModuleRequest(
@@ -659,14 +676,14 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
             action="create_task",
             app_id="app_a",
             user_id="user_1",
-            params={"title": "Draft scope", "task_id": "task_1", "project_id": "project_1"},
+            params={"title": "Draft scope", "task_id": "task_1", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_tasks = await executor.execute(
-        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"})
+        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"}, authority=trusted_framework_authority())
     )
     app_b_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={}, authority=trusted_framework_authority())
     )
 
     assert created_project.success is True
@@ -685,5 +702,5 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
     assert app_b_projects.data == {"items": [], "count": 0}
 
     assert any(context.app_id == "app_a" for context in FakePersistenceContext.constructed)
-    assert not hasattr(module_executor_module.ModuleRequest(module="x", action="y"), "db")
+    assert not hasattr(module_executor_module.ModuleRequest(module="x", action="y", authority=trusted_framework_authority()), "db")
 

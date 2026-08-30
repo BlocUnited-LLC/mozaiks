@@ -1,0 +1,367 @@
+schema_version: mozaiks.provider_api_contract.v1
+contract_id: mozaiks_cloud_provider_api
+provider_id: mozaiks_cloud
+base_path: /api/mozaiks-cloud/v1
+description: >
+  Public Mozaiks Cloud connector contract. Any provider, including a
+  custom/self-managed implementation, may satisfy this contract by exposing the
+  versioned endpoints, shared authentication rules, idempotency behavior,
+  normalized error envelope, and operation status model declared here.
+api_version:
+  header: X-MozaiksCloud-Api-Version
+  current: mozaiks.cloud.v1
+
+auth:
+  kind: managed_service_bearer
+  service: mozaiks_cloud
+  credential_reference: MOZAIKS_CLOUD_API_KEY
+  header: Authorization
+  scheme: Bearer
+  scopes:
+    read:
+      - cloud:read
+      - deployments:read
+      - domains:read
+    deploy:
+      - cloud:deploy
+      - deployments:write
+    rollback:
+      - cloud:rollback
+      - deployments:rollback
+    domains_write:
+      - domains:write
+    usage:
+      - cloud:usage
+      - cloud:deploy
+      - domains:manage
+    domains_manage:
+      - domains:manage
+
+idempotency:
+  header: Idempotency-Key
+  required_for_methods:
+    - POST
+    - DELETE
+  replay_behavior: same_key_same_scope_returns_original_operation_or_result
+  conflict_behavior: same_key_different_payload_returns_normalized_conflict_error
+
+error_envelope:
+  success_shape:
+    success: true
+  error_shape:
+    success: false
+    error:
+      code: str
+      message: str
+      kind: auth_error | rate_limited | validation_error | not_found | conflict | provider_error | timeout | unsupported | unknown
+      retryable: bool
+      details: dict | null
+      correlation_id: str | null
+
+operation_status_model:
+  terminal_statuses:
+    - succeeded
+    - failed
+    - cancelled
+  fields:
+    operation_id: str
+    operation_type: str
+    status: pending | running | succeeded | failed | cancelled | rolling_back | activating
+    resource_type: deployment | domain | rollback
+    resource_id: str | null
+    app_id: str
+    target_environment: str | null
+    created_at: str
+    updated_at: str | null
+    completed_at: str | null
+    error: dict | null
+    result: dict | null
+
+operations:
+  - id: submit_deployment
+    status: supported
+    method: POST
+    path: /deployments
+    scope: cloud:deploy | deployments:write
+    request_model: SubmitDeploymentRequest
+    response_model: OperationAccepted
+    idempotency: required
+    async_behavior: returns operation_id; poll get_deployment_operation_status
+    internal_app_owner: app_registry.request_hosting -> hosting deployment pipeline
+    app_pr_208: implemented_same_path
+    app_pr_209: not_applicable
+
+  - id: get_deployment_operation_status
+    status: supported
+    method: GET
+    path: /operations/{operation_id}
+    scope: cloud:read | deployments:read
+    request_model: OperationStatusRequest
+    response_model: OperationStatus
+    idempotency: not_allowed
+    async_behavior: canonical polling endpoint for deployment and rollback operations
+    internal_app_owner: hosting deployment records
+    app_pr_208: implemented_same_path
+    app_pr_209: must_share_same_model_for_domain_operations
+
+  - id: get_environment_endpoints
+    status: supported
+    method: GET
+    path: /apps/{app_id}/endpoints
+    scope: cloud:read | deployments:read
+    request_model: EnvironmentEndpointsRequest
+    response_model: EnvironmentEndpoints
+    idempotency: not_allowed
+    async_behavior: synchronous read
+    internal_app_owner: app_registry deployment_manifest + hosting_url
+    app_pr_208: implemented_same_path
+    app_pr_209: not_applicable
+
+  - id: get_deployment_health
+    status: supported
+    method: GET
+    path: /deployments/{deployment_id}/health
+    scope: cloud:read | deployments:read
+    request_model: DeploymentHealthRequest
+    response_model: DeploymentHealth
+    idempotency: not_allowed
+    async_behavior: synchronous read
+    internal_app_owner: hosting deployment records
+    app_pr_208: implemented_same_path
+    app_pr_209: not_applicable
+
+  - id: request_rollback
+    status: supported
+    method: POST
+    path: /rollbacks
+    scope: cloud:rollback | deployments:rollback
+    request_model: RollbackRequest
+    response_model: OperationAccepted
+    idempotency: required
+    async_behavior: returns operation_id; poll get_deployment_operation_status
+    internal_app_owner: hosting.rollback_deployment
+    app_pr_208: implemented_same_path
+    app_pr_209: not_applicable
+
+  - id: connect_domain
+    status: supported_contract_pending_app_correction
+    method: POST
+    path: /domains
+    scope: domains:write | domains:manage
+    request_model: ConnectDomainRequest
+    response_model: OperationAcceptedWithDomainVerification
+    idempotency: required
+    async_behavior: returns operation_id and binding_id; poll get_domain_operation_status
+    internal_app_owner: domains binding + verification records; dns/ssl/hosting pipeline
+    app_pr_208: not_applicable
+    app_pr_209: implemented_wrong_base_path_and_wrong_auth
+
+  - id: get_domain_verification
+    status: supported_contract_pending_app_correction
+    method: GET
+    path: /domains/{binding_id}/verification
+    scope: domains:read | cloud:read
+    request_model: DomainBindingRequest
+    response_model: DomainVerification
+    idempotency: not_allowed
+    async_behavior: synchronous read
+    internal_app_owner: domains verification records
+    app_pr_208: not_applicable
+    app_pr_209: exposed_as_instructions_under_wrong_base_path
+
+  - id: get_dns_instructions
+    status: supported_contract_pending_app_correction
+    method: GET
+    path: /domains/{binding_id}/instructions
+    scope: domains:read | cloud:read
+    request_model: DomainBindingRequest
+    response_model: DnsInstructions
+    idempotency: not_allowed
+    async_behavior: synchronous read
+    internal_app_owner: domains + hosting public endpoint facts
+    app_pr_208: not_applicable
+    app_pr_209: implemented_wrong_base_path_and_wrong_auth
+
+  - id: check_domain_verification
+    status: supported_contract_pending_app_correction
+    method: POST
+    path: /domains/{binding_id}/verify
+    scope: domains:write | domains:manage
+    request_model: DomainVerificationCheckRequest
+    response_model: OperationAccepted
+    idempotency: required
+    async_behavior: returns operation_id; may complete immediately if already verified
+    internal_app_owner: domains DNS verification + hosted domain pipeline trigger
+    app_pr_208: not_applicable
+    app_pr_209: implemented_wrong_base_path_and_wrong_auth
+
+  - id: request_domain_activation
+    status: supported_contract_pending_app_correction
+    method: POST
+    path: /domains/{binding_id}/activate
+    scope: domains:manage
+    request_model: DomainActivationRequest
+    response_model: OperationAccepted
+    idempotency: required
+    async_behavior: returns operation_id; poll get_domain_operation_status
+    internal_app_owner: domains verified binding -> dns/ssl/hosting activation pipeline
+    app_pr_208: not_applicable
+    app_pr_209: implemented_wrong_base_path_and_wrong_auth
+
+  - id: get_domain_status
+    status: supported_contract_pending_app_correction
+    method: GET
+    path: /domains/{binding_id}
+    scope: domains:read | cloud:read
+    request_model: DomainBindingRequest
+    response_model: DomainStatus
+    idempotency: not_allowed
+    async_behavior: synchronous read
+    internal_app_owner: domains binding status + dns/tls normalized status
+    app_pr_208: not_applicable
+    app_pr_209: implemented_wrong_base_path_and_wrong_auth
+
+  - id: disconnect_domain
+    status: supported_contract_pending_app_correction
+    method: DELETE
+    path: /domains/{binding_id}
+    scope: domains:manage
+    request_model: DomainDisconnectRequest
+    response_model: OperationAccepted
+    idempotency: required
+    async_behavior: returns operation_id; poll get_domain_operation_status
+    internal_app_owner: domains binding lifecycle + operator cleanup event
+    app_pr_208: not_applicable
+    app_pr_209: implemented_wrong_base_path_and_wrong_auth
+
+  - id: report_usage_rollups
+    status: supported
+    method: POST
+    path: /usage/rollups
+    scope: cloud:usage | cloud:deploy
+    request_model: UsageRollupsRequest
+    response_model: UsageRollupsAccepted
+    idempotency: required
+    async_behavior: synchronous; the (app_id, granularity, period_start) upsert is naturally idempotent
+    internal_app_owner: hosted_app_usage.ingest_rollups (app_id attributed from credentials)
+    app_pr_208: not_applicable
+    app_pr_209: not_applicable
+
+request_models:
+  UsageRollupsRequest:
+    required: [rollups]
+    fields:
+      rollups: "list[{period_start: str YYYY-MM-DD, granularity: 'day', page_views: int, unique_sessions: int | null, action_invocations: int | null, active_users: int | null, events: dict[str, int] | null}] (max 31)"
+  SubmitDeploymentRequest:
+    required: [app_id]
+    fields:
+      app_id: str
+      target_environment: str | null
+      release_ref: str | null
+  OperationStatusRequest:
+    required: [operation_id]
+    fields:
+      operation_id: str
+  EnvironmentEndpointsRequest:
+    required: [app_id]
+    fields:
+      app_id: str
+      target_environment: str | null
+  DeploymentHealthRequest:
+    required: [deployment_id]
+    fields:
+      deployment_id: str
+      app_id: str | null
+  RollbackRequest:
+    required: [target_release_id, approval_reference]
+    fields:
+      target_release_id: str
+      expected_current_deployment_id: str | null
+      target_environment: str | null
+      reason: str | null
+      approval_reference: str
+  ConnectDomainRequest:
+    required: [app_id, domain]
+    fields:
+      app_id: str
+      domain: str
+      target_environment: str | null
+  DomainBindingRequest:
+    required: [binding_id]
+    fields:
+      binding_id: str
+      tenant_id: str | null
+      app_id: str | null
+  DomainVerificationCheckRequest:
+    required: [binding_id]
+    fields:
+      binding_id: str
+      tenant_id: str | null
+      app_id: str | null
+  DomainActivationRequest:
+    required: [binding_id]
+    fields:
+      binding_id: str
+      tenant_id: str | null
+      app_id: str | null
+  DomainDisconnectRequest:
+    required: [binding_id]
+    fields:
+      binding_id: str
+      tenant_id: str | null
+      app_id: str | null
+
+response_models:
+  UsageRollupsAccepted:
+    fields:
+      success: bool
+      app_id: "str (from credentials, never from payload)"
+      accepted: int
+      rejected: "list[{index: int, code: str}]"
+  OperationAccepted:
+    required: [success, operation]
+    operation_ref: operation_status_model
+  OperationAcceptedWithDomainVerification:
+    required: [success, operation, binding_id, verification]
+  EnvironmentEndpoints:
+    required: [success, app_id, endpoints]
+  DeploymentHealth:
+    required: [success, deployment, health]
+  DomainVerification:
+    required: [success, binding_id, domain, verification]
+  DnsInstructions:
+    required: [success, binding_id, domain, records]
+  DomainStatus:
+    required: [success, binding_id, domain, status, dns_status, tls_status]
+
+unsupported_operations:
+  - domain_registration
+  - domain_purchase
+  - registrar_transfer
+  - dns_zone_creation
+  - dns_zone_deletion
+  - custom_certificate_upload
+  - generated_callback_receiver
+  - provider_account_creation
+  - source_code_upload
+
+callbacks:
+  generated_app_callback_routes: unsupported
+  provider_to_app_events: unsupported
+  polling_contract: use_operations_endpoint
+  replay_contract: providers must deduplicate mutating requests by Idempotency-Key
+
+drift_guard:
+  forbidden_response_fields:
+    - azure_resource_id
+    - azure_subscription_id
+    - azure_resource_group
+    - azure_tenant_id
+    - cloudflare_account_id
+    - cloudflare_zone_id
+    - cloudflare_api_token
+    - github_installation_id
+    - github_token
+    - provider_credentials
+    - ssl_private_key
+    - tls_private_key

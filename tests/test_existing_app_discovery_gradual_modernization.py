@@ -337,9 +337,15 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
     emitted = {}
 
     async def _fake_emit(component, payload, **kwargs):
+        emitted["component"] = component
         emitted["payload"] = payload
 
+    # Patch emit_ui_surface in both the save module and the overview emission module,
+    # since the new code delegates emission to emit_app_intelligence_enriched_overview_card.
     module.emit_ui_surface = _fake_emit
+    import factory_app.workflows.ExistingAppDiscovery.tools.emit_app_intelligence_overview as _overview_mod
+    _orig_emit = _overview_mod.emit_ui_surface
+    _overview_mod.emit_ui_surface = _fake_emit
 
     plan = _fake_decomposition_plan()
 
@@ -403,7 +409,10 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
         },
     )
 
-    result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
+    try:
+        result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
+    finally:
+        _overview_mod.emit_ui_surface = _orig_emit
 
     assert result["success"] is True
 
@@ -433,9 +442,15 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
     emitted = {}
 
     async def _fake_emit(component, payload, **kwargs):
+        emitted["component"] = component
         emitted["payload"] = payload
 
+    # Patch emit_ui_surface in both the save module and the overview emission module,
+    # since the new code delegates emission to emit_app_intelligence_enriched_overview_card.
     module.emit_ui_surface = _fake_emit
+    import factory_app.workflows.ExistingAppDiscovery.tools.emit_app_intelligence_overview as _overview_mod
+    _orig_emit = _overview_mod.emit_ui_surface
+    _overview_mod.emit_ui_surface = _fake_emit
 
     context = _Context(
         chat_id="chat_bridge_001",
@@ -484,7 +499,10 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
         },
     )
 
-    result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
+    try:
+        result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
+    finally:
+        _overview_mod.emit_ui_surface = _orig_emit
 
     assert result["success"] is True
 

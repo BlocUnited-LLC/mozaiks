@@ -307,14 +307,17 @@ async def get_llm_config(
             extra={"seed": selected_seed, "cache_key_fragment": cache_key[:60]},
         )
 
+    # NOTE: response_format is accepted as a parameter for cache-key differentiation
+    # only. It is NOT stored in the returned dict because llm_config_to_ag2_config()
+    # never reads it — actual structured-output enforcement is done via
+    # Agent(response_schema=...) in factory.py, which resolves the schema
+    # independently through get_structured_outputs_for_workflow().
     llm_config: dict[str, Any] = {
         "timeout": extra_config.get("timeout") if extra_config and "timeout" in extra_config else 600,
         "cache_seed": selected_seed,
         "config_list": config_list,
         "tools": [],  # Required by AG2 for tool registration
     }
-    if response_format is not None:
-        llm_config["response_format"] = response_format
     if extra_config:
         # Merge remaining extras without overwriting core entries already set unless user explicitly wants it
         for k, v in extra_config.items():

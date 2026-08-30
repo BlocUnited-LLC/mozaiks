@@ -8,6 +8,7 @@ module:
     as structured activity records and surfaces them as personalized feeds
     or per-user activity timelines on the profile page.
   handler: backend.handler:ActivityFeedHandler
+  user_data_scope: true
 
 permissions:
   - id: activity_feed.read
@@ -83,6 +84,7 @@ actions:
         success: { type: boolean }
         event_id: { type: string }
     permissions: [activity_feed.admin]
+    emits: [domain.social.activity.recorded]
 
 capabilities:
   - capability_id: social.feed.read

@@ -334,13 +334,17 @@ def test_resource_resolution_prefers_repo_assets_over_stale_package_copy(monkeyp
 
 # ── artifact_dependency_graph ──────────────────────────────────────────────────
 
-def test_artifact_dependency_graph_experience_spec_depends_on_design_docs(monkeypatch) -> None:
+def test_artifact_dependency_graph_uses_persisted_canonical_families(monkeypatch) -> None:
     _use_repo_factory_workflows(monkeypatch)
     graph = load_global_pack_graph()
     assert graph is not None
     deps = graph.artifact_dependency_graph
-    assert "design_docs" in deps["experience_spec"]
-    assert "concept" in deps["experience_spec"]
+    assert deps["theme_capture"] == ["concept"]
+    assert "theme_capture" in deps["app_bundle"]
+    assert "experience_spec" not in deps
+    assert "build_plan" not in deps
+    assert "brand" not in deps
+    assert "theme_config" not in deps
 
 
 def test_artifact_dependency_graph_is_acyclic(monkeypatch) -> None:
@@ -368,18 +372,15 @@ def test_artifact_dependency_graph_is_acyclic(monkeypatch) -> None:
             assert _dfs(node), f"Cycle detected in artifact_dependency_graph involving '{node}'"
 
 
-def test_stale_propagation_design_docs_reaches_experience_spec(monkeypatch) -> None:
-    """design_docs is declared as an upstream dependency of experience_spec.
-    When design_docs is written, BFS propagation via ArtifactInvalidationService
-    will mark experience_spec stale. This test verifies the structural edge exists."""
+def test_stale_propagation_uses_real_design_and_theme_families(monkeypatch) -> None:
     _use_repo_factory_workflows(monkeypatch)
     graph = load_global_pack_graph()
     assert graph is not None
     deps = graph.artifact_dependency_graph
-    # experience_spec directly lists design_docs as an upstream dependency
-    assert "design_docs" in deps.get("experience_spec", [])
-    # app_bundle remains downstream of experience_spec
-    assert "experience_spec" in deps.get("app_bundle", [])
+    assert "design_docs" in deps["subscription_contract"]
+    assert "design_docs" in deps["workflow_bundle"]
+    assert "design_docs" in deps["app_bundle"]
+    assert "theme_capture" in deps["app_bundle"]
 
 
 # ── conceptual_replan sequence ─────────────────────────────────────────────────
@@ -399,10 +400,8 @@ def test_conceptual_replan_affected_families_are_complete(monkeypatch) -> None:
     replan = next(s for s in graph.journeys if s.id == "conceptual_replan")
     expected = {
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle",
@@ -431,10 +430,8 @@ def test_full_rebuild_sequence_still_valid(monkeypatch) -> None:
     assert full_rebuild is not None
     expected_families = {
         "concept",
-        "build_plan",
-        "brand",
+        "theme_capture",
         "design_docs",
-        "experience_spec",
         "subscription_contract",
         "workflow_bundle",
         "app_bundle",

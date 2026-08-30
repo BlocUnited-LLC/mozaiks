@@ -1,0 +1,23 @@
+schema_version: mozaiks.app_page.v1
+name: tasks
+route: /tasks
+title: Tasks
+page_type: record_list
+layout: full-width
+roles: [user, admin]
+sections:
+  - id: tasks-header
+    primitive: PageHeader
+    config:
+      title: Tasks
+      subtitle: Track delivery work across projects.
+  - id: tasks-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/tasks/list_tasks
+      data_key: items
+      columns:
+        - { key: title, label: Task }
+        - { key: project_id, label: Project }
+        - { key: status, label: Status, type: badge }
+      empty: { title: No tasks, message: Create a task to begin. }

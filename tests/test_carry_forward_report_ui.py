@@ -22,7 +22,7 @@ Coverage:
  12.  Sensitive path redaction
  13.  Semantic Tailwind token classes
 
- CarryForwardReportSummary (compact — AppBuildHistoryPage, 10 tests):
+ CarryForwardReportSummary (compact — AppBuildReviewPage, 10 tests):
  14.  CarryForwardReportSummary.jsx file exists
  15.  StatusPill imported from StudioShared (no Panel — compact)
  16.  No hardcoded hex/rgb colors
@@ -34,8 +34,8 @@ Coverage:
  22.  Backend-not-copied notice
  23.  Sensitive path redaction
 
- AppBuildHistoryPage (build history, 10 tests):
- 24.  AppBuildHistoryPage.jsx file exists
+ AppBuildReviewPage (build review, 10 tests):
+ 24.  AppBuildReviewPage.jsx file exists
  25.  Imports CarryForwardReportSummary
  26.  Conditionally mounts CarryForwardReportSummary when cfReport present
  27.  Shows "No carry-forward" notice when report absent
@@ -43,8 +43,8 @@ Coverage:
  29.  No hardcoded colors
  30.  Uses buildHistory from snapshot
  31.  AppOverviewPage carry-forward behavior still intact (regression)
- 32.  StudioPage.jsx routes /activity to AppBuildHistoryPage
- 33.  admin/index.js registers AppBuildHistoryPage
+ 32.  StudioPage.jsx routes /activity to AppBuildReviewPage
+ 33.  admin/index.js registers AppBuildReviewPage
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _PANEL_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForwardReportPanel.jsx"
 _SUMMARY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForwardReportSummary.jsx"
-_HISTORY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppBuildHistoryPage.jsx"
+_BUILD_REVIEW_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppBuildReviewPage.jsx"
 _OVERVIEW_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppOverviewPage.jsx"
 _INDEX_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "index.js"
 
@@ -68,8 +68,8 @@ def _summary_src() -> str:
     return _SUMMARY_PATH.read_text(encoding="utf-8")
 
 
-def _history_src() -> str:
-    return _HISTORY_PATH.read_text(encoding="utf-8")
+def _build_review_src() -> str:
+    return _BUILD_REVIEW_PATH.read_text(encoding="utf-8")
 
 
 def _overview_src() -> str:
@@ -457,16 +457,16 @@ def test_summary_has_sensitive_path_redaction():
 
 
 # ===========================================================================
-# AppBuildHistoryPage (build history page, 24–33)
+# AppBuildReviewPage (build review page, 24–33)
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
 # 24. File existence
 # ---------------------------------------------------------------------------
 
-def test_app_build_history_page_file_exists():
-    assert _HISTORY_PATH.exists(), (
-        "factory_app/app/admin/pages/AppBuildHistoryPage.jsx must exist"
+def test_app_build_review_page_file_exists():
+    assert _BUILD_REVIEW_PATH.exists(), (
+        "factory_app/app/admin/pages/AppBuildReviewPage.jsx must exist"
     )
 
 
@@ -474,10 +474,10 @@ def test_app_build_history_page_file_exists():
 # 25. Imports CarryForwardReportSummary
 # ---------------------------------------------------------------------------
 
-def test_history_page_imports_carry_forward_summary():
-    src = _history_src()
+def test_build_review_page_imports_carry_forward_summary():
+    src = _build_review_src()
     assert "CarryForwardReportSummary" in src, (
-        "AppBuildHistoryPage must import CarryForwardReportSummary"
+        "AppBuildReviewPage must import CarryForwardReportSummary"
     )
 
 
@@ -485,14 +485,14 @@ def test_history_page_imports_carry_forward_summary():
 # 26. Conditionally mounts CarryForwardReportSummary when cfReport present
 # ---------------------------------------------------------------------------
 
-def test_history_page_mounts_summary_conditionally():
-    src = _history_src()
+def test_build_review_page_mounts_summary_conditionally():
+    src = _build_review_src()
     assert "CarryForwardReportSummary" in src
     assert "cfReport" in src, (
-        "AppBuildHistoryPage must extract cfReport from artifact commit_metadata"
+        "AppBuildReviewPage must extract cfReport from artifact commit_metadata"
     )
     assert "carry_forward_report" in src, (
-        "AppBuildHistoryPage must reference carry_forward_report key"
+        "AppBuildReviewPage must reference carry_forward_report key"
     )
 
 
@@ -500,10 +500,10 @@ def test_history_page_mounts_summary_conditionally():
 # 27. Shows no-carry-forward notice when report absent
 # ---------------------------------------------------------------------------
 
-def test_history_page_shows_no_report_notice():
-    src = _history_src()
+def test_build_review_page_shows_no_report_notice():
+    src = _build_review_src()
     assert "carry-forward" in src.lower() or "No carry-forward" in src or "carry_forward" in src, (
-        "AppBuildHistoryPage must show a notice when no carry-forward report is present"
+        "AppBuildReviewPage must show a notice when no carry-forward report is present"
     )
 
 
@@ -511,10 +511,10 @@ def test_history_page_shows_no_report_notice():
 # 28. Imports from StudioShared
 # ---------------------------------------------------------------------------
 
-def test_history_page_imports_from_console_shared():
-    src = _history_src()
+def test_build_review_page_imports_from_console_shared():
+    src = _build_review_src()
     assert "StudioShared" in src, (
-        "AppBuildHistoryPage must import from StudioShared.jsx (shared primitives)"
+        "AppBuildReviewPage must import from StudioShared.jsx (shared primitives)"
     )
     assert "Panel" in src
     assert "StatusPill" in src
@@ -524,11 +524,11 @@ def test_history_page_imports_from_console_shared():
 # 29. No hardcoded colors
 # ---------------------------------------------------------------------------
 
-def test_history_page_no_hardcoded_hex_colors():
-    src = _history_src()
+def test_build_review_page_no_hardcoded_hex_colors():
+    src = _build_review_src()
     hex_matches = re.findall(r'#[0-9a-fA-F]{3,8}\b', src)
     assert hex_matches == [], (
-        f"AppBuildHistoryPage must not contain hardcoded hex colors: {hex_matches}"
+        f"AppBuildReviewPage must not contain hardcoded hex colors: {hex_matches}"
     )
 
 
@@ -536,10 +536,10 @@ def test_history_page_no_hardcoded_hex_colors():
 # 30. Uses buildHistory from snapshot
 # ---------------------------------------------------------------------------
 
-def test_history_page_uses_build_history():
-    src = _history_src()
+def test_build_review_page_uses_build_history():
+    src = _build_review_src()
     assert "buildHistory" in src, (
-        "AppBuildHistoryPage must use buildHistory from snapshot"
+        "AppBuildReviewPage must use buildHistory from snapshot"
     )
 
 
@@ -557,13 +557,13 @@ def test_overview_carry_forward_panel_still_mounted():
 
 
 # ---------------------------------------------------------------------------
-# 32. route_manifest routes /activity to AppBuildHistoryPage
+# 32. route_manifest routes /activity to AppBuildReviewPage
 # ---------------------------------------------------------------------------
 
-def test_console_page_routes_activity_to_build_history():
+def test_console_page_routes_activity_to_build_review():
     src = (REPO_ROOT / "factory_app" / "app" / "ui" / "route_manifest.json").read_text(encoding="utf-8")
-    assert "AppBuildHistoryPage" in src, (
-        "route_manifest.json must route /activity to AppBuildHistoryPage"
+    assert "AppBuildReviewPage" in src, (
+        "route_manifest.json must route /activity to AppBuildReviewPage"
     )
     assert '"/apps/:appId/activity"' in src, (
         "route_manifest.json must declare /apps/:appId/activity"
@@ -571,13 +571,13 @@ def test_console_page_routes_activity_to_build_history():
 
 
 # ---------------------------------------------------------------------------
-# 33. admin/index.js registers AppBuildHistoryPage
+# 33. admin/index.js registers AppBuildReviewPage
 # ---------------------------------------------------------------------------
 
-def test_admin_index_registers_build_history_page():
+def test_admin_index_registers_build_review_page():
     src = _INDEX_PATH.read_text(encoding="utf-8")
-    assert "AppBuildHistoryPage" in src, (
-        "admin/index.js must import and register AppBuildHistoryPage"
+    assert "AppBuildReviewPage" in src, (
+        "admin/index.js must import and register AppBuildReviewPage"
     )
     assert "registerComponent" in src
 

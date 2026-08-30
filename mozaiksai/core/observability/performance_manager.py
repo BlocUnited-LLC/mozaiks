@@ -74,8 +74,20 @@ class AG2TelemetryConfig:
 def _context_data(context_variables: Any) -> Mapping[str, Any]:
     if context_variables is None:
         return {}
-    if hasattr(context_variables, "data") and isinstance(context_variables.data, dict):
-        return context_variables.data
+    if hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+        try:
+            snap = context_variables.snapshot()
+            if isinstance(snap, Mapping):
+                return snap
+        except Exception:
+            return {}
+    if hasattr(context_variables, "to_dict") and callable(getattr(context_variables, "to_dict", None)):
+        try:
+            data = context_variables.to_dict()
+            if isinstance(data, Mapping):
+                return data
+        except Exception:
+            return {}
     if isinstance(context_variables, Mapping):
         return context_variables
     return {}

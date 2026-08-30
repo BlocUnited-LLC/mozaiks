@@ -4,7 +4,6 @@ import asyncio
 import inspect
 import json
 import stat
-import sys
 import zipfile
 from pathlib import Path
 
@@ -39,7 +38,7 @@ def _version(
     *,
     artifact_version_id: str,
     zip_path: Path,
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
     lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
     validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
     refinement_request_id: str | None = None,
@@ -60,8 +59,8 @@ def _version(
         {
             "_id": artifact_version_id,
             "app_id": "app_1",
-            "artifact_kind": artifact_kind,
-            "artifact_key": "app_bundle",
+            "build_family": build_family,
+            "build_key": "app_bundle",
             "version_number": 2,
             "parent_version_id": "av_parent_1" if artifact_version_id != "av_parent_1" else None,
             "lineage_root_id": "av_parent_1",
@@ -106,13 +105,13 @@ class _PromoteStore:
         self.sessions = list(sessions or [])
         self.updated_sessions: list[dict[str, object]] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if artifact_version_id == self.version.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if build_record_id == self.version.id:
             return self.version
         return None
 
-    async def list_refinement_sessions(self, *, app_id: str, result_artifact_version_id: str, limit: int = 20):
-        if result_artifact_version_id == self.version.id:
+    async def list_refinement_sessions(self, *, app_id: str, result_build_record_id: str, limit: int = 20):
+        if result_build_record_id == self.version.id:
             return list(self.sessions[:limit])
         return []
 
@@ -164,7 +163,6 @@ def _studio_app(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
     from mozaiksai.hosts import studio as studio_app
 
     return studio_app
@@ -219,9 +217,16 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
     assert store.updated_sessions[-1]["status"] == RefinementSessionStatus.PROMOTED
     assert body["app_registry"] is None
     assert body["review"]["review_status"] == "promoted"
+    # promotion changes the live app root, so an App Intelligence refresh is
+    # always attempted and reported (best-effort: failure never blocks promote)
+    assert "app_intelligence_refresh" in body
+    assert body["app_intelligence_refresh"] is not None
 
 
-def test_promote_requires_override_for_skipped_validation(monkeypatch, tmp_path: Path) -> None:
+def test_promote_refuses_override_for_coding_produced_artifacts(monkeypatch, tmp_path: Path) -> None:
+    # Artifacts produced by the refinement coding lane must pass real
+    # validation; the override escape hatch would let unvalidated model output
+    # into the live app root, so the gate refuses it outright.
     bundle_zip = tmp_path / "bundle.zip"
     _write_bundle_zip(
         bundle_zip,
@@ -249,8 +254,39 @@ def test_promote_requires_override_for_skipped_validation(monkeypatch, tmp_path:
     assert "validation_status='passed' is required" in blocked.json()["detail"]
     assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
 
-    allowed = client.post(
+    overridden = client.post(
         "/api/studio/build/artifacts/av_skipped_validation_1/promote",
+        json={"allow_validation_override": True},
+    )
+
+    assert overridden.status_code == 409
+    assert "coding-produced" in overridden.json()["detail"]
+    assert not (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+
+
+def test_promote_allows_override_for_non_coding_artifacts(monkeypatch, tmp_path: Path) -> None:
+    bundle_zip = tmp_path / "bundle.zip"
+    _write_bundle_zip(
+        bundle_zip,
+        {
+            "GeneratedApp/src/App.jsx": "export default function App() { return <div>Promoted</div>; }\n",
+        },
+    )
+    version = _version(
+        artifact_version_id="av_skipped_plain_1",
+        zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.SKIPPED,
+        files_manifest=[
+            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
+        ],
+    )
+    runtime_root = tmp_path / "runtime_app"
+    store = _PromoteStore(version)
+    _, client = _promote_client(monkeypatch, runtime_root, store)
+
+    allowed = client.post(
+        "/api/studio/build/artifacts/av_skipped_plain_1/promote",
         json={"allow_validation_override": True},
     )
 
@@ -338,13 +374,17 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
         ),
         "GeneratedApp/ui/pages/dashboard.yaml": "\n".join(
             [
+                "schema_version: mozaiks.app_page.v1",
                 "name: dashboard",
                 "title: Dashboard",
                 "route: /dashboard",
+                "page_type: record_list",
+                "layout: full-width",
                 "sections:",
                 "  - id: overview",
-                "    title: Overview",
-                "    layout: stack",
+                "    primitive: PageHeader",
+                "    config:",
+                "      title: Overview",
             ]
         ),
         "GeneratedApp/modules/tasks/module.yaml": "\n".join(
@@ -494,7 +534,7 @@ def test_promote_rejects_non_app_bundle_artifact(monkeypatch, tmp_path: Path) ->
     version = _version(
         artifact_version_id="av_workflow_1",
         zip_path=bundle_zip,
-        artifact_kind="workflow_bundle",
+        build_family="workflow_bundle",
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
     )
     store = _PromoteStore(version)
@@ -511,8 +551,8 @@ def test_promote_rejects_missing_artifact_path(monkeypatch, tmp_path: Path) -> N
         {
             "_id": "av_missing_1",
             "app_id": "app_1",
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 2,
             "lineage_root_id": "av_missing_1",
             "canonical_inputs_version": {},

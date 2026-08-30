@@ -34,6 +34,7 @@ def test_workflow_manager_loads_optional_a2a_yaml(tmp_path: Path) -> None:
             [
                 "agents:",
                 "  - name: RemotePlanner",
+                "    structured_outputs_required: false",
                 "    prompt_sections:",
                 "      - id: role",
                 "        heading: \"[ROLE]\"",
@@ -83,7 +84,7 @@ def test_workflow_manager_load_summary_logs_degraded_on_partial_failure(
     )
     _write_yaml(
         ok_dir / "agents.yaml",
-        "agents:\n  - name: Helper\n    prompt_sections:\n      - id: role\n        heading: \"[ROLE]\"\n        content: \"You help.\"",
+        "agents:\n  - name: Helper\n    structured_outputs_required: false\n    prompt_sections:\n      - id: role\n        heading: \"[ROLE]\"\n        content: \"You help.\"",
     )
 
     # Bad workflow — missing workflow_startup_mode (will fail validation).
@@ -114,7 +115,7 @@ def test_workflow_manager_load_summary_logs_ok_when_all_load(
     )
     _write_yaml(
         ok_dir / "agents.yaml",
-        "agents:\n  - name: Helper\n    prompt_sections:\n      - id: role\n        heading: \"[ROLE]\"\n        content: \"You help.\"",
+        "agents:\n  - name: Helper\n    structured_outputs_required: false\n    prompt_sections:\n      - id: role\n        heading: \"[ROLE]\"\n        content: \"You help.\"",
     )
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None

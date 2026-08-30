@@ -70,7 +70,11 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      # Allows docs pages to include canonical files kept outside docs/,
+      # e.g. .github/AI_POLICY.md, so GitHub and the docs site cannot drift.
+      base_path: ["."]
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -93,7 +97,9 @@ validation:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
+  - Getting Started:
+      - getting-started.md
+      - Genesis Builds & Refinement Runs: getting-started/genesis-builds-and-refinement-runs.md
   - Key Concepts: concepts.md
 
   - Guides:
@@ -119,6 +125,7 @@ nav:
           - Refinement: guides/platform-intelligence/03-refinement.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Self-Hosting: guides/self-hosting.md
+      - Stability & Compatibility: guides/stability-and-compatibility.md
 
   - Studio:
       - studio/index.md
@@ -131,6 +138,12 @@ nav:
   - Architecture:
       - architecture/index.md
 
+      # ── 0. North Star ────────────────────────────────────────────────────────
+      # Authoritative OSS software-design document. All other architecture docs
+      # are elaborations of the decisions made here.
+      - OSS Software Design: architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md
+      - Architecture Quick Reference: architecture/ARCHITECTURE_QUICK_REFERENCE.md
+
       # ── 1. Foundations ───────────────────────────────────────────────────────
       # Core mental models and cross-cutting contracts. Start here.
       - Foundations:
@@ -139,12 +152,17 @@ nav:
           - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
+          - Public Architecture & OSS Boundary: architecture/foundations/public-architecture-and-oss-boundary.md
+          - Eval & Build Intelligence Boundary: architecture/foundations/eval-and-build-intelligence-boundary.md
+          - Framework & Operator Intelligence Boundary: architecture/foundations/framework-operator-intelligence-boundary.md
           - App Intelligence Plane: architecture/foundations/app-intelligence-plane.md
           - App Intelligence User Journey: architecture/foundations/app-intelligence-user-journey.md
           - Framework Detection: architecture/foundations/framework-detection.md
           - Context Graph & Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
           - App Context & Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
+          - OSS Boundary Families: architecture/foundations/oss-boundary-families.md
+          - Profile Panel Contract: architecture/foundations/profile-panel-contract.md
           - Event System: architecture/foundations/events-and-data/event-system.md
           - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
           - Persistence & Artifact Storage: architecture/foundations/events-and-data/persistence-and-artifact-storage.md
@@ -155,6 +173,7 @@ nav:
           - App Architecture:
               - architecture/app/index.md
               - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md
+              - Generated App Functional Acceptance: architecture/app/generated-app-functional-acceptance.md
               - Canonical App Structure: architecture/app/canonical-app-structure.md
               - App Manifest & Platform Targets: architecture/app/app-manifest-and-platform-targets.md
               - App Bundle Declaratives: architecture/app/app-bundle-declaratives.md
@@ -174,6 +193,7 @@ nav:
               - Internal Messaging: architecture/modules-systems/internal-messaging.md
               - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
               - Managed Capability Packs: architecture/modules-systems/managed-capability-packs.md
+              - MozaiksPay Provider Contract: architecture/modules-systems/mozaikspay-provider-contract.md
               - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
 
       # ── 3. AI Workflows ──────────────────────────────────────────────────────
@@ -186,10 +206,12 @@ nav:
           - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
           - Refinement Engine: architecture/workflows/refinement-engine.md
+          - End-to-End App Editing Loop: architecture/workflows/e2e-app-editing-loop.md
           - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
           - Session Router: architecture/workflows/session-router.md
           - Build Context Packs: architecture/workflows/build-context-packs.md
           - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
+          - Strategy Extension Contract: architecture/workflows/strategy-extension-contract.md
           - AG2 Integration:
               - AG2 Ownership Boundary: architecture/workflows/ag2-ownership-boundary.md
               - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
@@ -239,6 +261,7 @@ nav:
       # Chat UI runtime, generated UI system, auth, and mobile.
       - Frontend & UI:
           - architecture/frontend/index.md
+          - Mozaiks UI v1 Constitution: architecture/frontend/mozaiks-ui-v1.md
           - Chat UI:
               - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
               - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
@@ -265,9 +288,19 @@ nav:
           - Refinement Classifier: manual-smoke-tests/refinement-classifier.md
           - Refinement Dry Run: manual-smoke-tests/refinement-dry-run.md
       - AI Coding Agents:
+          - AI Policy: contributing/ai-policy.md
           - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
       - Release:
           - Releasing: releasing.md
           - Verified Setup Guide: architecture/verified/setup-guide.md
           - Auth Setup: architecture/verified/auth-setup.md
           - Trigger Mechanisms: architecture/verified/trigger-mechanisms.md
+
+  - Decisions:
+      - adr/0001-public-architecture-and-oss-strategy-boundary.md
+      - adr/0002-appgenerator-baseline-strategy-oss.md
+      - adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md
+      - adr/0004-mozaiks-mcp-contract-surface.md
+      - adr/0005-reference-factory-and-proprietary-build-intelligence-boundary.md
+      - adr/0006-provider-neutral-bounded-multi-workflow-journey-execution.md
+      - adr/0007-generalized-semantic-compiler.md

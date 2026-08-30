@@ -650,6 +650,106 @@ def _add_structural_nodes(
                 },
             )
             graph.add_edge(node_id, action_node_id, GraphEdgeType.DECLARES, metadata={"source_path": path})
+        for event_ref in file_context.structured_metadata.get("event_producers", []):
+            event_type = str(event_ref.get("event_type") or "").strip()
+            action_id = str(event_ref.get("action_id") or "").strip()
+            if not event_type or not action_id:
+                continue
+            action_node_id = owner_node_by_key.get(f"action:{module_id}:{action_id}") or _stable_id(
+                "action",
+                f"{module_id}:{action_id}",
+            )
+            event_node_id = _event_node_id(event_type)
+            graph.add_node(
+                event_node_id,
+                GraphNodeType.EVENT,
+                label=event_type,
+                metadata={"event_type": event_type, "source_path": path, "authority": "authoritative"},
+            )
+            graph.add_edge(
+                action_node_id,
+                event_node_id,
+                GraphEdgeType.PRODUCES,
+                metadata={
+                    "source_path": path,
+                    "relationship": "event_producer",
+                    "module_id": module_id,
+                    "action_id": action_id,
+                    "event_type": event_type,
+                    "authority": "authoritative",
+                },
+            )
+        for event_type in file_context.structured_metadata.get("event_types", []):
+            event_node_id = _event_node_id(str(event_type))
+            graph.add_node(
+                event_node_id,
+                GraphNodeType.EVENT,
+                label=str(event_type),
+                metadata={"event_type": event_type, "source_path": path, "authority": "authoritative"},
+            )
+            graph.add_edge(
+                node_id,
+                event_node_id,
+                GraphEdgeType.DECLARES,
+                metadata={
+                    "source_path": path,
+                    "relationship": "event_contract_declares_event",
+                    "event_type": event_type,
+                    "authority": "authoritative",
+                },
+            )
+        for reaction in file_context.structured_metadata.get("reactions", []):
+            event_type = str(reaction.get("event_type") or "").strip()
+            if not event_type:
+                continue
+            event_node_id = _event_node_id(event_type)
+            graph.add_node(
+                event_node_id,
+                GraphNodeType.EVENT,
+                label=event_type,
+                metadata={"event_type": event_type, "source_path": path, "authority": "authoritative"},
+            )
+            graph.add_edge(
+                node_id,
+                event_node_id,
+                GraphEdgeType.CONSUMES,
+                metadata={
+                    "source_path": path,
+                    "relationship": "event_reaction_consumer",
+                    "event_type": event_type,
+                    "authority": "authoritative",
+                },
+            )
+            target_action_id = str(reaction.get("target_action_id") or "").strip()
+            if target_action_id:
+                target_node_id = owner_node_by_key.get(
+                    f"action:{module_id}:{target_action_id}"
+                ) or _stable_id("action", f"{module_id}:{target_action_id}")
+                graph.add_node(
+                    target_node_id,
+                    GraphNodeType.API_ENDPOINT,
+                    label=target_action_id,
+                    metadata={
+                        "module_id": module_id,
+                        "action_id": target_action_id,
+                        "contract_role": "module_action",
+                        "source_path": path,
+                        "authority": "authoritative",
+                    },
+                )
+                graph.add_edge(
+                    event_node_id,
+                    target_node_id,
+                    GraphEdgeType.TRIGGERS,
+                    metadata={
+                        "source_path": path,
+                        "relationship": "reaction_target",
+                        "event_type": event_type,
+                        "module_id": module_id,
+                        "action_id": target_action_id,
+                        "authority": "authoritative",
+                    },
+                )
         return
 
     if contract_path.startswith("workflows/") and len(parts) >= 2:
@@ -703,6 +803,39 @@ def _add_structural_nodes(
                 metadata={"module_id": module_id},
             )
             graph.add_edge(node_id, module_node_id, GraphEdgeType.CALLS, metadata={"source_path": path})
+        for action_ref in file_context.structured_metadata.get("action_refs", []):
+            module_id = str(action_ref.get("module_id") or "").strip()
+            action_id = str(action_ref.get("action_id") or "").strip()
+            if not module_id or not action_id:
+                continue
+            action_node_id = owner_node_by_key.get(f"action:{module_id}:{action_id}") or _stable_id(
+                "action",
+                f"{module_id}:{action_id}",
+            )
+            graph.add_node(
+                action_node_id,
+                GraphNodeType.API_ENDPOINT,
+                label=action_id,
+                metadata={
+                    "module_id": module_id,
+                    "action_id": action_id,
+                    "contract_role": "module_action",
+                    "source_path": path,
+                    "authority": "authoritative",
+                },
+            )
+            graph.add_edge(
+                node_id,
+                action_node_id,
+                GraphEdgeType.CALLS,
+                metadata={
+                    "source_path": path,
+                    "relationship": "page_dispatches_action",
+                    "module_id": module_id,
+                    "action_id": action_id,
+                    "authority": "authoritative",
+                },
+            )
         return
 
     if contract_path.startswith(("ui/components/", "ui/pages/custom/")):
@@ -729,6 +862,136 @@ def _add_structural_nodes(
         )
         graph.add_edge("app", node_id, GraphEdgeType.CONTAINS, metadata={"source_path": path})
         graph.add_edge(node_id, file_node_id, GraphEdgeType.GENERATED_FROM, metadata={"source_path": path})
+        for route in file_context.structured_metadata.get("route_entries", []):
+            route_path = str(route.get("route_path") or "").strip()
+            if not route_path:
+                continue
+            route_node_id = _stable_id("route", route_path)
+            graph.add_node(
+                route_node_id,
+                GraphNodeType.ROUTE,
+                label=route_path,
+                metadata={"route_path": route_path, "source_path": path, "authority": "authoritative"},
+            )
+            graph.add_edge(
+                node_id,
+                route_node_id,
+                GraphEdgeType.DECLARES,
+                metadata={"source_path": path, "relationship": "route_manifest_declares_route", "authority": "authoritative"},
+            )
+            page_id = str(route.get("page_id") or "").strip()
+            if page_id:
+                page_node_id = owner_node_by_key.get(f"page:{page_id}") or _stable_id("page", page_id)
+                graph.add_node(
+                    page_node_id,
+                    GraphNodeType.PAGE,
+                    label=page_id,
+                    metadata={"page_id": page_id, "source_path": path, "authority": "authoritative"},
+                )
+                graph.add_edge(
+                    route_node_id,
+                    page_node_id,
+                    GraphEdgeType.RENDERS,
+                    metadata={
+                        "source_path": path,
+                        "relationship": "route_renders_page",
+                        "route_path": route_path,
+                        "page_id": page_id,
+                        "authority": "authoritative",
+                    },
+                )
+            for action_ref in route.get("action_refs") or []:
+                module_id = str(action_ref.get("module_id") or "").strip()
+                action_id = str(action_ref.get("action_id") or "").strip()
+                if not module_id or not action_id:
+                    continue
+                action_node_id = owner_node_by_key.get(f"action:{module_id}:{action_id}") or _stable_id(
+                    "action",
+                    f"{module_id}:{action_id}",
+                )
+                graph.add_node(
+                    action_node_id,
+                    GraphNodeType.API_ENDPOINT,
+                    label=action_id,
+                    metadata={
+                        "module_id": module_id,
+                        "action_id": action_id,
+                        "contract_role": "module_action",
+                        "source_path": path,
+                        "authority": "authoritative",
+                    },
+                )
+                graph.add_edge(
+                    route_node_id,
+                    action_node_id,
+                    GraphEdgeType.CALLS,
+                    metadata={
+                        "source_path": path,
+                        "relationship": "route_dispatches_action",
+                        "route_path": route_path,
+                        "module_id": module_id,
+                        "action_id": action_id,
+                        "authority": "authoritative",
+                    },
+                )
+        schema_version = str(file_context.structured_metadata.get("schema_version") or "").strip()
+        if schema_version:
+            schema_node_id = _stable_id("schema", schema_version)
+            graph.add_node(
+                schema_node_id,
+                GraphNodeType.CONFIG,
+                label=schema_version,
+                metadata={"schema_version": schema_version, "authority": "authoritative"},
+            )
+            graph.add_edge(
+                schema_node_id,
+                node_id,
+                GraphEdgeType.PROTECTED_BY,
+                metadata={"source_path": path, "relationship": "schema_governs_manifest", "authority": "authoritative"},
+            )
+        return
+
+    if contract_path == ".mozaiks/pack_provenance.json":
+        for item in file_context.structured_metadata.get("pack_outputs", []):
+            pack_id = str(item.get("pack_id") or "").strip()
+            output_path = _safe_relpath(str(item.get("path") or ""))
+            if not pack_id or not output_path:
+                continue
+            capability_node_id = owner_node_by_key.setdefault(f"capability:{pack_id}", f"capability:{_stable_token(pack_id)}")
+            graph.add_node(
+                capability_node_id,
+                GraphNodeType.CAPABILITY,
+                label=pack_id,
+                metadata={"capability_id": pack_id, "source_path": path, "authority": "authoritative"},
+            )
+            output_file_node_id = _file_node_id(output_path)
+            graph.add_node(
+                output_file_node_id,
+                GraphNodeType.FILE,
+                label=output_path,
+                metadata={
+                    "path": output_path,
+                    "source_path": output_path,
+                    "ownership": item.get("owner"),
+                    "authority": "authoritative",
+                },
+            )
+            graph.add_edge(
+                capability_node_id,
+                output_file_node_id,
+                GraphEdgeType.PRODUCES,
+                metadata={"source_path": path, "relationship": "capability_pack_owns_output", "authority": "authoritative"},
+            )
+            graph.add_edge(
+                output_file_node_id,
+                capability_node_id,
+                GraphEdgeType.GENERATED_FROM,
+                metadata={
+                    "source_path": path,
+                    "relationship": "generated_artifact_derives_from_provenance",
+                    "authority": "authoritative",
+                },
+            )
 
 
 def _file_contract_metadata(*, path: str, file_context: ExtractedFileContext) -> dict[str, Any]:
@@ -1203,15 +1466,36 @@ def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     contract_path = _contract_path(path)
     if path.endswith("module.yaml"):
-        metadata["module_id"] = _first_text(data, "id", "module_id", "name")
+        _raw_module = data.get("module")
+        module_block: dict[str, Any] = _raw_module if isinstance(_raw_module, dict) else {}
+        metadata["module_id"] = _first_text(data, "id", "module_id", "name") or _first_text(
+            module_block,
+            "id",
+            "module_id",
+            "name",
+        )
         metadata["action_ids"] = _extract_action_ids(data)
+        metadata["event_producers"] = _extract_action_event_producers(data)
+    elif contract_path.startswith("modules/") and contract_path.endswith("contracts/events.yaml"):
+        metadata["event_types"] = _extract_event_types(data)
+    elif contract_path.startswith("modules/") and contract_path.endswith("contracts/reactions.yaml"):
+        metadata["reactions"] = _extract_reactions(data)
     elif path.endswith("agents.yaml"):
         metadata["agent_names"] = _extract_named_items(data.get("agents"))
     elif path.endswith("tools.yaml"):
         metadata["tool_names"] = _extract_tool_names(data.get("tools"))
+    elif contract_path == ".mozaiks/pack_provenance.json":
+        metadata["pack_outputs"] = _extract_pack_outputs(data)
+    elif contract_path == "ui/route_manifest.json":
+        metadata["route_entries"] = _extract_route_entries(data)
+        metadata["schema_version"] = _first_text(data, "schema_version", "schemaVersion")
     elif contract_path.startswith("ui/pages/"):
         metadata["page_id"] = _first_text(data, "id", "page_id", "name", "title")
         metadata["module_ids"] = _extract_module_refs(data)
+        metadata["action_refs"] = _extract_action_refs(data)
+        metadata["schema_version"] = _first_text(data, "schema_version", "schemaVersion")
+    else:
+        metadata["schema_version"] = _first_text(data, "schema_version", "schemaVersion")
     return {key: value for key, value in metadata.items() if value not in (None, "", [])}
 
 
@@ -1230,6 +1514,169 @@ def _extract_action_ids(data: dict[str, Any]) -> list[str]:
         if candidate and candidate not in ids:
             ids.append(candidate)
     return ids
+
+
+def _extract_action_event_producers(data: dict[str, Any]) -> list[dict[str, str]]:
+    actions = data.get("actions")
+    if not isinstance(actions, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in actions:
+        if not isinstance(item, dict):
+            continue
+        action_id = _first_text(item, "id", "name", "action_id")
+        if not action_id:
+            continue
+        for key in ("emits", "emitted_events", "produces_events", "events"):
+            for event_type in _string_values(item.get(key)):
+                candidate = {"action_id": action_id, "event_type": event_type}
+                if candidate not in out:
+                    out.append(candidate)
+    return out
+
+
+def _extract_event_types(data: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("events", "event_types", "publishes", "produces"):
+        for item in _string_values(data.get(key)):
+            if item not in values:
+                values.append(item)
+    return values
+
+
+def _extract_reactions(data: dict[str, Any]) -> list[dict[str, str]]:
+    reactions = data.get("reactions") or data.get("handlers") or data.get("consumers")
+    if not isinstance(reactions, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in reactions:
+        if not isinstance(item, dict):
+            continue
+        event_type = _first_text(item, "event", "event_type", "consumes", "on")
+        target_action = _first_text(item, "action", "action_id", "target_action", "target_action_id")
+        target = item.get("target")
+        if isinstance(target, dict):
+            target_action = target_action or _first_text(target, "action", "action_id", "target_action_id")
+        if event_type:
+            candidate = {"event_type": event_type}
+            if target_action:
+                candidate["target_action_id"] = target_action
+            if candidate not in out:
+                out.append(candidate)
+    return out
+
+
+def _extract_route_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_routes = data.get("routes")
+    if isinstance(raw_routes, dict):
+        iterable = [{"path": key, **(value if isinstance(value, dict) else {})} for key, value in raw_routes.items()]
+    elif isinstance(raw_routes, list):
+        iterable = raw_routes
+    else:
+        iterable = []
+    out: list[dict[str, Any]] = []
+    for item in iterable:
+        if not isinstance(item, dict):
+            continue
+        route_path = _first_text(item, "path", "route", "route_path", "href")
+        if not route_path:
+            continue
+        entry: dict[str, Any] = {
+            "route_path": route_path,
+            "page_id": _first_text(item, "page", "page_id", "pageId", "component"),
+            "action_refs": _extract_action_refs(item),
+        }
+        if entry not in out:
+            out.append(entry)
+    return out
+
+
+def _extract_action_refs(data: dict[str, Any]) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            endpoint = _first_text(value, "endpoint", "url", "href")
+            _append_action_ref(refs, _action_ref_from_endpoint(endpoint))
+            module_id = _first_text(value, "module_id", "moduleId")
+            action_id = _first_text(value, "action_id", "actionId", "action")
+            if module_id and action_id:
+                _append_action_ref(refs, {"module_id": module_id, "action_id": action_id})
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, str):
+            _append_action_ref(refs, _action_ref_from_endpoint(value))
+
+    visit(data)
+    return refs
+
+
+def _extract_pack_outputs(data: dict[str, Any]) -> list[dict[str, str]]:
+    raw_items = data.get("materialized_owned_files") or data.get("owned_files") or data.get("files")
+    if not isinstance(raw_items, list):
+        return []
+    default_pack_id = _first_text(data, "pack_id", "capability_id", "context_id")
+    out: list[dict[str, str]] = []
+    for item in raw_items:
+        if isinstance(item, str):
+            path = item
+            pack_id = default_pack_id
+            owner = default_pack_id
+        elif isinstance(item, dict):
+            path = _first_text(item, "path", "file", "output_path") or ""
+            pack_id = _first_text(item, "pack_id", "capability_id", "owner") or default_pack_id
+            owner = _first_text(item, "owner", "pack_id", "capability_id") or pack_id
+        else:
+            continue
+        if path and pack_id:
+            candidate = {"path": path, "pack_id": pack_id}
+            if owner:
+                candidate["owner"] = owner
+            if candidate not in out:
+                out.append(candidate)
+    return out
+
+
+def _string_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                out.append(item.strip())
+            elif isinstance(item, dict):
+                name = _first_text(item, "type", "event_type", "event", "name", "id")
+                if name:
+                    out.append(name)
+        return _dedupe(out)
+    if isinstance(value, dict):
+        return _dedupe(str(key) for key in value if str(key).strip())
+    return []
+
+
+def _append_action_ref(refs: list[dict[str, str]], candidate: dict[str, str] | None) -> None:
+    if not candidate:
+        return
+    module_id = str(candidate.get("module_id") or "").strip()
+    action_id = str(candidate.get("action_id") or "").strip()
+    if not module_id or not action_id:
+        return
+    normalized = {"module_id": module_id, "action_id": action_id}
+    if normalized not in refs:
+        refs.append(normalized)
+
+
+def _action_ref_from_endpoint(value: str | None) -> dict[str, str] | None:
+    if not value:
+        return None
+    match = re.search(r"/api/modules/([^/\s]+)/([^/?#\s]+)", value)
+    if not match:
+        return None
+    return {"module_id": match.group(1), "action_id": match.group(2)}
 
 
 def _extract_named_items(value: Any) -> list[str]:
@@ -1447,6 +1894,10 @@ def _file_node_id(path: str) -> str:
 
 def _symbol_node_id(path: str, name: str, kind: str) -> str:
     return _stable_id("symbol", f"{path}:{kind}:{name}")
+
+
+def _event_node_id(event_type: str) -> str:
+    return _stable_id("event", event_type)
 
 
 def _stable_id(prefix: str, raw: str) -> str:

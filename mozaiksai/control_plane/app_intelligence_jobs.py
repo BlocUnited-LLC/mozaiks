@@ -64,7 +64,7 @@ class AppIntelligenceIndexJob(BaseModel):
     monorepo_path: str | None = None
     auth_connector_id: str | None = None
     ignored_paths: list[str] = Field(default_factory=list)
-    artifact_key: str = "app_intelligence_workspace"
+    workspace_key: str = "app_intelligence_workspace"
     make_current: bool = True
     scan_policy: dict[str, Any] | None = None
     status: IndexJobStatus = "queued"
@@ -93,7 +93,7 @@ def create_app_intelligence_index_job(
     monorepo_path: str | None = None,
     auth_connector_id: str | None = None,
     ignored_paths: list[str] | None = None,
-    artifact_key: str = "app_intelligence_workspace",
+    workspace_key: str = "app_intelligence_workspace",
     make_current: bool = True,
     scan_policy: dict[str, Any] | None = None,
 ) -> AppIntelligenceIndexJob:
@@ -122,7 +122,7 @@ def create_app_intelligence_index_job(
         monorepo_path=str(monorepo_path or "").strip().strip("/\\") or None,
         auth_connector_id=str(auth_connector_id or "").strip() or None,
         ignored_paths=[str(item or "").strip() for item in ignored_paths or [] if str(item or "").strip()],
-        artifact_key=str(artifact_key or "app_intelligence_workspace").strip() or "app_intelligence_workspace",
+        workspace_key=str(workspace_key or "app_intelligence_workspace").strip() or "app_intelligence_workspace",
         make_current=bool(make_current),
         scan_policy=dict(scan_policy or {}) if scan_policy else None,
         phases=phases,

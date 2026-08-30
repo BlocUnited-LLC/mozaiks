@@ -4,7 +4,6 @@
 
 <img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
 
-[![Release](https://img.shields.io/github/v/release/BlocUnited-LLC/mozaiks)](https://github.com/BlocUnited-LLC/mozaiks/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
 [![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
@@ -14,6 +13,9 @@
 > **Mozaiks is open source.** BlocUnited offers the managed product at
 > [mozaiks.ai](https://mozaiks.ai), but you can self-host the framework and run
 > the builder locally.
+
+> Public PyPI and GitHub releases are not published yet. Install from a local
+> checkout instead.
 
 ---
 

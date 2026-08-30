@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "app_id": "reporting-saas",
+  "surfaces": [
+    { "surface_id": "reports", "surface_kind": "module", "collections": [{ "module_id": "reports", "name": "reports", "entity_name": "reports", "mongo_collection": "reports", "data_alias": "reports.records" }] },
+    { "surface_id": "entitlement_dispatch", "surface_kind": "module", "collections": [{ "module_id": "entitlement_dispatch", "name": "subscriptions", "entity_name": "subscriptions", "mongo_collection": "entitlement_dispatch_subscriptions", "data_alias": "billing.subscriptions" }] }
+  ]
+}

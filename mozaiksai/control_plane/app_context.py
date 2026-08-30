@@ -346,9 +346,9 @@ async def _load_app_context_graph_ref(
 
     try:
         store = artifact_store or ArtifactStore()
-        artifact = await store.get_artifact_version(
+        artifact = await store.get_build_record(
             app_id=app_id,
-            artifact_version_id=graph_ref.ref_id,
+            build_record_id=graph_ref.ref_id,
         )
     except Exception as exc:
         return AppContextGraphLookupResult(
@@ -385,9 +385,9 @@ async def _load_source_context_bundle_ref(
 
     try:
         store = artifact_store or ArtifactStore()
-        artifact = await store.get_artifact_version(
+        artifact = await store.get_build_record(
             app_id=app_id,
-            artifact_version_id=bundle_ref.ref_id,
+            build_record_id=bundle_ref.ref_id,
         )
     except Exception as exc:
         return SourceContextBundleLookupResult(
@@ -424,9 +424,9 @@ async def _load_app_intelligence_snapshot_ref(
 
     try:
         store = artifact_store or ArtifactStore()
-        artifact = await store.get_artifact_version(
+        artifact = await store.get_build_record(
             app_id=app_id,
-            artifact_version_id=snapshot_ref.ref_id,
+            build_record_id=snapshot_ref.ref_id,
         )
     except Exception as exc:
         return AppIntelligenceSnapshotLookupResult(

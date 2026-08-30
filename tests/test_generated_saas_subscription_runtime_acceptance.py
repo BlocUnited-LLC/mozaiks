@@ -25,6 +25,7 @@ from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
 from mozaiksai.hosts.routers.billing import router as billing_router
+from tests.module_authority_test_helpers import enforce_authority
 
 
 class _Cursor:
@@ -369,6 +370,14 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
         "mozaiksai.core.runtime.composition.module_executor.get_audit_logger",
         lambda: _NoopAuditLogger(),
     )
+    # Freeze wallet "now" to July 2026 so the guard's ensure_plan_allowances call
+    # uses the same monthly period key (2026-07) as the fulfillment command's
+    # occurred_at, preventing a spurious second allocation when the test runs in
+    # a later month.
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet._now",
+        lambda: datetime(2026, 7, 15, tzinfo=UTC),
+    )
 
     assignments = _Collection([])
     adapter = ConfiguredEntitlementAdapter(
@@ -393,7 +402,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert denied.success is False
@@ -443,7 +452,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert granted.success is True
@@ -525,7 +534,7 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert cancelled.success is False
@@ -550,6 +559,13 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
     monkeypatch.setattr(
         "mozaiksai.hosts.routers.billing.get_audit_logger",
         lambda: _NoopAuditLogger(),
+    )
+    # Freeze wallet "now" to July 2026 so ensure_plan_allowances uses the same
+    # monthly period key (2026-07) as the HTTP fulfillment command, preventing a
+    # spurious second allocation when the test runs in a later calendar month.
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet._now",
+        lambda: datetime(2026, 7, 15, tzinfo=UTC),
     )
 
     database = _Database()
@@ -591,7 +607,7 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert denied_before_fulfillment.success is False
@@ -637,7 +653,7 @@ async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_
             params={"topic": "retention"},
             app_id="generated-saas",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert granted_after_fulfillment.success is True

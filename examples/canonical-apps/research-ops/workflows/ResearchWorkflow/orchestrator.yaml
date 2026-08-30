@@ -1,0 +1,7 @@
+workflow_name: ResearchWorkflow
+max_turns: 3
+human_in_the_loop: false
+workflow_startup_mode: AgentDriven
+orchestration_pattern: ag2_network
+initial_message: ResearchAgent, summarize the supplied local source text.
+initial_agent: ResearchAgent

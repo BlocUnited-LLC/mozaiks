@@ -1,0 +1,38 @@
+contract_id: farewell
+contract_type: build_pack_instructions
+
+# farewell depends on greetings to share the greeting session context.
+requires:
+  packs:
+    - pack_id: greetings
+      version: "0.1.0"
+      reason: "farewell module uses the greetings session context when saying goodbye"
+  capabilities:
+    - capability_id: greetings.say_hello
+      reason: "farewell actions verify a greeting session exists before farewell"
+
+selection_rules:
+  - id: select_for_farewell_apps
+    when:
+      intent_any:
+        - goodbye
+        - farewell
+        - sign off
+    action: select_pack
+
+recommended_domains:
+  - onboarding
+  - community
+
+required_outputs:
+  - path: modules/farewell/module.yaml
+    owner: templates
+  - path: modules/farewell/backend/__init__.py
+    owner: templates
+  - path: modules/farewell/backend/service.py
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/bye/
+
+facades: []

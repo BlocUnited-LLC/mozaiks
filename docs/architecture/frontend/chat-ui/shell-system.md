@@ -221,7 +221,7 @@ header and mobile shell chrome.
 
 Supported variant context:
 
-- `surface`: `studio`, `app_studio`, `workflow_session`, `transition`, `public`, or `page`
+- `surface`: `studio`, `app`, `user`, `workflow_session`, `transition`, `public`, or `page`
 - `shellMode`: `standard`, `workspace`, `conversation`, `focused`, `immersive`, or `public`
 - `workflow_sequence`: a workflow sequence id such as `build`
 - `transition`: a transition id

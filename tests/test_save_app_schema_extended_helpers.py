@@ -560,15 +560,18 @@ def _minimal_manifest() -> dict:
 
 def _minimal_page() -> dict:
     return {
+        "schema_version": "mozaiks.app_page.v1",
         "name": "home",
         "route": "/home",
         "title": "Home",
-        "schema_version": "mozaiks.page.v1",
+        "page_type": "landing",
+        "layout": "full-width",
         "sections": [
             {
-                "id": "main",
-                "label": "Main",
-                "components": [{"id": "c1", "primitive": "Heading", "config": {"text": "Hello"}}],
+                "id": "home-header",
+                "primitive": "PageHeader",
+                "title": None,
+                "config": {"title": "Home", "subtitle": "Hello"},
             }
         ],
     }

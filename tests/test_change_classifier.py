@@ -86,7 +86,7 @@ def _pack() -> LoadedControlPlanePack:
                 ControlPlaneCheckpointManifest(
                     event="request_submitted",
                     prompt_id="change_classifier_system",
-                    tool_ids=["get_revision_context", "get_artifact_summary"],
+                    tool_ids=["get_revision_context", "get_build_record_summary"],
                 ),
             ],
         ),
@@ -110,10 +110,10 @@ def _pack() -> LoadedControlPlanePack:
                     available_to=["request_submitted"],
                 ),
                 ControlPlaneToolDefinition(
-                    id="get_artifact_summary",
+                    id="get_build_record_summary",
                     kind="context_tool",
-                    description="Load artifact state",
-                    entrypoint="example.tools:get_artifact_summary",
+                    description="Load build record state",
+                    entrypoint="example.tools:get_build_record_summary",
                     available_to=["request_submitted"],
                 ),
             ],
@@ -139,8 +139,8 @@ async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
     )
 
     result = await classifier.classify(
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_family="app_bundle",
+        build_key="app_bundle",
         raw_user_request="Add exports for reporting",
         app_id="app_1",
     )
@@ -160,8 +160,8 @@ async def test_change_classifier_uses_refinement_policy_llm_config() -> None:
     assert '"get_revision_context"' in created[0].calls[0]["user_prompt"]
 
     assert len(tool_executor.calls) == 2
-    assert tool_executor.calls[0]["context"].artifact_kind == "app_bundle"
-    assert tool_executor.calls[0]["context"].artifact_key == "app_bundle"
+    assert tool_executor.calls[0]["context"].build_family == "app_bundle"
+    assert tool_executor.calls[0]["context"].build_key == "app_bundle"
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_change_classifier_requires_enabled_refinement_engine() -> None:
 
     with pytest.raises(RuntimeError, match="Refinement Engine is disabled"):
         await classifier.classify(
-            artifact_kind="app_bundle",
+            build_family="app_bundle",
             raw_user_request="Add exports for reporting",
             app_id="app_1",
         )

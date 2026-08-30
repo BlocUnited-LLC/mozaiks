@@ -9,6 +9,55 @@ Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those 
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 
+## Required Pre-Edit Architecture Check
+
+Before editing Mozaiks OSS:
+
+- read [docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md](docs/architecture/ARCHITECTURE_QUICK_REFERENCE.md)
+- for generator, structured-output, YAML contract, taxonomy, route/action/component binding, or materialization work, also read
+  [docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md](docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md)
+- if the task changes, extends, replaces, or challenges architecture, also read
+  [docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md](docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md)
+- current source remains final authority
+- if current source contradicts the frozen north star, stop and report the
+  contradiction before editing
+- before introducing a subsystem, identify the current canonical owner,
+  determine whether AG2 already owns the primitive, determine whether Mozaiks
+  already has the canonical implementation, and prefer extending or connecting
+  the existing owner
+- do not introduce a parallel subsystem without proving the canonical owner
+  cannot satisfy the requirement
+- architectural changes that contradict the frozen north star require an ADR or
+  explicit architecture decision
+
+## ADR Authoring Context
+
+For an ADR that changes or extends app generation, semantic authority,
+compilation/materialization, or refinement, review
+[issue #411](https://github.com/BlocUnited-LLC/mozaiks/issues/411) and state
+explicitly whether the ADR adopts, modifies, rejects, or defers that direction.
+
+Issue #411 is a design prompt, not architecture authority. Current source and
+Accepted ADRs remain authoritative. Any ADR using the issue must verify its
+claims against the repository and must not make a typed decision ledger a
+second authority for application meaning.
+
+## Deterministic Generation Rule
+
+Generated-app reliability takes precedence over maximum schema expressiveness.
+
+- Prefer small finite taxonomies, shallow typed schemas, and explicit canonical references.
+- One runtime concept gets one canonical name. Do not preserve overlapping aliases for pages, actions, modules, workflows, capabilities, routes, events, or UI concepts.
+- Every runtime-affecting structured-output value must resolve to a known canonical contract before promotion. Unknown taxonomy values and unresolved route/component/module/action/workflow/capability references fail early rather than becoming runtime `404`, `501`, missing-action, or fallback behavior.
+- YAML and structured outputs own architecture, topology, identity, and contracts. Python and JS/React are bounded customization escape hatches behind those contracts; do not expand canonical YAML into an unbounded programming language.
+- When a schema/taxonomy changes, update the structured-output model, Factory prompts/hooks, deterministic materializer/templates, runtime loader/consumer, validation, docs, fixtures, and acceptance tests together.
+- `factory_app` and/or generated-app acceptance must dogfood generic schema/taxonomy changes where applicable.
+
+This repo is pre-1.0 and not in production. **Replace obsolete internal contracts directly by default.** Remove stale shapes, aliases, shims, fallback branches, dual-read/dual-write behavior, normalization of retired names, obsolete prompt guidance, and retired tests in the same migration. Preserve an older shape only when an explicit current external contract or user-approved migration requirement proves it is necessary.
+
+The detailed implementation policy is
+[Canonical Schema Generation Policy](docs/architecture/CANONICAL_SCHEMA_GENERATION_POLICY.md).
+
 This repo uses layered FastAPI hosts as the canonical OSS server composition:
 - `mozaiksai.hosts.runtime`
 - `mozaiksai.hosts.platform`
@@ -33,6 +82,10 @@ superset chain. Studio is not the CLI's UI. CLI owns developer tooling (filesyst
 scaffolding, process management). Studio owns the management interface (workspace
 status, build lifecycle, artifacts, run history, config).
 
+Profile stays person-scoped. Studio / Workspace Shell is the org/workspace home
+base. App shells remain separate and brandable per app; do not collapse org
+management into `/me`.
+
 The current repo layout is transitional. The canonical target is documented in
 [docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md).
 Do not reintroduce a hybrid root that mixes the starter app bundle with shared
@@ -48,6 +101,26 @@ That means optimization goals are different from a typical enterprise codebase:
 - Prefer replacement over preservation.
 - Remove stale logic when a better contract or architecture is introduced.
 - Do not keep shims, aliases, wrappers, fallback branches, or duplicate schemas unless explicitly requested.
+
+## No Paid Infrastructure Until Launch
+
+**Do not provision, recommend, or assume any paid cloud service is running.**
+
+This project is pre-launch. All paid Azure infrastructure (Container Apps,
+Redis Cache, Container Registry, Log Analytics, Front Door) has been stopped
+or is not yet provisioned to avoid billing before the product is live.
+
+Rules for agents:
+- Do not add `REDIS_URL` to `.env.example` or any config as a required value.
+  Redis is **optional** — the app runs fine without it using in-memory fallbacks.
+  Wire it only when the product is actually live and multi-instance scaling is needed.
+- Do not suggest provisioning Azure Container Apps, Redis, or any other
+  paid Azure service as part of a task. Those decisions belong to the operator.
+- Do not reference staging or production Azure URLs as live endpoints.
+  The Front Door URL (`fd-mozaiks-endpoint-*.azurefd.net`) is a config
+  placeholder — it is not currently provisioned.
+- If a task requires a cloud service that costs money, note it as a
+  pre-launch prerequisite and stop — do not provision it.
 
 ## Release Hold
 
@@ -148,7 +221,7 @@ Canonical ownership:
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
 | `factory_app/workflows/` | Factory layer — shared builder/generator workflows (AppGenerator, AgentGenerator, DesignDocs, ValueEngine) |
 | `factory_app/workflows/{WorkflowName}/*.yaml` | Factory layer — workflow-owned runtime YAML, prompts, agents, transitions, structured outputs, tool bindings, and middleware |
-| `factory_app/workflows/_shared/` | Factory layer — shared prompt/catalog helpers consumed by multiple factory workflows |
+| `factory_app/workflows/_shared/` | Factory layer — shared builder implementation consumed by multiple factory workflows, including deterministic Python helpers and reusable workflow UI components |
 | `factory_app/build_context/{context_name}/context.yaml` | Factory layer — named build-context registries for static catalogs, contracts, reusable packs, and templates |
 | `factory_app/refinement_harness/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
@@ -197,6 +270,14 @@ products, and customer workspaces use the same shape:
 - Do not recreate `factory_app/workflows/_shared/catalogs/`. Catalog contents
   belong in `factory_app/build_context/{context_name}/`; workflow
   tools may contain workflow-specific renderers over those catalogs.
+- Shared workflow React components that are reused by multiple factory workflows
+  belong under `factory_app/workflows/_shared/ui/`. They are not auto-registered:
+  each consuming workflow must re-export/register them from its own
+  `factory_app/workflows/{WorkflowName}/ui/index.js` so UI ownership remains
+  workflow-scoped and deterministic.
+- Do not import UI from a sibling workflow folder. Move genuinely shared
+  workflow UI to `_shared/ui/`, or keep a workflow-specific wrapper in the
+  owning workflow's `ui/` folder.
 - `context_variables.yaml` declares runtime/session state. Large static prompt
   catalogs are injected by deterministic hooks; do not stuff them into context
   variables.
@@ -245,15 +326,37 @@ gh pr list --state open           # see what other agents have in flight
 git log origin/main --oneline -5  # see what recently landed
 ```
 
+Never branch off another open PR's still-unmerged branch, even as a "hard
+dependency" — you inherit its bugs and every later fix has to be re-propagated
+into your branch too. Wait for it to merge (green CI, actually in `main`) and
+branch from fresh `origin/main` instead. Always work in an isolated worktree
+(`git worktree add .local/worktrees/<task-name> origin/main -b cc/<desc>`),
+never directly in the shared main checkout — other agents run git commands
+there concurrently and will switch branches or sweep in unrelated edits.
+
 **Branch workflow — always use feature branches:**
 ```bash
 git checkout main && git reset --hard origin/main
 git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
-# ... work, commit ...
+# ... work, commit -s ...
 git push -u origin cc/<description>
 gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch --auto
+gh pr merge <number> --squash --delete-branch --auto   # auto-merge is enabled repo-wide; request it right away, don't wait on CI
 ```
+
+Before opening the PR, run `ruff check .` and `pytest -q --no-cov` locally in
+the worktree. If a check still fails, confirm via `git show origin/main:<path>`
+whether it's pre-existing on `main` before assuming it's your bug — and if a
+check fails identically across multiple unrelated PRs, it's a repo-wide `main`
+regression blocking everyone; fix it first with a small isolated hotfix PR.
+
+**Every commit must carry a DCO sign-off — use `git commit -s`, never plain
+`-m`.** See [DCO.md](DCO.md). A commit without a `Signed-off-by:` trailer
+fails the `dco` check, and that check is *not* in `main`'s required-checks
+list — `--auto` can merge right past a failing `dco` check, so a green
+auto-merge is not proof you signed off. Forgot on the last commit? Fix it
+before pushing with `git commit --amend -s --no-edit`; for several unsigned
+commits, `git rebase --signoff origin/main`.
 
 Primary repo ownership (avoids overlap by default):
 

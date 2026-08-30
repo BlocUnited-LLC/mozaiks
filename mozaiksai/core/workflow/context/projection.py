@@ -41,8 +41,18 @@ def _context_data(agent: Any) -> dict[str, Any]:
     context = getattr(agent, "context_variables", None) or getattr(agent, "_context_variables", None)
     if context is None:
         return {}
-    if hasattr(context, "data") and isinstance(context.data, dict):
-        return context.data
+    if hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+        try:
+            snap = context.snapshot()
+            if isinstance(snap, dict):
+                return snap
+        except Exception:
+            pass
+    if hasattr(context, "to_dict"):
+        try:
+            return dict(context.to_dict())
+        except Exception:
+            pass
     if isinstance(context, dict):
         return context
     return {}

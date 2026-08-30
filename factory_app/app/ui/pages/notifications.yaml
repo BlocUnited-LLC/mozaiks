@@ -1,6 +1,8 @@
+schema_version: mozaiks.app_page.v1
 name: notifications
 route: /notifications
 title: Notifications
+page_type: activity_feed
 layout: full-width
 roles: []
 sections:

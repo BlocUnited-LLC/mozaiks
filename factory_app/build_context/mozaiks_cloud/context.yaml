@@ -1,0 +1,110 @@
+context_id: mozaiks_cloud
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: provider_api_contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: mozaiks_cloud
+  version: "0.1.0"
+  status: active
+  capability_source: managed_capability
+  required_integrations:
+    - service: mozaiks_cloud
+      provider: mozaiks_cloud
+      display_name: Mozaiks Cloud
+      kind: api_key
+      purpose: >
+        Submit deployments, inspect hosting/environment state, request rollbacks,
+        and manage domain DNS/TLS lifecycle through one Mozaiks Cloud-compatible
+        managed-service credential.
+      required_at: runtime
+      service_scopes:
+        - cloud:read
+        - cloud:deploy
+        - cloud:rollback
+        - cloud:usage
+        - domains:read
+        - domains:write
+        - domains:manage
+      required_fields:
+        - name: api_base
+          label: Mozaiks Cloud API Base URL
+          type: url
+          required: true
+          frontend_safe: true
+        - name: api_key
+          label: Mozaiks Cloud API Key
+          type: secret
+          required: true
+          frontend_safe: false
+      optional_fields:
+        - name: app_id
+          label: Mozaiks Cloud App ID
+          type: text
+          required: false
+          frontend_safe: true
+  deployment_env:
+    optional:
+      - MOZAIKS_CLOUD_API_BASE
+      - MOZAIKS_CLOUD_APP_ID
+    secret:
+      - MOZAIKS_CLOUD_API_KEY
+capabilities:
+  - capability_id: cloud.deployment.submit
+    facade_recommended: cloud_deployment
+  - capability_id: cloud.deployment.status
+    facade_recommended: cloud_deployment
+  - capability_id: cloud.deployment.rollback
+    facade_recommended: cloud_deployment
+  - capability_id: cloud.environment.endpoints
+    facade_recommended: cloud_deployment
+  - capability_id: cloud.deployment.health
+    facade_recommended: cloud_deployment
+  - capability_id: cloud.domain.connect
+    facade_recommended: cloud_domain
+  - capability_id: cloud.domain.status
+    facade_recommended: cloud_domain
+  - capability_id: cloud.domain.disconnect
+    facade_recommended: cloud_domain
+  - capability_id: cloud.usage.report
+    facade_recommended: cloud_usage_reporter
+facades:
+  - module_id: cloud_deployment
+    provider_module: mozaiks_cloud
+    provider_actions:
+      - submit_deployment
+      - get_deployment_status
+      - get_environment_endpoints
+      - request_rollback
+    pages:
+      - name: Deployments
+        route: /deployments
+        page_type_hint: list_detail
+  - module_id: cloud_usage_reporter
+    provider_module: mozaiks_cloud
+    provider_actions:
+      - report_usage_rollups
+  - module_id: cloud_domain
+    provider_module: mozaiks_cloud
+    provider_actions:
+      - connect_domain
+      - get_domain_verification
+      - get_dns_instructions
+      - request_domain_activation
+      - get_domain_status
+      - disconnect_domain
+    pages:
+      - name: Domains
+        route: /domains
+        page_type_hint: list_detail
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs
+    operator_contracts:
+      from: operator_contracts

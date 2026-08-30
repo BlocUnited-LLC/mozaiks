@@ -74,11 +74,12 @@ assets:
     kind: templates
 pack:
   id: mozaikspay
+  version: "0.1.11"
   status: active
   capability_source: managed_capability
   required_integrations:
     - service: mozaikspay
-      provider: mozaikspay
+      provider: mozaiks_pay
       kind: api_key
       required_fields:
         - name: api_base
@@ -113,7 +114,11 @@ Required fields:
 
 Optional fields:
 
+- `description`: short structural registry metadata for human inspection. It is
+  not projected into workflow context variables unless repeated through
+  `values` or an explicit projection source.
 - `pack`: marks the context as a selectable build pack.
+- `pack.version`: required version string for selectable packs.
 - `pack.required_integrations`: connector requirements that selected packs add
   to AppGenerator integration readiness. Declare each requirement as a
   structured object with `service`, `provider`, `kind`, `purpose`,
@@ -122,7 +127,8 @@ Optional fields:
   API base URLs and client ids may be frontend safe.
 - `capabilities`, `facades`: structured pack metadata for planning agents.
 - `projections.context_variables`: values projected into workflow launch state.
-- `values`: static provider values used by projection rules.
+- `values`: static provider values used by projection rules. Put custom
+  projection inputs here rather than adding free-form top-level keys.
 
 Keep `context.yaml` structural. Do not put human guidance, semantic purpose
 text, generated file mappings, endpoint rewrites, resolver code, build tasks,
@@ -150,6 +156,11 @@ app bundle paths.
   bring-your-own provider adapter.
 - `mozaikspay`: managed-capability templates and connector contracts for apps
   that consume the MozaiksPay payment/subscription boundary.
+- `operator_readiness`: deterministic launch/evidence templates for
+  host-operator apps, SaaS workspaces, and other platform-style products that
+  need reproducible no-spend validation. This pack is intentionally narrow: it
+  is for platform/operator workspaces, not ordinary customer apps or brochure
+  sites.
 
 UI primitives stay first-class in `chat-ui`. Build-context packs compose page
 schemas from those primitives; they do not define their own primitive layer.
@@ -210,6 +221,9 @@ Current canonical asset kinds:
 - `contract`: typed agent-facing rule contract.
 - `templates`: directory of deterministic generated app files.
 
+Unknown asset kinds fail pack validation before prompt projection or
+materialization.
+
 Catalog prompt projection is declared on the catalog asset:
 
 ```yaml
@@ -251,7 +265,7 @@ selection_rules:
     action: select_pack
 required_integrations:
   - service: mozaikspay
-    provider: mozaikspay
+    provider: mozaiks_pay
     kind: api_key
     required_fields:
       - name: api_base
@@ -276,10 +290,27 @@ facades:
     provider_module: mozaikspay
 ```
 
-Use bounded fields such as `selection_rules`, `required_outputs`,
-`required_integrations`, `forbidden_outputs`, `runtime_boundaries`, `facades`, and
-`inactive_surfaces`. Do not use top-level narrative fields such as `purpose`,
-`description`, `generation_rules`, or `recommended_facades`.
+Use bounded fields such as `selection_rules`, `required_outputs`, `requires`,
+`provides_capabilities`, `forbidden_outputs`, `runtime_boundaries`, and
+`facades`. Do not use top-level narrative fields such as `purpose`,
+`description`, `generation_rules`, `recommended_facades`, or alternate schema
+languages.
+
+Pack dependencies use one canonical contract:
+
+```yaml
+requires:
+  packs:
+    - pack_id: messaging
+      version: "0.1.11"
+      reason: Support tickets reuse messaging threads.
+  capabilities:
+    - capability_id: messaging.threads.create
+      reason: Support needs a canonical thread creation capability.
+```
+
+`requires.packs[].version` is exact when present. Mozaiks does not solve semver
+ranges for build-context packs.
 
 ## Templates
 
@@ -305,6 +336,104 @@ YAML files inside `templates/` are generated app declaratives, not build-context
 contracts. A selected pack copies every file under each declared `templates`
 asset to the same relative path in the generated app bundle.
 
+## Trust And Integrity
+
+Community Components are verified local `CapabilityPack` directories. Discovery
+of a descriptor does not install it, installation does not verify it, and
+verification does not grant production authority.
+
+Before materialization, a selected local pack must pass deterministic checks for:
+
+- identity and version;
+- declared asset closure;
+- catalog and contract schema shape;
+- dependency declarations and exact dependency versions when declared;
+- canonical content digest.
+
+The digest is one `sha256:` value computed from `context.yaml` and every
+declared asset file. It excludes timestamps, absolute paths, worktree location,
+and transient generated metadata. The same pack content produces the same
+digest; material pack-content changes produce a different digest.
+
+Generated bundles retain pack metadata in the existing
+`.mozaiks/pack_provenance.json` manifest:
+
+```json
+{
+  "schema_version": "mozaiks.pack_provenance.v1",
+  "packs": [
+    {
+      "pack_id": "greetings",
+      "version": "0.1.0",
+      "source": "https://example.com/community-packs/greetings",
+      "digest": "sha256:...",
+      "materialized_owned_files": [
+        { "path": "modules/greetings/module.yaml", "owner": "templates" }
+      ]
+    }
+  ]
+}
+```
+
+Local installation pins a verified Community Component in workspace
+build-context metadata:
+
+```text
+build_context/
+└── .mozaiks/
+    ├── installed_components.json
+    └── installed_component_sources.json
+```
+
+`installed_components.json` is the canonical deterministic state:
+
+```json
+{
+  "schema_version": "mozaiks.installed_components.v1",
+  "components": [
+    {
+      "pack_id": "greetings",
+      "version": "0.1.0",
+      "digest": "sha256:...",
+      "source": "https://example.com/community-packs/greetings",
+      "dependencies": {
+        "packs": [],
+        "capabilities": []
+      },
+      "capabilities": [
+        { "capability_id": "greetings.say_hello" }
+      ]
+    }
+  ]
+}
+```
+
+It does not store absolute developer-machine paths. The non-portable
+`installed_component_sources.json` sidecar maps installed `pack_id` values to
+local source paths so deterministic verification and materialization can be
+re-run in that workspace checkout.
+
+Installation verifies the local pack, validates dependencies against already
+installed components, and writes pinned version/digest state. It does not
+materialize files and does not select the pack for a build.
+
+Upgrade planning is a dry run:
+
+```text
+installed A@v1 + verified local candidate A@v2 -> UpgradePlan
+```
+
+The plan reports exact version/digest movement, dependency changes, added,
+removed, and changed owned files, and potential conflicts. Applying an upgrade
+is allowed only when the operation can compare the workspace files against the
+old pack's rendered content. It refuses to overwrite locally modified owned
+files, files owned by another installed pack, or workspace-owned/custom files.
+It does not execute migration scripts.
+
+Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
+trust scoring, cryptographic signing, or automatic semver range upgrades for
+this local lifecycle layer.
+
 ## Resolution
 
 At launch, the build-context provider discovers contexts under:
@@ -323,6 +452,13 @@ For each context that applies to the target workflow:
 6. `templates` assets are materialized only for selected packs.
 
 Explicit launch context values take precedence over projected values.
+
+Installed Community Components are consumed only through explicit selection.
+An `AppBuildPlan` may select an installed `capability_pack_id`; the existing
+materializer then resolves the pinned local source through
+`build_context/.mozaiks` when launch context includes `build_context_root`.
+Installed state alone is not a selected pack list, and selected pack
+materialization still grants no provider or production authority.
 
 ## Build Context vs. Context Variables
 
@@ -395,6 +531,12 @@ settings, or level data, then the production move is not just adding a
 must first add bounded fields or artifact families for those outputs. After
 that, a `game_builder` build context can provide the domain catalogs,
 contracts, templates, and selected defaults.
+
+The same rule applies to `operator_readiness`: only add the pack when the
+workflow already has a bounded `readiness_profile` or similar typed output to
+drive it. If the product is not a host/operator platform, the pack should stay
+absent. Do not infer it from prose alone, and do not make it the default for
+customer-facing app generation.
 
 For that reason, a reusable builder pack should be designed in this order:
 

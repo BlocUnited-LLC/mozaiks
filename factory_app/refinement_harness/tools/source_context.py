@@ -132,7 +132,7 @@ async def _load_source_bundle(
             "warnings": list(current.warnings),
         }
 
-    if str(tool_context.artifact_version_id or "").strip():
+    if str(tool_context.build_record_id or "").strip():
         loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
         if loaded.get("present") and isinstance(loaded.get("source_context_bundle"), SourceCorpusBundle):
             return {

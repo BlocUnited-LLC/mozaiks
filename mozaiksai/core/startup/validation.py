@@ -9,8 +9,11 @@ Behaviour is controlled by the ``MOZAIKS_STARTUP_CHECKS`` environment variable:
   ``"warn"``   — (default) emit WARNING log records but do not block startup.
 
 Checks performed:
-  LLM API key          — OPENAI_API_KEY resolvable via env, Key Vault alias
-                         ``OpenAIApiKey``, or a MongoDB ``llm_config`` document.
+  LLM API key          — provider-specific API key resolvable via env based on
+                         ``LLM_PRIMARY_API_TYPE`` (google → GEMINI_API_KEY /
+                         GOOGLE_API_KEY; anthropic → ANTHROPIC_API_KEY; openai
+                         → OPENAI_API_KEY / Key Vault alias ``OpenAIApiKey``),
+                         or a MongoDB ``llm_config`` document.
   MongoDB              — MONGO_URI must be set (env or Key Vault alias ``MongoURI``)
                          and MongoDB must respond to a ping within the driver timeout.
   Workflows path       — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
@@ -53,19 +56,36 @@ def _startup_mode() -> str:
     return os.getenv("MOZAIKS_STARTUP_CHECKS", "warn").strip().lower()
 
 
-def _can_resolve_api_key() -> bool:
-    """Return True when ``OPENAI_API_KEY`` is resolvable from env or Key Vault.
+def _can_resolve_api_key() -> tuple[bool, str]:
+    """Return (resolvable, key_env_var_name) based on the configured LLM provider.
 
-    Key Vault is attempted only when the env var is absent, so the fast path
-    (env var set) incurs zero I/O.
+    Mirrors the provider-specific resolution order in ``llm_fallback.py`` so
+    the startup check matches what the actual LLM adapter will attempt:
+      - ``LLM_PRIMARY_API_TYPE=google``    → GEMINI_API_KEY / GOOGLE_API_KEY
+      - ``LLM_PRIMARY_API_TYPE=anthropic`` → ANTHROPIC_API_KEY
+      - otherwise (openai / default)       → OPENAI_API_KEY / Key Vault alias
+
+    Key Vault is attempted only for the OpenAI case (existing behaviour) since
+    that is the only alias currently registered.
     """
+    api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
+
+    if api_type == "google":
+        key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+        return bool(key), "GEMINI_API_KEY / GOOGLE_API_KEY"
+
+    if api_type == "anthropic":
+        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        return bool(key), "ANTHROPIC_API_KEY"
+
+    # openai / azure / default
     if os.getenv("OPENAI_API_KEY", "").strip():
-        return True
+        return True, "OPENAI_API_KEY"
     try:
         val = get_secret("OpenAIApiKey")
-        return bool(str(val or "").strip())
+        return bool(str(val or "").strip()), "OpenAIApiKey (Key Vault)"
     except Exception:
-        return False
+        return False, "OPENAI_API_KEY"
 
 
 async def _has_mongo_llm_config() -> bool:
@@ -99,15 +119,16 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     warnings: list[str] = []
 
     # ── LLM API key ──────────────────────────────────────────────────────────
-    api_key_in_env = _can_resolve_api_key()
+    api_key_in_env, key_var_name = _can_resolve_api_key()
     api_key_in_mongo = False if api_key_in_env else await _has_mongo_llm_config()
 
     if not api_key_in_env and not api_key_in_mongo:
         msg = (
-            "OPENAI_API_KEY is not set and no llm_config document was found in MongoDB. "
+            f"{key_var_name} is not set and no llm_config document was found in MongoDB. "
             "Workflow LLM calls will fail at request time. "
-            "Set OPENAI_API_KEY in the environment or insert an llm_config document "
-            "into the mozaiks_system.llm_config collection."
+            f"Set {key_var_name} in the environment (matching your LLM_PRIMARY_API_TYPE "
+            "setting) or insert an llm_config document into the mozaiks_system.llm_config "
+            "collection."
         )
         warnings.append(msg)
         logger.warning(

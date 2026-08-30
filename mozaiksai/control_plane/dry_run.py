@@ -26,6 +26,7 @@ from mozaiksai.control_plane.app_context_policy import (
     evaluate_app_context_policy,
 )
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.contracts import RefinementLane
 from mozaiksai.control_plane.implementations.change_classifier import LLMChangeClassifier
 from mozaiksai.control_plane.implementations.refinement_router import (
     ChangeClass,
@@ -86,7 +87,7 @@ class RefinementExecutionPlan(BaseModel):
     request_id: str
     app_id: str | None = None
     request: str
-    artifact_kind: str
+    build_family: str
     change_class: str
     refinement_lane: str | None = None
     workflow_id: str
@@ -111,12 +112,11 @@ class RefinementExecutionPlan(BaseModel):
     app_context_policy_override: AppContextPolicyOverride | None = None
     app_context_impact_hints: AppContextImpactHints | None = None
 
-
 class RefinementDryRunPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request: str
-    artifact_kind: str
+    build_family: str
     change_class: str
     refinement_lane: str | None = None
     workflow_id: str
@@ -250,20 +250,20 @@ def infer_refinement_lane(
         or any(term in path_text for term in ("data_contract", "data_migrations"))
         or any(term in request_text for term in ("data model", "database", "migration", "migrate", "required field"))
     ):
-        return "data_model_migration"
+        return RefinementLane.DATA_MODEL_MIGRATION.value
     if re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) or "provider-backed" in text:
-        return "managed_capability_change"
+        return RefinementLane.MANAGED_CAPABILITY_CHANGE.value
     if any(term in text for term in ("connector", "integration", "adapter")):
-        return "integration"
+        return RefinementLane.INTEGRATION.value
     if change_class == ChangeClass.CORE.value:
         if "architecture" in text:
-            return "architecture_replan"
-        return "conceptual_reframe"
+            return RefinementLane.ARCHITECTURE_REPLAN.value
+        return RefinementLane.CONCEPTUAL_REFRAME.value
     if workflow_sequence == "app_surface_revision" or "experience_spec" in text:
-        return "experience_design"
+        return RefinementLane.EXPERIENCE_DESIGN.value
     if any(term in text for term in ("module", "api", "action")):
-        return "feature_addition"
-    return "ui_patch"
+        return RefinementLane.FEATURE_ADDITION.value
+    return RefinementLane.UI_PATCH.value
 
 
 def _dedupe(values: list[str]) -> list[str]:
@@ -282,14 +282,14 @@ def _stable_request_id(
     *,
     app_id: str | None,
     request: str,
-    artifact_kind: str,
+    build_family: str,
     change_class: str,
     workflow_sequence: str,
     affected_bundle_paths: list[str],
 ) -> str:
     payload = {
         "app_id": app_id or "",
-        "artifact_kind": artifact_kind,
+        "build_family": build_family,
         "change_class": change_class,
         "request": request,
         "workflow_sequence": workflow_sequence,
@@ -317,7 +317,7 @@ def _path_text(paths: list[str]) -> str:
 def _has_ui_surface_impact(*, lane: str | None, paths: list[str], families: list[str]) -> bool:
     text = _path_text(paths)
     return (
-        lane in {"experience_design", "ui_patch", "managed_capability_change"}
+        lane in {RefinementLane.EXPERIENCE_DESIGN.value, RefinementLane.UI_PATCH.value, RefinementLane.MANAGED_CAPABILITY_CHANGE.value}
         or "experience_spec" in families
         or "ui/" in text
         or "route_manifest" in text
@@ -328,7 +328,7 @@ def _has_ui_surface_impact(*, lane: str | None, paths: list[str], families: list
 def _has_module_contract_impact(*, lane: str | None, paths: list[str]) -> bool:
     text = _path_text(paths)
     return (
-        lane in {"feature_addition", "managed_capability_change"}
+        lane in {RefinementLane.FEATURE_ADDITION.value, RefinementLane.MANAGED_CAPABILITY_CHANGE.value}
         or "modules/" in text
         or "/contracts/" in text
         or "/backend/handler.py" in text
@@ -338,7 +338,7 @@ def _has_module_contract_impact(*, lane: str | None, paths: list[str]) -> bool:
 
 def _has_integration_impact(*, lane: str | None, paths: list[str], scope_summary: str) -> bool:
     text = " ".join([_path_text(paths), str(scope_summary or "").lower()])
-    return lane == "integration" or any(term in text for term in ("integration", "integrations", "connector", "adapter"))
+    return lane == RefinementLane.INTEGRATION.value or any(term in text for term in ("integration", "integrations", "connector", "adapter"))
 
 
 def _has_database_review_impact(
@@ -352,7 +352,7 @@ def _has_database_review_impact(
     paths_text = _path_text(paths)
     scope_text = str(scope_summary or "").lower()
     return (
-        lane == "data_model_migration"
+        lane == RefinementLane.DATA_MODEL_MIGRATION.value
         or any(term in paths_text for term in ("data_contract", "data_migrations"))
         or "destructive changes require explicit review" in scope_text
         or any(
@@ -371,7 +371,7 @@ def _has_database_review_impact(
 def _has_managed_facade_impact(*, lane: str | None, paths: list[str], scope_summary: str) -> bool:
     text = " ".join([_path_text(paths), str(scope_summary or "").lower()])
     return (
-        lane == "managed_capability_change"
+        lane == RefinementLane.MANAGED_CAPABILITY_CHANGE.value
         or re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) is not None
         or "provider-backed" in text
     )
@@ -468,7 +468,7 @@ def requires_human_review(
     validation_ids = {item.id for item in validation_plan.items if item.required}
     return (
         change_class == ChangeClass.CORE.value
-        or refinement_lane == "data_model_migration"
+        or refinement_lane == RefinementLane.DATA_MODEL_MIGRATION.value
         or "database_migration_review" in validation_ids
         or "Destructive changes require explicit review." in scope_summary
     )
@@ -545,7 +545,7 @@ def _app_context_impact_warnings(hints: AppContextImpactHints | None) -> list[st
 def build_refinement_execution_plan_from_route(
     *,
     request: str,
-    artifact_kind: str,
+    build_family: str,
     change_class: str,
     workflow_id: str,
     workflow_sequence: str | None,
@@ -610,7 +610,7 @@ def build_refinement_execution_plan_from_route(
     resolved_request_id = request_id or _stable_request_id(
         app_id=app_id,
         request=request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         change_class=normalized_change_class,
         workflow_sequence=resolved_workflow_sequence,
         affected_bundle_paths=paths,
@@ -676,7 +676,7 @@ def build_refinement_execution_plan_from_route(
         request_id=resolved_request_id,
         app_id=app_id,
         request=request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         change_class=normalized_change_class,
         refinement_lane=refinement_lane,
         workflow_id=workflow_id,
@@ -708,7 +708,7 @@ def build_refinement_execution_plan_from_route(
 async def build_refinement_execution_plan(
     *,
     request: str,
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
     change_class: str | None = None,
     files_manifest: list[dict[str, Any]] | None = None,
     app_root: Path | None = None,
@@ -743,8 +743,8 @@ async def build_refinement_execution_plan(
     refinement_request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": artifact_kind,
-                "artifact_key": artifact_kind,
+                "build_family": build_family,
+                "build_key": build_family,
                 "raw_user_request": request,
                 "source_surface": source_surface,
                 "extra": {"files_manifest": manifest},
@@ -775,7 +775,7 @@ async def build_refinement_execution_plan(
     )
     return build_refinement_execution_plan_from_route(
         request=request,
-        artifact_kind=refinement_request.artifact_kind,
+        build_family=refinement_request.build_family,
         change_class=change_class_value,
         workflow_id=decision.workflow_id,
         workflow_sequence=workflow_sequence,
@@ -800,7 +800,7 @@ async def build_refinement_execution_plan(
 async def build_refinement_dry_run_plan(
     *,
     request: str,
-    artifact_kind: str = "app_bundle",
+    build_family: str = "app_bundle",
     change_class: str | None = None,
     files_manifest: list[dict[str, Any]] | None = None,
     app_root: Path | None = None,
@@ -810,7 +810,7 @@ async def build_refinement_dry_run_plan(
 ) -> RefinementDryRunPlan:
     execution_plan = await build_refinement_execution_plan(
         request=request,
-        artifact_kind=artifact_kind,
+        build_family=build_family,
         change_class=change_class,
         files_manifest=files_manifest,
         app_root=app_root,
@@ -820,7 +820,7 @@ async def build_refinement_dry_run_plan(
     )
     return RefinementDryRunPlan(
         request=request,
-        artifact_kind=execution_plan.artifact_kind,
+        build_family=execution_plan.build_family,
         change_class=execution_plan.change_class,
         refinement_lane=execution_plan.refinement_lane,
         workflow_id=execution_plan.workflow_id,

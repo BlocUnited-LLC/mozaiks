@@ -1,0 +1,31 @@
+schema_version: mozaiks.app_page.v1
+name: reports
+route: /reports
+title: Reports
+page_type: record_list
+layout: full-width
+roles: [user, admin]
+sections:
+  - id: reports-header
+    primitive: PageHeader
+    config:
+      title: Reports
+      subtitle: View reports on Free and export them on Pro.
+  - id: reports-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/reports/view_report
+      data_key: items
+      columns:
+        - { key: title, label: Report }
+        - { key: created_at, label: Created, type: date }
+      empty: { title: No reports, message: Seed a report to test the catalog. }
+  - id: export-report
+    primitive: ActionButton
+    config:
+      actions:
+        - id: export-report
+          label: Export report
+          variant: primary
+          action_type: submit
+          href: /api/modules/reports/export_report

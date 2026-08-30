@@ -1,0 +1,14 @@
+{
+  "_comment": "Canonical wire shape of a failed module dispatch. Asserted through the real platform router by tests/test_module_error_envelope_contract.py, and consumed by web_shell/playwright/generated-ui/entitlement-upgrade.spec.js so the browser mock cannot drift from the backend. Do not hand-edit: change mozaiksai/hosts/routers/modules.py and let the contract test tell you what to update.",
+  "entitlement_required": {
+    "status": 402,
+    "body": {
+      "detail": {
+        "error": "Entitlement required for premium_reports.generate_report: premium.reports.generate",
+        "error_code": "ENTITLEMENT_REQUIRED",
+        "module": "premium_reports",
+        "action": "generate_report"
+      }
+    }
+  }
+}

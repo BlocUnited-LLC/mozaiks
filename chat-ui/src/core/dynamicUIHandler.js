@@ -183,6 +183,25 @@ export class DynamicUIHandler {
    * @param {Object} updateData - Update data
    */
   notifyUIUpdate(updateData) {
+    try {
+      const toolName = updateData?.tool_name || updateData?.toolName || null;
+      const componentType = updateData?.component_type || updateData?.component || null;
+      const display = updateData?.display || updateData?.display_mode || updateData?.mode || null;
+      const payload = updateData?.payload && typeof updateData.payload === 'object' ? updateData.payload : null;
+      if (toolName || componentType || display) {
+        const logger = createToolsLogger({ tool: toolName || componentType || 'ui_update' });
+        logger.info('UI UPDATE DISPATCH', {
+          type: updateData?.type || null,
+          tool_name: toolName,
+          component_type: componentType,
+          display,
+          payload_keys: payload ? Object.keys(payload).slice(0, 20) : [],
+          has_structured_output: Boolean(payload?.structured_output && typeof payload.structured_output === 'object'),
+        });
+      }
+    } catch (err) {
+      try { console.debug('Failed to log UI update dispatch', err); } catch {}
+    }
     for (const callback of this.uiUpdateCallbacks) {
       try {
         callback(updateData);
@@ -215,7 +234,7 @@ export class DynamicUIHandler {
       return config;
       
     } catch (error) {
-      console.error(`Failed to load workflow config: ${workflowname}`, error);
+      console.error(`❌ Failed to load workflow config: ${workflowname}`, error);
       return { visual_agents: [] };
     }
   }
@@ -259,11 +278,11 @@ export class DynamicUIHandler {
         }
       }
       
-      console.warn(`Component ${componentName} not found in workflow ${workflowname}`);
+      console.warn(`⚠️ Component ${componentName} not found in workflow ${workflowname}`);
       return null;
       
     } catch (error) {
-      console.error(`Failed to get component definition: ${componentName}`, error);
+      console.error(`❌ Failed to get component definition: ${componentName}`, error);
       return null;
     }
   }
@@ -460,6 +479,19 @@ export class DynamicUIHandler {
 
   // Determine display mode ('composer', 'inline', or 'artifact') with robust fallbacks
       const display = eventData.display || eventData.display_type || (payload && (payload.display || payload.mode)) || null;
+      try {
+        const logger = createToolsLogger({ tool: toolName, toolCallId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
+        logger.info('UI TOOL DISPATCH', {
+          tool_name: toolName,
+          component_type: component_type || payload?.component_type || toolName,
+          workflow_name,
+          display: display || 'inline',
+          payload_keys: Object.keys(payload || {}).slice(0, 20),
+          has_structured_output: Boolean(payload?.structured_output && typeof payload.structured_output === 'object'),
+        });
+      } catch (err) {
+        try { console.debug('Failed to log UI tool dispatch', err); } catch {}
+      }
 
       // CRITICAL: Skip rendering for auto-tool events without explicit display mode
       // Auto-tool events are followed by explicit tool calls with proper display settings

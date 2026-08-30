@@ -122,6 +122,7 @@ def test_media_input_ref_rejects_kind_mismatch() -> None:
 def test_agent_spec_accepts_multimodal_and_image_generation_options() -> None:
     spec = AgentSpec.model_validate({
         "name": "BrandDesigner",
+        "structured_outputs_required": False,
         "system_message": "Design brand media.",
         "multimodal_inputs_enabled": True,
         "image_generation": {

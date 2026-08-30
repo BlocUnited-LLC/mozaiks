@@ -1,0 +1,77 @@
+name: Bug Report
+description: Report unexpected or incorrect behavior in Mozaiks.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search
+        [existing issues](https://github.com/BlocUnited-LLC/mozaiks/issues) first
+        to avoid duplicates.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps so a maintainer can reproduce the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: mozaiks-version
+    attributes:
+      label: Mozaiks version or commit
+      placeholder: e.g. 0.3.0, or a commit SHA if running from source
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: e.g. 3.11.9
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: Paste any relevant terminal output, stack traces, or logs. This will be rendered as code automatically.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This report is about the open-source `mozaiks` repository, not a privately hosted product built on top of it.
+          required: true

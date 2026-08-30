@@ -15,7 +15,7 @@ Built-in tighter limits on high-cost endpoints (can be overridden via RATE_LIMIT
   /api/chats/meta → 120/minute (cheap session metadata checks)
   /api/chats   → 10/minute   (workflow session starts, each spawns an LLM context)
   /chat        → 30/minute   (user message sends, primary LLM cost driver)
-  /api/workflows → 20/minute (programmatic workflow triggers)
+  /api/workflows → 120/minute (read-only workflow catalog listing; fetched on every page load and HMR reload)
   /ws/         → 10/minute   (WebSocket upgrade requests — each starts a new workflow context)
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ _DEFAULT_PATH_LIMITS: dict[str, int] = {
     "/api/chats/meta": 120,
     "/api/chats": 10,
     "/chat": 30,
-    "/api/workflows": 20,
+    "/api/workflows": 120,  # read-only catalog listing; fetched on page load and HMR reloads
     "/ws/": 10,           # WebSocket upgrades — each opens a new workflow context
 }
 
@@ -76,7 +76,7 @@ def _excluded_paths() -> set[str]:
         for path in os.getenv(
             "RATE_LIMIT_EXCLUDED_PATHS",
             (
-                "/api/health,/api/health/live,/api/health/ready,"
+                "/api/health,/api/health/live,/api/health/ready,/api/health/readiness,"
                 "/api/shell-config,/api/theme-config,/api/me,/api/me/preferences"
             ),
         ).split(",")
@@ -104,7 +104,15 @@ def _select_path_limit(path: str, parsed_limits: dict[str, Any], global_limit: A
 
 
 def _build_storage():
-    """Return Redis storage when REDIS_URL is configured, otherwise in-memory."""
+    """Return Redis storage when REDIS_URL is configured, otherwise in-memory.
+
+    RedisStorage uses a lazy connection internally; the constructor does not
+    attempt to connect.  We call ``store.check()`` (a synchronous ping) to
+    verify the server is reachable before handing the storage to the limiter.
+    If the ping fails we fall back to per-worker in-memory storage so that a
+    misconfigured or temporarily unavailable Redis does not make the whole rate
+    limiter raise on every request.
+    """
     from limits.storage import MemoryStorage
 
     redis_url = os.getenv("REDIS_URL", "").strip()
@@ -113,6 +121,8 @@ def _build_storage():
             from limits.storage import RedisStorage
 
             store = RedisStorage(redis_url)
+            if not store.check():
+                raise ConnectionError("Redis ping returned False — server unreachable")
             # Mask credentials in the log.
             safe_url = redis_url.split("@")[-1] if "@" in redis_url else redis_url
             logger.info("Rate limiter: using Redis storage (%s)", safe_url)
@@ -192,10 +202,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
 
         # Namespace (client_key, matched_prefix) keeps per-path buckets independent.
-        allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
-        stats = self._limiter.get_window_stats(active_limit, client_key, matched_prefix)
-        remaining = max(0, stats.remaining)
-        reset_in = max(0, int(stats.reset_time - time.time()))
+        # Fail open: if the backing storage is transiently unavailable (e.g. Redis
+        # connection refused) allow the request through rather than returning 500.
+        try:
+            allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
+            stats = self._limiter.get_window_stats(active_limit, client_key, matched_prefix)
+            remaining = max(0, stats.remaining)
+            reset_in = max(0, int(stats.reset_time - time.time()))
+        except Exception as exc:
+            logger.warning(
+                "Rate limiter: storage error — allowing request through: %s", exc
+            )
+            return await call_next(request)  # type: ignore[no-any-return]
 
         if not allowed:
             logger.warning(
@@ -267,7 +285,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self._global_limit,
         )
 
-        allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
+        try:
+            allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
+        except Exception as exc:
+            logger.warning(
+                "Rate limiter: storage error (websocket) — allowing through: %s", exc
+            )
+            await super().__call__(scope, receive, send)
+            return
 
         if not allowed:
             logger.warning(

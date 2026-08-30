@@ -253,7 +253,7 @@ def test_subscription_contract_designer_is_registered_before_generators() -> Non
     assert "SubscriptionContractDesigner" in workflow_ids
 
     graph = registry["artifact_dependency_graph"]
-    assert graph["subscription_contract"] == ["concept", "build_plan", "design_docs"]
+    assert graph["subscription_contract"] == ["concept", "design_docs"]
     assert "subscription_contract" in graph["workflow_bundle"]
     assert "subscription_contract" in graph["app_bundle"]
 
@@ -267,6 +267,23 @@ def test_subscription_contract_designer_is_registered_before_generators() -> Non
     assert ordered.index("SubscriptionContractDesigner") < ordered.index("AgentGenerator")
     assert ordered.index("SubscriptionContractDesigner") < ordered.index("AppGenerator")
     assert "subscription_contract" in build["affected_declarative_families"]
+
+
+def test_subscription_contract_fallback_queries_use_artifact_version_fields() -> None:
+    for workflow_name in ("AgentGenerator", "AppGenerator"):
+        context = yaml.safe_load(
+            (WORKFLOWS_ROOT / workflow_name / "context_variables.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        query = context["definitions"]["subscription_contract_artifact"]["source"][
+            "query_template"
+        ]
+
+        assert query["build_family"] == "subscription_contract"
+        assert query["build_key"] == "subscription_contract"
+        assert "artifact_kind" not in query
+        assert "artifact_key" not in query
 
 
 def test_subscription_contract_designer_pack_is_host_agnostic() -> None:
@@ -461,10 +478,16 @@ def test_app_build_plan_accepts_subscription_config_task() -> None:
             "entities": [],
             "roles": ["user"],
             "auth_strategy": "basic",
-            "service_scope": [],
-            "frontend_scope": [],
-            "capability_packs": [],
-            "external_integrations": [],
+                "service_scope": [],
+                "frontend_scope": [],
+                "monetization_provider": "entitlement_dispatch",
+                "capability_packs": [
+                    {
+                        "capability_pack_id": "entitlement_dispatch",
+                        "capability_source": "generated_module",
+                    }
+                ],
+                "external_integrations": [],
             "agent_backend_required": False,
             "build_tasks": [
                 {
@@ -559,7 +582,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     assert persisted["artifact_kind"] == "subscription_contract"
     assert persisted["artifact_key"] == "subscription_contract"
-    assert persisted["input_artifact_kinds"] == ("concept", "build_plan", "design_docs")
+    assert persisted["input_artifact_kinds"] == ("concept", "design_docs")
 
 
 @pytest.mark.asyncio
@@ -599,6 +622,100 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
     assert context["subscription_contract"] is None
     assert context["subscription_contract_files"] == []
     assert context["subscription_contract_review_status"] == "changes_requested"
+
+
+def test_transition_graph_routes_changes_requested_back_to_designer() -> None:
+    """The HITL revision loop must exist: changes_requested re-enters the designer."""
+    graph = _read_yaml(SUBSCRIPTION_WORKFLOW / "transition_graph.yaml")
+    rules = graph["transition_rules"]
+
+    loop_back = next(
+        (
+            rule
+            for rule in rules
+            if rule["source_agent"] == "ContractDesignerAgent"
+            and rule["target_agent"] == "ContractDesignerAgent"
+        ),
+        None,
+    )
+    assert loop_back is not None, (
+        "SubscriptionContractDesigner must loop back to the designer on "
+        "changes_requested instead of terminating without an approved contract"
+    )
+    assert loop_back["transition_type"] == "condition"
+    assert loop_back["condition_type"] == "context_expression"
+    assert "changes_requested" in loop_back["context_expression"]
+    assert "subscription_contract_review_status" in loop_back["context_expression"]
+
+    terminate = [
+        rule
+        for rule in rules
+        if rule["source_agent"] == "ContractDesignerAgent" and rule["target_agent"] == "terminate"
+    ]
+    assert terminate, "designer must still terminate once review is not requesting changes"
+
+    # The declared rules must compile into a valid AG2 TransitionGraph.
+    from mozaiksai.core.workflow.execution.network_graph import (
+        compile_transition_rules_to_graph,
+    )
+
+    compiled = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name="ContractDesignerAgent",
+        agent_id_by_name={"ContractDesignerAgent": "contract_designer"},
+    )
+    assert compiled is not None
+
+
+def _generator_agent_stub(name: str, context: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name,
+        context_variables=SimpleNamespace(data=context),
+        system_message="base",
+    )
+
+
+def test_inject_subscription_contract_context_raises_on_unapproved_changes_requested() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    agent = _generator_agent_stub(
+        "AppPlanAgent",
+        {
+            "subscription_contract": None,
+            "subscription_contract_review_status": "changes_requested",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="requested changes"):
+        inject_subscription_contract_context(agent, [])
+
+
+def test_inject_subscription_contract_context_noop_without_contract_or_rejection() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    agent = _generator_agent_stub("AppPlanAgent", {})
+    inject_subscription_contract_context(agent, [])
+    assert agent.system_message == "base"
+
+
+def test_inject_subscription_contract_context_ignores_rejection_for_untargeted_agents() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    agent = _generator_agent_stub(
+        "SomeOtherAgent",
+        {
+            "subscription_contract": None,
+            "subscription_contract_review_status": "changes_requested",
+        },
+    )
+    inject_subscription_contract_context(agent, [])
+    assert agent.system_message == "base"
 
 
 def test_subscription_contract_normalizer_rejects_hosted_product_terms() -> None:

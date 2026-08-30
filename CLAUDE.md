@@ -18,6 +18,8 @@ This repo uses layered FastAPI hosts as the canonical OSS server composition:
 
 **CLI and Studio are parallel interfaces**, not a superset chain. CLI owns developer tooling (filesystem, scaffolding, process management). Studio owns the management interface (workspace status, build lifecycle, artifacts, run history, config). Do not conflate them.
 
+Profile stays person-scoped. Studio / Workspace Shell is the org/workspace home base. App shells remain separate and brandable per app; do not collapse org management into `/me`.
+
 **`mozaiks gen` is a developer convenience**, not the canonical build lifecycle. Do not expand CLI commands to duplicate Studio surfaces (artifact review, diff, run history, promotion, build state). Those belong in Studio. The CLI hands off to Studio — it does not grow a parallel project-management surface.
 
 The current repo layout is transitional. The canonical target architecture is
@@ -78,6 +80,18 @@ For nontrivial OSS changes:
   unclear
 - include the appropriate impact section from `.claude/rules/testing.md` in the
   final report and always list tests run
+
+## ADR Authoring Context
+
+For an ADR that changes or extends app generation, semantic authority,
+compilation/materialization, or refinement, review
+[issue #411](https://github.com/BlocUnited-LLC/mozaiks/issues/411) and state
+explicitly whether the ADR adopts, modifies, rejects, or defers that direction.
+
+Issue #411 is a design prompt, not architecture authority. Current source and
+Accepted ADRs remain authoritative. Any ADR using the issue must verify its
+claims against the repository and must not make a typed decision ledger a
+second authority for application meaning.
 
 ## Pre-Production Cleanup Policy
 
@@ -216,6 +230,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 |---------------------|--------------|
 | Shared/factory AI workflow logic | `factory_app/workflows/{name}/` |
 | Factory workflow-owned prompt catalogs | `factory_app/build_context/{context_name}/context.yaml` `assets[]` with `kind: catalog` |
+| Shared factory workflow helpers | `factory_app/workflows/_shared/` for cross-workflow Python helpers and reusable workflow UI components |
 | Factory build-context path helper | `factory_app/workflows/_shared/hook_utils.py` |
 | OSS reusable build pack | `factory_app/build_context/{context_name}/context.yaml` with `pack:` and explicit `assets[]` |
 | App/workspace build context | `build_context/{context_name}/` beside the active `app/` root |
@@ -243,6 +258,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | First-party admin/Studio pages | `factory_app/app/admin/pages/` |
 | Admin portal registry | `factory_app/app/admin/admin_registry.yaml` |
 | Shared factory workflows | `factory_app/workflows/` |
+| Factory bundle-quality scorers and regression eval | `factory_app/eval/` |
 | Generated app/workflow artifacts | `generated/` |
 
 ## App Backend Integration

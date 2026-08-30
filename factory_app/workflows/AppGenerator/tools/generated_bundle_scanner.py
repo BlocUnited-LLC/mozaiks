@@ -26,7 +26,28 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from pydantic import ValidationError as PydanticValidationError
 
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
+    resolve_declared_pack_output_paths,
+)
+from mozaiksai.core.runtime.app.layout_registry import (
+    ExtensionSlot,
+    LayoutExtension,
+    PathScope,
+    build_app_layout_registry,
+)
+from mozaiksai.core.runtime.app.layout_validation import (
+    filter_layout_scannable_file_map,
+    layout_extensions_from_selected_packs,
+    layout_validation_errors,
+    validate_file_map_layout,
+)
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    validate_page_schema,
+)
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
     APP_DATA_CONTRACT_PATH,
@@ -34,6 +55,7 @@ from mozaiksai.core.runtime.app.paths import (
     disallowed_legacy_app_paths,
     noncanonical_app_config_paths,
     noncanonical_app_root_paths,
+    unsafe_app_paths,
 )
 
 # ---------------------------------------------------------------------------
@@ -49,6 +71,15 @@ _RAW_PAYMENT_PROVIDER_IMPORT_RE = re.compile(
     r"from\s+(stripe|paddle|paypal|braintree|square)\s+import\b)",
     re.IGNORECASE,
 )
+# Cloud provider SDK imports are forbidden in generated app bundles.
+# Generated apps must route all cloud operations through the bounded MozaiksCloud
+# sub-clients; they must not import Azure, Cloudflare, or GitHub SDKs directly.
+_RAW_CLOUD_PROVIDER_IMPORT_RE = re.compile(
+    r"(?m)^\s*(?:import\s+(azure(?:\.[a-zA-Z0-9_.]+)?|cloudflare)\b|"
+    r"from\s+(azure(?:\.[a-zA-Z0-9_.]+)?|cloudflare)\s+import\b)",
+    re.IGNORECASE,
+)
+
 _MANAGED_SETUP_RAW_PROVIDER_ENV_RE = re.compile(
     r"\b(?:STRIPE|PADDLE|PAYPAL|BRAINTREE|SQUARE)_[A-Z0-9_]*"
     r"(?:SECRET|KEY|TOKEN|PRIVATE|WEBHOOK|CLIENT_ID|PUBLISHABLE)[A-Z0-9_]*\b"
@@ -91,6 +122,9 @@ _SCANNABLE_SUFFIXES = (
     ".py", ".js", ".jsx", ".ts", ".tsx",
     ".yaml", ".yml", ".env.example", ".env.staging.example",
     ".env.production.example", ".env",
+    # Pack-declared workspace scripts ship to customers and must never carry
+    # raw credentials or provider leaks.
+    ".ps1", ".sh",
 )
 
 _RAW_SECRET_FIELD_KEYS = frozenset(
@@ -124,6 +158,47 @@ _AUTH_LOGIN_METHOD_KINDS = frozenset(
         "enterprise_sso",
     }
 )
+
+# Canonical action api_surface values — controls HTTP exposure posture.
+# Must match the typed literal in structured_outputs.yaml ModuleAction.api_surface
+# and the runtime ActionDef.api_surface field.
+_CANONICAL_API_SURFACE_VALUES = frozenset({
+    "public",
+    "public_readonly",
+    "internal",
+    "admin_internal",
+})
+
+# Canonical reaction target kinds — must match file_contracts.yaml and the
+# mozaiks.reactions.v1 schema.  service_adapter is intentionally present here
+# and in the runtime loader but absent from structured_outputs.yaml: it is a
+# pack-only extension (capability packs can generate service_adapter reactions
+# via templates, but the AppGenerator LLM should not produce them directly).
+_CANONICAL_REACTION_TARGET_KINDS = frozenset({
+    "handler",
+    "capability",
+    "notification",
+    "service_adapter",
+})
+
+# Platform-provided event namespaces — events in these namespaces are NOT
+# declared in the bundle's events.yaml and must be skipped during closure checks.
+_PLATFORM_EVENT_NAMESPACES = ("hosted.", "platform.", "mozaiks.")
+
+# Shell-built-in component names registered in chat-ui/src/registry/coreComponents.js.
+# These components are always available in the Mozaiks shell without a custom JSX file.
+# Route manifest entries referencing these names do NOT require a ui/pages/custom/*.jsx file.
+_SHELL_CORE_COMPONENTS = frozenset({
+    "ChatPage",
+    "SchemaPage",
+    "LauncherScreen",
+    "ConfirmScreen",
+    "ProfilePage",
+    "WorkflowCompletion",
+    "TokenStatusTab",
+    "AdminMyUsagePanel",
+    "AdminAppUsagePanel",
+})
 
 
 def _is_scannable(path: str) -> bool:
@@ -265,9 +340,23 @@ def _scan_data_contract_module_alignment(files_map: dict[str, str]) -> list[str]
     return errors
 
 
-def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
+def _scan_canonical_app_paths(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> list[str]:
     errors: list[str] = []
+    unsafe_paths = unsafe_app_paths(files_map)
+    if unsafe_paths:
+        errors.append(
+            "Generated app bundle contains absolute or traversal paths outside the app root: "
+            f"{unsafe_paths}. Every generated path must be app-root-relative."
+        )
     normalized_paths = sorted(_normalized_files_map(files_map))
+    try:
+        declared_pack_paths = resolve_declared_pack_output_paths(capability_packs)
+    except ManagedCapabilityTemplateError as exc:
+        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
     legacy_paths = disallowed_legacy_app_paths(normalized_paths)
     if legacy_paths:
         errors.append(
@@ -276,7 +365,9 @@ def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
             f"and {APP_SECURITY_SECRETS_PATH}."
         )
 
-    invalid_config_paths = noncanonical_app_config_paths(normalized_paths)
+    invalid_config_paths = sorted(
+        set(noncanonical_app_config_paths(normalized_paths)) - declared_pack_paths
+    )
     if invalid_config_paths:
         errors.append(
             "Generated app bundle contains noncanonical app config files: "
@@ -287,7 +378,9 @@ def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
             "not belong under app/config/."
         )
 
-    invalid_root_paths = noncanonical_app_root_paths(normalized_paths)
+    invalid_root_paths = sorted(
+        set(noncanonical_app_root_paths(normalized_paths)) - declared_pack_paths
+    )
     if invalid_root_paths:
         errors.append(
             "Generated app bundle contains files outside the canonical app planes: "
@@ -740,6 +833,7 @@ def _scan_mozaikspay_saas_contract(
         "modules/billing_portal/backend/schemas.py",
         "ui/pages/billing.yaml",
         "ui/pages/usage.yaml",
+        "ui/pages/pricing.yaml",
     }
     missing = sorted(path for path in required_paths if path not in normalized_files)
     if missing:
@@ -790,13 +884,33 @@ def _scan_mozaikspay_saas_contract(
     module_content = normalized_files.get("modules/billing_portal/module.yaml", "")
     if module_content:
         actions = _module_actions_from_yaml("modules/billing_portal/module.yaml", module_content)
-        required_actions = {"get_subscription_status", "get_usage_status", "open_billing_portal"}
+        required_actions = {
+            "get_subscription_status",
+            "get_usage_status",
+            "list_plans",
+            "open_billing_portal",
+        }
         missing_actions = sorted(required_actions - actions)
         if missing_actions:
             errors.append(
                 "modules/billing_portal/module.yaml must expose app-owned SaaS billing facade "
                 f"actions: {missing_actions}."
             )
+        parsed_module, module_parse_error = _load_yaml_mapping_from_file(
+            {"modules/billing_portal/module.yaml": module_content},
+            "modules/billing_portal/module.yaml",
+        )
+        if not module_parse_error and isinstance(parsed_module, dict):
+            for action in parsed_module.get("actions") or []:
+                if not isinstance(action, dict) or action.get("id") != "list_plans":
+                    continue
+                surface = str(action.get("api_surface") or "").strip()
+                if surface not in {"public", "public_readonly"} or action.get("permissions"):
+                    errors.append(
+                        "modules/billing_portal/module.yaml: 'list_plans' is the canonical "
+                        "anonymous data source for the public /pricing page and must declare "
+                        "api_surface public_readonly with no permissions."
+                    )
         declared_module_id = _declared_module_id_from_yaml(
             "modules/billing_portal/module.yaml",
             module_content,
@@ -845,6 +959,9 @@ def _scan_mozaikspay_saas_contract(
         "ui/pages/usage.yaml": {
             "/api/modules/billing_portal/get_usage_status",
         },
+        "ui/pages/pricing.yaml": {
+            "/api/modules/billing_portal/list_plans",
+        },
     }
     for page_path, required_endpoints in page_requirements.items():
         content = normalized_files.get(page_path, "")
@@ -873,6 +990,112 @@ def _scan_mozaikspay_saas_contract(
     return errors
 
 
+def _scan_mozaiks_cloud_connector_contract(
+    files_map: dict[str, Any],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Validate Mozaiks Cloud connector contract when the pack is selected.
+
+    When mozaiks_cloud is selected as managed_capability:
+    - All four client files must be present.
+    - The transport client must resolve credentials from ConnectorStore/env.
+    - Both facade module YAMLs must declare expected actions.
+    - No Azure SDK or Cloudflare SDK imports may appear anywhere in the bundle.
+    When the pack is NOT selected, this check is a no-op — absence is proven
+    by the fact that the templates were never materialized.
+    """
+    pack = _selected_pack_descriptor(capability_packs, "mozaiks_cloud")
+    if not pack or str(pack.get("capability_source") or "").strip() != "managed_capability":
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    errors: list[str] = []
+
+    required_paths = {
+        "services/integrations/mozaiks_cloud_client.py",
+        "services/integrations/mozaiks_cloud_deployment_client.py",
+        "services/integrations/mozaiks_cloud_domain_client.py",
+        "modules/cloud_deployment/module.yaml",
+        "modules/cloud_domain/module.yaml",
+    }
+    missing = sorted(path for path in required_paths if path not in normalized_files)
+    if missing:
+        errors.append(
+            "Selected mozaiks_cloud connector capability requires deterministic generated app "
+            f"files: {missing}."
+        )
+
+    client_content = normalized_files.get("services/integrations/mozaiks_cloud_client.py", "")
+    if client_content:
+        required_markers = {
+            "_CONNECTOR_SERVICE": "_CONNECTOR_SERVICE",
+            "mozaiks_cloud": "mozaiks_cloud",
+            "ConnectorStore": "ConnectorStore",
+            "get_connector_vault_backend": "get_connector_vault_backend",
+            "MOZAIKS_CLOUD_API_BASE": "MOZAIKS_CLOUD_API_BASE",
+            "MOZAIKS_CLOUD_API_KEY": "MOZAIKS_CLOUD_API_KEY",
+        }
+        missing_markers = [
+            label for label, marker in required_markers.items() if marker not in client_content
+        ]
+        if missing_markers:
+            errors.append(
+                "services/integrations/mozaiks_cloud_client.py must resolve the app-scoped "
+                f"mozaiks_cloud connector and env fallback; missing markers: {missing_markers}."
+            )
+
+    deployment_module = normalized_files.get("modules/cloud_deployment/module.yaml", "")
+    if deployment_module:
+        actions = _module_actions_from_yaml("modules/cloud_deployment/module.yaml", deployment_module)
+        required_actions = {
+            "submit_deployment",
+            "get_deployment_status",
+            "get_environment_endpoints",
+            "request_rollback",
+        }
+        missing_actions = sorted(required_actions - actions)
+        if missing_actions:
+            errors.append(
+                "modules/cloud_deployment/module.yaml must expose cloud_deployment facade "
+                f"actions: {missing_actions}."
+            )
+        declared_id = _declared_module_id_from_yaml(
+            "modules/cloud_deployment/module.yaml", deployment_module
+        )
+        if declared_id != "cloud_deployment":
+            errors.append(
+                "modules/cloud_deployment/module.yaml must declare module.id 'cloud_deployment'."
+            )
+
+    domain_module = normalized_files.get("modules/cloud_domain/module.yaml", "")
+    if domain_module:
+        actions = _module_actions_from_yaml("modules/cloud_domain/module.yaml", domain_module)
+        required_actions = {
+            "connect_domain",
+            "get_domain_verification",
+            "get_dns_instructions",
+            "request_domain_activation",
+            "get_domain_status",
+            "disconnect_domain",
+        }
+        missing_actions = sorted(required_actions - actions)
+        if missing_actions:
+            errors.append(
+                "modules/cloud_domain/module.yaml must expose cloud_domain facade "
+                f"actions: {missing_actions}."
+            )
+        declared_id = _declared_module_id_from_yaml(
+            "modules/cloud_domain/module.yaml", domain_module
+        )
+        if declared_id != "cloud_domain":
+            errors.append(
+                "modules/cloud_domain/module.yaml must declare module.id 'cloud_domain'."
+            )
+
+    return errors
+
+
 def _entitlement_gates_from_module_yaml(path: str, content: str) -> set[str]:
     parsed, error = _load_yaml_mapping_from_file({path: content}, path)
     if error or not isinstance(parsed, dict):
@@ -887,19 +1110,51 @@ def _entitlement_gates_from_module_yaml(path: str, content: str) -> set[str]:
     return gates
 
 
-def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
-    try:
-        config = yaml.safe_load(content) or {}
-    except Exception:
-        return set()
-    capability_ids: set[str] = set()
-    for plan in (config.get("plans") or []):
-        if not isinstance(plan, dict):
+def _entitlement_gate_map_from_module_yaml(path: str, content: str) -> dict[str, str]:
+    """Return {action_id: entitlement_gate} for every gated action in module.yaml."""
+    parsed, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error or not isinstance(parsed, dict):
+        return {}
+    result: dict[str, str] = {}
+    for action in (parsed.get("actions") or []):
+        if not isinstance(action, dict):
             continue
-        for cap in (plan.get("capabilities") or []):
-            if isinstance(cap, str) and cap.strip():
-                capability_ids.add(cap.strip())
+        gate = str(action.get("entitlement_gate") or "").strip()
+        action_id = str(action.get("id") or "").strip()
+        if gate and action_id:
+            result[action_id] = gate
+    return result
+
+
+def _subscriptions_config_from_yaml(path: str, content: str) -> tuple[Any | None, str | None]:
+    raw, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error:
+        return None, error
+    try:
+        from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+
+        return SubscriptionsConfig.model_validate(raw), None
+    except Exception as exc:
+        return None, f"{path}: invalid subscriptions contract: {exc}"
+
+
+def _capability_ids_from_subscriptions_config(config: Any) -> set[str]:
+    """Extract capability_ids using the canonical subscriptions loader output."""
+    capability_ids: set[str] = set()
+    for plan in (getattr(config, "plans", None) or []):
+        capability_ids.update(str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip())
+    for product in (getattr(config, "products", None) or []):
+        for plan in (getattr(product, "plans", None) or []):
+            capability_ids.update(str(cap).strip() for cap in (plan.capabilities or []) if str(cap).strip())
     return capability_ids
+
+
+def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
+    """Extract plan-granted capability_ids from canonical subscriptions parsing."""
+    config, error = _subscriptions_config_from_yaml("config/subscriptions.yaml", content)
+    if error or config is None:
+        return set()
+    return _capability_ids_from_subscriptions_config(config)
 
 
 def _scan_self_hosted_entitlement_dispatch_contract(
@@ -968,32 +1223,98 @@ def _scan_self_hosted_entitlement_dispatch_contract(
 
 
 def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> list[str]:
-    """Validate that all entitlement_gate values in module.yaml files reference
-    capability_ids that appear in at least one plan in config/subscriptions.yaml.
+    """Validate entitlement_gate ↔ subscriptions.yaml compile-time closure.
+
+    For every module action that declares an entitlement_gate capability_id,
+    that capability_id must appear in at least one plan's capabilities list in
+    config/subscriptions.yaml. An unresolvable gate causes permanent runtime
+    denial for all callers regardless of their subscription tier.
+
+    Skips apps without config/subscriptions.yaml (ungated apps, NoOp adapter).
+    Apps with config/subscriptions.yaml use ConfiguredEntitlementAdapter at
+    platform startup; assignment_store controls persisted assignment lookup, not
+    adapter selection.
+
+    Diagnostics include:
+    - module path and action id of the gated action
+    - the unresolvable capability_id
+    - typo near-matches found in the declared plan capabilities
+    - confirmation location (config/subscriptions.yaml plans[].capabilities[])
+    - whether no plan grants any capabilities at all
+
+    Errors are returned in deterministic sorted order.
     """
+    import difflib
+
     normalized_files = _normalized_files_map(files_map)
     subs_content = normalized_files.get("config/subscriptions.yaml")
     if not subs_content:
+        # No subscriptions.yaml -> ungated app, so ModuleExecutor uses NoOp.
         return []
 
-    plan_capabilities = _capability_ids_from_subscriptions_yaml(subs_content)
-    if not plan_capabilities:
+    subscriptions_config, subscriptions_error = _subscriptions_config_from_yaml(
+        "config/subscriptions.yaml",
+        subs_content,
+    )
+    if subscriptions_error:
+        return [subscriptions_error]
+    plan_capabilities = _capability_ids_from_subscriptions_config(subscriptions_config)
+
+    # Collect (module_path, action_id, gate) for every gated action.
+    gate_contexts: list[tuple[str, str, str]] = []
+    for path, content in sorted(normalized_files.items()):
+        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+            continue
+        gate_map = _entitlement_gate_map_from_module_yaml(path, content)
+        for action_id, gate in sorted(gate_map.items()):
+            gate_contexts.append((path, action_id, gate))
+
+    if not gate_contexts:
+        module_paths = sorted(
+            path
+            for path in normalized_files
+            if path.startswith("modules/") and path.endswith("/module.yaml")
+        )
+        if plan_capabilities and module_paths:
+            # The bundle sells plan capabilities but gates nothing, so every
+            # declared capability is unenforceable at dispatch time and the
+            # subscription contract is decorative.
+            return [
+                "config/subscriptions.yaml grants plan capabilities "
+                f"{sorted(plan_capabilities)} but no module action declares an "
+                "entitlement_gate. A SaaS bundle that sells capabilities must "
+                "enforce at least one of them: set actions[].entitlement_gate "
+                "to a granted capability_id on each plan-gated action in "
+                f"{module_paths}."
+            ]
         return []
 
     errors: list[str] = []
-    for path, content in normalized_files.items():
-        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+    for module_path, action_id, gate in gate_contexts:
+        if gate in plan_capabilities:
             continue
-        gates = _entitlement_gates_from_module_yaml(path, content)
-        unknown = sorted(gate for gate in gates if gate not in plan_capabilities)
-        if unknown:
-            errors.append(
-                f"{path}: entitlement_gate values {unknown} do not appear in any "
-                "plan's capabilities in config/subscriptions.yaml. Each gated capability "
-                "must be listed under at least one plan."
-            )
 
-    return errors
+        msg = (
+            f"{module_path}: action '{action_id}' declares "
+            f"entitlement_gate '{gate}' which is not granted by any plan in "
+            f"config/subscriptions.yaml. "
+            f"Actions with an unresolvable gate permanently deny all callers "
+            f"regardless of subscription tier. "
+            f"Add '{gate}' to at least one plan's capabilities[], or correct "
+            f"the capability_id. "
+            f"Expected location: config/subscriptions.yaml → "
+            f"plans[].capabilities[] (v1) or "
+            f"products[].plans[].capabilities[] (v2)."
+        )
+        if plan_capabilities:
+            close = difflib.get_close_matches(gate, sorted(plan_capabilities), n=3, cutoff=0.7)
+            if close:
+                msg += f" Near-matches in declared plan capabilities: {close}."
+        else:
+            msg += " No plan currently grants any capabilities."
+        errors.append(msg)
+
+    return sorted(errors)
 
 
 def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
@@ -1295,6 +1616,537 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _scan_route_manifest_consistency(files_map: dict[str, str]) -> list[str]:
+    """Validate ui/route_manifest.json structure when present.
+
+    Checks that each page entry has a path starting with '/' and a non-empty
+    component name. These are the minimum fields required for the runtime to
+    resolve a page route.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+    manifest_raw = normalized.get("ui/route_manifest.json")
+    if not manifest_raw:
+        return errors
+
+    try:
+        manifest = json.loads(manifest_raw)
+    except Exception:
+        errors.append("ui/route_manifest.json: invalid JSON — cannot parse route manifest")
+        return errors
+
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    if not isinstance(pages, list):
+        errors.append("ui/route_manifest.json: 'pages' must be a list")
+        return errors
+
+    for i, page in enumerate(pages):
+        if not isinstance(page, dict):
+            errors.append(f"ui/route_manifest.json: pages[{i}] must be a dict")
+            continue
+        path = page.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] 'path' must be a string starting with '/'"
+            )
+        component = page.get("component")
+        if not isinstance(component, str) or not component.strip():
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] 'component' must be a non-empty string"
+            )
+
+    return errors
+
+
+def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
+    """Validate declarative page YAML with the runtime page-schema contract."""
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+
+    for path, content in normalized.items():
+        if not path.startswith("ui/pages/"):
+            continue
+        if not path.endswith(".yaml"):
+            continue
+        if "/custom/" in path:
+            # Custom React escape-hatch pages — skip schema validation.
+            continue
+
+        try:
+            schema = yaml.safe_load(content)
+        except Exception:
+            errors.append(f"{path}: invalid YAML in schema-native page")
+            continue
+
+        if not isinstance(schema, dict):
+            errors.append(f"{path}: page schema must be a YAML mapping")
+            continue
+
+        try:
+            validate_page_schema(schema)
+        except PageSchemaValidationError as exc:
+            errors.extend(
+                f"{path}: {diagnostic.location}: {diagnostic.code}"
+                for diagnostic in exc.diagnostics
+            )
+
+    return errors
+
+
+_PACK_PROVENANCE_PATH = ".mozaiks/pack_provenance.json"
+_PACK_PROVENANCE_SCHEMA_VERSION = "mozaiks.pack_provenance.v1"
+
+_PROVENANCE_REQUIRED_KEYS = frozenset({"schema_version", "framework_version", "generated_at", "packs"})
+_PROVENANCE_PACK_REQUIRED_KEYS = frozenset({
+    "pack_id",
+    "version",
+    "source",
+    "digest",
+    "materialized_owned_files",
+})
+
+
+def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
+    """Validate .mozaiks/pack_provenance.json schema when present.
+
+    The file is optional — emitted only when packs were selected.  When present
+    it must conform to the ``mozaiks.pack_provenance.v1`` schema so future tooling
+    can rely on the structure for upgrade/diff decisions.
+    """
+    raw = files_map.get(_PACK_PROVENANCE_PATH)
+    if raw is None:
+        return []
+
+    errors: list[str] = []
+    try:
+        manifest = json.loads(raw)
+    except Exception as exc:
+        return [f"{_PACK_PROVENANCE_PATH}: invalid JSON — {exc}"]
+
+    if not isinstance(manifest, dict):
+        return [f"{_PACK_PROVENANCE_PATH}: pack_provenance.json must be a JSON object"]
+
+    # Check required top-level keys
+    missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
+    for key in sorted(missing_keys):
+        errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
+    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS)
+    for key in unknown_keys:
+        errors.append(f"{_PACK_PROVENANCE_PATH}: unsupported field '{key}'")
+
+    # Check schema_version value
+    sv = manifest.get("schema_version")
+    if sv and sv != _PACK_PROVENANCE_SCHEMA_VERSION:
+        errors.append(
+            f"{_PACK_PROVENANCE_PATH}: schema_version must be "
+            f"'{_PACK_PROVENANCE_SCHEMA_VERSION}', got '{sv}'"
+        )
+
+    # Validate packs entries
+    packs = manifest.get("packs")
+    if packs is not None:
+        if not isinstance(packs, list):
+            errors.append(f"{_PACK_PROVENANCE_PATH}: 'packs' must be a JSON array")
+        else:
+            for i, entry in enumerate(packs):
+                if not isinstance(entry, dict):
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] must be a JSON object")
+                    continue
+                missing_pack_keys = _PROVENANCE_PACK_REQUIRED_KEYS - set(entry.keys())
+                for key in sorted(missing_pack_keys):
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] missing required field '{key}'")
+                unknown_pack_keys = sorted(set(entry.keys()) - _PROVENANCE_PACK_REQUIRED_KEYS)
+                for key in unknown_pack_keys:
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] unsupported field '{key}'")
+                digest = str(entry.get("digest") or "")
+                if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                    errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}].digest must be a canonical sha256 digest")
+                files = entry.get("materialized_owned_files")
+                if files is not None and not isinstance(files, list):
+                    errors.append(
+                        f"{_PACK_PROVENANCE_PATH}: packs[{i}].materialized_owned_files must be a JSON array"
+                    )
+
+    return errors
+
+
+def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:
+    """Validate that api_endpoint values in schema-native page sections reference
+    modules and actions declared in the same bundle.
+
+    Only fires when module.yaml files are present — bundles without modules are
+    either page-only bundles or capability-only bundles, both of which may
+    legitimately call external modules.
+
+    Endpoints that do not match /api/modules/{module_id}/{action_id} exactly are
+    already flagged by the ui_quality gate; this check only verifies that
+    well-formed endpoints resolve to declared bundle artifacts.
+    """
+    normalized_files = _normalized_files_map(files_map)
+
+    # Build module_id → set[action_id] from all module.yaml files in the bundle.
+    module_actions: dict[str, set[str]] = {}
+    for path, content in normalized_files.items():
+        if not (path.startswith("modules/") and path.endswith("/module.yaml")):
+            continue
+        parts = PurePosixPath(path).parts
+        if len(parts) != 3:
+            continue
+        module_id = parts[1]
+        actions = _module_actions_from_yaml(path, content)
+        module_actions[module_id] = actions
+
+    if not module_actions:
+        return []  # No modules in bundle — skip reference closure.
+
+    errors: list[str] = []
+    for path, content in sorted(normalized_files.items()):
+        if not path.startswith("ui/pages/") or not path.endswith(".yaml") or "/custom/" in path:
+            continue
+        try:
+            schema = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(schema, dict):
+            continue
+        sections = schema.get("sections")
+        if not isinstance(sections, list):
+            continue
+        for i, section in enumerate(sections):
+            if not isinstance(section, dict):
+                continue
+            for ep in (
+                section.get("api_endpoint"),
+                (section.get("config") or {}).get("api_endpoint"),
+            ):
+                if not isinstance(ep, str):
+                    continue
+                ep = ep.strip()
+                if not ep.startswith("/api/modules/"):
+                    continue
+                ep_parts = ep.split("/")
+                # Expected: ['', 'api', 'modules', module_id, action_id]
+                if len(ep_parts) != 5:
+                    continue
+                ref_module, ref_action = ep_parts[3], ep_parts[4]
+                if not ref_module or not ref_action:
+                    continue
+                if ref_module not in module_actions:
+                    errors.append(
+                        f"{path}: sections[{i}] api_endpoint '{ep}' references "
+                        f"module '{ref_module}' which is not declared in this bundle."
+                    )
+                elif ref_action not in module_actions[ref_module]:
+                    errors.append(
+                        f"{path}: sections[{i}] api_endpoint '{ep}' references "
+                        f"action '{ref_action}' which is not declared in "
+                        f"modules/{ref_module}/module.yaml."
+                    )
+    return errors
+
+
+def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]:
+    """Validate that every component declared in ui/route_manifest.json has a
+    matching custom page file under ui/pages/custom/.
+
+    This catches the common generation failure where route_manifest.json is
+    written correctly but the corresponding JSX file is missing, which produces
+    a runtime 404 for every missing component.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+    manifest_raw = normalized.get("ui/route_manifest.json")
+    if not manifest_raw:
+        return errors
+
+    try:
+        manifest = json.loads(manifest_raw)
+    except Exception:
+        return errors  # Already caught by _scan_route_manifest_consistency.
+
+    pages = manifest.get("pages") if isinstance(manifest, dict) else None
+    if not isinstance(pages, list):
+        return errors
+
+    # Collect custom page file stems that are actually present.
+    custom_page_stems: set[str] = set()
+    for path in normalized:
+        if path.startswith("ui/pages/custom/") and path.endswith(".jsx"):
+            stem = PurePosixPath(path).stem
+            if stem:
+                custom_page_stems.add(stem)
+
+    for i, page in enumerate(pages):
+        if not isinstance(page, dict):
+            continue
+        component = str(page.get("component") or "").strip()
+        if not component:
+            continue
+        # Shell-built-in components are always available — no custom JSX file required.
+        if component in _SHELL_CORE_COMPONENTS:
+            continue
+        if component not in custom_page_stems:
+            route_path = str(page.get("path") or "<unknown>").strip()
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] route '{route_path}' declares "
+                f"component '{component}' but ui/pages/custom/{component}.jsx is missing. "
+                f"The route will 404 at runtime."
+            )
+    return errors
+
+
+def _scan_action_api_surface(files_map: dict[str, str]) -> list[str]:
+    """Validate that action api_surface values in module.yaml use the canonical vocabulary.
+
+    api_surface controls HTTP exposure posture.  Unknown values are silently ignored
+    by the runtime and could produce unintended public exposure.  Only the four
+    declared values are canonical; any other string is a generation error.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+
+    for path, content in normalized.items():
+        if not (path.startswith("modules/") and path.endswith("/module.yaml")):
+            continue
+        parts = PurePosixPath(path).parts
+        if len(parts) != 3:
+            continue
+        module_id = parts[1]
+
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        actions = parsed.get("actions")
+        if not isinstance(actions, list):
+            continue
+
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_id = str(action.get("id") or "").strip()
+            api_surface = action.get("api_surface")
+            if api_surface is None:
+                continue
+            api_surface_str = str(api_surface).strip()
+            if not api_surface_str or api_surface_str == "null":
+                continue
+            if api_surface_str not in _CANONICAL_API_SURFACE_VALUES:
+                errors.append(
+                    f"modules/{module_id}/module.yaml: action '{action_id}' "
+                    f"api_surface '{api_surface_str}' is not a canonical value. "
+                    f"Must be one of: {', '.join(sorted(_CANONICAL_API_SURFACE_VALUES))}."
+                )
+
+    return errors
+
+
+def _scan_event_reaction_closure(files_map: dict[str, str]) -> list[str]:
+    """Validate event/reaction reference closure within a generated bundle.
+
+    Checks:
+    1. Every reaction's event_type resolves to a declared event in the bundle's
+       events.yaml files (platform-namespace events are exempt and always pass).
+    2. Every reaction target.kind is a canonical value.
+    3. Target-kind-specific required fields are present and non-empty.
+
+    Only fires when at least one reactions.yaml is present in the bundle.
+    Platform events (hosted.*, platform.*, mozaiks.*) are not bundle-declared
+    and are always treated as resolvable.
+    """
+    errors: list[str] = []
+    normalized = _normalized_files_map(files_map)
+
+    # Collect all declared event_types from modules/*/contracts/events.yaml.
+    declared_event_types: set[str] = set()
+    for path, content in normalized.items():
+        if not re.match(r"modules/[^/]+/contracts/events\.yaml", path):
+            continue
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        events = parsed.get("events")
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if isinstance(event, dict):
+                event_type = str(event.get("type") or "").strip()
+                if event_type:
+                    declared_event_types.add(event_type)
+
+    # Validate each reaction in modules/*/contracts/reactions.yaml.
+    for path, content in sorted(normalized.items()):
+        if not re.match(r"modules/[^/]+/contracts/reactions\.yaml", path):
+            continue
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        reactions = parsed.get("reactions")
+        if not isinstance(reactions, list):
+            continue
+
+        for i, reaction in enumerate(reactions):
+            if not isinstance(reaction, dict):
+                continue
+            reaction_id = str(reaction.get("id") or f"[{i}]").strip()
+            label = f"{path}: reaction '{reaction_id}'"
+
+            # 1. event_type closure.
+            event_type = str(reaction.get("event_type") or "").strip()
+            if not event_type:
+                errors.append(f"{label} missing required 'event_type'.")
+            elif not any(event_type.startswith(ns) for ns in _PLATFORM_EVENT_NAMESPACES):
+                # Only validate domain events that must be bundle-declared.
+                if declared_event_types and event_type not in declared_event_types:
+                    errors.append(
+                        f"{label} event_type '{event_type}' is not declared in any "
+                        f"modules/*/contracts/events.yaml in this bundle."
+                    )
+
+            # 2. target.kind validation.
+            target = reaction.get("target")
+            if not isinstance(target, dict):
+                errors.append(f"{label} missing required 'target' mapping.")
+                continue
+
+            kind = str(target.get("kind") or "").strip()
+            if not kind:
+                errors.append(f"{label} target missing required 'kind'.")
+            elif kind not in _CANONICAL_REACTION_TARGET_KINDS:
+                errors.append(
+                    f"{label} target.kind '{kind}' is not canonical. "
+                    f"Must be one of: {', '.join(sorted(_CANONICAL_REACTION_TARGET_KINDS))}."
+                )
+            else:
+                # 3. Target-kind-specific required fields.
+                if kind == "handler":
+                    method = str(target.get("handler_method") or "").strip()
+                    if not method:
+                        errors.append(
+                            f"{label} target.kind='handler' requires non-empty 'handler_method'."
+                        )
+                elif kind == "capability":
+                    cap_id = str(target.get("capability_id") or "").strip()
+                    if not cap_id:
+                        errors.append(
+                            f"{label} target.kind='capability' requires non-empty 'capability_id'."
+                        )
+                elif kind == "notification":
+                    notif_id = str(target.get("notification_id") or "").strip()
+                    if not notif_id:
+                        errors.append(
+                            f"{label} target.kind='notification' requires non-empty 'notification_id'."
+                        )
+                elif kind == "service_adapter":
+                    adapter = str(target.get("adapter") or "").strip()
+                    if not adapter:
+                        errors.append(
+                            f"{label} target.kind='service_adapter' requires non-empty 'adapter'."
+                        )
+
+    return errors
+
+
+def _layout_extensions_for_selected_packs(
+    capability_packs: list[dict[str, Any]] | None,
+) -> tuple[LayoutExtension, ...]:
+    extensions = list(layout_extensions_from_selected_packs(capability_packs))
+    claimed_paths: dict[str, str] = {}
+    for pack in capability_packs or []:
+        pack_id = _pack_id_from_descriptor(pack)
+        if not pack_id:
+            continue
+        for path in sorted(resolve_declared_pack_output_paths([pack])):
+            prior_owner = claimed_paths.get(path)
+            if prior_owner is not None and prior_owner != pack_id:
+                raise ManagedCapabilityTemplateError(
+                    f"Selected packs '{prior_owner}' and '{pack_id}' both declare "
+                    f"output path {path!r}; duplicate pack output claims fail closed"
+                )
+            claimed_paths[path] = pack_id
+            if _path_matches_core_layout(path):
+                continue
+            try:
+                extensions.append(
+                    LayoutExtension(
+                        slot=ExtensionSlot.CAPABILITY_PACK_OUTPUT,
+                        pack_id=pack_id,
+                        path=path,
+                    )
+                )
+            except (ValueError, PydanticValidationError) as exc:
+                raise ManagedCapabilityTemplateError(
+                    f"Pack '{pack_id}' declares output {path!r} outside the "
+                    f"permitted pack output lanes: {exc}"
+                ) from exc
+    return tuple(sorted(extensions, key=lambda item: (item.slot.value, item.pack_id, item.path or "")))
+
+
+def _path_matches_core_layout(path: str) -> bool:
+    """True when the core registry (no extensions) already classifies the path."""
+    registry = build_app_layout_registry(())
+    scopes = (
+        PathScope.APP_BUNDLE_ROOT,
+        PathScope.DEPLOYMENT_DERIVED,
+        PathScope.WORKSPACE_ROOT,
+        PathScope.GENERATED_STAGING,
+    )
+    for scope in scopes:
+        try:
+            registry.match_path(path, scope)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _scan_declared_pack_repo_support_outputs(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    try:
+        declared_paths = (
+            resolve_declared_pack_output_paths(capability_packs)
+            if capability_packs
+            else frozenset()
+        )
+    except ManagedCapabilityTemplateError as exc:
+        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
+
+    repo_support = (
+        ".claude/",
+        ".github/",
+        "docs/",
+        "scripts/",
+        "tests/",
+    )
+    invalid = sorted(
+        path
+        for path in _normalized_files_map(files_map)
+        if path.startswith(repo_support)
+        and path not in {".github/workflows/deploy.yml", ".github/workflows/readiness.yml"}
+        and path not in declared_paths
+    )
+    if not invalid:
+        return []
+    return [
+        "Generated app bundle contains undeclared repository-support pack outputs: "
+        f"{invalid}. Selected capability packs must declare generated docs, scripts, "
+        "and repository-support files explicitly."
+    ]
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -1308,46 +2160,86 @@ def scan_generated_bundle(
 
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
+    - .mozaiks/pack_provenance.json: schema validation when present.
+    - ui/route_manifest.json: required path/component fields; component file existence.
+    - ui/pages/*.yaml (schema-native): required fields, canonical page_type, canonical primitives,
+      api_endpoint → module/action closure.
+    - modules/*/module.yaml: action api_surface canonical vocabulary.
+    - modules/*/contracts/reactions.yaml: event_type closure, target.kind taxonomy,
+      target-kind-specific required fields.
     """
-    errors: list[str] = []
-    errors.extend(_scan_canonical_app_paths(files_map))
-    errors.extend(_scan_security_secret_contract(files_map))
-    errors.extend(_scan_data_contract_module_alignment(files_map))
+    try:
+        selected_layout_extensions = _layout_extensions_for_selected_packs(capability_packs)
+    except ManagedCapabilityTemplateError as exc:
+        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
+    layout_report = validate_file_map_layout(
+        files_map,
+        selected_extensions=selected_layout_extensions,
+    )
+    errors: list[str] = layout_validation_errors(layout_report)
+    errors.extend(
+        _scan_declared_pack_repo_support_outputs(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    scannable_files_map = filter_layout_scannable_file_map(files_map, layout_report)
+    errors.extend(
+        _scan_canonical_app_paths(
+            scannable_files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(_scan_security_secret_contract(scannable_files_map))
+    errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
+    errors.extend(_scan_route_manifest_consistency(scannable_files_map))
+    errors.extend(_scan_route_manifest_component_files(scannable_files_map))
+    errors.extend(_scan_page_schema_structure(scannable_files_map))
+    errors.extend(_scan_page_api_endpoint_alignment(scannable_files_map))
+    errors.extend(_scan_action_api_surface(scannable_files_map))
+    errors.extend(_scan_event_reaction_closure(scannable_files_map))
+    errors.extend(_scan_data_contract_module_alignment(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_managed_setup_provider_leaks(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_token_wallets_require_mozaikspay(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_mozaikspay_saas_contract(
-            files_map,
+            scannable_files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(
+        _scan_mozaiks_cloud_connector_contract(
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
     errors.extend(
         _scan_self_hosted_entitlement_dispatch_contract(
-            files_map,
+            scannable_files_map,
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_entitlement_gate_capability_alignment(files_map))
-    errors.extend(_scan_auth_app_contract(files_map))
+    errors.extend(_scan_entitlement_gate_capability_alignment(scannable_files_map))
+    errors.extend(_scan_auth_app_contract(scannable_files_map))
     if require_deployment_artifacts:
-        errors.extend(_scan_deployment_artifacts_contract(files_map))
-        errors.extend(_scan_auth_deployment_contract(files_map))
+        errors.extend(_scan_deployment_artifacts_contract(scannable_files_map))
+        errors.extend(_scan_auth_deployment_contract(scannable_files_map))
 
     for path, content in files_map.items():
         if not isinstance(path, str) or not isinstance(content, str):
@@ -1406,6 +2298,14 @@ def scan_generated_bundle(
                 errors.append(
                     f"{path}: imports raw payment provider SDK {provider_name!r}. Generated apps must "
                     "use app-owned facade modules and managed/provider-neutral adapter clients."
+                )
+
+            for raw_cloud_import in _RAW_CLOUD_PROVIDER_IMPORT_RE.finditer(content):
+                provider_name = raw_cloud_import.group(1) or raw_cloud_import.group(2) or ""
+                errors.append(
+                    f"{path}: imports raw cloud provider SDK {provider_name!r}. Generated apps must "
+                    "route cloud operations through the bounded MozaiksCloud sub-clients, not "
+                    "provider SDKs (azure, cloudflare, etc.) directly."
                 )
 
     return errors

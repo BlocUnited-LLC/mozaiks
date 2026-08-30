@@ -9,18 +9,20 @@ def _read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def test_readme_uses_plain_tool_framing() -> None:
+def test_readme_uses_concise_setup_guidance() -> None:
     readme = _read("README.md")
 
-    assert "### Which Tool To Use" in readme
-    assert "pip install mozaiks" in readme
+    assert "If setup fails, check three things first:" in readme
+    assert "Mozaiks is not published as a public PyPI package yet." in readme
+    assert 'python -m pip install -e ".[dev]"' in readme
     assert "python -m mozaiks quickstart --dir .\\mozaiks-workspace" in readme
     assert "Docker Desktop is not required" in readme
+    assert "workflow-routing-transitions.md" in readme
+    assert "mid-flight-journeys.md" not in readme
     assert "pipx" not in readme
     assert "python -m venv .venv" not in readme
     assert "python -m pip install mozaiks" not in readme
-    assert "The **CLI** is just how you set up the" in readme
-    assert "Most users can start from Studio" in readme
+    assert "set an LLM API key before running builds." in readme
     assert "developer entrypoint" not in readme
     assert "internal host name" not in readme
 
@@ -64,7 +66,8 @@ def test_docs_homepage_uses_plain_summary_language() -> None:
 def test_mkdocs_nav_uses_plain_user_facing_labels() -> None:
     nav = _read("mkdocs.yml")
 
-    assert "- Getting Started: getting-started.md" in nav
+    assert "- Getting Started:" in nav
+    assert "- getting-started.md" in nav
     assert "- Use Studio: guides/studio/01-overview.md" in nav
     assert "- Local Setup: local-setup.md" in nav
 

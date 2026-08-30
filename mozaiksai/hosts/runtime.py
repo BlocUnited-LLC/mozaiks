@@ -218,6 +218,63 @@ def _validate_internal_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
+def _client_console_bridge_enabled() -> bool:
+    raw = os.getenv("CLIENT_CONSOLE_BRIDGE_ENABLED")
+    if raw is None or not raw.strip():
+        return env != "production"
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+class ClientConsoleLogEntry(BaseModel):
+    level: str = Field(default="info")
+    method: str | None = None
+    message: str | None = None
+    args: list[Any] = Field(default_factory=list)
+    timestamp: str | None = None
+    app_id: str | None = None
+    chat_id: str | None = None
+    workflow_name: str | None = None
+    user_id: str | None = None
+    pathname: str | None = None
+    href: str | None = None
+    origin: str | None = None
+    title: str | None = None
+    source: str | None = None
+    lineno: int | None = None
+    colno: int | None = None
+    stack: str | None = None
+    reason: Any | None = None
+    error: Any | None = None
+    category: str | None = None
+
+    @field_validator("level")
+    @classmethod
+    def _normalize_level(cls, value: str) -> str:
+        normalized = str(value or "info").strip().lower()
+        return normalized or "info"
+
+    @field_validator("message")
+    @classmethod
+    def _normalize_message(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class ClientConsoleBatch(BaseModel):
+    source: str = Field(default="browser_console")
+    reason: str | None = None
+    sent_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    entries: list[ClientConsoleLogEntry] = Field(default_factory=list)
+
+    @field_validator("entries")
+    @classmethod
+    def _limit_entries(cls, value: list[ClientConsoleLogEntry]) -> list[ClientConsoleLogEntry]:
+        return value[:100]
+
+
 _ENFORCE_PRINCIPAL_HEADERS = os.getenv("ENFORCE_PRINCIPAL_HEADERS", "false").lower() in {
     "true",
     "1",
@@ -440,6 +497,61 @@ async def health_check():
     }
 
 
+@app.post("/api/debug/client-console")
+async def ingest_client_console_logs(request: Request):
+    """Ingest browser console logs so frontend issues appear in backend logs."""
+    if not _client_console_bridge_enabled():
+        raise HTTPException(status_code=404, detail="Client console bridge disabled")
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Unable to read JSON payload") from exc
+
+    try:
+        batch = ClientConsoleBatch.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid client console payload") from exc
+
+    logger = logging.getLogger("mozaiks.workflow.frontend.browser_console")
+    accepted = 0
+    for entry in batch.entries:
+        entry_logger = get_workflow_logger(
+            base_logger=logger,
+            app_id=entry.app_id or batch.metadata.get("app_id"),
+            chat_id=entry.chat_id or batch.metadata.get("chat_id"),
+            workflow_name=entry.workflow_name or batch.metadata.get("workflow_name"),
+            user_id=entry.user_id or batch.metadata.get("user_id"),
+        )
+        message = entry.message or ""
+        details = {
+            "console_category": entry.category or batch.source,
+            "console_method": entry.method or entry.level,
+            "console_args": entry.args,
+            "console_timestamp": entry.timestamp,
+            "console_pathname": entry.pathname or batch.metadata.get("pathname"),
+            "console_href": entry.href or batch.metadata.get("href"),
+            "console_origin": entry.origin or batch.metadata.get("origin"),
+            "console_title": entry.title or batch.metadata.get("title"),
+            "console_source": entry.source,
+            "console_lineno": entry.lineno,
+            "console_colno": entry.colno,
+            "console_stack": entry.stack,
+            "console_reason": entry.reason,
+            "console_error": entry.error,
+            "console_batch_reason": batch.reason,
+            "console_batch_sent_at": batch.sent_at,
+        }
+        level = str(entry.level or "info").lower()
+        log_method = getattr(entry_logger, level, entry_logger.info)
+        log_method(message or "BROWSER_CONSOLE_EVENT", **details)
+        accepted += 1
+
+    return {"status": "accepted", "entries": accepted}
+
+
 @app.get("/api/events/metrics")
 async def get_event_metrics(
     principal: UserPrincipal = Depends(require_any_auth),
@@ -468,12 +580,24 @@ def _validate_context_for_workflow(workflow_name: str, context: dict[str, Any]) 
         return {}
 
     try:
+        from mozaiksai.core.workflow.context.authority import (
+            CALLER_INPUT_WRITER,
+            ContextAuthorityError,
+            build_context_authority_policy,
+        )
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
         wf_cfg = workflow_manager.get_config(workflow_name) or {}
-        declared_keys = set((wf_cfg.get("context_variables") or {}).get("definitions", {}).keys())
+        definitions = (wf_cfg.get("context_variables") or {}).get("definitions", {})
+        declared_keys = set(definitions.keys())
+        policy = build_context_authority_policy(
+            workflow_name=workflow_name,
+            definitions=definitions,
+            transition_rules=(wf_cfg.get("transition_graph") or {}).get("transition_rules") or [],
+        )
     except Exception:
         declared_keys = set()
+        policy = None
 
     validated: dict[str, Any] = {}
     for key, value in context.items():
@@ -485,6 +609,15 @@ def _validate_context_for_workflow(workflow_name: str, context: dict[str, Any]) 
                 extra={"workflow_name": workflow_name, "key": key},
             )
             continue
+        if policy is not None:
+            try:
+                policy.require_can_write(key, writer_id=CALLER_INPUT_WRITER)
+            except ContextAuthorityError as exc:
+                wf_logger.warning(
+                    "RUNTIME_CONTEXT_AUTHORITY_REJECTED",
+                    extra={"workflow_name": workflow_name, "key": key},
+                )
+                raise HTTPException(status_code=400, detail={"code": "CONTEXT_AUTHORITY_REJECTED"}) from exc
         validated[key] = value
     return validated
 
@@ -723,6 +856,13 @@ async def websocket_endpoint(
         await websocket.close(code=1011, reason="Transport service unavailable")
         return
 
+    suppress_history_replay = str(websocket.query_params.get("suppress_history_replay", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
     ws_user = await authenticate_websocket_with_path_binding(
         websocket,
         path_user_id=user_id,
@@ -738,10 +878,12 @@ async def websocket_endpoint(
     _raw_claims = getattr(ws_user, "raw_claims", None) or {}
     _token_exp: int = int(_raw_claims.get("exp", 0) or 0)
 
+    ws_id: int | None = None
     try:
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
         from mozaiksai.core.session.router import get_session_router
+        from mozaiksai.core.transport.event_contract import send_event_envelope
         from mozaiksai.core.transport.session_registry import session_registry
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -796,8 +938,9 @@ async def websocket_endpoint(
         except Exception as prereq_exc:
             logger.error("WS_PREREQ_VALIDATION_FAILED workflow=%s chat=%s: %s", resolved_workflow_name, chat_id, prereq_exc, exc_info=True)
             await websocket.accept()
-            await websocket.send_json(
+            await send_event_envelope(websocket,
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": "Failed to validate workflow prerequisites. Please try again.",
@@ -813,8 +956,9 @@ async def websocket_endpoint(
 
         if not prereqs_ok:
             await websocket.accept()
-            await websocket.send_json(
+            await send_event_envelope(websocket,
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": prereq_reason or "Workflow prerequisites are not met.",
@@ -860,6 +1004,11 @@ async def websocket_endpoint(
             requested_chat_id=chat_id,
         )
         resolved_chat_id = str(resume_resolution.get("chat_id") or chat_id)
+        resume_workflow_name = str(resume_resolution.get("workflow_id") or "").strip()
+        if resume_workflow_name:
+            resolved_resume_workflow = hooks.call_workflow_name_resolver(resume_workflow_name, workflow_names)
+            if resolved_resume_workflow:
+                resolved_workflow_name = resolved_resume_workflow
         resolved_doc = await coll.find_one(
             {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
             {
@@ -965,9 +1114,29 @@ async def websocket_endpoint(
         }
         await simple_transport.send_event_to_ui(chat_meta, resolved_chat_id)
 
+        from mozaiksai.core.workflow.startup_messages import (
+            resolve_workflow_launch_taxonomy,
+            should_autostart_empty_workflow,
+        )
+
         config = workflow_manager.get_config(resolved_workflow_name) or {}
-        startup_mode = str(config.get("workflow_startup_mode") or "").strip().lower()
-        if startup_mode in ("agentdriven", "userdriven") and run_history_count == 0:
+        _config_startup_mode = str(config.get("workflow_startup_mode") or "").strip()
+        startup_mode = _config_startup_mode or "AgentDriven"
+        launch_taxonomy = resolve_workflow_launch_taxonomy(
+            resolved_workflow_name,
+            workflow_startup_mode=startup_mode,
+        )
+        # When the operator has explicitly set workflow_startup_mode in the config,
+        # that intent takes precedence over the registry's launch_behavior default.
+        # Pass launch_behavior=None so startup_mode alone drives the auto-start decision.
+        _autostart_launch_behavior = None if _config_startup_mode else launch_taxonomy.get("launch_behavior")
+        if (
+            should_autostart_empty_workflow(
+                startup_mode,
+                launch_behavior=_autostart_launch_behavior,
+            )
+            and run_history_count == 0
+        ):
             existing_task = simple_transport._background_tasks.get(resolved_chat_id)
             if not (existing_task and not existing_task.done()):
                 conn = simple_transport.connections.setdefault(resolved_chat_id, {})
@@ -1003,22 +1172,23 @@ async def websocket_endpoint(
                 )
                 return
 
-        try:
-            await simple_transport.handle_websocket(
-                websocket=websocket,
-                chat_id=resolved_chat_id,
-                user_id=user_id,
-                workflow_name=resolved_workflow_name,
-                app_id=app_id,
-                ws_id=ws_id,
-                token_exp=_token_exp,
-            )
-        finally:
-            session_registry.remove_session(ws_id)
+        await simple_transport.handle_websocket(
+            websocket=websocket,
+            chat_id=resolved_chat_id,
+            user_id=user_id,
+            workflow_name=resolved_workflow_name,
+            app_id=app_id,
+            ws_id=ws_id,
+            token_exp=_token_exp,
+            suppress_history_replay=suppress_history_replay,
+        )
     except Exception as ownership_err:
         wf_logger.warning("WS_CHAT_PREP_FAILED: %s", ownership_err)
         await websocket.close(code=1011, reason="Failed to prepare chat session")
         return
+    finally:
+        if ws_id is not None:
+            session_registry.remove_session(ws_id)
 
 
 @app.post("/chat/{app_id}/{chat_id}/{user_id}/input")
@@ -1186,12 +1356,17 @@ async def get_workflows(
 ):
     """Return loaded workflows in SDK-friendly format."""
     _ = principal
+    from mozaiksai.core.workflow.startup_messages import resolve_workflow_launch_taxonomy
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
     workflows = []
     for workflow_name in sorted(workflow_manager.get_all_workflow_names()):
         config = workflow_manager.get_config(workflow_name)
         startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
+        launch_taxonomy = resolve_workflow_launch_taxonomy(
+            workflow_name,
+            workflow_startup_mode=startup_mode,
+        )
         workflows.append(
             {
                 "name": workflow_name,
@@ -1200,6 +1375,9 @@ async def get_workflows(
                 "visual_agents": config.get("visual_agents") or [],
                 "startup_mode": startup_mode,
                 "workflow_startup_mode": startup_mode,
+                "interaction_mode": launch_taxonomy.get("interaction_mode"),
+                "launch_behavior": launch_taxonomy.get("launch_behavior"),
+                "handoff_style": launch_taxonomy.get("handoff_style"),
                 "status": "ready",
             }
         )

@@ -44,11 +44,11 @@ def test_refinement_routes_reference_declared_workflow_sequences() -> None:
 
     missing: list[str] = []
     for artifact in harness["routing"]["artifacts"]:
-        artifact_kind = artifact["artifact_kind"]
+        build_family = artifact["build_family"]
         for change_class, route in artifact["routes"].items():
             sequence_id = str(route.get("workflow_sequence") or "").strip()
             if sequence_id not in sequence_ids:
-                missing.append(f"{artifact_kind}.{change_class}->{sequence_id}")
+                missing.append(f"{build_family}.{change_class}->{sequence_id}")
 
     assert missing == []
 
@@ -77,28 +77,29 @@ def test_workflow_sequence_impact_families_match_artifact_dependency_graph() -> 
     assert unknown_graph_edges == []
 
 
-def test_experience_spec_is_first_class_artifact_graph_family() -> None:
+def test_artifact_graph_uses_persisted_theme_family_without_phantoms() -> None:
     registry = _load_extension_registry()
     graph = registry.get("artifact_dependency_graph") or {}
 
-    assert "experience_spec" in graph
-    assert graph["experience_spec"] == ["concept", "design_docs"]
-    assert "experience_spec" in graph["app_bundle"]
+    assert graph["theme_capture"] == ["concept"]
+    assert "theme_capture" in graph["app_bundle"]
+    assert {"experience_spec", "build_plan", "brand", "theme_config"}.isdisjoint(graph)
 
 
-def test_experience_spec_sequences_are_declared_on_design_owned_reentry() -> None:
+def test_sequences_use_persisted_design_and_theme_families() -> None:
     registry = _load_extension_registry()
     sequences = {
         sequence["id"]: sequence.get("affected_declarative_families", [])
         for sequence in registry.get("workflow_sequences", [])
     }
 
-    assert "experience_spec" in sequences["build"]
-    assert "experience_spec" in sequences["full_rebuild"]
-    assert "experience_spec" in sequences["design_revision"]
-    assert sequences["app_surface_revision"] == ["experience_spec", "app_bundle"]
-    assert "experience_spec" not in sequences["theme_revision"]
-    assert "experience_spec" not in sequences["theme_patch"]
+    assert "theme_capture" in sequences["build"]
+    assert "theme_capture" in sequences["full_rebuild"]
+    assert sequences["app_surface_revision"] == ["design_docs", "app_bundle"]
+    assert sequences["theme_revision"] == ["theme_capture", "app_bundle"]
+    assert sequences["theme_patch"] == ["theme_capture", "app_bundle"]
+    for families in sequences.values():
+        assert {"experience_spec", "build_plan", "brand", "theme_config"}.isdisjoint(families)
 
 
 def test_refinement_docs_define_experience_spec_as_first_class_intent_artifact() -> None:

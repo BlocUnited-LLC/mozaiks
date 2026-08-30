@@ -12,13 +12,14 @@ configure_otel_from_env = telemetry_mod.configure_otel_from_env
 
 
 class _ContextBridge:
-    data = {
-        "app_id": "app-1",
-        "chat_id": "chat-1",
-        "user_id": "user-1",
-        "session_router_session_id": "session_router::app-1::user-1",
-        "journey_instance_id": "journey-1",
-    }
+    def snapshot(self):
+        return {
+            "app_id": "app-1",
+            "chat_id": "chat-1",
+            "user_id": "user-1",
+            "session_router_session_id": "session_router::app-1::user-1",
+            "journey_instance_id": "journey-1",
+        }
 
 
 def test_ag2_telemetry_config_defaults_to_safe_content_capture(monkeypatch):

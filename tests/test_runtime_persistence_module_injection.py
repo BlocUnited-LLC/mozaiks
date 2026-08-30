@@ -6,9 +6,11 @@ import pytest
 
 import mozaiksai.core.runtime.composition.module_executor as module_executor_module
 import mozaiksai.core.runtime.persistence.mongo as mongo_module
+from mozaiksai.core.runtime.app.module_loader import SettingDef
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 
 class FakeCursor:
@@ -121,7 +123,7 @@ async def test_module_executor_injects_persistence_when_app_id_exists() -> None:
     executor = ModuleExecutor()
     executor.register("inspect", CaptureContextHandler())
 
-    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1"))
+    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data["has_persistence"] is True
@@ -141,7 +143,7 @@ async def test_module_executor_production_path_uses_real_mongo_persistence_conte
     executor = ModuleExecutor()
     executor.register("inspect", CaptureContextHandler())
 
-    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1"))
+    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data["persistence_type"] == "MongoPersistenceContext"
@@ -152,7 +154,7 @@ async def test_injected_persistence_is_mongo_context_with_current_app_id() -> No
     executor = ModuleExecutor()
     executor.register("inspect", CaptureContextHandler())
 
-    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_abc"))
+    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_abc", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data["app_id"] == "app_abc"
@@ -170,7 +172,7 @@ async def test_user_and_tenant_scope_are_passed_to_persistence() -> None:
             app_id="app_1",
             user_id="user_1",
             tenant_id="tenant_1",
-            workspace_id="workspace_1",
+            workspace_id="workspace_1", authority=trusted_framework_authority(),
         )
     )
 
@@ -186,7 +188,7 @@ async def test_ctx_db_attribute_does_not_exist() -> None:
     executor = ModuleExecutor()
     executor.register("inspect", CaptureContextHandler())
 
-    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1"))
+    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data["has_db"] is False
@@ -197,7 +199,7 @@ async def test_handler_can_access_ctx_persistence() -> None:
     executor = ModuleExecutor()
     executor.register("inspect", CaptureContextHandler())
 
-    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1"))
+    result = await executor.execute(ModuleRequest(module="inspect", action="inspect_context", app_id="app_1", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data["has_persistence"] is True
@@ -210,7 +212,7 @@ async def test_handler_can_call_persistence_collection(monkeypatch: pytest.Monke
     executor = ModuleExecutor()
     executor.register("projects", PersistenceUsingHandler())
 
-    result = await executor.execute(ModuleRequest(module="projects", action="read_project", app_id="app_1"))
+    result = await executor.execute(ModuleRequest(module="projects", action="read_project", app_id="app_1", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data["doc"]["query"] == {"app_id": "app_1", "_id": "project_1"}
@@ -227,7 +229,7 @@ async def test_existing_event_emit_behavior_remains_unchanged() -> None:
     executor.register("tasks", EmitHandler())
 
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", app_id="app_1", user_id="user_1", tenant_id="tenant_1")
+        ModuleRequest(module="tasks", action="create", app_id="app_1", user_id="user_1", tenant_id="tenant_1", authority=trusted_framework_authority())
     )
 
     assert result.success is True
@@ -253,7 +255,7 @@ async def test_event_emit_includes_workspace_when_present() -> None:
             app_id="app_1",
             user_id="user_1",
             tenant_id="tenant_1",
-            workspace_id="workspace_1",
+            workspace_id="workspace_1", authority=trusted_framework_authority(),
         )
     )
 
@@ -267,16 +269,16 @@ async def test_event_emit_includes_workspace_when_present() -> None:
 
 @pytest.mark.asyncio
 async def test_existing_settings_and_auth_fields_remain_unchanged() -> None:
-    settings = [{"id": "max_items", "type": "integer", "default": 50}]
+    settings = [SettingDef(id="max_items", type="integer", default=50)]
     executor = ModuleExecutor()
     executor.register("tasks", EmitHandler(), settings=settings)
 
     result = await executor.execute(
-        ModuleRequest(module="tasks", action="create", app_id="app_1", auth_token="token_123")
+        ModuleRequest(module="tasks", action="create", app_id="app_1", auth_token="token_123", authority=trusted_framework_authority())
     )
 
     assert result.success is True
-    assert result.data["settings"] == settings
+    assert result.data["settings"] == {"max_items": 50}
     assert result.data["auth_token"] == "token_123"
 
 
@@ -285,7 +287,7 @@ async def test_module_execution_still_works_without_persistence_when_app_id_miss
     executor = ModuleExecutor()
     executor.register("optional", OptionalPersistenceHandler())
 
-    result = await executor.execute(ModuleRequest(module="optional", action="run"))
+    result = await executor.execute(ModuleRequest(module="optional", action="run", authority=trusted_framework_authority()))
 
     assert result.success is True
     assert result.data == {"persistence": None}

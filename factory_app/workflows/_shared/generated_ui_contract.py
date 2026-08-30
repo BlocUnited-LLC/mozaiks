@@ -17,6 +17,12 @@ try:
 except Exception:  # pragma: no cover - import failures are surfaced by tests.
     yaml = None  # type: ignore[assignment]
 
+from mozaiksai.core.runtime.app.page_schema import (
+    VALID_PAGE_TYPES,
+    PageSchemaValidationError,
+    validate_page_schema,
+)
+
 try:
     from mozaiksai.core.workflow.ui_primitives import get_page_ui_primitive_names
 except Exception:  # pragma: no cover - import failures are surfaced by runtime tests.
@@ -25,17 +31,6 @@ except Exception:  # pragma: no cover - import failures are surfaced by runtime 
 
 REMOVED_PRIMITIVES = {"Badge", "Card", "Stat"}
 SURFACE_PRIMITIVES = {"Panel", "SurfaceCard"}
-VALID_PAGE_TYPES = frozenset({
-    "record_list", "record_detail", "analytics_dashboard", "workflow_board",
-    "activity_feed", "gallery", "wizard", "split_view", "settings", "landing",
-    # checkout_success is a recognized type but must be a custom_route_bundle —
-    # YAML primitive pages cannot express the query-param access and polling
-    # required by post-payment redirect flows.
-    "checkout_success",
-})
-VALID_EXTENSION_SLOTS = frozenset({
-    "header", "empty_state", "hero", "sidebar", "actions_bar",
-})
 COPY_FLAGS = (
     "placeholder",
     "lorem",
@@ -673,6 +668,17 @@ def _walk_sections(
             )
 
 
+def _audit_runtime_page_contract(page: dict[str, Any], *, page_path: str) -> list[str]:
+    try:
+        validate_page_schema(page)
+    except PageSchemaValidationError as exc:
+        return [
+            f"{page_path} violates mozaiks.app_page.v1 at {diagnostic.location}: {diagnostic.code}."
+            for diagnostic in exc.diagnostics
+        ]
+    return []
+
+
 def audit_page_schemas(
     pages: Sequence[dict[str, Any]],
     *,
@@ -689,6 +695,7 @@ def audit_page_schemas(
         page_name = str(page.get("name") or page.get("title") or f"page[{page_index}]")
         page_path = f"{source_label} '{page_name}'"
         primitive_counts: dict[str, int] = {}
+        warnings.extend(_audit_runtime_page_contract(page, page_path=page_path))
 
         meta = page.get("meta")
         if meta is not None and not isinstance(meta, dict):
@@ -706,23 +713,15 @@ def audit_page_schemas(
                 f"{page_path} has invalid page_type '{page_type}'; must be one of: {', '.join(sorted(VALID_PAGE_TYPES))}."
             )
 
-        extensions = page.get("extensions")
-        if extensions is not None:
-            if not isinstance(extensions, list):
-                warnings.append(f"{page_path} extensions must be a list or null.")
-            else:
-                for ext in extensions:
-                    if not isinstance(ext, dict):
-                        continue
-                    slot = ext.get("slot")
-                    if slot not in VALID_EXTENSION_SLOTS:
-                        warnings.append(
-                            f"{page_path} extension uses invalid slot '{slot}'; must be one of: {', '.join(sorted(VALID_EXTENSION_SLOTS))}."
-                        )
-                    if not ext.get("component"):
-                        warnings.append(
-                            f"{page_path} extension slot '{slot}' is missing required 'component' field."
-                        )
+        if "extensions" in page:
+            # Retired contract: page slot extensions were never rendered by
+            # PageRenderer and are no longer part of AppPageSchema.  Custom UI
+            # zones belong to custom_route_bundle pages.
+            warnings.append(
+                f"{page_path} declares 'extensions', a retired unsupported field. "
+                "Remove it; use a custom_route_bundle page when primitives cannot "
+                "express the route."
+            )
 
         title = str(page.get("title") or page.get("name") or "")
         if "dashboard" in title.lower():

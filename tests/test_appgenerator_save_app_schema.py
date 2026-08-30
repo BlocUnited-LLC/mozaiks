@@ -53,9 +53,11 @@ def _base_manifest():
 
 def _base_page():
     return {
+        "schema_version": "mozaiks.app_page.v1",
         "name": "Dashboard",
         "route": "/dashboard",
         "title": "Dashboard",
+        "page_type": "record_list",
         "layout": "grid",
         "sections": [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}],
     }
@@ -63,9 +65,11 @@ def _base_page():
 
 def _canonical_page():
     return {
+        "schema_version": "mozaiks.app_page.v1",
         "name": "Dashboard",
         "route": "/dashboard",
         "title": "Dashboard",
+        "page_type": "record_list",
         "layout": "grid",
         "sections": [
             {
@@ -295,11 +299,14 @@ def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) ->
             "primitive": "Button",
             "config": {
                 "label": "Open Customer Support",
-                "action_type": "workflow",
-                "workflow_id": "CustomerSupport",
-                "context_variables": {
-                    "customer_id": "{id}",
-                    "source_page": "dashboard",
+                "action": {
+                    "label": "Open Customer Support",
+                    "action_type": "workflow",
+                    "workflow_id": "CustomerSupport",
+                    "context_variables": {
+                        "customer_id": "{id}",
+                        "source_page": "dashboard",
+                    },
                 },
             },
         }
@@ -1151,6 +1158,22 @@ def test_save_app_schema_defaults_generated_root_to_repo_generated(monkeypatch) 
     monkeypatch.delenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", raising=False)
 
     assert save_app_schema_module._resolve_generated_artifacts_root() == (workspace / "generated").resolve()
+
+
+def test_save_app_schema_propagates_filesystem_failure(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    monkeypatch.setattr(
+        save_app_schema_module,
+        "_persist_to_filesystem",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="Could not write schema files to disk"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            context_variables=_Context(),
+        )
 
 
 def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ assets:
     kind: templates
 pack:
   id: messaging
+  version: "0.1.11"
   status: active
   capability_source: generated_module
 capabilities:

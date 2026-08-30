@@ -11,11 +11,16 @@ import json
 import re
 from pathlib import Path
 
-import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from mozaiksai.core.auth.dependencies import validate_path_id
+from mozaiksai.core.metrics.usage_instrumentation import record_page_view
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    load_and_validate_page_schema,
+    safe_page_schema_error_detail,
+)
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_brand_root
 
@@ -84,20 +89,48 @@ async def get_app_theme(app_id: str):
 
 
 @router.get("/api/pages/{name}")
-async def get_page_schema(name: str):
+async def get_page_schema(name: str, request: Request):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
         raise HTTPException(status_code=400, detail="Invalid page name")
+
+    record_page_view(
+        app_id=str(request.query_params.get("app_id") or "default"),
+        page_name=name,
+    )
+
+    validated_pages = getattr(request.app.state, "page_schemas", None)
+    if isinstance(validated_pages, dict) and name in validated_pages:
+        return JSONResponse(content=validated_pages[name])
 
     page_path = _resolve_page_schema_path(name)
     if not page_path.exists():
         raise HTTPException(status_code=404, detail=f"Page '{name}' not found")
 
     try:
-        schema = yaml.safe_load(page_path.read_text(encoding="utf-8"))
-        if not isinstance(schema, dict):
-            raise ValueError("Page schema must be a YAML mapping")
-        return JSONResponse(content=schema)
+        action_index = _page_action_index_from_state(request)
+        schema = load_and_validate_page_schema(
+            page_path,
+            expected_name=name,
+            action_index=action_index,
+        )
+        return JSONResponse(content=schema.model_dump(mode="json", exclude_none=True))
+    except PageSchemaValidationError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=safe_page_schema_error_detail(exc),
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to read page schema") from exc
+        raise HTTPException(status_code=500, detail="Invalid page schema") from exc
+
+
+def _page_action_index_from_state(request: Request) -> dict[str, frozenset[str]] | None:
+    surfaces = getattr(request.app.state, "module_action_surfaces", None)
+    if not isinstance(surfaces, dict):
+        return None
+    return {
+        str(module): frozenset(str(action) for action in actions)
+        for module, actions in surfaces.items()
+        if isinstance(actions, dict)
+    }

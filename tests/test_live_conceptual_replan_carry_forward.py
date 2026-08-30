@@ -104,8 +104,8 @@ def _run_preservation(tmp_path: Path) -> dict:
     doc = ArtifactVersionDoc.model_validate({
         "_id": "av_safety_v1",
         "app_id": "smoke-safety-app",
-        "artifact_kind": "app_bundle",
-        "artifact_key": "app_bundle",
+        "build_family": "app_bundle",
+        "build_key": "app_bundle",
         "version_number": 1,
         "lineage_root_id": "av_safety_v1",
         "commit_metadata": ArtifactCommitMetadata(
@@ -113,7 +113,7 @@ def _run_preservation(tmp_path: Path) -> dict:
         ).model_dump(),
     })
     mock_store = MagicMock()
-    mock_store.get_artifact_version = AsyncMock(return_value=doc)
+    mock_store.get_build_record = AsyncMock(return_value=doc)
 
     context_variables: dict = {
         "app_id": "smoke-safety-app",

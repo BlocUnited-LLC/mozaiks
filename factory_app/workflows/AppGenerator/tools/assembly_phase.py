@@ -22,11 +22,18 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
 logger = logging.getLogger(__name__)
 
 
-def _merge_code_files(feature_outputs: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _merge_code_files(
+    feature_outputs: list[dict[str, Any]],
+    *,
+    build_timestamp: str | None = None,
+) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename."""
     file_map: dict[str, str] = {}
     for output in feature_outputs:
-        for item in extract_code_file_entries_from_payload(output):
+        for item in extract_code_file_entries_from_payload(
+            output,
+            build_timestamp=build_timestamp,
+        ):
             filename = item.get("filename")
             content = item.get("content")
             if not filename or content is None:
@@ -38,6 +45,8 @@ def _merge_code_files(feature_outputs: list[dict[str, Any]]) -> list[dict[str, s
 async def assemble_features(
     app_id: str,
     feature_outputs: list[dict[str, Any]],
+    *,
+    build_timestamp: str | None = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -54,7 +63,10 @@ async def assemble_features(
         }
     """
     try:
-        merged_files = _merge_code_files(feature_outputs or [])
+        merged_files = _merge_code_files(
+            feature_outputs or [],
+            build_timestamp=build_timestamp,
+        )
         logger.info(
             "Assembled %d feature outputs into %d files",
             len(feature_outputs or []),

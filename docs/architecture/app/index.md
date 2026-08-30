@@ -10,6 +10,7 @@ app manifests, app lifecycle, or app-owned service surfaces.
 | Doc | Scope |
 | --- | --- |
 | [Generated App Lifecycle](generated-app-lifecycle-model.md) | App lifecycle states and promotion model |
+| [Generated App Functional Acceptance](generated-app-functional-acceptance.md) | Deterministic checks that generated routes, actions, workflows, facades, and runtime load are coherent |
 | [Canonical App Structure](canonical-app-structure.md) | App workspace shape for config, backend, modules, pages, root workflows, and brand |
 | [App Manifest and Platform Targets](app-manifest-and-platform-targets.md) | App manifest fields and platform target semantics |
 | [App Bundle Declaratives](app-bundle-declaratives.md) | Declarative app artifact families |

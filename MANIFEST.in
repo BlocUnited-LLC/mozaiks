@@ -1,10 +1,17 @@
+# Agent guidance split policy:
+#   mozaiks_cli/agent_guidance/ — USER-FACING skills (add-module, add-page,
+#     create-workflow, setup, etc.) and app-workspace rules.  Ships in the wheel
+#     so installed packages include guidance for app developers.
+#   .claude/skills/ — CONTRIBUTOR-ONLY framework-change skills (appgenerator-change,
+#     control-plane-refinement-change, oss-contribution-review, etc.).  Git-only;
+#     NOT in MANIFEST.in and NOT shipped in the wheel.
 recursive-include mozaiks_cli/agent_guidance *.md
 recursive-include factory_app/app *
 recursive-include factory_app/build_context *
 recursive-include factory_app/refinement_harness *
 recursive-include factory_app/workflows *
 recursive-include mozaiksai/core/usage/catalogs *.json
-include pricing/catalogs/usage-pricing.generated.json
+include ai-pricing/catalogs/usage-pricing.generated.json
 recursive-include web_shell *.js *.jsx *.cjs *.css *.html *.json *.md
 include web_shell/.env.example
 recursive-include chat-ui/src *

@@ -14,6 +14,30 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     normalize_app_path,
 )
+from mozaiksai.core.workflow.assignment_kinds import app_build_assignment_kind_values
+
+try:
+    from .managed_monetization_contract import (
+        MOZAIKS_PAY_PROVIDER_ID,
+        MOZAIKSPAY_PACK_ID,
+        SELF_MANAGED_PROVIDER_ID,
+        SUBSCRIPTION_WRITE_PATH_CAPABILITY,
+        normalize_monetization_provider,
+    )
+    from .managed_monetization_contract import (
+        pack_id_from_descriptor as _canonical_pack_id_from_descriptor,
+    )
+except ImportError:
+    from factory_app.workflows.AppGenerator.tools.managed_monetization_contract import (
+        MOZAIKS_PAY_PROVIDER_ID,
+        MOZAIKSPAY_PACK_ID,
+        SELF_MANAGED_PROVIDER_ID,
+        SUBSCRIPTION_WRITE_PATH_CAPABILITY,
+        normalize_monetization_provider,
+    )
+    from factory_app.workflows.AppGenerator.tools.managed_monetization_contract import (
+        pack_id_from_descriptor as _canonical_pack_id_from_descriptor,
+    )
 
 _logger = logging.getLogger("tools.app_build_plan")
 
@@ -51,19 +75,7 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
-_ALLOWED_TASK_TYPES = {
-    "subscription_config",
-    "service_foundation",
-    "module_contract",
-    "persistence_contract",
-    "data_migrations",
-    "data_models",
-    "business_services",
-    "api_surface",
-    "page_bundle",
-    "agent_backend_integration",
-    "refinement_harness",
-}
+_ALLOWED_TASK_TYPES = app_build_assignment_kind_values()
 _CANONICAL_INITIAL_AGENTS = {
     "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",
@@ -293,6 +305,90 @@ def _dedupe_preserving_order(values: Iterable[Any]) -> list[str]:
 
 def _join_unique_text(parts: Iterable[Any], *, separator: str = " ") -> str:
     return separator.join(_dedupe_preserving_order(parts)).strip()
+
+
+_READINESS_PROFILE_VALUES = {
+    "none",
+    "basic_app",
+    "saas_app",
+    "host_operator_platform",
+    "marketplace_platform",
+}
+
+
+def _normalize_readiness_profile(value: Any) -> str:
+    profile = str(value or "").strip()
+    return profile if profile in _READINESS_PROFILE_VALUES else "none"
+
+
+def _infer_readiness_profile(
+    plan: dict[str, Any],
+    *,
+    context_variables: Any | None,
+) -> str:
+    explicit = _normalize_readiness_profile(plan.get("readiness_profile"))
+    if explicit != "none":
+        return explicit
+
+    parts: list[str] = [
+        str(plan.get("agent_message") or ""),
+        str(plan.get("app_kind") or ""),
+        str(plan.get("profile_layout") or ""),
+        " ".join(_normalize_string_list(plan.get("service_scope"))),
+        " ".join(_normalize_string_list(plan.get("frontend_scope"))),
+        " ".join(_normalize_string_list(plan.get("roles"))),
+        " ".join(
+            str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "")
+            for pack in _normalize_object_list(plan.get("capability_packs"))
+            if isinstance(pack, dict)
+        ),
+    ]
+    if context_variables is not None and hasattr(context_variables, "get"):
+        for key in ("app_type", "concept_overview", "build_mode"):
+            try:
+                parts.append(str(context_variables.get(key) or ""))
+            except Exception:
+                continue
+
+    haystack = " ".join(parts).lower()
+    host_operator_terms = (
+        "host operator",
+        "host-operator",
+        "hosted app",
+        "hosted apps",
+        "operator platform",
+        "platform ops",
+        "launch readiness",
+        "readiness gate",
+        "evidence ledger",
+        "staging verification",
+        "compliance",
+        "launch gate",
+        "hosting",
+        "domains",
+    )
+    if any(term in haystack for term in host_operator_terms):
+        return "host_operator_platform"
+
+    if "marketplace" in haystack or "multi-tenant marketplace" in haystack:
+        return "marketplace_platform"
+
+    saas_terms = (
+        "saas",
+        "subscription",
+        "subscriptions",
+        "seat",
+        "tier",
+        "pricing",
+        "billing portal",
+    )
+    if any(term in haystack for term in saas_terms):
+        return "saas_app"
+
+    if "simple app" in haystack or "single-purpose" in haystack or "basic app" in haystack:
+        return "basic_app"
+
+    return "none"
 
 
 def _merge_persistence_contract_tasks(build_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -530,7 +626,7 @@ def _ensure_managed_capability_entries(
 
 
 def _pack_id_from_descriptor(pack: dict[str, Any]) -> str:
-    return str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+    return _canonical_pack_id_from_descriptor(pack)
 
 
 def _ensure_context_selected_capability_packs(
@@ -567,99 +663,160 @@ def _ensure_context_selected_capability_packs(
     return result
 
 
-def _inject_default_mozaikspay_if_applicable(
+def _default_mozaikspay_descriptor(context_variables: Any | None) -> dict[str, Any]:
+    """Return the public MozaiksPay pack descriptor used for SaaS defaults."""
+    available_packs = _context_available_pack_map(context_variables)
+    configured = available_packs.get(MOZAIKSPAY_PACK_ID)
+    if isinstance(configured, dict):
+        descriptor = dict(configured)
+    else:
+        import yaml
+
+        from factory_app.workflows._shared.hook_utils import workflow_context_path
+
+        contract_path = workflow_context_path(MOZAIKSPAY_PACK_ID, "contract.yaml")
+        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+        descriptor = {
+            "id": MOZAIKSPAY_PACK_ID,
+            "display_name": "MozaiksPay",
+            "description": "Managed subscription billing provider for generated SaaS apps.",
+            "provides_capabilities": contract.get("provides_capabilities") or [],
+            "required_integrations": contract.get("required_integrations") or [],
+            "facades": contract.get("facades") or [],
+        }
+
+    descriptor.setdefault("capability_pack_id", MOZAIKSPAY_PACK_ID)
+    descriptor.setdefault("capability_source", "managed_capability")
+    descriptor.setdefault("surface_id", "mozaikspay_managed")
+    descriptor.setdefault("surface_kind", "external_integration")
+    descriptor.setdefault("implementation_mode", "external_integration")
+    descriptor.setdefault("pack_type", "managed_capability")
+    descriptor.setdefault("label", descriptor.get("display_name") or "MozaiksPay")
+    descriptor.setdefault(
+        "summary",
+        descriptor.get("description") or "Managed subscription billing capability.",
+    )
+    return descriptor
+
+
+def _apply_default_monetization_provider(
     capability_packs: list[dict[str, Any]],
     build_tasks: list[dict[str, Any]],
     *,
+    monetization_provider: str | None,
     context_variables: Any | None,
-) -> list[dict[str, Any]]:
-    """Inject mozaikspay as the default billing managed capability for SaaS plans.
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Default subscription builds to MozaiksPay while preserving explicit overrides.
 
-    Fires when ALL of the following are true:
-      1. The build plan declares a ``subscription_config`` task (SaaS billing signal).
-      2. ``mozaikspay`` is not already present in ``capability_packs``.
-      3. No other managed capability pack declares ``provides_capabilities:
-         [subscription_write_path]`` inline in its descriptor.
-
-    The descriptor is taken from the context ``available_managed_capabilities``
-    when present (operator-configured deployment), falling back to the OSS
-    factory build context at ``factory_app/build_context/mozaikspay/contract.yaml``.
-    This makes MozaiksPay the OSS default billing provider for generated SaaS apps
-    without requiring an explicit operator selection.
-
-    Override paths:
-      - Include a different managed capability that declares
-        ``provides_capabilities: [subscription_write_path]`` to prevent injection.
-      - Remove ``subscription_config`` from the plan (non-SaaS apps are unaffected).
-      - Explicitly include ``mozaikspay`` in ``capability_packs`` before this runs
-        (already-selected packs are never re-added).
+    A subscription_config task is the deterministic signal that the generated
+    app needs a subscription assignment write path. An explicit provider value
+    always wins. Selecting entitlement_dispatch without a provider value is also
+    treated as an explicit self-managed choice. Otherwise MozaiksPay is selected
+    and its public, replaceable managed-capability descriptor is added.
     """
-    # Only inject for SaaS billing plans
     has_subscription_config = any(
         isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
         for task in build_tasks
     )
     if not has_subscription_config:
-        return capability_packs
+        return capability_packs, monetization_provider
 
-    # Skip if mozaikspay is already selected
-    existing_ids = {
-        str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+    selected_ids = {
+        _pack_id_from_descriptor(pack)
         for pack in capability_packs
         if isinstance(pack, dict)
     } - {""}
-    if "mozaikspay" in existing_ids:
-        return capability_packs
+    if monetization_provider == MOZAIKS_PAY_PROVIDER_ID and MOZAIKSPAY_PACK_ID not in selected_ids:
+        return [*capability_packs, _default_mozaikspay_descriptor(context_variables)], monetization_provider
+    if monetization_provider:
+        return capability_packs, monetization_provider
+    if SELF_MANAGED_PROVIDER_ID in selected_ids:
+        return capability_packs, SELF_MANAGED_PROVIDER_ID
+    if MOZAIKSPAY_PACK_ID in selected_ids:
+        return capability_packs, MOZAIKS_PAY_PROVIDER_ID
 
-    # Skip if another managed capability already provides the subscription write path
+    _logger.info(
+        "[app_build_plan] defaulting SaaS subscription provider to MozaiksPay; "
+        "set monetization_provider='entitlement_dispatch' to use the self-managed OSS path"
+    )
+    return [*capability_packs, _default_mozaikspay_descriptor(context_variables)], MOZAIKS_PAY_PROVIDER_ID
+
+
+def _validate_monetization_provider_selection(
+    capability_packs: list[dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
+    *,
+    monetization_provider: str | None,
+) -> None:
+    """Validate the resolved SaaS subscription-assignment provider selection."""
+    has_subscription_config = any(
+        isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
+        for task in build_tasks
+    )
+    if not has_subscription_config:
+        if monetization_provider:
+            raise ValueError(
+                "AppBuildPlan.monetization_provider is only valid when build_tasks include "
+                "task_type='subscription_config'."
+            )
+        return
+
+    existing_ids = {
+        _pack_id_from_descriptor(pack)
+        for pack in capability_packs
+        if isinstance(pack, dict)
+    } - {""}
+    has_mozaikspay = MOZAIKSPAY_PACK_ID in existing_ids
+    has_entitlement_dispatch = SELF_MANAGED_PROVIDER_ID in existing_ids
+    managed_write_path_owners: list[str] = []
     for pack in capability_packs:
         if not isinstance(pack, dict):
             continue
         if str(pack.get("capability_source") or "").strip() != "managed_capability":
             continue
         inline = pack.get("provides_capabilities")
-        if isinstance(inline, list) and "subscription_write_path" in inline:
-            return capability_packs
+        if isinstance(inline, list) and SUBSCRIPTION_WRITE_PATH_CAPABILITY in inline:
+            managed_write_path_owners.append(_pack_id_from_descriptor(pack))
 
-    # Try context-configured descriptor first (operator deployment)
-    available_packs = _context_available_pack_map(context_variables)
-    descriptor: dict[str, Any] | None = available_packs.get("mozaikspay")
-
-    # Fall back to OSS factory pack contract for vanilla OSS deployments
-    if descriptor is None:
-        try:
-            import yaml  # type: ignore[import]
-
-            from factory_app.workflows._shared.hook_utils import workflow_context_path
-
-            contract_path = workflow_context_path("mozaikspay", "contract.yaml")
-            with open(contract_path, encoding="utf-8") as _fh:
-                contract = yaml.safe_load(_fh) or {}
-            descriptor = {
-                "id": "mozaikspay",
-                "capability_source": "managed_capability",
-                "display_name": "MozaiksPay",
-                "description": "Managed subscription billing provider for generated SaaS apps.",
-            }
-            facades = contract.get("facades")
-            if facades:
-                descriptor["facades"] = facades
-        except Exception:
-            _logger.debug("[app_build_plan] mozaikspay contract.yaml not loadable; skipping default injection")
-            return capability_packs
-
-    injected: dict[str, Any] = dict(descriptor)
-    injected.setdefault("capability_pack_id", "mozaikspay")
-    injected.setdefault("capability_source", "managed_capability")
-    injected.setdefault("surface_id", "mozaikspay_managed")
-    injected.setdefault("surface_kind", "external_integration")
-    injected.setdefault("implementation_mode", "external_integration")
-    injected.setdefault("pack_type", "managed_capability")
-    injected.setdefault("label", injected.get("display_name") or "MozaiksPay")
-    injected.setdefault("summary", injected.get("description") or "Managed subscription billing capability.")
-
-    _logger.debug("[app_build_plan] injecting default mozaikspay managed capability for SaaS plan")
-    return [*capability_packs, injected]
+    if not monetization_provider:
+        raise ValueError(
+            "AppBuildPlan.monetization_provider is required for subscription_config builds. "
+            "Choose 'mozaiks_pay' for the managed MozaiksPay connector or "
+            "'entitlement_dispatch' for the self-managed OSS assignment path."
+        )
+    if has_mozaikspay and has_entitlement_dispatch:
+        raise ValueError(
+            "MozaiksPay and entitlement_dispatch must not both be selected; "
+            "only one subscription assignment write path may own config/subscriptions.yaml."
+        )
+    if len(set(managed_write_path_owners)) > 1:
+        raise ValueError(
+            "Multiple managed capability packs provide subscription_write_path: "
+            f"{sorted(set(managed_write_path_owners))}. Select exactly one subscription assignment owner."
+        )
+    if monetization_provider == MOZAIKS_PAY_PROVIDER_ID:
+        if not has_mozaikspay:
+            raise ValueError(
+                "AppBuildPlan.monetization_provider='mozaiks_pay' requires the "
+                "mozaikspay managed capability pack to be explicitly selected."
+            )
+        if has_entitlement_dispatch:
+            raise ValueError(
+                "AppBuildPlan.monetization_provider='mozaiks_pay' cannot include entitlement_dispatch."
+            )
+        return
+    if monetization_provider == SELF_MANAGED_PROVIDER_ID:
+        if has_mozaikspay or managed_write_path_owners:
+            raise ValueError(
+                "AppBuildPlan.monetization_provider='entitlement_dispatch' cannot include "
+                "MozaiksPay or another managed subscription_write_path owner."
+            )
+        if not has_entitlement_dispatch:
+            raise ValueError(
+                "AppBuildPlan.monetization_provider='entitlement_dispatch' requires the "
+                "entitlement_dispatch pack to be explicitly selected."
+            )
+        return
 
 
 def _pack_facades(descriptor: dict[str, Any]) -> list[dict[str, Any]]:
@@ -718,6 +875,28 @@ def _apply_selected_pack_files(
     if not available_packs:
         return capability_packs, pages, build_tasks
 
+    def _merge_missing_page_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key in (
+            "page_type",
+            "page_type_hint",
+            "ui_layout",
+            "shell_mode",
+            "shell_mode_hint",
+            "ui_surface",
+            "design_intent",
+            "primary_entities",
+            "primary_actions",
+        ):
+            if key not in source:
+                continue
+            current = target.get(key)
+            if current not in (None, "", [], {}):
+                continue
+            value = source.get(key)
+            if value in (None, "", [], {}):
+                continue
+            target[key] = value
+
     selected_managed_capability_ids = {
         _pack_id_from_descriptor(pack)
         for pack in capability_packs
@@ -766,7 +945,22 @@ def _apply_selected_pack_files(
             for page in _normalize_object_list(facade.get("pages")):
                 route = str(page.get("route") or "").strip()
                 name = str(page.get("name") or page.get("page_id") or "").strip().lower()
-                if (route and route in existing_page_routes) or (name and name in existing_page_names):
+                matched_page: dict[str, Any] | None = None
+                if route and route in existing_page_routes:
+                    for existing_page in result_pages:
+                        if isinstance(existing_page, dict) and str(existing_page.get("route") or "").strip() == route:
+                            matched_page = existing_page
+                            break
+                elif name and name in existing_page_names:
+                    for existing_page in result_pages:
+                        if not isinstance(existing_page, dict):
+                            continue
+                        existing_name = str(existing_page.get("name") or existing_page.get("page_id") or "").strip().lower()
+                        if existing_name == name:
+                            matched_page = existing_page
+                            break
+                if matched_page is not None:
+                    _merge_missing_page_metadata(matched_page, page)
                     continue
                 result_pages.append(page)
                 if route:
@@ -1694,6 +1888,11 @@ def app_build_plan(
     profile_layout = str(AppBuildPlan.get("profile_layout") or "").strip() or None
     if profile_layout and profile_layout not in _valid_profile_layouts:
         profile_layout = None
+    readiness_profile = _infer_readiness_profile(AppBuildPlan, context_variables=context_variables)
+    _raw_monetization_provider = AppBuildPlan.get("monetization_provider") or (
+        (AppBuildPlan.get("monetization_plan") or {}).get("monetization_provider")
+    )
+    monetization_provider = normalize_monetization_provider(_raw_monetization_provider)
     capability_packs = _ensure_context_selected_capability_packs(
         _normalize_object_list(AppBuildPlan.get("capability_packs")),
         context_variables=context_variables,
@@ -1710,6 +1909,16 @@ def app_build_plan(
         ],
         key=_task_sort_key,
     ))
+    capability_packs, monetization_provider = _apply_default_monetization_provider(
+        capability_packs,
+        build_tasks,
+        monetization_provider=monetization_provider,
+        context_variables=context_variables,
+    )
+    capability_packs = _normalize_capability_pack_sources(
+        capability_packs,
+        context_variables=context_variables,
+    )
     inferred_managed_capability_ids = _infer_managed_capability_ids_from_adapter_tasks(
         build_tasks,
         context_variables=context_variables,
@@ -1728,11 +1937,6 @@ def app_build_plan(
             build_tasks,
             managed_capability_ids=inferred_managed_capability_ids,
         )
-    capability_packs = _inject_default_mozaikspay_if_applicable(
-        capability_packs,
-        build_tasks,
-        context_variables=context_variables,
-    )
     capability_packs = _normalize_capability_pack_sources(
         capability_packs,
         context_variables=context_variables,
@@ -1742,6 +1946,7 @@ def app_build_plan(
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
     carry_forward_decisions = _normalize_object_list(AppBuildPlan.get("carry_forward_decisions"))
+    demo_fixture_sets = _normalize_object_list(AppBuildPlan.get("demo_fixture_sets"))
 
     managed_capability_ids = frozenset(
         _pack_id_from_descriptor(p)
@@ -1785,6 +1990,11 @@ def app_build_plan(
         pages,
         build_tasks,
         managed_capability_ids=managed_capability_ids,
+    )
+    _validate_monetization_provider_selection(
+        capability_packs,
+        build_tasks,
+        monetization_provider=monetization_provider,
     )
 
     task_ids: frozenset[str] = frozenset(
@@ -1830,6 +2040,8 @@ def app_build_plan(
         "theme_preferences": theme_preferences,
         "brand_intent": brand_intent if isinstance(brand_intent, dict) else None,
         "profile_layout": profile_layout,
+        "readiness_profile": readiness_profile,
+        "monetization_provider": monetization_provider,
         "capability_packs": capability_packs,
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
@@ -1838,6 +2050,7 @@ def app_build_plan(
         "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,
         "generation_order": generation_order,
         "carry_forward_decisions": carry_forward_decisions,
+        "demo_fixture_sets": demo_fixture_sets,
     }
 
     if context_variables and hasattr(context_variables, "set"):

@@ -26,7 +26,7 @@ export function BrandProvider({ children }) {
         setBrand(b);
       })
       .catch((e) => {
-        console.error('Failed to load brand:', e);
+        console.error('❌ Failed to load brand:', e);
         setError(e);
       })
       .finally(() => setLoading(false));

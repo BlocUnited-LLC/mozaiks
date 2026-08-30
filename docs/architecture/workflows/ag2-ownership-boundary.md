@@ -57,6 +57,39 @@ schemas. Custom logic is not appropriate when it is a generic replacement for
 AG2 Hub, AgentClient, network adapters, task streams, task observation,
 delegation engines, or agent scheduling.
 
+## Sandbox Execution Boundary
+
+AG2 owns agent-level code and shell execution: `SandboxCodeTool` /
+`SandboxShellTool` over `CodeEnvironment` backends (local, docker, daytona,
+tenki) — the model writes a snippet or command, it runs, results return.
+Mozaiks agents that need shell access declare `sandbox_shell: true` and get
+the AG2 tool; do not build a Mozaiks snippet executor.
+
+Mozaiks owns application-preview and build-validation sandboxes:
+`SandboxPort` and its e2b/docker adapters boot a full generated app —
+write the bundle, install, run the build, start a dev server, expose a
+preview URL, manage session lifecycle and cost. That is application-runtime
+behavior, not agent tooling, and AG2's execution surface deliberately does
+not provide it (no long-lived servers, no preview URLs).
+
+Rules:
+
+- Do not route app preview/validation through AG2 execution tools, and do
+  not reimplement snippet execution behind `SandboxPort`.
+- Every provider sandbox is created with identity metadata (app/chat or
+  artifact id, purpose) and a provider-side kill deadline, and the session
+  id that produced a validation outcome is persisted with the outcome. An
+  orphaned sandbox must be attributable and self-terminating.
+- Sandboxes are ephemeral workspaces, never truth stores — committed output
+  must persist into artifact versions before the session dies (see the
+  refinement engine's E2B contract).
+- A validation strategy label on a build record must name an execution path
+  that actually ran.
+
+Watchpoint: if AG2 `CodeEnvironment` grows long-lived sessions with exposed
+ports, preview URLs, and per-session budgets, shrink `SandboxPort` adapters
+to request/result conversion (see ag2-update-watchpoints.md).
+
 ## Missing AG2 Capability Process
 
 If AG2 does not provide a required capability:
@@ -105,6 +138,44 @@ launching deterministically.
 
 This keeps AG2 responsible for agent execution mechanics while keeping Mozaiks
 responsible for app-specific artifact and lifecycle policy.
+
+## AG2 KnowledgeStore Injection Seam
+
+AG2's `KnowledgeStore` protocol (`ag2.knowledge.KnowledgeStore`) is the
+virtual path-based store for all agent workflow memory. AG2 owns this
+abstraction; Mozaiks must not create a parallel knowledge database layer.
+
+The `AG2NetworkRunnerRequest.knowledge_store` field is the narrow injection
+point. When `None` (the default), `AG2NetworkRunner` creates a fresh
+`MemoryKnowledgeStore()` per Hub — the safe isolated default for local
+development and test runs. An operator or hosted deployment may supply any
+AG2-compatible implementation (Memory, Sqlite, Disk, Redis, Locked, or a
+custom duck-typed store) without modifying OSS code.
+
+**Lifecycle contract:**
+- One Hub is opened per workflow run (or per live session kept alive for
+  paused runs).
+- `Hub.close()` does NOT close the store; store lifetime is owned by the
+  caller that constructs it.
+- Two runs that receive distinct store instances share no AG2 workflow
+  memory. A single shared store (e.g. Redis with a namespace prefix) may be
+  passed intentionally across runs — namespace/tenant isolation is the
+  operator's responsibility.
+
+**Security contract:**
+- An injected KnowledgeStore is trusted operator runtime configuration. It
+  can observe AG2 workflow/network memory for every run that uses it.
+- Production credentials must not flow into generated app bundles through
+  this seam.
+- This seam does not grant Mozaiks tenant or platform authority.
+
+**Threading path:**
+```
+run_workflow_orchestration(knowledge_store=...)
+  → _run_ag2_network_phase(knowledge_store=...)
+    → AG2NetworkRunnerRequest(knowledge_store=...)
+      → Hub.open(request.knowledge_store or MemoryKnowledgeStore(), ...)
+```
 
 ## Review Checklist
 

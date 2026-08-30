@@ -308,7 +308,7 @@ class SessionRouter:
         # refinement requests — even after a normal (non-revision) workflow run.
         try:
             from mozaiksai.core.artifacts.store import get_artifact_store
-            current_refs = await get_artifact_store().get_current_artifact_version_refs(app_id=app)
+            current_refs = await get_artifact_store().get_current_build_record_refs(app_id=app)
             if current_refs:
                 state.artifact_version_refs.update(current_refs)
         except Exception as exc:
@@ -466,6 +466,29 @@ class SessionRouter:
             }
 
         if requested_chat:
+            latest_requested_workflow_doc = await self._find_latest_chat_doc(
+                coll=coll,
+                app_id=app,
+                user_id=user,
+                workflow_id=requested_workflow or state.current_workflow_id,
+                in_progress_only=True,
+            )
+            if latest_requested_workflow_doc is not None:
+                self._apply_chat_doc_to_state(
+                    state,
+                    latest_requested_workflow_doc,
+                    requested_workflow=requested_workflow,
+                )
+                await self._store.upsert(state)
+                return {
+                    "chat_id": str(latest_requested_workflow_doc.get("_id")),
+                    "workflow_id": str(latest_requested_workflow_doc.get("workflow_name") or requested_workflow or ""),
+                    "found": True,
+                    "resolved_from": "latest_chat_after_requested_chat_missing",
+                    "requested_chat_id": requested_chat,
+                    "session_state": self._serialize_state(state),
+                }
+
             if requested_workflow:
                 state.current_workflow_id = requested_workflow
             state.current_chat_id = requested_chat

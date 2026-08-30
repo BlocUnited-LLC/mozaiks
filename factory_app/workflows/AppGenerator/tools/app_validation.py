@@ -12,6 +12,7 @@ This tool can:
 import ast
 import asyncio
 import builtins
+import hashlib
 import json
 import logging
 import os
@@ -956,8 +957,15 @@ async def _run_sandbox_validation(
     commands: list[str],
     start_dev_server: bool,
     timeout_seconds: int,
+    session_metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Run build validation through a SandboxPort adapter (e2b or docker)."""
+    """Run build validation through a SandboxPort adapter (e2b or docker).
+
+    The session is tagged with app/chat identity metadata so orphaned
+    provider sandboxes can be reconciled to their app, and the session
+    identity is recorded on the result so the run that produced a validation
+    outcome is durable evidence rather than an ephemeral local variable.
+    """
     from mozaiksai.core.adapters import get_sandbox_adapter
 
     try:
@@ -972,8 +980,13 @@ async def _run_sandbox_validation(
     result = _base_result(strategy=strategy, status="passed")
     session_id: str | None = None
     try:
-        session = await adapter.create_session(timeout_seconds=timeout_seconds)
+        session = await adapter.create_session(
+            timeout_seconds=timeout_seconds,
+            metadata=session_metadata or {"purpose": "app_validation"},
+        )
         session_id = session.session_id
+        result["sandbox_session_id"] = session_id
+        result["sandbox_provider"] = session.provider
 
         await adapter.write_files(session_id=session_id, files=resolved_files)
 
@@ -1876,6 +1889,19 @@ def _select_bundle_repair_target(classified: dict[str, list[str]]) -> str | None
     return None
 
 
+def _repair_failure_fingerprint(*, repair_kind: str, evidence: Any) -> str:
+    """Return a stable digest for deterministic repair no-progress checks."""
+
+    normalized = json.dumps(
+        {"repair_kind": repair_kind, "evidence": evidence},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _bundle_repair_request(
     *,
     target: str,
@@ -1915,6 +1941,9 @@ def _prepare_bundle_repair(
         _context_get(context_variables, "bundle_repair_attempt_count", 0),
         0,
     )
+    previous_fingerprint = str(
+        _context_get(context_variables, "bundle_repair_failure_fingerprint", "") or ""
+    ).strip()
     max_attempts = max(0, _as_int(max_attempts, 2))
 
     if bundle_scan_result.get("passed"):
@@ -1929,12 +1958,16 @@ def _prepare_bundle_repair(
             "errors": [],
             "target_errors": [],
             "deferred_errors": [],
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "bundle_repair_status", "passed")
         _context_set(context_variables, "bundle_repair_target", None)
         _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
         _context_set(context_variables, "bundle_repair_request", None)
         _context_set(context_variables, "bundle_repair_errors", [])
+        _context_set(context_variables, "bundle_repair_failure_fingerprint", None)
+        _context_set(context_variables, "bundle_repair_no_progress", False)
         _context_set(context_variables, "bundle_repair_result", result)
         return result
 
@@ -1954,12 +1987,16 @@ def _prepare_bundle_repair(
             "errors": errors,
             "target_errors": [],
             "deferred_errors": errors,
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "bundle_repair_status", status)
         _context_set(context_variables, "bundle_repair_target", None)
         _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
         _context_set(context_variables, "bundle_repair_request", None)
         _context_set(context_variables, "bundle_repair_errors", errors)
+        _context_set(context_variables, "bundle_repair_failure_fingerprint", None)
+        _context_set(context_variables, "bundle_repair_no_progress", False)
         _context_set(context_variables, "bundle_repair_result", result)
         return result
 
@@ -1974,8 +2011,20 @@ def _prepare_bundle_repair(
         target_errors=target_errors,
         deferred_errors=deferred_errors,
     )
+    failure_fingerprint = _repair_failure_fingerprint(
+        repair_kind=f"bundle:{target}",
+        evidence={
+            "target_errors": sorted(target_errors),
+            "deferred_errors": sorted(deferred_errors),
+        },
+    )
+    no_progress = bool(
+        prior_attempts > 0
+        and previous_fingerprint
+        and previous_fingerprint == failure_fingerprint
+    )
 
-    if prior_attempts >= max_attempts:
+    if no_progress or prior_attempts >= max_attempts:
         status = "blocked"
         attempt = prior_attempts
         repairable = False
@@ -1997,6 +2046,8 @@ def _prepare_bundle_repair(
         "errors": errors,
         "target_errors": target_errors,
         "deferred_errors": deferred_errors,
+        "failure_fingerprint": failure_fingerprint,
+        "no_progress": no_progress,
     }
     _context_set(context_variables, "bundle_repair_status", status)
     _context_set(context_variables, "bundle_repair_target", repair_target)
@@ -2004,6 +2055,8 @@ def _prepare_bundle_repair(
     _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
     _context_set(context_variables, "bundle_repair_request", repair_request)
     _context_set(context_variables, "bundle_repair_errors", errors)
+    _context_set(context_variables, "bundle_repair_failure_fingerprint", failure_fingerprint)
+    _context_set(context_variables, "bundle_repair_no_progress", no_progress)
     _context_set(context_variables, "bundle_repair_result", result)
     return result
 
@@ -2027,9 +2080,13 @@ def _prepare_workflow_integration_repair(
             "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
             "max_attempts": max_attempts,
             "repair_request": None,
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "workflow_integration_repair_status", "passed")
         _context_set(context_variables, "workflow_integration_repair_request", None)
+        _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", None)
+        _context_set(context_variables, "workflow_integration_repair_no_progress", False)
         _context_set(context_variables, "workflow_integration_repair_result", result)
         return result
     if not failed_tests:
@@ -2040,16 +2097,35 @@ def _prepare_workflow_integration_repair(
             "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
             "max_attempts": max_attempts,
             "repair_request": None,
+            "failure_fingerprint": None,
+            "no_progress": False,
         }
         _context_set(context_variables, "workflow_integration_repair_status", "not_applicable")
+        _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", None)
+        _context_set(context_variables, "workflow_integration_repair_no_progress", False)
         _context_set(context_variables, "workflow_integration_repair_result", result)
         return result
 
     prior_attempts = _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0)
+    previous_fingerprint = str(
+        _context_get(context_variables, "workflow_integration_repair_failure_fingerprint", "") or ""
+    ).strip()
     max_attempts = max(0, _as_int(max_attempts, 2))
     repair_request = _workflow_integration_repair_request(failed_tests)
+    failure_fingerprint = _repair_failure_fingerprint(
+        repair_kind="workflow_integration",
+        evidence=sorted(
+            failed_tests,
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        ),
+    )
+    no_progress = bool(
+        prior_attempts > 0
+        and previous_fingerprint
+        and previous_fingerprint == failure_fingerprint
+    )
 
-    if prior_attempts >= max_attempts:
+    if no_progress or prior_attempts >= max_attempts:
         status = "blocked"
         attempt = prior_attempts
         repairable = False
@@ -2066,12 +2142,16 @@ def _prepare_workflow_integration_repair(
         "max_attempts": max_attempts,
         "repair_request": repair_request,
         "failed_tests": failed_tests,
+        "failure_fingerprint": failure_fingerprint,
+        "no_progress": no_progress,
     }
     _context_set(context_variables, "workflow_integration_repair_status", status)
     _context_set(context_variables, "workflow_integration_repair_count", attempt)
     _context_set(context_variables, "workflow_integration_repair_max_attempts", max_attempts)
     _context_set(context_variables, "workflow_integration_repair_request", repair_request)
     _context_set(context_variables, "workflow_integration_repair_failed_tests", failed_tests)
+    _context_set(context_variables, "workflow_integration_repair_failure_fingerprint", failure_fingerprint)
+    _context_set(context_variables, "workflow_integration_repair_no_progress", no_progress)
     _context_set(context_variables, "workflow_integration_repair_result", result)
     return result
 
@@ -2116,6 +2196,10 @@ async def run_app_bundle_acceptance_gate(
     if generated_files:
         _context_set(context_variables, "generated_files", generated_files)
 
+    from mozaiksai.core.validation.functional_generated_app import (
+        scan_functional_generated_app,
+    )
+
     from .generated_bundle_scanner import scan_generated_bundle
     from .validate_wiring import validate_wiring
 
@@ -2159,6 +2243,64 @@ async def run_app_bundle_acceptance_gate(
     wiring_result = await validate_wiring(context_variables=context_variables)
     module_implementation_result = validate_module_implementation_contract(generated_files)
     runtime_quality_result = _runtime_quality_result(generated_files)
+    functional_diagnostics = scan_functional_generated_app(
+        generated_files,
+        capability_packs=selected_capability_packs,
+    )
+    functional_errors = [item for item in functional_diagnostics if item.severity == "error"]
+    functional_result = {
+        "contract_version": "1.0",
+        "passed": not functional_errors,
+        "checks": [
+            _check_result(
+                check_id="generated_app_functional_completeness",
+                passed=not functional_errors,
+                message=(
+                    "Generated app routes, module references, capability facades, and expected handlers are functionally coherent."
+                    if not functional_errors
+                    else f"{len(functional_errors)} generated app functional completeness issue(s) found."
+                ),
+                details={
+                    "diagnostic_count": len(functional_diagnostics),
+                    "error_count": len(functional_errors),
+                    "diagnostics": [
+                        {
+                            "code": item.code,
+                            "message": item.message,
+                            "path": item.path,
+                            "severity": item.severity,
+                        }
+                        for item in functional_diagnostics
+                    ],
+                },
+            )
+        ],
+        "failed_tests": [
+            {
+                "test": item.code,
+                "path": item.path,
+                "error": item.message,
+                "fix_suggestion": (
+                    "Regenerate or repair the canonical app artifact so declared "
+                    "routes, module actions, workflow/tool references, capability "
+                    "facades, and implementation files resolve before export."
+                ),
+            }
+            for item in functional_errors
+        ],
+        "warnings": [
+            item.message for item in functional_diagnostics if item.severity == "warning"
+        ],
+        "diagnostics": [
+            {
+                "code": item.code,
+                "message": item.message,
+                "path": item.path,
+                "severity": item.severity,
+            }
+            for item in functional_diagnostics
+        ],
+    }
     workflow_integration_result = validate_workflow_integration_contract(
         generated_files,
         context_variables,
@@ -2171,6 +2313,7 @@ async def run_app_bundle_acceptance_gate(
         "module_wiring": wiring_result,
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
+        "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
     }
@@ -2214,6 +2357,7 @@ async def run_app_bundle_acceptance_gate(
             _result_check(wiring_result, default_id="module_wiring", default_message="Module wiring check completed."),
             _result_check(module_implementation_result, default_id="module_implementation", default_message="Module implementation check completed."),
             _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
+            _result_check(functional_result, default_id="functional_completeness", default_message="Functional completeness check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
             _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
         ],
@@ -2245,6 +2389,8 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "module_runtime_quality_status", "passed" if runtime_quality_result["passed"] else "blocked")
     _context_set(context_variables, "module_runtime_quality_warnings", runtime_quality_result.get("warnings") or [])
     _context_set(context_variables, "module_runtime_quality_result", runtime_quality_result)
+    _context_set(context_variables, "generated_app_functional_completeness_passed", functional_result.get("passed"))
+    _context_set(context_variables, "generated_app_functional_completeness_result", functional_result)
     _context_set(context_variables, "workflow_integration_validation_passed", workflow_integration_result.get("passed"))
     _context_set(context_variables, "workflow_integration_validation_result", workflow_integration_result)
     _context_set(context_variables, "app_runtime_load_passed", app_runtime_load_result.get("passed"))
@@ -2348,6 +2494,11 @@ async def validate_app_build(
         commands=list(commands),
         start_dev_server=bool(start_dev_server),
         timeout_seconds=timeout_seconds,
+        session_metadata={
+            "purpose": "app_validation",
+            **({"app_id": str(app_id)} if app_id else {}),
+            **({"chat_id": str(chat_id)} if chat_id else {}),
+        },
     )
     result["strategy_reason"] = strategy_reason
     _persist_validation_context(context_variables=context_variables, result=result)
@@ -2410,6 +2561,7 @@ async def validate_app_bundle_from_request(
     wiring_result = acceptance_result["module_wiring"]
     module_implementation_result = acceptance_result["module_implementation"]
     runtime_quality_result = acceptance_result["module_runtime_quality"]
+    functional_result = acceptance_result["functional_completeness"]
     workflow_integration_result = acceptance_result["workflow_integration"]
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     workflow_integration_repair = acceptance_result.get("workflow_integration_repair")
@@ -2423,6 +2575,7 @@ async def validate_app_bundle_from_request(
         "module_wiring": wiring_result,
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
+        "functional_completeness": functional_result,
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,
@@ -2441,6 +2594,7 @@ async def validate_app_bundle_from_request(
         "wiring_validation_result": wiring_result,
         "module_implementation_validation_result": module_implementation_result,
         "module_runtime_quality_result": runtime_quality_result,
+        "generated_app_functional_completeness_result": functional_result,
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,

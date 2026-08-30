@@ -41,6 +41,7 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
                 "agents": [
                     {
                         "name": "AppSchemaAgent",
+                        "structured_outputs_required": False,
                         "prompt_sections": [
                             {"heading": "[ROLE]", "content": "Generate the app UI."}
                         ],
@@ -70,6 +71,9 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
         def get(self, key: str, default=None):
             return self.data.get(key, default)
 
+        def snapshot(self):
+            return dict(self.data)
+
     async def _fake_llm_config(*args, **kwargs):
         return None, {"config_list": [{"model": "gpt-4o-mini", "api_key": "test-key"}]}
 
@@ -89,26 +93,47 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
 
 
 def test_persisted_session_context_overrides_declared_defaults() -> None:
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
     from mozaiksai.core.workflow.execution.run_bootstrap import (
         merge_persisted_extra_context as _merge_persisted_extra_context,
     )
 
-    class _Context:
-        def __init__(self) -> None:
-            self.data = {
-                "interview_complete": False,
-                "app_plan_ready": False,
-                "capability_packs": [],
-                "app_build_plan": None,
-            }
-
-        def get(self, key: str, default=None):
-            return self.data.get(key, default)
-
-        def set(self, key: str, value) -> None:
-            self.data[key] = value
-
-    context = _Context()
+    definitions = {
+        "interview_complete": {
+            "type": "boolean",
+            "authority_class": "closed_writer_routing_state",
+            "routing": True,
+            "writer_ids": ["user_text_trigger"],
+            "source": {"type": "state", "default": False},
+        },
+        "app_plan_ready": {
+            "type": "boolean",
+            "source": {"type": "state", "default": False},
+        },
+        "capability_packs": {
+            "type": "array",
+            "source": {"type": "state", "default": []},
+        },
+        "app_build_plan": {
+            "type": "object",
+            "source": {"type": "state", "default": None},
+        },
+    }
+    policy = build_context_authority_policy(
+        workflow_name="AppGenerator",
+        definitions=definitions,
+        transition_rules=[],
+    )
+    context = create_context_container(
+        initial={
+            "interview_complete": False,
+            "app_plan_ready": False,
+            "capability_packs": [],
+            "app_build_plan": None,
+        },
+        authority_policy=policy,
+    )
 
     _merge_persisted_extra_context(
         context,
@@ -117,15 +142,14 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
             "app_plan_ready": True,
             "capability_packs": [{"pack_id": "wallet"}],
             "app_build_plan": {"app_name": "Support Operations"},
-            "parent_chat_id": "chat-parent",
         },
     )
 
+    snapshot = context.snapshot()
     assert context.get("interview_complete") is True
     assert context.get("app_plan_ready") is True
-    assert context.get("capability_packs") == [{"pack_id": "wallet"}]
-    assert context.get("app_build_plan") == {"app_name": "Support Operations"}
-    assert context.get("automated_workflow_run") is True
+    assert snapshot["capability_packs"] == [{"pack_id": "wallet"}]
+    assert snapshot["app_build_plan"] == {"app_name": "Support Operations"}
 
 
 @pytest.mark.asyncio

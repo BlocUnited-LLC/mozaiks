@@ -27,6 +27,7 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, M
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
+from tests.module_authority_test_helpers import enforce_authority
 from tests.test_generated_saas_subscription_runtime_acceptance import (
     _Collection,
     _Database,
@@ -74,7 +75,12 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
             {
                 "context_id": "wallet",
                 "assets": [{"path": "templates/", "kind": "templates"}],
-                "pack": {"id": "wallet", "status": "active", "capability_source": "managed_capability"},
+                "pack": {
+                    "id": "wallet",
+                    "version": "0.1.0",
+                    "status": "active",
+                    "capability_source": "managed_capability",
+                },
             },
             sort_keys=False,
         ),
@@ -126,7 +132,13 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
     }
 
 
-def _base_plan(*, pages: list[dict[str, Any]], capability_packs: list[dict[str, Any]], build_tasks: list[dict[str, Any]]) -> dict[str, Any]:
+def _base_plan(
+    *,
+    pages: list[dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
+    monetization_provider: str | None = None,
+) -> dict[str, Any]:
     return {
         "agent_message": "Plan generated app artifacts.",
         "app_kind": "saas",
@@ -138,6 +150,7 @@ def _base_plan(*, pages: list[dict[str, Any]], capability_packs: list[dict[str, 
         "frontend_scope": [],
         "theme_preferences": None,
         "brand_intent": None,
+        "monetization_provider": monetization_provider,
         "capability_packs": capability_packs,
         "external_integrations": [],
         "agent_backend_required": False,
@@ -156,10 +169,9 @@ def _wallet_replay_plan() -> dict[str, Any]:
                 "sections_hint": [
                     {
                         "section_id_hint": "wallet-summary",
-                        "primitive": "SummaryStrip",
+                        "primitive": "ResourceTable",
                         "config_hint": {
                             "api_endpoint": "/api/modules/wallet/get_wallet_summary",
-                            "method": "POST",
                         },
                     }
                 ],
@@ -252,7 +264,16 @@ def _wallet_task_outputs() -> dict[str, Any]:
                 },
                 {
                     "filename": "ui/pages/wallet.yaml",
-                    "content": "sections:\n  - config:\n      api_endpoint: /api/modules/wallet/get_wallet_summary\n",
+                    "content": (
+                        "sections:\n"
+                        "  - id: wallet-summary\n"
+                        "    primitive: ResourceTable\n"
+                        "    config:\n"
+                        "      columns:\n"
+                        "        - key: id\n"
+                        "          label: ID\n"
+                        "      api_endpoint: /api/modules/wallet_dashboard/get_wallet_summary\n"
+                    ),
                 },
             ]
         },
@@ -331,6 +352,7 @@ def _subscriptions_yaml() -> str:
 
 def _mozaikspay_replay_plan() -> dict[str, Any]:
     return _base_plan(
+        monetization_provider="mozaiks_pay",
         pages=[
             {
                 "name": "Billing",
@@ -354,7 +376,7 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
                 "sections_hint": [
                     {
                         "section_id_hint": "usage-status",
-                        "primitive": "DataPanel",
+                        "primitive": "SummaryStrip",
                         "config_hint": {
                             "api_endpoint": "/api/modules/mozaikspay/get_usage_status",
                             "method": "POST",
@@ -537,11 +559,41 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
             "code_files": [
                 {
                     "filename": "ui/pages/billing.yaml",
-                    "content": "sections:\n  - config:\n      api_endpoint: /api/modules/mozaikspay/get_subscription_status\n",
+                    "content": (
+                        "schema_version: mozaiks.app_page.v1\n"
+                        "name: Billing\n"
+                        "route: /billing\n"
+                        "title: Billing\n"
+                        "page_type: analytics_dashboard\n"
+                        "layout: full-width\n"
+                        "shell_mode: workspace\n"
+                        "sections:\n"
+                        "  - id: billing-status\n"
+                        "    primitive: SummaryStrip\n"
+                        "    config:\n"
+                        "      items:\n"
+                        "        - label: Status\n"
+                        "          value_key: status\n"
+                    ),
                 },
                 {
                     "filename": "ui/pages/usage.yaml",
-                    "content": "sections:\n  - config:\n      api_endpoint: /api/modules/mozaikspay/get_usage_status\n",
+                    "content": (
+                        "schema_version: mozaiks.app_page.v1\n"
+                        "name: Usage\n"
+                        "route: /usage\n"
+                        "title: Usage\n"
+                        "page_type: analytics_dashboard\n"
+                        "layout: full-width\n"
+                        "shell_mode: workspace\n"
+                        "sections:\n"
+                        "  - id: usage-status\n"
+                        "    primitive: SummaryStrip\n"
+                        "    config:\n"
+                        "      items:\n"
+                        "        - label: Usage\n"
+                        "          value_key: runtime_ai_usage\n"
+                    ),
                 },
             ]
         },
@@ -611,6 +663,8 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
 
     assert adapter_task["capability_pack_id"] == "mozaikspay"
     assert facade_task["capability_pack_id"] == "billing_portal"
+    assert cached_plan["pages"][0]["page_type_hint"] == "analytics_dashboard"
+    assert cached_plan["pages"][1]["page_type_hint"] == "analytics_dashboard"
     assert cached_plan["pages"][0]["sections_hint"][0]["config_hint"]["api_endpoint"] == (
         "/api/modules/billing_portal/get_subscription_status"
     )
@@ -650,6 +704,8 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert "/api/modules/billing_portal/list_plans" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/billing_portal/open_billing_portal" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/mozaikspay/" not in files["ui/pages/billing.yaml"]
+    assert "page_type: analytics_dashboard" in files["ui/pages/billing.yaml"]
+    assert "page_type: analytics_dashboard" in files["ui/pages/usage.yaml"]
     for name in (
         "MOZAIKS_APP_URL",
         "MOZAIKSPAY_API_BASE",
@@ -703,6 +759,13 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         "mozaiksai.core.runtime.composition.module_executor.get_audit_logger",
         lambda: _NoopAuditLogger(),
     )
+    # Freeze wallet "now" to July 2026 so ensure_plan_allowances uses the same
+    # monthly period key (2026-07) as the fulfillment command's occurred_at,
+    # preventing a spurious second allocation when the test runs in a later month.
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet._now",
+        lambda: datetime(2026, 7, 15, tzinfo=UTC),
+    )
     for module in loaded.modules:
         executor.register(
             module.name,
@@ -720,7 +783,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             params={"topic": "retention"},
             app_id="mozaikspay-replay",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert denied.success is False
@@ -733,7 +796,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             params={},
             app_id="mozaikspay-replay",
             user_id="user_1",
-            granted_permissions=["billing_portal.read"],
+            authority=enforce_authority("billing_portal.read"),
         )
     )
     assert plan_catalog.success is True
@@ -770,7 +833,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             params={"topic": "retention"},
             app_id="mozaikspay-replay",
             user_id="user_1",
-            granted_permissions=[],
+            authority=enforce_authority(),
         )
     )
     assert granted.success is True

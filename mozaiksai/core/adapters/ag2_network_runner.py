@@ -8,14 +8,16 @@ validated declarations and already constructed AG2 agents.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from ag2.knowledge import MemoryKnowledgeStore
+from ag2.knowledge import KnowledgeStore, MemoryKnowledgeStore
 from ag2.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
@@ -36,10 +38,103 @@ from ag2.network.client.handlers import default_handler
 
 from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.context.authority import (
+    AGENT_TEXT_WRITER,
+    CONTEXT_BRIDGE_WRITER,
+    DETERMINISTIC_TOOL_WRITER,
+    LIVE_USER_CONTEXT_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
+    ContextAuthorityPolicy,
+)
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
 _INITIATOR_NAME = "mozaiks_user"
+
+
+def _json_safe_key(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, Mapping):
+        return {
+            _json_safe_key(key): _json_safe(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list | tuple | set):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return _json_safe(value.model_dump(mode="json"))
+        except TypeError:
+            return _json_safe(value.model_dump())
+    return str(value)
+
+
+def _json_safe_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    serialized = _json_safe(dict(value or {}))
+    return serialized if isinstance(serialized, dict) else {}
+
+
+def _resolve_declared_writer(
+    key: str,
+    *,
+    base_writer: str,
+    elevated_writer: str,
+    context_authority_policy: ContextAuthorityPolicy | None,
+) -> str:
+    """Label a write with the highest-fidelity writer the declaration
+    authorizes for this mechanism. The policy stays the single authority —
+    this only picks between the mechanism's base writer and its declared
+    deterministic form (e.g. a bridge write to a variable whose declaration
+    authorizes deterministic tools, or an agent-text derive for a variable
+    declared with an exact-match sentinel trigger)."""
+    if context_authority_policy is None:
+        return base_writer
+    authority = context_authority_policy.variables.get(key)
+    if authority is not None and elevated_writer in authority.writer_ids:
+        return elevated_writer
+    return base_writer
+
+
+def _authorized_context_updates(
+    updates: Mapping[str, Any] | None,
+    *,
+    writer_id: str,
+    context_authority_policy: ContextAuthorityPolicy | None,
+    elevated_writer_id: str | None = None,
+) -> dict[str, Any]:
+    if not updates:
+        return {}
+    safe: dict[str, Any] = {}
+    for key, value in updates.items():
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            continue
+        effective_writer = writer_id
+        if elevated_writer_id is not None:
+            effective_writer = _resolve_declared_writer(
+                clean_key,
+                base_writer=writer_id,
+                elevated_writer=elevated_writer_id,
+                context_authority_policy=context_authority_policy,
+            )
+        if context_authority_policy is not None:
+            context_authority_policy.require_can_write(clean_key, writer_id=effective_writer, operation="set")  # type: ignore[arg-type]
+        safe[clean_key] = value
+    return safe
 
 
 @dataclass(slots=True)
@@ -58,6 +153,35 @@ class AG2NetworkRunnerRequest:
     max_turns: int | None = None
     close_timeout_seconds: float = 120.0
     attach_network_plugin: bool = True
+    agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
+    context_authority_policy: ContextAuthorityPolicy | None = None
+    # ---------------------------------------------------------------------------
+    # AG2 KnowledgeStore injection seam
+    # ---------------------------------------------------------------------------
+    # Accepts an AG2-native KnowledgeStore instance (ag2.knowledge.KnowledgeStore
+    # protocol). When None the runner creates a fresh MemoryKnowledgeStore per
+    # Hub — the safe default for local development and test isolation.
+    #
+    # Lifecycle notes:
+    #   - One Hub is created per workflow run (or per live session, kept alive for
+    #     paused runs). Hub.close() does NOT close the store; store lifetime is
+    #     owned by the caller that constructs it.
+    #   - A durable operator-owned store (e.g. SqliteKnowledgeStore or
+    #     RedisKnowledgeStore) may be intentionally shared across runs. The caller
+    #     is responsible for namespace isolation and lifecycle management.
+    #   - Two runs that receive distinct store instances will not share AG2
+    #     workflow memory between them.
+    #
+    # Security notes:
+    #   - Injected KnowledgeStore code and storage are trusted operator runtime
+    #     configuration. The store can observe AG2 workflow/network memory for
+    #     every run that uses it.
+    #   - Production credentials (keys, tokens) must not flow into generated app
+    #     bundles through this seam; configure the store outside bundle artifacts.
+    #   - This seam does not grant production mutation authority over Mozaiks
+    #     tenant or platform data; AG2 memory/knowledge controls are engine-level,
+    #     not Mozaiks-level authority.
+    knowledge_store: KnowledgeStore | None = None
 
 
 @dataclass(slots=True)
@@ -104,7 +228,7 @@ class AG2NetworkRunner:
             )
 
         hub = await Hub.open(
-            MemoryKnowledgeStore(),
+            request.knowledge_store if request.knowledge_store is not None else MemoryKnowledgeStore(),
             ttl_sweep_interval=0,
             expectation_sweep_interval=0,
         )
@@ -140,7 +264,13 @@ class AG2NetworkRunner:
                     Resume(claimed_capabilities=[name]),
                     attach_plugin=request.attach_network_plugin,
                 )
-                _install_context_update_handler(agent=agent, client=client)
+                _install_context_update_handler(
+                    agent=agent,
+                    client=client,
+                    agent_name=name,
+                    agent_text_context_deriver=request.agent_text_context_deriver,
+                    context_authority_policy=request.context_authority_policy,
+                )
                 agent_clients[name] = client
                 agent_id_by_name[name] = client.agent_id
 
@@ -152,14 +282,17 @@ class AG2NetworkRunner:
                 initial_agent_name=initial_agent_name,
                 agent_id_by_name=agent_id_by_name,
                 max_turns=request.max_turns,
+                context_authority_policy=request.context_authority_policy,
             )
+
+            safe_context_vars = _json_safe_dict(request.context_variables)
 
             channel = await initiator.open(
                 type="workflow",
                 target=[client.agent_id for client in agent_clients.values()],
                 knobs={
                     "graph": graph.to_dict(),
-                    "context_vars": dict(request.context_variables or {}),
+                    "context_vars": safe_context_vars,
                 },
             )
             channel_id = channel.channel_id
@@ -199,8 +332,8 @@ class AG2NetworkRunner:
                         app_id=request.app_id,
                         channel_id=channel.channel_id,
                         close_reason=close_reason,
-                        context_variables=dict(getattr(state, "context_vars", {}) or {}),
-                        structured_outputs=structured_outputs,
+                        context_variables={},
+                        structured_outputs=[],
                         agent_name_by_id=agent_name_by_id,
                         wal=[_envelope_to_dict(envelope) for envelope in wal],
                         error=validation_error,
@@ -212,7 +345,7 @@ class AG2NetworkRunner:
                     app_id=request.app_id,
                     channel_id=channel.channel_id,
                     close_reason=close_reason,
-                    context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                    context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                     structured_outputs=structured_outputs,
                     agent_name_by_id=agent_name_by_id,
                     wal=[_envelope_to_dict(envelope) for envelope in wal],
@@ -256,7 +389,7 @@ class AG2NetworkRunner:
                         chat_id=request.chat_id,
                         app_id=request.app_id,
                         channel_id=channel.channel_id,
-                        context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                        context_variables=_json_safe_dict(getattr(state, "context_vars", {}) or {}),
                         agent_name_by_id=agent_name_by_id,
                         wal=[_envelope_to_dict(envelope) for envelope in wal],
                         error=f"AG2 turn failed for {failed_agent}: {failure['error']}",
@@ -301,6 +434,7 @@ class AG2NetworkRunner:
                         turn_failure_listener=turn_failure_listener,
                         snapshot_result=_snapshot_result,
                         close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
+                        context_authority_policy=request.context_authority_policy,
                     )
                     keep_live_run = True
                     return result
@@ -372,12 +506,14 @@ class AG2NetworkRunner:
         initial_agent_name: str,
         agent_id_by_name: Mapping[str, str],
         max_turns: int | None,
+        context_authority_policy: ContextAuthorityPolicy | None,
     ) -> TransitionGraph:
         graph = compile_transition_rules_to_graph(
             transition_rules,
             initial_agent_name=initial_agent_name,
             agent_id_by_name=agent_id_by_name,
             max_turns=max_turns,
+            context_authority_policy=context_authority_policy,
         )
         initiator_id = agent_id_by_name[_INITIATOR_NAME]
         initial_agent_id = agent_id_by_name[initial_agent_name]
@@ -414,6 +550,7 @@ class _AG2LiveWorkflowRun:
         turn_failure_listener: _TurnFailureListener,
         snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]],
         close_timeout_seconds: float,
+        context_authority_policy: ContextAuthorityPolicy | None,
     ) -> None:
         self.workflow_name = workflow_name
         self.chat_id = chat_id
@@ -429,6 +566,7 @@ class _AG2LiveWorkflowRun:
         self._closed = False
         self._lock = asyncio.Lock()
         self._wal_cursor = 0
+        self._context_authority_policy = context_authority_policy
 
     async def continue_with_user_message(
         self,
@@ -455,10 +593,15 @@ class _AG2LiveWorkflowRun:
             }
 
             if context_updates:
+                safe_updates = _authorized_context_updates(
+                    context_updates,
+                    writer_id=LIVE_USER_CONTEXT_WRITER,
+                    context_authority_policy=self._context_authority_policy,
+                )
                 await self._channel.send(
                     "",
                     event_type=EV_CONTEXT_SET,
-                    event_data={"set": dict(context_updates or {}), "delete": []},
+                    event_data={"set": _json_safe_dict(safe_updates), "delete": []},
                 )
             audience = self._next_agent_audience_for_user_text(str(message or "."))
             await self._channel.send(str(message or "."), audience=audience)
@@ -598,25 +741,44 @@ class _AG2LiveWorkflowRun:
             )
 
 
-def _install_context_update_handler(*, agent: Any, client: Any) -> None:
+def _packet_body_text(event_data: Mapping[str, Any]) -> str:
+    body = event_data.get("body")
+    if isinstance(body, str):
+        return body
+    if isinstance(body, (dict, list)):
+        return json.dumps(body, ensure_ascii=False, default=str)
+    return str(body or "")
+
+
+def _install_context_update_handler(
+    *,
+    agent: Any,
+    client: Any,
+    agent_name: str,
+    agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None,
+    context_authority_policy: ContextAuthorityPolicy | None = None,
+) -> None:
     """Commit Mozaiks tool context mutations through AG2 workflow packets.
 
     AG2 Workflow routing reads ``WorkflowState.context_vars``. Mozaiks tools
     receive ``ContextVariablesBridge`` for ergonomics, so this adapter consumes
-    bridge mutations at round end and merges them into the outgoing AG2
-    ``EV_PACKET.context_updates`` payload before AG2 selects the next speaker.
+    bridge mutations and declarative agent-text state triggers at round end and
+    merges them into the outgoing AG2 ``EV_PACKET.context_updates`` payload
+    before AG2 selects the next speaker.
     """
 
     bridge = getattr(agent, "_mozaiks_context_bridge", None)
-    if bridge is None:
-        return
-    if not callable(getattr(bridge, "clear_context_updates", None)):
-        return
-    if not callable(getattr(bridge, "consume_context_updates", None)):
+    has_bridge = (
+        bridge is not None
+        and callable(getattr(bridge, "clear_context_updates", None))
+        and callable(getattr(bridge, "consume_context_updates", None))
+    )
+    if not has_bridge and agent_text_context_deriver is None:
         return
 
     async def _handler(envelope: Any) -> None:
-        bridge.clear_context_updates()
+        if bridge is not None:
+            bridge.clear_context_updates()
         original_send_envelope = client.send_envelope
 
         async def _send_with_context_updates(out_envelope: Any) -> str:
@@ -625,17 +787,58 @@ def _install_context_update_handler(*, agent: Any, client: Any) -> None:
                 and str(getattr(out_envelope, "channel_id", "") or "")
                 == str(getattr(envelope, "channel_id", "") or "")
             ):
-                updates = bridge.consume_context_updates()
-                if updates.get("set") or updates.get("delete"):
-                    event_data = dict(getattr(out_envelope, "event_data", {}) or {})
+                bridge_updates = (
+                    bridge.consume_context_updates()
+                    if bridge is not None
+                    else {"set": {}, "delete": []}
+                )
+                event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
+                derived_updates: Mapping[str, Any] = {}
+                if agent_text_context_deriver is not None:
+                    text = _packet_body_text(event_data)
+                    if text.strip():
+                        try:
+                            candidate_updates = agent_text_context_deriver(agent_name, text)
+                        except Exception as err:  # pragma: no cover
+                            logger.debug(
+                                "AG2_AGENT_TEXT_CONTEXT_DERIVE_FAILED agent=%s: %s",
+                                agent_name,
+                                err,
+                            )
+                            candidate_updates = {}
+                        if isinstance(candidate_updates, Mapping):
+                            derived_updates = _authorized_context_updates(
+                                candidate_updates,
+                                writer_id=AGENT_TEXT_WRITER,
+                                context_authority_policy=context_authority_policy,
+                                elevated_writer_id=SENTINEL_TEXT_TRIGGER_WRITER,
+                            )
+                if (
+                    bridge_updates.get("set")
+                    or bridge_updates.get("delete")
+                    or derived_updates
+                ):
                     existing = dict(event_data.get("context_updates") or {})
+                    bridge_set = _authorized_context_updates(
+                        bridge_updates.get("set") or {},
+                        writer_id=CONTEXT_BRIDGE_WRITER,
+                        context_authority_policy=context_authority_policy,
+                        elevated_writer_id=DETERMINISTIC_TOOL_WRITER,
+                    )
+                    existing_set = _authorized_context_updates(
+                        existing.get("set") or {},
+                        writer_id=CONTEXT_BRIDGE_WRITER,
+                        context_authority_policy=context_authority_policy,
+                        elevated_writer_id=DETERMINISTIC_TOOL_WRITER,
+                    )
                     merged_set = {
-                        **dict(existing.get("set") or {}),
-                        **dict(updates.get("set") or {}),
+                        **_json_safe_dict(existing_set),
+                        **_json_safe_dict(derived_updates),
+                        **_json_safe_dict(bridge_set),
                     }
                     merged_delete = [
                         *list(existing.get("delete") or []),
-                        *list(updates.get("delete") or []),
+                        *list(bridge_updates.get("delete") or []),
                     ]
                     event_data["context_updates"] = {
                         "set": merged_set,
@@ -649,7 +852,8 @@ def _install_context_update_handler(*, agent: Any, client: Any) -> None:
             await default_handler(envelope, client)
         finally:
             client.send_envelope = original_send_envelope
-            bridge.clear_context_updates()
+            if bridge is not None:
+                bridge.clear_context_updates()
 
     client.on_envelope(_handler)
 
@@ -693,10 +897,10 @@ def _envelope_to_dict(envelope: Any) -> dict[str, Any]:
         "envelope_id": str(getattr(envelope, "envelope_id", "") or ""),
         "channel_id": str(getattr(envelope, "channel_id", "") or ""),
         "sender_id": str(getattr(envelope, "sender_id", "") or ""),
-        "audience": list(getattr(envelope, "audience", None) or []),
+        "audience": _json_safe(list(getattr(envelope, "audience", None) or [])),
         "event_type": str(getattr(envelope, "event_type", "") or ""),
-        "event_data": dict(getattr(envelope, "event_data", {}) or {}),
-        "causation_id": getattr(envelope, "causation_id", None),
+        "event_data": _json_safe_dict(getattr(envelope, "event_data", {}) or {}),
+        "causation_id": _json_safe(getattr(envelope, "causation_id", None)),
     }
 
 
@@ -706,6 +910,10 @@ def _validate_wal_structured_outputs(
     agent_name_by_id: Mapping[str, str],
     structured_registry: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None]:
+    # AG2 Network WAL packets expose serialized body data, not the original
+    # AgentReply. Without that supported AG2 handle this runner cannot invoke
+    # AgentReply.content(retries=...) for schema-correction turns. It therefore
+    # performs post-hoc structured-output validation and fails the run closed.
     structured_outputs: list[dict[str, Any]] = []
     if not structured_registry:
         return structured_outputs, None
@@ -727,7 +935,7 @@ def _validate_wal_structured_outputs(
         if validation is None:
             continue
         if not validation.validation_passed or validation.structured_data is None:
-            return structured_outputs, (
+            return [], (
                 f"structured output validation failed for {agent_name}: {validation.error}"
             )
         structured_outputs.append(

@@ -66,9 +66,21 @@ def _write_valid_workflow(
         workflow_dir / "agents.yaml",
         {
             "agents": [
-                {"name": "PlannerAgent", "system_message": "Plan the workflow."},
-                {"name": "WorkerAgent", "system_message": "Execute workflow tasks."},
-                {"name": "AnalysisAgent", "system_message": "Execute specialist analysis tasks."},
+                {
+                    "name": "PlannerAgent",
+                    "structured_outputs_required": False,
+                    "system_message": "Plan the workflow.",
+                },
+                {
+                    "name": "WorkerAgent",
+                    "structured_outputs_required": False,
+                    "system_message": "Execute workflow tasks.",
+                },
+                {
+                    "name": "AnalysisAgent",
+                    "structured_outputs_required": False,
+                    "system_message": "Execute specialist analysis tasks.",
+                },
             ]
         },
     )

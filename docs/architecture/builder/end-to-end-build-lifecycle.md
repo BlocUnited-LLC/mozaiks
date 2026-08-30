@@ -13,6 +13,16 @@ This document defines the canonical lifecycle across:
 
 Terminology note:
 
+- a **Genesis Build** is the first complete build journey for an app and
+  establishes its first canonical artifact lineage
+- a **Refinement Run** is every later change against that lineage, whether the
+  change is classified as `patch`, `design`, `feature`, or `core`
+- the Refinement Engine is the internal system that classifies, scopes, and
+  routes Refinement Runs; `refinement` remains an implementation and contract
+  term rather than the product-facing run name
+- resuming an unfinished Genesis Build does not create another Genesis Build,
+  and a `core` Refinement Run remains a Refinement Run unless it creates a new app
+  lineage
 - `Studio` is the browser product and `studio` is the host/composition name
 - `mozaiks studio` is the current public CLI command for opening Studio
 - customer-facing UX should prefer `Apps`, `Usage`, `Health`, and

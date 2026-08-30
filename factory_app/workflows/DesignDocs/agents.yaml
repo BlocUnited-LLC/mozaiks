@@ -289,10 +289,22 @@ agents:
       - Do NOT describe custom full-page React in experience_spec — mark those as explicit escape-hatch needs in prose.
       - Do NOT include header/profile/notification/footer content — those belong in `config/shell.json`.
       - Do NOT encode raw visual token values — those belong in `brand/theme_config.json`.
+  - id: app_intelligence_context
+    heading: '[APP INTELLIGENCE CONTEXT]'
+    content: |-
+      If `app_intelligence_ready` is true, treat `app_intelligence_summary`,
+      `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`
+      as prompt-safe context authority for the connected or current app.
+
+      These variables are compact summaries and indexes, not raw source code. Use them to:
+      - Preserve known product capabilities and integration boundaries.
+      - Avoid asking for repository details already captured upstream.
+      - Decide which surfaces need Mozaiks-owned design and which are external or protected.
+      - Cite source-context refs in rationale when a design choice depends on discovered app facts.
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt.**
 
       When brownfield adoption context is injected, DesignDocs scopes its design output to the
       approved adoption surfaces only. Apply all rules below before generating design documents:
@@ -319,6 +331,11 @@ agents:
       3. **Write an explicit brownfield context section in the Backend doc.**
          - Include a `## Brownfield Adoption Context` section in the backend design document that:
            - States the active `brownfield_build_path` ("light_integration" or "full_migration")
+           - States the user-facing path label. Use "Add AI Workflows" for `light_integration`.
+             Use "Build App Features" for `full_migration`.
+           - Explains that Add AI Workflows preserves the existing app as
+             source of truth, while Build App Features designs only explicitly
+             approved Mozaiks-owned module and product expansion scope.
            - Lists which surfaces are `read_only_discovered` and what read access is permitted
            - Lists which surfaces are `generated_overlay` and what Mozaiks owns
            - Notes any `human_decisions_required` from the adoption plan that affect design

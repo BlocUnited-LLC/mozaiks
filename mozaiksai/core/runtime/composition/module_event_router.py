@@ -16,12 +16,31 @@ import inspect
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
+from mozaiksai.core.runtime.composition.module_event_provenance import (
+    ModuleEventProvenance,
+    ModuleReactionAudit,
+    ModuleReactionProvenance,
+    build_module_reaction_audit,
+    module_event_identity,
+    normalize_module_event_provenance,
+    normalize_module_reaction_provenance,
+)
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
+    LeaseClaim,
+    ReactionIdempotencyStore,
+)
+from mozaiksai.core.runtime.composition.schema_validation import (
+    SchemaValidationDiagnostic,
+    validate_json_schema,
+)
 
 logger = get_workflow_logger("module_event_router")
 
@@ -33,15 +52,61 @@ CapabilityInvoker = Callable[[str, dict[str, Any], dict[str, Any]], Awaitable[An
 class _ReactionCtx:
     """Minimal context passed to handler methods during reaction dispatch."""
 
-    def __init__(self, *, app_id: str, tenant_id: str, user_id: str, event_emitter: EventEmitter | None) -> None:
+    def __init__(
+        self,
+        *,
+        app_id: str,
+        tenant_id: str,
+        user_id: str,
+        event_emitter: EventEmitter | None,
+        event_provenance: ModuleEventProvenance | None = None,
+        reaction_provenance: ModuleReactionProvenance | None = None,
+        permissions: Iterable[str] | None = None,
+    ) -> None:
         self.app_id = app_id
         self.tenant_id = tenant_id
         self.user_id = user_id
+        self.event_provenance = event_provenance
+        self.reaction_provenance = reaction_provenance
+        self.permissions = list(permissions or [])
+        self.correlation_id = event_provenance.correlation_id if event_provenance is not None else None
+        self.causation_id = event_provenance.causation_id if event_provenance is not None else None
         self._event_emitter = event_emitter
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         if self._event_emitter is not None:
             await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
+
+
+class ModuleEventPayloadValidationError(ValueError):
+    """Raised when a routed event violates its declared payload schema."""
+
+    def __init__(
+        self,
+        *,
+        event_type: str,
+        source_module: str | None,
+        source_action: str | None,
+        diagnostic: SchemaValidationDiagnostic,
+    ) -> None:
+        self.event_type = event_type
+        self.source_module = source_module
+        self.source_action = source_action
+        self.diagnostic = diagnostic
+        super().__init__(
+            "MODULE_EVENT_PAYLOAD_INVALID: "
+            f"event={event_type} module={source_module or ''} action={source_action or ''} "
+            f"path={diagnostic.path} error={diagnostic.message}"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": "MODULE_EVENT_PAYLOAD_INVALID",
+            "event_type": self.event_type,
+            "source_module": self.source_module,
+            "source_action": self.source_action,
+            "schema_error": self.diagnostic.to_dict(),
+        }
 
 
 class ModuleEventRouter:
@@ -54,15 +119,25 @@ class ModuleEventRouter:
         event_emitter: EventEmitter | None = None,
         notification_store: NotificationStore | None = None,
         capability_invoker: CapabilityInvoker | None = None,
+        idempotency_store: ReactionIdempotencyStore | None = None,
     ) -> None:
         self._event_emitter = event_emitter
         self._notification_store = notification_store
         self._capability_invoker = capability_invoker
+        self._idempotency_store = idempotency_store
         self._reactions_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_key: dict[tuple[str, str], dict] = {}
         self._handlers_by_module: dict[str, Any] = {}
+        self._event_schemas_by_producer: dict[tuple[str, str], dict[str, Any]] = {}
+        self._event_schemas_by_type: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+        self._capability_ids: set[str] = set()
+        self._capability_index_available = False
+        self._handler_emits_by_module_method: dict[tuple[str, str], list[str]] = {}
+        self._processed_reaction_keys: set[tuple[str, str, str, str, str]] = set()
         self._index_modules(modules)
+        self._validate_reaction_targets()
+        self._validate_static_reaction_cycles()
 
     @property
     def event_types(self) -> list[str]:
@@ -81,8 +156,87 @@ class ModuleEventRouter:
     async def handle_event(self, event_type: str, envelope: dict[str, Any]) -> None:
         """Handle one canonical module event envelope."""
         emitted_notifications: set[tuple[str, str]] = set()
+        event_provenance = normalize_module_event_provenance(event_type, envelope)
+        validation_error = self._validate_event_payload(event_type, envelope, event_provenance)
+        if validation_error is not None:
+            logger.warning(
+                "MODULE_EVENT_PAYLOAD_INVALID: event=%s module=%s action=%s path=%s error=%s",
+                event_type,
+                validation_error.source_module,
+                validation_error.source_action,
+                validation_error.diagnostic.path,
+                validation_error.diagnostic.message,
+                extra={"module_event_payload_validation": validation_error.to_dict()},
+            )
+            for reaction in self._reactions_by_event.get(event_type, []):
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=self._reaction_provenance(reaction),
+                        outcome="failed",
+                        reason=str(validation_error),
+                    )
+                )
+            raise validation_error
 
         for reaction in self._reactions_by_event.get(event_type, []):
+            permission_result = self._evaluate_reaction_permissions(reaction, envelope)
+            reaction_provenance = self._reaction_provenance(
+                reaction,
+                permissions_enforced=permission_result["required"],
+                idempotency_enforced=bool(reaction.get("idempotency_key")),
+            )
+            if not permission_result["allowed"]:
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome="skipped",
+                        reason=permission_result["reason"],
+                    )
+                )
+                continue
+            idempotency_key = self._idempotency_key(reaction, event_type, envelope, event_provenance)
+            # durable_key_str and claim_token are set when the durable store is active and
+            # the slot was successfully claimed; used to mark complete/fail after dispatch.
+            durable_key_str: str | None = None
+            claim_token: str | None = None
+            if idempotency_key is not None:
+                # Fast path: in-memory check (same process, established by PR #256).
+                if idempotency_key in self._processed_reaction_keys:
+                    await self._emit_reaction_audit(
+                        build_module_reaction_audit(
+                            event=event_provenance,
+                            reaction=reaction_provenance,
+                            outcome="skipped",
+                            reason="idempotent reaction already processed",
+                        )
+                    )
+                    continue
+                # Durable path: restart-safe check via persistent ledger.
+                if self._idempotency_store is not None:
+                    durable_key_str = "|".join(idempotency_key)
+                    lease_claim: LeaseClaim = await self._idempotency_store.claim(
+                        app_id=event_provenance.app_id or "",
+                        tenant_id=event_provenance.tenant_id,
+                        workspace_id=event_provenance.workspace_id,
+                        idempotency_key_str=durable_key_str,
+                        lease_seconds=int(reaction.get("lease_seconds") or 300),
+                        max_attempts=reaction.get("max_attempts"),
+                    )
+                    if not lease_claim.claimed:
+                        durable_key_str = None  # not our claim; do not mark complete/fail
+                        await self._emit_reaction_audit(
+                            build_module_reaction_audit(
+                                event=event_provenance,
+                                reaction=reaction_provenance,
+                                outcome="skipped",
+                                reason="idempotent reaction suppressed by durable ledger",
+                            )
+                        )
+                        continue
+                    claim_token = lease_claim.claim_token
+                self._processed_reaction_keys.add(idempotency_key)
             target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
             target_kind = str(target.get("kind") or "").strip()
             if target_kind == "notification":
@@ -94,22 +248,97 @@ class ModuleEventRouter:
                 )
                 if rule is not None:
                     if not _notification_rule_matches(rule, envelope):
+                        await self._emit_reaction_audit(
+                            build_module_reaction_audit(
+                                event=event_provenance,
+                                reaction=reaction_provenance,
+                                outcome="skipped",
+                                reason="notification condition did not match",
+                            )
+                        )
                         continue
                     key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
                     await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
+                    await self._emit_reaction_audit(
+                        build_module_reaction_audit(
+                            event=event_provenance,
+                            reaction=reaction_provenance,
+                            outcome="ok",
+                        )
+                    )
+                    await self._durable_complete(durable_key_str, claim_token, event_provenance)
+                else:
+                    await self._emit_reaction_audit(
+                        build_module_reaction_audit(
+                            event=event_provenance,
+                            reaction=reaction_provenance,
+                            outcome="skipped",
+                            reason="notification rule not found",
+                        )
+                    )
             elif target_kind == "handler":
-                await self._dispatch_handler(reaction, event_type, envelope)
+                outcome, reason = await self._dispatch_handler(
+                    reaction,
+                    event_type,
+                    envelope,
+                    event_provenance=event_provenance,
+                    reaction_provenance=reaction_provenance,
+                    permissions=permission_result["granted"],
+                )
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome=outcome,
+                        reason=reason,
+                    )
+                )
+                if outcome == "ok":
+                    await self._durable_complete(durable_key_str, claim_token, event_provenance)
+                else:
+                    await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
             elif target_kind == "service_adapter":
-                adapter_result = await self._dispatch_service_adapter(reaction, event_type, envelope)
+                adapter_result = await self._dispatch_service_adapter(
+                    reaction,
+                    event_type,
+                    envelope,
+                    event_provenance=event_provenance,
+                    reaction_provenance=reaction_provenance,
+                )
                 await self._emit_platform_reaction(
                     reaction,
                     event_type,
                     envelope,
                     reaction_result=adapter_result,
                 )
+                adapter_failed = isinstance(adapter_result, dict) and adapter_result.get("success") is False
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome="failed" if adapter_failed else "ok",
+                        reason=(
+                            str(adapter_result.get("error_code") or "service adapter failed")
+                            if adapter_failed
+                            else None
+                        ),
+                    )
+                )
+                if adapter_failed:
+                    await self._durable_mark_failed(durable_key_str, claim_token, reaction, event_provenance)
+                else:
+                    await self._durable_complete(durable_key_str, claim_token, event_provenance)
             elif target_kind:
                 await self._emit_platform_reaction(reaction, event_type, envelope)
+                await self._emit_reaction_audit(
+                    build_module_reaction_audit(
+                        event=event_provenance,
+                        reaction=reaction_provenance,
+                        outcome="ok",
+                    )
+                )
+                await self._durable_complete(durable_key_str, claim_token, event_provenance)
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
@@ -120,8 +349,36 @@ class ModuleEventRouter:
         for module in modules:
             module_id = module.name
             self._handlers_by_module[module_id] = module.handler
-            if module.manifests.reactions is not None:
-                for reaction_model in module.manifests.reactions.reactions:
+            manifests = getattr(module, "manifests", None)
+            definition = getattr(module, "definition", None)
+            if definition is not None:
+                capabilities = getattr(definition, "capabilities", None)
+                actions = getattr(definition, "actions", None)
+                if isinstance(capabilities, list):
+                    self._capability_index_available = True
+                for capability in capabilities or []:
+                    capability_id = str(getattr(capability, "capability_id", "") or "").strip()
+                    if capability_id:
+                        self._capability_ids.add(capability_id)
+                for action in actions or []:
+                    handler_method = str(getattr(action, "handler_method", "") or "").strip()
+                    emits = [str(event).strip() for event in getattr(action, "emits", []) or [] if str(event).strip()]
+                    if handler_method:
+                        self._handler_emits_by_module_method[(module_id, handler_method)] = emits
+            events_manifest = getattr(manifests, "events", None)
+            if events_manifest is not None:
+                events = getattr(events_manifest, "events", None)
+                if not isinstance(events, list):
+                    events = []
+                for event in events:
+                    event_type = str(getattr(event, "type", "") or "").strip()
+                    payload_schema = getattr(event, "payload_schema", None)
+                    if event_type and isinstance(payload_schema, dict) and payload_schema:
+                        self._event_schemas_by_producer[(module_id, event_type)] = dict(payload_schema)
+                        self._event_schemas_by_type[event_type].append((module_id, dict(payload_schema)))
+            reactions_manifest = getattr(manifests, "reactions", None)
+            if reactions_manifest is not None:
+                for reaction_model in reactions_manifest.reactions:
                     event_type = str(reaction_model.event_type or "").strip()
                     if not event_type:
                         continue
@@ -129,8 +386,9 @@ class ModuleEventRouter:
                     reaction["module_id"] = module_id
                     self._reactions_by_event[event_type].append(reaction)
 
-            if module.manifests.notifications is not None:
-                for raw_rule in module.manifests.notifications.notifications:
+            notifications_manifest = getattr(manifests, "notifications", None)
+            if notifications_manifest is not None:
+                for raw_rule in notifications_manifest.notifications:
                     if hasattr(raw_rule, "as_rule") and callable(raw_rule.as_rule):
                         raw_rule = raw_rule.as_rule()
                     elif hasattr(raw_rule, "model_dump") and callable(raw_rule.model_dump):
@@ -145,6 +403,258 @@ class ModuleEventRouter:
                     rule["module_id"] = module_id
                     self._notifications_by_event[event_type].append(rule)
                     self._notifications_by_key[(module_id, rule_id)] = rule
+
+    def _validate_reaction_targets(self) -> None:
+        for reactions in self._reactions_by_event.values():
+            for reaction in reactions:
+                module_id = str(reaction.get("module_id") or "").strip()
+                target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
+                target_kind = str(target.get("kind") or "").strip()
+                if target_kind == "handler":
+                    handler_method = str(target.get("handler_method") or "").strip()
+                    handler = self._handlers_by_module.get(module_id)
+                    if handler is not None and handler_method and not callable(getattr(handler, handler_method, None)):
+                        raise ValueError(
+                            "MODULE_REACTION_TARGET_INVALID: "
+                            f"module={module_id} reaction={reaction.get('id')} "
+                            f"handler_method={handler_method} not found"
+                        )
+                elif target_kind == "capability":
+                    capability_id = str(target.get("capability_id") or "").strip()
+                    if self._capability_index_available and capability_id not in self._capability_ids:
+                        raise ValueError(
+                            "MODULE_REACTION_TARGET_INVALID: "
+                            f"module={module_id} reaction={reaction.get('id')} "
+                            f"capability_id={capability_id} not declared"
+                        )
+
+    def _validate_static_reaction_cycles(self) -> None:
+        edges: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+        for event_type, reactions in self._reactions_by_event.items():
+            for reaction in reactions:
+                target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
+                if target.get("kind") != "handler":
+                    continue
+                module_id = str(reaction.get("module_id") or "").strip()
+                handler_method = str(target.get("handler_method") or "").strip()
+                for emitted_event in self._handler_emits_by_module_method.get((module_id, handler_method), []):
+                    edges[event_type].append((emitted_event, reaction))
+
+        visiting: list[str] = []
+        visited: set[str] = set()
+
+        def visit(event_type: str) -> None:
+            if event_type in visiting:
+                cycle = [*visiting[visiting.index(event_type):], event_type]
+                raise ValueError(
+                    "MODULE_REACTION_CYCLE: "
+                    + " -> ".join(cycle)
+                )
+            if event_type in visited:
+                return
+            visiting.append(event_type)
+            for next_event, _reaction in edges.get(event_type, []):
+                visit(next_event)
+            visiting.pop()
+            visited.add(event_type)
+
+        for event_type in list(edges):
+            visit(event_type)
+
+    def _validate_event_payload(
+        self,
+        event_type: str,
+        envelope: dict[str, Any],
+        event_provenance: ModuleEventProvenance,
+    ) -> ModuleEventPayloadValidationError | None:
+        schema = self._payload_schema_for_event(event_type, event_provenance)
+        if not schema:
+            return None
+        payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
+        diagnostic = validate_json_schema(payload, schema)
+        if diagnostic is None:
+            return None
+        return ModuleEventPayloadValidationError(
+            event_type=event_type,
+            source_module=event_provenance.producer_module_id,
+            source_action=event_provenance.producer_action_id,
+            diagnostic=diagnostic,
+        )
+
+    def _payload_schema_for_event(
+        self,
+        event_type: str,
+        event_provenance: ModuleEventProvenance,
+    ) -> dict[str, Any] | None:
+        producer_module = str(event_provenance.producer_module_id or "").strip()
+        if producer_module:
+            schema = self._event_schemas_by_producer.get((producer_module, event_type))
+            if schema:
+                return schema
+        schemas = self._event_schemas_by_type.get(event_type) or []
+        if len(schemas) == 1:
+            return schemas[0][1]
+        return None
+
+    def _reaction_provenance(
+        self,
+        reaction: dict[str, Any],
+        *,
+        permissions_enforced: bool = False,
+        idempotency_enforced: bool = False,
+    ) -> ModuleReactionProvenance:
+        provenance = normalize_module_reaction_provenance(reaction)
+        return replace(
+            provenance,
+            permissions_enforced=permissions_enforced,
+            idempotency_enforced=idempotency_enforced,
+        )
+
+    def _evaluate_reaction_permissions(
+        self,
+        reaction: dict[str, Any],
+        envelope: dict[str, Any],
+    ) -> dict[str, Any]:
+        required = [
+            str(permission).strip()
+            for permission in (reaction.get("permissions") or [])
+            if str(permission).strip()
+        ]
+        if not required:
+            return {"allowed": True, "required": False, "granted": [], "reason": None}
+        authority = envelope.get("authority") if isinstance(envelope.get("authority"), dict) else {}
+        granted = [
+            str(permission).strip()
+            for permission in (authority.get("permissions") if isinstance(authority, dict) else []) or []
+            if str(permission).strip()
+        ]
+        missing = sorted(set(required) - set(granted))
+        if missing:
+            return {
+                "allowed": False,
+                "required": True,
+                "granted": granted,
+                "reason": f"reaction permission denied: missing {missing}",
+            }
+        return {"allowed": True, "required": True, "granted": granted, "reason": None}
+
+    def _idempotency_key(
+        self,
+        reaction: dict[str, Any],
+        event_type: str,
+        envelope: dict[str, Any],
+        event_provenance: ModuleEventProvenance,
+    ) -> tuple[str, str, str, str, str] | None:
+        declared = str(reaction.get("idempotency_key") or "").strip()
+        if not declared:
+            return None
+        reaction_id = str(reaction.get("id") or "").strip()
+        module_id = str(reaction.get("module_id") or "").strip()
+        event_identity = module_event_identity(
+            event_type,
+            envelope,
+            event_provenance,
+        )
+        return (module_id, reaction_id, event_type, declared, event_identity)
+
+    async def _durable_complete(
+        self,
+        durable_key_str: str | None,
+        claim_token: str | None,
+        event_provenance: ModuleEventProvenance,
+    ) -> None:
+        """Mark the durable ledger slot as completed if active."""
+        if durable_key_str is None or claim_token is None or self._idempotency_store is None:
+            return
+        try:
+            await self._idempotency_store.complete(
+                app_id=event_provenance.app_id or "",
+                tenant_id=event_provenance.tenant_id,
+                workspace_id=event_provenance.workspace_id,
+                idempotency_key_str=durable_key_str,
+                claim_token=claim_token,
+            )
+        except Exception:
+            logger.warning(
+                "REACTION_IDEMPOTENCY_COMPLETE_FAILED: key=%s app=%s",
+                durable_key_str,
+                event_provenance.app_id,
+                exc_info=True,
+            )
+
+    async def _durable_mark_failed(
+        self,
+        durable_key_str: str | None,
+        claim_token: str | None,
+        reaction: dict[str, Any],
+        event_provenance: ModuleEventProvenance,
+    ) -> None:
+        """Transition the durable ledger slot to retryable or dead_letter on failure.
+
+        Emits ``runtime.reaction.dead_lettered`` when the retry budget is exhausted.
+        Module reactions cannot subscribe to ``runtime.*`` events, so this emission
+        is safe from recursive dead-lettering.
+        """
+        if durable_key_str is None or claim_token is None or self._idempotency_store is None:
+            return
+        try:
+            new_status = await self._idempotency_store.mark_failed(
+                app_id=event_provenance.app_id or "",
+                tenant_id=event_provenance.tenant_id,
+                workspace_id=event_provenance.workspace_id,
+                idempotency_key_str=durable_key_str,
+                claim_token=claim_token,
+                retry_delay_seconds=int(reaction.get("retry_delay_seconds") or 0),
+            )
+        except Exception:
+            logger.warning(
+                "REACTION_IDEMPOTENCY_FAIL_RELEASE_FAILED: key=%s app=%s",
+                durable_key_str,
+                event_provenance.app_id,
+                exc_info=True,
+            )
+            return
+        if new_status == "dead_letter":
+            logger.warning(
+                "REACTION_DEAD_LETTERED: key=%s module=%s reaction=%s app=%s attempts=%s",
+                durable_key_str,
+                reaction.get("module_id"),
+                reaction.get("id"),
+                event_provenance.app_id,
+                reaction.get("max_attempts"),
+            )
+            if self._event_emitter is not None:
+                dead_letter_event = {
+                    "id": f"evt_{uuid4().hex}",
+                    "type": "runtime.reaction.dead_lettered",
+                    "version": 1,
+                    "occurred_at": _utc_now(),
+                    "source": {
+                        "layer": "runtime",
+                        "module_id": reaction.get("module_id"),
+                        "reaction_id": reaction.get("id"),
+                    },
+                    "app_id": event_provenance.app_id,
+                    "tenant_id": event_provenance.tenant_id,
+                    "workspace_id": event_provenance.workspace_id,
+                    "payload": {
+                        "idempotency_key_str": durable_key_str,
+                        "reaction_id": reaction.get("id"),
+                        "module_id": reaction.get("module_id"),
+                        "max_attempts": reaction.get("max_attempts"),
+                    },
+                    "visibility": "internal",
+                }
+                try:
+                    await self._maybe_await(
+                        self._event_emitter("runtime.reaction.dead_lettered", dead_letter_event)
+                    )
+                except Exception:
+                    logger.warning(
+                        "REACTION_DEAD_LETTER_EVENT_FAILED: key=%s",
+                        durable_key_str,
+                        exc_info=True,
+                    )
 
     def _handler_for(self, event_type: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
         async def handle(envelope: dict[str, Any]) -> None:
@@ -224,6 +734,9 @@ class ModuleEventRouter:
         reaction: dict,
         event_type: str,
         envelope: dict[str, Any],
+        *,
+        event_provenance: ModuleEventProvenance,
+        reaction_provenance: ModuleReactionProvenance,
     ) -> Any:
         target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         adapter_ref = str(target.get("adapter") or "").strip()
@@ -250,7 +763,17 @@ class ModuleEventRouter:
             adapter = adapter_type()
             method = getattr(adapter, adapter_method)
             payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
-            return await self._maybe_await(_call_service_adapter(method, payload, event_type, envelope, reaction))
+            return await self._maybe_await(
+                _call_service_adapter(
+                    method,
+                    payload,
+                    event_type,
+                    envelope,
+                    reaction,
+                    event_provenance=event_provenance,
+                    reaction_provenance=reaction_provenance,
+                )
+            )
         except Exception as exc:
             logger.error(
                 "SERVICE_ADAPTER_DISPATCH_ERROR: %r.%r raised %s",
@@ -266,7 +789,11 @@ class ModuleEventRouter:
         reaction: dict,
         event_type: str,
         envelope: dict[str, Any],
-    ) -> None:
+        *,
+        event_provenance: ModuleEventProvenance,
+        reaction_provenance: ModuleReactionProvenance,
+        permissions: Iterable[str] | None = None,
+    ) -> tuple[str, str | None]:
         module_id = str(reaction.get("module_id") or "").strip()
         target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         handler_method = str(target.get("handler_method") or "").strip()
@@ -276,12 +803,12 @@ class ModuleEventRouter:
                 "HANDLER_TARGET_SKIPPED: reaction %r missing module_id or handler_method",
                 reaction.get("id"),
             )
-            return
+            return "skipped", "missing module_id or handler_method"
 
         handler = self._handlers_by_module.get(module_id)
         if handler is None:
             logger.warning("HANDLER_TARGET_SKIPPED: no handler registered for module %r", module_id)
-            return
+            return "skipped", "handler not registered"
 
         method = getattr(handler, handler_method, None)
         if not callable(method):
@@ -290,15 +817,18 @@ class ModuleEventRouter:
                 module_id,
                 handler_method,
             )
-            return
+            return "skipped", "handler method not callable"
 
         tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
         actor = envelope.get("actor") if isinstance(envelope.get("actor"), dict) else {}
         ctx = _ReactionCtx(
-            app_id=str(tenant.get("app_id") or ""),
-            tenant_id=str(tenant.get("tenant_id") or ""),
-            user_id=str(actor.get("id") or ""),
+            app_id=str(tenant.get("app_id") or event_provenance.app_id or ""),
+            tenant_id=str(tenant.get("tenant_id") or event_provenance.tenant_id or ""),
+            user_id=str(actor.get("id") or event_provenance.actor_id or ""),
             event_emitter=self._event_emitter,
+            event_provenance=event_provenance,
+            reaction_provenance=reaction_provenance,
+            permissions=permissions,
         )
         payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
         try:
@@ -311,6 +841,22 @@ class ModuleEventRouter:
                 exc,
                 exc_info=True,
             )
+            return "failed", type(exc).__name__
+        return "ok", None
+
+    async def _emit_reaction_audit(self, audit: ModuleReactionAudit) -> None:
+        """Emit payload-free reaction audit metadata without affecting fan-out."""
+
+        record = audit.to_dict()
+        logger.info(
+            "MODULE_REACTION_AUDIT event=%s reaction=%s target=%s outcome=%s",
+            audit.event.event_type,
+            audit.reaction.reaction_id,
+            audit.reaction.target_kind,
+            audit.outcome,
+            extra={"module_reaction_audit": record},
+        )
+        await get_platform_hooks().call_module_reaction_audit(audit)
 
     async def _create_notification(
         self,
@@ -494,6 +1040,9 @@ def _call_service_adapter(
     event_type: str,
     envelope: dict[str, Any],
     reaction: dict[str, Any],
+    *,
+    event_provenance: ModuleEventProvenance | None = None,
+    reaction_provenance: ModuleReactionProvenance | None = None,
 ) -> Any:
     """Call a contract-declared service adapter with the narrowest useful args."""
     try:
@@ -519,6 +1068,10 @@ def _call_service_adapter(
         kwargs["envelope"] = envelope
     if "reaction" in params:
         kwargs["reaction"] = reaction
+    if "event_provenance" in params:
+        kwargs["event_provenance"] = event_provenance
+    if "reaction_provenance" in params:
+        kwargs["reaction_provenance"] = reaction_provenance
     if kwargs:
         return method(**kwargs)
     return method(payload)

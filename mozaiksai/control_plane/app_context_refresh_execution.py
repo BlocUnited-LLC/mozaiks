@@ -242,7 +242,7 @@ def _validate_refresh_plan(plan: ContextRefreshPlan, *, app_id: str | None) -> s
             "Context refresh execution only supports "
             f"{BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE!r}."
         )
-    if bool(getattr(plan, "mutation_allowed", True)):
+    if plan.mutation_allowed:
         raise ValueError("Context refresh execution requires mutation_allowed=false.")
 
     resolved_app_id = str(app_id or plan.app_id or "").strip()
@@ -356,23 +356,23 @@ async def _current_context_artifact_ref(
         APP_CONTEXT_VERSION_ARTIFACT_KEY,
         APP_CONTEXT_VERSION_ARTIFACT_KIND,
     )
-    from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus
+    from mozaiksai.core.artifacts.models import BuildRecordStatus
 
-    versions = await artifact_store.list_artifact_versions(
+    versions = await artifact_store.list_build_records(
         app_id=app_id,
-        artifact_kind=APP_CONTEXT_VERSION_ARTIFACT_KIND,
-        artifact_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        build_family=APP_CONTEXT_VERSION_ARTIFACT_KIND,
+        build_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
+        lifecycle_status=BuildRecordStatus.CURRENT,
         limit=1,
     )
     if not versions:
         return None
     artifact = versions[0]
     return ArtifactRef(
-        artifact_kind=str(getattr(artifact, "artifact_kind", APP_CONTEXT_VERSION_ARTIFACT_KIND)),
-        artifact_key=str(getattr(artifact, "artifact_key", APP_CONTEXT_VERSION_ARTIFACT_KEY)),
-        artifact_version_id=str(getattr(artifact, "id", "") or getattr(artifact, "_id", "")),
-        lifecycle_status=_artifact_lifecycle_value(getattr(artifact, "lifecycle_status", None)),
+        artifact_kind=artifact.build_family,
+        artifact_key=artifact.build_key,
+        artifact_version_id=artifact.id,
+        lifecycle_status=_artifact_lifecycle_value(artifact.lifecycle_status),
     )
 
 

@@ -11,15 +11,16 @@ The key separation is simple:
   or managed provider means.
 
 `mozaiks-app` uses this split for the hosted product: it owns
-`tenant_identity`, workspace memberships, MozaiksPay access, and hosted provider
-defaults. The OSS repo should not copy that product logic.
+`tenant_identity`, workspace memberships, MozaiksPay access, hosted provider
+defaults, and the branded org/workspace home. The OSS repo should not copy that
+product logic.
 
 ## Terms
 
 - User: the authenticated person or service principal.
 - Tenant: the account or organization boundary for product data.
 - Workspace: the working area under a tenant. Hosted products can use it for
-  teams, billing assignment, and app ownership.
+  teams, billing assignment, app ownership, and the Studio/workspace shell.
 - App: the Mozaiks app bundle or generated customer app being hosted.
 - Principal: provider-neutral identity facts decoded from auth.
 - Identity scope: the resolved `{app_id, tenant_id, workspace_id, user_id}`
@@ -47,6 +48,10 @@ Hosted products and app workspaces own:
 - hosted provider defaults such as Mozaiks-hosted auth, hosted AI, MozaiksPay,
   or managed hosting
 - whether a workspace can use proprietary managed capabilities
+- workspace-level branding and shell composition
+
+Tenant/workspace records are not person profiles. Person profile state belongs
+to `/me`; tenant/workspace state belongs to Studio / Workspace Shell.
 
 ## Current Contract
 
@@ -65,9 +70,10 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
 - When auth is enabled, external HTTP module dispatch requires an authenticated
   principal by default. The only anonymous HTTP module actions are those whose
   `actions[].api_surface` is explicitly `public` or `public_readonly`.
-- External HTTP module dispatch never uses the trusted internal
-  `granted_permissions=None` bypass. It passes a concrete permission list,
-  including an empty list for anonymous public actions.
+- External HTTP module dispatch always constructs an enforce-mode
+  `ModuleDispatchAuthority` carrying the caller's concrete permission set —
+  an empty set for anonymous public actions. There is no trusted bypass on
+  the HTTP path.
 - Authenticated HTTP module dispatch rejects request-supplied `user_id`,
   `tenant_id`, or `workspace_id` values that conflict with token-bound claims.
 - `PlatformHookRegistry` exposes `module_scope_resolver`, a provider-neutral
@@ -96,13 +102,16 @@ The platform should resolve external requests in this order:
 4. Return a canonical identity scope plus granted module permissions.
 5. Dispatch the module action with that scope in `ModuleRequest`.
 
-For external requests, missing auth or missing permission resolution should
-result in an empty permission list or an auth error, not the internal
-`granted_permissions=None` bypass.
+For external requests, missing auth or missing permission resolution results
+in an empty permission set on an enforce-mode authority or an auth error —
+never a trusted bypass.
 
-Internal runtime calls may still use trusted dispatch when the caller is already
-inside the runtime boundary. That path must stay explicit and separate from
-HTTP user traffic.
+Internal runtime calls may use trusted dispatch only by constructing one of
+the closed server-owned `ModuleDispatchAuthority` kinds
+(`framework_internal`, `operator_internal`, contract-declared
+`event_reaction`, or auth-disabled `local_development`). That path stays
+explicit and separate from HTTP user traffic; internal location alone never
+grants bypass.
 
 ## Remaining Production Work
 
@@ -128,8 +137,8 @@ HTTP user traffic.
 - product plan assignment records in `hosted_billing.subscriptions`
 
 Hosted launch should be preset for tenant workspaces: Mozaiks-hosted auth,
-hosted AI, MozaiksPay, and managed hosting are available by default so builders
-can create apps without provider setup. The hosted product may also choose which
+hosted AI, MozaiksPay, and managed hosting may be available as selected managed
+providers so builders can create apps without provider setup. The hosted product may also choose which
 provider areas can carry bring-your-own metadata. For example, `mozaiks-app`
 hosted v1 presets Mozaiks-hosted auth and MozaiksPay, allows secret-free
 external auth/payment metadata, and keeps hosted AI plus managed hosting

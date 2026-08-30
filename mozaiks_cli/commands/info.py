@@ -3,9 +3,20 @@ mozaiks info - Show current configuration.
 """
 
 import json
+import sys
 from pathlib import Path
 
 from mozaiks_cli.workspace import resolve_active_app_root
+
+
+def _supports_unicode() -> bool:
+    """Check if stdout supports Unicode characters."""
+    enc = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        "✓✗".encode(enc)
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
 
 # Tier definitions
 TIER_PRESETS = {
@@ -104,8 +115,12 @@ def _show_current_config():
     print(f"  Preset:        {preset}")
     print(f"  Auth Required: {auth_required}")
     print("\nEnabled Features:")
+    use_unicode = _supports_unicode()
     for feature, enabled in sorted(features.items()):
-        status = "✓" if enabled else "✗"
+        if use_unicode:
+            status = "✓" if enabled else "✗"
+        else:
+            status = "[x]" if enabled else "[ ]"
         print(f"    {status} {feature}")
 
     # Show upgrade path if not full

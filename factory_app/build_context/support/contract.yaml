@@ -27,8 +27,11 @@ recommended_domains:
   - customer operations
   - app operations
 
-required_packs:
-  - messaging
+# Machine-readable dependency declaration: messaging pack must also be selected.
+requires:
+  packs:
+    - pack_id: messaging
+      reason: "support stores message_thread_id and delegates conversations to messages module"
 
 required_outputs:
   - path: data/migrations/001_support_collections.json
@@ -36,6 +39,8 @@ required_outputs:
   - path: modules/support/module.yaml
     owner: templates
   - path: modules/support/backend/__init__.py
+    owner: templates
+  - path: modules/support/backend/account_data_handler.py
     owner: templates
   - path: modules/support/backend/base_handler.py
     owner: templates

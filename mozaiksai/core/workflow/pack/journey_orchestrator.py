@@ -155,6 +155,7 @@ class JourneyOrchestrator:
         if advance.next_transition_id:
             await transport.send_event_to_ui(
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.transition_requested",
                     "data": {
                         "transition_id": advance.next_transition_id,
@@ -209,6 +210,7 @@ class JourneyOrchestrator:
                 )
                 await transport.send_event_to_ui(
                     {
+                        "schema_version": "mozaiks.ui.event.v1",
                         "type": "chat.error",
                         "data": {
                             "message": reason,
@@ -326,6 +328,7 @@ class JourneyOrchestrator:
 
         await transport.send_event_to_ui(
             {
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.context_switched",
                 "data": {
                     "from_chat_id": chat_id,

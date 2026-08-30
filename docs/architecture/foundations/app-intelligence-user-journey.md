@@ -38,6 +38,11 @@ Studio creates or updates the app registry record first. Then it starts a
 source import and App Intelligence index job. The app overview becomes the
 visible transition surface while the job runs.
 
+Local Studio must materialize that registry state from the workflow lifecycle
+event even when hosted build-event delivery is not configured. Imported apps
+therefore show up in `/apps` as soon as discovery starts, with the active chat
+and workflow recorded for resume.
+
 ## Index Source
 
 Indexing is a background job with explicit phases:
@@ -86,13 +91,24 @@ Studio shows a source-context panel before edit-heavy workflows proceed:
 This panel is not documentation text inside the build workflow. It is the
 operational status of the app context that agents can use.
 
-During Existing App Discovery startup, Studio must also show a chat-feed status
-row while App Intelligence is indexing. The status row updates from obtaining
-context to ready or failed so the user is not left on a blank chat while source
-selection, parsing, graph build, and snapshot synthesis run. After the ready
-state, Studio emits an inline App Intelligence brief in the chat transcript and
-the full overview in the artifact panel so the user can see the context agents
-received.
+During Existing App Discovery startup, Studio must show a persistent chat-feed
+progress card while App Intelligence is indexing. The card updates in place and
+keeps completed stages visible:
+
+- connect to codebase
+- read app signals
+- choose safe files
+- load source files
+- parse code structure
+- build the relationship graph
+- prepare the agent brief
+
+The user should see a current stage, percent complete, and any blocked or
+warning state without waiting on a blank chat. After the ready state, the
+chat-feed progress surface collapses into a compact completed marker while
+ExistingAppDiscovery emits its workflow-owned App Intelligence artifact-panel
+surface. The first discovery-agent message should translate that context into a
+feature-first product readout, with indexing coverage as supporting detail.
 
 ## Generate Or Refine
 
@@ -103,6 +119,13 @@ Greenfield generation indexes the generated app bundle before future edits.
 Repository imports index the selected source root before adoption or refinement.
 Refinement reuses the current context and reads exact files only after the
 scope is selected.
+
+For existing apps, the post-discovery build path choice must be plain-language:
+
+| Choice | Use when | Code ownership |
+| --- | --- | --- |
+| Add AI Workflows | The user wants Mozaiks AI help without changing the current product. This should be the recommended default for most existing apps. | Existing app remains source of truth; Mozaiks adds app-aware AI workflows, chat surfaces, and only the safe adapters those workflows require. |
+| Build App Features | The user intentionally wants deeper product capability beyond AI workflows. | Only explicitly approved surfaces become Mozaiks modules, workflows, pages, data contracts, or extended functionality. This is not a whole-repo rewrite by default. |
 
 ## Validate
 

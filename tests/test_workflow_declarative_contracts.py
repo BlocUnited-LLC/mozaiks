@@ -34,6 +34,7 @@ def _write_minimal_orchestrator_and_agents(wf_dir: Path, workflow_name: str) -> 
             [
                 "agents:",
                 "  - name: Planner",
+                "    structured_outputs_required: false",
                 "    system_message: \"You are a planner.\"",
             ]
         ),
@@ -50,6 +51,7 @@ def test_workflow_manager_rejects_removed_agent_auto_tool_field(tmp_path: Path) 
             [
                 "agents:",
                 "  - name: Planner",
+                "    structured_outputs_required: false",
                 "    system_message: \"You are a planner.\"",
                 "    auto_tool_mode: false",
             ]
@@ -180,8 +182,10 @@ def test_workflow_manager_rejects_undeclared_transition_context_variable(tmp_pat
             [
                 "agents:",
                 "  - name: Planner",
+                "    structured_outputs_required: false",
                 "    system_message: \"You are a planner.\"",
                 "  - name: Reviewer",
+                "    structured_outputs_required: false",
                 "    system_message: \"You are a reviewer.\"",
             ]
         ),
@@ -230,8 +234,10 @@ def test_workflow_manager_rejects_undeclared_transition_context_expression_varia
             [
                 "agents:",
                 "  - name: Planner",
+                "    structured_outputs_required: false",
                 "    system_message: \"You are a planner.\"",
                 "  - name: Reviewer",
+                "    structured_outputs_required: false",
                 "    system_message: \"You are a reviewer.\"",
             ]
         ),

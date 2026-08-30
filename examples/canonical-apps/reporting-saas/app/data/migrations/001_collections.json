@@ -1,0 +1,8 @@
+{
+  "migration_id": "001_collections",
+  "version": "1",
+  "operations": [
+    { "type": "ensure_collection", "module_id": "reports", "entity_name": "reports", "data_alias": "reports.records" },
+    { "type": "ensure_collection", "module_id": "entitlement_dispatch", "entity_name": "subscriptions", "data_alias": "billing.subscriptions" }
+  ]
+}

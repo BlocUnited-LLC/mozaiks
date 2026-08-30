@@ -28,15 +28,15 @@ class _FakeArtifactStore:
         self.versions: dict[str, SimpleNamespace] = {}
         self._counter = 0
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self._counter += 1
-        version_id = f"av_{kwargs['artifact_kind']}_{self._counter}"
+        version_id = f"av_{kwargs['build_family']}_{self._counter}"
         self.calls.append(kwargs)
         doc = SimpleNamespace(
             id=version_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             lifecycle_status=kwargs["lifecycle_status"],
             commit_metadata=SimpleNamespace(
                 metadata=kwargs.get("commit_metadata", {}).get("metadata", {})
@@ -45,24 +45,24 @@ class _FakeArtifactStore:
         self.versions[version_id] = doc
         return doc
 
-    async def get_artifact_version(self, *, app_id, artifact_version_id):
-        artifact = self.versions.get(artifact_version_id)
+    async def get_build_record(self, *, app_id, build_record_id):
+        artifact = self.versions.get(build_record_id)
         if artifact is None or artifact.app_id != app_id:
             return None
         return artifact
 
-    async def accept_artifact_version(self, *, app_id, artifact_version_id):
-        artifact = await self.get_artifact_version(
+    async def accept_build_record(self, *, app_id, build_record_id):
+        artifact = await self.get_build_record(
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if artifact is None:
             return None
         for version in self.versions.values():
             if (
                 version.app_id == app_id
-                and version.artifact_kind == artifact.artifact_kind
-                and version.artifact_key == artifact.artifact_key
+                and version.build_family == artifact.build_family
+                and version.build_key == artifact.build_key
                 and version.id != artifact.id
                 and version.lifecycle_status is ArtifactLifecycleStatus.CURRENT
             ):
@@ -306,8 +306,12 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
         emitted["payload"] = payload
         emitted["kwargs"] = kwargs
 
-    monkeypatch.setattr(save_module, "emit_ui_surface", _fake_emit)
     monkeypatch.setattr(save_module, "get_artifact_store", lambda: fake_store)
+    monkeypatch.setitem(
+        save_module.emit_app_intelligence_enriched_overview_card.__globals__,
+        "emit_ui_surface",
+        _fake_emit,
+    )
 
     result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
 
@@ -318,9 +322,9 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     assert context["existing_app_discovery_artifact"]["request_intent"] == "brownfield_app"
     assert context["module_decomposition_plan"] == json.dumps(_decomposition_evidence())
     assert "module_decomposition_plan" not in context["existing_app_discovery_artifact"]
-    assert emitted["component"] == "DiscoveryBriefCard"
+    assert emitted["component"] == "AppIntelligenceOverviewCard"
 
-    persisted_kinds = {call["artifact_kind"] for call in fake_store.calls}
+    persisted_kinds = {call["build_family"] for call in fake_store.calls}
     assert persisted_kinds == {
         *app_context_mapping.APP_CONTEXT_ARTIFACT_KINDS,
         APP_CONTEXT_VERSION_ARTIFACT_KIND,

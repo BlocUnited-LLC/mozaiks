@@ -29,6 +29,14 @@ from pydantic import ValidationError
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
+from mozaiksai.core.runtime.app.page_schema import (
+    AppPageSchema,
+    PageSchemaValidationError,
+    build_page_action_index,
+    build_page_action_index_from_module_contracts,
+    discover_page_schema_paths,
+    load_app_page_schemas,
+)
 from mozaiksai.core.runtime.app.provenance import (
     AppProvenance,
     AppProvenanceLoadError,
@@ -64,6 +72,7 @@ class AppLoadResult:
         data_entities_by_key: Data entities indexed by (module_id, entity_name)
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
         provenance:           Parsed app provenance, or None when not declared
+        page_schemas:         Validated declarative page schemas indexed by page name
         failed_module_names:  Names of modules that failed to load — empty on full success
     """
     definition: AppDefinition
@@ -72,6 +81,7 @@ class AppLoadResult:
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
     provenance: AppProvenance | None = None
+    page_schemas: dict[str, AppPageSchema] = field(default_factory=dict)
     failed_module_names: list[str] = field(default_factory=list)
 
 
@@ -178,6 +188,20 @@ class AppLoader:
                     ", ".join(m.name for m in loaded_modules),
                 )
 
+        try:
+            action_index = build_page_action_index_from_module_contracts(base_path)
+            action_index.update(build_page_action_index(loaded_modules))
+            page_schemas = load_app_page_schemas(
+                base_path,
+                action_index=action_index,
+            )
+        except PageSchemaValidationError as exc:
+            formatted = "; ".join(
+                f"{diagnostic.location}: {diagnostic.code}"
+                for diagnostic in exc.diagnostics
+            )
+            raise AppLoadError(f"Invalid page schema: {formatted}") from exc
+
         return AppLoadResult(
             definition=app_def,
             modules=loaded_modules,
@@ -185,6 +209,7 @@ class AppLoader:
             data_entities_by_key=data_entities_by_key,
             subscriptions_config=subscriptions_config,
             provenance=provenance,
+            page_schemas=page_schemas,
             failed_module_names=failed_module_names,
         )
 
@@ -206,16 +231,7 @@ class AppLoader:
 
     @classmethod
     def _discover_page_names(cls, base_path: Path) -> list[str]:
-        pages_dir = base_path / "ui" / "pages"
-        if not pages_dir.exists():
-            return []
-        names: list[str] = []
-        for child in sorted(pages_dir.iterdir(), key=lambda item: item.name.lower()):
-            if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
-                names.append(child.stem)
-            elif child.is_dir() and ((child / "page.yaml").exists() or (child / "page.yml").exists()):
-                names.append(child.name)
-        return names
+        return list(discover_page_schema_paths(base_path))
 
     @classmethod
     def _resolve_env_vars(cls, content: Any) -> Any:

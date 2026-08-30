@@ -56,7 +56,8 @@ def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> 
     assert mozaikspay["recommendation_rank"] == 1
     assert mozaikspay["capability_kind"] == "operator_pack"
     assert {"billing", "subscriptions", "usage", "saas"} <= set(mozaikspay["domains"])
-    assert "Prioritize the mozaikspay capability pack" in notes
+    assert "Default to the mozaikspay capability pack" in notes
+    assert "monetization_provider=entitlement_dispatch" in notes
     assert "billing_portal facade" in notes
     assert "mozaikspay_client.py" in notes
     assert "Do not generate checkout, webhook handlers" in notes
@@ -66,7 +67,7 @@ def test_managed_adapter_rules_keep_default_packs_app_agnostic() -> None:
     directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
     app_agnostic_rules = " ".join(directory.get("app_agnostic_rules", []))
 
-    assert "recommendation-only" in app_agnostic_rules
+    assert "replaceable" in app_agnostic_rules
     assert "runtime requirements" in app_agnostic_rules
     assert "provider-neutral" in app_agnostic_rules
     assert "external_adapter replacement path" in app_agnostic_rules
@@ -99,8 +100,20 @@ def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     assert subscriptions["subscription_contract"] == "required"
     assert "managed mozaikspay pack" in subscriptions["operator_pack_note"]
     assert "hosted MozaiksPay API" in subscriptions["operator_pack_note"]
-    assert "prioritize the managed mozaikspay capability pack" in rule
-    assert "billing provider" in rule
+    assert "monetization_provider=mozaiks_pay" in subscriptions["operator_pack_note"]
+    assert "entitlement_dispatch" in rule
+
+
+def test_capability_routing_includes_operator_readiness_pack() -> None:
+    routing = _read_yaml("factory_app/build_context/AppGenerator/capability_routing.yaml")
+    packs = {pack["id"]: pack for pack in routing["layers"]["capability_pack"]["packs"]}
+
+    assert "operator_readiness" in packs
+    readiness = packs["operator_readiness"]
+    assert readiness["capability_kind"] == "operator_pack"
+    assert "readiness" in readiness["covers"].lower()
+    assert "no-spend" in readiness["use_when"].lower()
+    assert "brochure site" in readiness["avoid_when"].lower()
 
 
 @pytest.mark.parametrize("pack_id", ["messaging", "support", "social", "entitlement_dispatch"])
@@ -165,7 +178,7 @@ def test_mozaikspay_contract_declares_subscription_write_path_capability() -> No
     contract = _read_yaml("factory_app/build_context/mozaikspay/contract.yaml")
 
     assert "subscription_write_path" in contract.get("provides_capabilities", []), (
-        "The default MozaiksPay managed pack must declare the generic "
+        "The recommended MozaiksPay managed pack must declare the generic "
         "subscription_write_path capability instead of relying on pack-name "
         "special casing."
     )
@@ -253,7 +266,13 @@ def test_support_pack_requires_messaging_and_stores_only_ticket_metadata() -> No
     action_ids = {action["id"] for action in module["actions"]}
     paths = _output_paths(contract["required_outputs"])
 
-    assert contract["required_packs"] == ["messaging"]
+    # Machine-readable dependency is now under requires.packs (canonical format)
+    requires = contract.get("requires") or {}
+    pack_ids = [
+        (entry.get("pack_id") if isinstance(entry, dict) else entry)
+        for entry in (requires.get("packs") or [])
+    ]
+    assert "messaging" in pack_ids
     assert {"create_support_request", "list_support_requests", "link_message_thread", "update_support_status"} <= action_ids
     assert "message_thread_id" in module["actions"][0]["input_schema"]["properties"]
     assert any("modules/support/module.yaml" in path for path in paths)

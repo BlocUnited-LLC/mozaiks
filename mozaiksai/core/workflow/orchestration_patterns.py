@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import Callable
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
@@ -73,6 +73,39 @@ def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
         name = str(message.get("name") or role).strip() or role
         rendered.append(f"{name} ({role}): {content}")
     return "\n\n".join(rendered).strip() or "."
+
+
+async def _fetch_chat_session_extra_context(
+    persistence_manager: Any,
+    *,
+    chat_id: str,
+    app_id: str,
+    workflow_name: str,
+) -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        await persistence_manager.fetch_chat_session_extra_context(
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+        ),
+    )
+
+
+async def _persist_context_variables(
+    persistence_manager: Any,
+    *,
+    chat_id: str,
+    app_id: str,
+    workflow_name: str,
+    variables: dict[str, Any],
+) -> None:
+    await persistence_manager.persist_context_variables(
+        chat_id=chat_id,
+        app_id=app_id,
+        workflow_name=workflow_name,
+        variables=variables,
+    )
 
 
 def _first_agent_payload_from_runner_result(runner_result: Any, agent_name: str) -> dict[str, Any] | None:
@@ -312,6 +345,19 @@ _SENSITIVE_CONTEXT_KEY_PARTS = (
     "token",
 )
 
+_HANDOFF_CONTEXT_LOG_KEYS = (
+    "app_type",
+    "app_name",
+    "github_repo",
+    "brownfield_build_path",
+    "workflow_sequence",
+    "build_mode",
+    "revision_scope",
+    "current_app_context_version_id",
+    "app_intelligence_ready",
+    "app_intelligence_status",
+)
+
 
 def _safe_context_keys(context_variables: dict[str, Any]) -> list[str]:
     keys: list[str] = []
@@ -321,6 +367,44 @@ def _safe_context_keys(context_variables: dict[str, Any]) -> list[str]:
             continue
         keys.append(key)
     return keys
+
+
+def _safe_handoff_context_preview(
+    context_variables: dict[str, Any],
+    extra_context: dict[str, Any],
+) -> dict[str, Any]:
+    preview: dict[str, Any] = {}
+    for key in _HANDOFF_CONTEXT_LOG_KEYS:
+        if key not in context_variables:
+            continue
+        value = context_variables.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        if isinstance(value, str):
+            preview[key] = value[:160]
+        elif isinstance(value, (bool, int, float)):
+            preview[key] = value
+        elif isinstance(value, dict):
+            preview[key] = f"dict:{len(value)}"
+        elif isinstance(value, list):
+            preview[key] = f"list:{len(value)}"
+        else:
+            preview[key] = type(value).__name__
+
+    trigger_meta = extra_context.get("trigger_meta") if isinstance(extra_context, dict) else None
+    if isinstance(trigger_meta, dict):
+        for source_key, preview_key in (
+            ("trigger_source", "trigger_source"),
+            ("transition_id", "transition_id"),
+            ("option_id", "transition_option"),
+            ("journey_id", "journey_id"),
+            ("resolved_workflow_id", "resolved_workflow"),
+        ):
+            value = trigger_meta.get(source_key)
+            if isinstance(value, str) and value.strip():
+                preview[preview_key] = value.strip()[:160]
+
+    return preview
 
 
 def _set_context_value(context_ref: Any, key: str, value: Any) -> None:
@@ -354,6 +438,13 @@ def _structured_model_for_agent(
     return None
 
 
+def _structured_output_validation_failed(runner_result: Any) -> bool:
+    return (
+        getattr(runner_result, "status", None) is RunStatus.FAILED
+        and "structured output validation failed" in str(getattr(runner_result, "error", "") or "")
+    )
+
+
 async def _emit_validated_structured_outputs_from_runner_result(
     *,
     runner_result: Any,
@@ -368,6 +459,9 @@ async def _emit_validated_structured_outputs_from_runner_result(
     wf_logger: Any,
 ) -> None:
     """Emit runtime structured-output events from AG2 Network results."""
+
+    if _structured_output_validation_failed(runner_result):
+        return
 
     structured_outputs = list(getattr(runner_result, "structured_outputs", []) or [])
     if not structured_outputs:
@@ -564,6 +658,9 @@ async def _run_ag2_network_phase(
     context_variables: dict[str, Any],
     structured_registry: dict[str, Any],
     max_turns: int,
+    agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
+    knowledge_store: Any = None,
+    context_authority_policy: Any = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -577,8 +674,55 @@ async def _run_ag2_network_phase(
             context_variables=context_variables,
             structured_registry=structured_registry,
             max_turns=max_turns,
+            agent_text_context_deriver=agent_text_context_deriver,
+            knowledge_store=knowledge_store,
+            context_authority_policy=context_authority_policy,
         )
     )
+
+
+def _assemble_result_payload(
+    *,
+    workflow_name: str,
+    chat_id: str,
+    app_id: str,
+    user_id: str | None,
+    workflow_complete: bool,
+    awaiting_user_input: bool,
+    run_failed: bool,
+    run_error: Any,
+    workflow_status_value: int,
+    agents_created: int,
+    agent_turns: int,
+    ag2_channel_id: Any,
+    ag2_close_reason: Any,
+    structured_outputs: Any,
+) -> dict[str, Any]:
+    """Final orchestration result contract handed back to callers (Studio, CLI).
+
+    ``agents_created`` and ``agent_turns`` are the evidence a caller needs to
+    distinguish a real generation from a silent no-op where the graph loaded
+    but no agent ever produced a reply (issue #379).
+    """
+    return {
+        "workflow_name": workflow_name,
+        "chat_id": chat_id,
+        "app_id": app_id,
+        "user_id": user_id,
+        "messages": None,
+        "max_turns_reached": False,
+        "response": None,
+        "run_completed": workflow_complete,
+        "awaiting_user_input": awaiting_user_input,
+        "run_status": "failed" if run_failed else workflow_status_value,
+        "failed": run_failed,
+        "error": run_error,
+        "agents_created": agents_created,
+        "agent_turns": agent_turns,
+        "ag2_channel_id": ag2_channel_id,
+        "ag2_close_reason": ag2_close_reason,
+        "structured_outputs": structured_outputs,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -594,6 +738,7 @@ async def run_workflow_orchestration(
     initial_agent_name_override: str | None = None,
     agents_factory: Callable | None = None,
     context_factory: Callable | None = None,
+    knowledge_store: Any = None,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     start_time = perf_counter()
@@ -689,6 +834,7 @@ async def run_workflow_orchestration(
             wf_logger.debug("[%s] frontend_context lookup failed: %s", workflow_name_upper, _fe_err)
 
         context: Any = None
+        persisted_extra_ctx: dict[str, Any] = {}
         if context_factory:
             result_ctx = context_factory()
             if inspect.isawaitable(result_ctx):
@@ -710,13 +856,16 @@ async def run_workflow_orchestration(
                 except Exception as _ctx_err:
                     wf_logger.debug("[%s] frontend_context inject failed key=%s: %s", workflow_name_upper, prefixed, _ctx_err)
 
-        try:
-            if context is not None:
-                extra_ctx = await persistence_manager.fetch_chat_session_extra_context(chat_id=chat_id, app_id=app_id)
-                if isinstance(extra_ctx, dict) and extra_ctx:
-                    merge_persisted_extra_context(context, extra_ctx)
-        except Exception as seed_err:
-            wf_logger.debug("[%s] Persisted extra context merge failed: %s", workflow_name_upper, seed_err)
+        if context is not None:
+            extra_ctx = await _fetch_chat_session_extra_context(
+                persistence_manager,
+                chat_id=chat_id,
+                app_id=app_id,
+                workflow_name=workflow_name,
+            )
+            if isinstance(extra_ctx, dict) and extra_ctx:
+                persisted_extra_ctx = dict(extra_ctx)
+                merge_persisted_extra_context(context, extra_ctx)
 
         context_time = (perf_counter() - context_start) * 1000
         performance_logger.info("context_load_duration_ms", extra={
@@ -729,8 +878,8 @@ async def run_workflow_orchestration(
             ctx_dict: dict[str, Any] = {}
         elif hasattr(context, "to_dict"):
             ctx_dict = context.to_dict()
-        elif hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
-            ctx_dict = dict(context.data)
+        elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+            ctx_dict = context.snapshot()
         elif isinstance(context, dict):
             ctx_dict = context
         else:
@@ -753,6 +902,14 @@ async def run_workflow_orchestration(
                 except Exception as _ctx_exc:
                     wf_logger.debug("[%s] CONTEXT_SEED_FAILED key=%s: %s", workflow_name_upper, key, _ctx_exc)
 
+        if persisted_extra_ctx:
+            wf_logger.info(
+                "[%s] SESSION_CONTEXT_MERGED extra_keys=%s handoff=%s",
+                workflow_name_upper,
+                _safe_context_keys(persisted_extra_ctx),
+                _safe_handoff_context_preview(ctx_dict, persisted_extra_ctx),
+            )
+
         # 6) Preload deterministic context before agent prompts are composed.
         try:
             from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
@@ -771,10 +928,10 @@ async def run_workflow_orchestration(
         # Lifecycle tools mutate the context container in place. Refresh the
         # bridge source before agent prompts and AG2 channel state are created.
         if context is not None:
-            if hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
-                ctx_dict.update(context.data)
-            elif hasattr(context, "to_dict"):
+            if hasattr(context, "to_dict"):
                 ctx_dict.update(context.to_dict())
+            elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
+                ctx_dict.update(context.snapshot())
             elif isinstance(context, dict):
                 ctx_dict.update(context)
 
@@ -825,13 +982,36 @@ async def run_workflow_orchestration(
             cb = getattr(ag, "_mozaiks_context_bridge", None)
             if cb is not None:
                 context_bridge = cb
-                context_bridge._data.update(ctx_dict)
-                ctx_dict = context_bridge._data
+                bridge_state = context_bridge.snapshot() if hasattr(context_bridge, "snapshot") else {}
+                if bridge_state != ctx_dict:
+                    for key, value in ctx_dict.items():
+                        if bridge_state.get(key) == value:
+                            continue
+                        try:
+                            context_bridge.set(key, value)
+                        except Exception as sync_err:
+                            wf_logger.debug(
+                                "[%s] CONTEXT_BRIDGE_SYNC_SKIPPED key=%s: %s",
+                                workflow_name_upper,
+                                key,
+                                sync_err,
+                            )
+                    bridge_state = context_bridge.snapshot() if hasattr(context_bridge, "snapshot") else bridge_state
+                ctx_dict = bridge_state
                 break
 
         if context_bridge is None:
             from .agents.factory import ContextVariablesBridge
-            context_bridge = ContextVariablesBridge(ctx_dict)
+            context_bridge = ContextVariablesBridge(
+                ctx_dict,
+                authority_policy=getattr(context, "_mozaiks_context_authority_policy", None),
+            )
+
+        context_authority_policy = getattr(context_bridge, "_mozaiks_context_authority_policy", None) or getattr(
+            context,
+            "_mozaiks_context_authority_policy",
+            None,
+        )
 
         initial_agent_name = _resolve_executable_initial_agent(
             initial_agent_name=initial_agent_name,
@@ -935,6 +1115,13 @@ async def run_workflow_orchestration(
 
         # 10) Execute AG2 Network workflow channel
         network_prompt = _messages_to_network_prompt(initial_messages)
+        agent_text_context_deriver = (
+            getattr(derived_context_manager, "preview_agent_text_updates", None)
+            if derived_context_manager is not None
+            else None
+        )
+        if not callable(agent_text_context_deriver):
+            agent_text_context_deriver = None
         projected_sequence = 0
         project_final_runner_result = True
         if task_batches_config is not None:
@@ -956,6 +1143,9 @@ async def run_workflow_orchestration(
                 context_variables=dict(ctx_dict),
                 structured_registry=structured_registry,
                 max_turns=max_turns,
+                agent_text_context_deriver=agent_text_context_deriver,
+                knowledge_store=knowledge_store,
+                context_authority_policy=context_authority_policy,
             )
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
@@ -997,6 +1187,7 @@ async def run_workflow_orchestration(
                     wf_logger=wf_logger,
                     fresh_agents_per_task=True,
                     agents_factory=agents_factory,
+                    context_authority_policy=context_authority_policy,
                 )
                 continuation_agent = _resolve_continuation_agent_after_trigger(
                     transition_rules=transition_rules,
@@ -1023,6 +1214,9 @@ async def run_workflow_orchestration(
                         context_variables=ctx_dict,
                         structured_registry=structured_registry,
                         max_turns=max_turns,
+                        agent_text_context_deriver=agent_text_context_deriver,
+                        knowledge_store=knowledge_store,
+                        context_authority_policy=context_authority_policy,
                     )
                 else:
                     runner_result = first_phase_result
@@ -1039,11 +1233,16 @@ async def run_workflow_orchestration(
                 context_variables=ctx_dict,
                 structured_registry=structured_registry,
                 max_turns=max_turns,
+                agent_text_context_deriver=agent_text_context_deriver,
+                knowledge_store=knowledge_store,
+                context_authority_policy=context_authority_policy,
             )
 
-        await _emit_structured_once(runner_result, projected_sequence)
+        structured_validation_failed = _structured_output_validation_failed(runner_result)
+        if not structured_validation_failed:
+            await _emit_structured_once(runner_result, projected_sequence)
 
-        if project_final_runner_result:
+        if project_final_runner_result and not structured_validation_failed:
             sequence_counter = await _project_ag2_wal_to_mozaiks_transport(
                 runner_result=runner_result,
                 transport=transport,
@@ -1122,13 +1321,16 @@ async def run_workflow_orchestration(
             "sequence_counter": sequence_counter,
         }
 
-        # 11) Persist final context snapshot
-        try:
-            await persistence_manager.persist_context_variables(
-                chat_id=chat_id, app_id=app_id, variables=dict(ctx_dict),
-            )
-        except Exception as persist_ctx_err:
-            wf_logger.debug("[%s] Final context persist failed: %s", workflow_name_upper, persist_ctx_err)
+        # 11) Persist the final AG2 orchestration/network snapshot. The agent
+        # context bridge is a detached store and is intentionally not overlaid
+        # here; unifying those stores is a separate runtime architecture change.
+        await _persist_context_variables(
+            persistence_manager,
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            variables=dict(ctx_dict),
+        )
 
         workflow_complete = run_completed and not awaiting_user_input and not run_failed
         workflow_status_value = 1 if workflow_complete else 0
@@ -1157,23 +1359,22 @@ async def run_workflow_orchestration(
         duration_sec = perf_counter() - start_time
         wf_logger.info("[EXECUTION_COMPLETE] Duration: %.2fs", duration_sec)
 
-        result_payload = {
-            "workflow_name": workflow_name,
-            "chat_id": chat_id,
-            "app_id": app_id,
-            "user_id": user_id,
-            "messages": None,
-            "max_turns_reached": False,
-            "response": None,
-            "run_completed": workflow_complete,
-            "awaiting_user_input": awaiting_user_input,
-            "run_status": "failed" if run_failed else workflow_status_value,
-            "failed": run_failed,
-            "error": run_error,
-            "ag2_channel_id": runner_result.channel_id,
-            "ag2_close_reason": runner_result.close_reason,
-            "structured_outputs": runner_result.structured_outputs,
-        }
+        result_payload = _assemble_result_payload(
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+            user_id=user_id,
+            workflow_complete=workflow_complete,
+            awaiting_user_input=awaiting_user_input,
+            run_failed=run_failed,
+            run_error=run_error,
+            workflow_status_value=workflow_status_value,
+            agents_created=len(agents),
+            agent_turns=sequence_counter,
+            ag2_channel_id=runner_result.channel_id,
+            ag2_close_reason=runner_result.close_reason,
+            structured_outputs=runner_result.structured_outputs,
+        )
 
     except Exception as e:
         logger.error("[%s] Orchestration failed: %s", workflow_name_upper, e, exc_info=True)

@@ -127,7 +127,7 @@ export function useWorkflowStart() {
         return payload;
       } catch (err) {
         setError(err.message);
-        console.error('[useWorkflowStart] trigger failed:', err);
+        console.error('❌ [useWorkflowStart] trigger failed:', err);
         return null;
       } finally {
         setStarting(false);

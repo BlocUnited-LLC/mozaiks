@@ -26,6 +26,7 @@ export {
   FileList,
   Form,
   Grid,
+  ArtifactLoadingState,
   IconButton,
   InlineEmptyState,
   LinkButton,
@@ -48,3 +49,6 @@ export {
   Timeline,
   UsageTrendPanel,
 } from './primitives/index.js';
+
+export { default as OnboardingTour } from './components/OnboardingTour.jsx';
+export { parseOnboardingConfigSource } from './lib/onboardingConfig.js';

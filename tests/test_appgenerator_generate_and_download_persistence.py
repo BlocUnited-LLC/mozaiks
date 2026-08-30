@@ -5,6 +5,8 @@ import importlib
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 def _load_generate_and_download_module():
     workspace = Path(__file__).resolve().parents[1]
@@ -57,7 +59,7 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls = []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
         return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
 
@@ -134,7 +136,6 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
         "resolve_latest_artifact_version_refs",
         lambda **kwargs: asyncio.sleep(0, result={
             "concept": "av_concept_1",
-            "build_plan": "av_build_plan_1",
             "design_docs": "av_design_docs_1",
             "workflow_bundle": "av_workflow_bundle_1",
             "theme_capture": "av_theme_capture_1",
@@ -170,12 +171,11 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     )
 
     assert artifact_version.id == "av_bundle_1"
-    assert fake_artifact_store.calls[0]["artifact_kind"] == "app_bundle"
-    assert fake_artifact_store.calls[0]["artifact_key"] == "app_bundle"
-    assert fake_artifact_store.calls[0]["parent_version_id"] == "av_parent_1"
+    assert fake_artifact_store.calls[0]["build_family"] == "app_bundle"
+    assert fake_artifact_store.calls[0]["build_key"] == "app_bundle"
+    assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_1",
-        "build_plan": "av_build_plan_1",
         "design_docs": "av_design_docs_1",
         "workflow_bundle": "av_workflow_bundle_1",
         "theme_capture": "av_theme_capture_1",
@@ -268,4 +268,59 @@ def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypat
     assert result["app_bundle_acceptance_status"] == "failed"
     assert context.data["app_bundle_acceptance_status"] == "failed"
     assert result["bundle_errors"]
+
+
+def test_generate_and_download_uses_canonical_build_root_and_propagates_registration_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class _FakePersistence:
+        async def gather_latest_agent_jsons(self, **_kwargs):
+            return {}
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    async def passed_acceptance(**_kwargs):
+        return {
+            "passed": True,
+            "status": "passed",
+            "bundle_scan": {"errors": []},
+            "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
+        }
+
+    async def registration_failure(**_kwargs):
+        raise RuntimeError("artifact registration failed")
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(generate_and_download_module, "AG2PersistenceManager", lambda: _FakePersistence())
+    monkeypatch.setattr(generate_and_download_module, "_inject_agent_context_env", noop)
+    monkeypatch.setattr(generate_and_download_module, "run_app_bundle_acceptance_gate", passed_acceptance)
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "_register_app_bundle_artifact_version",
+        registration_failure,
+    )
+
+    context = _Context(
+        {
+            "chat_id": "chat_123",
+            "app_id": "app/123",
+            "build_id": "build 123",
+            "generated_files": {"app.json": '{"app_id":"app-123"}'},
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="artifact registration failed"):
+        asyncio.run(
+            generate_and_download_module.generate_and_download(
+                {},
+                "Bundle ready.",
+                context_variables=context,
+            )
+        )
+
+    expected_app_dir = tmp_path / "generated" / "apps" / "app-123" / "build-123" / "app"
+    assert (expected_app_dir / "app.json").exists()
+    assert not (tmp_path / "generated_apps").exists()
 

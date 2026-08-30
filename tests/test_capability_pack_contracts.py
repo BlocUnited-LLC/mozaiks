@@ -1069,62 +1069,16 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(m
     assert summary_artifact["author_user_id"] == "user_123"
 
 
-def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blueprint(monkeypatch) -> None:
+def test_valueengine_decompose_exposes_only_live_feature_context_tool() -> None:
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/decompose.py",
         "tests.valueengine_decompose_direct",
     )
-    module._HAS_PERSISTENCE = False
-    summary_artifact = {}
 
-    async def _fake_persist_summary_artifact(**kwargs):
-        summary_artifact.update(kwargs)
-        return type("ArtifactVersion", (), {"id": "av_build_plan_1"})()
-
-    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
-    context = _Context(
-        app_id="app_123",
-        chat_id="chat_123",
-        user_id="user_123",
-        value_manifest={
-            "app_name": "AdMarket",
-            "value_proposition": "Invest in campaigns",
-        },
-    )
-
-    result = asyncio.run(
-        module.save_build_plan(
-            tasks=[
-                {
-                    "task_id": "task_marketplace_pages",
-                    "task_type": "app_module",
-                    "capability_pack_id": "marketplace_core",
-                    "target_workflow": "AppGenerator",
-                    "description": "Build marketplace pages",
-                    "initial_message": "Generate marketplace pages",
-                }
-            ],
-            capability_packs=[
-                {
-                    "capability_pack_id": "marketplace_core",
-                    "pack_type": "marketplace_pack",
-                    "label": "Marketplace",
-                    "summary": "Listings and campaign discovery",
-                    "implementation_mode": "declarative_module",
-                }
-            ],
-            required_inputs=["ads_api_key"],
-            context_variables=context,
-        )
-    )
-
-    assert result["success"] is True
-    assert context.data["build_plan"]["concept_blueprint"]["app_name"] == "AdMarket"
-    assert context.data["build_plan"]["capability_packs"][0]["pack_type"] == "marketplace_pack"
-    assert context.data["capability_packs"][0]["capability_pack_id"] == "marketplace_core"
-    assert summary_artifact["artifact_kind"] == "build_plan"
-    assert summary_artifact["input_artifact_kinds"] == ("concept",)
-    assert summary_artifact["summary_payload"]["capability_packs"][0]["capability_pack_id"] == "marketplace_core"
+    assert callable(module.get_feature_context)
+    assert not hasattr(module, "save_build_plan")
+    assert not hasattr(module, "get_build_plan")
+    assert not hasattr(module, "persist_summary_artifact")
 
 
 def test_app_generation_strategy_docs_are_indexed_and_examples_are_grounded() -> None:

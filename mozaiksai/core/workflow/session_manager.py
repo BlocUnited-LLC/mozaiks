@@ -7,7 +7,18 @@ import time
 import uuid
 from typing import Any
 
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+
+WORKFLOW_SESSIONS_COLLECTION = "WorkflowSessions"
+ARTIFACT_INSTANCES_COLLECTION = "ArtifactInstances"
+
+
+async def _runtime_collection(pm: AG2PersistenceManager, name: str) -> Any:
+    await pm.persistence._ensure_client()
+    if pm.persistence.client is None:
+        raise RuntimeError("Mongo client not initialized")
+    return pm.persistence.client[SYSTEM_DATABASE][name]
 
 
 async def create_workflow_session(app_id: str, user_id: str, workflow_name: str) -> dict[str, Any]:
@@ -37,7 +48,7 @@ async def create_workflow_session(app_id: str, user_id: str, workflow_name: str)
         "created_at": time.time(),
         "updated_at": time.time(),
     }
-    coll = await pm._coll("WorkflowSessions")
+    coll = await _runtime_collection(pm, WORKFLOW_SESSIONS_COLLECTION)
     await coll.replace_one({"_id": chat_id}, doc, upsert=True)
     return doc
 
@@ -57,7 +68,7 @@ async def complete_workflow_session(chat_id: str, app_id: str) -> None:
         app_id: App ID for multi-tenant isolation
     """
     pm = AG2PersistenceManager()
-    coll = await pm._coll("WorkflowSessions")
+    coll = await _runtime_collection(pm, WORKFLOW_SESSIONS_COLLECTION)
     await coll.update_one(
         {"_id": chat_id, "app_id": app_id},
         {"$set": {"status": "COMPLETED", "updated_at": time.time()}}
@@ -94,7 +105,7 @@ async def create_artifact_instance(
         "created_at": time.time(),
         "updated_at": time.time(),
     }
-    coll = await pm._coll("ArtifactInstances")
+    coll = await _runtime_collection(pm, ARTIFACT_INSTANCES_COLLECTION)
     await coll.replace_one({"_id": aid}, doc, upsert=True)
     return doc
 
@@ -109,8 +120,8 @@ async def attach_artifact_to_session(chat_id: str, artifact_id: str, app_id: str
         app_id: App ID for multi-tenant isolation
     """
     pm = AG2PersistenceManager()
-    sess_coll = await pm._coll("WorkflowSessions")
-    art_coll = await pm._coll("ArtifactInstances")
+    sess_coll = await _runtime_collection(pm, WORKFLOW_SESSIONS_COLLECTION)
+    art_coll = await _runtime_collection(pm, ARTIFACT_INSTANCES_COLLECTION)
     
     await sess_coll.update_one(
         {"_id": chat_id, "app_id": app_id},
@@ -136,7 +147,7 @@ async def update_artifact_state(
         state_updates: Dict of state keys to update
     """
     pm = AG2PersistenceManager()
-    coll = await pm._coll("ArtifactInstances")
+    coll = await _runtime_collection(pm, ARTIFACT_INSTANCES_COLLECTION)
     
     # Build update operations for nested state fields
     update_ops = {}
@@ -163,7 +174,7 @@ async def get_artifact_instance(artifact_id: str, app_id: str) -> dict[str, Any]
         Artifact document or None if not found
     """
     pm = AG2PersistenceManager()
-    coll = await pm._coll("ArtifactInstances")
+    coll = await _runtime_collection(pm, ARTIFACT_INSTANCES_COLLECTION)
     doc = await coll.find_one({"_id": artifact_id, "app_id": app_id})
     return doc
 
@@ -180,6 +191,6 @@ async def get_workflow_session(chat_id: str, app_id: str) -> dict[str, Any] | No
         Session document or None if not found
     """
     pm = AG2PersistenceManager()
-    coll = await pm._coll("WorkflowSessions")
+    coll = await _runtime_collection(pm, WORKFLOW_SESSIONS_COLLECTION)
     doc = await coll.find_one({"_id": chat_id, "app_id": app_id})
     return doc

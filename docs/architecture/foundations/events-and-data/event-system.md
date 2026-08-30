@@ -107,7 +107,10 @@ Current implementation:
 - `mozaiksai/hosts/platform.py` indexes capability-triggered workflows from
   `workflows/*/orchestrator.yaml`, creates the routed chat session, and
   auto-starts background execution when transport is available.
-- Capability resolution emits `platform.workflow_capability_started`.
+- Admitted capability resolution emits `platform.workflow_capability_started`;
+  replay, cycle/depth, rate, or authority rejection emits
+  `platform.workflow_capability_trigger_rejected` without creating a session or
+  starting a workflow.
 - Handler targets route the event payload directly to a named module action
   method, enabling module-to-module event-driven calls without HTTP indirection.
 - Service adapter targets route the event payload to an app-owned

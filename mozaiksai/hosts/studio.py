@@ -20,15 +20,12 @@ from fastapi import BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
-
-configure_repo_host_defaults("studio")
-
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
-    AcceptedStagedAppBundleArtifactVersionError,
+    AcceptedStagedAppBundleBuildRecordError,
     SourceImportRequest,
-    accept_staged_refinement_artifact_version,
+    accept_staged_refinement_build_record,
+    build_refinement_review_package,
     get_orchestration_control_harness,
     index_workspace_app_intelligence,
     resolve_source_import,
@@ -101,6 +98,7 @@ from mozaiksai.core.session.model import (
     TriggerInput,
 )
 from mozaiksai.core.session.router import configure_session_router, get_session_router
+from mozaiksai.core.studio.scope import resolve_studio_scope
 from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
@@ -111,13 +109,16 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import platform as platform_app
+from mozaiksai.hosts.bootstrap import register_repo_host_bootstrap
 from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
-    resolve_scope_from_principal,
 )
+from mozaiksai.hosts.routers.sandbox import router as _sandbox_router
 
 app = platform_app.app
+register_repo_host_bootstrap(app, "studio")
+app.include_router(_sandbox_router)
 logger = get_workflow_logger("studio_app")
 
 _BUNDLE_MAX_TEXT_FILES = 200
@@ -339,6 +340,18 @@ def _validation_override_required(version) -> bool:  # noqa: ANN001
     return version.validation_status in {ArtifactValidationStatus.PENDING, ArtifactValidationStatus.SKIPPED}
 
 
+def _is_coding_produced_artifact(version) -> bool:  # noqa: ANN001
+    """True when this artifact version was produced by the refinement coding lane.
+
+    Covers both the coding worker's staged bundles (``bundle_mode``) and
+    staged-refinement artifacts carrying a ``refinement`` metadata envelope.
+    """
+    metadata = _version_metadata(version)
+    if str(metadata.get("bundle_mode") or "").strip() == "staged_refinement_bundle":
+        return True
+    return isinstance(metadata.get("refinement"), dict)
+
+
 def _enforce_artifact_validation_gate(
     version,  # noqa: ANN001
     *,
@@ -353,6 +366,17 @@ def _enforce_artifact_validation_gate(
     if version.validation_status == ArtifactValidationStatus.PASSED:
         return
     if allow_validation_override and _validation_override_required(version):
+        # Coding-produced artifacts (structured or ACP provider output) must
+        # pass real validation; an override would let unvalidated model output
+        # into acceptance/promotion, so it is refused outright.
+        if _is_coding_produced_artifact(version):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Artifact cannot be {action}; coding-produced artifacts require "
+                    "validation_status='passed' and do not accept a validation override."
+                ),
+            )
         return
     raise HTTPException(
         status_code=409,
@@ -365,8 +389,8 @@ def _enforce_artifact_validation_gate(
 
 def _resolve_bundle_restore_target(version) -> Path:  # noqa: ANN001
     app_root = resolve_app_root()
-    if version.artifact_kind != "app_bundle":
-        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.artifact_kind}")
+    if version.build_family != "app_bundle":
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.build_family}")
     app_root.mkdir(parents=True, exist_ok=True)
     return app_root
 
@@ -486,10 +510,10 @@ async def _build_artifact_review_payload(
     parent_version = None
     parent_files: dict[str, str] = {}
     parent_skipped: list[str] = []
-    if version.parent_version_id:
-        parent_version = await artifact_store.get_artifact_version(
+    if version.parent_build_record_id:
+        parent_version = await artifact_store.get_build_record(
             app_id=app_id,
-            artifact_version_id=version.parent_version_id,
+            build_record_id=version.parent_build_record_id,
         )
         parent_zip = _artifact_bundle_path_from_version(parent_version) if parent_version is not None else None
         if parent_zip is not None:
@@ -497,7 +521,7 @@ async def _build_artifact_review_payload(
 
     sessions = await artifact_store.list_refinement_sessions(
         app_id=app_id,
-        result_artifact_version_id=version.id,
+        result_build_record_id=version.id,
         limit=5,
     )
     latest_session = sessions[0] if sessions else None
@@ -507,14 +531,15 @@ async def _build_artifact_review_payload(
             app_id=app_id,
             change_request_id=latest_session.change_request_id,
         )
-    if change_request is None and version.parent_version_id:
+    if change_request is None and version.parent_build_record_id:
         requests = await artifact_store.list_change_requests(
             app_id=app_id,
-            artifact_version_id=version.parent_version_id,
+            build_record_id=version.parent_build_record_id,
             limit=1,
         )
         change_request = requests[0] if requests else None
 
+    refinement_metadata = _refinement_metadata_from_version(version)
     changed_files = _build_bundle_diff_summary(current_files=current_files, parent_files=parent_files)
     selected_paths = []
     validation_result = None
@@ -554,30 +579,37 @@ async def _build_artifact_review_payload(
     elif validation_override_required:
         validation_blocker = "Validation has not passed. Run validation or use an explicit operator override."
 
+    review_package = build_refinement_review_package(
+        app_id=app_id,
+        artifact_version_id=version.id,
+        artifact_kind=version.build_family,
+        artifact_key=version.build_key,
+        parent_version_id=version.parent_build_record_id,
+        lifecycle_status=version.lifecycle_status.value,
+        validation_status=version.validation_status.value,
+        review_status=review_status,
+        changed_files=changed_files,
+        selected_paths=selected_paths,
+        current_skipped_files=current_skipped,
+        parent_skipped_files=parent_skipped,
+        refinement_metadata=refinement_metadata,
+        change_request=change_request,
+        latest_session=latest_session,
+        coding_summary=coding_summary,
+        validation_result=validation_result,
+        validation_override_required=validation_override_required,
+        validation_blocker=validation_blocker,
+        can_accept=can_accept,
+        can_reject=can_reject,
+        can_promote=can_promote,
+    )
+
     return {
         "artifact_version": version.model_dump(by_alias=False, mode="python"),
         "parent_artifact_version": parent_version.model_dump(by_alias=False, mode="python") if parent_version else None,
         "change_request": change_request.model_dump(by_alias=False, mode="python") if change_request else None,
         "refinement_session": latest_session.model_dump(by_alias=False, mode="python") if latest_session else None,
-        "review": {
-            "artifact_version_id": version.id,
-            "parent_version_id": version.parent_version_id,
-            "review_status": review_status,
-            "lifecycle_status": version.lifecycle_status.value,
-            "validation_status": version.validation_status.value,
-            "changed_file_count": len(changed_files),
-            "changed_files": changed_files,
-            "selected_paths": selected_paths,
-            "coding_summary": coding_summary,
-            "validation_result": validation_result,
-            "validation_override_required": validation_override_required,
-            "validation_blocker": validation_blocker,
-            "current_skipped_files": current_skipped,
-            "parent_skipped_files": parent_skipped,
-            "can_accept": can_accept,
-            "can_reject": can_reject,
-            "can_promote": can_promote,
-        },
+        "review": review_package.model_dump(mode="python"),
     }
 
 configure_session_router(
@@ -591,12 +623,13 @@ def _resolve_studio_scope(
     user_id: str | None = None,
 ) -> tuple[str, str]:
     """Resolve app/user scope for Studio endpoints in both auth modes."""
-    return resolve_scope_from_principal(
+    scope = resolve_studio_scope(
         principal,
         app_id=app_id,
         user_id=user_id,
         default_user_id=platform_app._DEFAULT_PROFILE_USER_ID,
     )
+    return scope.app_id, scope.user_id
 
 
 @app.get("/api/shell-config")
@@ -844,7 +877,7 @@ class AppIntelligenceIndexRequest(BaseModel):
     monorepo_path: str | None = Field(default=None, max_length=1000)
     auth_connector_id: str | None = Field(default=None, max_length=160)
     ignored_paths: list[str] = Field(default_factory=list)
-    artifact_key: str = "app_intelligence_workspace"
+    workspace_key: str = "app_intelligence_workspace"
     make_current: bool = True
     scan_policy: dict[str, Any] | None = None
 
@@ -1098,7 +1131,7 @@ async def _start_studio_app_intelligence_index_job(
             monorepo_path=body.monorepo_path,
             auth_connector_id=body.auth_connector_id,
             ignored_paths=body.ignored_paths,
-            artifact_key=body.artifact_key,
+            workspace_key=body.workspace_key,
             make_current=body.make_current,
             scan_policy=body.scan_policy,
         )
@@ -1161,7 +1194,7 @@ async def _run_studio_app_intelligence_index_job(app_id: str, job_id: str) -> No
             app_id=job.app_id,
             workspace_root=import_result.selected_root,
             artifact_store=get_artifact_store(),
-            artifact_key=job.artifact_key,
+            workspace_key=job.workspace_key,
             source_workflow="studio_app_intelligence_index",
             source_chat_id=job.requested_by,
             scan_policy=source_import_scan_policy(job.scan_policy, ignored_paths=import_result.ignored_paths),
@@ -1573,23 +1606,23 @@ async def remove_integration_connector(
 async def get_build_history(
     principal: UserPrincipal = Depends(require_user_scope),
     app_id: str | None = None,
-    artifact_kind: str | None = None,
-    artifact_key: str | None = None,
-    artifact_version_id: str | None = None,
+    build_family: str | None = None,
+    build_key: str | None = None,
+    build_record_id: str | None = None,
     limit: int = 25,
 ):
     """Return recent artifact versions and change requests for the current workspace."""
     app_id, _ = _resolve_studio_scope(principal)
     artifact_store = get_artifact_store()
-    versions = await artifact_store.list_artifact_versions(
+    versions = await artifact_store.list_build_records(
         app_id=app_id,
-        artifact_kind=artifact_kind,
-        artifact_key=artifact_key,
+        build_family=build_family,
+        build_key=build_key,
         limit=min(limit, 100),
     )
     change_requests = await artifact_store.list_change_requests(
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
         limit=min(limit, 100),
     )
     return {
@@ -1608,14 +1641,14 @@ async def get_build_artifact_bundle(
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
-    version = await artifact_store.get_artifact_version(
+    version = await artifact_store.get_build_record(
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=artifact_version_id,
     )
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
-    if version.artifact_kind not in {"app_bundle", "workflow_bundle"}:
-        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for bundle workbench: {version.artifact_kind}")
+    if version.build_family not in {"app_bundle", "workflow_bundle"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for bundle workbench: {version.build_family}")
 
     zip_path = _artifact_bundle_path_from_version(version)
     if zip_path is None:
@@ -1638,18 +1671,18 @@ async def get_build_artifact_bundle(
     return {
         "app_id": app_id,
         "artifact_version_id": version.id,
-        "artifact_kind": version.artifact_kind,
-        "artifact_key": version.artifact_key,
+        "build_family": version.build_family,
+        "build_key": version.build_key,
         "source_workflow": version.source_workflow,
         "bundle_path": str(zip_path),
         "generated_files": generated_files,
         "skipped_files": skipped_files,
         "workbench": {
-            "title": f"Artifact Workbench · {version.artifact_key} v{version.version_number}",
+            "title": f"Artifact Workbench · {version.build_key} v{version.version_number}",
             "description": "Inspect a persisted artifact bundle and launch scoped coding refinement from explicit file scope.",
             "artifact_version_id": version.id,
-            "artifact_kind": version.artifact_kind,
-            "artifact_key": version.artifact_key,
+            "build_family": version.build_family,
+            "build_key": version.build_key,
             "generated_files": generated_files,
         },
         "review": review_payload["review"],
@@ -1667,9 +1700,9 @@ async def get_build_artifact_review(
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
-    version = await artifact_store.get_artifact_version(
+    version = await artifact_store.get_build_record(
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=artifact_version_id,
     )
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
@@ -1699,7 +1732,7 @@ async def accept_build_artifact_version(
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
-    version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
     if version.lifecycle_status == ArtifactLifecycleStatus.ARCHIVED:
@@ -1722,28 +1755,28 @@ async def accept_build_artifact_version(
         )
     if refinement_review_record is not None:
         try:
-            accepted_result = await accept_staged_refinement_artifact_version(
+            accepted_result = await accept_staged_refinement_build_record(
                 app_id=app_id,
-                draft_artifact_version_id=artifact_version_id,
+                draft_build_record_id=artifact_version_id,
                 review_record=refinement_review_record,
                 request_id=refinement_review_record.request_id,
-                artifact_store=artifact_store,
+                record_store=artifact_store,
                 accepted_by=principal.user_id,
                 notes=body.notes if body is not None else None,
                 allow_validation_override=allow_validation_override,
             )
-        except (AcceptedStagedAppBundleArtifactVersionError, ValueError) as exc:
+        except (AcceptedStagedAppBundleBuildRecordError, ValueError) as exc:
             logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
             raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
-        accepted = accepted_result.artifact_version
+        accepted = accepted_result.build_record
     else:
-        accepted = await artifact_store.accept_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+        accepted = await artifact_store.accept_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if accepted is None:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
 
     for session in await artifact_store.list_refinement_sessions(
         app_id=app_id,
-        result_artifact_version_id=artifact_version_id,
+        result_build_record_id=artifact_version_id,
         limit=20,
     ):
         await artifact_store.update_refinement_session(
@@ -1770,7 +1803,7 @@ async def reject_build_artifact_version(
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
-    version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
     if version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
@@ -1786,7 +1819,7 @@ async def reject_build_artifact_version(
 
     for session in await artifact_store.list_refinement_sessions(
         app_id=app_id,
-        result_artifact_version_id=artifact_version_id,
+        result_build_record_id=artifact_version_id,
         limit=20,
     ):
         await artifact_store.update_refinement_session(
@@ -1796,7 +1829,7 @@ async def reject_build_artifact_version(
             ended_at=datetime.now(UTC),
         )
 
-    refreshed = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    refreshed = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     payload = await _build_artifact_review_payload(
         app_id=app_id,
         version=refreshed,
@@ -1819,6 +1852,7 @@ class BuildArtifactPromotionRequest(BaseModel):
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
 async def promote_build_artifact_version(
     artifact_version_id: str,
+    background_tasks: BackgroundTasks,
     body: BuildArtifactPromotionRequest | None = None,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
@@ -1826,13 +1860,13 @@ async def promote_build_artifact_version(
     validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
-    version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    version = await artifact_store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
     if version.lifecycle_status != ArtifactLifecycleStatus.CURRENT:
         raise HTTPException(status_code=409, detail="Only accepted current artifact versions can be promoted.")
-    if version.artifact_kind != "app_bundle":
-        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.artifact_kind}")
+    if version.build_family != "app_bundle":
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.build_family}")
     allow_validation_override = bool(body.allow_validation_override) if body is not None else False
     _enforce_artifact_validation_gate(
         version,
@@ -1890,7 +1924,7 @@ async def promote_build_artifact_version(
 
     for session in await artifact_store.list_refinement_sessions(
         app_id=app_id,
-        result_artifact_version_id=artifact_version_id,
+        result_build_record_id=artifact_version_id,
         limit=20,
     ):
         await artifact_store.update_refinement_session(
@@ -1909,6 +1943,22 @@ async def promote_build_artifact_version(
             logger.warning("promote_build conflict app=%s build=%s: %s", app_id, promotion_build_registry_id, exc)
             raise HTTPException(status_code=409, detail="Conflict promoting build.") from exc
 
+    # A promoted bundle changes the live app root, so the App Intelligence
+    # context must be rebuilt or the next refinement cycle classifies, scopes,
+    # and validates against a stale snapshot. Enqueued best-effort: a refresh
+    # failure is logged and reported but never rolls back the promotion.
+    app_intelligence_refresh: dict[str, Any] | None = None
+    try:
+        app_intelligence_refresh = await _start_studio_app_intelligence_index_job(
+            app_id=app_id,
+            user_id=user_id,
+            body=AppIntelligenceIndexRequest(),
+            background_tasks=background_tasks,
+        )
+    except Exception as exc:
+        logger.warning("POST_PROMOTE_APP_INTELLIGENCE_REFRESH_FAILED app=%s: %s", app_id, exc)
+        app_intelligence_refresh = {"status": "failed", "error": str(exc)}
+
     payload = await _build_artifact_review_payload(
         app_id=app_id,
         version=version,
@@ -1918,8 +1968,8 @@ async def promote_build_artifact_version(
         "Promoted app_id=%s artifact_version_id=%s (%s/%s) restored=%s skipped=%s refinement_request_id=%s",
         app_id,
         artifact_version_id,
-        version.artifact_kind,
-        version.artifact_key,
+        version.build_family,
+        version.build_key,
         len(restore_summary["restored"]),
         len(restore_summary["skipped"]),
         str((refinement_metadata or {}).get("request_id") or "").strip() or None,
@@ -1928,13 +1978,14 @@ async def promote_build_artifact_version(
         "promoted": True,
         "app_id": app_id,
         "artifact_version_id": artifact_version_id,
-        "artifact_kind": version.artifact_kind,
-        "artifact_key": version.artifact_key,
+        "build_family": version.build_family,
+        "build_key": version.build_key,
         "target_path": str(target_dir),
         "restart_required": True,
         "restored_files": restore_summary["restored"],
         "skipped_files": restore_summary["skipped"],
         "app_registry": app_registry_result,
+        "app_intelligence_refresh": app_intelligence_refresh,
         **payload,
     }
 
@@ -1960,9 +2011,9 @@ async def revert_to_artifact_version(
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
 
-    version = await artifact_store.get_artifact_version(
+    version = await artifact_store.get_build_record(
         app_id=app_id,
-        artifact_version_id=body.artifact_version_id,
+        build_record_id=body.artifact_version_id,
     )
     if not version:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {body.artifact_version_id}")
@@ -1983,13 +2034,13 @@ async def revert_to_artifact_version(
 
     app_root = resolve_app_root()
 
-    if version.artifact_kind == "workflow_bundle":
+    if version.build_family == "workflow_bundle":
         target_dir = candidate_app_workflows_roots(app_root)[0]
         target_dir.mkdir(parents=True, exist_ok=True)
-    elif version.artifact_kind == "app_bundle":
+    elif version.build_family == "app_bundle":
         target_dir = app_root
     else:
-        raise HTTPException(status_code=400, detail=f"Cannot revert artifact kind: {version.artifact_kind}")
+        raise HTTPException(status_code=400, detail=f"Cannot revert artifact kind: {version.build_family}")
 
     try:
         _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir)
@@ -2002,15 +2053,15 @@ async def revert_to_artifact_version(
         "Reverted app_id=%s to artifact_version_id=%s (%s/%s)",
         app_id,
         body.artifact_version_id,
-        version.artifact_kind,
-        version.artifact_key,
+        version.build_family,
+        version.build_key,
     )
 
     return {
         "reverted": True,
         "artifact_version_id": body.artifact_version_id,
-        "artifact_kind": version.artifact_kind,
-        "artifact_key": version.artifact_key,
+        "build_family": version.build_family,
+        "build_key": version.build_key,
         "target_path": str(target_dir),
         "restart_required": True,
     }
@@ -2213,7 +2264,7 @@ async def trigger_workflow(
         if (
             orchestration_control.contract_surface_enabled()
             and refinement_decision.change_intent.change_class.value in {"feature", "design"}
-            and refinement_request.artifact_kind in {"app_bundle", "workflow_bundle"}
+            and refinement_request.build_family in {"app_bundle", "workflow_bundle"}
         ):
             try:
                 contract_surface_plan, harness_decision = (
@@ -2234,8 +2285,8 @@ async def trigger_workflow(
                 surface_result = None
                 harness_decision = orchestration_control.build_harness_decision(refinement_decision)
         resolved_change_class = refinement_decision.change_intent.change_class.value
-        resolved_artifact_kind = refinement_request.artifact_kind
-        resolved_artifact_version_id = refinement_request.artifact_version_id
+        resolved_artifact_kind = refinement_request.build_family
+        resolved_artifact_version_id = refinement_request.build_record_id
         if orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
             coding_request = orchestration_control.build_coding_request(
                 refinement_request=refinement_request,
@@ -2271,9 +2322,9 @@ async def trigger_workflow(
         try:
             persisted_change_request = await artifact_store.create_change_request(
                 app_id=app_id,
-                artifact_kind=refinement_request.artifact_kind,
-                artifact_key=body.artifact_key or refinement_request.normalized_artifact_key(),
-                artifact_version_id=refinement_request.artifact_version_id,
+                build_family=refinement_request.build_family,
+                build_key=body.artifact_key or refinement_request.normalized_build_key(),
+                build_record_id=refinement_request.build_record_id,
                 raw_user_request=refinement_request.raw_user_request,
                 classification=ChangeClassification(refinement_decision.change_intent.change_class.value),
                 refinement_request=refinement_request.model_dump(mode="python"),
@@ -2442,7 +2493,7 @@ async def trigger_workflow(
         }
 
     if coding_result is not None and coding_result.eligible:
-        if artifact_store is not None and persisted_change_request_id is not None and refinement_request.artifact_version_id:
+        if artifact_store is not None and persisted_change_request_id is not None and refinement_request.build_record_id:
             try:
                 session_status = {
                     "validated": RefinementSessionStatus.VALIDATED,
@@ -2450,9 +2501,9 @@ async def trigger_workflow(
                 }.get(coding_result.status, RefinementSessionStatus.PENDING)
                 coding_session = await artifact_store.create_refinement_session(
                     app_id=app_id,
-                    artifact_version_id=refinement_request.artifact_version_id,
+                    build_record_id=refinement_request.build_record_id,
                     change_request_id=persisted_change_request_id,
-                    result_artifact_version_id=((coding_result.metadata or {}).get("artifact_version_id")),
+                    result_build_record_id=((coding_result.metadata or {}).get("build_record_id") or (coding_result.metadata or {}).get("artifact_version_id")),
                     provider="control_plane_coding",
                     status=session_status,
                     preview_url=((coding_result.validation_result or {}).get("preview_url")),
@@ -2483,7 +2534,7 @@ async def trigger_workflow(
         if (
             artifact_store is not None
             and persisted_change_request_id is not None
-            and refinement_request.artifact_version_id
+            and refinement_request.build_record_id
         ):
             try:
                 surface_session_status = {
@@ -2493,7 +2544,7 @@ async def trigger_workflow(
                 }.get(surface_result.status, RefinementSessionStatus.PENDING)
                 surface_session = await artifact_store.create_refinement_session(
                     app_id=app_id,
-                    artifact_version_id=refinement_request.artifact_version_id,
+                    build_record_id=refinement_request.build_record_id,
                     change_request_id=persisted_change_request_id,
                     provider="contract_surface_regeneration",
                     status=surface_session_status,
@@ -2530,8 +2581,8 @@ async def trigger_workflow(
             extra_trigger_meta={
                 "action_id": body.action_id,
                 "change_class": resolved_change_class,
-                "artifact_version_id": resolved_artifact_version_id,
-                "artifact_kind": resolved_artifact_kind,
+                "build_record_id": resolved_artifact_version_id,
+                "build_family": resolved_artifact_kind,
                 "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else None,
             },
         )

@@ -5,10 +5,10 @@
 # Defines canonical shapes for UI component rendering events sent from the
 # Python runtime to the frontend over WebSocket.
 #
-# Outbound event types (Python → frontend):
-#   ui.render  — render a named UI component (inline or artifact)
-#   ui.update  — patch an already-rendered component's payload in place
-#   ui.dismiss — tear down a rendered component
+# Outbound event types (Python → frontend) — canonical type strings:
+#   MozaiksEventType.UI_RENDER  ("ui.render")  — render a named UI component (inline or artifact)
+#   MozaiksEventType.UI_UPDATE  ("ui.update")  — patch an already-rendered component's payload in place
+#   MozaiksEventType.UI_DISMISS ("ui.dismiss") — tear down a rendered component
 #
 # Inbound event types (frontend → backend) are unchanged:
 #   tool_call_response — user interaction response correlated by tool_call_id
@@ -19,6 +19,10 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from mozaiksai.core.transport.event_contract import (
+    MozaiksEventType as MozaiksEventType,  # re-exported for ui.* consumers
+)
 
 
 class UIDisplayMode(StrEnum):
@@ -74,6 +78,7 @@ class UIDismissData(BaseModel):
 
 
 __all__ = [
+    "MozaiksEventType",
     "UIDisplayMode",
     "UIRenderData",
     "UIUpdateData",

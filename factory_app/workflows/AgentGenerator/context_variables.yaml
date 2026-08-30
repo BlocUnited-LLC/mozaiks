@@ -213,6 +213,15 @@ definitions:
     source:
       type: state
       default: false
+  app_type:
+    type: string
+    description: >
+      Entry path selected at the app_type_selector gate. `greenfield_app`
+      starts from a new concept; `brownfield_app` enhances a connected or
+      discovered existing application.
+    source:
+      type: state
+      default: "greenfield_app"
   app_intelligence_ready:
     type: boolean
     description: True when startup loaded an App Intelligence catalog.
@@ -258,9 +267,12 @@ definitions:
     type: string
     description: >
       Selected brownfield build path from brownfield_path_selector. One of
-      "light_integration" (overlay-only generation via AgentGenerator +
-      AppGenerator) or "full_migration" (DesignDocs + full pipeline grounded
-      in AdoptionPlan scope). Null for greenfield builds.
+      "light_integration" (Add AI Workflows: preserve the existing app as
+      source of truth and generate app-aware AI workflows, chat surfaces, and
+      only required safe adapters around approved capabilities) or
+      "full_migration" (Build App Features: generate Mozaiks-owned modules,
+      workflows, pages, data contracts, and extended functionality for
+      explicitly approved expansion scope). Null for greenfield builds.
     source:
       type: state
       default: null
@@ -412,8 +424,8 @@ definitions:
       collection: ArtifactVersions
       query_template:
         app_id: '{{runtime.app_id}}'
-        artifact_kind: subscription_contract
-        artifact_key: subscription_contract
+        build_family: subscription_contract
+        build_key: subscription_contract
         lifecycle_status: current
       fields:
       - commit_metadata
@@ -770,6 +782,20 @@ agents:
     - impact_set
     - llm_profile
     - context_aware
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
+    - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
+    - brownfield_registration
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint
@@ -784,6 +810,16 @@ agents:
     - subscription_contract_artifact
     - backend_design_document
     - experience_spec_document
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
+    - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - monetization_enabled
     - macro_workflow_graph
     - is_multi_workflow
@@ -819,6 +855,16 @@ agents:
     - subscription_contract_artifact
     - backend_design_document
     - experience_spec_document
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
+    - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - pack_name
     - is_multi_workflow
     - brownfield_build_path

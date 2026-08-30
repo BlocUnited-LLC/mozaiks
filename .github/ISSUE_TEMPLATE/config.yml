@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question on Discord
+    url: https://discord.gg/Qnsywad9kp
+    about: Usage questions, design discussion, and help getting set up. Faster than an issue for anything that is not a bug or a concrete proposal.
+  - name: Read the docs
+    url: https://docs.mozaiks.ai
+    about: Architecture, contracts, CLI reference, and contributor guides.
+  - name: Report a security vulnerability
+    url: https://github.com/BlocUnited-LLC/mozaiks/security
+    about: Please use GitHub's private vulnerability reporting instead of a public issue. See SECURITY.md.

@@ -7,7 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mozaiksai.control_plane.dry_run import RefinementExecutionPlan, path_has_secret_marker
+from mozaiksai.control_plane.contracts import is_secret_sensitive_path
+from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.promotion_policy import (
     PromotionPolicyDecision,
     evaluate_refinement_promotion_policy,
@@ -32,20 +33,6 @@ PROMOTION_BACKUP_DIRNAME = "backups"
 
 RefinementPromotionFileStatus = Literal["promoted", "skipped", "blocked", "failed"]
 
-_SECRET_PATH_TERMS = (
-    ".env",
-    "secret",
-    "secrets",
-    "vault",
-    "credential",
-    "credentials",
-    "private_key",
-    "private-key",
-    "id_rsa",
-    "id_dsa",
-    ".pem",
-    ".key",
-)
 _GLOB_CHARS = ("*", "?", "[")
 
 
@@ -119,8 +106,7 @@ def _normalize_bundle_path(path: str) -> tuple[str | None, RefinementPromotionFi
         return None, "skipped", "Path traversal is not allowed."
 
     relative_path = "/".join(parts)
-    lowered = relative_path.lower()
-    if path_has_secret_marker(relative_path) or any(term in lowered for term in _SECRET_PATH_TERMS):
+    if is_secret_sensitive_path(relative_path):
         return relative_path, "skipped", "Secret-sensitive paths are not promoted."
     if any(char in relative_path for char in _GLOB_CHARS):
         return relative_path, "skipped", "Glob paths are not promoted."
@@ -290,6 +276,10 @@ def promote_refinement_staging(
         raise RefinementPromotionError("Refinement promotion requires mutation_allowed=false on plan and staging result.")
     if review_record.mutation_allowed is not False:
         raise RefinementPromotionError("Refinement promotion requires mutation_allowed=false on the review record.")
+    if not dry_run and review_record.write_back_mode != "local_workspace":
+        raise RefinementPromotionError(
+            "Direct source-bundle promotion requires review.write_back_mode='local_workspace'."
+        )
     if execution_result.mutation_allowed is not False or execution_result.source_mutated is not False:
         raise RefinementPromotionError("Refinement promotion requires a non-mutating scoped execution result.")
     if execution_result.execution_mode != "scoped_staging" or execution_result.mutation_scope != "staging_only":

@@ -23,6 +23,7 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.events.runtime_events import RUNTIME_PROCESS_COMPLETED
 
 # Extracted mixins for separation of concerns
+from mozaiksai.core.transport.event_contract import send_event_envelope
 from mozaiksai.core.transport.general_mode import GeneralModeMixin
 
 # Message handlers (extracted for maintainability)
@@ -293,7 +294,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if getattr(websocket, "client_state", None) is WebSocketState.DISCONNECTED:
             return
         try:
-            await websocket.send_json({
+            await send_event_envelope(websocket, {
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",
                 "data": {"message": message, "error_code": error_code},
                 "timestamp": _utc_timestamp(),
@@ -584,10 +586,20 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         Serializes and sends a raw AG2 event to the UI.
         This is the primary method for forwarding AG2 native events.
         """
+        is_transport_envelope = (
+            isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event
+        )
+        if is_transport_envelope:
+            from mozaiksai.core.transport.event_contract import (
+                validate_event_envelope_schema_version,
+            )
+
+            validate_event_envelope_schema_version(event)
+
         try:
             # Allow callers to provide a fully-formed transport envelope (e.g., ack.tool_call_response)
             # without forcing another serialization pass through the dispatcher.
-            if isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event:
+            if is_transport_envelope:
                 logger.debug(
                     "TRANSPORT_ENVELOPE_PASSTHROUGH type=%s",
                     event.get('type')
@@ -745,11 +757,23 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         "STREAM_TEXT_CHUNK agent=%s chat_id=%s len=%d",
                         _agent, chat_id, len(_content),
                     )
+                    # Stream frames need the same provenance as stream_end so
+                    # clients can enforce mode isolation before the turn ends.
+                    # Keep the per-frame payload compact: classification only.
+                    _message_metadata = _d.get('metadata')
+                    _chunk_metadata = None
+                    if isinstance(_message_metadata, dict) and _message_metadata.get('source'):
+                        _chunk_metadata = {'source': _message_metadata['source']}
                     await self._emit_text_as_chunks(
-                        _content, str(_agent), chat_id or '', _stream_id
+                        _content,
+                        str(_agent),
+                        chat_id or '',
+                        _stream_id,
+                        metadata=_chunk_metadata,
                     )
                     await self._broadcast_to_websockets(
                         {
+                            "schema_version": "mozaiks.ui.event.v1",
                             "type": "chat.stream_end",
                             "data": {
                                 "agent": _agent,
@@ -825,6 +849,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         agent_name: str,
         chat_id: str,
         stream_id: str,
+        *,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Split *content* into adaptive text chunks and emit each as chat.stream_chunk.
 
@@ -834,19 +860,24 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         A minimal async yield between chunks ensures React 18's automatic
         batching doesn't collapse all updates into a single render. The caller
-        is responsible for sending chat.stream_end afterwards.
+        is responsible for sending chat.stream_end afterwards. ``metadata`` is
+        compact message provenance forwarded with every chunk.
         """
         chunks = self._chunk_text_for_stream(content)
         for seq, token in enumerate(chunks):
+            chunk_data: dict[str, Any] = {
+                "agent": agent_name,
+                "content": token,
+                "stream_id": stream_id,
+                "chunk_seq": seq,
+            }
+            if metadata:
+                chunk_data["metadata"] = dict(metadata)
             await self._broadcast_to_websockets(
                 {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.stream_chunk",
-                    "data": {
-                        "agent": agent_name,
-                        "content": token,
-                        "stream_id": stream_id,
-                        "chunk_seq": seq,
-                    },
+                    "data": chunk_data,
                 },
                 chat_id or None,
             )
@@ -906,16 +937,44 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
     async def _broadcast_to_websockets(self, event_data: dict[str, Any], target_chat_id: str | None = None) -> None:
         """Broadcast event data to relevant WebSocket connections."""
+        from mozaiksai.core.transport.event_contract import validate_event_envelope_schema_version
+
+        validate_event_envelope_schema_version(event_data)
         active_connections = list(self.connections.items())
-        
+
         # If a chat_id is specified, only send to that connection
         if target_chat_id:
             connection_info = self.connections.get(target_chat_id)
+
+            # Detect artifact tool_call events for elevated logging.
+            _event_type = event_data.get("type") if isinstance(event_data, dict) else None
+            _event_data_inner = event_data.get("data") if isinstance(event_data, dict) else None
+            _is_artifact_tc = (
+                _event_type == "chat.tool_call"
+                and isinstance(_event_data_inner, dict)
+                and _event_data_inner.get("display") == "artifact"
+            )
+            _artifact_component = (
+                (_event_data_inner or {}).get("component_type")
+                or (_event_data_inner or {}).get("tool_name")
+            ) if _is_artifact_tc else None
+
             if connection_info and connection_info.get("websocket"):
+                if _is_artifact_tc:
+                    logger.info(
+                        "ARTIFACT_TOOL_CALL_DISPATCH component=%s chat=%s ws_id=%s — queuing for live WS",
+                        _artifact_component, target_chat_id, connection_info.get("ws_id"),
+                    )
                 # H1: Use message queuing with backpressure control
                 await self._queue_message_with_backpressure(target_chat_id, event_data)
                 await self._flush_message_queue(target_chat_id)
             else:
+                if _is_artifact_tc:
+                    logger.warning(
+                        "ARTIFACT_TOOL_CALL_BUFFERED component=%s chat=%s — no live WS at emit time; "
+                        "queuing in pre-connection buffer (will flush on next reconnect)",
+                        _artifact_component, target_chat_id,
+                    )
                 # H4: Buffer message until the websocket connects
                 buf = self._pre_connection_buffers.setdefault(target_chat_id, [])
                 buf.append(event_data)
@@ -1176,7 +1235,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             asset_id = str(params.get("asset_id") or payload.get("asset_id") or "").strip()
             promotion_target = str(params.get("promotion_target") or params.get("target") or "artifact").strip()
             if action_id:
-                await websocket.send_json({
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "artifact.action.started",
                     "data": {
                         "action_id": action_id,
@@ -1197,7 +1257,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     promotion_target=promotion_target,
                     promoted_by=str(user_id),
                 )
-                await websocket.send_json({
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "artifact.action.completed",
                     "data": {
                         "action_id": action_id,
@@ -1214,7 +1275,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     "timestamp": datetime.now(UTC).isoformat(),
                 })
             except Exception as exc:
-                await websocket.send_json({
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "artifact.action.failed",
                     "data": {
                         "action_id": action_id,
@@ -1250,7 +1312,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             )
             resolved_workflow = route_decision.workflow_id
             if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
-                await websocket.send_json({
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.workflow_rerouted",
                     "data": {
                         "requested_workflow_name": str(target_workflow),
@@ -1278,7 +1341,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             logger.debug("Created new session %s with artifact %s", new_session['_id'], artifact['_id'])
             
             # Notify frontend to navigate to new chat
-            await websocket.send_json({
+            await send_event_envelope(websocket, {
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.navigate",
                 "data": {
                     "chat_id": new_session["_id"],
@@ -1306,7 +1370,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             logger.debug("Updated artifact state for %s: %s", artifact_id, list(state_updates.keys()))
             
             # Broadcast state update to all connections for this artifact
-            await websocket.send_json({
+            await send_event_envelope(websocket, {
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "artifact.state.updated",
                 "data": {
                     "artifact_id": artifact_id,
@@ -1320,7 +1385,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         # Route: other actions (forward to agent as tool_call or handle directly)
         logger.debug("ARTIFACT_ACTION_RECEIVED action=%s chat=%s", action, chat_id)
         # Future: route to agent or handle other action types
-        await websocket.send_json({
+        await send_event_envelope(websocket, {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "ack.artifact_action",
             "data": {
                 "action": action,
@@ -1456,6 +1522,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if extra_data:
             data.update(extra_data)
         event_data = {
+            "schema_version": "mozaiks.ui.event.v1",
             "type": "error",
             "data": data,
             "timestamp": datetime.now(UTC).isoformat()
@@ -1484,6 +1551,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         app_id: str | None = None,
         ws_id: int | None = None,
         token_exp: int = 0,
+        suppress_history_replay: bool = False,
     ) -> None:
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
         if self._owner_loop is None:
@@ -1588,7 +1656,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._pre_connection_buffer_overflow_counts.pop(chat_id, None)
 
         # H5: Auto-resume for IN_PROGRESS chats (check status and restore chat history)
-        await self._replay_run_on_connect_if_needed(chat_id, websocket, app_id)
+        await self._replay_run_on_connect_if_needed(
+            chat_id,
+            websocket,
+            app_id,
+            suppress_history_replay=suppress_history_replay,
+        )
         
         try:
             # Inbound loop: receive JSON control messages from client

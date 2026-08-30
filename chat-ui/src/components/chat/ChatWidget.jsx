@@ -136,7 +136,7 @@ function ChatWidget({
             if (onMessage) onMessage(newMessage);
           }
         } catch (e) {
-          console.warn('[ChatWidget] Failed to parse message:', e);
+          console.warn('⚠️ [ChatWidget] Failed to parse message:', e);
         }
       };
 
@@ -145,7 +145,7 @@ function ChatWidget({
       };
 
       ws.onerror = (error) => {
-        console.error('[ChatWidget] WebSocket error:', error);
+        console.error('❌ [ChatWidget] WebSocket error:', error);
         setConnectionStatus('error');
       };
 
@@ -154,7 +154,7 @@ function ChatWidget({
         wsRef.current = null;
       };
     } catch (error) {
-      console.error('[ChatWidget] Failed to connect:', error);
+      console.error('❌ [ChatWidget] Failed to connect:', error);
       setConnectionStatus('error');
     }
   }, [isExpanded, endpoint, userId, getWsUrl, onMessage]);

@@ -4,5 +4,6 @@ visual_agents:
   - DiscoveryHostAgent
   - CapabilityMapperAgent
   - IntegrationPlannerAgent
+  - ModuleDecomposerAgent
   - DiscoveryArtifactAssemblerAgent
   - user

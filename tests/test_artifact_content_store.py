@@ -259,13 +259,13 @@ class TestArtifactWorkspaceContentRef:
         if artifact_store is None:
             artifact = _make_artifact_version(metadata)
             mock_store = AsyncMock()
-            mock_store.get_artifact_version = AsyncMock(return_value=artifact)
+            mock_store.get_build_record = AsyncMock(return_value=artifact)
             artifact_store = mock_store
 
         return await load_artifact_workspace(
             artifact_store=artifact_store,
             app_id="app1",
-            artifact_version_id="av_001",
+            build_record_id="av_001",
             content_store=content_store,
         )
 

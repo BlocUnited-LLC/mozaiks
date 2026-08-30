@@ -117,7 +117,7 @@ effects into OSS fulfillment code.
 
 OSS owns the cash-to-token contract.
 
-Payment providers own payment fulfillment only. MozaiksPay is the default
+Payment providers own payment fulfillment only. MozaiksPay is the recommended
 managed provider adapter, but Stripe, Paddle, manual invoice, enterprise
 contract billing, or a custom app-owned integration should be able to feed the
 same runtime contract.
@@ -310,7 +310,8 @@ billing_portal.get_token_status
 ```
 
 These names are intentionally app-owned facade actions. They can call
-MozaiksPay by default or another selected billing provider later.
+MozaiksPay when `monetization_provider=mozaiks_pay` is selected, or another
+selected billing provider later.
 
 ## AG2 Token Guard Integration
 
@@ -601,7 +602,7 @@ platform.
 - [x] Add `0.1.10` release notes describing the provider-neutral cash-to-token
   loop.
 - [x] Document local/manual top-up smoke instructions.
-- [x] Document that MozaiksPay is the default adapter, not the canonical owner
+- [x] Document that MozaiksPay is the recommended adapter, not the canonical owner
   of wallet or subscription state.
 
 ## Non-Goals for 0.1.10

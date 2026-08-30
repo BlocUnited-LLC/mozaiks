@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -95,39 +95,61 @@ class ControlPlaneArtifactChangeRoutesManifest(BaseModel):
 class ControlPlaneArtifactRoutingManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    artifact_kind: str = Field(min_length=1)
+    build_family: str = Field(min_length=1)
     label: str | None = None
     routes: ControlPlaneArtifactChangeRoutesManifest
 
-    @field_validator("artifact_kind")
+    @field_validator("build_family")
     @classmethod
-    def _normalize_artifact_kind(cls, value: str) -> str:
+    def _normalize_build_family(cls, value: str) -> str:
         normalized = str(value or "").strip().lower()
         if not normalized:
-            raise ValueError("artifact_kind must be non-empty")
+            raise ValueError("build_family must be non-empty")
         return normalized
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        if "artifact_kind" in values:
+            if "build_family" not in values:
+                values["build_family"] = values["artifact_kind"]
+            values.pop("artifact_kind", None)
+        return values
 
 
 class ControlPlaneRoutingManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    default_artifact_kind: str = Field(default="app_bundle", min_length=1)
+    default_build_family: str = Field(default="app_bundle", min_length=1)
     artifacts: list[ControlPlaneArtifactRoutingManifest] = Field(default_factory=list)
 
-    @field_validator("default_artifact_kind")
+    @field_validator("default_build_family")
     @classmethod
-    def _normalize_default_artifact_kind(cls, value: str) -> str:
+    def _normalize_default_build_family(cls, value: str) -> str:
         normalized = str(value or "").strip().lower()
         if not normalized:
-            raise ValueError("default_artifact_kind must be non-empty")
+            raise ValueError("default_build_family must be non-empty")
         return normalized
 
     @model_validator(mode="after")
     def _unique_artifact_kinds(self) -> ControlPlaneRoutingManifest:
-        artifact_kinds = [artifact.artifact_kind for artifact in self.artifacts]
+        artifact_kinds = [artifact.build_family for artifact in self.artifacts]
         if len(artifact_kinds) != len(set(artifact_kinds)):
-            raise ValueError("harness.yaml routing.artifacts artifact_kind values must be unique")
+            raise ValueError("harness.yaml routing.artifacts build_family values must be unique")
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        if "default_artifact_kind" in values:
+            if "default_build_family" not in values:
+                values["default_build_family"] = values["default_artifact_kind"]
+            values.pop("default_artifact_kind", None)
+        return values
 
 
 class ControlPlaneManifest(BaseModel):
@@ -240,11 +262,11 @@ class LoadedControlPlanePack(BaseModel):
     def routing_for_artifact(self, artifact_kind: str) -> ControlPlaneArtifactRoutingManifest | None:
         requested = str(artifact_kind or "").strip().lower()
         artifacts = list(self.manifest.routing.artifacts)
-        for candidate in [requested, str(self.manifest.routing.default_artifact_kind or "").strip().lower()]:
+        for candidate in [requested, str(self.manifest.routing.default_build_family or "").strip().lower()]:
             if not candidate:
                 continue
             for artifact in artifacts:
-                if artifact.artifact_kind == candidate:
+                if artifact.build_family == candidate:
                     return artifact
         return None
 

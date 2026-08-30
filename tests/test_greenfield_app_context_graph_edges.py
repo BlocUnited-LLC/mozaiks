@@ -92,8 +92,8 @@ def _app_bundle() -> ArtifactVersionDoc:
     return ArtifactVersionDoc(
         _id="av_app_bundle_edges",
         app_id="sample_app",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_family="app_bundle",
+        build_key="app_bundle",
         version_number=1,
         lineage_root_id="av_app_bundle_edges",
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,

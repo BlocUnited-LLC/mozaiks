@@ -1,0 +1,39 @@
+contract_id: greetings
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_greeting_apps
+    when:
+      intent_any:
+        - greeting
+        - hello
+        - welcome message
+    action: select_pack
+
+recommended_domains:
+  - onboarding
+  - community
+
+required_outputs:
+  - path: modules/greetings/module.yaml
+    owner: templates
+  - path: modules/greetings/backend/__init__.py
+    owner: templates
+  - path: modules/greetings/backend/handler.py
+    owner: workspace
+  - path: modules/greetings/backend/service.py
+    owner: templates
+  - path: ui/pages/greetings.yaml
+    owner: templates
+  - path: ui/route_manifest.json
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/hello/
+  - path_prefix: services/greetings/
+
+runtime_boundaries:
+  - id: greeting_persistence
+    rule: Greetings are ephemeral; do not persist greeting events to a database.
+
+facades: []

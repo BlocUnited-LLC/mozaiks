@@ -73,8 +73,8 @@ def _build_source_artifact(*, app_id: str, source_zip: Path) -> ArtifactVersionD
         {
             "_id": "av_factory_source_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_factory_source_1",
             "canonical_inputs_version": {"design_docs": "av_design_docs_1"},
@@ -93,7 +93,7 @@ def _build_refinement_plan(*, request_id: str, app_id: str, staging_area: Path) 
         request_id=request_id,
         app_id=app_id,
         request="Add a resolved_at field to the support ticket module.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         refinement_lane="module_patch",
         workflow_id="workflow_app",
@@ -134,31 +134,31 @@ class _FakeArtifactStore:
         self._source = source_version
         self._draft: ArtifactVersionDoc | None = None
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str) -> ArtifactVersionDoc | None:
-        if app_id == self._source.app_id and artifact_version_id == self._source.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str) -> ArtifactVersionDoc | None:
+        if app_id == self._source.app_id and build_record_id == self._source.id:
             return self._source
-        if self._draft is not None and app_id == self._draft.app_id and artifact_version_id == self._draft.id:
+        if self._draft is not None and app_id == self._draft.app_id and build_record_id == self._draft.id:
             return self._draft
         return None
 
-    async def list_artifact_versions(self, **kwargs: Any) -> list[ArtifactVersionDoc]:
+    async def list_build_records(self, **kwargs: Any) -> list[ArtifactVersionDoc]:
         if (
             kwargs.get("app_id") == self._source.app_id
-            and kwargs.get("artifact_kind") == "app_bundle"
+            and kwargs.get("build_family") == "app_bundle"
             and kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT
         ):
             return [self._source]
         return []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
         self._draft = ArtifactVersionDoc.model_validate(
             {
                 "_id": "av_draft_promotion_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
-                "parent_version_id": kwargs.get("parent_version_id"),
+                "parent_build_record_id": kwargs.get("parent_build_record_id"),
                 "lineage_root_id": self._source.lineage_root_id,
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
                 "lifecycle_status": kwargs["lifecycle_status"].value,
@@ -179,8 +179,8 @@ class _FakeArtifactStore:
             )
         return True
 
-    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata: dict | None = None) -> ArtifactVersionDoc | None:
-        if self._draft is not None and self._draft.id == artifact_version_id and self._draft.app_id == app_id:
+    async def accept_build_record(self, *, app_id: str, build_record_id: str, commit_metadata: dict | None = None) -> ArtifactVersionDoc | None:
+        if self._draft is not None and self._draft.id == build_record_id and self._draft.app_id == app_id:
             self._draft = self._draft.model_copy(
                 update={
                     "lifecycle_status": ArtifactLifecycleStatus.CURRENT,

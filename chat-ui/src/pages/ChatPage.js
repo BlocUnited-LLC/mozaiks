@@ -34,18 +34,30 @@ import { useWorkflowStart } from '../hooks/useWorkflowStart';
 import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
+  clearStoredWorkflowChatId,
   getStoredActiveChatId,
   getStoredActiveWorkflowName,
   getStoredArtifactPanelOpen,
   getStoredChatCacheSeed,
+  getStoredWorkflowChatId,
+  logChatPersistence,
   readStoredCurrentArtifact,
   readStoredLastArtifact,
+  readStoredWorkflowTranscriptSnapshot,
   setStoredActiveChatId,
+  setStoredActiveWorkflowName,
   setStoredArtifactPanelOpen,
   setStoredChatCacheSeed,
+  setStoredWorkflowChatId,
+  summarizeWorkflowMessages,
   writeStoredLastArtifact,
   writeStoredCurrentArtifact,
+  writeStoredWorkflowTranscriptSnapshot,
 } from '../session/chatSessionStorage';
+import {
+  buildWorkflowResolutionCandidates,
+  resolveWorkflowForChat,
+} from '../session/workflowChatResolution';
 import {
   AskHistorySidebar,
   MobileAskHistoryDrawer,
@@ -64,6 +76,11 @@ import {
   resolveSupportRequestScope,
   shouldOfferHumanSupport,
 } from '../utils/supportLinks';
+import {
+  buildComposerArtifactContext,
+  shouldShowToolProgress,
+  upsertInlineToolCallMessage,
+} from '../components/chat/inlineSurfaces';
 
 // Extracted hooks for gradual migration
 // Usage: const { messages, addMessage, ... } = useConversation({ chatId, conversationMode, ... });
@@ -134,7 +151,7 @@ const ChatPage = () => {
   );
   const queryEmbeddedView = searchParams.get('view');
   // Gate / action / refinement context — set by useWorkflowStart
-  // e.g. /chat?workflow=AppGenerator&context={"app_type":"new"}&trigger_source=gate
+  // e.g. /chat?workflow=<workflow_id>&context={...}&trigger_source=gate
   const queryContextRaw = searchParams.get('context');
   const queryContext = (() => {
     if (!queryContextRaw) return null;
@@ -242,18 +259,57 @@ const ChatPage = () => {
   useEffect(() => {
     currentArtifactMessagesRef.current = currentArtifactMessages;
   }, [currentArtifactMessages]);
+  const [artifactPanelLoading, setArtifactPanelLoading] = useState(false);
+  const artifactPanelLoadingTimerRef = useRef(null);
+  const startArtifactPanelLoading = useCallback((durationMs = 320) => {
+    try {
+      if (artifactPanelLoadingTimerRef.current) {
+        clearTimeout(artifactPanelLoadingTimerRef.current);
+        artifactPanelLoadingTimerRef.current = null;
+      }
+      setArtifactPanelLoading(true);
+      artifactPanelLoadingTimerRef.current = setTimeout(() => {
+        artifactPanelLoadingTimerRef.current = null;
+        logChatPersistence('artifact_loading_finished', {
+          chatId: currentChatId || null,
+          workflowName: currentWorkflowNameRef.current || activeWorkflowName || urlWorkflowName || null,
+        });
+        setArtifactPanelLoading(false);
+      }, durationMs);
+    } catch (err) {
+      console.warn('⚠️ Failed to start artifact loading state', err);
+    }
+  }, [activeWorkflowName, currentChatId, urlWorkflowName]);
+  const stopArtifactPanelLoading = useCallback(() => {
+    try {
+      if (artifactPanelLoadingTimerRef.current) {
+        clearTimeout(artifactPanelLoadingTimerRef.current);
+        artifactPanelLoadingTimerRef.current = null;
+      }
+    } finally {
+      setArtifactPanelLoading(false);
+    }
+  }, []);
+  useEffect(() => () => {
+    if (artifactPanelLoadingTimerRef.current) {
+      clearTimeout(artifactPanelLoadingTimerRef.current);
+      artifactPanelLoadingTimerRef.current = null;
+    }
+  }, []);
   const navTriggerRef = useRef(null);
   const navCacheContextRef = useRef(null);
   const embeddedViewHandledRef = useRef(false);
   const viewArtifactSnapshotRef = useRef(null);
   // Track the most recent artifact-mode UI event id to manage auto-collapse
   const lastArtifactEventRef = useRef(null);
+  const artifactAutoClearRef = useRef(true);
   // Prevent duplicate restores per connection
   const artifactRestoredOnceRef = useRef(false);
   const artifactCacheValidRef = useRef(false);
   const lastErrorIdRef = useRef(null); // Track last error to prevent duplicates
   const workflowMessagesCacheRef = useRef([]);
   const workflowReplayPendingRef = useRef(false);
+  const workflowConnectReplayPolicyRef = useRef(null);
   const workflowMessagesSharedRef = useRef([]);
   const generalMessagesCacheRef = useRef([]);
   const layoutModeForConversation = conversationMode === 'ask' ? 'full' : layoutMode;
@@ -330,7 +386,35 @@ const ChatPage = () => {
     if (!Array.isArray(messageList) || messageList.length === 0) {
       return [];
     }
-    return messageList.filter((message) => !shouldSuppressHiddenWorkflowMessage(message));
+    const visibleMessages = messageList.filter((message) => !shouldSuppressHiddenWorkflowMessage(message));
+    const dedupedMessages = [];
+    for (const message of visibleMessages) {
+      const previous = dedupedMessages[dedupedMessages.length - 1];
+      const previousSender = String(previous?.sender || '').trim().toLowerCase();
+      const nextSender = String(message?.sender || '').trim().toLowerCase();
+      const previousEventType = previous?.metadata?.event_type || null;
+      const nextEventType = message?.metadata?.event_type || null;
+      const previousSource = String(previous?.metadata?.source || '').trim().toLowerCase();
+      const nextSource = String(message?.metadata?.source || '').trim().toLowerCase();
+      if (
+        previous
+        && previousSender === 'agent'
+        && nextSender === 'agent'
+        && previousEventType !== 'activity'
+        && nextEventType !== 'activity'
+        && !previous.isThinking
+        && !message.isThinking
+        && !previous.__streaming
+        && !message.__streaming
+        && String(previous?.agentName || previous?.agent_name || '').trim() === String(message?.agentName || message?.agent_name || '').trim()
+        && String(previous?.content || '').trim() === String(message?.content || '').trim()
+        && previousSource === nextSource
+      ) {
+        continue;
+      }
+      dedupedMessages.push(message);
+    }
+    return dedupedMessages;
   }, [shouldSuppressHiddenWorkflowMessage]);
 
   const isAskModeWorkflowLeak = useCallback((event) => {
@@ -408,6 +492,201 @@ const ChatPage = () => {
     return resolveWorkflow() || workflowConfig.getDefaultWorkflow() || null;
   }, []);
 
+  const mergeWorkflowTranscriptMessages = useCallback((...messageLists) => {
+    const merged = [];
+    const indexByKey = new Map();
+
+    const stableNumber = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    };
+
+    const isClientGeneratedMessageId = (id) => {
+      const value = String(id || '');
+      return /^(text|activity|tool-call|tool-call-msg|tool-call-artifact|ui-restored|nav-cache)-/.test(value);
+    };
+
+    const contentSignature = (content) => {
+      if (typeof content === 'string') {
+        return content.trim().slice(0, 1000);
+      }
+      try {
+        return JSON.stringify(content).slice(0, 1000);
+      } catch {
+        return String(content || '').slice(0, 1000);
+      }
+    };
+
+    const messageKey = (message) => {
+      const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+      const toolCall = message?.toolCall && typeof message.toolCall === 'object' ? message.toolCall : {};
+      const replayIndex = stableNumber(message?.replayIndex ?? metadata.replayIndex ?? metadata.index);
+      const serverSequence = stableNumber(message?.serverSequence ?? metadata.serverSequence ?? metadata.sequence);
+      if (replayIndex !== null) {
+        return [
+          'replay_index',
+          metadata.workflow_name || toolCall.workflow_name || '',
+          replayIndex,
+        ].join(':');
+      }
+      if (serverSequence !== null) {
+        return [
+          'server_sequence',
+          metadata.workflow_name || toolCall.workflow_name || '',
+          serverSequence,
+        ].join(':');
+      }
+      if (metadata.event_type === 'tool_progress') {
+        return [
+          'tool_progress',
+          metadata.workflow_name || '',
+          metadata.tool_name || toolCall.tool_name || '',
+          metadata.tool_call_id || toolCall.tool_call_id || '',
+        ].join(':');
+      }
+      const toolCallId = metadata.toolCallId || metadata.tool_call_id || toolCall.tool_call_id || message?.tool_call_id || null;
+      if (toolCallId) {
+        return [
+          'tool_call',
+          metadata.workflow_name || toolCall.workflow_name || '',
+          toolCallId,
+          metadata.type || toolCall.display || '',
+        ].join(':');
+      }
+      if (message?.id && !isClientGeneratedMessageId(message.id)) {
+        return ['message_id', message.id].join(':');
+      }
+      return [
+        'message',
+        message?.sender || '',
+        message?.agentName || message?.agent_name || '',
+        metadata.source || '',
+        contentSignature(message?.content),
+      ].join(':');
+    };
+
+    for (const list of messageLists) {
+      const messagesList = Array.isArray(list) ? list : [];
+      for (const message of messagesList) {
+        if (!message || typeof message !== 'object' || message.isThinking) {
+          continue;
+        }
+        const key = messageKey(message);
+        const existingIndex = indexByKey.get(key);
+        if (existingIndex === undefined) {
+          indexByKey.set(key, merged.length);
+          merged.push(message);
+        } else {
+          merged[existingIndex] = {
+            ...merged[existingIndex],
+            ...message,
+            id: merged[existingIndex]?.id || message.id,
+            metadata: {
+              ...(merged[existingIndex]?.metadata || {}),
+              ...(message.metadata || {}),
+            },
+          };
+        }
+      }
+    }
+
+    return sanitizeVisibleWorkflowMessages(merged);
+  }, [sanitizeVisibleWorkflowMessages]);
+
+  const persistWorkflowTranscriptSnapshot = useCallback((messageList, options = {}) => {
+    const targetChatId = options.chatId || currentChatId;
+    if (!targetChatId) {
+      return false;
+    }
+
+    const targetWorkflowName = options.workflowName || currentWorkflowName || currentWorkflowNameRef.current || null;
+    const existingSnapshot = readStoredWorkflowTranscriptSnapshot(targetChatId);
+    const existingMatches = Boolean(
+      existingSnapshot
+      && (
+        !existingSnapshot.workflowName
+        || !targetWorkflowName
+        || existingSnapshot.workflowName === targetWorkflowName
+      )
+    );
+    const messagesToPersist = mergeWorkflowTranscriptMessages(
+      existingMatches ? existingSnapshot.messages : [],
+      messageList,
+    );
+    if (messagesToPersist.length === 0) {
+      return false;
+    }
+
+    return writeStoredWorkflowTranscriptSnapshot(targetChatId, {
+      chatId: targetChatId,
+      workflowName: targetWorkflowName,
+      messages: messagesToPersist,
+      ts: Date.now(),
+    });
+  }, [
+    currentChatId,
+    currentWorkflowName,
+    currentWorkflowNameRef,
+    mergeWorkflowTranscriptMessages,
+  ]);
+
+  const cacheWorkflowTranscriptMessage = useCallback((message, options = {}) => {
+    if (!message || typeof message !== 'object') {
+      return [];
+    }
+
+    const targetChatId = options.chatId || currentChatId;
+    const targetWorkflowName = options.workflowName || currentWorkflowName || currentWorkflowNameRef.current || null;
+    const applyMessage = (messageList) => {
+      const messagesList = Array.isArray(messageList)
+        ? messageList.filter((item) => !item?.isThinking)
+        : [];
+      const nextMessage = { ...message };
+      const lastIndex = messagesList.length - 1;
+      const last = lastIndex >= 0 ? messagesList[lastIndex] : null;
+
+      if (
+        last
+        && last.sender === nextMessage.sender
+        && last.agentName === nextMessage.agentName
+        && String(last.content || '').trim() === String(nextMessage.content || '').trim()
+        && (last.metadata?.source || null) === (nextMessage.metadata?.source || null)
+      ) {
+        messagesList[lastIndex] = {
+          ...last,
+          ...nextMessage,
+          id: last.id || nextMessage.id,
+        };
+        return messagesList;
+      }
+
+      return [...messagesList, nextMessage];
+    };
+
+    const nextCache = mergeWorkflowTranscriptMessages(
+      workflowMessagesSharedRef.current,
+      workflowMessagesCacheRef.current,
+      applyMessage(workflowMessagesCacheRef.current),
+    );
+    workflowMessagesCacheRef.current = nextCache;
+    workflowMessagesSharedRef.current = nextCache;
+    setWorkflowMessages((prev) => mergeWorkflowTranscriptMessages(prev, nextCache));
+    persistWorkflowTranscriptSnapshot(nextCache, {
+      chatId: targetChatId,
+      workflowName: targetWorkflowName,
+    });
+    return nextCache;
+  }, [
+    currentChatId,
+    currentWorkflowName,
+    currentWorkflowNameRef,
+    mergeWorkflowTranscriptMessages,
+    persistWorkflowTranscriptSnapshot,
+    setWorkflowMessages,
+    workflowMessagesCacheRef,
+    workflowMessagesSharedRef,
+  ]);
+
   const restoreStoredArtifactForChat = useCallback((chatId, fallbackWorkflowName = null) => {
     if (!chatId) {
       return false;
@@ -416,8 +695,44 @@ const ChatPage = () => {
     try {
       const cachedCurrent = readStoredCurrentArtifact(chatId);
       const cachedLast = readStoredLastArtifact(chatId);
-      const cached = cachedCurrent || cachedLast;
-      if (!cached?.tool_name) {
+      const cached = (
+        cachedCurrent?.tool_name || cachedCurrent?.toolCall?.tool_name
+          ? cachedCurrent
+          : cachedLast
+      );
+      const cachedToolCall = cached?.toolCall && typeof cached.toolCall === 'object'
+        ? cached.toolCall
+        : {};
+      const cachedToolName = cached?.tool_name || cachedToolCall.tool_name;
+      if (!cachedToolName) {
+        return false;
+      }
+      // Workflow-match guard: reject ONLY when the stored artifact belongs to a
+      // workflow that the caller explicitly ruled out.
+      //
+      // We do NOT reject when a user navigates from one workflow to the next
+      // via "Continue Build" on the same chat session.
+      // In that case the artifact from the previous workflow is valid to show until
+      // the new workflow emits its own — so we only block cross-CHAT mismatches
+      // (different chatId AND different workflow), not same-chat workflow transitions.
+      const cachedWorkflow = cached?.workflow_name || cachedToolCall?.workflow_name;
+      if (cachedWorkflow && fallbackWorkflowName && cachedWorkflow !== fallbackWorkflowName) {
+        // Allow if this chatId was the last active chat (same session, different workflow step)
+        const lastActiveChatId = (() => { try { return getStoredActiveChatId?.(); } catch { return null; } })();
+        const isContinuationOfSameSession = chatId && (chatId === currentChatId || chatId === lastActiveChatId);
+        if (!isContinuationOfSameSession) {
+          return false;
+        }
+      }
+      const cachedPayload = cached?.payload || cachedToolCall.payload || {};
+      const cachedDisplay = cached?.display || cachedToolCall.display || cachedPayload.display || cachedPayload.mode || 'artifact';
+
+      // Never restore an inline component into the artifact panel.
+      // This guards against stale localStorage data written before the
+      // display-mode guard was added to cacheServerLastArtifact.
+      // Also clear the stale entry so it never resurfaces.
+      if (cachedDisplay !== 'artifact') {
+        try { clearStoredArtifactState(chatId); } catch (_) {}
         return false;
       }
 
@@ -425,22 +740,24 @@ const ChatPage = () => {
         const restoredMsg = {
           id: `ui-restored-${Date.now()}`,
           sender: 'agent',
-          agentName: cached.payload?.agentName || cached.payload?.agent_name || cached.agentName || cached.agent_name || 'Agent',
-          content: cached.payload?.structured_output || cached.payload || {},
+          agentName: cachedPayload.agentName || cachedPayload.agent_name || cached.agentName || cached.agent_name || 'Agent',
+          content: cachedPayload.structured_output || cachedPayload || {},
           isStreaming: false,
           toolCall: {
-            tool_name: cached.tool_name,
-            payload: cached.payload || {},
-            tool_call_id: cached.tool_call_id || null,
-            workflow_name: cached.workflow_name || fallbackWorkflowName || currentWorkflowName,
+            tool_name: cachedToolName,
+            payload: cachedPayload,
+            tool_call_id: cached.tool_call_id || cachedToolCall.tool_call_id || null,
+            workflow_name: cached.workflow_name || cachedToolCall.workflow_name || fallbackWorkflowName || currentWorkflowName,
             onResponse: undefined,
-            display: cached.display || 'artifact',
+            display: cachedDisplay,
+            component_type: cached.component_type || cachedToolCall.component_type || cachedPayload.component_type || cachedToolName,
             restored: true,
           },
         };
 
       setCurrentArtifactMessages([restoredMsg]);
       lastArtifactEventRef.current = cached.tool_call_id || restoredMsg.id;
+      artifactAutoClearRef.current = false;
       artifactCacheValidRef.current = true;
       artifactRestoredOnceRef.current = true;
 
@@ -449,14 +766,24 @@ const ChatPage = () => {
         if (setLayoutMode) {
           setLayoutMode('split');
         }
+        // Sync the surface reducer so panelOpen state is consistent with direct open
+        if (dispatchSurfaceEvent) {
+          dispatchSurfaceEvent({
+            type: 'ui.render',
+            tool_name: cachedToolName,
+            tool_call_id: cached.tool_call_id || cachedToolCall.tool_call_id || null,
+            component_type: cached.component_type || cachedToolCall.component_type || cachedToolName,
+            display: cachedDisplay || 'artifact',
+          });
+        }
       }
 
       return true;
     } catch (e) {
-      console.warn('[RESTORE] Failed to restore artifact from stored session:', e);
+      console.warn('💾 [RESTORE] Failed to restore artifact from stored session:', e);
       return false;
     }
-  }, [currentWorkflowName, setIsSidePanelOpen, setLayoutMode]);
+  }, [currentWorkflowName, dispatchSurfaceEvent, setIsSidePanelOpen, setLayoutMode]);
 
   useEffect(() => {
     if (typeof setCurrentArtifactContext !== 'function') {
@@ -486,8 +813,11 @@ const ChatPage = () => {
     if (!currentChatId || conversationMode !== 'workflow') {
       return;
     }
+    if (!Array.isArray(currentArtifactMessages) || currentArtifactMessages.length === 0) {
+      return;
+    }
     setStoredArtifactPanelOpen(currentChatId, isSidePanelOpen);
-  }, [currentChatId, conversationMode, isSidePanelOpen]);
+  }, [currentArtifactMessages, currentChatId, conversationMode, isSidePanelOpen]);
 
   useEffect(() => {
     if (!currentChatId) return;
@@ -526,7 +856,7 @@ const ChatPage = () => {
       });
       artifactCacheValidRef.current = true;
     } catch (e) {
-      console.warn('Failed to persist artifact cache', e);
+      console.warn('⚠️ Failed to persist artifact cache', e);
     }
 
     try {
@@ -552,41 +882,118 @@ const ChatPage = () => {
         }
       }
     } catch (e) {
-      console.warn('Failed to update nav-trigger cache', e);
+      console.warn('⚠️ Failed to update nav-trigger cache', e);
     }
   }, [currentArtifactMessages, currentChatId, currentWorkflowName]);
   const generalHydrationPendingRef = useRef(false);
   const askModeSyncedChatRef = useRef(null);
-  const workflowArtifactSnapshotRef = useRef({ isOpen: false, messages: [], layoutMode: 'split' });
+  const artifactWorkspaceSnapshotRef = useRef({ isOpen: false, messages: [], layoutMode: 'split' });
   const queryResumeHandledRef = useRef(null);
   const validatedChatIdRef = useRef(null);
   const validatingChatIdRef = useRef(false);
 
   useEffect(() => {
     const sanitizedWorkflowMessages = sanitizeVisibleWorkflowMessages(workflowMessages);
-    workflowMessagesSharedRef.current = sanitizedWorkflowMessages;
-    if (Array.isArray(workflowMessages) && sanitizedWorkflowMessages.length !== workflowMessages.length) {
-      setWorkflowMessages(sanitizedWorkflowMessages);
+    const mergedWorkflowMessages = mergeWorkflowTranscriptMessages(
+      workflowMessagesSharedRef.current,
+      workflowMessagesCacheRef.current,
+      sanitizedWorkflowMessages,
+    );
+    workflowMessagesSharedRef.current = mergedWorkflowMessages;
+    const sanitizedSummary = summarizeWorkflowMessages(sanitizedWorkflowMessages);
+    const mergedSummary = summarizeWorkflowMessages(mergedWorkflowMessages);
+    if (
+      Array.isArray(workflowMessages)
+      && (
+        sanitizedWorkflowMessages.length !== workflowMessages.length
+        || mergedWorkflowMessages.length !== sanitizedWorkflowMessages.length
+        || mergedSummary.uiMessageCount !== sanitizedSummary.uiMessageCount
+      )
+    ) {
+      setWorkflowMessages(mergedWorkflowMessages);
     }
-  }, [sanitizeVisibleWorkflowMessages, setWorkflowMessages, workflowMessages]);
-  
+  }, [mergeWorkflowTranscriptMessages, sanitizeVisibleWorkflowMessages, setWorkflowMessages, workflowMessages]);
+
+  // Keep the generic artifact workspace snapshot current while the panel is open
+  // so mode-switch restoration does not fall back to the initial closed state.
+  useEffect(() => {
+    if (conversationMode !== 'workflow') return;
+    if (isSidePanelOpen && currentArtifactMessages?.length > 0) {
+      artifactWorkspaceSnapshotRef.current = {
+        isOpen: true,
+        layoutMode: layoutMode || 'split',
+        messages: [...currentArtifactMessages],
+      };
+    }
+  }, [conversationMode, currentArtifactMessages, isSidePanelOpen, layoutMode]);
+
   useEffect(() => {
     if (conversationMode === 'workflow') {
       // Resume clears the visible transcript briefly while the backend replays.
       // Keep the last shared workflow snapshot intact during that window.
       if (!(workflowReplayPendingRef.current && messages.length === 0)) {
         const sanitizedMessages = sanitizeVisibleWorkflowMessages(messages);
-        workflowMessagesCacheRef.current = sanitizedMessages;
-        workflowMessagesSharedRef.current = sanitizedMessages;
-        setWorkflowMessages(sanitizedMessages);
+        const storedWorkflowTranscript = currentChatId ? readStoredWorkflowTranscriptSnapshot(currentChatId) : null;
+        const storedWorkflowTranscriptMatches = Boolean(
+          storedWorkflowTranscript
+          && (
+            !storedWorkflowTranscript.workflowName
+            || !currentWorkflowName
+            || storedWorkflowTranscript.workflowName === currentWorkflowName
+          )
+        );
+        const storedWorkflowMessages = storedWorkflowTranscriptMatches
+          ? sanitizeVisibleWorkflowMessages(storedWorkflowTranscript.messages)
+          : [];
+        const mergedMessages = mergeWorkflowTranscriptMessages(
+          storedWorkflowMessages,
+          workflowMessagesSharedRef.current,
+          workflowMessagesCacheRef.current,
+          sanitizedMessages,
+        );
+        logChatPersistence('workflow_messages_cache_sync', {
+          currentChatId: currentChatId || null,
+          currentWorkflowName: currentWorkflowName || null,
+          conversationMode,
+          workflowReplayPending: Boolean(workflowReplayPendingRef.current),
+          rawMessages: summarizeWorkflowMessages(messages),
+          sanitizedMessages: summarizeWorkflowMessages(sanitizedMessages),
+          storedWorkflowTranscriptMatches,
+          storedWorkflowMessages: summarizeWorkflowMessages(storedWorkflowMessages),
+          mergedMessages: summarizeWorkflowMessages(mergedMessages),
+          cacheBefore: summarizeWorkflowMessages(workflowMessagesCacheRef.current),
+          sharedBefore: summarizeWorkflowMessages(workflowMessagesSharedRef.current),
+        });
+        workflowMessagesCacheRef.current = mergedMessages;
+        workflowMessagesSharedRef.current = mergedMessages;
+        setWorkflowMessages(mergedMessages);
+        persistWorkflowTranscriptSnapshot(mergedMessages);
+        const mergedSummary = summarizeWorkflowMessages(mergedMessages);
+        const sanitizedSummary = summarizeWorkflowMessages(sanitizedMessages);
+        // Only merge back when the stored/shared transcript adds UI surface
+        // messages that the current list is missing. Never merge back plain agent text
+        // that would create duplicate content (same text under a different key) for one
+        // render frame before sanitizeVisibleWorkflowMessages dedupes it next tick.
+        if (mergedSummary.uiMessageCount > sanitizedSummary.uiMessageCount) {
+          setMessagesWithLogging(mergedMessages);
+        }
       }
     } else {
-      generalMessagesCacheRef.current = sanitizeVisibleAskMessages(messages);
+      const sanitizedMessages = sanitizeVisibleAskMessages(messages);
+      logChatPersistence('ask_messages_cache_sync', {
+        currentChatId: currentChatId || null,
+        currentWorkflowName: currentWorkflowName || null,
+        conversationMode,
+        rawMessages: summarizeWorkflowMessages(messages),
+        sanitizedMessages: summarizeWorkflowMessages(sanitizedMessages),
+        cacheBefore: summarizeWorkflowMessages(generalMessagesCacheRef.current),
+      });
+      generalMessagesCacheRef.current = sanitizedMessages;
     }
     if (conversationMode === 'ask') {
       setAskMessages(sanitizeVisibleAskMessages(messages));
     }
-  }, [messages, conversationMode, sanitizeVisibleAskMessages, sanitizeVisibleWorkflowMessages, setAskMessages, setWorkflowMessages]);
+  }, [messages, conversationMode, currentChatId, currentWorkflowName, mergeWorkflowTranscriptMessages, persistWorkflowTranscriptSnapshot, sanitizeVisibleAskMessages, sanitizeVisibleWorkflowMessages, setAskMessages, setMessagesWithLogging, setWorkflowMessages]);
 
   useEffect(() => {
     if (conversationMode !== 'ask') {
@@ -615,6 +1022,16 @@ const ChatPage = () => {
     }
 
     const sanitizedMessages = sanitizeVisibleWorkflowMessages(messages);
+    const messageSummary = summarizeWorkflowMessages(messages);
+    if (messageSummary.uiMessageCount > 0) {
+      logChatPersistence('workflow_transcript_sync', {
+        currentChatId: currentChatId || null,
+        currentWorkflowName: currentWorkflowName || null,
+        conversationMode,
+        messages: messageSummary,
+        sanitizedMessages: summarizeWorkflowMessages(sanitizedMessages),
+      });
+    }
     if (sanitizedMessages.length === messages.length) {
       return;
     }
@@ -673,6 +1090,25 @@ const ChatPage = () => {
     'MozaiksAI'
   ).trim() || 'MozaiksAI';
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
+  const rememberWorkflowChatSession = useCallback((chatId, workflowName = null) => {
+    const resolvedWorkflowName =
+      workflowConfig.resolveKnownWorkflowName(workflowName)
+      || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+      || resolveKnownWorkflowName(workflowName);
+    if (!chatId || !currentAppId || !currentUserId || !resolvedWorkflowName) {
+      return false;
+    }
+    setStoredActiveChatId(chatId);
+    setStoredActiveWorkflowName(resolvedWorkflowName);
+    return setStoredWorkflowChatId({
+      appId: currentAppId,
+      userId: currentUserId,
+      workflowName: resolvedWorkflowName,
+      chatId,
+    });
+  }, [activeWorkflowName, currentAppId, currentUserId, currentWorkflowName, resolveKnownWorkflowName, workflowConfig]);
   const {
     startWorkflow: startPendingHarnessWorkflow,
     starting: pendingHarnessDecisionBusy,
@@ -791,6 +1227,66 @@ const ChatPage = () => {
       setPendingHarnessDecisionError(null);
     }
   }, [buildPendingHarnessDecision]);
+  const applySessionStatePendingTransition = useCallback((sessionState) => {
+    const transitionId = String(sessionState?.pending_transition_id || '').trim();
+    if (!transitionId) {
+      if (pendingTransitionIdRef.current && pendingTransitionIdRef.current !== 'workflow_complete') {
+        setPendingTransitionId(null);
+        setPendingTransitionContext({});
+      }
+      return false;
+    }
+
+    setPendingTransitionId(transitionId);
+    setPendingTransitionContext({});
+    return true;
+  }, []);
+  const applySessionRouterState = useCallback((sessionState) => {
+    if (!sessionState || typeof sessionState !== 'object') {
+      return false;
+    }
+
+    applySessionStatePendingHarnessDecision(sessionState);
+    const restoredTransition = applySessionStatePendingTransition(sessionState);
+    const stateChatId = String(sessionState.current_chat_id || '').trim();
+    const rawWorkflowName = String(
+      sessionState.current_workflow_id
+      || sessionState.last_requested_workflow_id
+      || currentWorkflowName
+      || activeWorkflowName
+      || ''
+    ).trim();
+    const stateWorkflowName = rawWorkflowName
+      ? (resolveKnownWorkflowName(rawWorkflowName) || rawWorkflowName)
+      : null;
+
+    if (stateChatId) {
+      setCurrentChatId(stateChatId);
+      setActiveChatId(stateChatId);
+    }
+    if (stateWorkflowName) {
+      currentWorkflowNameRef.current = stateWorkflowName;
+      setCurrentWorkflowName(stateWorkflowName);
+      setActiveWorkflowName(stateWorkflowName);
+    }
+    if (stateChatId && stateWorkflowName) {
+      rememberWorkflowChatSession(stateChatId, stateWorkflowName);
+    }
+
+    return restoredTransition || Boolean(stateChatId && stateWorkflowName);
+  }, [
+    activeWorkflowName,
+    applySessionStatePendingHarnessDecision,
+    applySessionStatePendingTransition,
+    currentWorkflowName,
+    currentWorkflowNameRef,
+    rememberWorkflowChatSession,
+    resolveKnownWorkflowName,
+    setActiveChatId,
+    setActiveWorkflowName,
+    setCurrentChatId,
+    setCurrentWorkflowName,
+  ]);
   const handlePendingHarnessDecisionAction = useCallback(async (action) => {
     if (!pendingHarnessDecision || !action) {
       return;
@@ -911,21 +1407,27 @@ const ChatPage = () => {
   }, [isPrimaryChatRoute, isInWidgetMode, setIsInWidgetMode]);
 
   useEffect(() => {
-    if (urlWorkflowName && urlWorkflowName !== currentWorkflowName) {
+    if (urlWorkflowName && urlWorkflowName !== currentWorkflowName && !currentChatId) {
       setCurrentWorkflowName(urlWorkflowName);
     }
-  }, [urlWorkflowName, currentWorkflowName]);
+  }, [urlWorkflowName, currentWorkflowName, currentChatId]);
 
   useEffect(() => {
     if (!workflowConfigLoaded) {
       return;
     }
 
-    const nextWorkflowName =
-      workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
-      || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+    const urlResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
+    const storedResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+    const activeResolvedWorkflow =
+      storedResolvedWorkflow
       || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
-      || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+      || workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
+    const nextWorkflowName = (
+      currentChatId
+        ? activeResolvedWorkflow || urlResolvedWorkflow
+        : urlResolvedWorkflow || activeResolvedWorkflow
+    )
       || resolveWorkflow()
       || workflowConfig.getDefaultWorkflow()
       || null;
@@ -940,7 +1442,7 @@ const ChatPage = () => {
     if (nextWorkflowName !== activeWorkflowName) {
       setActiveWorkflowName(nextWorkflowName);
     }
-  }, [workflowConfigLoaded, urlWorkflowName, currentWorkflowName, activeWorkflowName, setActiveWorkflowName]);
+  }, [workflowConfigLoaded, urlWorkflowName, currentWorkflowName, activeWorkflowName, currentChatId, setActiveWorkflowName]);
 
   useEffect(() => {
     if (!pendingNavigationTrigger) return;
@@ -992,6 +1494,10 @@ const ChatPage = () => {
     lastArtifactEventRef.current = null;
     artifactRestoredOnceRef.current = false;
     artifactCacheValidRef.current = false;
+    // Reset artifact reducer state so mode-toggle logic knows no artifact exists yet.
+    if (dispatchSurfaceAction) {
+      dispatchSurfaceAction({ type: 'ARTIFACT_CLEARED' });
+    }
 
     navCacheContextRef.current = null;
     if (trigger?.cache_ttl && nextWorkflow) {
@@ -1052,6 +1558,7 @@ const ChatPage = () => {
     setCompletionData,
     setIsSidePanelOpen,
     setPendingNavigationTrigger,
+    dispatchSurfaceAction,
   ]);
 
   // One-time initial spinner: show after websocket connects, hide after first agent chat.text message
@@ -1085,10 +1592,6 @@ const ChatPage = () => {
   }, []);
 
   const shouldSuppressConsecutiveAssistantDuplicate = useCallback((messageList, { agentName, content, source } = {}) => {
-    if (source !== 'general_agent') {
-      return false;
-    }
-
     const normalizedContent = String(content || '').trim();
     if (!normalizedContent || !Array.isArray(messageList) || messageList.length === 0) {
       return false;
@@ -1111,6 +1614,9 @@ const ChatPage = () => {
 
       const candidateContent = String(candidate.content || '').trim();
       const candidateSource = candidate.metadata?.source || null;
+      if (source !== candidateSource) {
+        continue;
+      }
       return candidate.sender === 'agent'
         && candidate.agentName === agentName
         && candidateContent === normalizedContent
@@ -1295,7 +1801,7 @@ const ChatPage = () => {
         return next;
       });
     } catch (err) {
-      console.error('Failed to hydrate general chat transcript:', err);
+      console.error('❌ Failed to hydrate general chat transcript:', err);
     }
   }, [api, conversationMode, currentAppId, mapGeneralMessage, setActiveGeneralChatId, setGeneralChatSummary, setGeneralChatSessions, setMessagesWithLogging]);
 
@@ -1359,6 +1865,265 @@ const ChatPage = () => {
     if (!update) return;
     updateArtifactPayload(artifactId, (payload) => applyArtifactUpdate(payload, update));
   }, [updateArtifactPayload]);
+
+  const cacheServerLastArtifact = useCallback((lastArtifact, options = {}) => {
+    const targetChatId = options?.chatId || currentChatId;
+    const targetWorkflowName = options?.workflowName || lastArtifact?.workflow_name || currentWorkflowName;
+    if (!targetChatId || !lastArtifact?.tool_name) {
+      return false;
+    }
+    // Don't restore an artifact that was emitted by a different workflow — unless
+    // this is a same-session workflow continuation (e.g. via "Continue Build").
+    // In that case the previous workflow's artifact is valid to show until the
+    // new workflow emits its own.
+    const lastArtifactWorkflow = lastArtifact?.workflow_name;
+    if (lastArtifactWorkflow && options?.workflowName && lastArtifactWorkflow !== options.workflowName) {
+      const lastActiveChatId = (() => { try { return getStoredActiveChatId?.(); } catch { return null; } })();
+      const isContinuation = targetChatId && (targetChatId === currentChatId || targetChatId === lastActiveChatId);
+      if (!isContinuation) {
+        return false;
+      }
+    }
+
+    const cachedArtifact = {
+      tool_name: lastArtifact.tool_name,
+      tool_call_id: lastArtifact.tool_call_id || null,
+      component_type: lastArtifact.component_type || lastArtifact.tool_name,
+      workflow_name: targetWorkflowName,
+      payload: lastArtifact.payload || {},
+      display: lastArtifact.display || 'artifact',
+      ts: Date.now(),
+    };
+    const artifactPayload = {
+      ...cachedArtifact.payload,
+      artifact_id: deriveArtifactId(cachedArtifact.payload, cachedArtifact.tool_call_id || cachedArtifact.tool_name),
+    };
+    const restoredArtifactMessage = {
+      id: `ui-restored-${cachedArtifact.tool_call_id || cachedArtifact.tool_name}`,
+      sender: 'agent',
+      agentName: artifactPayload.agentName || artifactPayload.agent_name || 'Agent',
+      content: artifactPayload.structured_output || artifactPayload || {},
+      isStreaming: false,
+      toolCall: {
+        tool_name: cachedArtifact.tool_name,
+        payload: artifactPayload,
+        tool_call_id: cachedArtifact.tool_call_id,
+        workflow_name: cachedArtifact.workflow_name,
+        onResponse: null,
+        display: cachedArtifact.display,
+        component_type: cachedArtifact.component_type || cachedArtifact.tool_name,
+        restored: true,
+      },
+    };
+
+    let storedPanelOpen = null;
+    let hadStoredArtifact = false;
+    try {
+      storedPanelOpen = getStoredArtifactPanelOpen(targetChatId);
+      hadStoredArtifact = Boolean(
+        readStoredCurrentArtifact(targetChatId)
+        || readStoredLastArtifact(targetChatId)
+      );
+    } catch (_) {
+      storedPanelOpen = null;
+      hadStoredArtifact = false;
+    }
+
+    const isArtifactDisplay = (cachedArtifact.display || 'artifact') === 'artifact';
+
+    try {
+      // Only persist to localStorage when this is a proper artifact (display: 'artifact').
+      // Inline components must not be stored here — they would be incorrectly restored
+      // into the artifact panel on the next page load.
+      if (isArtifactDisplay) {
+        writeStoredLastArtifact(targetChatId, cachedArtifact);
+        writeStoredCurrentArtifact(targetChatId, restoredArtifactMessage);
+      }
+      artifactCacheValidRef.current = true;
+    } catch (e) {
+      console.warn('⚠️ Failed to cache server last_artifact', e);
+    }
+
+    if (isArtifactDisplay) {
+      setCurrentArtifactMessages((prev) => {
+        if (Array.isArray(prev) && prev.length > 0) {
+          return prev;
+        }
+        return [restoredArtifactMessage];
+      });
+      lastArtifactEventRef.current = cachedArtifact.tool_call_id || restoredArtifactMessage.id;
+      artifactAutoClearRef.current = false;
+      artifactRestoredOnceRef.current = true;
+
+      if (!(storedPanelOpen === false && hadStoredArtifact)) {
+        setIsSidePanelOpen(true);
+        if (setLayoutMode) {
+          setLayoutMode('split');
+        }
+      }
+    }
+
+    return true;
+  }, [currentChatId, currentWorkflowName, setIsSidePanelOpen, setLayoutMode]);
+
+  const handleMissingBackendArtifact = useCallback((chatId, workflowName = null) => {
+    if (!chatId) {
+      return false;
+    }
+    const restored = restoreStoredArtifactForChat(chatId, workflowName || currentWorkflowName);
+    if (restored) {
+      return true;
+    }
+
+    // If there is already an artifact in view from a previous workflow session
+    // (e.g. an overview card from a discovery workflow switching to a build workflow
+    // via "continue build"), preserve it until the new workflow emits its own.
+    // Clearing here would leave the panel empty for the entire handoff window.
+    if (Array.isArray(currentArtifactMessagesRef.current) && currentArtifactMessagesRef.current.length > 0) {
+      return false;
+    }
+
+    clearStoredArtifactState(chatId);
+    setCurrentArtifactMessages([]);
+    lastArtifactEventRef.current = null;
+    artifactRestoredOnceRef.current = false;
+    artifactCacheValidRef.current = false;
+    return false;
+  }, [
+    currentWorkflowName,
+    restoreStoredArtifactForChat,
+    setCurrentArtifactMessages,
+  ]);
+
+  const chatMetaHydratedRef = useRef(new Set());
+  const chatMetaHydrationInFlightRef = useRef(new Set());
+  const chatMetaHydrationMissedAtRef = useRef(new Map());
+  const hydrateServerArtifactForChat = useCallback(async (options = {}) => {
+    if (!api || typeof api.get !== 'function') {
+      return false;
+    }
+
+    const targetChatId = options?.chatId || currentChatId;
+    const targetWorkflowName = (
+      resolveKnownWorkflowName(options?.workflowName)
+      || options?.workflowName
+      || currentWorkflowName
+    );
+    if (!currentAppId || !targetWorkflowName || !targetChatId) {
+      return false;
+    }
+
+    const metaKey = `${currentAppId}:${targetWorkflowName}:${targetChatId}`;
+    if (!options?.force && chatMetaHydratedRef.current.has(metaKey)) {
+      return false;
+    }
+    if (!options?.force) {
+      const missedAt = chatMetaHydrationMissedAtRef.current.get(metaKey);
+      if (missedAt && Date.now() - missedAt < 5000) {
+        return false;
+      }
+    }
+    if (chatMetaHydrationInFlightRef.current.has(metaKey)) {
+      return false;
+    }
+
+    const encodedAppId = encodeURIComponent(currentAppId);
+    const encodedWorkflow = encodeURIComponent(targetWorkflowName);
+    const encodedChatId = encodeURIComponent(targetChatId);
+
+    chatMetaHydrationInFlightRef.current.add(metaKey);
+    logChatPersistence('server_artifact_hydrate_requested', {
+      reason: options?.reason || null,
+      chatId: targetChatId,
+      workflowName: targetWorkflowName,
+      force: Boolean(options?.force),
+    });
+
+    try {
+      const meta = await api.get(`/api/chats/meta/${encodedAppId}/${encodedWorkflow}/${encodedChatId}`);
+      if (!meta) {
+        return false;
+      }
+
+      if (meta.cache_seed !== undefined && meta.cache_seed !== null) {
+        setCacheSeed(meta.cache_seed);
+        setStoredChatCacheSeed(targetChatId, meta.cache_seed);
+      }
+      if (meta.exists === false) {
+        setChatExists(false);
+        logChatPersistence('server_artifact_hydrate_missing_chat', {
+          reason: options?.reason || null,
+          chatId: targetChatId,
+          workflowName: targetWorkflowName,
+        });
+        return false;
+      }
+      if (meta.exists === true) {
+        setChatExists(true);
+      }
+
+      if (meta.last_artifact?.tool_name) {
+        const cached = cacheServerLastArtifact(meta.last_artifact, {
+          chatId: targetChatId,
+          workflowName: targetWorkflowName,
+        });
+        if (cached) {
+          chatMetaHydratedRef.current.add(metaKey);
+          chatMetaHydrationMissedAtRef.current.delete(metaKey);
+        }
+        logChatPersistence('server_artifact_hydrate_result', {
+          reason: options?.reason || null,
+          chatId: targetChatId,
+          workflowName: targetWorkflowName,
+          cached,
+          toolName: meta.last_artifact.tool_name,
+          display: meta.last_artifact.display || null,
+        });
+        return cached;
+      }
+
+      logChatPersistence('server_artifact_hydrate_result', {
+        reason: options?.reason || null,
+        chatId: targetChatId,
+        workflowName: targetWorkflowName,
+        cached: false,
+        toolName: null,
+      });
+      chatMetaHydrationMissedAtRef.current.set(metaKey, Date.now());
+      return false;
+    } catch (err) {
+      console.warn('⚠️ Failed to hydrate chat metadata', err);
+      logChatPersistence('server_artifact_hydrate_error', {
+        reason: options?.reason || null,
+        chatId: targetChatId,
+        workflowName: targetWorkflowName,
+        error: err?.message || String(err),
+      });
+      return false;
+    } finally {
+      chatMetaHydrationInFlightRef.current.delete(metaKey);
+    }
+  }, [api, cacheServerLastArtifact, currentAppId, currentChatId, currentWorkflowName, resolveKnownWorkflowName]);
+
+  useEffect(() => {
+    if (conversationMode !== 'workflow' || !currentAppId || !currentWorkflowName || !currentChatId) {
+      return undefined;
+    }
+
+    hydrateServerArtifactForChat({
+      chatId: currentChatId,
+      workflowName: currentWorkflowName,
+      reason: 'workflow_chat_meta_effect',
+    });
+    return undefined;
+  }, [
+    conversationMode,
+    currentAppId,
+    currentWorkflowName,
+    currentChatId,
+    hydrateServerArtifactForChat,
+  ]);
+
   const handleIncomingRef = useRef(null);
 
   // Simplified incoming handler (namespaced chat.* only)
@@ -1368,6 +2133,37 @@ const ChatPage = () => {
       dispatchSurfaceEvent(data);
     }
     const showSystemMessages = debugFlag('mozaiks.show_system_messages') || debugFlag('mozaiks.debug_pipeline');
+    const applyWorkflowSessionMeta = (metaData = {}) => {
+      const metaChatId = String(metaData.chat_id || '').trim() || currentChatId || null;
+      const rawWorkflowName = String(
+        metaData.workflow_name
+        || currentWorkflowName
+        || activeWorkflowName
+        || urlWorkflowName
+        || ''
+      ).trim();
+      const metaWorkflowName = rawWorkflowName
+        ? (resolveKnownWorkflowName(rawWorkflowName) || rawWorkflowName)
+        : null;
+
+      if (conversationModeRef.current === 'workflow') {
+        if (metaChatId && metaChatId !== currentChatId) {
+          setCurrentChatId(metaChatId);
+        }
+        if (metaChatId) {
+          setActiveChatId(metaChatId);
+        }
+        if (metaWorkflowName) {
+          setCurrentWorkflowName(metaWorkflowName);
+          setActiveWorkflowName(metaWorkflowName);
+        }
+        if (metaChatId && metaWorkflowName) {
+          rememberWorkflowChatSession(metaChatId, metaWorkflowName);
+        }
+      }
+
+      return { chatId: metaChatId, workflowName: metaWorkflowName };
+    };
     // Robust spinner hide: only once
     try {
       if (initSpinnerShownRef.current && !initSpinnerHiddenOnceRef.current) {
@@ -1385,24 +2181,26 @@ const ChatPage = () => {
     if (debugFlag('mozaiks.debug_pipeline')) {
       const agentDbg = data.agent || data.agent_name;
       if ((data.type === 'chat.print' || data.type === 'chat.text') && data.is_visual === false) {
-        console.warn('[PIPELINE] Non-visual agent message received (unexpected?)', agentDbg);
+        console.warn('💬 [PIPELINE] Non-visual agent message received (unexpected?)', agentDbg);
       }
     }
 
     // Handle chat_meta events (which may not have chat. prefix)
     if (data.type === 'chat_meta' || data.type === 'chat.chat_meta') {
       // Initial metadata handshake from backend
+      const { chatId: metaChatId, workflowName: metaWorkflowName } = applyWorkflowSessionMeta(data);
       applySessionStatePendingHarnessDecision(data.session_state);
+      applySessionStatePendingTransition(data.session_state);
       if (data.cache_seed !== undefined && data.cache_seed !== null) {
         setCacheSeed(data.cache_seed);
-        if (currentChatId) {
-          setStoredChatCacheSeed(currentChatId, data.cache_seed);
+        if (metaChatId) {
+          setStoredChatCacheSeed(metaChatId, data.cache_seed);
         }
       }
       if (data.chat_exists === false) {
         // Backend indicates this chat_id had no persisted session (fresh after client-side reuse)
         setChatExists(false);
-        clearStoredArtifactState(currentChatId);
+        clearStoredArtifactState(metaChatId);
         // Reset any prior artifact state
         setCurrentArtifactMessages([]);
         lastArtifactEventRef.current = null;
@@ -1411,26 +2209,14 @@ const ChatPage = () => {
       } else if (data.chat_exists === true) {
         setChatExists(true);
         if (!data.last_artifact || !data.last_artifact.tool_name) {
-          clearStoredArtifactState(currentChatId);
-          setCurrentArtifactMessages([]);
-          lastArtifactEventRef.current = null;
-          artifactRestoredOnceRef.current = false;
-          artifactCacheValidRef.current = false;
+          handleMissingBackendArtifact(metaChatId, metaWorkflowName);
         }
 
-        // If backend already sent last_artifact and we have not restored yet, cache it for restore effect
-        if (!artifactRestoredOnceRef.current && data.last_artifact && data.last_artifact.tool_name) {
-          try {
-            writeStoredLastArtifact(currentChatId, {
-              tool_name: data.last_artifact.tool_name,
-              tool_call_id: data.last_artifact.tool_call_id || null,
-              workflow_name: data.last_artifact.workflow_name || currentWorkflowName,
-              payload: data.last_artifact.payload || {},
-              display: data.last_artifact.display || 'artifact',
-              ts: Date.now(),
-            });
-            artifactCacheValidRef.current = true;
-          } catch (e) { console.warn('Failed to cache server last_artifact', e); }
+        if (data.last_artifact && data.last_artifact.tool_name) {
+          cacheServerLastArtifact(data.last_artifact, {
+            chatId: metaChatId,
+            workflowName: metaWorkflowName,
+          });
         }
       }
       return;
@@ -1448,16 +2234,18 @@ const ChatPage = () => {
           // If this is chat_meta, handle it directly
           if (inner.type === 'chat_meta') {
             const metaData = inner.data || {};
+            const { chatId: metaChatId, workflowName: metaWorkflowName } = applyWorkflowSessionMeta(metaData);
             applySessionStatePendingHarnessDecision(metaData.session_state);
+            applySessionStatePendingTransition(metaData.session_state);
             if (metaData.cache_seed !== undefined && metaData.cache_seed !== null) {
               setCacheSeed(metaData.cache_seed);
-              if (currentChatId) {
-                setStoredChatCacheSeed(currentChatId, metaData.cache_seed);
+              if (metaChatId) {
+                setStoredChatCacheSeed(metaChatId, metaData.cache_seed);
               }
             }
             if (metaData.chat_exists === false) {
               setChatExists(false);
-              clearStoredArtifactState(currentChatId);
+              clearStoredArtifactState(metaChatId);
               setCurrentArtifactMessages([]);
               lastArtifactEventRef.current = null;
               artifactRestoredOnceRef.current = true;
@@ -1465,24 +2253,13 @@ const ChatPage = () => {
             } else if (metaData.chat_exists === true) {
               setChatExists(true);
               if (!metaData.last_artifact || !metaData.last_artifact.tool_name) {
-                clearStoredArtifactState(currentChatId);
-                setCurrentArtifactMessages([]);
-                lastArtifactEventRef.current = null;
-                artifactRestoredOnceRef.current = false;
-                artifactCacheValidRef.current = false;
+                handleMissingBackendArtifact(metaChatId, metaWorkflowName);
               }
-              if (!artifactRestoredOnceRef.current && metaData.last_artifact && metaData.last_artifact.tool_name) {
-                try {
-                  writeStoredLastArtifact(currentChatId, {
-                    tool_name: metaData.last_artifact.tool_name,
-                    tool_call_id: metaData.last_artifact.tool_call_id || null,
-                    workflow_name: metaData.last_artifact.workflow_name || currentWorkflowName,
-                    payload: metaData.last_artifact.payload || {},
-                    display: metaData.last_artifact.display || 'artifact',
-                    ts: Date.now(),
-                  });
-                  artifactCacheValidRef.current = true;
-                } catch (e) { console.warn('Failed to cache server last_artifact', e); }
+              if (metaData.last_artifact && metaData.last_artifact.tool_name) {
+                cacheServerLastArtifact(metaData.last_artifact, {
+                  chatId: metaChatId,
+                  workflowName: metaWorkflowName,
+                });
               }
             }
             return;
@@ -1513,7 +2290,7 @@ const ChatPage = () => {
         }
       }
     } catch (e) {
-      if (debugFlag('mozaiks.debug_pipeline')) console.warn('[PIPELINE] failed to unwrap nested envelope', e);
+      if (debugFlag('mozaiks.debug_pipeline')) console.warn('⚠️ [PIPELINE] failed to unwrap nested envelope', e);
     }
     
     if (!data.type.startsWith('chat.') && !data.type.startsWith('ui.') && data.type !== 'unknown') return;
@@ -1549,7 +2326,7 @@ const ChatPage = () => {
         });
       }
     } catch (e) {
-      if (debugFlag('mozaiks.debug_pipeline')) console.warn('[PIPELINE] failed to promote data.data fields', e);
+      if (debugFlag('mozaiks.debug_pipeline')) console.warn('⚠️ [PIPELINE] failed to promote data.data fields', e);
     }
 
     // Final resolution / fallback normalization before dispatch
@@ -1656,27 +2433,6 @@ const ChatPage = () => {
         setConversationMode('workflow');
         setWorkflowCompleted(false);
         setCompletionData(null);
-        if (String(payload.workflow_name || '').toLowerCase() === 'designdocs') {
-          setMessagesWithLogging((prev) => {
-            const statusKey = 'designdocs-generating';
-            const last = prev.length ? prev[prev.length - 1] : null;
-            if (last?.metadata?.status_key === statusKey) return prev;
-            return [
-              ...prev,
-              {
-                id: `designdocs-status-${Date.now()}`,
-                sender: 'system',
-                agentName: 'System',
-                content: 'Generating design...',
-                isStreaming: false,
-                metadata: {
-                  event_type: 'workflow_status',
-                  status_key: statusKey,
-                },
-              },
-            ];
-          });
-        }
         if (payload.message && showSystemMessages) {
           setMessagesWithLogging((prev) => ([
             ...prev,
@@ -1697,6 +2453,7 @@ const ChatPage = () => {
         const agentNameChunk = extractAgentName(data);
         const chunkContent = data.content || '';
         const streamId = data.stream_id || null;
+        const streamChunkMetadata = data.metadata || data.data?.metadata || null;
         if (!chunkContent) return;
         // Hide init spinner on first streaming token
         if (showInitSpinner) setShowInitSpinner(false);
@@ -1714,6 +2471,7 @@ const ChatPage = () => {
               updated[i] = {
                 ...m,
                 content: `${m.content || ''}${chunkContent}`,
+                metadata: streamChunkMetadata || m.metadata || null,
               };
               return updated;
             }
@@ -1730,6 +2488,7 @@ const ChatPage = () => {
             isStructuredCapable: !!(data.is_structured_capable),
             isVisual: data.is_visual !== undefined ? !!data.is_visual : true,
             isToolAgent: !!(data.is_tool_agent),
+            metadata: streamChunkMetadata,
           });
           return updated;
         });
@@ -1743,6 +2502,30 @@ const ChatPage = () => {
         const finalContent = data.full_content || data.content || '';
         const streamEndMetadata = data.metadata || data.data?.metadata || {};
         const streamId = data.stream_id || data.data?.stream_id || null;
+        if (conversationModeRef.current === 'ask' && streamEndMetadata?.source !== 'general_agent') {
+          if (finalContent) {
+            cacheWorkflowTranscriptMessage({
+              id: `stream-end-${Date.now()}`,
+              sender: 'agent',
+              agentName: agentNameEnd,
+              content: finalContent,
+              isStreaming: false,
+              isStructuredCapable: !!(data.is_structured_capable),
+              isVisual: data.is_visual !== undefined ? !!data.is_visual : true,
+              isToolAgent: !!(data.is_tool_agent),
+              structuredOutput: data.structured_output || null,
+              structuredSchema: data.structured_schema || null,
+              metadata: streamEndMetadata || null,
+            }, {
+              chatId: data.chat_id || data.chatId || currentChatId || activeChatId || null,
+              workflowName: streamEndMetadata?.workflow_name || currentWorkflowName || activeWorkflowName || null,
+            });
+          }
+          if (showInitSpinner) {
+            setShowInitSpinner(false);
+          }
+          return;
+        }
         setMessagesWithLogging(prev => {
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
@@ -1918,6 +2701,27 @@ const ChatPage = () => {
           Boolean(metadataSource?.input_request_id)
         );
         if (conversationMode === 'ask' && metadataSource?.source !== 'general_agent') {
+          if (content.trim()) {
+            const displayAsWorkflowUser = isWorkflowUserMessage;
+            cacheWorkflowTranscriptMessage({
+              id: `text-${Date.now()}`,
+              sender: displayAsWorkflowUser ? 'user' : 'agent',
+              agentName: displayAsWorkflowUser ? 'You' : extractAgentName(data),
+              content,
+              isStreaming: false,
+              isStructuredCapable: !!data.is_structured_capable,
+              structuredOutput: data.structured_output || null,
+              structuredSchema: data.structured_schema || null,
+              isVisual: !!data.is_visual,
+              isToolAgent: !!data.is_tool_agent,
+              metadata: metadataSource,
+              replayIndex,
+              serverSequence,
+            }, {
+              chatId: data.chat_id || data.chatId || currentChatId || activeChatId || null,
+              workflowName: metadataSource?.workflow_name || currentWorkflowName || activeWorkflowName || null,
+            });
+          }
           if (debugFlag('mozaiks.debug_pipeline')) {
           }
           return;
@@ -1944,7 +2748,9 @@ const ChatPage = () => {
           return;
         }
         if (isGeneralUserEcho) {
-          const recent = messagesRef.current[messagesRef.current.length - 1];
+          const recent = [...messagesRef.current]
+            .reverse()
+            .find(message => message && !message.isThinking);
           if (recent && recent.sender === 'user') {
             const recentText = String(recent.content || '').trim();
             if (recentText && recentText === String(content).trim()) {
@@ -1986,6 +2792,25 @@ const ChatPage = () => {
         const displayAsUser = isGeneralUserEcho || isWorkflowUserMessage;
         const agentName = displayAsUser ? 'You' : extractAgentName(data);
         const computedSender = displayAsUser ? 'user' : 'agent';
+        if (!displayAsUser) {
+          const normalizedContent = String(content || '').trim();
+          const recent = messagesRef.current[messagesRef.current.length - 1];
+          const recentContent = String(recent?.content || '').trim();
+          const recentSource = recent?.metadata?.source || null;
+          const currentSource = metadataSource?.source || null;
+          if (
+            normalizedContent
+            && recent
+            && recent.sender === 'agent'
+            && recent.agentName === agentName
+            && !recent.isThinking
+            && !recent.__streaming
+            && recentContent === normalizedContent
+            && recentSource === currentSource
+          ) {
+            return;
+          }
+        }
         setMessagesWithLogging(prev => {
           // Remove any thinking messages when agent actually speaks
           const thinkingMessages = prev.filter(m => m.isThinking);
@@ -2110,7 +2935,7 @@ const ChatPage = () => {
             if (activeWs && activeWs.send) {
               return activeWs.send(responseData);
             }
-            console.warn('���s������,? No WebSocket connection available for UI tool response (tool_call)');
+            console.warn('⚠️ No WebSocket connection available for UI tool response (tool_call)');
             return false;
           };
           dynamicUIHandler.processUIEvent({
@@ -2245,6 +3070,7 @@ const ChatPage = () => {
         if (lastArtifactEventRef.current && (!dismissedId || dismissedId === lastArtifactEventRef.current)) {
           setIsSidePanelOpen(false);
           lastArtifactEventRef.current = null;
+          artifactAutoClearRef.current = true;
           artifactCacheValidRef.current = false;
           setCurrentArtifactMessages([]);
           if (currentChatId) clearStoredArtifactState(currentChatId);
@@ -2322,6 +3148,7 @@ const ChatPage = () => {
         if (lastArtifactEventRef.current && (!dismissedId || dismissedId === lastArtifactEventRef.current)) {
           setIsSidePanelOpen(false);
           lastArtifactEventRef.current = null;
+          artifactAutoClearRef.current = true;
           artifactCacheValidRef.current = false;
           setCurrentArtifactMessages([]);
           if (currentChatId) {
@@ -2481,83 +3308,13 @@ const ChatPage = () => {
           ];
         });
         
-        // Speaker selection often marks a new turn/run start. If we have an open artifact
-        // from a prior sequence, collapse it now and clear the cache.
-        if (lastArtifactEventRef.current && isSidePanelOpen) {
-          try {
-          } catch {}
-          setIsSidePanelOpen(false);
-          lastArtifactEventRef.current = null;
-          setCurrentArtifactMessages([]);
-          // Clear artifact cache on new conversation turn
-          if (currentChatId) {
-            clearStoredArtifactState(currentChatId);
-          }
-        }
-        return;
-      }
-      case 'activity': {
-        const activityType = data.activity_type || data.status || 'background';
-        const activityAgent = data.agent || data.agent_name || 'System';
-        const activityStatus = data.status || 'working';
-        const activityMessage = data.message
-          || `${activityAgent} is working in the background.`;
-        const activityKey = `${activityType}:${activityAgent}`;
-        const normalizedActivityStatus = String(activityStatus || '').trim().toLowerCase();
-        const activityCompleteStatuses = ['complete', 'completed', 'ready', 'success', 'succeeded', 'done'];
-        const activityFailedStatuses = ['failed', 'error', 'unavailable'];
-        const activityIcon = activityCompleteStatuses.includes(normalizedActivityStatus)
-          ? '✓'
-          : activityFailedStatuses.includes(normalizedActivityStatus)
-            ? '⚠'
-            : '⏳';
-        if (showInitSpinner) {
-          setShowInitSpinner(false);
-          initSpinnerHiddenOnceRef.current = true;
-        }
-        setMessagesWithLogging(prev => {
-          const updated = [...prev];
-          const last = updated.length ? updated[updated.length - 1] : null;
-          const nextEntry = {
-            id: last?.metadata?.event_type === 'activity' && last?.metadata?.activity_key === activityKey
-              ? last.id
-              : `activity-${Date.now()}`,
-            sender: 'system',
-            agentName: 'System',
-            content: `${activityIcon} ${activityMessage}`,
-            isStreaming: false,
-            metadata: {
-              event_type: 'activity',
-              activity_type: activityType,
-              activity_status: activityStatus,
-              activity_agent: activityAgent,
-              activity_key: activityKey,
-              progress_percent: data.progress_percent,
-              workflow_name: data.workflow_name || currentWorkflowName || null,
-            },
-          };
-          if (last?.metadata?.event_type === 'activity' && last?.metadata?.activity_key === activityKey) {
-            updated[updated.length - 1] = nextEntry;
-            return updated;
-          }
-          if (last?.metadata?.event_type === 'activity' && last?.content === nextEntry.content) {
-            return updated;
-          }
-          updated.push(nextEntry);
-          return updated;
-        });
         return;
       }
       case 'tool_progress': {
         // Update or append progress for a long-running tool
         const progress = Number(data.progress_percent || 0);
         const tool = data.tool_name || 'tool';
-        const userVisibleToolProgress = (
-          tool === 'App Intelligence'
-          || tool === 'app_intelligence'
-          || data.ui_visibility === 'user'
-          || data.metadata?.ui_visibility === 'user'
-        );
+        const userVisibleToolProgress = shouldShowToolProgress(data);
         if (!showSystemMessages && !userVisibleToolProgress) {
           return;
         }
@@ -2575,7 +3332,7 @@ const ChatPage = () => {
               return updated;
             }
           }
-          updated.push({ id:`tool-progress-${Date.now()}`, sender:'system', agentName:'System', content: progressContent, isStreaming:false, metadata:{ event_type:'tool_progress', tool_name: tool, progress_percent: progress }});
+          updated.push({ id:`tool-progress-${Date.now()}`, sender:'system', agentName: tool, content: progressContent, isStreaming:false, metadata:{ event_type:'tool_progress', tool_name: tool, progress_percent: progress }});
           return updated;
         });
         return;
@@ -2682,7 +3439,6 @@ const ChatPage = () => {
           const errorMessage = data.error || data.data?.error || data.message || data.data?.message || `Workflow failed (${reason})`;
           setLoading(false);
           setPendingWorkflowReply(null);
-          setError(errorMessage);
           setMessagesWithLogging(prev => [...prev, {
             id:`run-failed-${Date.now()}`,
             sender:'system',
@@ -2711,11 +3467,23 @@ const ChatPage = () => {
         // Only show completion overlay when no server-fired transition is already pending.
         // pendingTransitionIdRef gives synchronous access to avoid the race where
         // transition_requested and run_complete arrive in quick succession.
-        if (!pendingTransitionIdRef.current) {
+        //
+        // human_in_the_loop workflows must NOT auto-complete from run_complete:
+        // each user message starts a new AG2 network run which terminates cleanly
+        // after the agent speaks and routes back to the user (RevertToUserTarget).
+        // That run terminating with status "completed" does not mean the workflow is
+        // done — the user must still continue the conversation. These workflows use
+        // explicit transition_requested events (or a server-emitted workflow_complete
+        // transition) when they are truly finished.
+        const activeWorkflow = currentWorkflowNameRef.current || currentWorkflowName;
+        const isHumanInTheLoop = workflowConfig?.getWorkflowConfig
+          ? Boolean(workflowConfig.getWorkflowConfig(activeWorkflow)?.human_in_the_loop)
+          : false;
+        if (!pendingTransitionIdRef.current && !isHumanInTheLoop) {
           const duration = data.duration_sec || data.data?.duration_sec;
           const tokensUsed = data.total_tokens || data.data?.total_tokens;
           setPendingTransitionContext({
-            workflowName: currentWorkflowNameRef.current || currentWorkflowName,
+            workflowName: activeWorkflow,
             summary: {
               duration: duration ? `${Math.round(duration)}s` : null,
               tokensUsed: tokensUsed ? tokensUsed.toLocaleString() : null,
@@ -2775,7 +3543,7 @@ const ChatPage = () => {
         })
           .then(async (res) => {
             if (!res.ok) {
-              console.error('[ChatPage] revision trigger failed:', res.status);
+              console.error('❌ [ChatPage] revision trigger failed:', res.status);
               return;
             }
             const triggerData = await res.json();
@@ -2784,6 +3552,7 @@ const ChatPage = () => {
               setActiveChatId(triggerData.chat_id);
               setCurrentWorkflowName(triggerData.workflow_id);
               setActiveWorkflowName(triggerData.workflow_id);
+              rememberWorkflowChatSession(triggerData.chat_id, triggerData.workflow_id);
               setConversationMode('workflow');
               setWorkflowCompleted(false);
               setPendingHarnessDecision(null);
@@ -2811,7 +3580,7 @@ const ChatPage = () => {
             }
           })
           .catch((err) => {
-            console.error('[ChatPage] revision trigger error:', err);
+            console.error('❌ [ChatPage] revision trigger error:', err);
           });
         return;
       }
@@ -2854,7 +3623,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [currentChatId, currentWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, buildPendingHarnessDecision]);
+  }, [activeChatId, activeWorkflowName, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -2884,7 +3653,7 @@ const ChatPage = () => {
     // Hard requirement: app_id must be set via route/query/env (no implicit fallback)
     if (!currentAppId) {
       console.error(
-        "Missing app_id. Provide it via URL (/chat/<app_id>), query (?appId=...), or REACT_APP_DEFAULT_APP_ID."
+        "❌ Missing app_id. Provide it via URL (/chat/<app_id>), query (?appId=...), or REACT_APP_DEFAULT_APP_ID."
       );
       setConnectionStatus('error');
       setLoading(false);
@@ -2906,7 +3675,27 @@ const ChatPage = () => {
     }
 
     if (queryMode !== 'ask' && !queryForceAsk && !currentChatId && !queryChatId && !queryFreshStart) {
-      const stored = getStoredActiveChatId();
+      const exactStoredWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+      const exactActiveWorkflow = workflowConfig.resolveKnownWorkflowName(activeWorkflowName);
+      const exactCurrentWorkflow = workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
+      const exactUrlWorkflow = workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
+      const storedWorkflowName =
+        exactCurrentWorkflow
+        || exactUrlWorkflow
+        || exactActiveWorkflow
+        || exactStoredWorkflow
+        || resolveKnownWorkflowName(currentWorkflowName)
+        || resolveKnownWorkflowName(urlWorkflowName)
+        || resolveKnownWorkflowName(activeWorkflowName)
+        || resolveKnownWorkflowName(getStoredActiveWorkflowName());
+      const scopedStored = storedWorkflowName
+        ? getStoredWorkflowChatId({
+            appId: currentAppId,
+            userId: currentUserId,
+            workflowName: storedWorkflowName,
+          })
+        : null;
+      const stored = scopedStored || getStoredActiveChatId();
       if (stored) {
         setCurrentChatId(stored);
         const seedStored = getStoredChatCacheSeed(stored);
@@ -2915,174 +3704,228 @@ const ChatPage = () => {
         }
       }
     }
-  }, [api, currentChatId, currentAppId, queryChatId, queryFreshStart, queryForceAsk, queryMode, setActiveChatId]);
+  }, [
+    activeWorkflowName,
+    api,
+    currentAppId,
+    currentChatId,
+    currentUserId,
+    currentWorkflowName,
+    queryChatId,
+    queryFreshStart,
+    queryForceAsk,
+    queryMode,
+    resolveKnownWorkflowName,
+    setActiveChatId,
+    urlWorkflowName,
+    workflowConfig,
+  ]);
 
-  // NEW: Preflight chat existence + cache clearing logic
-useEffect(() => {
-  if (!api) return;
-  if (!workflowConfigLoaded) return; // wait until registry is ready
-  if (currentChatId) return; // existing logic handles resume or already started
-  if (queryDeferStart) {
-    setLoading(false);
-    pendingStartRef.current = false;
-    return;
-  }
-  if (pendingStartRef.current) return;
+  // Preflight chat existence + scoped workflow resume.
+  useEffect(() => {
+    if (!api) return;
+    if (!workflowConfigLoaded) return;
+    if (currentChatId) return;
+    if (queryDeferStart) {
+      setLoading(false);
+      pendingStartRef.current = false;
+      return;
+    }
+    if (pendingStartRef.current) return;
 
-  pendingStartRef.current = true;
-  (async () => {
-    try {
-      const askCarrierMode = queryMode === 'ask' || queryForceAsk || conversationMode === 'ask';
-      let reuseChatId = queryFreshStart ? null : queryChatId;
-
-      if (reuseChatId) {
-        const wfName = resolveKnownWorkflowName(currentWorkflowName);
-        if (!wfName) {
-          console.warn('[EXISTS] No runnable workflow resolved; skipping chat reuse check');
-          pendingStartRef.current = false;
+    pendingStartRef.current = true;
+    (async () => {
+      try {
+        const askCarrierMode = queryMode === 'ask' || queryForceAsk || (!queryMode && conversationMode === 'ask');
+        const exactStoredWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+        const exactActiveWorkflow = workflowConfig.resolveKnownWorkflowName(activeWorkflowName);
+        const exactCurrentWorkflow = workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
+        const exactUrlWorkflow = workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
+        const preferredWorkflowCandidates = buildWorkflowResolutionCandidates({
+          workflowConfig,
+          candidates: [
+            ...(queryChatId
+              ? [exactStoredWorkflow, exactActiveWorkflow, exactCurrentWorkflow, exactUrlWorkflow]
+              : [exactCurrentWorkflow, exactUrlWorkflow, exactActiveWorkflow, exactStoredWorkflow]),
+            resolveKnownWorkflowName(currentWorkflowName),
+            resolveKnownWorkflowName(urlWorkflowName),
+            resolveKnownWorkflowName(activeWorkflowName),
+            resolveKnownWorkflowName(getStoredActiveWorkflowName()),
+          ],
+          includeAvailable: Boolean(queryChatId),
+        });
+        const startWorkflowName = preferredWorkflowCandidates[0];
+        if (!startWorkflowName) {
+          console.warn('⚠️ [INIT] No runnable workflow resolved; skipping startChat');
           return;
         }
-        try {
-          const resp = await fetch(`${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${wfName}/${reuseChatId}`);
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data.exists) {
-              setCurrentChatId(reuseChatId);
-              setChatExists(true);
-              if (askCarrierMode) {
-                setCurrentWorkflowName(wfName);
-                setConversationMode('ask');
-                setConnectionInitialized(false);
-                connectionInProgressRef.current = false;
-                pendingStartRef.current = false;
-                return;
-              }
-              
-              // Update global chat context for persistent bubble
-              setActiveChatId(reuseChatId);
-              setActiveWorkflowName(wfName);
-              setChatMinimized(false);
-              
-              pendingStartRef.current = false;
-              return;
-            }
-            clearStoredArtifactState(reuseChatId);
-            clearStoredChatCacheSeed(reuseChatId);
-            if (getStoredActiveChatId() === reuseChatId) {
-              setStoredActiveChatId(null);
-            }
-            consumeNavigationQueryParams(['chat_id']);
-          } else {
-            console.warn('[EXISTS] Backend returned non-OK; falling back to reuse chat_id');
-            setCurrentChatId(reuseChatId);
-            setChatExists(null);
-            if (askCarrierMode) {
-              setCurrentWorkflowName(wfName);
-              setConversationMode('ask');
-              setConnectionInitialized(false);
-              connectionInProgressRef.current = false;
-              pendingStartRef.current = false;
-              return;
-            }
-            setActiveChatId(reuseChatId);
-            setActiveWorkflowName(wfName);
-            setChatMinimized(false);
-            pendingStartRef.current = false;
-            return;
+
+        const scopedStoredChatId = !queryFreshStart && !askCarrierMode
+          ? getStoredWorkflowChatId({
+              appId: currentAppId,
+              userId: currentUserId,
+              workflowName: startWorkflowName,
+            })
+          : null;
+        const candidateWorkflowChatIds = queryFreshStart
+          ? []
+          : [
+              queryChatId,
+              scopedStoredChatId,
+              activeChatId,
+              getStoredActiveChatId(),
+            ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
+
+        const markCandidateStale = (candidateChatId, workflowNamesToClear = [startWorkflowName]) => {
+          clearStoredArtifactState(candidateChatId);
+          clearStoredChatCacheSeed(candidateChatId);
+          if (getStoredActiveChatId() === candidateChatId) {
+            setStoredActiveChatId(null);
           }
-        } catch (e) {
-          console.warn('[EXISTS] Existence check failed; reusing chat_id without backend', e);
-          setCurrentChatId(reuseChatId);
-          setChatExists(null);
+          const clearWorkflows = buildWorkflowResolutionCandidates({
+            workflowConfig,
+            candidates: workflowNamesToClear,
+          });
+          for (const workflowNameToClear of clearWorkflows) {
+            clearStoredWorkflowChatId({
+              appId: currentAppId,
+              userId: currentUserId,
+              workflowName: workflowNameToClear,
+            });
+          }
+          if (candidateChatId === queryChatId) {
+            consumeNavigationQueryParams(['chat_id']);
+          }
+        };
+
+        for (const candidateChatId of candidateWorkflowChatIds) {
+          const candidateWorkflowCandidates = buildWorkflowResolutionCandidates({
+            workflowConfig,
+            candidates: [
+              ...preferredWorkflowCandidates,
+              startWorkflowName,
+            ],
+            includeAvailable: candidateChatId === queryChatId,
+          });
+          const resolution = await resolveWorkflowForChat({
+            api,
+            appId: currentAppId,
+            chatId: candidateChatId,
+            workflowCandidates: candidateWorkflowCandidates,
+          });
+          let resolvedCandidateWorkflow = resolution.workflowName;
+          let candidateExists = Boolean(resolvedCandidateWorkflow);
+
+          if (resolution.validationIncomplete) {
+            if (resolution.error) {
+              console.warn('⚠️ [EXISTS] Could not validate workflow chat candidate; attempting resume:', resolution.error);
+            }
+            resolvedCandidateWorkflow = candidateWorkflowCandidates[0] || startWorkflowName;
+            candidateExists = null;
+          }
+
+          if (!resolvedCandidateWorkflow) {
+            if (resolution.sawMissingWorkflow) {
+              markCandidateStale(candidateChatId, candidateWorkflowCandidates);
+            }
+            continue;
+          }
+
+          setCurrentChatId(candidateChatId);
+          setChatExists(candidateExists === true ? true : null);
+
           if (askCarrierMode) {
-            setCurrentWorkflowName(wfName || currentWorkflowName);
+            setCurrentWorkflowName(resolvedCandidateWorkflow);
             setConversationMode('ask');
             setConnectionInitialized(false);
             connectionInProgressRef.current = false;
-            pendingStartRef.current = false;
             return;
           }
-          setActiveChatId(reuseChatId);
-          setActiveWorkflowName(wfName || null);
+
+          setActiveChatId(candidateChatId);
+          setActiveWorkflowName(resolvedCandidateWorkflow);
+          setCurrentWorkflowName(resolvedCandidateWorkflow);
           setChatMinimized(false);
-          pendingStartRef.current = false;
+          rememberWorkflowChatSession(candidateChatId, resolvedCandidateWorkflow);
+
+          const nextParams = new URLSearchParams(location.search || '');
+          nextParams.delete('context');
+          nextParams.delete('new');
+          nextParams.delete('fresh');
+          nextParams.delete('force_new');
+          nextParams.set('workflow', resolvedCandidateWorkflow);
+          nextParams.set('chat_id', candidateChatId);
+          nextParams.set('mode', 'workflow');
+          const nextSearch = nextParams.toString();
+          navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
           return;
         }
-      }
 
-      const startWorkflowName = resolveKnownWorkflowName(currentWorkflowName);
-      if (!startWorkflowName) {
-        console.warn('[INIT] No runnable workflow resolved; skipping startChat');
-        return;
-      }
-      const triggerMeta = {
-        trigger_source: queryTriggerSource,
-        ...(queryActionId ? { action_id: queryActionId } : {}),
-        ...(queryChangeClass ? { change_class: queryChangeClass } : {}),
-        ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
-      };
-      const sessionOptions = {
-        ...(askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}),
-        ...(queryFreshStart ? { forceNew: true } : {}),
-      };
-      const result = await api.startChat(
-        currentAppId,
-        startWorkflowName,
-        currentUserId,
-        {},
-        queryContext,
-        triggerMeta,
-        Object.keys(sessionOptions).length > 0 ? sessionOptions : null,
-      );
-      if (result && (result.chat_id || result.id)) {
-        const newId = result.chat_id || result.id;
-        const reused = !!result.reused;
-        const resolvedWorkflowName = result.workflow_name || startWorkflowName;
-        setCurrentChatId(newId);
-        setChatExists(reused);
+        const triggerMeta = {
+          trigger_source: queryTriggerSource,
+          ...(queryActionId ? { action_id: queryActionId } : {}),
+          ...(queryChangeClass ? { change_class: queryChangeClass } : {}),
+          ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
+        };
+        const sessionOptions = {
+          ...(askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}),
+          ...(queryFreshStart ? { forceNew: true } : {}),
+        };
+        const result = await api.startChat(
+          currentAppId,
+          startWorkflowName,
+          currentUserId,
+          {},
+          queryContext,
+          triggerMeta,
+          Object.keys(sessionOptions).length > 0 ? sessionOptions : null,
+        );
+        if (result && (result.chat_id || result.id)) {
+          const newId = result.chat_id || result.id;
+          const reused = !!result.reused;
+          const resolvedWorkflowName = result.workflow_name || startWorkflowName;
+          setCurrentChatId(newId);
+          setChatExists(reused);
 
-        if (askCarrierMode) {
+          if (askCarrierMode) {
+            setCurrentWorkflowName(resolvedWorkflowName);
+            setConversationMode('ask');
+            setConnectionInitialized(false);
+            connectionInProgressRef.current = false;
+            if (!reused) {
+              clearStoredArtifactState(newId);
+            }
+            return;
+          }
+
+          const nextParams = new URLSearchParams(location.search || '');
+          nextParams.delete('context');
+          nextParams.delete('new');
+          nextParams.delete('fresh');
+          nextParams.delete('force_new');
+          nextParams.set('workflow', resolvedWorkflowName);
+          nextParams.set('chat_id', newId);
+          nextParams.set('mode', 'workflow');
+          const nextSearch = nextParams.toString();
+          navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
+
+          setActiveChatId(newId);
+          setActiveWorkflowName(resolvedWorkflowName);
           setCurrentWorkflowName(resolvedWorkflowName);
-          setConversationMode('ask');
-          setConnectionInitialized(false);
-          connectionInProgressRef.current = false;
+          setChatMinimized(false);
+          rememberWorkflowChatSession(newId, resolvedWorkflowName);
           if (!reused) {
             clearStoredArtifactState(newId);
           }
-          return;
         }
-
-        // Keep URL session context canonical after chat creation so refresh/resume
-        // paths always keep the concrete chat_id for this workflow run.
-        const nextParams = new URLSearchParams(location.search || '');
-        nextParams.delete('context');
-        nextParams.delete('new');
-        nextParams.delete('fresh');
-        nextParams.delete('force_new');
-        nextParams.set('workflow', resolvedWorkflowName);
-        nextParams.set('chat_id', newId);
-        nextParams.set('mode', 'workflow');
-        const nextSearch = nextParams.toString();
-        navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
-
-        // Update global chat context for persistent bubble
-        setActiveChatId(newId);
-        setActiveWorkflowName(resolvedWorkflowName);
-        setCurrentWorkflowName(resolvedWorkflowName);
-        setChatMinimized(false);
-        setStoredActiveChatId(newId);
-        if (!reused) {
-          clearStoredArtifactState(newId);
-        }
+      } catch (e) {
+        console.error('❌ [INIT] Failed to initialize chat:', e);
+      } finally {
+        pendingStartRef.current = false;
       }
-    } catch (e) {
-      console.error('[INIT] Failed to initialize chat:', e);
-    } finally {
-      pendingStartRef.current = false;
-    }
-  })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, queryDeferStart, queryForceAsk, queryMode, conversationMode, resolveKnownWorkflowName, consumeNavigationQueryParams]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkflowName, api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, activeChatId, queryChatId, queryDeferStart, queryForceAsk, queryFreshStart, queryMode, conversationMode, resolveKnownWorkflowName, consumeNavigationQueryParams, rememberWorkflowChatSession, urlWorkflowName, workflowConfig]);
 
   // Ensure resumed workflow chats always keep a canonical URL session context.
   // This prevents ambiguous reconnect behavior when the page was loaded with only ?workflow=...
@@ -3099,13 +3942,20 @@ useEffect(() => {
       return;
     }
 
+    if (validatedChatIdRef.current !== canonicalChatId) {
+      return;
+    }
+
     const workflowForUrl =
-      resolveKnownWorkflowName(currentWorkflowName)
-      || resolveKnownWorkflowName(urlWorkflowName)
+      workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+      || workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
       || workflowConfig.getDefaultWorkflow();
     if (!workflowForUrl) {
       return;
     }
+    rememberWorkflowChatSession(canonicalChatId, workflowForUrl);
 
     const params = new URLSearchParams(location.search || '');
     const chatParam = params.get('chat_id');
@@ -3134,6 +3984,7 @@ useEffect(() => {
     location.search,
     navigate,
     queryFreshStart,
+    rememberWorkflowChatSession,
     resolveKnownWorkflowName,
     urlWorkflowName,
     workflowConfig,
@@ -3152,22 +4003,50 @@ useEffect(() => {
     validatingChatIdRef.current = true;
     (async () => {
       try {
-        const workflowForCheck =
-          resolveKnownWorkflowName(currentWorkflowName)
-          || resolveKnownWorkflowName(urlWorkflowName)
-          || workflowConfig.getDefaultWorkflow()
-          || 'GreenRoom';
+        const storedWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+        const activeResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(activeWorkflowName);
+        const currentResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
+        const urlResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
+        const workflowCandidates = buildWorkflowResolutionCandidates({
+          workflowConfig,
+          candidates: [
+            storedWorkflow,
+            activeResolvedWorkflow,
+            currentResolvedWorkflow,
+            urlResolvedWorkflow,
+            workflowConfig.getDefaultWorkflow(),
+            'GreenRoom',
+          ],
+          includeAvailable: true,
+        });
+        const resolution = await resolveWorkflowForChat({
+          api,
+          appId: currentAppId,
+          chatId: currentChatId,
+          workflowCandidates,
+        });
 
-        const resp = await fetch(
-          `${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${workflowForCheck}/${currentChatId}`
-        );
-        if (!resp.ok) {
+        if (resolution.validationIncomplete) {
           validatedChatIdRef.current = currentChatId;
           return;
         }
 
-        const result = await resp.json();
-        if (result?.exists === false) {
+        const resolvedWorkflowForChat = resolution.workflowName;
+
+        if (resolvedWorkflowForChat) {
+          if (resolvedWorkflowForChat !== currentWorkflowName) {
+            currentWorkflowNameRef.current = resolvedWorkflowForChat;
+            setCurrentWorkflowName(resolvedWorkflowForChat);
+          }
+          if (resolvedWorkflowForChat !== activeWorkflowName) {
+            setActiveWorkflowName(resolvedWorkflowForChat);
+          }
+          rememberWorkflowChatSession(currentChatId, resolvedWorkflowForChat);
+          validatedChatIdRef.current = currentChatId;
+          return;
+        }
+
+        if (resolution.sawMissingWorkflow) {
           console.warn('🧹 [CHAT_GUARD] Stale chat id detected; resetting:', currentChatId);
           try {
             const activeWs = wsRef.current;
@@ -3179,6 +4058,13 @@ useEffect(() => {
           clearStoredArtifactState(currentChatId);
           clearStoredChatCacheSeed(currentChatId);
           setStoredActiveChatId(null);
+          for (const workflowForCheck of workflowCandidates) {
+            clearStoredWorkflowChatId({
+              appId: currentAppId,
+              userId: currentUserId,
+              workflowName: workflowForCheck,
+            });
+          }
           validatedChatIdRef.current = null;
           setActiveChatId(null);
           setMessagesWithLogging([]);
@@ -3199,10 +4085,14 @@ useEffect(() => {
     workflowConfigLoaded,
     currentAppId,
     currentChatId,
+    activeWorkflowName,
     currentWorkflowName,
     urlWorkflowName,
     resolveKnownWorkflowName,
+    rememberWorkflowChatSession,
     setActiveChatId,
+    setActiveWorkflowName,
+    setCurrentWorkflowName,
     setMessagesWithLogging,
   ]);
 
@@ -3266,13 +4156,46 @@ useEffect(() => {
       return;
     }
     
-    // Prevent duplicate connections
+    const routeParams = new URLSearchParams(location.search || '');
+    const routeChatId = routeParams.get('chat_id');
+    const routeWorkflowName = workflowConfig.resolveKnownWorkflowName(routeParams.get('workflow'));
+    const preferredConnectionWorkflow =
+      workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+      || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
+    const expectedConnectionWorkflow = routeWorkflowName || preferredConnectionWorkflow;
+    const existingConnectionWorkflow = workflowConfig.resolveKnownWorkflowName(wsRef.current?.workflowName);
+
+    // Prevent duplicate connections, but do not keep a same-chat socket when
+    // transition routing has moved that chat into a different workflow.
     if (connectionInProgressRef.current) {
       // console.debug('Connection already initialized or in progress, skipping...');
       return;
     }
-    if (wsRef.current && wsRef.current.chatId === currentChatId) {
+    if (
+      wsRef.current
+      && wsRef.current.chatId === currentChatId
+      && (
+        !expectedConnectionWorkflow
+        || !existingConnectionWorkflow
+        || existingConnectionWorkflow === expectedConnectionWorkflow
+      )
+    ) {
       return;
+    }
+    if (
+      wsRef.current
+      && wsRef.current.chatId === currentChatId
+      && expectedConnectionWorkflow
+      && existingConnectionWorkflow
+      && existingConnectionWorkflow !== expectedConnectionWorkflow
+    ) {
+      try {
+        wsRef.current.close?.();
+      } catch {}
+      wsRef.current = null;
+      setWs(null);
     }
     
   // console.debug('Establishing WebSocket connection');
@@ -3280,21 +4203,30 @@ useEffect(() => {
     // Mark connection as in progress immediately to prevent duplicates
     connectionInProgressRef.current = true;
     setConnectionInitialized(true);
+    let effectDisposed = false;
+    let cleanup = () => {};
     
     // Define connection functions inside useEffect to avoid dependency issues
     const connectWebSocket = (resolvedWorkflowName = null) => {
       // WebSocket connection for chat communication
-      if (!currentChatId) {
-        console.error('WebSocket requires existing chat ID');
+      if (effectDisposed) {
+        setConnectionInitialized(false);
+        connectionInProgressRef.current = false;
         return () => {};
       }
-      
+      if (!currentChatId) {
+        console.error('❌ WebSocket requires existing chat ID');
+        return () => {};
+      }
+
       setConnectionStatus('connecting');
       setTransportType('websocket');
 
-      const workflowName = resolveKnownWorkflowName(resolvedWorkflowName)
-        || resolveKnownWorkflowName(urlWorkflowName)
-        || resolveKnownWorkflowName(currentWorkflowName)
+      const workflowName = workflowConfig.resolveKnownWorkflowName(resolvedWorkflowName)
+        || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+        || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+        || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+        || workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
         || resolveWorkflow(resolvedWorkflowName || urlWorkflowName || currentWorkflowName);
       if (!workflowName) {
         console.warn('⚠️ No workflow available to connect');
@@ -3313,6 +4245,15 @@ useEffect(() => {
       }
 
       let connection = null;
+      const connectReplayPolicy = workflowConnectReplayPolicyRef.current;
+      const suppressHistoryReplay = Boolean(connectReplayPolicy?.suppressHistoryReplay);
+      if (suppressHistoryReplay) {
+        logChatPersistence('workflow_ws_connect_replay_suppressed', {
+          chatId: currentChatId || null,
+          workflowName,
+          reason: connectReplayPolicy?.reason || null,
+        });
+      }
       connection = api.createWebSocketConnection(
         currentAppId,
         currentUserId,
@@ -3324,6 +4265,9 @@ useEffect(() => {
             // console.debug('WebSocket connection established');
             setConnectionStatus('connected');
             setLoading(false);
+            if (suppressHistoryReplay) {
+              workflowConnectReplayPolicyRef.current = null;
+            }
             // Show one-time spinner ONLY if it has never been shown and never been hidden
             if (!initSpinnerHiddenOnceRef.current && !initSpinnerShownRef.current) {
               setShowInitSpinner(true);
@@ -3335,7 +4279,7 @@ useEffect(() => {
               }
             }
             if (conversationModeRef.current === 'workflow') {
-              setStoredActiveChatId(currentChatId);
+              rememberWorkflowChatSession(currentChatId, workflowName);
             }
           },
           onMessage: (data) => {
@@ -3351,7 +4295,7 @@ useEffect(() => {
             if (!connection || wsRef.current !== connection) {
               return;
             }
-            console.error("WebSocket error:", error);
+            console.error('❌ WebSocket error:', error);
             setConnectionStatus('error');
             setConnectionInitialized(false);
             connectionInProgressRef.current = false;
@@ -3376,7 +4320,10 @@ useEffect(() => {
           }
         },
         workflowName,
-        currentChatId // Pass the existing chat ID
+        currentChatId, // Pass the existing chat ID
+        {
+          suppressHistoryReplay,
+        }
       );
 
       if (!connection) {
@@ -3402,16 +4349,130 @@ useEffect(() => {
       };
     };
 
+    const clearMissingConnectionChat = (missingChatId, workflowNamesToClear = []) => {
+      if (!missingChatId) {
+        return;
+      }
+      console.warn('🔌 [WS_CONNECT] Chat id no longer exists; resetting before websocket connect:', missingChatId);
+      clearStoredArtifactState(missingChatId);
+      clearStoredChatCacheSeed(missingChatId);
+      if (getStoredActiveChatId() === missingChatId) {
+        setStoredActiveChatId(null);
+      }
+      for (const workflowNameToClear of workflowNamesToClear) {
+        clearStoredWorkflowChatId({
+          appId: currentAppId,
+          userId: currentUserId,
+          workflowName: workflowNameToClear,
+        });
+      }
+      if (activeChatId === missingChatId) {
+        setActiveChatId(null);
+      }
+      setMessagesWithLogging([]);
+      setCurrentChatId(null);
+      setConnectionStatus('disconnected');
+      setConnectionInitialized(false);
+      connectionInProgressRef.current = false;
+      if (routeChatId === missingChatId) {
+        consumeNavigationQueryParams(['chat_id']);
+      }
+    };
+
+    const canonicalizeConnectionRoute = (workflowName) => {
+      if (!workflowName || conversationModeRef.current !== 'workflow') {
+        return false;
+      }
+      const params = new URLSearchParams(location.search || '');
+      const chatParam = params.get('chat_id');
+      const modeParam = params.get('mode');
+      const workflowParam = params.get('workflow');
+      if (
+        chatParam === String(currentChatId)
+        && modeParam === 'workflow'
+        && workflowParam === workflowName
+      ) {
+        return false;
+      }
+      params.set('workflow', workflowName);
+      params.set('chat_id', String(currentChatId));
+      params.set('mode', 'workflow');
+      const nextSearch = params.toString();
+      navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
+      return true;
+    };
+
+    const resolveConnectionWorkflowForChat = async (preferredWorkflowName) => {
+      const storedWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+      const activeResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(activeWorkflowName);
+      const currentResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
+      const urlResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
+      const workflowCandidates = buildWorkflowResolutionCandidates({
+        workflowConfig,
+        candidates: [
+          preferredWorkflowName,
+          storedWorkflow,
+          activeResolvedWorkflow,
+          currentResolvedWorkflow,
+          urlResolvedWorkflow,
+          workflowConfig.getDefaultWorkflow(),
+          'GreenRoom',
+        ],
+        includeAvailable: true,
+      });
+
+      const resolution = await resolveWorkflowForChat({
+        api,
+        appId: currentAppId,
+        chatId: currentChatId,
+        workflowCandidates,
+      });
+
+      if (effectDisposed) {
+        return null;
+      }
+
+      if (resolution.workflowName) {
+        const resolvedConnectionWorkflow = resolution.workflowName;
+        validatedChatIdRef.current = currentChatId;
+        currentWorkflowNameRef.current = resolvedConnectionWorkflow;
+        setActiveWorkflowName(resolvedConnectionWorkflow);
+        setCurrentWorkflowName(resolvedConnectionWorkflow);
+        rememberWorkflowChatSession(currentChatId, resolvedConnectionWorkflow);
+        if (canonicalizeConnectionRoute(resolvedConnectionWorkflow)) {
+          return null;
+        }
+        return resolvedConnectionWorkflow;
+      }
+
+      if (resolution.sawMissingWorkflow && !resolution.validationIncomplete) {
+        clearMissingConnectionChat(currentChatId, workflowCandidates);
+        return null;
+      }
+
+      if (resolution.validationIncomplete && resolution.error) {
+        console.warn('🔌 [WS_CONNECT] Could not validate chat owner before websocket connect; using preferred workflow:', resolution.error);
+      }
+
+      return preferredWorkflowName;
+    };
+
     // Query the workflow transport type and use WebSocket connection
     const connectWithCorrectTransport = async () => {
       try {
-        // Unified workflow resolution: URL explicit → backend entry_point → singleton → null
-        const workflowName = resolveKnownWorkflowName(urlWorkflowName)
-          || resolveKnownWorkflowName(currentWorkflowName)
-          || resolveWorkflow(urlWorkflowName)
-          || resolveWorkflow(currentWorkflowName);
+        // Prefer the active chat's workflow over the URL because transitions
+        // can briefly leave the previous workflow in location.search.
+        const preferredWorkflowName = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+          || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
+          || resolveWorkflow(currentWorkflowName)
+          || resolveWorkflow(urlWorkflowName);
+        const workflowName = await resolveConnectionWorkflowForChat(preferredWorkflowName);
         if (!workflowName) {
-          throw new Error('No workflow available');
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
+          return () => {};
         }
   // console.debug('Using workflow name:', workflowName);
         
@@ -3427,15 +4488,28 @@ useEffect(() => {
         if (transportInfo && transportInfo.allow_resume === false) {
           console.debug('Transport indicates resume is disabled for', workflowName);
         }
+        if (effectDisposed) {
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
+          return () => {};
+        }
         setCurrentWorkflowName(workflowName);
         return connectWebSocket(workflowName);
       } catch (error) {
-        console.error('Error querying workflow transport:', error);
+        console.error('❌ Error querying workflow transport:', error);
+        if (effectDisposed) {
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
+          return () => {};
+        }
         // Fallback to WebSocket
-        const fallbackWf = resolveKnownWorkflowName(currentWorkflowName)
-          || resolveKnownWorkflowName(urlWorkflowName)
+        const fallbackPreferredWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+          || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+          || workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
           || resolveWorkflow(currentWorkflowName)
           || resolveWorkflow(urlWorkflowName);
+        const fallbackWf = await resolveConnectionWorkflowForChat(fallbackPreferredWorkflow);
         if (!fallbackWf) {
           console.warn('⚠️ No workflow available for fallback');
           setConnectionInitialized(false);
@@ -3449,8 +4523,6 @@ useEffect(() => {
     };
     
     // Execute the async function and handle cleanup
-    let effectDisposed = false;
-    let cleanup = () => {};
     connectWithCorrectTransport().then(cleanupFn => {
       const normalizedCleanup = typeof cleanupFn === 'function' ? cleanupFn : () => {};
       if (effectDisposed) {
@@ -3459,7 +4531,7 @@ useEffect(() => {
       }
       cleanup = normalizedCleanup;
     }).catch(error => {
-      console.error('Failed to connect with transport:', error);
+      console.error('❌ Failed to connect with transport:', error);
       // Reset connection flags on error so user can retry
       setConnectionInitialized(false);
       connectionInProgressRef.current = false;
@@ -3471,7 +4543,7 @@ useEffect(() => {
       // Reset the in-progress flag when component unmounts
       connectionInProgressRef.current = false;
     };
-  }, [api, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, currentWorkflowName, resolveKnownWorkflowName, connectionRetryNonce]);
+  }, [activeChatId, api, consumeNavigationQueryParams, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, currentWorkflowName, activeWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, connectionRetryNonce, location.pathname, location.search, navigate, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, setMessagesWithLogging, workflowConfig]);
 
   // Retry connection function
   const retryConnection = useCallback(() => {
@@ -3528,6 +4600,7 @@ useEffect(() => {
             if (lastArtifactEventRef.current === dismissId) {
               setIsSidePanelOpen(false);
               lastArtifactEventRef.current = null;
+              artifactAutoClearRef.current = true;
               artifactCacheValidRef.current = false;
               setCurrentArtifactMessages([]);
               if (currentChatId) clearStoredArtifactState(currentChatId);
@@ -3543,6 +4616,16 @@ useEffect(() => {
             dispatchSurfaceEvent(update);
           }
           const { tool_name, payload = {}, tool_call_id, workflow_name, onResponse, display } = update;
+          const toolName = tool_name || payload.tool_name || update.component_type || update.component || null;
+          const toolCallId = tool_call_id || payload.tool_call_id || null;
+          const componentType =
+            update.component_type
+            || update.component
+            || payload.component_type
+            || payload.component
+            || toolName
+            || null;
+          const payloadKeys = Object.keys(payload || {});
           // If this UI tool requests artifact display, auto-open the ArtifactPanel like OpenAI/Claude canvases
           const displayMode = (display || payload.display || payload.mode);
           const resolvedAgentName =
@@ -3560,7 +4643,7 @@ useEffect(() => {
           if (displayMode === 'composer') {
             setMessagesWithLogging((prev) => {
               const withoutThinking = prev.filter((msg) => !msg.isThinking);
-              const messageKey = tool_call_id || tool_name;
+              const messageKey = toolCallId || toolName;
               const composerMessage = {
                 id: `tool-call-${messageKey || Date.now()}`,
                 sender: 'agent',
@@ -3568,21 +4651,21 @@ useEffect(() => {
                 content: '',
                 isStreaming: false,
                 toolCall: {
-                  tool_name,
+                  tool_name: toolName,
                   payload: {
                     ...payload,
                     ...(composerPrompt ? { prompt: composerPrompt } : {}),
                   },
-                  tool_call_id,
+                  tool_call_id: toolCallId,
                   workflow_name,
                   onResponse,
                   display: 'composer',
-                  component_type: update.component_type || payload.component_type || tool_name,
+                  component_type: componentType,
                 },
                 metadata: {
                   type: 'composer_tool_call',
                   toolCallId: messageKey,
-                  tool_name,
+                  tool_name: toolName,
                   display: 'composer',
                   hideInTranscript: true,
                 },
@@ -3619,6 +4702,31 @@ useEffect(() => {
           }
           const shouldRenderArtifact = displayMode === 'artifact' || isViewDisplay;
           if (shouldRenderArtifact) {
+            const awaitingResponse = update.awaiting_response ?? payload.awaiting_response ?? payload.awaitingResponse ?? null;
+            artifactAutoClearRef.current = displayMode === 'artifact' ? false : awaitingResponse !== false;
+            startArtifactPanelLoading();
+            logChatPersistence('artifact_loading_started', {
+              chatId: currentChatId || null,
+              workflowName: workflow_name || currentWorkflowName || null,
+              displayMode,
+              componentType,
+              toolName,
+              toolCallId,
+              payloadKeys,
+              hasStructuredOutput: Boolean(payload.structured_output && typeof payload.structured_output === 'object'),
+            });
+            logChatPersistence('artifact_surface_rendered', {
+              chatId: currentChatId || null,
+              workflowName: workflow_name || currentWorkflowName || null,
+              displayMode,
+              componentType,
+              toolName,
+              toolCallId,
+              payloadKeys,
+              hasStructuredOutput: Boolean(payload.structured_output && typeof payload.structured_output === 'object'),
+              awaitingResponse,
+              autoClearOnNextTurn: artifactAutoClearRef.current,
+            });
             if (isMobileView) {
               setMobileDrawerState('expanded');
               setHasUnseenArtifact(false);
@@ -3630,17 +4738,18 @@ useEffect(() => {
             if (agentText) {
               setMessagesWithLogging((prev) => {
                 const withoutThinking = prev.filter(msg => !msg.isThinking);
-                const hasExisting = withoutThinking.some(msg => msg?.metadata?.toolCallId === (tool_call_id || tool_name) && msg?.metadata?.type === 'tool_call_agent_message');
+                const messageKey = toolCallId || toolName;
+                const hasExisting = withoutThinking.some(msg => msg?.metadata?.toolCallId === messageKey && msg?.metadata?.type === 'tool_call_agent_message');
                 if (hasExisting) return withoutThinking;
                 return [
                   ...withoutThinking,
                   {
-                    id: `tool-call-msg-${tool_call_id || Date.now()}`,
+                    id: `tool-call-msg-${messageKey || Date.now()}`,
                     sender: 'agent',
                     agentName: resolvedAgentName,
                     content: agentText,
                     isStreaming: false,
-                    metadata: { type: 'tool_call_agent_message', toolCallId: tool_call_id || tool_name, tool_name }
+                    metadata: { type: 'tool_call_agent_message', toolCallId: messageKey, tool_name: toolName }
                   }
                 ];
               });
@@ -3650,18 +4759,39 @@ useEffect(() => {
             try {
               artifactPayload = {
                 ...payload,
-                artifact_id: deriveArtifactId(payload, tool_call_id || tool_name || null),
+                artifact_id: deriveArtifactId(payload, toolCallId || toolName || null),
               };
+              logChatPersistence('artifact_payload_prepared', {
+                chatId: currentChatId || null,
+                workflowName: workflow_name || currentWorkflowName || null,
+                displayMode,
+                componentType,
+                toolName,
+                toolCallId,
+                artifactId: artifactPayload.artifact_id || null,
+                hasStructuredOutput: Boolean(artifactPayload.structured_output && typeof artifactPayload.structured_output === 'object'),
+                payloadKeys: Object.keys(artifactPayload || {}),
+              });
               const artifactMsg = {
-                id: `tool-call-artifact-${tool_call_id || Date.now()}`,
+                id: `tool-call-artifact-${toolCallId || artifactPayload.artifact_id || Date.now()}`,
                 sender: 'agent',
                 agentName: resolvedAgentName,
                 content: artifactPayload.structured_output || artifactPayload.content || artifactPayload || {},
                 isStreaming: false,
-                toolCall: { tool_name, payload: artifactPayload, tool_call_id, workflow_name, onResponse, display: displayMode, component_type: update.component_type || payload.component_type || tool_name }
+                toolCall: { tool_name: toolName, payload: artifactPayload, tool_call_id: toolCallId, workflow_name, onResponse, display: displayMode, component_type: componentType }
               };
               setCurrentArtifactMessages([artifactMsg]);
               artifactCacheValidRef.current = true;
+              logChatPersistence('artifact_message_set', {
+                chatId: currentChatId || null,
+                workflowName: workflow_name || currentWorkflowName || null,
+                displayMode,
+                componentType,
+                toolName,
+                toolCallId,
+                artifactId: artifactPayload.artifact_id || null,
+                currentArtifactCount: 1,
+              });
               
               // Also cache to platform storage for persistence across panel open/close
               try {
@@ -3676,16 +4806,20 @@ useEffect(() => {
                   };
                   writeStoredCurrentArtifact(currentChatId, serializableArtifact);
                 }
-              } catch (e) { console.warn('Failed to cache artifact', e); }
-            } catch (e) { console.warn('Failed to set artifact message', e); }
+              } catch (e) { console.warn('⚠️ Failed to cache artifact', e); }
+            } catch (e) {
+              stopArtifactPanelLoading();
+              console.warn('⚠️ Failed to set artifact message', e);
+            }
             // Remember this artifact to collapse on next sequence
-            lastArtifactEventRef.current = tool_call_id || tool_name || 'artifact';
+            lastArtifactEventRef.current = toolCallId || toolName || 'artifact';
             // Persist minimal artifact session state for graceful refresh restore
             try {
               if (currentChatId) {
                 const cache = {
-                  tool_name,
-                  tool_call_id: tool_call_id || null,
+                  tool_name: toolName,
+                  tool_call_id: toolCallId || null,
+                  component_type: componentType || toolName || null,
                   workflow_name,
                   payload: artifactPayload || payload,
                   display: displayMode || 'artifact',
@@ -3708,8 +4842,9 @@ useEffect(() => {
                     cacheWorkflow,
                     navCache?.input ?? null,
                     {
-                      tool_name,
-                      tool_call_id: tool_call_id || null,
+                      tool_name: toolName,
+                      tool_call_id: toolCallId || null,
+                      component_type: componentType || toolName || null,
                       workflow_name: cacheWorkflow,
                       payload: artifactPayload,
                       display: displayMode || 'artifact',
@@ -3719,47 +4854,68 @@ useEffect(() => {
                 }
               }
             } catch (e) {
-              console.warn('Failed to cache nav-trigger artifact', e);
+              console.warn('⚠️ Failed to cache nav-trigger artifact', e);
             }
             // Don't inject artifact UIs into the chat feed; they'll render in ArtifactPanel only
             return;
           }
-          setMessagesWithLogging((prev) => {
-            const thinkingMessages = prev.filter(m => m.isThinking);
-            if (thinkingMessages.length > 0) {
-            }
-            
-            const withoutThinking = prev.filter(m => !m.isThinking); // Remove thinking bubbles when UI tool event arrives
-            return [
-              ...withoutThinking,
-              {
-                id: `tool-call-${tool_call_id || Date.now()}`,
-                sender: 'agent',
-                agentName: resolvedAgentName,
-                content: (payload.agent_message || payload.description || ''), // Surface agent context alongside inline UI
-                isStreaming: false,
-                toolCall: {
-                  tool_name,
-                  payload,
-                  tool_call_id,
-                  workflow_name,
-                  onResponse,
-                  // Surface display mode for inline Completed chip logic
-                  display: displayMode || 'inline',
-                  component_type: update.component_type || payload.component_type || tool_name,
-                },
-              },
-            ];
+          const messageKey = toolCallId || toolName;
+          const resolvedWorkflowNameForMessage = workflow_name || currentWorkflowName || null;
+          const inlineMessage = {
+            id: `tool-call-${messageKey || Date.now()}`,
+            sender: 'agent',
+            agentName: resolvedAgentName,
+            content: (payload.agent_message || payload.description || ''),
+            isStreaming: false,
+            toolCall: {
+              tool_name: toolName,
+              payload,
+              tool_call_id: toolCallId,
+              workflow_name: resolvedWorkflowNameForMessage,
+              onResponse,
+              display: displayMode || 'inline',
+              component_type: componentType,
+            },
+            metadata: {
+              toolCallId: messageKey,
+              tool_call_id: toolCallId,
+              tool_name: toolName,
+              component_type: componentType,
+              workflow_name: resolvedWorkflowNameForMessage,
+              display: displayMode || 'inline',
+              interaction_type: update.interaction_type || payload.interaction_type || 'ui_surface',
+              awaiting_response: update.awaiting_response ?? payload.awaiting_response ?? false,
+            },
+          };
+          cacheWorkflowTranscriptMessage(inlineMessage, {
+            chatId: currentChatId,
+            workflowName: resolvedWorkflowNameForMessage,
           });
+          setMessagesWithLogging((prev) => upsertInlineToolCallMessage(
+            prev.filter(m => !m.isThinking),
+            inlineMessage,
+          ));
         }
       } catch (err) {
-        console.error('❌ Failed to handle DynamicUIHandler update in ChatPage:', err);
+        console.error('❌ Failed to handle DynamicUIHandler update in ChatPage:', err, {
+          updateType: update?.type || null,
+          toolName: update?.tool_name || update?.toolName || null,
+          componentType: update?.component_type || update?.component || null,
+          display: update?.display || update?.display_mode || update?.mode || null,
+          hasPayload: Boolean(update?.payload),
+          payloadKeys: update?.payload && typeof update.payload === 'object' ? Object.keys(update.payload) : [],
+        });
       }
     });
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-    }, [setMessagesWithLogging, currentChatId]);
+    }, [
+      cacheWorkflowTranscriptMessage,
+      currentChatId,
+      currentWorkflowName,
+      setMessagesWithLogging,
+    ]);
 
   const isComposerInputRequestToolCall = (toolCall, message = null) => {
     if (!toolCall?.tool_call_id || message?.tool_call_completed) {
@@ -3832,7 +4988,9 @@ useEffect(() => {
 
   const sendMessage = async (messageContent) => {
 
-    const artifactContextPayload = messageContent?.artifactContext || currentArtifactContext || null;
+    const artifactContextPayload = buildComposerArtifactContext(
+      messageContent?.artifactContext || currentArtifactContext || null
+    );
     
     // Create a properly structured user message
     const userMessage = {
@@ -3841,7 +4999,13 @@ useEffect(() => {
       agentName: 'You',
       content: messageContent.content,
       timestamp: Date.now(),
-      isStreaming: false
+      isStreaming: false,
+      metadata: conversationMode === 'ask'
+        ? {
+            source: 'general_agent',
+            ...(activeGeneralChatId ? { general_chat_id: activeGeneralChatId } : {})
+          }
+        : null
     };
     
     
@@ -4021,7 +5185,7 @@ useEffect(() => {
       activeWs.send(payload);
       return true;
     } catch (err) {
-      console.error('Failed to send websocket payload', payload, err);
+      console.error('❌ Failed to send websocket payload', payload, err);
       return false;
     }
   }, []);
@@ -4098,8 +5262,11 @@ useEffect(() => {
     layoutMode,
     askMessages,
     workflowReplayPendingRef,
+    workflowConnectReplayPolicyRef,
     workflowMessagesCacheRef,
-    workflowArtifactSnapshotRef,
+    artifactWorkspaceSnapshotRef,
+    artifactCacheValidRef,
+    artifactRestoredOnceRef,
     generalMessagesCacheRef,
     messagesRef,
     setIsSidePanelOpen,
@@ -4114,6 +5281,7 @@ useEffect(() => {
     currentWorkflowName,
     setActiveChatId,
     setActiveWorkflowName,
+    rememberWorkflowChatSession,
     currentWorkflowNameRef,
     setCurrentWorkflowName,
     workflowMessagesSharedRef,
@@ -4145,10 +5313,13 @@ useEffect(() => {
     urlWorkflowName,
     restoreViewSnapshot,
     clearViewArtifacts,
+    restoreStoredArtifactForChat,
+    hydrateServerArtifactForChat,
     queryMode,
     queryGeneralChatId,
     setConnectionInitialized,
     connectionInProgressRef,
+    applySessionRouterState,
   });
 
   useChatStartupEffects({
@@ -4171,10 +5342,13 @@ useEffect(() => {
     setCurrentArtifactMessages,
     setLayoutMode,
     queryChatId,
-    workflowArtifactSnapshotRef,
+    artifactWorkspaceSnapshotRef,
+    artifactCacheValidRef,
+    artifactRestoredOnceRef,
     currentChatId,
     activeChatId,
     restoreStoredArtifactForChat,
+    hydrateServerArtifactForChat,
     urlWorkflowName,
     conversationMode,
     connectionStatus,
@@ -4187,8 +5361,10 @@ useEffect(() => {
     generalHydrationPendingRef,
     hydrateGeneralTranscript,
     workflowMessagesCacheRef,
+    workflowMessagesSharedRef,
     sanitizeVisibleWorkflowMessages,
     workflowMessages,
+    setWorkflowMessages,
     messagesRef,
     isPrimaryChatRoute,
     isInWidgetMode,
@@ -4203,6 +5379,7 @@ useEffect(() => {
     resolveKnownWorkflowName,
     setIsInWidgetMode,
     setActiveChatId,
+    rememberWorkflowChatSession,
     workflowConfig,
     workflowReplayPendingRef,
   });
@@ -4267,7 +5444,7 @@ useEffect(() => {
         applyOptimisticForAction(actionId, artifactId, action.optimistic);
       }
     } else {
-      console.warn('No WebSocket connection available for artifact.action');
+      console.warn('⚠️ No WebSocket connection available for artifact.action');
       return null;
     }
 
@@ -4355,6 +5532,7 @@ useEffect(() => {
             dispatchSurfaceAction({ type: 'ARTIFACT_CLEARED' });
           }
             lastArtifactEventRef.current = null;
+          artifactAutoClearRef.current = true;
           setCurrentArtifactMessages([]);
           // Clear persisted artifact cache for this chat
           if (currentChatId) {
@@ -4426,7 +5604,7 @@ useEffect(() => {
       }
       dynamicUIHandler.notifyUIUpdate(event);
     } catch (err) {
-      console.warn('Failed to emit local artifact event', err);
+      console.warn('⚠️ Failed to emit local artifact event', err);
     }
   }, []);
 
@@ -4523,7 +5701,7 @@ useEffect(() => {
           }
         } catch (e) {
           artifactCacheValidRef.current = false;
-          console.warn('Failed to restore artifact from cache', e);
+          console.warn('💾 Failed to restore artifact from cache', e);
         }
       } else if (next && currentArtifactMessages.length === 0) {
         artifactCacheValidRef.current = false;
@@ -4703,6 +5881,19 @@ useEffect(() => {
         }
 
         const data = await res.json();
+        const closeActiveWorkflowConnection = () => {
+          try {
+            const activeWs = wsRef.current;
+            if (activeWs && typeof activeWs.close === 'function') {
+              activeWs.close();
+            }
+          } catch {}
+          wsRef.current = null;
+          setWs(null);
+          validatedChatIdRef.current = null;
+          queryResumeHandledRef.current = null;
+        };
+
         if (data.resolution_type === 'transition' && data.transition?.id) {
           setPendingTransitionContext(data.context_variables ?? mergedContext);
           setPendingTransitionId(data.transition.id);
@@ -4710,16 +5901,25 @@ useEffect(() => {
         }
 
         if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
+          const resolvedWorkflowId = resolveKnownWorkflowName(data.workflow_id) || data.workflow_id;
+          closeActiveWorkflowConnection();
           setPendingTransitionId(null);
           setPendingTransitionContext({});
           setCurrentChatId(data.chat_id);
           setActiveChatId(data.chat_id);
-          setCurrentWorkflowName(data.workflow_id);
-          setActiveWorkflowName(data.workflow_id);
+          currentWorkflowNameRef.current = resolvedWorkflowId;
+          setCurrentWorkflowName(resolvedWorkflowId);
+          setActiveWorkflowName(resolvedWorkflowId);
+          rememberWorkflowChatSession(data.chat_id, resolvedWorkflowId);
+          workflowReplayPendingRef.current = false;
+          setWorkflowCompleted(false);
+          setCompletionData(null);
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
           setConversationMode('workflow');
           const chatParams = new URLSearchParams({
             mode: 'workflow',
-            workflow: String(data.workflow_id),
+            workflow: String(resolvedWorkflowId),
             chat_id: String(data.chat_id),
           });
           navigate(`/chat?${chatParams.toString()}`);
@@ -4727,19 +5927,34 @@ useEffect(() => {
         }
 
         if (data.resolution_type === 'chat_session' && data.chat_id && data.workflow_id) {
+          const resolvedWorkflowId = resolveKnownWorkflowName(data.workflow_id) || data.workflow_id;
+          closeActiveWorkflowConnection();
           setPendingTransitionId(null);
           setPendingTransitionContext({});
           setCurrentChatId(data.chat_id);
           setActiveChatId(data.chat_id);
-          setCurrentWorkflowName(data.workflow_id);
-          setActiveWorkflowName(data.workflow_id);
+          currentWorkflowNameRef.current = resolvedWorkflowId;
+          setCurrentWorkflowName(resolvedWorkflowId);
+          setActiveWorkflowName(resolvedWorkflowId);
+          rememberWorkflowChatSession(data.chat_id, resolvedWorkflowId);
+          workflowReplayPendingRef.current = false;
+          setWorkflowCompleted(false);
+          setCompletionData(null);
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
           setConversationMode('workflow');
+          const chatParams = new URLSearchParams({
+            mode: 'workflow',
+            workflow: String(resolvedWorkflowId),
+            chat_id: String(data.chat_id),
+          });
+          navigate(`/chat?${chatParams.toString()}`);
           return true;
         }
 
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
-        console.error('[ChatPage] transition resolution failed:', err);
+        console.error('❌ [ChatPage] transition resolution failed:', err);
         return false;
       }
     },
@@ -4749,10 +5964,20 @@ useEffect(() => {
       navigate,
       pendingTransitionContext,
       pendingTransitionId,
+      connectionInProgressRef,
+      currentWorkflowNameRef,
+      rememberWorkflowChatSession,
+      resolveKnownWorkflowName,
       setActiveChatId,
       setActiveWorkflowName,
+      setCompletionData,
+      setConnectionInitialized,
       setConversationMode,
+      setCurrentChatId,
+      setCurrentWorkflowName,
+      setWorkflowCompleted,
       user,
+      workflowReplayPendingRef,
     ]
   );
 
@@ -4925,6 +6150,7 @@ useEffect(() => {
                       viewMode={isViewMode}
                       onExitView={exitViewMode}
                       messages={currentArtifactMessages}
+                      loading={artifactPanelLoading}
                       chatId={currentChatId}
                       workflowName={currentWorkflowName}
                       chatTheme={chatTheme}
@@ -4999,6 +6225,7 @@ useEffect(() => {
                       viewMode={isViewMode}
                       onExitView={exitViewMode}
                       messages={currentArtifactMessages}
+                      loading={artifactPanelLoading}
                       chatId={currentChatId}
                       workflowName={currentWorkflowName}
                       chatTheme={chatTheme}

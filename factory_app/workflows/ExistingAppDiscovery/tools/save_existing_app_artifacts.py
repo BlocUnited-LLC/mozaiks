@@ -10,13 +10,15 @@ from factory_app.workflows.ExistingAppDiscovery.tools.app_context_mapping import
     APP_CONTEXT_ARTIFACT_KINDS,
     build_existing_app_context_artifacts,
 )
+from factory_app.workflows.ExistingAppDiscovery.tools.emit_app_intelligence_overview import (
+    emit_app_intelligence_enriched_overview_card,
+)
 from mozaiksai.core.app_context.store import (
     build_brownfield_app_context_version,
     register_app_context_version,
 )
 from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus, ArtifactValidationStatus
 from mozaiksai.core.artifacts.store import get_artifact_store
-from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +84,10 @@ async def _persist_app_context_artifact_drafts(
             continue
 
         raw = _json_bytes(payload)
-        version_doc = await store.create_artifact_version(
+        version_doc = await store.create_build_record(
             app_id=str(app_id),
-            artifact_kind=artifact_kind,
-            artifact_key=artifact_kind,
+            build_family=artifact_kind,
+            build_key=artifact_kind,
             files_manifest=[
                 {
                     "path": f"existing_app_discovery/{artifact_kind}.json",
@@ -135,71 +137,22 @@ async def save_existing_app_artifacts(
     product_spec = data.get("existing_product_spec") or {}
     capability_specs = data.get("capability_specs") or []
     augmentation_plan = data.get("agent_augmentation_plan") or {}
+    analysis_summary = str(data.get("analysis_summary") or data.get("app_summary") or data.get("discovery_brief") or "").strip()
     ai_caps = augmentation_plan.get("ai_accessible_capabilities") or []
     chat_id = context_variables.get("chat_id")
 
+    logger.info(
+        "[ExistingAppDiscovery] Final discovery artifact save requested: chat_id=%s app=%s capability_specs=%d ai_caps=%d analysis_summary_present=%s structured_output_present=%s",
+        chat_id or "NONE",
+        product_spec.get("app_name") or "unknown",
+        len(capability_specs),
+        len(ai_caps),
+        bool(analysis_summary),
+        True,
+    )
+
     adoption_level = augmentation_plan.get("adoption_level", "embed")
     migration_complexity = augmentation_plan.get("migration_complexity")
-
-    # ------------------------------------------------------------------
-    # UI payload — includes new detection signals for UI surface display
-    # ------------------------------------------------------------------
-    ui_payload = {
-        "app_name": product_spec.get("app_name", "Unknown App"),
-        "app_description": product_spec.get("app_description", ""),
-        "tech_stack": product_spec.get("tech_stack", ""),
-        "brand_theme_summary": product_spec.get("brand_theme_summary", ""),
-        "brand_theme_evidence": product_spec.get("brand_theme_evidence") or {},
-        "storage_pattern": product_spec.get("storage_pattern", "unknown"),
-        "storage_migration_required": product_spec.get("storage_migration_required", False),
-        "detected_connectors": product_spec.get("detected_connectors") or [],
-        "mozaiks_vocabulary_detected": product_spec.get("mozaiks_vocabulary_detected", False),
-        "mozaiks_authored_app": product_spec.get("mozaiks_authored_app", False),
-        "adoption_level": adoption_level,
-        "migration_complexity": migration_complexity,
-        "adoption_rationale": augmentation_plan.get("adoption_rationale", ""),
-        "new_adapters_required": augmentation_plan.get("new_adapters_required") or [],
-        "theme_adaptation_strategy": augmentation_plan.get("theme_adaptation_strategy", ""),
-        "embed_theme_ready": augmentation_plan.get("embed_theme_ready", False),
-        "discovery_brief": data.get("discovery_brief", ""),
-        "capability_count": len(capability_specs),
-        "ai_accessible_count": len(ai_caps),
-        "service_surface_count": len(product_spec.get("service_surfaces") or []),
-        "route_surface_count": len(product_spec.get("route_surfaces") or []),
-        "adoption_plan_available": bool(augmentation_plan),
-        "capabilities": [
-            {
-                "name": cap.get("label", cap.get("capability_id", "")),
-                "agent_ready": cap.get("agent_ready", False),
-                "confidence": cap.get("confidence", "unverified"),
-                "delivery_surface": cap.get("delivery_surface", ""),
-                "migration_priority": cap.get("migration_priority"),
-                "connector_requirements": cap.get("connector_requirements") or [],
-            }
-            for cap in capability_specs
-        ],
-        "unresolved_questions": [
-            {
-                "question": item.get("question", ""),
-                "priority": item.get("priority", "medium"),
-            }
-            for item in data.get("unresolved_questions") or []
-        ],
-        "auth_model": product_spec.get("auth_model", ""),
-        "auth_delegation_model": augmentation_plan.get("auth_delegation_model", ""),
-        "ui_surface_preference": augmentation_plan.get("ui_surface_preference", ""),
-        "initial_workflows": augmentation_plan.get("initial_workflows") or [],
-        "ecosystem_bindings": augmentation_plan.get("ecosystem_bindings") or [],
-        "artifact_version": data.get("artifact_version", "1.0"),
-    }
-
-    await emit_ui_surface(
-        "DiscoveryBriefCard",
-        ui_payload,
-        chat_id=str(chat_id) if chat_id else None,
-        workflow_name="ExistingAppDiscovery",
-        agent_name="DiscoveryArtifactAssemblerAgent",
-    )
 
     # ------------------------------------------------------------------
     # Persist context variables
@@ -207,6 +160,7 @@ async def save_existing_app_artifacts(
     context_variables["existing_product_spec"] = product_spec
     context_variables["capability_specs"] = capability_specs
     context_variables["agent_augmentation_plan"] = augmentation_plan
+    _set_context_value(context_variables, "analysis_summary", analysis_summary)
     context_variables["existing_app_discovery_artifact"] = data
 
     # ------------------------------------------------------------------
@@ -332,6 +286,25 @@ async def save_existing_app_artifacts(
         adoption_level,
         migration_complexity or "n/a",
     )
+
+    # Re-emit the overview card with agent-enriched capability data (descriptions, categories)
+    # and the synthesized analysis summary. This updates the artifact panel with the full v2
+    # payload now that the assembler has produced the canonical discovery result.
+    try:
+        logger.info(
+            "[ExistingAppDiscovery] Re-emitting overview with agent output: chat_id=%s capability_specs=%d",
+            chat_id or "NONE",
+            len(capability_specs),
+        )
+        _set_context_value(context_variables, "discovery_brief", analysis_summary or data.get("discovery_brief") or "")
+        _set_context_value(context_variables, "analysis_summary", analysis_summary)
+        _set_context_value(context_variables, "existing_app_discovery_artifact", data)
+        await emit_app_intelligence_enriched_overview_card(
+            context_variables=context_variables,
+            capability_specs=capability_specs,
+        )
+    except Exception as exc:
+        logger.warning("[ExistingAppDiscovery] Enriched overview card re-emission failed: %s", exc)
 
     summary_parts = [
         f"Existing app augmentation artifacts created for "

@@ -6,9 +6,10 @@
 - Node.js 18+
 - Docker Desktop — [download here](https://www.docker.com/products/docker-desktop/) (used to run MongoDB)
 
-Mozaiks installs Tree-sitter parser packages with the core Python package so
-Studio can build source-backed App Intelligence for generated and existing
-apps.
+Mozaiks installs Tree-sitter parser packages with the core framework checkout
+so Studio can build source-backed App Intelligence for generated and existing
+apps. Mozaiks is not published on PyPI yet, so install it from this repo
+instead of `pip install mozaiks`.
 No separate parser setup is required.
 
 ## 1. Install
@@ -16,13 +17,13 @@ No separate parser setup is required.
 === "Windows"
 
     ```powershell
-    pip install mozaiks
+    python -m pip install -e ".[dev]"
     ```
 
 === "macOS / Linux"
 
     ```bash
-    pip install mozaiks
+    python -m pip install -e ".[dev]"
     ```
 
 ## 2. Start MongoDB
@@ -100,6 +101,10 @@ Studio in your browser at `http://localhost:3000`.
 4. Review and promote the generated app when it's ready
 
 In-progress builds stay in **Apps** so you can always pick up where you left off.
+
+This first build is your app's **Genesis Build**; after that, every change you
+ask for is a **Refinement Run** against the app you already have. See
+[Genesis Builds and Refinement Runs](getting-started/genesis-builds-and-refinement-runs.md).
 
 ## Code Context Infrastructure
 

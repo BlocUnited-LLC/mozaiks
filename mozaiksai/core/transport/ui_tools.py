@@ -78,7 +78,7 @@ class UIToolsMixin:
         display_type: str,
         payload: dict[str, Any],
     ) -> None:
-        """Persist latest artifact/inline UI payload for chat restoration."""
+        """Persist the latest artifact-panel UI payload for chat restoration."""
         if not chat_id or not isinstance(payload, dict):
             return
 
@@ -92,15 +92,10 @@ class UIToolsMixin:
             None,
         )
         normalized_mode = display_mode.lower() if display_mode else None
-        persist_flag = bool(payload.get("persist_ui_state")) if isinstance(payload, dict) else False
-
-        if not normalized_mode and not persist_flag:
-            return
-        if normalized_mode not in ("artifact", "inline") and not persist_flag:
-            return
-
         if not normalized_mode:
-            normalized_mode = "artifact"
+            return
+        if normalized_mode != "artifact":
+            return
 
         try:
             pm = self._get_or_create_persistence_manager()

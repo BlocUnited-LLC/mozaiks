@@ -4,7 +4,12 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_studio_shell_config_injects_studio_routes():
+async def test_studio_shell_config_injects_studio_routes(monkeypatch):
+    from tests.import_utils import active_app_root
+
+    # Importing the Studio host is environment-inert; bind the workspace
+    # explicitly instead of relying on an import-time side effect.
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
     from mozaiksai.hosts import studio as studio_app
 
     shell_config = await studio_app.get_studio_shell_config()
@@ -89,9 +94,14 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
 
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio as studio_app
+    from tests.import_utils import active_app_root
+
+    # Importing the Studio host is environment-inert; bind the workspace
+    # explicitly instead of relying on an import-time side effect.
+    monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
 
     class _ArtifactStore:
-        async def list_artifact_versions(self, **_kwargs):
+        async def list_build_records(self, **_kwargs):
             return []
 
         async def list_change_requests(self, **_kwargs):
@@ -270,6 +280,10 @@ triggers:
 
 @pytest.mark.asyncio
 async def test_platform_host_invokes_capability_route_into_workflow_session():
+    from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+        WORKFLOW_TRIGGER_TRACE_KEY,
+        WorkflowTriggerDecision,
+    )
     from mozaiksai.hosts import platform as platform_app
 
     created: list[dict] = []
@@ -281,6 +295,22 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
 
     async def fake_emit(event_type: str, payload: dict) -> None:
         emitted.append((event_type, payload))
+
+    class _AllowingGuard:
+        async def authorize(self, **_kwargs):
+            return WorkflowTriggerDecision(
+                allowed=True,
+                reason="allowed",
+                invocation_id="wti_test",
+                event_identity="evt_1",
+                depth=1,
+                trace={
+                    "root_event_id": "evt_1",
+                    "depth": 1,
+                    "capability_ids": ["tasks.review"],
+                    "invocation_ids": ["wti_test"],
+                },
+            )
 
     result = await platform_app._invoke_workflow_capability(
         capability_id="tasks.review",
@@ -309,6 +339,7 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
         },
         event_emitter=fake_emit,
         create_session=fake_create_session,
+        trigger_guard=_AllowingGuard(),
         auto_start=False,
     )
 
@@ -319,6 +350,8 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
         "chat_id": "chat_capability_1",
         "app_id": "app_1",
         "user_id": "user_1",
+        "invocation_id": "wti_test",
+        "trigger_depth": 1,
         "started": False,
         "websocket_url": "/ws/ReviewWorkflow/app_1/chat_capability_1/user_1",
     }
@@ -327,6 +360,7 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
     assert created[0]["user_id"] == "user_1"
     assert created[0]["context_variables"]["triggered_capability_id"] == "tasks.review"
     assert created[0]["context_variables"]["task_id"] == "task_1"
+    assert created[0]["context_variables"][WORKFLOW_TRIGGER_TRACE_KEY]["depth"] == 1
     assert created[0]["trigger_meta"] == {
         "trigger_source": "module_event",
         "event_type": "domain.tasks.task_created",
@@ -335,6 +369,8 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
         "workflow_id": "ReviewWorkflow",
         "subscription_id": "task_created_react",
         "module_id": "tasks",
+        "invocation_id": "wti_test",
+        "trigger_depth": 1,
     }
     assert emitted[0][0] == "platform.workflow_capability_started"
     assert emitted[0][1]["payload"]["chat_id"] == "chat_capability_1"

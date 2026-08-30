@@ -26,13 +26,13 @@ class _MemoryArtifactStore:
     def __init__(self) -> None:
         self.created: list[ArtifactVersionDoc] = []
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
         artifact_id = f"av_{len(self.created) + 1}"
         artifact = ArtifactVersionDoc(
             _id=artifact_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=len(self.created) + 1,
             lineage_root_id=artifact_id,
             source_workflow=kwargs.get("source_workflow"),
@@ -112,10 +112,10 @@ async def test_persist_app_context_index_creates_source_and_graph_artifacts() ->
         source_workflow="test_workflow",
     )
 
-    assert persisted.source_context_artifact.artifact_kind == SOURCE_CONTEXT_ARTIFACT_KIND
-    assert persisted.graph_artifact.artifact_kind == APP_CONTEXT_GRAPH_ARTIFACT_KIND
-    assert persisted.intelligence_artifact.artifact_kind == APP_INTELLIGENCE_ARTIFACT_KIND
-    assert [artifact.artifact_kind for artifact in store.created] == [
+    assert persisted.source_context_artifact.build_family == SOURCE_CONTEXT_ARTIFACT_KIND
+    assert persisted.graph_artifact.build_family == APP_CONTEXT_GRAPH_ARTIFACT_KIND
+    assert persisted.intelligence_artifact.build_family == APP_INTELLIGENCE_ARTIFACT_KIND
+    assert [artifact.build_family for artifact in store.created] == [
         "source_context_bundle",
         "app_context_graph",
         "app_intelligence_snapshot",

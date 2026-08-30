@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..declarative import parse_context_variables_config
+from .authority import ContextAuthorityClass, ContextWriterId
 
 
 def _required_text(value: Any, *, field_name: str) -> str:
@@ -159,12 +160,24 @@ class ContextVariableDefinition(ContextModel):
 
     type: str | None = None
     description: str | None = None
+    authority_class: ContextAuthorityClass | None = None
+    model_visible: bool | None = None
+    tool_visible: bool | None = None
+    persisted: bool | None = None
+    routing: bool | None = None
+    authorization: bool | None = None
+    writer_ids: list[ContextWriterId] = Field(default_factory=list)
     source: ContextVariableSource
 
     @field_validator("type", "description", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
+
+    @field_validator("writer_ids")
+    @classmethod
+    def _normalize_writer_ids(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value)
 
 
 class ContextAgentView(ContextModel):

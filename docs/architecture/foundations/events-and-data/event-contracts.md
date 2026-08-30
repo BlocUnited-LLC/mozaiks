@@ -384,8 +384,11 @@ Current platform support:
   intent and emits `notification.created`.
 - `capability` targets are active. The platform host resolves
   `target.capability_id` against workflow `orchestrator.yaml` trigger
-  declarations, creates the routed workflow session, and emits
-  `platform.workflow_capability_started`.
+  declarations, admits the event/capability pair through durable replay,
+  ancestry/depth, and per-tenant rate guards, then creates the routed workflow
+  session and emits `platform.workflow_capability_started`. Rejected admissions
+  emit `platform.workflow_capability_trigger_rejected` without creating a
+  session or starting a workflow.
 - `handler` targets are active. `ModuleEventRouter` invokes
   `target.handler_method` on the module handler class and passes event payload
   fields as keyword arguments.

@@ -18,6 +18,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     audit_generated_react_files,
     audit_page_schemas,
 )
+from mozaiksai.control_plane.contracts import RefinementLane
 from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.scoped_execution import ScopedRefinementResult
 from mozaiksai.control_plane.staging import WORKSPACE_DIRNAME, RefinementStagingResult
@@ -264,7 +265,7 @@ def _plan_validation_targets(plan: RefinementExecutionPlan) -> list[str]:
 
     lane = str(plan.refinement_lane or "").strip()
     families = {str(family or "").strip() for family in plan.affected_declarative_families}
-    if lane == "experience_design" or "experience_spec" in families:
+    if lane == RefinementLane.EXPERIENCE_DESIGN.value or "experience_spec" in families:
         targets.extend(["experience_spec_validation", "app_bundle_validation"])
     return _dedupe_ordered(targets)
 
@@ -438,7 +439,7 @@ def _experience_spec_validation(
 ) -> RefinementValidationItemResult:
     entries = _experience_spec_entries(files)
     if not entries:
-        if plan.refinement_lane == "experience_design" or "experience_spec" in {str(family or "").strip() for family in plan.affected_declarative_families}:
+        if plan.refinement_lane == RefinementLane.EXPERIENCE_DESIGN.value or "experience_spec" in {str(family or "").strip() for family in plan.affected_declarative_families}:
             return _result(
                 name="experience_spec_validation",
                 status="warning",

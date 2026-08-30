@@ -235,6 +235,10 @@ function validatePrimitiveCatalog(registryEntries, primitiveCatalog) {
   }
 }
 
+function normalizeLineEndings(value) {
+  return value.replace(/\r\n/g, '\n');
+}
+
 async function main() {
   const checkOnly = process.argv.includes('--check');
   const { PRIMITIVE_SCHEMAS } = await import(pathToFileURL(schemaModulePath).href);
@@ -259,7 +263,7 @@ async function main() {
     const current = fs.existsSync(outputPath)
       ? fs.readFileSync(outputPath, 'utf8')
       : '';
-    if (current !== serialized) {
+    if (normalizeLineEndings(current) !== serialized) {
       console.error('primitive_schemas.json is out of date. Run: node scripts/export-primitive-schemas.js');
       process.exit(1);
     }

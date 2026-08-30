@@ -67,6 +67,6 @@ regulatory handling, and marketplace promotion admin are not generic OSS
 subscription primitives.
 
 See [Monetization Contract](monetization-contract.md) for the durable boundary:
-MozaiksPay is the default managed adapter for supported generated-app
+MozaiksPay is the recommended managed adapter for supported generated-app
 monetization surfaces, while provider mechanics, hosted commercial policy,
 payouts, campaign terms, and proprietary revenue distribution stay outside OSS.

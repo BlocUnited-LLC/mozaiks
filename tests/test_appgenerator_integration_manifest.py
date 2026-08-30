@@ -36,7 +36,9 @@ class _FakeWorkspaceIntegrationsService:
 
 
 @pytest.mark.asyncio
-async def test_save_integration_manifest_defaults_mozaikspay_for_subscription_app(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_save_integration_manifest_does_not_default_mozaikspay_for_subscription_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _FakeWorkspaceIntegrationsService.instances = []
     monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", _FakeWorkspaceIntegrationsService)
     monkeypatch.delenv("MOZAIKSPAY_API_BASE", raising=False)
@@ -53,17 +55,12 @@ async def test_save_integration_manifest_defaults_mozaikspay_for_subscription_ap
         )
     )
 
-    assert result["saved"] == 1
-    saved = _FakeWorkspaceIntegrationsService.instances[0].saved
-    assert saved[0]["service"] == "mozaikspay"
-    assert saved[0]["defaulted"] is True
-    assert saved[0]["removable"] is True
-    assert saved[0]["optional"] is True
-    assert saved[0]["source"] == "monetization_default"
+    assert result["saved"] == 0
+    assert _FakeWorkspaceIntegrationsService.instances == []
 
 
 @pytest.mark.asyncio
-async def test_save_integration_manifest_defaults_mozaikspay_for_required_subscription_contract(
+async def test_save_integration_manifest_does_not_default_mozaikspay_for_required_subscription_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeWorkspaceIntegrationsService.instances = []
@@ -79,8 +76,8 @@ async def test_save_integration_manifest_defaults_mozaikspay_for_required_subscr
         )
     )
 
-    assert result["saved"] == 1
-    assert _FakeWorkspaceIntegrationsService.instances[0].saved[0]["service"] == "mozaikspay"
+    assert result["saved"] == 0
+    assert _FakeWorkspaceIntegrationsService.instances == []
 
 
 @pytest.mark.asyncio

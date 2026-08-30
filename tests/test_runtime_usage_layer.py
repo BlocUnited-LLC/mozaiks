@@ -512,3 +512,128 @@ class TestRecordUsageDeltaGuards:
         assert doc["prompt_tokens"] == 12
         assert doc["completion_tokens"] == 8
         assert doc["total_tokens"] == 20
+
+
+# ---------------------------------------------------------------------------
+# 8. build_id passthrough and emission counters
+# ---------------------------------------------------------------------------
+
+class TestBuildIdPassthrough:
+    @pytest.mark.asyncio
+    async def test_record_usage_delta_persists_build_id(self, monkeypatch):
+        from mozaiksai.core.usage import ledger as ledger_mod
+
+        writes = []
+
+        async def fake_coll(self):
+            class _FakeColl:
+                async def update_one(self, *a, **k):
+                    writes.append((a, k))
+                async def create_index(self, *a, **k):
+                    pass
+            return _FakeColl()
+
+        monkeypatch.setattr(ledger_mod.RuntimeUsageLedger, "_coll", fake_coll)
+        ledger = ledger_mod.RuntimeUsageLedger()
+        await ledger.record_usage_delta({
+            "app_id": "app-1",
+            "chat_id": "chat-1",
+            "workflow_name": "AppGenerator",
+            "build_id": "build_abc123",
+            "prompt_tokens": 10,
+        })
+        assert len(writes) == 1
+        doc = writes[0][1]["update"]["$setOnInsert"] if "update" in writes[0][1] else writes[0][0][1]["$setOnInsert"]
+        assert doc["build_id"] == "build_abc123"
+
+    @pytest.mark.asyncio
+    async def test_emit_usage_delta_forwards_build_id(self, monkeypatch):
+        from mozaiksai.core.tokens import manager as manager_mod
+
+        captured = []
+
+        class _FakeDispatcher:
+            async def emit(self, event_type, payload):
+                captured.append((event_type, payload))
+
+        monkeypatch.setattr(
+            "mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher",
+            lambda: _FakeDispatcher(),
+        )
+        await manager_mod.TokenManager.emit_usage_delta(
+            chat_id="chat-1",
+            app_id="app-1",
+            user_id="user-1",
+            workflow_name="AppGenerator",
+            build_id="build_abc123",
+            prompt_tokens=10,
+            completion_tokens=5,
+        )
+        assert len(captured) == 1
+        assert captured[0][1]["build_id"] == "build_abc123"
+
+
+class TestEmissionCounters:
+    @pytest.mark.asyncio
+    async def test_disabled_flag_counts_drop(self, monkeypatch):
+        from mozaiksai.core.tokens import manager as manager_mod
+
+        monkeypatch.setenv("USAGE_EVENTS_ENABLED", "false")
+        before = manager_mod.get_usage_emission_stats()["dropped_disabled"]
+        await manager_mod.TokenManager.emit_usage_delta(
+            chat_id="chat-1",
+            app_id="app-1",
+            user_id="user-1",
+            workflow_name="AppGenerator",
+            prompt_tokens=10,
+        )
+        after = manager_mod.get_usage_emission_stats()["dropped_disabled"]
+        assert after == before + 1
+
+    @pytest.mark.asyncio
+    async def test_missing_context_counts_drop(self, monkeypatch):
+        from mozaiksai.core.tokens import manager as manager_mod
+
+        monkeypatch.setenv("USAGE_EVENTS_ENABLED", "true")
+        before = manager_mod.get_usage_emission_stats()["dropped_missing_context"]
+        await manager_mod.TokenManager.emit_usage_delta(
+            chat_id="",
+            app_id="app-1",
+            user_id="user-1",
+            workflow_name="AppGenerator",
+            prompt_tokens=10,
+        )
+        after = manager_mod.get_usage_emission_stats()["dropped_missing_context"]
+        assert after == before + 1
+
+    @pytest.mark.asyncio
+    async def test_successful_emit_counts_emitted(self, monkeypatch):
+        from mozaiksai.core.tokens import manager as manager_mod
+
+        monkeypatch.setenv("USAGE_EVENTS_ENABLED", "true")
+
+        class _FakeDispatcher:
+            async def emit(self, event_type, payload):
+                return None
+
+        monkeypatch.setattr(
+            "mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher",
+            lambda: _FakeDispatcher(),
+        )
+        before = manager_mod.get_usage_emission_stats()["emitted"]
+        await manager_mod.TokenManager.emit_usage_delta(
+            chat_id="chat-1",
+            app_id="app-1",
+            user_id="user-1",
+            workflow_name="AppGenerator",
+            prompt_tokens=10,
+        )
+        after = manager_mod.get_usage_emission_stats()["emitted"]
+        assert after == before + 1
+
+    def test_stats_snapshot_is_a_copy(self):
+        from mozaiksai.core.tokens import manager as manager_mod
+
+        snapshot = manager_mod.get_usage_emission_stats()
+        snapshot["emitted"] = -999
+        assert manager_mod.get_usage_emission_stats()["emitted"] != -999

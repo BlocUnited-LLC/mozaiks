@@ -6,7 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mozaiksai.control_plane.dry_run import RefinementExecutionPlan, path_has_secret_marker
+from mozaiksai.control_plane.contracts import is_secret_sensitive_path
+from mozaiksai.control_plane.dry_run import RefinementExecutionPlan
 from mozaiksai.control_plane.staging import WORKSPACE_DIRNAME, RefinementStagingResult
 
 EXECUTION_RESULT_FILENAME = "execution_result.json"
@@ -18,20 +19,6 @@ ScopedRefinementFileStatus = Literal[
     "skipped_unsafe",
 ]
 
-_SECRET_PATH_TERMS = (
-    ".env",
-    "secret",
-    "secrets",
-    "vault",
-    "credential",
-    "credentials",
-    "private_key",
-    "private-key",
-    "id_rsa",
-    "id_dsa",
-    ".pem",
-    ".key",
-)
 _GLOB_CHARS = ("*", "?", "[")
 
 
@@ -104,8 +91,7 @@ def _normalize_change_path(path: str) -> tuple[str | None, ScopedRefinementFileS
         return None, "skipped_unsafe", "Path traversal is not allowed."
 
     relative_path = "/".join(parts)
-    lowered = relative_path.lower()
-    if path_has_secret_marker(relative_path) or any(term in lowered for term in _SECRET_PATH_TERMS):
+    if is_secret_sensitive_path(relative_path):
         return relative_path, "skipped_secret", "Secret-sensitive paths are not updated by scoped execution."
     if any(char in relative_path for char in _GLOB_CHARS):
         return relative_path, "skipped_unsafe", "Glob paths are not valid scoped execution targets."

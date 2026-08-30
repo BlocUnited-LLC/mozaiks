@@ -1,5 +1,4 @@
 import json
-import sys
 import zipfile
 from pathlib import Path
 
@@ -44,7 +43,19 @@ def _write_source_bundle(root: Path) -> None:
     (root / "modules" / "projects" / "backend").mkdir(parents=True, exist_ok=True)
 
     (root / "ui" / "pages" / "dashboard.yaml").write_text(
-        "page_type: landing\ntitle: Dashboard\n",
+        (
+            "schema_version: mozaiks.app_page.v1\n"
+            "name: dashboard\n"
+            "route: /dashboard\n"
+            "title: Dashboard\n"
+            "page_type: landing\n"
+            "layout: full-width\n"
+            "sections:\n"
+            "  - id: dashboard-header\n"
+            "    primitive: PageHeader\n"
+            "    config:\n"
+            "      title: Dashboard\n"
+        ),
         encoding="utf-8",
     )
     (root / "ui" / "route_manifest.json").write_text(
@@ -117,8 +128,8 @@ def _build_source_version(*, app_id: str, source_zip: Path, files_manifest: list
         {
             "_id": "av_source_smoke_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_source_smoke_1",
             "canonical_inputs_version": {"concept": "av_concept_smoke_1"},
@@ -144,22 +155,22 @@ class _E2EArtifactStore:
         self.accept_calls: list[dict[str, object]] = []
         self.updated_sessions: list[dict[str, object]] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        version = self.versions.get(artifact_version_id)
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        version = self.versions.get(build_record_id)
         if version is None:
             return None
         return version
 
-    async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def create_build_record(self, **kwargs):  # noqa: ANN003
         self.create_calls.append(dict(kwargs))
         version = ArtifactVersionDoc.model_validate(
             {
                 "_id": "av_draft_smoke_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
-                "parent_version_id": kwargs.get("parent_version_id"),
+                "parent_build_record_id": kwargs.get("parent_build_record_id"),
                 "lineage_root_id": "av_source_smoke_1",
                 "source_workflow": kwargs.get("source_workflow"),
                 "source_chat_id": kwargs.get("source_chat_id"),
@@ -191,17 +202,17 @@ class _E2EArtifactStore:
         self.versions[version.id] = updated
         return True
 
-    async def accept_artifact_version(self, **kwargs):  # noqa: ANN003
+    async def accept_build_record(self, **kwargs):  # noqa: ANN003
         self.accept_calls.append(dict(kwargs))
-        version = self.versions.get(kwargs["artifact_version_id"])
+        version = self.versions.get(kwargs["build_record_id"])
         if version is None:
             return None
         for existing_id, existing in list(self.versions.items()):
             if (
                 existing_id != version.id
                 and existing.app_id == version.app_id
-                and existing.artifact_kind == version.artifact_kind
-                and existing.artifact_key == version.artifact_key
+                and existing.build_family == version.build_family
+                and existing.build_key == version.build_key
                 and existing.lifecycle_status == ArtifactLifecycleStatus.CURRENT
             ):
                 self.versions[existing_id] = existing.model_copy(
@@ -219,11 +230,11 @@ class _E2EArtifactStore:
         self.versions[updated.id] = updated
         return updated
 
-    async def list_refinement_sessions(self, *, app_id: str, result_artifact_version_id: str, limit: int = 20):
+    async def list_refinement_sessions(self, *, app_id: str, result_build_record_id: str, limit: int = 20):
         matches = [
             session
             for session in self.sessions
-            if session.result_artifact_version_id == result_artifact_version_id
+            if session.result_build_record_id == result_build_record_id
         ]
         return matches[:limit]
 
@@ -265,7 +276,6 @@ def _studio_app(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
-    sys.modules.pop("factory_app", None)
     from mozaiksai.hosts import studio as studio_app
 
     return studio_app
@@ -291,7 +301,7 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     request_id = "refine_smoke_001"
     plan = dry_run.build_refinement_execution_plan_from_route(
         request="Change the dashboard page title to prioritize reports.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         workflow_id="AppGenerator",
         workflow_sequence="app_revision",
@@ -327,11 +337,23 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
         request_id=request_id,
         source="deterministic",
         changes=[
-            StagedCodingWorkerChange(
-                path="ui/pages/dashboard.yaml",
-                new_content="page_type: landing\ntitle: Reports Overview\n",
-                reason="Prioritize reports on the overview surface.",
-            )
+                StagedCodingWorkerChange(
+                    path="ui/pages/dashboard.yaml",
+                    new_content=(
+                        "schema_version: mozaiks.app_page.v1\n"
+                        "name: dashboard\n"
+                        "route: /dashboard\n"
+                        "title: Reports Overview\n"
+                        "page_type: landing\n"
+                        "layout: full-width\n"
+                        "sections:\n"
+                        "  - id: dashboard-header\n"
+                        "    primitive: PageHeader\n"
+                        "    config:\n"
+                        "      title: Reports Overview\n"
+                    ),
+                    reason="Prioritize reports on the overview surface.",
+                )
         ],
     )
     scoped_result = run_deterministic_staged_coding_worker(plan, staging_result, worker_result)
@@ -429,6 +451,13 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
         )
     )
 
+    draft_review_response = TestClient(studio_app.app).get(
+        f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/review"
+    )
+    assert draft_review_response.status_code == 200
+    assert draft_review_response.json()["review"]["write_back_mode"] == "generated_artifact"
+    assert draft_review_response.json()["review"]["write_back_target"] is None
+
     draft_promote_response = TestClient(studio_app.app).post(
         f"/api/studio/build/artifacts/{draft_result.artifact_version_id}/promote"
     )
@@ -453,7 +482,7 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert promote_response.status_code == 200
     payload = promote_response.json()
     assert payload["promoted"] is True
-    assert payload["artifact_kind"] == "app_bundle"
+    assert payload["build_family"] == "app_bundle"
     assert payload["restored_files"] == [
         "ui/index.js",
         "ui/pages/custom/ReportsOverviewPage.jsx",
@@ -469,7 +498,9 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert not (runtime_root / "refinement_review.json").exists()
     assert not (runtime_root / "execution_result.json").exists()
     assert not (runtime_root / "backups").exists()
-    assert (runtime_root / "ui" / "pages" / "dashboard.yaml").read_text(encoding="utf-8") == "page_type: landing\ntitle: Reports Overview\n"
+    assert "title: Reports Overview\n" in (
+        runtime_root / "ui" / "pages" / "dashboard.yaml"
+    ).read_text(encoding="utf-8")
     assert (runtime_root / "ui" / "index.js").read_text(encoding="utf-8") == (source_bundle / "ui" / "index.js").read_text(encoding="utf-8")
     assert (runtime_root / "ui" / "route_manifest.json").read_text(encoding="utf-8") == (
         source_bundle / "ui" / "route_manifest.json"

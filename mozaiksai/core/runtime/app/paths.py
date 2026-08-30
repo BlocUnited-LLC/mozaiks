@@ -57,6 +57,7 @@ CANONICAL_APP_ROOT_DIRS = frozenset(
         "backend",
         "brand",
         ".github",
+        ".mozaiks",  # pack provenance and framework metadata directory
         "config",
         "data",
         "dashboard",
@@ -96,6 +97,22 @@ def normalize_app_path(raw_path: object) -> str:
     while s.startswith("./") or s.startswith("../"):
         s = s[3:] if s.startswith("../") else s[2:]
     return s
+
+
+def is_safe_app_path(raw_path: object) -> bool:
+    """Return whether a raw path is relative and contained by the app root."""
+
+    path = str(raw_path or "").replace("\\", "/").strip()
+    if not path or path.startswith("/") or "://" in path:
+        return False
+    pure = PurePosixPath(path)
+    if pure.is_absolute() or any(part == ".." for part in pure.parts):
+        return False
+    return not (pure.parts and ":" in pure.parts[0])
+
+
+def unsafe_app_paths(paths: Iterable[object]) -> list[str]:
+    return sorted({str(path) for path in paths if not is_safe_app_path(path)})
 
 
 def is_data_migration_path(path: str) -> bool:
@@ -184,8 +201,10 @@ __all__ = [
     "is_canonical_app_config_path",
     "is_data_migration_path",
     "is_disallowed_legacy_app_path",
+    "is_safe_app_path",
     "is_sensitive_app_config_path",
     "noncanonical_app_config_paths",
     "noncanonical_app_root_paths",
     "normalize_app_path",
+    "unsafe_app_paths",
 ]

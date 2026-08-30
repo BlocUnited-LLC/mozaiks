@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WebSocketApiAdapter } from '../adapters/api';
+import BrowserConsoleBridge from '../components/debug/BrowserConsoleBridge.jsx';
 
 function normalizeRuntimeBaseUrl(runtimeUrl) {
   if (!runtimeUrl || typeof runtimeUrl !== 'string') {
@@ -505,7 +506,7 @@ const MozaiksEmbed = ({
       })
       .catch((err) => {
         if (!cancelled) {
-          console.warn('[MozaiksEmbed] Failed to load theme:', err.message);
+          console.warn('⚠️ [MozaiksEmbed] Failed to load theme:', err.message);
         }
       });
 
@@ -775,6 +776,11 @@ const MozaiksEmbed = ({
   const containerPosition = positionStyles[position] || positionStyles['bottom-right'];
   const connected = connectionStatus === 'connected';
   const brandName = resolvedTheme?.identity?.app_name || resolvedTheme?.identity?.name || 'Mozaiks AI';
+  const consoleBridgeMetadata = {
+    app_id: appId,
+    workflow_name: resolvedWorkflowName,
+    surface: mode === 'inline' ? 'embed_inline' : `embed_${mode}`,
+  };
 
   if (mode === 'inline') {
     return (
@@ -784,6 +790,10 @@ const MozaiksEmbed = ({
         style={{ width, height }}
         data-app-id={appId}
       >
+        <BrowserConsoleBridge
+          endpointUrl={runtimeBaseUrl}
+          metadata={consoleBridgeMetadata}
+        />
         <EmbedChatPanel
           messages={messages}
           input={input}
@@ -851,6 +861,10 @@ const MozaiksEmbed = ({
           }}
           data-app-id={appId}
         >
+          <BrowserConsoleBridge
+            endpointUrl={runtimeBaseUrl}
+            metadata={consoleBridgeMetadata}
+          />
           <div
             style={{
               padding: '12px 16px',

@@ -59,7 +59,7 @@ def _build_plan(*, request_id: str, app_id: str, staging_area: Path) -> Refineme
         request_id=request_id,
         app_id=app_id,
         request="Update the dashboard surface.",
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class="patch",
         refinement_lane="ui_patch",
         workflow_id="workflow_app",
@@ -110,8 +110,8 @@ def _build_source_version(*, app_id: str, source_zip: Path) -> ArtifactVersionDo
         {
             "_id": "av_source_1",
             "app_id": app_id,
-            "artifact_kind": "app_bundle",
-            "artifact_key": "app_bundle",
+            "build_family": "app_bundle",
+            "build_key": "app_bundle",
             "version_number": 1,
             "lineage_root_id": "av_source_1",
             "canonical_inputs_version": {"concept": "av_concept_1"},
@@ -132,32 +132,32 @@ class _FakeArtifactStore:
         self.create_calls: list[dict] = []
         self.accept_calls: list[dict] = []
 
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if self.created_version is not None and app_id == self.created_version.app_id and artifact_version_id == self.created_version.id:
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if self.created_version is not None and app_id == self.created_version.app_id and build_record_id == self.created_version.id:
             return self.created_version
-        if app_id == self.source_version.app_id and artifact_version_id == self.source_version.id:
+        if app_id == self.source_version.app_id and build_record_id == self.source_version.id:
             return self.source_version
         return None
 
-    async def list_artifact_versions(self, **kwargs):
+    async def list_build_records(self, **kwargs):
         if (
             kwargs.get("app_id") == self.source_version.app_id
-            and kwargs.get("artifact_kind") == "app_bundle"
+            and kwargs.get("build_family") == "app_bundle"
             and kwargs.get("lifecycle_status") == ArtifactLifecycleStatus.CURRENT
         ):
             return [self.source_version]
         return []
 
-    async def create_artifact_version(self, **kwargs):
+    async def create_build_record(self, **kwargs):
         self.create_calls.append(dict(kwargs))
         self.created_version = ArtifactVersionDoc.model_validate(
             {
                 "_id": "av_draft_1",
                 "app_id": kwargs["app_id"],
-                "artifact_kind": kwargs["artifact_kind"],
-                "artifact_key": kwargs["artifact_key"],
+                "build_family": kwargs["build_family"],
+                "build_key": kwargs["build_key"],
                 "version_number": 2,
-                "parent_version_id": kwargs.get("parent_version_id"),
+                "parent_build_record_id": kwargs.get("parent_build_record_id"),
                 "lineage_root_id": self.source_version.lineage_root_id,
                 "canonical_inputs_version": dict(kwargs.get("canonical_inputs_version") or {}),
                 "lifecycle_status": kwargs["lifecycle_status"].value,
@@ -168,15 +168,15 @@ class _FakeArtifactStore:
         )
         return self.created_version
 
-    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata=None):
+    async def accept_build_record(self, *, app_id: str, build_record_id: str, commit_metadata=None):
         self.accept_calls.append(
             {
                 "app_id": app_id,
-                "artifact_version_id": artifact_version_id,
+                "build_record_id": build_record_id,
                 "commit_metadata": commit_metadata,
             }
         )
-        if self.created_version is None or app_id != self.created_version.app_id or artifact_version_id != self.created_version.id:
+        if self.created_version is None or app_id != self.created_version.app_id or build_record_id != self.created_version.id:
             return None
         self.source_version = self.source_version.model_copy(
             update={"lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED}
@@ -272,6 +272,7 @@ async def test_accepts_draft_app_bundle_when_review_is_promotion_ready(tmp_path:
     assert result.refinement_review_status == "promotion_ready"
     assert result.metadata["refinement"]["request_id"] == context["plan"].request_id
     assert result.metadata["refinement"]["review"]["status"] == "promotion_ready"
+    assert result.metadata["refinement"]["review"]["write_back_mode"] == "generated_artifact"
     assert result.metadata["acceptance"]["accepted_by"] == "operator-1"
     assert result.metadata["acceptance"]["request_id"] == context["plan"].request_id
     assert result.artifact_version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
@@ -381,13 +382,32 @@ async def test_rejects_request_id_mismatch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejects_write_back_mode_mismatch(tmp_path: Path) -> None:
+    context = await _build_acceptance_context(tmp_path)
+    version = context["artifact_store"].created_version
+    metadata = version.commit_metadata.model_dump(mode="python")
+    metadata["metadata"]["refinement"]["review"]["write_back_mode"] = "external_patch"
+    context["artifact_store"].created_version = version.model_copy(update={"commit_metadata": metadata})
+
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="write_back_mode"):
+        await accept_staged_refinement_artifact_version(
+            app_id=context["app_id"],
+            draft_artifact_version_id=context["draft_result"].artifact_version_id,
+            review_record=context["review_record"],
+            request_id=context["plan"].request_id,
+            artifact_store=context["artifact_store"],
+            accepted_by="operator-1",
+        )
+
+
+@pytest.mark.asyncio
 async def test_rejects_non_app_bundle_artifact_kind(tmp_path: Path) -> None:
     context = await _build_acceptance_context(tmp_path)
     context["artifact_store"].created_version = context["artifact_store"].created_version.model_copy(
-        update={"artifact_kind": "workflow_bundle"}
+        update={"build_family": "workflow_bundle"}
     )
 
-    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="artifact_kind='app_bundle'"):
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="'app_bundle'"):
         await accept_staged_refinement_artifact_version(
             app_id=context["app_id"],
             draft_artifact_version_id=context["draft_result"].artifact_version_id,
@@ -451,6 +471,7 @@ async def test_acceptance_preserves_refinement_metadata_and_records_accepted_by(
     acceptance_metadata = result.artifact_version.commit_metadata.metadata["acceptance"]
     assert refinement_metadata["request_id"] == context["plan"].request_id
     assert refinement_metadata["review"]["status"] == "promotion_ready"
+    assert refinement_metadata["review"]["write_back_mode"] == "generated_artifact"
     assert acceptance_metadata["accepted_by"] == "operator-1"
     assert acceptance_metadata["refinement_review_status"] == "promotion_ready"
     assert acceptance_metadata["request_id"] == context["plan"].request_id

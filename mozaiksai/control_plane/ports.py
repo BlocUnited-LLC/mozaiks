@@ -10,6 +10,7 @@ from .contracts import (
     ControlPlaneToolResult,
     HarnessDecision,
     ScopeProposal,
+    StagedPatchProposal,
 )
 
 
@@ -23,6 +24,23 @@ class RoutingPolicyPort(Protocol):
 
 class CodingWorkerPort(Protocol):
     async def execute(self, request: CodingWorkerRequest) -> CodingWorkerResult: ...
+
+
+class CodingExecutionProvider(Protocol):
+    """Produces a scoped patch proposal for one refinement coding request.
+
+    Sits one level below :class:`CodingWorkerPort`: the coding worker owns
+    eligibility, validation, artifact persistence, and the checkpoint result
+    shape, while a provider owns only the production of staged file changes
+    within the explicitly scoped inputs. Providers never widen scope, never
+    write live app source, and never touch the artifact store — their sole
+    output is the provider-neutral :class:`StagedPatchProposal`.
+    """
+
+    @property
+    def provider_id(self) -> str: ...
+
+    async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal: ...
 
 
 class ScopeProposalPort(Protocol):

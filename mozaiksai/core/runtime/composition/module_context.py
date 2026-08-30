@@ -14,6 +14,11 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAudit,
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.persistence.adapter import ModulePersistenceContext
 
 
@@ -45,11 +50,15 @@ class ModuleContext:
     # Resolved permission ids for this caller/action dispatch.  None preserves
     # trusted internal runtime calls; external dispatch normally supplies a list.
     permissions: list[str] | None = None
+    dispatch_authority: ModuleDispatchAuthority | None = None
+    dispatch_provenance: ModuleDispatchProvenance | None = None
+    dispatch_audit: ModuleDispatchAudit | None = None
 
-    # Setting definitions declared in settings.yaml for this module.
-    # Each entry is a setting definition dict: {id, type, default, label, ...}.
-    # Handlers use this to resolve defaults or validate setting-aware logic.
-    settings: list[dict[str, Any]] | None = None
+    # Resolved setting values for this module, scoped to the calling user.
+    # Dict of {setting_id: resolved_value} — already merged from defaults,
+    # app-scoped overrides, and user-scoped overrides.
+    # Empty dict when the module declares no settings; None for trusted internal calls.
+    settings: dict[str, Any] | None = None
 
     # App-scoped generated-module persistence. ModuleExecutor injects this
     # when app_id is available. It may be None for explicitly constructed test

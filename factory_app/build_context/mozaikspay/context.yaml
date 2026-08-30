@@ -10,11 +10,12 @@ assets:
     kind: templates
 pack:
   id: mozaikspay
+  version: "0.1.11"
   status: active
   capability_source: managed_capability
   required_integrations:
     - service: mozaikspay
-      provider: mozaikspay
+      provider: mozaiks_pay
       display_name: MozaiksPay
       kind: api_key
       purpose: Connect this generated SaaS app to the managed MozaiksPay subscription provider.
@@ -85,8 +86,10 @@ facades:
     pages:
       - name: Billing
         route: /billing
+        page_type_hint: analytics_dashboard
       - name: Usage
         route: /usage
+        page_type_hint: analytics_dashboard
 projections:
   context_variables:
     capability_packs:

@@ -292,6 +292,11 @@ def _task_context(task: dict[str, Any], contract: dict[str, Any]) -> dict[str, A
     return {
         "workflow_name": "AppGenerator",
         "app_id": DEFAULT_APP_ID,
+        # chat_id/user_id give the usage ledger the full identity it requires;
+        # without them TokenManager.emit_usage_delta silently drops the event
+        # and headless smoke builds record zero token usage.
+        "chat_id": "smoke-appgenerator-live-subscription",
+        "user_id": "smoke-harness",
         "task_run_mode": True,
         "current_build_task_id": task["task_id"],
         "current_build_task_type": task["task_type"],
@@ -838,38 +843,64 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
         ),
         "ui/pages/reports.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.app_page.v1
             name: Reports
             route: /reports
             title: Reports
+            page_type: record_list
+            layout: full-width
             sections:
               - id: report-list
-                type: record_list
+                primitive: DataTable
                 config:
+                  columns:
+                    - key: report_id
+                      label: Report
                   api_endpoint: /api/modules/reports/list_reports
               - id: report-generate
-                type: form
+                primitive: Form
                 config:
+                  fields:
+                    - name: report_name
+                      label: Report Name
+                      type: text
                   submit_action:
-                    api_endpoint: /api/modules/reports/generate_report
+                    label: Generate Report
+                    action_type: submit
+                    href: /api/modules/reports/generate_report
             """
         ).strip() + "\n",
         "ui/pages/usage.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.app_page.v1
             name: Usage
             route: /usage
             title: Usage
+            page_type: analytics_dashboard
+            layout: full-width
             sections:
               - id: usage-summary
-                type: summary_strip
+                primitive: DataTable
                 config:
+                  columns:
+                    - key: meter_id
+                      label: Meter
+                    - key: used
+                      label: Used
                   api_endpoint: /api/me/usage
               - id: token-balances
-                type: record_list
+                primitive: DataTable
                 config:
+                  columns:
+                    - key: token_type
+                      label: Token
                   api_endpoint: /api/me/tokens
               - id: token-ledger
-                type: record_list
+                primitive: DataTable
                 config:
+                  columns:
+                    - key: entry_id
+                      label: Entry
                   api_endpoint: /api/me/tokens/ledger
             """
         ).strip() + "\n",
@@ -1143,10 +1174,21 @@ async def _run_config_task(
         "base",
         agent_name="ConfigMiddlewareAgent",
     )
+    from mozaiksai.core.usage.middleware import build_ag2_usage_middleware
+
     agent = Agent(
         "ConfigMiddlewareAgent",
         prompt=system_prompt,
         config=llm_config_to_ag2_config(llm_config),
+        # Meter this one-shot call in the runtime usage ledger so live smoke
+        # builds produce real per-build token/cost numbers.
+        middleware=[
+            build_ag2_usage_middleware(
+                agent_name="ConfigMiddlewareAgent",
+                workflow_name="AppGenerator",
+                context_variables=context,
+            )
+        ],
     )
     task_prompt = "\n\n".join(
         [

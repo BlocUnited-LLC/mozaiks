@@ -14,6 +14,604 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Typed semantic payloads + Merkle-rooted graph v2 (ADR 0007 Slice 2E)**:
+  every semantic node kind now has exactly one strict payload variant
+  (`mozaiks.semantic_payload.v1` — titles/intent text, typed field shapes,
+  integer minor-unit prices with ISO-4217 codes, explicit dense-position ordering, taxonomy-
+  validated event/capability ids, portable-path-validated paths; no untyped
+  dicts), pinned into `mozaiks.semantic_graph.v2` nodes by a full-identity
+  `SemanticPayloadRef` so the graph digest is a Merkle root — any payload byte
+  change re-roots the graph. The reference resolver cold-validates payload and
+  graph model instances before mutation, registers payloads as immutable
+  content-bearing subjects, and requires complete payload closure before a v2
+  graph registers; there is no "current"/latest payload lookup. Semantic
+  payloads and the layout registry consume one shared leaf `StubKind` authority.
+  Graph v1 is byte-for-byte unchanged (golden vectors), no production code
+  consumes the new symbols, and no compiler capability is advertised.
+
+- **Portable path, registry v2, and deterministic archive substrate (ADR 0007
+  Slice 4A)**: compiler-owned outputs now share one host-independent
+  `mozaiks.portable_path.v1` profile (POSIX separators, NFC normalization,
+  Windows-compatible restrictions on every host, case-folded duplicate and
+  file/directory-prefix collision detection, fail-closed rejection of
+  absolute/drive/UNC/traversal/glob/reserved/control-character/trailing-dot
+  paths). ZIP becomes a deterministic transport envelope — STORED entries in
+  canonical byte order with pinned timestamps and permissions, byte-identical
+  across hosts and processes, verified fail-closed against every non-canonical
+  metadata field (compression method, create_system, permissions and type
+  bits, extra fields, comments, name-encoding flags, timestamps) plus
+  link/directory/out-of-order/non-portable entries, with a closing check that
+  the bytes equal the canonical serialization of their own entries — and is
+  never a semantic authority. The
+  application layout registry evolves in place to `mozaiks.app_layout.v2`:
+  artifact families gain bounded stub-kind and dependency-family declarations,
+  the registry self-digest covers them, dependency closure is validated
+  acyclic, and `ordered_families()` provides a deterministic
+  dependency-respecting total order. No semantic or planning authority
+  changes: generators, `AppBuildPlan`, workflow execution, persistence, and
+  promotion remain exactly as before, and no capability is advertised.
+
+### Changed
+
+- **App lifecycle terminology now centers Genesis Builds and Refinement Runs.**
+  Public docs use Genesis Build for an app's first canonical build journey and
+  Refinement Run for every later change in that app lineage, while Refinement
+  Engine remains the internal routing and contract term.
+
+- **Importing `mozaiksai.hosts.studio` no longer mutates the process
+  environment.** Repo-local Studio defaults (`PLATFORM_PATH`,
+  `MOZAIKS_WORKFLOWS_PATH`) and OpenTelemetry configuration are now applied
+  exactly once at server startup — before runtime and platform startup run —
+  instead of at module import time. Because the global workflow catalog is
+  built when `mozaiksai.core.workflow.workflow_manager` is imported, Studio
+  startup now also rebinds that catalog to the workflow root its defaults
+  select, so `mozaiks serve <workspace> --host studio` still serves the shared
+  factory workflow catalog rather than the workspace's own `workflows/` root.
+  The `uvicorn mozaiksai.hosts.studio:app` entrypoint, `mozaiks serve`, and
+  app-local host composition keep their existing behavior; caller-provided
+  environment values keep precedence, and embedders that only import the host
+  module no longer see their environment rewritten.
+
+### Added
+
+- **Offline semantic projection comparison (ADR 0007 Slice 3)**: deterministic,
+  input-immutable adapters accept current AppGenerator, DesignDocs,
+  subscription, module, page/route, AgentGenerator bundle, deployment,
+  recorded-AppBuildPlan, and AppContext ownership shapes. They project only
+  graph-v1 facts and report every other source fact through typed,
+  machine-readable coverage and gaps; unresolved action, event, capability,
+  scope, and ownership references fail closed instead of creating graph facts,
+  as do duplicate canonical root aliases. Build-context and recorded workflow
+  envelopes are accepted as provenance and classified entirely as typed gaps —
+  they declare no graph-v1 identity and cannot by themselves produce a graph.
+  Page bindings outside `/api/modules/{module}/{action}` are retained as typed
+  gaps rather than invented action targets, so any valid AppPageSchema api path
+  projects. Surface realization kinds that graph v1 cannot retain are likewise
+  precise typed gaps rather than falsely reported as represented, and custom
+  route identities retain their current AppSchema producer paths. Projection
+  requires an explicitly pinned Slice 1
+  `TaxonomyRegistry`, which keeps the call free of runtime, workflow, and
+  workflow-catalog side effects. Production generators, hosts, loaders, Studio,
+  workflows, control-plane code, capability advertisement, and runtime
+  authority remain unchanged.
+
+- **Semantic-compiler contract layer (ADR 0007 Slice 2)**: strict, immutable,
+  content-digested contracts for `ApplicationManifest`
+  (`mozaiks.app_manifest.v1`), `SemanticGraph` (`mozaiks.semantic_graph.v1`),
+  and `ImplementationBinding` (`mozaiks.implementation_binding.v1`), plus the
+  full typed reference roster (`ApplicationManifestRef`, `SemanticGraphRef`,
+  `ImplementationBindingRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
+  `TaxonomyNamespaceRef`, `RefinementPatchRef`, `ArtifactRevisionRef`, and
+  typed child-contract refs), one canonical serialization/digest contract
+  (`mozaiks.canonical_json.v1`), deterministic node/edge identity, and
+  fail-closed reference resolution and graph-closure validation in
+  `mozaiksai.core.semantics`. The package sits behind non-production/test
+  seams: no generator, runtime, or refinement code consumes it, and the ADR
+  0006/0007 compiler capabilities (`semantic_taxonomy_v1`,
+  `semantic_reference_contracts_v1`) remain unadvertised because Slice 1
+  taxonomy validation has not yet passed outside advisory mode.
+
+- **Advisory semantic taxonomy (`mozaiks.taxonomy.v1`)**: development and
+  test callers can now validate registered event, capability, and artifact-
+  family identifiers consistently across module loading, subscriptions,
+  layout resolution, and event dispatch. Production name enforcement remains
+  unchanged while later ADR 0007 authority-cutover slices are pending, and
+  outbound dispatcher envelopes now declare `mozaiks.ui.event.v1` explicitly.
+
+- **Coding provider observability**: ACP provider executions now capture a
+  bounded list of operational events (plan updates, tool invocations, mode
+  changes — model reasoning is never recorded) on the
+  `StagedPatchProposal`, and the coding worker persists a
+  `coding_provider` execution record (provider id, model, token usage,
+  dispatch attempts, events) into both the worker result metadata and the
+  artifact commit metadata, making provider activity reviewable and
+  auditable from the artifact record. Token-usage *ledger* wiring is
+  deferred: AG2 middleware owns token accounting, and attaching it to the
+  provider's agent is tracked as an AG2 upgrade watchpoint rather than a
+  parallel Mozaiks accounting path.
+- **Promotion now triggers an App Intelligence refresh**: promoting an
+  artifact into the live app root enqueues a context index job automatically
+  (best-effort, reported in the promote response as
+  `app_intelligence_refresh`) — previously the refresh was a manual three-step
+  operator flow, so every refinement cycle after a promotion classified,
+  scoped, and validated against a stale context snapshot.
+
+### Security
+
+- **Coding-produced artifacts can no longer be promoted or accepted with a
+  validation override**: artifacts created by the refinement coding lane
+  (structured or ACP provider output) require `validation_status='passed'`;
+  the `allow_validation_override` escape hatch now returns 409 for them
+  instead of letting unvalidated model output into the live app root.
+
+- **Deterministic coding-provider selection with a fail-closed fallback
+  ladder**: the refinement coding worker now dispatches each approved patch to
+  a provider via pure policy (`select_coding_provider`) — the ACP provider is
+  chosen only for multi-file scopes on `app_bundle`/`theme_config` artifacts
+  within its configured budget, and only when it is enabled and installed;
+  everything else stays on the structured-output provider. Operational ACP
+  failures (unavailable, failed, empty, timeout, budget exceeded) fall back to
+  the structured provider exactly once; an out-of-scope ACP result
+  (`rejected_scope`) surfaces as a failure and never retries. Every attempt is
+  recorded in result metadata (`coding_provider_attempts`). With the ACP
+  provider disabled (the default), dispatch is byte-identical to before.
+
+- **ACP-backed CLI coding provider (dark)**: `ACPCodingProvider` drives an
+  ACP-compatible coding agent (Claude Code, Codex, OpenCode) for one bounded
+  turn inside a disposable staged workspace, then accepts only what the
+  deterministic hash harvest verifies — out-of-scope edits, timeouts, empty
+  results, and budget overruns all fail closed with typed statuses. Headless
+  hardening is explicit: allowlisted subprocess env (provider API keys only),
+  `expose_tools=False`, terminal capability not advertised,
+  `elicitation_policy="decline"`. Disabled by default in refinement policy,
+  packaged behind the new optional `mozaiks[acp-coding]` extra
+  (`agent-client-protocol` pinned to 0.12.0 — 0.12.1 breaks ag2 1.0.2's
+  dispatcher import), and not yet reachable from any production path:
+  provider selection ships separately.
+
+- **Typed refinement lanes and coding provider policy**: the eight refinement
+  lanes (`ui_patch`, `experience_design`, `feature_addition`, `integration`,
+  `managed_capability_change`, `data_model_migration`, `architecture_replan`,
+  `conceptual_reframe`) are now a canonical `RefinementLane` enum consumed by
+  lane inference, promotion policy, context policy, and validation — replacing
+  unpinned string literals. `refinement_policy.yaml` gains a
+  `coding.providers` section declaring the opt-in ACP coding provider
+  (disabled by default) with hard execution budgets (`max_files`,
+  `max_diff_bytes`, `max_wall_seconds`, `max_retries`); credentials and
+  adapter connection details are rejected by schema.
+
+- **Coding workspace materializer and deterministic diff harvester**
+  (`mozaiksai/control_plane/workspace.py`): scoped files are written into a
+  disposable per-request workspace with pre-run sha256 manifests, and results
+  are harvested from the real tree — symlinks, files outside the editable
+  manifest, and deletions surface as typed scope violations instead of being
+  accepted. Refinement artifact persistence now writes through this module,
+  refuses secret-sensitive or unsafe scoped paths loudly instead of silently
+  skipping them, and records per-file content hashes in artifact commit
+  metadata. This is the enforcement layer ACP-backed coding providers will
+  execute inside. The secret-sensitive path policy previously duplicated
+  across staging, promotion, and scoped execution is now a single canonical
+  helper (`is_secret_sensitive_path`) — the unified term list is the union of
+  the old copies, so each call site is equal or stricter than before.
+
+- **`CodingExecutionProvider` boundary in the refinement control plane**: the
+  scoped coding worker now delegates patch production to a provider behind a
+  typed, provider-neutral `StagedPatchProposal` contract. The first provider,
+  `StructuredOutputCodingProvider`, preserves today's single-shot
+  structured-output behavior exactly; the boundary is where ACP-backed CLI
+  coding providers (Codex, Claude Code, OpenCode) plug in later without
+  gaining routing, scope, acceptance, or promotion authority. The shared
+  `safe_artifact_relpath` helper now also rejects drive-qualified and UNC
+  paths, aligning the coding path with the staging module's path policy.
+
+### Fixed
+
+- **Generated custom-route clients now recognize real entitlement denials**:
+  module-action and workflow-start failures unwrap FastAPI's structured
+  `detail` envelope, so HTTP 402 responses reach the app's upgrade flow while
+  flat object responses remain compatible. Declarative page rendering is
+  unchanged.
+- **Module-event workflow triggers now fail closed instead of amplifying**:
+  each event/capability invocation is durably claimed before session creation,
+  concurrent replay is suppressed, workflow-trigger lineage carries bounded
+  depth and cycle ancestry, and Mongo-backed per-tenant admission limits reject
+  runaway unique events without affecting other tenants. Replay, cycle/depth,
+  rate, rate-authority, and persistence rejections emit distinct platform
+  diagnostics.
+- **ADR 0007 Slice 0 closes proven generator and refinement defects**:
+  generated app/workflow writers now use the canonical build-scoped staging
+  roots, required artifact and DesignDocs persistence fails closed, lineage
+  queries and dependency families match persisted build-record fields, and
+  launch-context authority failures no longer admit unvalidated context.
+- **Generated SaaS plan limits now survive AppGenerator assembly and export**:
+  `usage_limits` and `token_allowances` are preserved in
+  `config/subscriptions.yaml`, and the canonical module API helper no longer
+  creates a false missing-action failure during export acceptance.
+- **Ask-mode messages now render immediately**: optimistic user messages and
+  live assistant frames retain their general-chat provenance, so the active
+  chat no longer hides either side until the persisted transcript is reloaded.
+- **`mozaiks gen` burned tokens on runs it could never finish** (#383): the
+  CLI takes one `--prompt` and has no way to reply, but AgentGenerator opens
+  with `InterviewAgent`, which asks a clarifying question and hands the turn
+  to `user`. Every run therefore stalled at `WORKFLOW_AWAITING_INPUT` with
+  zero files written — after real LLM spend. `gen` now inspects the staged
+  workflow's own declarative config before executing anything and refuses
+  when the workflow can hand control to a user (`human_in_the_loop: true` in
+  `orchestrator.yaml`, or a `transition_graph.yaml` edge targeting `user` /
+  reverting to the user), redirecting to `mozaiks studio --dir . --open`.
+  Detection is on the property, not the workflow name, so genuinely one-shot
+  workflows still run and future interview-driven ones are covered.
+  `--allow-interactive` bypasses the refusal for anyone who wants to start a
+  run and drive it elsewhere.
+- **Every workflow failed instantly under context-authority enforcement**:
+  the routing-variable validation added in #298/#344 required deterministic
+  writers that the runtime never actually produced — agent-sentinel triggers
+  ("say NEXT") wrote as freeform `agent_text` and declared workflow tools
+  wrote as `tool_writeback`/`context_bridge`, all banned for routing state.
+  Every graph compile raised `ContextAuthorityError` before any agent spoke,
+  so every Studio conversation "completed" in under a second with zero agent
+  activity. The writer taxonomy is now complete: exact-match `equals`
+  triggers write as a new deterministic `sentinel_text_trigger` writer
+  (freeform contains/regex-capture stays banned from routing), auto-invoked
+  tools write as `deterministic_tool`, closed routing/quality state accepts
+  the deterministic tool/lifecycle/structured-output machinery, and the AG2
+  runner elevates bridge/derive writes to the declared deterministic writer
+  per variable. A new drift guard
+  (`tests/test_workflow_context_authority_compile.py`) compiles all 14
+  factory workflows against their real policies on every PR — the test that
+  would have caught this before merge.
+- **ExistingAppDiscovery crashed at persist time**: twelve context variables
+  declared `type: object` with list defaults/values, which the replay type
+  guard fail-closes on. Declarations corrected to `type: array`, and the new
+  drift guard also validates every declared default against its declared
+  type.
+- **`mozaiks gen` no longer reports a silent no-op as success** (issue #379):
+  the CLI now initialises real logging (workflow-engine INFO records and file
+  sinks were previously swallowed), asserts on the orchestration result —
+  failed runs, runs paused awaiting a user reply, and runs where no agent
+  ever produced a turn now exit 1 with distinct messages — points
+  `MOZAIKS_GENERATED_ARTIFACTS_PATH` at the CLI output directory so the
+  empty-output check inspects where tools actually write, and warns loudly
+  when `MONGO_URI` is unset. The orchestration result payload now carries
+  `agents_created` / `agent_turns` evidence, echoed in the completion
+  summary as `agents=N turns=M`.
+- **Apps no longer shows a duplicate Create App action**: app creation remains
+  available from the shell header while the Apps management page focuses on
+  searching, filtering, and opening existing apps.
+- **AppWorkbench live-preview refresh actually works now**: the preview
+  sandbox API the workbench calls after a scoped refinement
+  (`/api/artifacts/{id}/sandbox`, `/api/sandbox/*`, `/ws/sandbox/*`) was
+  defined but never mounted by any host, so every refinement-triggered
+  preview refresh failed with a 404 and the iframe kept showing the stale
+  app. The session manager was promoted from workflow-local dead code to
+  `mozaiksai/core/sandbox/preview_sessions.py` over the `SandboxPort` seam
+  and the routes are mounted on the Studio host with auth. Because it now
+  rides `SandboxPort`, the live-preview loop also works on local Docker —
+  previously it was hard-wired to e2b, so OSS self-hosters had no live
+  refresh at all.
+
+### Added
+
+- **Per-build usage attribution and emission counters**: runtime usage events
+  now carry an optional `build_id` (read from the build-lifecycle context
+  variable) so token cost can be rolled up per build, not just per chat or
+  workflow. `TokenManager` also counts emission outcomes
+  (`emitted` / `dropped_disabled` / `dropped_missing_context` / `failed`),
+  exposes them via `get_usage_emission_stats()`, and logs a one-time warning
+  per drop reason — a fully-dropped usage stream now announces itself instead
+  of looking identical to a healthy one.
+
+### Changed
+
+- **Factory Studio demo mode now uses a three-app canonical fleet**: the six
+  disconnected pseudo-app records were replaced by three accepted archetypes
+  (authenticated CRUD, admin operations, and monetized AI SaaS). Usage,
+  billing, deployment, users, activity, integrations, workflows, runs,
+  sessions, and artifact history now stay closed over the same three app IDs,
+  with current passing bundles and healthy deployed states for meaningful
+  cross-portal testing.
+- **AppWorkbench leads with the app, speaks the user's language**: the
+  file-tree/editor/preview grid now renders directly under the status strip
+  (previously it sat below the review and refinement panels), build logs
+  default to collapsed unless validation failed, and the refinement panel's
+  copy no longer leaks internal vocabulary ("control-plane harness",
+  "codex-backed patch", artifact version ids) — it reads "Describe a change
+  and the agents will patch your app." The preview pane gains a
+  **Start live preview** button when no preview exists yet (boots the bundle
+  in an e2b or Docker sandbox on demand), and `generate_and_download` now
+  passes `app_id` so preview sandboxes are keyed to the app
+  deterministically.
+- **AppWorkbench pane naming and preview messaging cleaned up**: the internal
+  panes of the Studio `AppWorkbench` artifact are now named `*Pane.js`
+  (`PreviewPane`, `FileTreePane`, `CodeEditorPane`, `BuildStatusPane`) instead
+  of the misleading `*Artifact.js`, since only `AppWorkbench` itself is a
+  registered UI artifact. The preview pane's empty state now explains when a
+  live preview is available (e2b or Docker sandbox validation) instead of
+  referencing e2b internals. The workflow UI docs gain an explicit
+  artifact-vs-pane naming convention.
+
+- **README onboarding restructured around the documented first-run path**: the
+  Quickstart now opens with a prerequisites list and five numbered steps
+  (install, MongoDB, LLM key, `quickstart`, first app), and sits above the
+  architecture deep-dive so a new reader reaches an install command without
+  scrolling past runtime internals first. Adds a short troubleshooting list
+  and a "Where To Go Next" table pointing at the Studio and guides pages.
+- **README AG2 badge no longer claims a beta**: it now reads `1.0.1`, matching
+  the pinned `ag2==1.0.1` dependency in `pyproject.toml` and `requirements.txt`.
+
+### Added
+
+- **Subscription contract refinement routing**: the refinement harness now has
+  a `subscription_contract` build family. Post-build monetization change
+  requests (plans, pricing tiers, entitlement gates) route to new
+  `subscription_patch` (`SubscriptionContractDesigner → AppGenerator`) and
+  `subscription_revision` (`SubscriptionContractDesigner → AgentGenerator →
+  AppGenerator`) sequences instead of silently falling back to `app_bundle`
+  routes that skipped the contract designer. New closure tests enforce that
+  every harness route resolves to a declared sequence, every refinable family
+  has explicit routes, and any sequence claiming to refresh
+  `subscription_contract` actually runs SubscriptionContractDesigner.
+- **Sandbox boundary, previews, and persistence**: codified the boundary
+  between AG2 agent-level execution (`SandboxShellTool`) and Mozaiks-owned
+  app-preview/validation sandboxes (`SandboxPort`) in the ownership-boundary
+  and watchpoints docs, plus a consolidated
+  `docs/architecture/builder/app-validation-sandboxes.md` (strategies, all
+  env vars, hosted e2b activation and cost posture). Docker validation
+  sandboxes now publish preview ports so `get_preview_url` works locally for
+  free. Validation results persist `sandbox_session_id`/`sandbox_provider`,
+  provider sandboxes are created with identity metadata and kill deadlines
+  (closing the orphaned-sandbox billing vector), and `BuildRecord` gains
+  queryable `app_validation_status` / `app_validation_strategy` /
+  `sandbox_session_id` / `sandbox_provider` fields. The control-plane coding
+  worker's unimplemented `e2b` validation label was removed so build records
+  only claim strategies that actually ran.
+
+### Fixed
+
+- **Gemini is consistently the documented default LLM provider** (#367): the
+  README quickstart now leads with `GEMINI_API_KEY` (matching
+  `docs/getting-started.md` and `.env.example`), and the `quickstart` CLI's
+  no-key warning checks and names `GEMINI_API_KEY` instead of telling Gemini
+  users they have no API key.
+- **SaaS bundles can no longer sell capabilities they never enforce**: the
+  generated-bundle scanner now fails a bundle whose
+  `config/subscriptions.yaml` grants plan capabilities while no module action
+  declares an `entitlement_gate` — previously such bundles passed validation
+  and shipped a decorative subscription contract. Token/usage-only plans
+  (no capabilities) are unaffected.
+- **Public /pricing page works anonymously in MozaiksPay SaaS apps**: the
+  mozaikspay pack's `billing_portal.list_plans` action now declares
+  `api_surface: public_readonly` with no permission requirement, so the
+  pricing landing page can render the plan catalog before login. The scanner
+  now also requires `ui/pages/pricing.yaml` in mozaikspay SaaS bundles and
+  verifies it binds to `list_plans`.
+- **Rejecting the subscription contract review no longer silently produces a
+  non-SaaS build**: when a reviewer requests changes,
+  SubscriptionContractDesigner now loops back to the designer agent to revise
+  and re-submit instead of terminating without an approved contract, and the
+  downstream generator context hook fails loudly if an unapproved
+  (changes-requested) contract state ever reaches AppGenerator/AgentGenerator.
+
+### Added
+
+- **Monetized archetype proves the entitlement chain**: the generated-app
+  archetype matrix now wires the monetized SaaS archetype with the real
+  `ConfiguredEntitlementAdapter` and the platform billing fulfillment
+  endpoint instead of a no-op checker, and asserts the full loop — gated
+  action denied on the free default plan (402 ENTITLEMENT_REQUIRED),
+  granted after a verified-provider `subscription_activated` fulfillment
+  command applied through the app's own `/api/billing/fulfillment/apply`,
+  and denied again after `subscription_cancelled`. The previous check
+  (`status_code in {200, 402}`) passed regardless of whether entitlement
+  enforcement existed at all.
+- **Factory regression suite**: `factory_app/eval/` (bundle scorers + run
+  persistence + baseline diff, upstreamed from the hosted product's
+  build_intelligence bundle evaluation) and
+  `tests/test_factory_regression_suite.py`, which materializes the five
+  archetype-matrix app plans offline (no LLM, no network), scores every
+  generated bundle deterministically, and fails CI when a check that passed
+  on the committed baseline (`tests/fixtures/factory_bundle_eval_baseline.json`)
+  regresses. Refresh deliberately with `REFRESH_FACTORY_EVAL_BASELINE=1` and
+  commit the reviewed delta. A determinism guard asserts two
+  materialize+score passes agree exactly.
+
+- **Generic usage instrumentation and rollups**: the platform host records
+  `app.page_view` (per page-schema serve) and `app.action_invoked` (per
+  successful module action) into the app's own AppMetrics store —
+  fire-and-forget, env-gated `MOZAIKS_USAGE_METRICS` (default on), no data
+  leaves the app. `AppMetrics.usage_rollup(since, until)` aggregates them
+  into daily buckets (page views, unique sessions, action invocations,
+  active users). The mozaiks_cloud pack gains a sink-agnostic
+  `cloud_usage_reporter` module template plus `mozaiks_cloud_usage_client`
+  posting daily aggregate rollups to a configured Mozaiks Cloud-compatible
+  operator endpoint (`POST /usage/rollups`, scope `cloud:usage`); when no
+  connector or `MOZAIKS_CLOUD_*` configuration exists the reporter is
+  silently idle — generated apps never phone home by default, and only
+  aggregate counts are ever sent.
+
+### Security
+
+- **Fail-closed Mongo index readiness**: app data-contract indexes are now
+  compared against materialized Mongo metadata by name, ordered keys, and the
+  complete supported option set (`unique`, `sparse`, partial filters,
+  collation, TTL, hidden state, and wildcard projection). Same-name mismatches
+  and same-key definitions under another name abort startup; missing indexes are awaited,
+  reread, and verified before readiness. Inspection and creation errors are no
+  longer swallowed, and the runtime never drops conflicting indexes.
+
+- **Module dispatch requires explicit authority**: `ModuleRequest.authority` is
+  now a required keyword-only `ModuleDispatchAuthority`, and the
+  `granted_permissions` field is removed along with the
+  `from_granted_permissions()` translation shim and both compatibility
+  authority kinds. Permission and entitlement enforcement key exclusively on
+  `authority.permission_mode` and `authority.permissions`; a missing principal
+  or empty permission list now denies closed instead of silently bypassing.
+  Trusted bypass is restricted to a closed, constructor-validated set of
+  server-owned kinds (`framework_internal`, `operator_internal`,
+  contract-declared `event_reaction`, auth-disabled `local_development`);
+  `local_development` cannot be constructed while authentication is enabled or
+  the deployment environment is production. New `workflow_user_authority()` and
+  `event_reaction_authority()` helpers are the canonical producers for workflow
+  and event-reaction dispatch. `ModuleActionDispatchRequest.authority` is also
+  required (keyword-only) and the facade's separate permission-list field is
+  deleted: the caller's enforce-mode authority carries its permissions and is
+  passed to `ModuleExecutor` exactly as supplied. `ModuleContext` receives
+  `dispatch_authority`, `dispatch_provenance`, and `dispatch_audit` on every
+  execution path, including caller-supplied contexts. Downstream apps
+  constructing `ModuleRequest` or `ModuleActionDispatchRequest` directly must
+  supply an explicit authority when they adopt this version.
+
+### Removed
+
+- **Generated UI browser acceptance retired result vocabulary**: the
+  `scripts/generated_ui_acceptance.py` output no longer exposes top-level
+  `status`, `findings`, `revision_count`, or `revision_request` fields. Browser
+  validation now returns the canonical `ValidationRun` and one
+  `RepairDecision` (`accept`, `repair`, or `block`) from the shared acceptance
+  controller. No aliases or compatibility translation are retained; consumers
+  must read `validation_run.gate_results` and `repair_decision` before adopting
+  this version.
+
+- **`AppPageSchema.extensions` / `AppPageSlotExtension`**: the page slot-override
+  contract is removed from structured outputs, generator prompts, and the UI
+  quality audit. It was a schema-only promise — `PageRenderer` never rendered
+  the field, no fixture or workspace used it, and no component-closure
+  authority existed. Generated pages declaring `extensions` now fail bundle
+  acceptance, and the quality audit flags the field for removal. Routes that
+  primitives cannot express use `custom_route_bundle`.
+
+### Added
+
+- **`mozaiks.app_page.v1` runtime page validation** (`mozaiksai.core.runtime.app.page_schema`):
+  canonical, strict Pydantic validation of every declarative page schema at `AppLoader` boot
+  and at serve time. Apps with invalid page YAML fail to start rather than silently serving
+  bad schemas.
+  - `AppPageSchema` enforces `schema_version: mozaiks.app_page.v1`, 11 closed `page_type`
+    values, 4 closed `layout` values, 26 registered primitives, and `extra="forbid"` on all
+    nested config models. No unknown fields are silently accepted.
+  - `AppLoader.load()` validates every `ui/pages/**/*.yaml` before boot completes; a
+    `PageSchemaValidationError` aborts startup with a structured diagnostic.
+  - `GET /api/pages/{name}` serves from the pre-validated boot cache; the disk-read fallback
+    (dev/hot-reload) calls the identical canonical validator and returns `safe_page_schema_error_detail()`
+    — no raw exception text, file paths, or tracebacks in HTTP responses.
+  - `generated_ui_contract.audit_page_schemas()` and `generated_bundle_scanner` reuse the same
+    canonical validator so generation, acceptance, and runtime share one contract.
+  - Factory `page_plan_utils` injects `schema_version: mozaiks.app_page.v1` into every
+    materialized page; `save_app_schema` validates against the runtime schema before writing.
+
+- **Mozaiks UI v1 architecture constitution**
+  (`docs/architecture/frontend/mozaiks-ui-v1.md`): the authoritative target
+  documentation contract for the native UI framework — canonical surface kinds,
+  single-owner layer map, registry constitution, target `mozaiks.ui.event.v1`
+  requirements, state-domain ownership, the deterministic generation pipeline,
+  extension checklists, security invariants, and a dependency-ordered roadmap.
+  Documentation only; current implementation truth remains documented in the
+  current-versus-target table; no runtime, schema, or registry behavior changed.
+
+- **Canonical app layout registry v1** (`mozaiksai.core.runtime.app.layout_registry`):
+  the first typed, versioned layout authority (`mozaiks.app_layout.v1`). Closed
+  enums for artifact kind, owner, requirement, condition, path scope, materializer,
+  validator, runtime consumer, and security class; deterministic digest-signed
+  registry identity (prose and timestamps excluded); fail-closed path matching
+  with specificity precedence, Unicode NFC normalization, and explicit
+  prohibited-path families; bounded extension slots for managed-capability packs.
+  Data-only in this release — not yet wired into `paths.py`, loaders,
+  materializers, or prompts.
+
+- **Mozaiks Cloud OSS connector contracts** (`factory_app/build_context/mozaiks_cloud/`):
+  versioned, optional capability pack wiring generated apps to the Mozaiks Cloud
+  managed platform for deployment, environment endpoints, and domain management.
+  - `MozaiksCloudTransport` shared auth/retry/idempotency base; bounded sub-clients
+    `MozaiksCloudDeploymentClient`, `MozaiksCloudEnvironmentClient`, and
+    `MozaiksCloudDomainClient` in generated app bundles.
+  - Provider API contract (`provider_api_contract.yaml`) with closed deployment/domain/TLS
+    status enums, normalized error taxonomy, and globally forbidden response fields.
+  - App-owned facade modules `cloud_deployment` and `cloud_domain` with bounded actions,
+    declared events, and read-only reactions on `hosted.cloud.*` events.
+  - Explicit-selection-only contract — pack never auto-selects; provider-neutral bundles
+    contain zero cloud connector artifacts when the pack is not chosen.
+  - `generated_bundle_scanner` extended with `_scan_mozaiks_cloud_connector_contract`
+    and `_RAW_CLOUD_PROVIDER_IMPORT_RE` (Azure/Cloudflare SDK import guard).
+  - `capability_directory.yaml` and `capability_routing.yaml` wired with `mozaiks_cloud`
+    operator pack entry and `cloud_hosting` routing layer.
+
+- **Crash-safe workflow-queue leases**: `MongoWorkflowQueue` now issues a
+  unique `claim_token` (fencing token) on each claim, enforces bounded lease
+  durations, and supports bounded retries with dead-letter terminal state.
+  - Fenced `complete()` and `fail()`: only the current claim_token holder can
+    transition a claimed item. Stale workers whose lease expired are rejected.
+  - `renew_lease()` extends an active lease without reclaiming.
+  - Configurable `max_attempts` and `retry_delay_seconds` per enqueued item.
+  - Expired leases are atomically reclaimed by the next `claim_next()` call
+    (crash recovery without a background sweeper).
+  - Pre-upgrade records (no `claim_token`) are immediately reclaimable.
+  - `ClaimResult` returned from `claim_next()` carries `claimed`, `item`,
+    `claim_token`, and `attempt_count`.
+  - No TTL index on lease fields; completed and dead-letter records remain
+    available for audit.
+
+- **Entitlement gate compile-time closure**: Generated app bundles with
+  `config/subscriptions.yaml` now fail deterministic bundle validation if any
+  `module.yaml` action declares an `entitlement_gate` capability_id that is not
+  granted by at least one subscription plan. The platform wires
+  `ConfiguredEntitlementAdapter` whenever `config/subscriptions.yaml` loads
+  successfully; `assignment_store` controls persisted assignment lookup, not
+  adapter selection. Previously such bundles passed validation but permanently
+  denied the gated action at runtime for every user.
+  - Per-action diagnostics name the module path, action id, and unresolvable
+    capability_id, and suggest typo near-matches from the declared plan catalog.
+  - Apps without `subscriptions.yaml` remain ungated via `NoOpEntitlementAdapter`.
+    Malformed `subscriptions.yaml` files are not treated as custom/dynamic
+    adapter declarations.
+  - `PlanDef` in `subscriptions_loader` now rejects plans that list the same
+    `capability_id` more than once (duplicate conflicting declarations).
+  - The bundle scanner derives plan grants from the canonical
+    `SubscriptionsConfig` loader output, covering both v1 (flat `plans[]`) and
+    v2 (`products[].plans[]`) subscriptions schema.
+  - 36 tests in `tests/test_entitlement_gate_closure.py` cover all scenarios:
+    positive (valid gated actions, multi-plan grants, `assignment_store`-absent
+    configured catalogs, ungated app, no-action bundle) and negative (unknown
+    gate, near-match typo, ungranted capability, all-plans-empty, malformed
+    YAML, multi-module multi-failure deterministic ordering, duplicate
+    capabilities).
+
+- **Community Component Foundation v1**: Extended capability packs to carry versioned identity and machine-readable dependency declarations without introducing a parallel component runtime.
+  - `context.yaml` pack blocks now require `version`; `author`, `license`, and `source` remain optional metadata.
+  - `contract.yaml` supports the canonical `requires.packs` / `requires.capabilities` block for machine-readable dependency declarations; exact `requires.packs[].version` values are enforced when present.
+  - `resolve_managed_capability_templates()` verifies local packs before materialization, computes one canonical `sha256:` content digest from declared pack assets, and emits `.mozaiks/pack_provenance.json` with `pack_id`, `version`, `source`, `digest`, and `materialized_owned_files`.
+  - Structural allowlisting of `context.yaml` pack blocks via `validate_pack_context()` now rejects unexpected root, asset, and pack-block keys before any pack data reaches AG2.
+  - `scan_generated_bundle()` now validates the provenance manifest schema when `.mozaiks/pack_provenance.json` is present in a generated bundle.
+  - `.mozaiks` added to `CANONICAL_APP_ROOT_DIRS` so the provenance directory is a first-class part of the canonical app surface.
+  - First-party packs (`messaging`, `support`, `social`, `commerce`, `notifications`, `files`, `entitlement_dispatch`, `mozaikspay`, `operator_readiness`, `onboarding`) updated to `version: "0.1.11"`.
+  - `support/contract.yaml` migrated from informal `required_packs` to canonical `requires.packs` format.
+  - Fixture community packs in `tests/fixtures/community_packs/` prove dependency validation and provenance work locally without App Zero, network, or a paid LLM.
+  - 49 tests in `tests/test_community_pack_foundation.py` cover schema validation, digest stability, tamper rejection, provenance emission,
+    bundle scanner integration, retired-shape rejection, and first-party pack behavior.
+
+- Published `docs/architecture/MOZAIKS_OSS_SOFTWARE_DESIGN.md` as the authoritative OSS north-star software-design document; added to mkdocs.yml navigation as the primary architecture reference. No competing document exists under `docs/architecture/foundations/`.
+
+- Proved clean-room self-host experience end-to-end: a fresh `pip install -e ".[dev]"` on a clean clone boots Studio, loads all 14 factory workflows, and passes the clean-room self-host acceptance suite without private config or BlocUnited infrastructure. Added `tests/test_selfhost_clean_install.py` with 15 deterministic CI smoke tests covering install, CLI entry, factory resources, startup warning quality, no-fork guard, and self-host docs presence.
+- Fixed startup validator to route by `LLM_PRIMARY_API_TYPE`: the provider-specific API-key check now names the correct env var per provider (`GEMINI_API_KEY / GOOGLE_API_KEY` for google, `ANTHROPIC_API_KEY` for anthropic, `OPENAI_API_KEY` for openai). Previously always warned about `OPENAI_API_KEY` even when `.env.example` defaults to Gemini free tier.
+- Enforced pre-1.0 OSS/proprietary boundary as an architecture contract: added `docs/adr/0003-pre-1-0-oss-proprietary-boundary-freeze.md` ("DIFFERENT INTELLIGENCE, SAME CANONICAL APP"), `docs/architecture/foundations/oss-boundary-families.md` (authoritative DO-NOT-MOVE family registry), and `tests/test_oss_boundary_policy.py` (governance guard).
+- Added generated-app archetype regression matrix (`tests/test_generated_app_archetype_matrix.py`) covering Level-2 acceptance across authenticated CRUD, monetized SaaS, workflow/agent, admin/operations dashboard, community/content, and AppPlan materialization archetypes.
+- Added `scripts/package_content_guard.py`: artifact-level content guard that inspects built wheels and sdists before publication. Fails on learned-artifact directories (`evals/`, `corpora/`, `corrections/`, `production_outcomes/`, `learned_rankings/`, `customer_patterns/`, etc.), raw private keys, raw provider credentials (`sk_live_`, `sk_test_`, etc.), `.env` files (non-example), private-key file extensions (`.pem`, `.key`), and unapproved top-level package families or `factory_app/` sub-families. Warns on large data files and review-pattern paths.
+- Added `scripts/run_release_audit.py`: local pre-release audit script that chains governance guardrails, build, package content guard, twine check, smoke install into a clean venv, Factory resource resolution verification, and offline functional acceptance tests. Run with `python scripts/run_release_audit.py` before tagging any release.
+- Added `docs/adr/0002-appgenerator-baseline-strategy-oss.md`: records the intentional decision to publish the AppGenerator baseline strategy as OSS. Establishes that future learned or operator-derived additions require a new publication review ADR before entering this repository.
+- Added deterministic brownfield and AgentGenerator handoff acceptance coverage proving captured post-reasoning artifacts can flow through AppGenerator materialization and Level-2 generated-app runtime acceptance offline.
+
+### Security
+
+- Extended `scripts/governance_guardrails.py` with learned-artifact quarantine enforcement at the source level: data files (`.jsonl`, `.csv`, `.parquet`, `.pkl`, etc.) inside quarantine directories are now a governance ERROR; code files inside those directories are a NOTICE. Complements the artifact-level guard in `package_content_guard.py`.
+- Added package content guard step to `.github/workflows/release.yml` between `twine check` and wheel install smoke test. Inspects all built artifacts for prohibited content before any publication step.
+- Disabled tag-triggered releases in `.github/workflows/release.yml`: the `release` GitHub environment has no required reviewers (`protection_rules: []`), meaning any `v*` tag push would have auto-published. The tag trigger is now commented out; only a manual `workflow_dispatch` with `confirm_release: "release-confirmed"` can proceed. Add environment reviewers and uncomment the tag trigger when ready to ship.
+
+### Changed
+
+- Updated `docs/releasing.md` with an explicit "RELEASES ARE CURRENTLY DISABLED" banner, verified NOT PROTECTED release gate status (with remediation steps), a full Pre-Release Checklist (P0/P1), and a Release-Candidate Audit Command section documenting `scripts/run_release_audit.py`.
+- Updated `MANIFEST.in` with a comment block documenting the agent-guidance split policy: `mozaiks_cli/agent_guidance/` (user-facing skills, ships in wheel) vs `.claude/skills/` (contributor-only framework skills, git-only, not shipped).
+
+### Added
+
 - Added the App Intelligence Plane: source-backed indexing now produces an `app_intelligence_snapshot` artifact alongside `source_context_bundle` and `app_context_graph`, with discovery and refinement tools exposing compact architecture, capability, ownership, integration, data, and risk context before agents read exact files.
 - Added a provider-neutral generated app auth contract (`app/config/auth.yaml`) and hardened OIDC PKCE adapter output so authenticated apps keep auth behavior deterministic while leaving provider setup to operators or hosted services.
 - Added workspace handler extension system: `workspace_extensions_contract.yaml` declares the schema for `app/build_context/{pack_id}/extensions.yaml` files that workspace apps use to express extra params, param overrides, and extra actions on top of OSS-generated base handlers without editing generated files.
@@ -22,14 +620,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Fixed workflow run context persistence and replay to require resolved workflow
+  declarations, omit non-persisted authority fields, reject malformed known
+  values, safely drop stale unknown keys, and surface required storage failures.
 - Fixed `validate_module_implementation_contract` to resolve handler methods through single-level base class inheritance within the same module's `backend/` directory. The `base_handler.py`/`handler.py` split pattern previously caused the acceptance gate to report every action as missing a handler method on the thin workspace subclass.
 - Fixed messaging and support pack `module.yaml` handler entrypoints: after the `base_handler.py`/`handler.py` split renamed workspace subclasses from `MessagesModule`/`SupportModule` to `MessagesHandler`/`SupportHandler`, `module.yaml` still declared the old class names, causing `ModuleLoadError` at runtime and in tests.
+- Fixed the MozaiksPay generated billing and usage page contract to emit canonical `analytics_dashboard` page types through both the build-context pack hints and the replayed page schema fixtures, removing stale `dashboard` page-type drift from the generated SaaS path.
 - Fixed `scripts/run-infra.ps1` to propagate the `docker compose up` exit code and print an actionable error message when Docker Desktop is not running. Previously the script silently continued on failure.
 - Fixed Vite 8 dev-server startup: added `optimizeDeps.rolldownOptions.moduleTypes: { '.js': 'jsx' }` so the Rolldown pre-scan can parse first-party JSX-in-.js UI files before the transform plugin runs.
 
 ### Changed
 
+- OSS framework telemetry now emits only structural build outcome payloads. Build satisfaction and other customer/operator feedback belongs to app/operator-owned endpoints rather than the generic `MOZAIKS_TELEMETRY_ENDPOINT` channel.
 - Tree-sitter parser packages are now installed with the core Mozaiks package so source-backed Context Graph indexing is part of the default code-context setup.
+- Public docs now describe Mozaiks as not yet published to PyPI or GitHub releases, and direct users to install from a local checkout with editable install instructions instead of a public package URL.
 
 ### Removed
 
@@ -1714,6 +2318,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Removed the unreachable ValueEngine `save_build_plan` branch and the orphaned
+  event-envelope guard that targeted a nonexistent schema directory.
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
   workflow transition conditions now use AG2-native `ContextEquals` and
   `ToolCalled`, wrapped by `SourceScopedContextEquals` and

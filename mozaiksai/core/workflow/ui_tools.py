@@ -384,6 +384,7 @@ async def use_ui_tool(
 
                 transport = await SimpleTransport.get_instance()
                 completion_event = {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.tool_call_complete",
                     "data": {
                         "tool_call_id": event_id,

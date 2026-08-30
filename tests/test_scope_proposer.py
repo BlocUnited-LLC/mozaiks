@@ -6,12 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from mozaiksai.control_plane import (
-    ArtifactKind,
     ArtifactScopeProposer,
     ChangeClass,
     ChangeIntent,
-    ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
+    ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
     ControlPlaneManifest,
     ControlPlanePoliciesManifest,
@@ -51,7 +50,7 @@ class _FakeToolExecutor:
 
     async def execute_tool(self, call, *, context=None):  # noqa: ANN001, ANN003
         self.calls.append({"call": call, "context": context})
-        if call.tool_id == "get_artifact_workspace_catalog":
+        if call.tool_id == "get_bundle_workspace_catalog":
             return ControlPlaneToolResult(
                 success=True,
                 output={
@@ -64,11 +63,11 @@ class _FakeToolExecutor:
 
 
 class _FakeArtifactStore:
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
         return SimpleNamespace(
-            id=artifact_version_id,
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
+            id=build_record_id,
+            build_family="app_bundle",
+            build_key="app_bundle",
             commit_metadata=SimpleNamespace(
                 metadata={
                     "workspace_dir": str(
@@ -82,7 +81,7 @@ class _FakeArtifactStore:
 def _enabled_control_plane() -> ControlPlaneConfig:
     return ControlPlaneConfig(
         enabled=True,
-        coding=ControlPlaneCapabilityConfig(
+        coding=ControlPlaneCodingCapabilityConfig(
             enabled=True,
             llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
         ),
@@ -98,7 +97,7 @@ def _pack() -> LoadedControlPlanePack:
                 ControlPlaneCheckpointManifest(
                     event="scope_requested",
                     prompt_id="coding_scope_selection_system",
-                    tool_ids=["get_revision_context", "get_artifact_summary", "get_artifact_workspace_catalog"],
+                    tool_ids=["get_revision_context", "get_build_record_summary", "get_bundle_workspace_catalog"],
                 )
             ],
         ),
@@ -115,10 +114,10 @@ def _pack() -> LoadedControlPlanePack:
             schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
-                    id="get_artifact_summary",
+                    id="get_build_record_summary",
                     kind="context_tool",
-                    description="artifact summary",
-                    entrypoint="example.tools:get_artifact_summary",
+                    description="build record summary",
+                    entrypoint="example.tools:get_build_record_summary",
                     available_to=["scope_requested"],
                 ),
                 ControlPlaneToolDefinition(
@@ -129,10 +128,10 @@ def _pack() -> LoadedControlPlanePack:
                     available_to=["scope_requested"],
                 ),
                 ControlPlaneToolDefinition(
-                    id="get_artifact_workspace_catalog",
+                    id="get_bundle_workspace_catalog",
                     kind="context_tool",
                     description="workspace catalog",
-                    entrypoint="example.tools:get_artifact_workspace_catalog",
+                    entrypoint="example.tools:get_bundle_workspace_catalog",
                     available_to=["scope_requested"],
                 ),
             ],
@@ -150,9 +149,9 @@ def _pack() -> LoadedControlPlanePack:
 def _request() -> RefinementRequest:
     return RefinementRequest(
         request_kind="refinement",
-        artifact_kind=ArtifactKind.APP_BUNDLE,
-        artifact_key="app_bundle",
-        artifact_version_id="av_123",
+        build_family="app_bundle",
+        build_key="app_bundle",
+        build_record_id="av_123",
         raw_user_request="Change the dashboard title copy to say Builder Workspace.",
         source_surface="app_workbench",
         app_id="app_1",
@@ -202,11 +201,11 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
     )
 
     class _LocalArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return SimpleNamespace(
-                id=artifact_version_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                id=build_record_id,
+                build_family="app_bundle",
+                build_key="app_bundle",
                 commit_metadata=SimpleNamespace(
                     metadata={"workspace_dir": str((tmp_path / "scope_workspace").resolve())}
                 ),
@@ -266,11 +265,11 @@ async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(
         path.write_text("export default function Component() { return null; }\n", encoding="utf-8")
 
     class _LocalArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return SimpleNamespace(
-                id=artifact_version_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                id=build_record_id,
+                build_family="app_bundle",
+                build_key="app_bundle",
                 commit_metadata=SimpleNamespace(
                     metadata={"workspace_dir": str((tmp_path / "scope_workspace").resolve())}
                 ),
@@ -319,11 +318,11 @@ async def test_scope_proposer_rejects_paths_missing_from_artifact_workspace(tmp_
     )
 
     class _LocalArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return SimpleNamespace(
-                id=artifact_version_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                id=build_record_id,
+                build_family="app_bundle",
+                build_key="app_bundle",
                 commit_metadata=SimpleNamespace(
                     metadata={"workspace_dir": str((tmp_path / "scope_workspace").resolve())}
                 ),

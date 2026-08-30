@@ -1,0 +1,265 @@
+contract_id: mozaiks_cloud_connector
+contract_type: build_pack_instructions
+
+# Declares capabilities this pack provides to the OSS planning system.
+# cloud_deployment_write_path: this managed pack owns the deployment
+# submission path. Generated apps use app-owned facade modules.
+# cloud_domain_write_path: this managed pack owns domain connection ops.
+provides_capabilities:
+  - cloud_deployment_write_path
+  - cloud_domain_write_path
+
+selection_rules:
+  - id: require_explicit_selection_for_cloud_hosting
+    description: >
+      Mozaiks Cloud connector requires explicit user selection. Self-hosted and
+      portable app deployments work without it. Never auto-select this pack
+      from generic deployment intent alone.
+    when:
+      intent_any:
+        - deploy to mozaiks cloud
+        - mozaiks cloud hosting
+        - managed cloud hosting
+        - cloud deployment connector
+    action: require_explicit_user_confirmation
+    confirmation_message: >
+      Mozaiks Cloud adds managed deployment, environment endpoint retrieval, and
+      custom domain management. Activation requires a Mozaiks Cloud account and
+      API credentials. This pack is optional — self-hosted and portable
+      deployments remain fully valid without it.
+
+recommended_domains:
+  - deployments
+  - hosting
+  - domains
+  - environments
+
+required_integrations:
+  - service: mozaiks_cloud
+    provider: mozaiks_cloud
+    display_name: Mozaiks Cloud
+    kind: api_key
+    purpose: >
+      Submit deployments, inspect hosting/environment state, request rollbacks,
+      and manage domain DNS/TLS lifecycle through one Mozaiks Cloud-compatible
+      managed-service credential.
+    required_at: runtime
+    service_scopes:
+      - cloud:read
+      - cloud:deploy
+      - cloud:rollback
+      - domains:read
+      - domains:write
+      - domains:manage
+    required_fields:
+      - name: api_base
+        label: Mozaiks Cloud API Base URL
+        type: url
+        required: true
+        frontend_safe: true
+      - name: api_key
+        label: Mozaiks Cloud API Key
+        type: secret
+        required: true
+        frontend_safe: false
+    optional_fields:
+      - name: app_id
+        label: Mozaiks Cloud App ID
+        type: text
+        required: false
+        frontend_safe: true
+
+required_outputs:
+  - path: services/integrations/mozaiks_cloud_client.py
+    owner: templates
+  - path: services/integrations/mozaiks_cloud_deployment_client.py
+    owner: templates
+  - path: services/integrations/mozaiks_cloud_domain_client.py
+    owner: templates
+  - path: modules/cloud_deployment/module.yaml
+    owner: templates
+  - path: modules/cloud_deployment/backend/handler.py
+    owner: templates
+  - path: modules/cloud_deployment/backend/service.py
+    owner: templates
+  - path: modules/cloud_domain/module.yaml
+    owner: templates
+  - path: modules/cloud_domain/backend/handler.py
+    owner: templates
+  - path: modules/cloud_domain/backend/service.py
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: services/adapters/azure/
+    reason: Azure provider mechanics belong in mozaiks-app, not in generated app bundles.
+  - path_prefix: services/adapters/cloudflare/
+    reason: Cloudflare provider mechanics belong in mozaiks-app, not in generated app bundles.
+  - path_prefix: services/adapters/github/
+    reason: GitHub CI/CD provider mechanics belong in mozaiks-app, not in generated app bundles.
+  - path_prefix: services/adapters/dns/
+    reason: DNS provider mechanics belong in mozaiks-app, not in generated app bundles.
+  - path_prefix: modules/mozaiks_cloud/
+    reason: No monolithic cloud module; use bounded facade modules (cloud_deployment, cloud_domain).
+  - path_prefix: infra/azure/
+    reason: Azure infrastructure configuration belongs in mozaiks-app.
+
+runtime_boundaries:
+  - id: no_azure_sdk
+    rule: >
+      Generated bundles must not import Azure SDK libraries directly.
+      All Azure operations flow through the Mozaiks Cloud platform API; never
+      through azure-sdk or azure-mgmt in the generated app.
+  - id: no_cloudflare_sdk
+    rule: >
+      Generated bundles must not import Cloudflare SDK libraries directly.
+      DNS and TLS operations flow through the MozaiksCloud domain client,
+      not cloudflare-sdk.
+  - id: no_direct_provider_operations
+    rule: >
+      All deployment and domain operations must route through the bounded
+      MozaiksCloud sub-clients. Generated business code must not construct
+      raw HTTP calls to deployment, hosting, DNS, or TLS provider APIs.
+  - id: secret_by_reference_only
+    rule: >
+      Generated code contains only environment variable names
+      (MOZAIKS_CLOUD_API_KEY, MOZAIKS_CLOUD_API_BASE). Credential values
+      are resolved at runtime through ConnectorStore or env fallback.
+      No API key values appear in generated source.
+  - id: no_provision_on_import
+    rule: >
+      Importing or constructing any MozaiksCloud sub-client must not provision,
+      create, or modify external infrastructure. Side effects are confined to
+      explicit authorized API method calls.
+  - id: page_bindings
+    rule: >
+      Generated pages must call app-owned cloud_deployment and cloud_domain
+      facade actions, not Mozaiks Cloud platform API endpoints directly.
+
+facades:
+  - module_id: cloud_deployment
+    provider_module: mozaiks_cloud
+    provider_actions:
+      - submit_deployment
+      - get_deployment_status
+      - get_environment_endpoints
+      - get_deployment_health
+      - request_rollback
+    pages:
+      - name: Deployments
+        route: /deployments
+        page_type_hint: list_detail
+        primary_entities:
+          - deployment_operation
+        primary_actions:
+          - submit_deployment
+          - get_deployment_status
+          - request_rollback
+  - module_id: cloud_domain
+    provider_module: mozaiks_cloud
+    provider_actions:
+      - connect_domain
+      - get_domain_verification
+      - get_dns_instructions
+      - request_domain_activation
+      - get_domain_status
+      - disconnect_domain
+    pages:
+      - name: Domains
+        route: /domains
+        page_type_hint: list_detail
+        primary_entities:
+          - domain_connection
+        primary_actions:
+          - connect_domain
+          - get_domain_status
+          - disconnect_domain
+
+provider_api_response_contract:
+  spec_file: provider_api_contract.yaml
+  description: >
+    A Mozaiks Cloud-compatible provider serves the deployment and domain API
+    endpoints consumed by generated apps. Response shapes are pinned in
+    provider_api_contract.yaml. Any change to field names or types on either
+    side is a breaking change requiring coordinated release. Generated apps use
+    polling-only operation status and do not expose provider callback routes.
+  operation_required_fields:
+    - operation_id
+    - status
+    - created_at
+  deployment_status_required_fields:
+    - operation_id
+    - status
+    - environment
+    - release_ref
+    - created_at
+  environment_endpoints_required_fields:
+    - environment
+    - endpoints
+  domain_status_required_fields:
+    - domain
+    - status
+    - dns_verified
+    - tls_status
+    - created_at
+  dns_instructions_required_fields:
+    - domain
+    - records
+  globally_forbidden_response_fields:
+    - azure_resource_id
+    - azure_subscription_id
+    - azure_resource_group
+    - azure_tenant_id
+    - cloudflare_account_id
+    - cloudflare_zone_id
+    - cloudflare_api_token
+    - github_installation_id
+    - github_token
+    - internal_pricing
+    - internal_margin
+    - provider_credentials
+    - ssl_private_key
+    - tls_private_key
+
+inactive_surfaces:
+  - domain_purchasing
+  - registrar_transfer
+  - domain_renewal
+  - generated_callback_routes
+  - provider_account_creation
+  - source_upload
+
+# ---------------------------------------------------------------------------
+# Provider lifecycle boundary — responsibilities owned by the Mozaiks Cloud-
+# compatible provider, not by the generated app. Generated apps never
+# implement cloud provisioning, DNS management, TLS provisioning, credential
+# issuance, deployment pipeline mechanics, or provider resource management.
+# ---------------------------------------------------------------------------
+provider_lifecycle_boundary:
+  - id: no_provision_on_select
+    provider_role: mozaiks_cloud_compatible_provider
+    description: >
+      Selecting the mozaiks_cloud pack must not create or provision any external
+      infrastructure, DNS records, TLS certificates, deployment environments, or
+      cloud resources. Provisioning occurs only through explicit authorized API
+      operations after credentials are configured.
+  - id: no_credential_generation
+    provider_role: mozaiks_cloud_compatible_provider
+    description: >
+      The pack does not generate or distribute API keys. Users obtain credentials
+      from the Mozaiks Cloud portal and configure them through the app-scoped
+      mozaiks_cloud connector or MOZAIKS_CLOUD_API_KEY environment variable.
+  - id: provider_owns_infrastructure
+    provider_role: mozaiks_cloud_compatible_provider
+    description: >
+      Azure resources, Cloudflare zones, DNS records, TLS certificates, deployment
+      pipelines, rollback state, and environment provisioning are provider-owned.
+      Generated apps receive normalized status responses; they never see or store
+      provider-internal resource identifiers (azure_resource_id, cloudflare_zone_id,
+      github_installation_id, ssl_private_key, or equivalent).
+  - id: deployment_separation
+    provider_role: mozaiks_cloud_compatible_provider
+    description: >
+      Hosting and Domains are separate bounded sub-resources sharing only
+      transport and authentication. No god-client or cross-resource operation
+      must be generated. Provider implementations remain bounded by the
+      deployment client API and the domain client API independently.

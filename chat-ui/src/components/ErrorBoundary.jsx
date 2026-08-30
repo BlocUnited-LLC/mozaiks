@@ -24,8 +24,8 @@ class ErrorBoundary extends Component {
 
     // Log to console in development
     if (process.env.NODE_ENV === 'development') {
-      console.error('[ErrorBoundary] Caught error:', error);
-      console.error('[ErrorBoundary] Component stack:', errorInfo?.componentStack);
+      console.error('❌ [ErrorBoundary] Caught error:', error);
+      console.error('❌ [ErrorBoundary] Component stack:', errorInfo?.componentStack);
     }
 
     // Call optional onError callback

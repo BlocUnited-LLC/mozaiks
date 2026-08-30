@@ -333,25 +333,25 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     candidates: list[Any] = []
     refs = _context_get(context_variables, "artifact_version_refs", {})
     workflow_ref = refs.get("workflow_bundle") if isinstance(refs, dict) else None
-    if workflow_ref and hasattr(artifact_store, "get_artifact_version"):
+    if workflow_ref and hasattr(artifact_store, "get_build_record"):
         try:
-            artifact = await artifact_store.get_artifact_version(
+            artifact = await artifact_store.get_build_record(
                 app_id=app_id,
-                artifact_version_id=str(workflow_ref),
+                build_record_id=str(workflow_ref),
             )
             if artifact is not None:
                 candidates.append(artifact)
         except Exception:
             pass
 
-    if hasattr(artifact_store, "list_artifact_versions"):
+    if hasattr(artifact_store, "list_build_records"):
         try:
             from mozaiksai.core.artifacts import ArtifactLifecycleStatus
 
             candidates.extend(
-                await artifact_store.list_artifact_versions(
+                await artifact_store.list_build_records(
                     app_id=app_id,
-                    artifact_kind="workflow_bundle",
+                    build_family="workflow_bundle",
                     lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                     limit=5,
                 )

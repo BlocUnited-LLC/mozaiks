@@ -276,11 +276,14 @@ class TestBuildReviewSnapshot:
         assert snapshot["source_bundle_path"] == "generated/apps/myapp/bundle.zip"
         assert snapshot["staging_area"] == "staging/abc"
         assert "app/wallet.py" in snapshot["affected_bundle_paths"]
+        assert snapshot["write_back_mode"] == "generated_artifact"
+        assert snapshot["write_back_target"] is None
 
     def test_affected_bundle_paths_is_list(self):
         record = RefinementReviewRecord(request_id="req-test", staging_area="staging/abc")
         snapshot = _build_review_snapshot(record)
         assert isinstance(snapshot["affected_bundle_paths"], list)
+        assert snapshot["write_back_mode"] == "generated_artifact"
 
 
 # ---------------------------------------------------------------------------

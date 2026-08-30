@@ -18,7 +18,14 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
+
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_HEADER,
+    WORKFLOW_TRIGGER_TRACE_KEY,
+)
 
 logger = logging.getLogger("mozaiksai.app_backend_tools")
 
@@ -45,9 +52,24 @@ async def backend_request(
 
         ctx = context_variables or {}
         token = ctx.get("auth_token")
+        headers: dict[str, str] | None = None
+        trigger_trace = ctx.get(WORKFLOW_TRIGGER_TRACE_KEY)
+        if isinstance(trigger_trace, dict):
+            headers = {
+                WORKFLOW_TRIGGER_TRACE_HEADER: json.dumps(
+                    trigger_trace,
+                    separators=(",", ":"),
+                )
+            }
 
         backend = get_app_backend()
-        result = await backend.request(method, path, json_body=payload, user_token=token)
+        result = await backend.request(
+            method,
+            path,
+            json_body=payload,
+            headers=headers,
+            user_token=token,
+        )
 
         if result.success:
             return json.dumps({"status": "success", "data": result.data})
@@ -76,7 +98,32 @@ async def emit_event(
         from mozaiksai.core.adapters.http_app_backend import get_app_backend
 
         ctx = context_variables or {}
-        data = {**(event_data or {}), "app_id": ctx.get("app_id", ""), "user_id": ctx.get("user_id", "")}
+        tenant = {"app_id": ctx.get("app_id", "")}
+        if ctx.get("tenant_id"):
+            tenant["tenant_id"] = ctx["tenant_id"]
+        if ctx.get("workspace_id"):
+            tenant["workspace_id"] = ctx["workspace_id"]
+        data: dict[str, Any] = {
+            "id": f"evt_{uuid4().hex}",
+            "type": event_type,
+            "version": 1,
+            "occurred_at": datetime.now(UTC).isoformat(),
+            "source": {
+                "layer": "workflow",
+                "workflow_id": ctx.get("workflow_id") or ctx.get("workflow_name"),
+                "chat_id": ctx.get("chat_id"),
+            },
+            "tenant": tenant,
+            "payload": dict(event_data or {}),
+            "visibility": "internal",
+        }
+        if ctx.get("user_id"):
+            data["actor"] = {"type": "user", "id": ctx["user_id"]}
+        if ctx.get("correlation_id"):
+            data["correlation"] = {"correlation_id": ctx["correlation_id"]}
+        trigger_trace = ctx.get(WORKFLOW_TRIGGER_TRACE_KEY)
+        if isinstance(trigger_trace, dict):
+            data[WORKFLOW_TRIGGER_TRACE_KEY] = dict(trigger_trace)
 
         backend = get_app_backend()
         ok = await backend.emit(event_type, data)

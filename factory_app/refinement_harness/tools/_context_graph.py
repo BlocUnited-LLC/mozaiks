@@ -23,15 +23,15 @@ async def load_context_graph_for_tool(
     """Load artifact workspace and merge current app-context graph with code graph."""
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()
-    artifact_version_id = str(tool_context.artifact_version_id or "").strip()
-    if not app_id or not artifact_version_id:
-        return {"present": False, "reason": "missing_app_id_or_artifact_version"}
+    build_record_id = str(tool_context.build_record_id or "").strip()
+    if not app_id or not build_record_id:
+        return {"present": False, "reason": "missing_app_id_or_build_record"}
 
     store = artifact_store or get_artifact_store()
     workspace = await load_artifact_workspace(
         artifact_store=store,
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
     )
     if not workspace.get("present"):
         return workspace
@@ -41,8 +41,8 @@ async def load_context_graph_for_tool(
         app_id=app_id,
         file_map=workspace["file_map"],
         artifact_version_id=artifact.id,
-        artifact_kind=artifact.artifact_kind,
-        artifact_key=artifact.artifact_key,
+        artifact_kind=artifact.build_family,
+        artifact_key=artifact.build_key,
         source=workspace.get("source") or "artifact_workspace",
     )
     current_graph_lookup = await get_current_app_context_graph(

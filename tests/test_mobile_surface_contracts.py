@@ -172,7 +172,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "app support route stays responsive across desktop and mobile widths" in smoke_source
     assert "app billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app access route stays responsive across desktop and mobile widths" in smoke_source
-    assert "app build history route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app build review route stays responsive across desktop and mobile widths" in smoke_source
     assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "mobile app Studio navigation keeps route transitions stable" in smoke_source
     assert "mobile workspace Studio navigation keeps route transitions stable" in smoke_source
@@ -181,7 +181,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "npm run test:responsive-smoke" in ci_source
 
 
-def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
+def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     smoke_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
     console_components = {
@@ -203,7 +203,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
         "AppSupportPage": "app support route stays responsive across desktop and mobile widths",
-        "AppBuildHistoryPage": "app build history route stays responsive across desktop and mobile widths",
+        "AppBuildReviewPage": "app build review route stays responsive across desktop and mobile widths",
     }
     # Components served from chat-ui or custom pages — not admin console pages
     # covered by the Playwright studio smoke suite.
@@ -264,10 +264,10 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/app/ui/components/OnboardingTour.jsx",
         "factory_app/app/ui/installOnboardingTour.jsx",
-        "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
-        # ExistingAppDiscovery App Intelligence surfaces — emitted before and after agent speaks
-        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceInlineBrief.jsx",
+        # ExistingAppDiscovery workflow-owned inline and artifact surfaces
         "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceOverviewCard.jsx",
+        "factory_app/workflows/ExistingAppDiscovery/ui/AppIntelligenceProgressCard.jsx",
+        "factory_app/workflows/ExistingAppDiscovery/ui/RepoAccessRecoveryCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
         # SubscriptionContractDesigner agentic UI artifact — approval card for contract review

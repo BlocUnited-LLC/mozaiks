@@ -25,6 +25,8 @@ agents:
       - `frontend_design_document`, `backend_design_document`, `database_design_document`: Draft design documents when they already exist.
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools`: Upstream agent-backend integration context when an agent backend is part of the build.
       - `platform_user_email`: Email of the authenticated platform user running this session. When non-null, use this as the admin email — do NOT ask the user for it.
+      - `app_intelligence_summary`, `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`: Prompt-safe source-backed context for an existing/current app when available.
+      - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and `brownfield_registration`: Existing-app enhancement scope and protected boundaries when available.
 
       This workflow is for normal product application generation, not for inventing new AI workflows.
   - id: instructions
@@ -94,7 +96,7 @@ agents:
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt.**
 
       When brownfield adoption context is injected, the app scope is NOT open-ended.
       The adoption plan already determines what gets built. Adjust your interview accordingly:
@@ -105,7 +107,13 @@ agents:
          Do not ask about unrelated product features, pricing models, or page count.
 
       2. **For `light_integration` path (overlay):**
-         - The existing app is not being replaced. Overlays add NEW surfaces only.
+         - User-facing label: Add AI Workflows.
+         - The existing app is not being replaced. This path adds app-aware AI
+           workflows, chat surfaces, and only required safe adapters around
+           approved capabilities.
+         - Treat this as the normal first move for most existing apps: preserve
+           current code, data, auth, and business logic while adding Mozaiks AI
+           capability around the product.
          - Confirm only: which of the `candidate_overlays` the user wants to proceed with,
            and whether any integration constraints apply to the listed `candidate_adapters`.
          - Do NOT ask about the existing app's architecture, database, or current tech stack —
@@ -113,9 +121,13 @@ agents:
          - Emit NEXT as soon as the overlay selection is confirmed (usually 0–1 questions).
 
       3. **For `full_migration` path:**
-         - `candidate_migrations` lists the modules to migrate. Confirm module priorities
-           and any data-migration constraints if the user has not already provided them.
-         - Do NOT redesign the existing app from scratch — migration scope is bounded by
+         - User-facing label: Build App Features.
+         - `candidate_migrations` lists the modules or product areas to expand.
+           Confirm module priorities and any data-migration constraints if the
+           user has not already provided them.
+         - This is approved module and product expansion scope only. Do NOT imply Mozaiks will
+           automatically take over the whole repository.
+         - Do NOT redesign the existing app from scratch — expansion scope is bounded by
            the adoption plan.
          - Emit NEXT once module priorities are clear (usually 1–2 questions maximum).
 
@@ -149,6 +161,8 @@ agents:
       - `experience_spec`: typed ExperienceSpec from DesignDocs — the authoritative page structure. When present with a non-empty `pages[]`, use these designed pages as the canonical page list. Map each `experience_spec.pages[i]` directly to your `pages[]` output, preserving name, route, layout, intent, and mapping `sections[j]` to `sections_hint[]`. Do not invent page structure from capability packs when `experience_spec.pages[]` is present.
       - `experience_spec_document`: human-readable YAML version of the ExperienceSpec. Use as a readable fallback or secondary reference only when `experience_spec` is null.
       - `concept_api_endpoints`, `concept_blueprint`: optional structured hints from upstream planning, including `capability_pack_hints`, `monetization_intent`, and `agentic_capabilities`.
+      - `app_intelligence_summary`, `app_intelligence_catalog`, `source_context_catalog`, and `app_context_summary`: prompt-safe source-backed context for the current app. Use these to avoid duplicating protected existing behavior and to keep build tasks tied to discovered app facts.
+      - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and `brownfield_registration`: existing-app enhancement scope and provenance. When present, they constrain which modules, pages, workflows, services, and adapters may be generated.
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
@@ -271,12 +285,19 @@ agents:
          - Every capability pack must declare `surface_id` and `surface_kind`.
          - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `commerce_pack`, `marketplace_pack`, `campaigns_pack`, `mozaikspay`, `billing_pack`, `notifications_pack`, `analytics_pack`, and `agent_backend_integration`.
          - Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Keep payment provider mechanics outside the commerce module; pair with a selected managed payment pack or a user-requested provider adapter when checkout processing is required.
-         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS subscriptions, plan-gated access, seats, billing portal, AI credits, token top-ups, or usage budgets, prioritize the managed `mozaikspay` capability pack when it is available and the user has not explicitly requested another billing provider. Generate only app-owned billing facades and clients that call the hosted MozaiksPay API; never generate provider internals. If MozaiksPay is unavailable or the user names another provider, generate a provider-neutral `external_adapter` path. For ecommerce checkout, marketplace, sponsorship, contributions, campaign funding, revenue-share, or other product-specific money flows, set `revenue_model: custom` and use the relevant domain pack, custom_owned module, managed facade, or policy hook. Do not collapse all revenue into billing.
+         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS subscriptions, plan-gated access, seats, billing portal, AI credits, token top-ups, or usage budgets, default to the managed `mozaikspay` capability pack and `monetization_provider: mozaiks_pay` unless the user explicitly selects `entitlement_dispatch` for the self-managed OSS path. Generate only app-owned billing facades and clients that call the hosted MozaiksPay API; never generate provider internals. Do not emit decorative custom provider ids for subscription assignment. For ecommerce checkout, marketplace, sponsorship, contributions, campaign funding, revenue-share, or other product-specific money flows, set `revenue_model: custom` and use the relevant domain pack, custom_owned module, managed facade, or policy hook. Do not collapse all revenue into billing.
          - **NEVER include these as capability packs** — they are first-class runtime features already provided by the Mozaiks platform host and must not be scaffolded:
            `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`, `token_usage_ledger`, `ai_token_metering`
            If the product spec mentions any of these, reference them as existing runtime capabilities in `service_scope`, not as packs to generate.
          - If the product needs domain-specific profile records (for example investor profiles, founder profiles, vendor profiles, or creator profiles), model them as module-owned entities/actions/events inside the relevant capability pack. They do not replace the host-owned `/api/me` account/profile contract.
          - Distinguish deterministic product behavior from optional agentic augmentation.
+         - When the concept is a host/operator platform, launch-gated SaaS workspace, or multi-party platform product that needs reproducible no-spend evidence gates, set `readiness_profile` to one of:
+           - `basic_app` for lightweight readiness guidance
+           - `saas_app` for subscription apps that need launch evidence but not host-operator operations
+           - `host_operator_platform` for products that host, bill, or operate other apps
+           - `marketplace_platform` for platform operations that coordinate multiple tenants/parties
+           - `none` for ordinary customer apps
+           Use this profile as the deterministic handoff for any downstream build-context readiness pack. Do not infer it from freeform prose later in the pipeline.
       4a. Resolve monetization before deriving monetization build tasks.
          - `monetization_enabled=true`, `builder_options.monetization.enabled=true`, or `builder_options.provider_backed_capabilities[].intent_id == "monetization"` means only that a revenue model is desired. It does not mean subscriptions.
          - **When `concept_blueprint.pricing_recommendation` is present, use it as the authoritative tier structure.** Feed its `tiers[]`, `model`, and `take_rate_pct` directly into your `subscription_config` build task initial_message. Do not re-derive or simplify the tier structure — the recommendation was already validated against industry patterns.
@@ -319,6 +340,7 @@ agents:
              Choose the layout that best fits the app's primary user context and domain. Default to `top_nav` only when truly uncertain. Do NOT leave this null for apps with user profiles.
       9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
          - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `mongodb`, `postgres`, `redis`, `openai`, `anthropic`, `gemini`, `google_oauth`, `microsoft_oauth`, `segment`.
+         - Do not add `redis` for generic production readiness, caching best practice, rate limiting, or future scale. Include Redis only when the approved product scope explicitly requires shared cache, shared sessions, pub/sub, queues, or when scanned source/package evidence already depends on Redis. Redis is BYOK/operator-owned and must not be planned as paid managed infrastructure by default.
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
            - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
@@ -326,6 +348,11 @@ agents:
            - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
          - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
          - This check is read-only and non-blocking. If the tool fails, continue planning with all integrations treated as unchecked.
+      9c. When the app brief explicitly asks for deterministic browser/demo/preview records, populate `demo_fixture_sets` with the route/module/entity groups that need seeded data:
+         - Treat this as planning metadata for local smoke, browser demo, or replay fixtures only.
+         - Name the routes that depend on the fixtures, the module/entity families involved, the required record states, and any stable key hints the seed tool should fill.
+         - Keep the fixture plan deterministic and no-spend: do not turn it into runtime module behavior, production data, or provider-side provisioning.
+         - If the brief does not need preview data, leave `demo_fixture_sets` empty.
       10. If agent-backend context exists (`agent_api_url` or `agent_websocket_url` is non-null), set `agent_backend_required` to true and include the required integration surfaces in `frontend_scope`, `service_scope`, `external_integrations`, and `capability_packs`.
          - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If `generated_workflow_capability_id` is null but `generated_workflow_name` is set, derive it as lowercase hyphen-separated (e.g. `CustomerSupport` → `customer-support`).
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
@@ -616,7 +643,7 @@ agents:
   - id: brownfield_scope
     heading: '[BROWNFIELD ADOPTION SCOPE]'
     content: |-
-      **This section is active only when `[BROWNFIELD ADOPTION CONTEXT]` is present in your prompt.**
+      **This section is active only when `[EXISTING APP ENHANCEMENT]` is present in your prompt.**
 
       When brownfield adoption context is injected, the app bundle scope is constrained by the
       adoption plan. Apply all of the following rules before planning capability packs or pages:
@@ -1064,7 +1091,7 @@ agents:
       - `record_list`: entity browse with DataTable/ResourceTable + filter + actions bar
       - `record_detail`: Form + Panel/SurfaceCard detail zones driven by one primary record
       - `analytics_dashboard`: Grid of Metric/SummaryStrip/SegmentedBar; no primary editable entity
-      - `workflow_board`: custom_route_bundle or extensions.slot=header — primitives alone cannot express drag-to-reorder lanes; use `ui_surface: custom_react_page` or a custom slot override
+      - `workflow_board`: custom_route_bundle — primitives alone cannot express drag-to-reorder lanes; use `ui_surface: custom_react_page`
       - `activity_feed`: Timeline as primary section; chronological, no edit-in-place
       - `gallery`: Grid of SurfaceCards with image/thumbnail and action; pagination or infinite scroll
       - `wizard`: multi-step flow with `shell_mode: focused`. Required structure per step: ProgressTracker header (stages list — each stage has `id`, `label`, `state` ∈ {done|active|pending|error}) + at least one Form section with `submit_action` bound to an app-owned module action + ActionButton for navigation. A wizard without a Form section is invalid and will be flagged by the quality gate — the Form is the submission path to the backing module. Always declare `depends_on: [<module_contract_task_id>]` on the wizard page_bundle task so the module action exists before the page schema references it.
@@ -1087,7 +1114,7 @@ agents:
       - Form state between steps must be held by the module or passed through the submit_action payload chain. Do not store partial wizard state in client-only component state — if the user refreshes, the wizard must still resolve correctly.
       - If the wizard requires reading URL query params on mount, polling an endpoint, or conditional rendering based on async state, it cannot be declarative — use `custom_route_bundle` instead.
 
-      When `page_type` is `workflow_board` and the app requires drag-to-reorder kanban lanes, this exceeds the shipped primitive set. Use `custom_route_bundle` and declare a custom React page, or use `extensions` with `slot: header` to override the board surface while keeping auxiliary sections declarative.
+      When `page_type` is `workflow_board` and the app requires drag-to-reorder kanban lanes, this exceeds the shipped primitive set. Use `custom_route_bundle` and declare a custom React page.
 
       **External-redirect and post-redirect confirmation flows**:
       When an app includes an external-redirect checkout or payment flow (where the user is sent to a hosted third-party page and returned via redirect), the following page types and escape-hatch rules apply:
@@ -1105,14 +1132,6 @@ agents:
       - Keep the route authenticated together with `meta.routeAuth` for scoped private routes. Do not declare `routeAuth` for public landing/legal/static routes or for simple role-only navigation visibility.
       - In structured AppSchemaAgent output, `routeAuth.params` is a strict list of `{key, value}` entries that save_app_schema normalizes into the runtime object shape. Values may map shell placeholders to action inputs: `$route.<param>`, `$query.<param>`, `$meta.<path>`, `$user.<path>`, and `$path`.
       - If the route needs scoped access but the owning module does not yet declare a suitable `authorize_*_route` action, keep the route and module action in the same build plan dependency chain so the action exists before the page route references it.
-
-      **Page extensions** — `extensions[]` declares bounded custom slot overrides within an otherwise declarative page:
-      - Use `slot: empty_state` to replace a data section's empty state with a branded call-to-action
-      - Use `slot: header` to replace the page header with a custom branded or data-rich header component
-      - Use `slot: hero` for gallery/landing pages where the above-fold area is visual and custom
-      - Use `slot: sidebar` for a custom sidebar when the sidebar layout cannot express the required navigation
-      - Use `slot: actions_bar` for a complex multi-action toolbar above a table that ActionButton cannot express
-      Emit extensions only when a specific zone genuinely cannot be expressed with primitives. Null for most pages.
 
       **Page layout options**: grid | sidebar | full-width | split
 
@@ -1245,7 +1264,6 @@ agents:
           d. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces. Use `focused` for wizard/onboarding pages.
           e. Set `roles` to null unless the plan restricts page access.
           f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
-          g. Set `extensions` only when a specific UI zone cannot be expressed with primitives (see extension slot rules above). Null for most pages.
       4. Build the `manifest`:
           a. `app_name`, `description`, `tagline`, and `value_proposition` — preserve the approved concept identity from `value_manifest` / `concept_blueprint` when present. `description` should be the durable "what this app is" summary shown in Studio; `tagline` should be a short positioning line; `value_proposition` should carry the core user value.
           b. `pages` — list every declared `app_build_plan.pages[].name`.
@@ -1297,7 +1315,6 @@ agents:
             "shell_mode": "workspace",
             "roles": null,
             "navigation": { "id": "dashboard", "label": "Dashboard", "scope": "global", "order": 10, "visible": true, "placement": null },
-            "extensions": null,
             "sections": [
               {
                 "id": "kpi-row",
@@ -1369,7 +1386,7 @@ agents:
          footer intended for mobile primary navigation; local/workspace nav placed as
          global nav without an explicit reason; conversation/focused/immersive surfaces
          that keep distracting footer or bottom-bar chrome through custom chrome
-         overrides; extensions with unrecognized slot names; custom routes whose
+         overrides; custom routes whose
          `route_manifest[*].component` key is not registered by exactly one matching
          `custom_route_bundle.page_files[*].registry_key`;
          any `DataTable` or `ResourceTable` section with a non-null `api_endpoint`
@@ -2194,6 +2211,11 @@ agents:
       1. Write content to `/tmp/validate_config_<stem>.yaml`.
       2. Run `python -c "import yaml,sys; yaml.safe_load(open('/tmp/validate_config_<stem>.yaml'))"` — fix parse errors before continuing.
 
+      Cross-reference checks (run after all files parse cleanly):
+      3. Permission consistency — every permission id referenced in `module.yaml.actions[].permissions` and `module.yaml.capabilities[].permissions` must be declared in `module.yaml.permissions[].id`. If any reference is missing, add the declaration or fix the reference before emitting.
+      4. Notification id consistency — every `notification_id` value in `reactions.yaml` targets must appear as an `id` in `notifications.yaml.notifications[]`. If `notifications.yaml` is absent, create it with the required definitions before emitting.
+      5. Emits/events alignment — every event type string in `module.yaml.actions[].emits` must appear as a `type` in `events.yaml.events[]`. Conversely, every `events.yaml.events[].type` must appear in at least one action's `emits` list or be a reaction-only event with a documented source. Flag and resolve any orphaned declarations before emitting.
+
       Emit ConfigMiddlewareOutput only after all files pass. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
@@ -2786,6 +2808,9 @@ agents:
       3. Run `ruff check --select E,F /tmp/validate_handler.py` — fix any undefined-name or import errors before continuing.
 
       Emit ServiceOutput only after all files pass both checks. Do not include validation shell output in ServiceOutput.
+
+      Cross-reference check (run after syntax and lint pass):
+      4. Events.yaml coverage — for every event type declared in `contracts/events.yaml.events[].type`, verify that the exact string literal appears in at least one of `service.py`, `base_handler.py`, or `handler.py` as a `ctx.emit(...)` argument. If any declared event type is absent, add the missing emit call before emitting ServiceOutput.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

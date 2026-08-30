@@ -1,0 +1,31 @@
+name: Documentation Improvement
+description: Report unclear, incorrect, or missing documentation.
+title: "docs: "
+labels:
+  - documentation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for gaps, errors, or unclear guidance in
+        `README.md`, `CONTRIBUTING.md`, or anything under `docs/`.
+  - type: input
+    id: location
+    attributes:
+      label: Page or file
+      description: The doc page URL (e.g. https://docs.mozaiks.ai/...) or repo path (e.g. docs/getting-started.md).
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is wrong, unclear, or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix
+      description: If you have a specific wording or structure in mind, share it here.
+    validations:
+      required: false

@@ -6,10 +6,16 @@ from typing import Any
 def normalize_app_id(value: Any) -> str | None:
     if value is None:
         return None
+    # bool is a subclass of int, so True/False would otherwise become the
+    # scope strings "True"/"False" and silently pass the tenant boundary.
+    # A boolean is never a valid app id, so reject it up front.
+    if isinstance(value, bool):
+        return None
     if isinstance(value, str):
         trimmed = value.strip()
         return trimmed or None
-    return str(value) or None
+    trimmed = str(value).strip()
+    return trimmed or None
 
 
 def coalesce_app_id(*, app_id: Any = None) -> str | None:

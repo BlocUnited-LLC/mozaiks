@@ -1,0 +1,3 @@
+{
+  "chat": { "chat_startup_mode": "ask", "default_workflow": "ResearchWorkflow" }
+}

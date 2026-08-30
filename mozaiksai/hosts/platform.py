@@ -55,13 +55,26 @@ from mozaiksai.core.runtime.composition.extensions import (
     start_module_services,
     stop_services,
 )
+from mozaiksai.core.runtime.composition.module_authority import (
+    ModuleDispatchAuthority,
+    ModuleDispatchProvenance,
+)
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
+    ReactionIdempotencyStore,
+)
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+    WORKFLOW_TRIGGER_TRACE_KEY,
+    MongoWorkflowTriggerRateLimiter,
+    WorkflowTriggerGuard,
+)
 from mozaiksai.core.runtime.persistence import (
     DatabaseStartupPolicyError,
     apply_data_migrations,
     apply_database_indexes,
+    database_persistence_is_enabled,
     get_database_startup_policy,
     load_data_migrations,
 )
@@ -84,6 +97,7 @@ app.state.subscriptions_config = None
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
+app.state.page_schemas = {}
 _runtime_services: list[Any] = []
 
 
@@ -101,6 +115,7 @@ async def add_api_version_header(request: Request, call_next):
 _DEFAULT_PROFILE_USER_ID = os.getenv("MOZAIKS_DEFAULT_USER_ID", "demo-user").strip() or "demo-user"
 _ACCOUNT_PROFILE_COLLECTION = "UserProfiles"
 _ACCOUNT_PREFERENCES_COLLECTION = "UserPreferences"
+_USER_SETTINGS_COLLECTION = "UserSettings"
 
 
 # Module runtime_extensions.yaml routers are mounted in _platform_startup()
@@ -162,8 +177,13 @@ def _warn_undeclared_entitlement_gates(
     almost always a misconfiguration rather than intentional behaviour.
     """
     declared_capabilities: set[str] = set()
-    for plan in subscriptions_config.plans:
+    # v1: flat top-level plans
+    for plan in (getattr(subscriptions_config, "plans", None) or []):
         declared_capabilities.update(plan.capabilities or [])
+    # v2: plans nested under products
+    for product in (getattr(subscriptions_config, "products", None) or []):
+        for plan in product.plans:
+            declared_capabilities.update(plan.capabilities or [])
 
     for loaded_module in modules:
         for action_id, capability_id in loaded_module.action_entitlement_map.items():
@@ -240,7 +260,13 @@ async def _platform_startup() -> None:
     try:
         load_result = await AppLoader.load(str(app_root))
         app.state.subscriptions_config = load_result.subscriptions_config
-        if load_result.data_contract:
+        app.state.page_schemas = {
+            name: schema.model_dump(mode="json", exclude_none=True)
+            for name, schema in sorted(load_result.page_schemas.items())
+        }
+        app.state.database_index_readiness = None
+        persistence_enabled = database_persistence_is_enabled(database_startup_policy)
+        if load_result.data_contract and persistence_enabled:
             index_app_id = (
                 load_result.data_contract.get("app_id")
                 or load_result.definition.config.get("appId")
@@ -248,22 +274,37 @@ async def _platform_startup() -> None:
                 or _resolve_default_app_id()
             )
             try:
-                index_count = await apply_database_indexes(load_result.data_contract, app_id=str(index_app_id))
-                if index_count:
-                    logger.info("DATABASE_INDEXES_READY: app_id=%s count=%s", index_app_id, index_count)
+                index_result = await apply_database_indexes(
+                    load_result.data_contract,
+                    app_id=str(index_app_id),
+                )
+                app.state.database_index_readiness = index_result
+                if index_result.verified:
+                    logger.info(
+                        "DATABASE_INDEXES_READY: app_id=%s verified=%s created=%s",
+                        index_app_id,
+                        index_result.verified,
+                        index_result.created,
+                    )
             except Exception as exc:
-                logger.warning(
-                    "DATABASE_INDEXES_NOT_APPLIED: policy=%s app_id=%s app_root=%s error=%s",
+                app.state.database_index_readiness = None
+                logger.error(
+                    "DATABASE_INDEXES_NOT_READY: policy=%s app_id=%s app_root=%s error=%s",
                     database_startup_policy,
                     index_app_id,
                     app_root,
                     exc,
                 )
-                if database_startup_policy == "required":
-                    raise DatabaseStartupError(
-                        f"Database indexes were not applied for app_id={index_app_id!r} "
-                        f"at app_root={str(app_root)!r}: {exc}"
-                    ) from exc
+                raise DatabaseStartupError(
+                    f"Database indexes are not ready for app_id={index_app_id!r} "
+                    f"at app_root={str(app_root)!r}: {exc}"
+                ) from exc
+        elif load_result.data_contract:
+            logger.info(
+                "DATABASE_INDEXES_SKIPPED: persistence is disabled for local best-effort startup "
+                "app_root=%s",
+                app_root,
+            )
         try:
             migrations = load_data_migrations(app_root)
             if migrations:
@@ -310,6 +351,14 @@ async def _platform_startup() -> None:
             workflow_capability_routes = _load_workflow_capability_routes(app_root)
             app.state.workflow_capability_routes = workflow_capability_routes
 
+            mongo_uri = str(os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or "").strip()
+            _reaction_idempotency_store = ReactionIdempotencyStore() if mongo_uri else None
+            workflow_trigger_guard = WorkflowTriggerGuard(
+                claim_store=_reaction_idempotency_store,
+                rate_limiter=(MongoWorkflowTriggerRateLimiter(mongo_uri) if mongo_uri else None),
+            )
+            app.state.workflow_trigger_guard = workflow_trigger_guard
+
             async def invoke_capability(
                 capability_id: str,
                 source_event: dict[str, Any],
@@ -321,12 +370,14 @@ async def _platform_startup() -> None:
                     subscription=subscription,
                     routes=workflow_capability_routes,
                     event_emitter=dispatcher.emit,
+                    trigger_guard=workflow_trigger_guard,
                 )
 
             module_event_router = ModuleEventRouter(
                 load_result.modules,
                 event_emitter=dispatcher.emit,
                 capability_invoker=invoke_capability,
+                idempotency_store=_reaction_idempotency_store,
             )
             module_event_router.register(dispatcher)
             app.state.module_event_router = module_event_router
@@ -356,6 +407,8 @@ async def _platform_startup() -> None:
                     action_permissions=loaded_module.action_permissions_map,
                     action_schemas=loaded_module.action_schemas_map,
                     action_entitlements=loaded_module.action_entitlement_map,
+                    action_emits=loaded_module.action_emits_map,
+                    event_payload_schemas=loaded_module.event_payload_schemas_map,
                 )
             executor_registry.register(module_executor)
             app.state.module_action_surfaces = module_action_surfaces
@@ -400,8 +453,13 @@ async def _platform_startup() -> None:
         raise
     except DatabaseStartupPolicyError:
         raise
-    except AppLoadError:
-        logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
+    except AppLoadError as exc:
+        if str(exc).startswith("app.json not found"):
+            logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
+        else:
+            logger.error("APP_LOAD_FAILED_DEGRADED (AppLoadError): %s", exc)
+            app.state.startup_degraded = True
+            app.state.startup_degraded_reason = "APP_LOAD_ERROR"
     except ModuleLoadError as exc:
         # A module contract is invalid — platform starts in degraded state so
         # health checks can surface this rather than hiding it as a warning.
@@ -463,7 +521,7 @@ def _append_page_once(pages: list[dict], page: dict) -> None:
 
 def _normalize_shell_surface(surface: str | None) -> str:
     candidate = str(surface or "platform").strip().lower()
-    return candidate if candidate in {"platform", "studio"} else "platform"
+    return candidate if candidate in {"platform", "studio", "user"} else "platform"
 
 
 def _page_targets_surface(page: dict, *, surface: str) -> bool:
@@ -981,7 +1039,7 @@ _ADMIN_PORTAL_MENU_ITEM = {
 
 
 def _inject_admin_portal(result: dict) -> None:
-    """Guarantee Admin Portal appears in the profile menu for admin users.
+    """Guarantee Admin Portal appears in the Studio profile menu for admin users.
 
     Called after the full shell config pipeline so nothing can suppress it.
     Inserts before signout, or appends if signout is absent.
@@ -1125,7 +1183,11 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
 
     shell_surface = _normalize_shell_surface(surface)
     is_studio = shell_surface == "studio"
-    result: dict = {"chat_startup_mode": "ask", "landing_spot": "/apps" if is_studio else "/"}
+    is_user = shell_surface == "user"
+    result: dict = {
+        "chat_startup_mode": "ask",
+        "landing_spot": "/apps" if is_studio else "/me" if is_user else "/",
+    }
     app_manifest = _load_app_manifest()
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
@@ -1143,7 +1205,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 if isinstance(value, str) and value.strip():
                     result["appId"] = value.strip()
                     break
-            if not is_studio:
+            if not is_studio and not is_user:
                 startup = app_manifest.get("startup") if isinstance(app_manifest.get("startup"), dict) else {}
                 landing_spot = startup.get("landing_spot")
                 if isinstance(landing_spot, str) and landing_spot.startswith("/"):
@@ -1274,9 +1336,11 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     )
     result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
-    # Admin Portal is a framework guarantee — inject after the full pipeline so
-    # no app config or route processing can accidentally suppress it.
-    _inject_admin_portal(result)
+    # Admin Portal is a Studio guarantee — not injected into app or user surfaces.
+    if is_studio:
+        _inject_admin_portal(result)
+
+    result["surface"] = shell_surface
 
     return result
 
@@ -1304,8 +1368,8 @@ async def health_check(request: Request):
 
 
 @app.get("/api/shell-config")
-async def get_shell_config():
-    return await build_shell_config(surface="platform")
+async def get_shell_config(surface: str | None = None):
+    return await build_shell_config(surface=surface or "platform")
 
 
 @app.get("/api/me")
@@ -1315,6 +1379,16 @@ async def get_current_user_profile(
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
     return await _ensure_account_profile(principal, app_id=resolved_app_id, user_id=user_id)
+
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120, description="Preferred user-facing display name")
+    bio: str | None = Field(default=None, max_length=500, description="Short user bio")
+    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL — must be a URL, not a data URI")
+
+
+class ProfilePreferencesUpdateRequest(BaseModel):
+    settings: dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
 
 
 @app.get("/api/users/{username}")
@@ -1514,6 +1588,123 @@ async def update_current_user_preferences(
     return await _load_account_preferences(app_id=resolved_app_id, user_id=user_id)
 
 
+@app.get("/api/me/settings/{module_id}")
+async def get_module_settings_for_user(
+    module_id: str,
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return the settings schema and resolved values for one module, scoped to the calling user.
+
+    Response shape:
+        {
+            "module_id": "commerce",
+            "settings": [
+                {"id": "commerce.checkout.default_provider", "type": "string",
+                 "scope": "user", "label": "...", "default": "mozaikspay", "value": "mozaikspay"}
+            ]
+        }
+
+    Values are resolved in priority order: declared default → stored user override.
+    Only settings with scope="user" are user-editable from this endpoint.
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    module_executor = executor_registry.module_executor
+    if module_executor is None:
+        return {"module_id": module_id, "settings": []}
+
+    defs = module_executor.setting_defs(module_id)
+    defaults = module_executor.resolve_settings(module_id)
+    stored = await _load_user_settings(app_id=resolved_app_id, user_id=user_id, module_id=module_id)
+    resolved = {**defaults, **stored}
+
+    return {
+        "module_id": module_id,
+        "settings": [
+            {
+                "id": d.id,
+                "type": d.type,
+                "scope": d.scope,
+                "label": d.label,
+                "description": d.description,
+                "default": d.default,
+                **({"enum_values": d.enum_values} if d.enum_values is not None else {}),
+                "value": resolved.get(d.id, d.default),
+            }
+            for d in defs
+        ],
+    }
+
+
+@app.put("/api/me/settings/{module_id}")
+async def update_module_settings_for_user(
+    module_id: str,
+    body: dict[str, Any],
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Update user-scoped settings for one module.
+
+    Only fields whose declared scope is 'user' may be updated via this endpoint.
+    App-scoped settings are read-only from this surface (they belong in /api/admin/settings).
+    Values are validated against the declared type and enum_values before storage.
+    Stored values are merged on top of any previously saved overrides (partial update semantics).
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    module_executor = executor_registry.module_executor
+    if module_executor is None:
+        raise HTTPException(status_code=503, detail="Module executor not ready")
+
+    defs = module_executor.setting_defs(module_id)
+    user_defs = {d.id: d for d in defs if d.scope == "user"}
+
+    errors: list[str] = []
+    validated: dict[str, Any] = {}
+    for key, value in body.items():
+        if key not in user_defs:
+            errors.append(f"{key!r}: not a user-scoped setting for module {module_id!r}")
+            continue
+        d = user_defs[key]
+        if d.type == "boolean" and not isinstance(value, bool):
+            errors.append(f"{key!r}: expected boolean")
+        elif d.type == "integer" and not isinstance(value, int):
+            errors.append(f"{key!r}: expected integer")
+        elif d.type == "enum" and d.enum_values and value not in d.enum_values:
+            errors.append(f"{key!r}: must be one of {d.enum_values}")
+        else:
+            validated[key] = value
+
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
+    # Merge validated overrides on top of any previously stored values, then persist.
+    stored = await _load_user_settings(
+        app_id=resolved_app_id, user_id=user_id, module_id=module_id
+    )
+    merged_stored = {**stored, **validated}
+    await _save_user_settings(
+        app_id=resolved_app_id, user_id=user_id, module_id=module_id, values=merged_stored
+    )
+
+    resolved = {**module_executor.resolve_settings(module_id), **merged_stored}
+    return {
+        "module_id": module_id,
+        "settings": [
+            {
+                "id": d.id,
+                "type": d.type,
+                "scope": d.scope,
+                "label": d.label,
+                "description": d.description,
+                "default": d.default,
+                **({"enum_values": d.enum_values} if d.enum_values is not None else {}),
+                "value": resolved.get(d.id, d.default),
+            }
+            for d in defs
+        ],
+    }
+
+
 def _relationship_result_rows(data: Any) -> list[Any]:
     if isinstance(data, list):
         return data
@@ -1667,7 +1858,14 @@ async def get_profile_panels(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=list(principal.scopes) if principal else None,
+                    authority=ModuleDispatchAuthority(
+                        kind="authenticated_user",
+                        permission_mode="enforce",
+                        reason="platform profile panel hydration",
+                        actor_id=viewer_user_id,
+                        permissions=tuple(principal.scopes) if principal else (),
+                    ),
+                    provenance=ModuleDispatchProvenance(surface="profile_panel"),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1769,7 +1967,14 @@ async def get_profile_tabs(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=list(principal.scopes) if principal else None,
+                    authority=ModuleDispatchAuthority(
+                        kind="authenticated_user",
+                        permission_mode="enforce",
+                        reason="platform profile tab hydration",
+                        actor_id=viewer_user_id,
+                        permissions=tuple(principal.scopes) if principal else (),
+                    ),
+                    provenance=ModuleDispatchProvenance(surface="profile_tab"),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1850,7 +2055,6 @@ async def get_profile_pages(
     - Platform built-in pages (always present)
     - Module-contributed pages from modules/*/contracts/profile.yaml (v2 native
       pages, or v1 tabs automatically promoted to pages)
-    - A "my-apps" page when the app registry module is available
 
     Each module-contributed page with an ``action`` is hydrated by calling the
     module executor. Pages whose action fails are still returned with
@@ -1904,7 +2108,14 @@ async def get_profile_pages(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=list(principal.scopes) if principal else None,
+                    authority=ModuleDispatchAuthority(
+                        kind="authenticated_user",
+                        permission_mode="enforce",
+                        reason="platform profile page hydration",
+                        actor_id=viewer_user_id,
+                        permissions=tuple(principal.scopes) if principal else (),
+                    ),
+                    provenance=ModuleDispatchProvenance(surface="profile_page"),
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1969,33 +2180,6 @@ async def get_profile_pages(
                 "source": "platform_builtin",
             }
         )
-
-    # Inject "my-apps" when no module has already claimed that id and the
-    # app registry module is accessible.
-    if "my-apps" not in builtin_ids:
-        _app_registry_accessible = False
-        try:
-            if module_executor is not None:
-                module_names = getattr(module_executor, "_modules", {})
-                _app_registry_accessible = "app_registry" in module_names
-        except Exception:
-            pass
-        if _app_registry_accessible:
-            hydrated.append(
-                {
-                    "id": "my-apps",
-                    "label": "My Apps",
-                    "route": "apps",
-                    "section": "platform",
-                    "order": 50,
-                    "renderer": "custom_component",
-                    "component": "MyAppsPage",
-                    "visibility": "owner_only",
-                    "data": None,
-                    "error": None,
-                    "source": "platform_builtin",
-                }
-            )
 
     hydrated.sort(key=lambda p: (p.get("order") if p.get("order") is not None else 100,))
 
@@ -2080,7 +2264,14 @@ async def get_current_user_relationships(
                 tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                 auth_token=None,
                 correlation_id=None,
-                granted_permissions=list(principal.scopes) if principal else None,
+                authority=ModuleDispatchAuthority(
+                    kind="authenticated_user",
+                    permission_mode="enforce",
+                    reason="platform relationship provider hydration",
+                    actor_id=user_id,
+                    permissions=tuple(principal.scopes) if principal else (),
+                ),
+                provenance=ModuleDispatchProvenance(surface="relationship_provider"),
             )
             result = await module_executor.execute(req, context=None)
             if result.success:
@@ -2385,6 +2576,52 @@ async def _account_preferences_collection():
     return client["mozaiksai"][_ACCOUNT_PREFERENCES_COLLECTION]
 
 
+async def _user_settings_collection():
+    await persistence_manager.persistence._ensure_client()
+    client = persistence_manager.persistence.client
+    if client is None:
+        raise RuntimeError("Mongo client not initialized")
+    return client["mozaiksai"][_USER_SETTINGS_COLLECTION]
+
+
+def _user_settings_doc_id(app_id: str, user_id: str, module_id: str) -> str:
+    return f"{app_id}:{user_id}:{module_id}"
+
+
+async def _load_user_settings(*, app_id: str, user_id: str, module_id: str) -> dict[str, Any]:
+    """Load stored user-scoped setting overrides for one module. Returns {} when none stored."""
+    try:
+        collection = await _user_settings_collection()
+        doc = await collection.find_one({"_id": _user_settings_doc_id(app_id, user_id, module_id)})
+        return dict(doc.get("values") or {}) if doc else {}
+    except Exception as exc:
+        logger.warning("[user-settings] Could not load settings for %s/%s/%s: %s", app_id, user_id, module_id, exc)
+        return {}
+
+
+async def _save_user_settings(
+    *, app_id: str, user_id: str, module_id: str, values: dict[str, Any]
+) -> None:
+    """Upsert user-scoped setting overrides for one module."""
+    collection = await _user_settings_collection()
+    doc_id = _user_settings_doc_id(app_id, user_id, module_id)
+    now = datetime.now(UTC)
+    await collection.update_one(
+        {"_id": doc_id},
+        {
+            "$setOnInsert": {
+                "_id": doc_id,
+                "app_id": app_id,
+                "user_id": user_id,
+                "module_id": module_id,
+                "created_at": now,
+            },
+            "$set": {"values": values, "updated_at": now},
+        },
+        upsert=True,
+    )
+
+
 def _resolve_profile_scope(
     principal: UserPrincipal,
     *,
@@ -2643,18 +2880,6 @@ async def _load_account_preferences(*, app_id: str, user_id: str) -> dict[str, A
     }
 
 
-class ProfileUpdateRequest(BaseModel):
-    display_name: str | None = Field(default=None, max_length=120, description="Preferred user-facing display name")
-    bio: str | None = Field(default=None, max_length=500, description="Short user bio")
-    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL — must be a URL, not a data URI")
-
-
-class ProfilePreferencesUpdateRequest(BaseModel):
-    settings: dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
-
-
-
-
 def _load_workflow_capability_routes(app_root: Path) -> dict[str, list[dict[str, Any]]]:
     """Index workflow trigger declarations by public capability id."""
     workflows_dir = next(
@@ -2718,6 +2943,7 @@ async def _invoke_workflow_capability(
     routes: dict[str, list[dict[str, Any]]],
     event_emitter: Callable[[str, dict[str, Any]], Any] | None = None,
     create_session: Callable[..., Any] | None = None,
+    trigger_guard: WorkflowTriggerGuard | None = None,
     auto_start: bool = True,
 )-> dict[str, Any]:
     route = _select_workflow_capability_route(
@@ -2741,13 +2967,90 @@ async def _invoke_workflow_capability(
     tenant = source_event.get("tenant") if isinstance(source_event.get("tenant"), dict) else {}
     actor = source_event.get("actor") if isinstance(source_event.get("actor"), dict) else {}
     app_id = str(tenant.get("app_id") or source_event.get("app_id") or "default")
+    tenant_id = str(tenant.get("tenant_id") or source_event.get("tenant_id") or "").strip() or None
+    workspace_id = (
+        str(tenant.get("workspace_id") or source_event.get("workspace_id") or "").strip() or None
+    )
     user_id = str(actor.get("id") or source_event.get("user_id") or "system")
+    if trigger_guard is None:
+        trigger_guard = WorkflowTriggerGuard(
+            claim_store=None,
+            rate_limiter=None,
+        )
+    decision = await trigger_guard.authorize(
+        capability_id=capability_id,
+        source_event=source_event,
+        app_id=app_id,
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
+    )
+    if not decision.allowed:
+        result = {
+            "status": {
+                "replay": "replay_suppressed",
+                "rate": "rate_limited",
+                "rate_authority": "failed_closed",
+                "persistence": "failed_closed",
+            }.get(decision.reason, "rejected"),
+            "reason": decision.reason,
+            "detail": decision.detail,
+            "capability_id": capability_id,
+            "workflow_id": workflow_id,
+            "event_type": source_event.get("type"),
+            "source_event_id": source_event.get("id") or source_event.get("event_id"),
+            "invocation_id": decision.invocation_id,
+            "trigger_depth": decision.depth,
+            "app_id": app_id,
+            "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
+        }
+        logger.warning(
+            "WORKFLOW_CAPABILITY_TRIGGER_REJECTED: reason=%s invocation=%s "
+            "capability=%s event=%s app=%s tenant=%s",
+            decision.reason,
+            decision.invocation_id,
+            capability_id,
+            source_event.get("type"),
+            app_id,
+            tenant_id,
+        )
+        if event_emitter is not None:
+            diagnostic = {
+                "id": f"evt_{uuid4().hex}",
+                "type": "platform.workflow_capability_trigger_rejected",
+                "version": 1,
+                "occurred_at": datetime.now(UTC).isoformat(),
+                "source": {
+                    "layer": "platform",
+                    "capability_id": capability_id,
+                    "workflow_id": workflow_id,
+                },
+                "tenant": tenant,
+                "correlation": (
+                    source_event.get("correlation")
+                    if isinstance(source_event.get("correlation"), dict)
+                    else {}
+                ),
+                "payload": result,
+                "visibility": "internal",
+            }
+            if isinstance(decision.trace, dict):
+                diagnostic[WORKFLOW_TRIGGER_TRACE_KEY] = dict(decision.trace)
+            await _maybe_await(
+                event_emitter(
+                    "platform.workflow_capability_trigger_rejected",
+                    diagnostic,
+                )
+            )
+        return result
+
     context_seed = _build_workflow_trigger_context(
         capability_id=capability_id,
         source_event=source_event,
         trigger=route.get("trigger") if isinstance(route.get("trigger"), dict) else {},
     )
     context_variables = validate_context_for_workflow(workflow_id, context_seed)
+    context_variables[WORKFLOW_TRIGGER_TRACE_KEY] = decision.trace
     trigger_meta = {
         "trigger_source": "module_event",
         "event_type": source_event.get("type"),
@@ -2756,6 +3059,8 @@ async def _invoke_workflow_capability(
         "workflow_id": workflow_id,
         "subscription_id": subscription.get("id"),
         "module_id": subscription.get("module_id"),
+        "invocation_id": decision.invocation_id,
+        "trigger_depth": decision.depth,
     }
     session_creator = create_session or create_routed_chat_session
     chat_id = await _maybe_await(
@@ -2784,6 +3089,8 @@ async def _invoke_workflow_capability(
         "chat_id": str(chat_id),
         "app_id": app_id,
         "user_id": user_id,
+        "invocation_id": decision.invocation_id,
+        "trigger_depth": decision.depth,
         "started": started,
         "websocket_url": f"/ws/{workflow_id}/{app_id}/{chat_id}/{user_id}",
     }
@@ -2799,6 +3106,7 @@ async def _invoke_workflow_capability(
             "correlation": source_event.get("correlation") if isinstance(source_event.get("correlation"), dict) else {},
             "payload": {**result, "source_event_id": source_event.get("id")},
             "visibility": "internal",
+            WORKFLOW_TRIGGER_TRACE_KEY: dict(decision.trace or {}),
         }
         await _maybe_await(event_emitter("platform.workflow_capability_started", event))
     return result
@@ -3183,6 +3491,7 @@ async def websocket_endpoint(
             user_id,
         )
 
+    from mozaiksai.core.transport.event_contract import send_event_envelope
     from mozaiksai.core.transport.session_registry import session_registry
 
     ws_id = id(websocket)
@@ -3197,7 +3506,8 @@ async def websocket_endpoint(
         if not is_valid:
             try:
                 await websocket.accept()
-                await websocket.send_json({
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
                     "data": {
                         "message": error_msg,
@@ -3215,7 +3525,8 @@ async def websocket_endpoint(
         logger.error("WS_PREREQ_VALIDATION_FAILED: %s", dep_err, exc_info=True)
         try:
             await websocket.accept()
-            await websocket.send_json({
+            await send_event_envelope(websocket, {
+                "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",
                 "data": {
                     "message": "Failed to validate workflow prerequisites. Please try again.",
@@ -3274,9 +3585,21 @@ async def websocket_endpoint(
             except Exception as reload_err:
                 logger.debug("Workflow hot-reload skipped for %s: %s", workflow_name, reload_err)
 
+            from mozaiksai.core.workflow.startup_messages import (
+                resolve_workflow_launch_taxonomy,
+                should_autostart_empty_workflow,
+            )
+
             cfg = workflow_manager.get_config(workflow_name) or {}
             startup_mode = str(cfg.get("workflow_startup_mode") or "").strip() or "AgentDriven"
-            if startup_mode != "AgentDriven":
+            launch_taxonomy = resolve_workflow_launch_taxonomy(
+                workflow_name,
+                workflow_startup_mode=startup_mode,
+            )
+            if not should_autostart_empty_workflow(
+                startup_mode,
+                launch_behavior=launch_taxonomy.get("launch_behavior"),
+            ):
                 return
 
             coll = await runtime_app._chat_coll()
@@ -3319,16 +3642,28 @@ async def websocket_endpoint(
             logger.error("Auto-start failed for %s/%s: %s", workflow_name, active_chat_id, exc)
 
     _task = asyncio.create_task(_auto_start_if_needed())
-    _task.add_done_callback(
-        lambda t: logger.error(
-            "Auto-start task raised unexpected error for %s/%s: %s",
-            workflow_name,
-            active_chat_id,
-            t.exception(),
-        )
-        if not t.cancelled() and t.exception() is not None
-        else None
-    )
+    if runtime_app.simple_transport:
+        existing_task = runtime_app.simple_transport._background_tasks.get(active_chat_id)
+        if existing_task and not existing_task.done():
+            _task.cancel()
+        else:
+            runtime_app.simple_transport._background_tasks[active_chat_id] = _task
+
+    def _clear_auto_start_task(t: asyncio.Task[Any]) -> None:
+        try:
+            if runtime_app.simple_transport and runtime_app.simple_transport._background_tasks.get(active_chat_id) is t:
+                runtime_app.simple_transport._background_tasks.pop(active_chat_id, None)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    "Auto-start task raised unexpected error for %s/%s: %s",
+                    workflow_name,
+                    active_chat_id,
+                    t.exception(),
+                )
+        except Exception as cb_err:
+            logger.debug("Auto-start task cleanup failed for %s/%s: %s", workflow_name, active_chat_id, cb_err)
+
+    _task.add_done_callback(_clear_auto_start_task)
 
     try:
         has_children = False
@@ -3434,9 +3769,15 @@ async def websocket_endpoint(
         app_id=app_id,
         user_id=user_id,
         auto_activate=True,
-    )
+        )
 
     try:
+        suppress_history_replay = str(websocket.query_params.get("suppress_history_replay", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         await runtime_app.simple_transport.handle_websocket(
             websocket=websocket,
             chat_id=active_chat_id,
@@ -3444,6 +3785,7 @@ async def websocket_endpoint(
             workflow_name=workflow_name,
             app_id=app_id,
             ws_id=ws_id,
+            suppress_history_replay=suppress_history_replay,
         )
     finally:
         session_registry.remove_session(ws_id)

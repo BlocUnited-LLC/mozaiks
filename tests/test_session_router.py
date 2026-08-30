@@ -242,8 +242,8 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
     assert decision.lifecycle_state == _session_model.SessionLifecycle.ACTIVE
     assert decision.context_seed.get("build_mode") == "revision"
     assert decision.context_seed.get("revision_scope") == "patch"
-    assert decision.context_seed.get("artifact_kind") == "workflow_bundle"
-    assert decision.context_seed.get("artifact_version_id") == "v1"
+    assert decision.context_seed.get("build_family") == "workflow_bundle"
+    assert decision.context_seed.get("build_record_id") == "v1"
     assert decision.context_seed.get("sequence_status") == "in_progress"
     assert decision.context_seed.get("change_intent", {}).get("change_class") == "patch"
     assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
@@ -518,12 +518,44 @@ async def test_resolve_transition_option_sequence_override_rebinds_journey(monke
                         },
                         {
                             "id": "brownfield_app",
-                            "route_to": "ExistingAppDiscovery",
+                            "route_to": "brownfield_path_selector",
                             "sequence": "brownfield_app_adoption",
                             "context_variables": {"app_type": "brownfield_app"},
                         },
                     ],
-                }
+                },
+                {
+                    "id": "brownfield_path_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldPathSelector", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "light_integration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"brownfield_build_path": "light_integration"},
+                        },
+                        {
+                            "id": "full_migration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"brownfield_build_path": "full_migration"},
+                        },
+                    ],
+                },
+                {
+                    "id": "brownfield_repo_input",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "start_discovery",
+                            "route_to": "ExistingAppDiscovery",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"github_repo": "BlocUnited-LLC/mozaiks-app"},
+                        },
+                    ],
+                },
             ],
             "workflow_sequences": [
                 {
@@ -537,6 +569,8 @@ async def test_resolve_transition_option_sequence_override_rebinds_journey(monke
                     "id": "brownfield_app_adoption",
                     "steps": [
                         {"transition": "app_type_selector"},
+                        {"transition": "brownfield_path_selector"},
+                        {"transition": "brownfield_repo_input"},
                         {"workflows": ["ExistingAppDiscovery"]},
                     ],
                 },
@@ -554,15 +588,123 @@ async def test_resolve_transition_option_sequence_override_rebinds_journey(monke
         context_seed={},
     )
 
-    assert resolution.route_type == "workflow"
-    assert resolution.routing_decision is not None
-    assert resolution.routing_decision.workflow_id == "ExistingAppDiscovery"
-    assert resolution.routing_decision.journey_id == "brownfield_app_adoption"
+    assert resolution.route_type == "transition"
+    assert resolution.target_id == "brownfield_path_selector"
+    assert resolution.routing_decision is None
+    assert resolution.journey_id == "brownfield_app_adoption"
 
     state = await store.load(app_id="app_1", user_id="user_1")
     assert state is not None
     assert state.journey_key == "brownfield_app_adoption"
     assert state.journey_position == 1
+    assert state.pending_transition_id == "brownfield_path_selector"
+    assert state.lifecycle_state == _session_model.SessionLifecycle.AWAITING_TRANSITION
+
+
+@pytest.mark.asyncio
+async def test_resolve_brownfield_path_selector_routes_to_repo_input(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}, {"id": "ExistingAppDiscovery"}],
+            "transitions": [
+                {
+                    "id": "app_type_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "greenfield_app",
+                            "route_to": "ValueEngine",
+                            "sequence": "build",
+                            "context_variables": {"app_type": "greenfield_app"},
+                        },
+                        {
+                            "id": "brownfield_app",
+                            "route_to": "brownfield_path_selector",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"app_type": "brownfield_app"},
+                        },
+                    ],
+                },
+                {
+                    "id": "brownfield_path_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldPathSelector", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "light_integration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"brownfield_build_path": "light_integration"},
+                        },
+                        {
+                            "id": "full_migration",
+                            "route_to": "brownfield_repo_input",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"brownfield_build_path": "full_migration"},
+                        },
+                    ],
+                },
+                {
+                    "id": "brownfield_repo_input",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "BrownfieldRepoInput", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "start_discovery",
+                            "route_to": "ExistingAppDiscovery",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"github_repo": "BlocUnited-LLC/mozaiks-app"},
+                        },
+                    ],
+                },
+            ],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ValueEngine"]},
+                    ],
+                },
+                {
+                    "id": "brownfield_app_adoption",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"transition": "brownfield_path_selector"},
+                        {"transition": "brownfield_repo_input"},
+                        {"workflows": ["ExistingAppDiscovery"]},
+                    ],
+                },
+            ],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    resolution = await router.resolve_transition(
+        app_id="app_1",
+        user_id="user_1",
+        transition_id="brownfield_path_selector",
+        option_id="light_integration",
+        journey_id="brownfield_app_adoption",
+        context_seed={"brownfield_build_path": "light_integration"},
+    )
+
+    assert resolution.route_type == "transition"
+    assert resolution.target_id == "brownfield_repo_input"
+    assert resolution.routing_decision is None
+    assert resolution.journey_id == "brownfield_app_adoption"
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+    assert state is not None
+    assert state.journey_key == "brownfield_app_adoption"
+    assert state.journey_position == 2
+    assert state.pending_transition_id == "brownfield_repo_input"
+    assert state.lifecycle_state == _session_model.SessionLifecycle.AWAITING_TRANSITION
 
 
 @pytest.mark.asyncio
@@ -1051,7 +1193,7 @@ async def test_resolve_resume_prefers_session_state_chat(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_resolve_resume_does_not_substitute_when_requested_chat_missing(monkeypatch):
+async def test_resolve_resume_substitutes_latest_workflow_when_requested_chat_missing(monkeypatch):
     persistence = _FakePersistence()
     sessions = await persistence._coll()
     sessions._docs["chat_agent_1"] = {
@@ -1079,6 +1221,35 @@ async def test_resolve_resume_does_not_substitute_when_requested_chat_missing(mo
         workflow_id="AgentGenerator",
         chat_id="chat_agent_1",
     )
+
+    resolution = await router.resolve_resume(
+        app_id="app_1",
+        user_id="user_1",
+        requested_workflow_id="AgentGenerator",
+        requested_chat_id="fresh_chat_id",
+    )
+
+    assert resolution["found"] is True
+    assert resolution["resolved_from"] == "latest_chat_after_requested_chat_missing"
+    assert resolution["chat_id"] == "chat_agent_1"
+    assert resolution["requested_chat_id"] == "fresh_chat_id"
+    assert resolution["session_state"]["current_chat_id"] == "chat_agent_1"
+
+
+@pytest.mark.asyncio
+async def test_resolve_resume_keeps_requested_missing_chat_when_no_prior_run(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "AgentGenerator"}],
+            "transitions": [],
+            "workflow_sequences": [],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
 
     resolution = await router.resolve_resume(
         app_id="app_1",

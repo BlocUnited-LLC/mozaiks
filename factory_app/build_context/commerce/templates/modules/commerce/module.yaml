@@ -8,6 +8,7 @@ module:
   visibility: app
   type: standard
   handler: backend.handler:CommerceHandler
+  user_data_scope: true
 
 permissions:
   - id: commerce.catalog.read

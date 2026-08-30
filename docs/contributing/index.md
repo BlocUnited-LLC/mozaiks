@@ -7,12 +7,29 @@ improving Studio, or maintaining the release pipeline.
 If you are building an app with Mozaiks, you do not need this section.
 Start with [Getting Started](../getting-started.md) instead.
 
+## Your First Pull Request
+
+The full mechanical path — fork, branch, install development dependencies,
+make a focused change, run the relevant tests, and open a pull request — plus
+what you can contribute **without** MongoDB, Node.js, a running Studio
+instance, or an LLM API key (documentation, most Python tests, and many CLI
+changes) is documented once, in
+[CONTRIBUTING.md](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CONTRIBUTING.md#quickstart-your-first-pull-request).
+Start there.
+
 ## Where to start
 
 - **[Local Setup](../local-setup.md)** — source checkout, editable install, and how to run the builder stack from repo
 - **[Architecture](../architecture/index.md)** — how the runtime, app bundle contract, module system, workflows, and frontend fit together
+- **[AI Policy](ai-policy.md)** — what we ask of AI-assisted contributions, and the repository-boundary mistake coding agents make most often here
 - **[Agent Bootstrap Prompt](../agent-bootstrap-prompt.md)** — hand a task to Claude Code, Cursor, or Copilot with the repo-aware bootstrap prompt
 - **[Contributor Guidance Readiness](contributor-guidance-readiness.md)** — current skill coverage, routing map, deferrals, and guidance validation tests
+
+## Getting Help
+
+Ask in [Discord](https://discord.gg/Qnsywad9kp) — questions about an approach
+are welcome before you write the code, and usually save everyone a review
+cycle.
 
 ## Preview the Docs Locally
 
@@ -32,7 +49,7 @@ Open **http://127.0.0.1:8000** — the site rebuilds automatically when you save
 
 ## Release and Maintenance
 
-- **[Releasing](../releasing.md)** — tag-driven PyPI publish flow
+- **[Releasing](../releasing.md)** — release hold and future publish workflow
 - **[Verified Setup Guide](../architecture/verified/setup-guide.md)** — maintainer-verified local environment
 - **[Auth Setup](../architecture/verified/auth-setup.md)** — Keycloak and auth configuration
 - **[Trigger Mechanisms](../architecture/verified/trigger-mechanisms.md)** — workflow trigger reference

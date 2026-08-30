@@ -1,7 +1,8 @@
 # ValueEngine handoffs.
 
 transition_rules:
-# Unconditional fallbacks first (lowest priority — only fire when no condition matches)
+# The runtime compiler prioritizes conditional rules before unconditional
+# after_turn fallbacks while preserving YAML order within each group.
 - source_agent: ValueInterviewAgent
   target_agent: user
   transition_type: after_turn
@@ -17,7 +18,7 @@ transition_rules:
   transition_type: after_turn
   transition_target: RevertToUserTarget
 
-# Conditional rules after their fallbacks (higher index = higher priority = evaluated first)
+# Conditional rules win over same-source after_turn fallbacks when their context matches.
 - source_agent: ValueInterviewAgent
   target_agent: ResearchAgent
   transition_type: condition

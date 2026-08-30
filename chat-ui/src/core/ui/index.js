@@ -13,6 +13,8 @@ import DiagramViewer from './DiagramViewer';
 import DownloadCenter from './DownloadCenter';
 import ArtifactWorkbench from './ArtifactWorkbench';
 import EscalationCard from './EscalationCard';
+import ArtifactLoadingState from '../../ui/primitives/ArtifactLoadingState';
+import SystemStatusCard from './SystemStatusCard';
 
 // L1 agent-UI primitives (ui.render event system)
 import {
@@ -46,6 +48,8 @@ const CoreComponents = {
   DiagramViewer,
   DownloadCenter,
   ArtifactWorkbench,
+  ArtifactLoadingState,
+  SystemStatusCard,
   // L1 primitives — discoverable by WorkflowUIRouter via component name
   DataTable,
   Timeline,
@@ -70,6 +74,8 @@ export {
   DiagramViewer,
   DownloadCenter,
   ArtifactWorkbench,
+  ArtifactLoadingState,
+  SystemStatusCard,
   // L1 primitives
   DataTable,
   Timeline,

@@ -88,6 +88,41 @@ async def test_backend_request_success_path(monkeypatch):
     assert parsed["data"]["ok"] is True
 
 
+@pytest.mark.asyncio
+async def test_backend_request_propagates_workflow_trigger_lineage(monkeypatch):
+    import mozaiksai.core.adapters.http_app_backend as _http_mod
+    from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+        WORKFLOW_TRIGGER_TRACE_HEADER,
+        WORKFLOW_TRIGGER_TRACE_KEY,
+    )
+    from mozaiksai.core.workflow import app_backend_tools
+
+    captured = {}
+
+    class _CapturingBackend(_HealthyBackend):
+        async def request(self, method, path, **kwargs):
+            captured.update(kwargs)
+            return await super().request(method, path, **kwargs)
+
+    monkeypatch.setattr(_http_mod, "get_app_backend", lambda: _CapturingBackend())
+    trace = {
+        "root_event_id": "evt-root",
+        "depth": 1,
+        "capability_ids": ["tasks.review"],
+        "invocation_ids": ["wti-parent"],
+    }
+
+    result = await app_backend_tools.backend_request(
+        "POST",
+        "/api/modules/tasks/complete",
+        payload={"task_id": "task-1"},
+        context_variables={WORKFLOW_TRIGGER_TRACE_KEY: trace},
+    )
+
+    assert json.loads(result)["status"] == "success"
+    assert json.loads(captured["headers"][WORKFLOW_TRIGGER_TRACE_HEADER]) == trace
+
+
 # ---------------------------------------------------------------------------
 # emit_event
 # ---------------------------------------------------------------------------
@@ -121,6 +156,57 @@ async def test_emit_event_success_path(monkeypatch):
 
     assert parsed["status"] == "emitted"
     assert parsed["event_type"] == "listing.saved"
+
+
+@pytest.mark.asyncio
+async def test_emit_event_propagates_canonical_trigger_lineage(monkeypatch):
+    import mozaiksai.core.adapters.http_app_backend as _http_mod
+    from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+        WORKFLOW_TRIGGER_TRACE_KEY,
+    )
+    from mozaiksai.core.workflow import app_backend_tools
+
+    captured = {}
+
+    class _CapturingBackend(_HealthyBackend):
+        async def emit(self, event_type, data):
+            captured["event_type"] = event_type
+            captured["data"] = data
+            return True
+
+    monkeypatch.setattr(_http_mod, "get_app_backend", lambda: _CapturingBackend())
+    trace = {
+        "root_event_id": "evt-root",
+        "depth": 1,
+        "capability_ids": ["tasks.review"],
+        "invocation_ids": ["wti-parent"],
+    }
+    result = await app_backend_tools.emit_event(
+        "domain.tasks.reviewed",
+        {"task_id": "task-1"},
+        context_variables={
+            "app_id": "app-1",
+            "tenant_id": "tenant-1",
+            "workspace_id": "workspace-1",
+            "user_id": "user-1",
+            "workflow_id": "ReviewWorkflow",
+            "chat_id": "chat-1",
+            WORKFLOW_TRIGGER_TRACE_KEY: trace,
+        },
+    )
+
+    assert json.loads(result)["status"] == "emitted"
+    envelope = captured["data"]
+    assert captured["event_type"] == "domain.tasks.reviewed"
+    assert envelope["id"].startswith("evt_")
+    assert envelope["type"] == "domain.tasks.reviewed"
+    assert envelope["payload"] == {"task_id": "task-1"}
+    assert envelope["tenant"] == {
+        "app_id": "app-1",
+        "tenant_id": "tenant-1",
+        "workspace_id": "workspace-1",
+    }
+    assert envelope[WORKFLOW_TRIGGER_TRACE_KEY] == trace
 
 
 # ---------------------------------------------------------------------------

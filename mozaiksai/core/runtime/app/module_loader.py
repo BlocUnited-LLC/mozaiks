@@ -34,6 +34,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.taxonomy import SemanticCategory, validate_registered_identifier
 
 logger = get_workflow_logger("module_loader")
 
@@ -288,6 +289,11 @@ class ModuleDefinition(ModuleContractModel):
         """Maps each action id to its entitlement_gate capability_id (or None)."""
         return {action.id: action.entitlement_gate for action in self.actions}
 
+    @property
+    def action_emits_map(self) -> dict[str, list[str]]:
+        """Maps each action id to event types declared in module.yaml actions[].emits."""
+        return {action.id: list(action.emits) for action in self.actions}
+
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> ModuleDefinition:
         action_ids = [action.id for action in self.actions]
@@ -308,6 +314,17 @@ class ModuleDefinition(ModuleContractModel):
                 raise ValueError(
                     f"action capability {capability.capability_id!r} targets unknown action {capability.target!r}"
                 )
+
+        # Check 3: every permission ID referenced in action.permissions[] must be
+        # declared in the module-level permissions block.
+        declared_permission_ids = set(permission_ids)
+        for action in self.actions:
+            for perm_id in action.permissions:
+                if perm_id not in declared_permission_ids:
+                    raise ValueError(
+                        f"action {action.id!r} references undeclared permission {perm_id!r}; "
+                        "add it to the module-level permissions block"
+                    )
         return self
 
 
@@ -406,6 +423,13 @@ class ModuleReaction(ModuleContractModel):
     filters: dict[str, Any] | None = None
     idempotency_key: str | None = None
     permissions: list[str] = Field(default_factory=list)
+    # Lease and retry configuration — only meaningful when idempotency_key is set.
+    # lease_seconds: how long a claim is held before it becomes reclaimable (crash recovery).
+    # max_attempts: total attempts allowed; None = unlimited retries.
+    # retry_delay_seconds: minimum wait after a failure before the slot is reclaimable.
+    lease_seconds: int = 300
+    max_attempts: int | None = None
+    retry_delay_seconds: int = 0
 
     @field_validator("id", "event_type", mode="before")
     @classmethod
@@ -429,6 +453,39 @@ class ModuleReaction(ModuleContractModel):
             raise ValueError(
                 f"module reactions must use {CANONICAL_EVENT_PREFIX_LABEL} event_type values"
             )
+        return value
+
+    @field_validator("lease_seconds", "max_attempts", "retry_delay_seconds", mode="before")
+    @classmethod
+    def _int_not_bool(cls, value: Any, info) -> Any:
+        """Reject booleans and non-integers; accept None only for max_attempts."""
+        if value is None:
+            return value
+        if isinstance(value, bool):
+            raise ValueError(f"{info.field_name} must be an integer, not a boolean")
+        if not isinstance(value, int):
+            raise ValueError(f"{info.field_name} must be an integer")
+        return value
+
+    @field_validator("lease_seconds")
+    @classmethod
+    def _lease_seconds_bounds(cls, value: int) -> int:
+        if value < 10 or value > 3600:
+            raise ValueError("lease_seconds must be between 10 and 3600")
+        return value
+
+    @field_validator("max_attempts")
+    @classmethod
+    def _max_attempts_positive(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("max_attempts must be at least 1")
+        return value
+
+    @field_validator("retry_delay_seconds")
+    @classmethod
+    def _retry_delay_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("retry_delay_seconds must be >= 0")
         return value
 
 
@@ -561,10 +618,26 @@ class ModuleNotificationsManifest(ModuleContractModel):
         return self
 
 
+class SettingDef(ModuleContractModel):
+    """A single setting declared in contracts/settings.yaml."""
+
+    id: str
+    type: Literal["string", "boolean", "integer", "enum"] = "string"
+    default: Any = None
+    scope: Literal["app", "user"] = "app"
+    label: str = ""
+    description: str | None = None
+    enum_values: list[str] | None = None
+
+
 class ModuleSettingsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.settings.v1"] = "mozaiks.settings.v1"
-    settings: list[dict[str, Any]] = Field(default_factory=list)
+    settings: list[SettingDef] = Field(default_factory=list)
     features: list[dict[str, Any]] = Field(default_factory=list)
+
+    def defaults(self) -> dict[str, Any]:
+        """Return a resolved dict of {setting_id: default_value} for all declared settings."""
+        return {s.id: s.default for s in self.settings}
 
 
 class ModuleAdminPanel(ModuleContractModel):
@@ -1042,6 +1115,20 @@ class LoadedModule:
     def action_entitlement_map(self) -> dict[str, str | None]:
         return self.definition.action_entitlement_map
 
+    @property
+    def action_emits_map(self) -> dict[str, list[str]]:
+        return self.definition.action_emits_map
+
+    @property
+    def event_payload_schemas_map(self) -> dict[str, dict[str, Any]]:
+        if self.manifests.events is None:
+            return {}
+        return {
+            event.type: dict(event.payload_schema)
+            for event in self.manifests.events.events
+            if event.payload_schema
+        }
+
     def __repr__(self) -> str:
         return f"<LoadedModule name={self.name!r} handler={type(self.handler).__name__}>"
 
@@ -1066,8 +1153,9 @@ class ModuleLoader:
         "policy_hooks": ("policy_hooks.yaml", ModulePolicyHooksManifest),
     }
 
-    def __init__(self, base_path: str) -> None:
+    def __init__(self, base_path: str, *, taxonomy_advisory: bool = False) -> None:
         self._base = Path(base_path)
+        self._taxonomy_advisory = taxonomy_advisory
         import_roots = [self._base.parent, self._base] if self._base.name == "app" else [self._base]
         for root in import_roots:
             root_text = str(root.resolve())
@@ -1124,6 +1212,24 @@ class ModuleLoader:
         except Exception as exc:
             raise ModuleLoadError(f"Invalid module.yaml for {name!r}: {exc}") from exc
 
+        if self._taxonomy_advisory:
+            try:
+                for capability in definition.capabilities:
+                    validate_registered_identifier(
+                        SemanticCategory.CAPABILITY,
+                        capability.capability_id,
+                        advisory=True,
+                    )
+                for action in definition.actions:
+                    if action.entitlement_gate:
+                        validate_registered_identifier(
+                            SemanticCategory.CAPABILITY,
+                            action.entitlement_gate,
+                            advisory=True,
+                        )
+            except ValueError as exc:
+                raise ModuleLoadError(f"Invalid module.yaml taxonomy for {name!r}: {exc}") from exc
+
         if definition.name != name:
             raise ModuleLoadError(
                 f"module.yaml module.id {definition.name!r} must match folder name {name!r}"
@@ -1170,19 +1276,19 @@ class ModuleLoader:
         Protocol).  It is registered under ``module_id`` with the process-global
         ``account_data_registry``.
 
-        Failure to load the handler logs a warning (not a hard error) so a
-        missing handler file does not prevent the rest of the module from loading.
-        Generated modules must declare the file; the warning makes the gap visible.
+        A missing backend/account_data_handler.py raises ModuleLoadError — the
+        module will not load. Generated modules must declare this file whenever
+        user_data_scope=true is set.
         """
         handler_file = module_dir / "backend" / "account_data_handler.py"
         if not handler_file.exists():
-            logger.warning(
-                "ACCOUNT_HANDLER_MISSING: module %r declares user_data_scope=true "
-                "but backend/account_data_handler.py was not found. "
-                "Account deletion and data export will NOT cover this module's data.",
-                module_id,
+            raise ModuleLoadError(
+                f"module {module_id!r} declares user_data_scope=true but "
+                "backend/account_data_handler.py was not found. "
+                "Generate backend/account_data_handler.py implementing the "
+                "AccountDataHandler protocol (delete_user_data + export_user_data), "
+                "or remove user_data_scope=true from module.yaml."
             )
-            return
 
         try:
             import importlib.util as _ilu
@@ -1298,6 +1404,18 @@ class ModuleLoader:
 
         manifests = ModuleCompanionManifests.model_validate(parsed)
         declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
+        if self._taxonomy_advisory:
+            try:
+                for event_type in sorted(declared_events):
+                    validate_registered_identifier(
+                        SemanticCategory.EVENT,
+                        event_type,
+                        advisory=True,
+                    )
+            except ValueError as exc:
+                raise ModuleLoadError(
+                    f"Invalid events.yaml taxonomy for {definition.name!r}: {exc}"
+                ) from exc
         if manifests.events is not None:
             for event in manifests.events.events:
                 if event.producer != definition.name:
@@ -1324,20 +1442,76 @@ class ModuleLoader:
         declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
 
         if manifests.reactions is not None:
+            declared_permission_ids = {permission.id for permission in definition.permissions}
             for reaction in manifests.reactions.reactions:
                 event_type = str(reaction.event_type or "").strip()
+                if self._taxonomy_advisory and event_type:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.EVENT, event_type, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"reactions.yaml references unknown event {event_type!r}: {exc}"
+                        ) from exc
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"reactions.yaml references non-canonical event {event_type!r}"
                     )
+                for permission_id in reaction.permissions:
+                    if permission_id not in declared_permission_ids:
+                        raise ModuleLoadError(
+                            f"reactions.yaml reaction {reaction.id!r} references undeclared "
+                            f"permission {permission_id!r}; add it to the module-level permissions block"
+                        )
+                capability_id = reaction.target.capability_id
+                if self._taxonomy_advisory and capability_id:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.CAPABILITY, capability_id, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"reactions.yaml references unknown capability {capability_id!r}: {exc}"
+                        ) from exc
 
         if manifests.notifications is not None:
             for notification in manifests.notifications.notifications:
                 event_type = str(getattr(notification, "event_type", "") or "").strip()
+                if self._taxonomy_advisory and event_type:
+                    try:
+                        validate_registered_identifier(
+                            SemanticCategory.EVENT, event_type, advisory=True
+                        )
+                    except ValueError as exc:
+                        raise ModuleLoadError(
+                            f"notifications.yaml references unknown event {event_type!r}: {exc}"
+                        ) from exc
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"notifications.yaml references non-canonical event {event_type!r}"
                     )
+
+        # Check 6: notification reactions must reference a notification_id
+        # declared in contracts/notifications.yaml.
+        if manifests.reactions is not None:
+            notification_reactions = [
+                r for r in manifests.reactions.reactions if r.target.kind == "notification"
+            ]
+            if notification_reactions:
+                if manifests.notifications is None:
+                    raise ModuleLoadError(
+                        f"reactions.yaml reaction {notification_reactions[0].id!r} has "
+                        "target.kind=notification but contracts/notifications.yaml does not exist"
+                    )
+                declared_notification_ids = {n.id for n in manifests.notifications.notifications}
+                for reaction in notification_reactions:
+                    nid = reaction.target.notification_id
+                    if nid and nid not in declared_notification_ids:
+                        raise ModuleLoadError(
+                            f"reactions.yaml reaction {reaction.id!r} target.notification_id "
+                            f"{nid!r} is not declared in contracts/notifications.yaml"
+                        )
 
     @staticmethod
     def _is_known_or_canonical_event(event_type: str, declared_events: set[str]) -> bool:

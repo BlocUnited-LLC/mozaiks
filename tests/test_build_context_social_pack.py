@@ -177,6 +177,25 @@ def test_activity_feed_module_capabilities_target_existing_actions() -> None:
     assert _capability_ids(module_yaml) == {"social.feed.read"}
 
 
+def test_activity_feed_declares_user_data_scope() -> None:
+    """activity_feed stores actor_id/about_user_id/feed_user_ids — user-owned PII.
+
+    Without user_data_scope=true the module_loader skips AccountDataHandler
+    registration, so GDPR delete and export silently miss this module's data.
+    """
+    module_yaml = _read_yaml(TEMPLATES / "modules" / "activity_feed" / "module.yaml")
+    assert module_yaml.get("module", {}).get("user_data_scope") is True
+
+
+def test_activity_feed_backend_ships_account_data_handler() -> None:
+    handler = TEMPLATES / "modules" / "activity_feed" / "backend" / "account_data_handler.py"
+    assert handler.exists(), "account_data_handler.py must exist alongside user_data_scope=true"
+    source = handler.read_text(encoding="utf-8")
+    assert "class AccountDataHandler" in source
+    assert "async def delete_user_data" in source
+    assert "async def export_user_data" in source
+
+
 def test_activity_feed_populated_via_reactions_not_direct_calls() -> None:
     """activity_feed populates via domain event reactions, not direct service calls."""
     reactions = _read_yaml(

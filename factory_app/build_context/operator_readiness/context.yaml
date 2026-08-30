@@ -1,0 +1,27 @@
+context_id: operator_readiness
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates
+    kind: templates
+pack:
+  id: operator_readiness
+  version: "0.1.11"
+  status: active
+  capability_source: config_file
+  description: >
+    Deterministic host/operator launch-readiness pack. The pack renders a
+    canonical no-spend readiness config, a local launcher wrapper, and a short
+    operator guide from structured AppPlanAgent output. It is intended for
+    platform-style Mozaiks apps that need reproducible evidence gates, not for
+    ordinary customer apps.
+capabilities:
+  - capability_id: operator_readiness.profile.select
+  - capability_id: operator_readiness.evidence.local
+  - capability_id: operator_readiness.launch.check
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

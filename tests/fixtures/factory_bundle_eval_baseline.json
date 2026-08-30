@@ -1,0 +1,579 @@
+{
+  "aggregates": {
+    "action_count": {
+      "errored": 0,
+      "failed": 0,
+      "key": "action_count",
+      "mean": 3.2,
+      "pass_rate": null,
+      "passed": 0,
+      "samples": 5
+    },
+    "action_gate_coverage": {
+      "errored": 0,
+      "failed": 0,
+      "key": "action_gate_coverage",
+      "mean": 0.05,
+      "pass_rate": null,
+      "passed": 0,
+      "samples": 5
+    },
+    "bundle_parses": {
+      "errored": 0,
+      "failed": 0,
+      "key": "bundle_parses",
+      "mean": null,
+      "pass_rate": 1.0,
+      "passed": 5,
+      "samples": 0
+    },
+    "every_module_has_contract": {
+      "errored": 0,
+      "failed": 0,
+      "key": "every_module_has_contract",
+      "mean": null,
+      "pass_rate": 1.0,
+      "passed": 5,
+      "samples": 0
+    },
+    "gated_capabilities_declared": {
+      "errored": 0,
+      "failed": 0,
+      "key": "gated_capabilities_declared",
+      "mean": null,
+      "pass_rate": 1.0,
+      "passed": 5,
+      "samples": 0
+    },
+    "has_app_manifest": {
+      "errored": 0,
+      "failed": 0,
+      "key": "has_app_manifest",
+      "mean": null,
+      "pass_rate": 1.0,
+      "passed": 5,
+      "samples": 0
+    },
+    "has_dockerfile": {
+      "errored": 0,
+      "failed": 5,
+      "key": "has_dockerfile",
+      "mean": null,
+      "pass_rate": 0.0,
+      "passed": 0,
+      "samples": 0
+    },
+    "has_subscription_catalog": {
+      "errored": 0,
+      "failed": 4,
+      "key": "has_subscription_catalog",
+      "mean": null,
+      "pass_rate": 0.2,
+      "passed": 1,
+      "samples": 0
+    },
+    "module_count": {
+      "errored": 0,
+      "failed": 0,
+      "key": "module_count",
+      "mean": 1.6,
+      "pass_rate": null,
+      "passed": 0,
+      "samples": 5
+    },
+    "ui_endpoints_resolve": {
+      "errored": 0,
+      "failed": 0,
+      "key": "ui_endpoints_resolve",
+      "mean": null,
+      "pass_rate": 1.0,
+      "passed": 5,
+      "samples": 0
+    },
+    "ui_pages_present": {
+      "errored": 0,
+      "failed": 0,
+      "key": "ui_pages_present",
+      "mean": null,
+      "pass_rate": 1.0,
+      "passed": 5,
+      "samples": 0
+    },
+    "ungated_plan_capabilities": {
+      "errored": 0,
+      "failed": 0,
+      "key": "ungated_plan_capabilities",
+      "mean": 0.2,
+      "pass_rate": null,
+      "passed": 0,
+      "samples": 5
+    }
+  },
+  "bundle_count": 5,
+  "bundles": {
+    "admin_operations_dashboard/app": [
+      {
+        "comment": null,
+        "detail": {},
+        "key": "bundle_parses",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_app_manifest",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_subscription_catalog",
+        "score": 0.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "every_module_has_contract",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "module_count",
+        "score": null,
+        "value": 1.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_count",
+        "score": null,
+        "value": 2.0
+      },
+      {
+        "comment": null,
+        "detail": {
+          "orphaned": []
+        },
+        "key": "gated_capabilities_declared",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "ungated": []
+        },
+        "key": "ungated_plan_capabilities",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_gate_coverage",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "ui_pages_present",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "broken": []
+        },
+        "key": "ui_endpoints_resolve",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_dockerfile",
+        "score": 0.0,
+        "value": null
+      }
+    ],
+    "authenticated_crud_projects/app": [
+      {
+        "comment": null,
+        "detail": {},
+        "key": "bundle_parses",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_app_manifest",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_subscription_catalog",
+        "score": 0.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "every_module_has_contract",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "module_count",
+        "score": null,
+        "value": 2.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_count",
+        "score": null,
+        "value": 4.0
+      },
+      {
+        "comment": null,
+        "detail": {
+          "orphaned": []
+        },
+        "key": "gated_capabilities_declared",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "ungated": []
+        },
+        "key": "ungated_plan_capabilities",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_gate_coverage",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "ui_pages_present",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "broken": []
+        },
+        "key": "ui_endpoints_resolve",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_dockerfile",
+        "score": 0.0,
+        "value": null
+      }
+    ],
+    "community_content/app": [
+      {
+        "comment": null,
+        "detail": {},
+        "key": "bundle_parses",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_app_manifest",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_subscription_catalog",
+        "score": 0.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "every_module_has_contract",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "module_count",
+        "score": null,
+        "value": 2.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_count",
+        "score": null,
+        "value": 4.0
+      },
+      {
+        "comment": null,
+        "detail": {
+          "orphaned": []
+        },
+        "key": "gated_capabilities_declared",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "ungated": []
+        },
+        "key": "ungated_plan_capabilities",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_gate_coverage",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "ui_pages_present",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "broken": []
+        },
+        "key": "ui_endpoints_resolve",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_dockerfile",
+        "score": 0.0,
+        "value": null
+      }
+    ],
+    "monetized_saas_reports/app": [
+      {
+        "comment": null,
+        "detail": {},
+        "key": "bundle_parses",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_app_manifest",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_subscription_catalog",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "every_module_has_contract",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "module_count",
+        "score": null,
+        "value": 2.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_count",
+        "score": null,
+        "value": 4.0
+      },
+      {
+        "comment": null,
+        "detail": {
+          "orphaned": []
+        },
+        "key": "gated_capabilities_declared",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": "not gated by any action: reports.view",
+        "detail": {
+          "ungated": [
+            "reports.view"
+          ]
+        },
+        "key": "ungated_plan_capabilities",
+        "score": null,
+        "value": 1.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_gate_coverage",
+        "score": null,
+        "value": 0.25
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "ui_pages_present",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "broken": []
+        },
+        "key": "ui_endpoints_resolve",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_dockerfile",
+        "score": 0.0,
+        "value": null
+      }
+    ],
+    "workflow_agent_research/app": [
+      {
+        "comment": null,
+        "detail": {},
+        "key": "bundle_parses",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_app_manifest",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_subscription_catalog",
+        "score": 0.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "every_module_has_contract",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "module_count",
+        "score": null,
+        "value": 1.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_count",
+        "score": null,
+        "value": 2.0
+      },
+      {
+        "comment": null,
+        "detail": {
+          "orphaned": []
+        },
+        "key": "gated_capabilities_declared",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "ungated": []
+        },
+        "key": "ungated_plan_capabilities",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "action_gate_coverage",
+        "score": null,
+        "value": 0.0
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "ui_pages_present",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {
+          "broken": []
+        },
+        "key": "ui_endpoints_resolve",
+        "score": 1.0,
+        "value": null
+      },
+      {
+        "comment": null,
+        "detail": {},
+        "key": "has_dockerfile",
+        "score": 0.0,
+        "value": null
+      }
+    ]
+  },
+  "run_id": "factory-regression",
+  "schema_version": "mozaiks.bundle_eval.v1"
+}

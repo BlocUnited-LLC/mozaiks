@@ -19,6 +19,7 @@ from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
     load_data_migrations,
 )
+from tests.module_authority_test_helpers import trusted_framework_authority
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "appplan_persistent_projects_output.json"
@@ -101,6 +102,19 @@ class FakePersistenceCollection:
 
     async def count(self, query: Mapping[str, Any]) -> int:
         return len(await self.find_many(query, limit=100))
+
+    def list_indexes(self):
+        return FakeCursor(
+            [
+                {"name": name, "key": dict(index["keys"]), **{k: v for k, v in index.items() if k not in {"name", "keys"}}}
+                for name, index in self.indexes.items()
+            ]
+        )
+
+    async def create_index(self, keys: list[tuple[str, int]], **kwargs: Any) -> str:
+        name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
+        self.indexes[name] = {"name": name, "keys": list(keys), **{k: v for k, v in kwargs.items() if k != "name"}}
+        return name
 
     async def ensure_indexes(self, indexes: Sequence[Mapping[str, Any]]) -> None:
         for index in indexes:
@@ -193,7 +207,9 @@ class FakeHistoryCollection:
 
     async def create_index(self, keys, **kwargs):
         name = str(kwargs.get("name") or "_".join(field for field, _ in keys))
-        self.index_rows.append({"name": name, "key": dict(keys)})
+        self.index_rows.append(
+            {"name": name, "key": dict(keys), **{key: value for key, value in kwargs.items() if key != "name"}}
+        )
         return name
 
     async def find_one(self, query: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -587,13 +603,20 @@ def _page_output() -> dict[str, Any]:
                 "filename": "ui/pages/projects.yaml",
                 "content": yaml.safe_dump(
                     {
+                        "schema_version": "mozaiks.app_page.v1",
+                        "name": "Projects",
                         "route": "/projects",
                         "title": "Projects",
+                        "page_type": "record_list",
+                        "layout": "full-width",
                         "sections": [
                             {
                                 "id": "projects",
-                                "type": "data_table",
-                                "api_endpoint": "/api/modules/projects/list_projects",
+                                "primitive": "DataTable",
+                                "config": {
+                                    "columns": ["id", "name", "status"],
+                                    "api_endpoint": "/api/modules/projects/list_projects",
+                                },
                             }
                         ],
                     },
@@ -604,13 +627,20 @@ def _page_output() -> dict[str, Any]:
                 "filename": "ui/pages/tasks.yaml",
                 "content": yaml.safe_dump(
                     {
+                        "schema_version": "mozaiks.app_page.v1",
+                        "name": "Tasks",
                         "route": "/tasks",
                         "title": "Tasks",
+                        "page_type": "record_list",
+                        "layout": "full-width",
                         "sections": [
                             {
                                 "id": "tasks",
-                                "type": "data_table",
-                                "api_endpoint": "/api/modules/tasks/list_tasks",
+                                "primitive": "DataTable",
+                                "config": {
+                                    "columns": ["id", "title", "status"],
+                                    "api_endpoint": "/api/modules/tasks/list_tasks",
+                                },
                             }
                         ],
                     },
@@ -801,7 +831,8 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
         persistence=persistence,
         history_client=FakeHistoryClient(),
     )
-    assert applied_indexes == 2
+    assert applied_indexes.created == 2
+    assert applied_indexes.verified == 2
     assert applied_migrations == 1
     assert "project_owner_created_at" in persistence.collection("projects", "projects").indexes
     assert "task_project_status" in persistence.collection("tasks", "tasks").indexes
@@ -825,11 +856,11 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
             app_id="app_a",
             tenant_id="tenant_1",
             user_id="user_1",
-            params={"project_id": "project_1", "name": "Launch Plan"},
+            params={"project_id": "project_1", "name": "Launch Plan"}, authority=trusted_framework_authority(),
         )
     )
     listed_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_a", params={}, authority=trusted_framework_authority())
     )
     created_task = await executor.execute(
         ModuleRequest(
@@ -837,14 +868,14 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
             action="create_task",
             app_id="app_a",
             user_id="user_1",
-            params={"task_id": "task_1", "title": "Draft scope", "project_id": "project_1"},
+            params={"task_id": "task_1", "title": "Draft scope", "project_id": "project_1"}, authority=trusted_framework_authority(),
         )
     )
     listed_tasks = await executor.execute(
-        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"})
+        ModuleRequest(module="tasks", action="list_tasks", app_id="app_a", params={"project_id": "project_1"}, authority=trusted_framework_authority())
     )
     app_b_projects = await executor.execute(
-        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={})
+        ModuleRequest(module="projects", action="list_projects", app_id="app_b", params={}, authority=trusted_framework_authority())
     )
 
     assert created_project.success is True

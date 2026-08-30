@@ -86,6 +86,7 @@ class GraphNodeType(StrEnum):
     DATA_ENTITY = "data_entity"
     INTEGRATION = "integration"
     CAPABILITY = "capability"
+    EVENT = "event"
     MODULE = "module"
     WORKFLOW = "workflow"
     AGENT = "agent"
@@ -121,6 +122,126 @@ class GraphEdgeType(StrEnum):
     REPLACES = "replaces"
     DEPENDS_ON = "depends_on"
     BLOCKS = "blocks"
+
+
+class ParserAuthority(StrEnum):
+    AUTHORITATIVE = "authoritative"
+    DEGRADED = "degraded"
+    INSUFFICIENT = "insufficient"
+
+
+class ImpactDirection(StrEnum):
+    OUTBOUND = "outbound"
+    INBOUND = "inbound"
+    BOTH = "both"
+
+
+class GraphSnapshotIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repository_scope: str | None = None
+    application_scope: str = Field(min_length=1)
+    baseline_commit_sha: str | None = None
+    graph_schema_version: str = Field(min_length=1)
+    parser_manifest_version: str = Field(min_length=1)
+    parser_manifest_digest: str = Field(min_length=1)
+    source_manifest_digest: str = Field(min_length=1)
+    graph_content_digest: str = Field(min_length=1)
+    scan_health: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    identity_digest: str = Field(min_length=1)
+
+
+class ImpactQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_digest: str = Field(min_length=1)
+    seed_node_ids: list[str] = Field(min_length=1)
+    allowed_edge_types: list[GraphEdgeType] = Field(min_length=1)
+    direction: ImpactDirection = ImpactDirection.BOTH
+    max_depth: int = Field(default=2, ge=0, le=8)
+    allowed_node_kinds: list[GraphNodeType] = Field(default_factory=list)
+    max_results: int = Field(default=100, ge=1, le=500)
+    scope_path: str | None = None
+
+    @field_validator("seed_node_ids")
+    @classmethod
+    def _dedupe_seed_node_ids(cls, value: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in value:
+            node_id = str(item or "").strip()
+            if not node_id:
+                raise ValueError("seed_node_ids must not contain empty values")
+            if node_id not in out:
+                out.append(node_id)
+        return out
+
+    @field_validator("allowed_edge_types")
+    @classmethod
+    def _dedupe_edge_types(cls, value: list[GraphEdgeType]) -> list[GraphEdgeType]:
+        out: list[GraphEdgeType] = []
+        for item in value:
+            if item not in out:
+                out.append(item)
+        return out
+
+    @field_validator("allowed_node_kinds")
+    @classmethod
+    def _dedupe_node_kinds(cls, value: list[GraphNodeType]) -> list[GraphNodeType]:
+        out: list[GraphNodeType] = []
+        for item in value:
+            if item not in out:
+                out.append(item)
+        return out
+
+    @field_validator("scope_path")
+    @classmethod
+    def _normalize_scope_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.replace("\\", "/").strip().strip("/")
+        if not normalized:
+            return None
+        if normalized.startswith("/") or any(part in {"", ".", ".."} for part in normalized.split("/")):
+            raise ValueError("scope_path must be repository-relative")
+        return normalized
+
+
+class ImpactEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seed_node_id: str = Field(min_length=1)
+    affected_node_id: str = Field(min_length=1)
+    ordered_edge_path: list[str] = Field(default_factory=list)
+    relationship_types: list[GraphEdgeType] = Field(default_factory=list)
+    distance: int = Field(ge=0)
+    structured_evidence: dict[str, Any] = Field(default_factory=dict)
+    ownership: str | None = None
+    authority: ParserAuthority = ParserAuthority.INSUFFICIENT
+    degradation_reason: str | None = None
+
+
+class ImpactReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_identity: GraphSnapshotIdentity
+    query: ImpactQuery
+    snapshot_digest: str = Field(min_length=1)
+    query_digest: str = Field(min_length=1)
+    affected_node_ids: list[str] = Field(default_factory=list)
+    affected_files: list[str] = Field(default_factory=list)
+    affected_symbols: list[str] = Field(default_factory=list)
+    affected_contracts: list[str] = Field(default_factory=list)
+    ownership_boundaries: list[dict[str, Any]] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    dependents: list[str] = Field(default_factory=list)
+    collision_risks: list[str] = Field(default_factory=list)
+    ambiguity_risks: list[str] = Field(default_factory=list)
+    unresolved_relationships: list[str] = Field(default_factory=list)
+    parser_degradation: list[str] = Field(default_factory=list)
+    truncated: bool = False
+    evidence: list[ImpactEvidence] = Field(default_factory=list)
+    report_digest: str = Field(min_length=1)
 
 
 class IntegrationReadinessStatus(StrEnum):

@@ -9,9 +9,39 @@ from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
+from .authority import (
+    AGENT_TEXT_WRITER,
+    RUNTIME_SYSTEM_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
+    UI_RESPONSE_TRIGGER_WRITER,
+    USER_TEXT_TRIGGER_WRITER,
+    ContextWriterId,
+)
 from .schema import load_context_variables_config
 
 logger = get_workflow_logger("derived_context")
+
+
+def _agent_text_writer_for(trigger: Any) -> ContextWriterId:
+    """Exact-equals triggers with a fixed declared value are deterministic
+    sentinel extraction; anything freeform (contains/regex/capture) is not."""
+    equals = str(getattr(trigger, "equals", "") or "").strip()
+    value = getattr(trigger, "value", None)
+    if equals and value != "$1":
+        return SENTINEL_TEXT_TRIGGER_WRITER
+    return AGENT_TEXT_WRITER
+
+
+def _provider_set_with_writer(provider: Any, key: str, value: Any, writer_id: ContextWriterId) -> None:
+    policy = getattr(provider, "_mozaiks_context_authority_policy", None)
+    old_writer = getattr(provider, "_mozaiks_context_writer_id", RUNTIME_SYSTEM_WRITER)
+    if policy is not None:
+        provider._mozaiks_context_writer_id = writer_id
+    try:
+        provider.set(key, value)
+    finally:
+        if policy is not None:
+            provider._mozaiks_context_writer_id = old_writer
 
 
 def _resolve_nested_key(payload: Any, key: str | None) -> Any:
@@ -224,7 +254,7 @@ class DerivedVariableSpec:
                 continue
             if hasattr(provider, "set"):
                 try:
-                    provider.set(self.name, self.default)  # type: ignore[attr-defined]
+                            _provider_set_with_writer(provider, self.name, self.default, RUNTIME_SYSTEM_WRITER)
                 except Exception as err:  # pragma: no cover
                     logger.debug("Derived variable seed failed: %s", err)
 
@@ -243,7 +273,7 @@ class DerivedVariableSpec:
                             if current != trigger.from_state:
                                 continue
                         try:
-                            provider.set(self.name, trigger.value)  # type: ignore[attr-defined]
+                            _provider_set_with_writer(provider, self.name, trigger.value, _agent_text_writer_for(trigger))
                         except Exception as err:  # pragma: no cover
                             logger.debug("Derived variable update failed: %s", err)
                 return True
@@ -439,7 +469,7 @@ class DerivedContextManager:
             for provider in self.providers:
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(binding.variable, value)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, binding.variable, value, UI_RESPONSE_TRIGGER_WRITER)
                         updated = True
                     except Exception as err:  # pragma: no cover
                         logger.debug("[DERIVED_CONTEXT] ui_response update failed: %s", err)
@@ -463,13 +493,44 @@ class DerivedContextManager:
         next routing decision is made.
         """
 
+        updates = self.preview_agent_text_updates(agent_name, text)
+        if not updates:
+            return {}
+
+        updated_vars: dict[str, Any] = {}
+        trigger_by_var = {var.name: list(var.triggers) for var in self.variables}
+        for name, value in updates.items():
+            matched = trigger_by_var.get(name) or []
+            writer = AGENT_TEXT_WRITER
+            if matched and all(_agent_text_writer_for(t) == SENTINEL_TEXT_TRIGGER_WRITER for t in matched):
+                writer = SENTINEL_TEXT_TRIGGER_WRITER
+            for provider in self.providers:
+                if hasattr(provider, "set"):
+                    try:
+                        _provider_set_with_writer(provider, name, value, writer)
+                        updated_vars[name] = value
+                    except Exception as err:  # pragma: no cover
+                        logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
+            if name in updated_vars:
+                logger.debug(
+                    "[DERIVED_CONTEXT] %s: %s -> %r (agent_text, agent=%s)",
+                    self.workflow_name, name, updated_vars[name], agent_name,
+                )
+                for cb in list(self._listeners):
+                    try:
+                        cb({"variable": name, "value": updated_vars[name], "source": "agent_text"})
+                    except Exception:  # pragma: no cover
+                        pass
+        return updated_vars
+
+    def preview_agent_text_updates(self, agent_name: str, text: str) -> dict[str, Any]:
+        """Return agent_text-derived updates without mutating providers."""
+
         candidate = str(text or "").strip()
         if not candidate or not self.variables:
             return {}
 
-        # Build a per-agent lookup once and check only variables that care about
-        # this specific agent to keep the hot path O(matching triggers).
-        updated_vars: dict[str, Any] = {}
+        updates: dict[str, Any] = {}
         for var in self.variables:
             for trigger in var.triggers:
                 if trigger.agent != agent_name:
@@ -481,24 +542,8 @@ class DerivedContextManager:
                     m = trigger._compiled.search(candidate)
                     if m and m.groups():
                         value_to_set = m.group(1)
-                for provider in self.providers:
-                    if hasattr(provider, "set"):
-                        try:
-                            provider.set(var.name, value_to_set)  # type: ignore[attr-defined]
-                            updated_vars[var.name] = value_to_set
-                        except Exception as err:  # pragma: no cover
-                            logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
-                if var.name in updated_vars:
-                    logger.debug(
-                        "[DERIVED_CONTEXT] %s: %s -> %r (agent_text, agent=%s)",
-                        self.workflow_name, var.name, updated_vars[var.name], agent_name,
-                    )
-                    for cb in list(self._listeners):
-                        try:
-                            cb({"variable": var.name, "value": updated_vars[var.name], "source": "agent_text"})
-                        except Exception:  # pragma: no cover
-                            pass
-        return updated_vars
+                updates[var.name] = value_to_set
+        return updates
 
     def apply_user_text(self, text: str) -> dict[str, Any]:
         """Apply declarative user_text triggers based on a free-form composer reply."""
@@ -515,7 +560,7 @@ class DerivedContextManager:
             for provider in self.providers:
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(binding.variable, binding.value)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, binding.variable, binding.value, USER_TEXT_TRIGGER_WRITER)
                         updated = True
                     except Exception as err:  # pragma: no cover
                         logger.debug("[DERIVED_CONTEXT] user_text update failed: %s", err)
@@ -570,7 +615,7 @@ class DerivedContextManager:
                     continue
                 if hasattr(provider, "set"):
                     try:
-                        provider.set(name, default)  # type: ignore[attr-defined]
+                        _provider_set_with_writer(provider, name, default, RUNTIME_SYSTEM_WRITER)
                     except Exception as err:  # pragma: no cover
                         logger.debug("Derived variable seed failed: %s", err)
 
@@ -585,11 +630,12 @@ class DerivedContextManager:
             if var.apply(event, self.providers):
                 logger.debug("[DERIVED_CONTEXT] %s: %s -> True", self.workflow_name, var.name)
                 try:
-                    snapshot = (
-                        self.base_context.to_dict()
-                        if hasattr(self.base_context, "to_dict")
-                        else getattr(self.base_context, "data", {})
-                    )
+                    if hasattr(self.base_context, "snapshot") and callable(getattr(self.base_context, "snapshot", None)):
+                        snapshot = self.base_context.snapshot()
+                    elif hasattr(self.base_context, "to_dict") and callable(getattr(self.base_context, "to_dict", None)):
+                        snapshot = self.base_context.to_dict()
+                    else:
+                        snapshot = {}
                     logger.debug("[DERIVED_CONTEXT] base_context snapshot: %s", snapshot)
                 except Exception as ctx_err:  # pragma: no cover
                     logger.debug("[DERIVED_CONTEXT] base_context snapshot unavailable: %s", ctx_err)

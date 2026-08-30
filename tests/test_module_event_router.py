@@ -22,15 +22,25 @@ Covers:
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from mozaiksai.core.runtime.composition.module_event_provenance import (
+    normalize_module_event_provenance,
+    normalize_module_reaction_provenance,
+)
 from mozaiksai.core.runtime.composition.module_event_router import (
+    ModuleEventPayloadValidationError,
     ModuleEventRouter,
     _is_secret_context_key,
     _render_template,
+)
+from mozaiksai.core.runtime.composition.platform_hooks import (
+    PlatformExtensionBundle,
+    PlatformHookRegistry,
 )
 
 # ---------------------------------------------------------------------------
@@ -74,6 +84,22 @@ def _loaded_module(
     return m
 
 
+def _with_event_schema(module: MagicMock, *, event_type: str, payload_schema: dict) -> MagicMock:
+    event = SimpleNamespace(type=event_type, payload_schema=payload_schema)
+    module.manifests.events = SimpleNamespace(events=[event])
+    return module
+
+
+def _with_definition(
+    module: MagicMock,
+    *,
+    actions: list[SimpleNamespace] | None = None,
+    capabilities: list[SimpleNamespace] | None = None,
+) -> MagicMock:
+    module.definition = SimpleNamespace(actions=actions or [], capabilities=capabilities or [])
+    return module
+
+
 def _router(
     modules=(),
     *,
@@ -110,17 +136,37 @@ class RecordingServiceAdapter:
         return {"success": True, "seen": payload.get("build_registry_id")}
 
 
+class RecordingProvenanceServiceAdapter:
+    calls: list[dict[str, Any]] = []
+
+    async def handle(
+        self,
+        payload: dict[str, Any],
+        event_provenance=None,
+        reaction_provenance=None,
+    ) -> dict[str, Any]:
+        self.__class__.calls.append(
+            {
+                "payload": dict(payload),
+                "event_type": event_provenance.event_type if event_provenance else None,
+                "reaction_id": reaction_provenance.reaction_id if reaction_provenance else None,
+            }
+        )
+        return {"success": True}
+
+
 def _service_adapter_target_reaction(
     event_type: str,
     *,
     reaction_id: str = "r-adapter",
+    adapter: str = f"{__name__}:RecordingServiceAdapter",
 ) -> MagicMock:
     return _reaction_model(
         event_type,
         id=reaction_id,
         target={
             "kind": "service_adapter",
-            "adapter": f"{__name__}:RecordingServiceAdapter",
+            "adapter": adapter,
             "adapter_method": "handle",
         },
     )
@@ -346,6 +392,82 @@ class TestRegister:
         assert inspect.iscoroutinefunction(registered_handler)
 
 
+class TestStaticReactionValidation:
+    def test_handler_target_must_resolve_when_handler_is_registered(self):
+        class Handler:
+            pass
+
+        mod = _loaded_module(
+            "orders",
+            reactions=[_handler_target_reaction("domain.orders.created", handler_method="missing")],
+            handler=Handler(),
+        )
+
+        with pytest.raises(ValueError, match="MODULE_REACTION_TARGET_INVALID"):
+            _router([mod])
+
+    def test_capability_target_must_resolve_when_capabilities_are_declared(self):
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.react",
+            target={"kind": "capability", "capability_id": "orders.missing"},
+        )
+        mod = _with_definition(
+            _loaded_module("orders", reactions=[reaction]),
+            capabilities=[
+                SimpleNamespace(capability_id="orders.review"),
+            ],
+        )
+
+        with pytest.raises(ValueError, match="MODULE_REACTION_TARGET_INVALID"):
+            _router([mod])
+
+    def test_statically_detectable_reaction_cycle_fails_load(self):
+        class HandlerA:
+            async def on_b(self, ctx, **kwargs):
+                return None
+
+        class HandlerB:
+            async def on_a(self, ctx, **kwargs):
+                return None
+
+        mod_a = _with_definition(
+            _loaded_module(
+                "component_a",
+                reactions=[
+                    _handler_target_reaction(
+                        "domain.component_b.y",
+                        handler_method="on_b",
+                        reaction_id="component_a.react_y",
+                    )
+                ],
+                handler=HandlerA(),
+            ),
+            actions=[
+                SimpleNamespace(handler_method="on_b", emits=["domain.component_a.x"]),
+            ],
+        )
+        mod_b = _with_definition(
+            _loaded_module(
+                "component_b",
+                reactions=[
+                    _handler_target_reaction(
+                        "domain.component_a.x",
+                        handler_method="on_a",
+                        reaction_id="component_b.react_x",
+                    )
+                ],
+                handler=HandlerB(),
+            ),
+            actions=[
+                SimpleNamespace(handler_method="on_a", emits=["domain.component_b.y"]),
+            ],
+        )
+
+        with pytest.raises(ValueError, match="MODULE_REACTION_CYCLE"):
+            _router([mod_a, mod_b])
+
+
 # ---------------------------------------------------------------------------
 # 5. handle_event — handler target
 # ---------------------------------------------------------------------------
@@ -423,6 +545,239 @@ class TestHandleEventHandlerTarget:
         assert received_ctx[0].app_id == "app-99"
         assert received_ctx[0].tenant_id == "t-99"
         assert received_ctx[0].user_id == "user-99"
+
+    @pytest.mark.asyncio
+    async def test_ctx_exposes_structured_event_and_reaction_provenance(self):
+        received_ctx = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                received_ctx.append(ctx)
+
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.react",
+            target={"kind": "handler", "handler_method": "on_event"},
+            idempotency_key="order_id",
+            permissions=["orders.react"],
+        )
+        mod = _loaded_module("orders", reactions=[reaction], handler=Handler())
+        router = _router([mod])
+
+        await router.handle_event(
+            "domain.orders.created",
+            {
+                "id": "evt-99",
+                "type": "domain.orders.created",
+                "source": {
+                    "layer": "module",
+                    "app_id": "app-99",
+                    "module_id": "orders",
+                    "capability_id": "orders.create",
+                },
+                "tenant": {"app_id": "app-99", "tenant_id": "t-99", "workspace_id": "w-99"},
+                "actor": {"type": "user", "id": "user-99"},
+                "correlation": {"correlation_id": "corr-99", "causation_id": "cause-99"},
+                "authority": {"permissions": ["orders.react"]},
+                "payload": {},
+            },
+        )
+
+        ctx = received_ctx[0]
+        assert ctx.app_id == "app-99"
+        assert ctx.tenant_id == "t-99"
+        assert ctx.user_id == "user-99"
+        assert ctx.correlation_id == "corr-99"
+        assert ctx.causation_id == "cause-99"
+        assert ctx.event_provenance.event_id == "evt-99"
+        assert ctx.event_provenance.trust_shape == "module_envelope"
+        assert ctx.event_provenance.producer_action_id == "create"
+        assert ctx.reaction_provenance.reaction_id == "orders.react"
+        assert ctx.reaction_provenance.idempotency_key == "order_id"
+        assert ctx.reaction_provenance.declared_permissions == ("orders.react",)
+        assert ctx.reaction_provenance.permissions_enforced is True
+        assert ctx.reaction_provenance.idempotency_enforced is True
+        assert ctx.permissions == ["orders.react"]
+
+    @pytest.mark.asyncio
+    async def test_payload_permission_claim_does_not_authorize_reaction(self):
+        called = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                called.append((ctx, kwargs))
+
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.react",
+            target={"kind": "handler", "handler_method": "on_event"},
+            permissions=["orders.react"],
+        )
+        mod = _loaded_module("orders", reactions=[reaction], handler=Handler())
+        router = _router([mod])
+
+        await router.handle_event(
+            "domain.orders.created",
+            _envelope(payload={"order_id": "o-1", "permissions": ["orders.react"]}),
+        )
+
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_runtime_authority_authorizes_declared_reaction_permission(self):
+        received_ctx = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                received_ctx.append(ctx)
+
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.react",
+            target={"kind": "handler", "handler_method": "on_event"},
+            permissions=["orders.react"],
+        )
+        mod = _loaded_module("orders", reactions=[reaction], handler=Handler())
+        router = _router([mod])
+
+        await router.handle_event(
+            "domain.orders.created",
+            _envelope(payload={"order_id": "o-1"})
+            | {"authority": {"permissions": ["orders.react"]}},
+        )
+
+        assert len(received_ctx) == 1
+        assert received_ctx[0].permissions == ["orders.react"]
+
+    @pytest.mark.asyncio
+    async def test_idempotency_key_executes_same_event_reaction_once(self):
+        called = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                called.append(kwargs)
+
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.react",
+            target={"kind": "handler", "handler_method": "on_event"},
+            idempotency_key="order_id",
+        )
+        mod = _loaded_module("orders", reactions=[reaction], handler=Handler())
+        router = _router([mod])
+        envelope = _envelope(payload={"order_id": "o-1"})
+
+        await router.handle_event("domain.orders.created", envelope)
+        await router.handle_event("domain.orders.created", envelope)
+
+        assert called == [{"order_id": "o-1"}]
+
+    @pytest.mark.asyncio
+    async def test_idempotency_key_keeps_distinct_events_separate(self):
+        called = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                called.append(kwargs)
+
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.react",
+            target={"kind": "handler", "handler_method": "on_event"},
+            idempotency_key="order_id",
+        )
+        mod = _loaded_module("orders", reactions=[reaction], handler=Handler())
+        router = _router([mod])
+
+        await router.handle_event("domain.orders.created", _envelope(payload={"order_id": "o-1"}))
+        await router.handle_event(
+            "domain.orders.created",
+            _envelope(payload={"order_id": "o-2"}) | {"id": "evt-2"},
+        )
+
+        assert called == [{"order_id": "o-1"}, {"order_id": "o-2"}]
+
+    @pytest.mark.asyncio
+    async def test_declared_event_payload_schema_rejects_invalid_payload_before_reaction(self):
+        called = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                called.append(kwargs)
+
+        event_type = "domain.component_a.item_created"
+        producer = _with_event_schema(
+            _loaded_module("component_a"),
+            event_type=event_type,
+            payload_schema={
+                "type": "object",
+                "required": ["item_id"],
+                "properties": {"item_id": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        )
+        consumer = _loaded_module(
+            "component_b",
+            reactions=[_handler_target_reaction(event_type, handler_method="on_event")],
+            handler=Handler(),
+        )
+        router = _router([producer, consumer])
+        envelope = {
+            "id": "evt-invalid",
+            "type": event_type,
+            "source": {"layer": "module", "module_id": "component_a", "action_id": "create"},
+            "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+            "payload": {"bad": "payload"},
+        }
+
+        with pytest.raises(ModuleEventPayloadValidationError) as exc_info:
+            await router.handle_event(event_type, envelope)
+
+        assert called == []
+        diagnostic = exc_info.value.to_dict()
+        assert diagnostic["event_type"] == event_type
+        assert diagnostic["source_module"] == "component_a"
+        assert diagnostic["source_action"] == "create"
+        assert diagnostic["schema_error"]["path"] == "$"
+
+    @pytest.mark.asyncio
+    async def test_community_component_event_composition_valid_payload_dispatches(self):
+        called = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                called.append((ctx.event_provenance.producer_module_id, kwargs))
+
+        event_type = "domain.component_a.item_created"
+        producer = _with_event_schema(
+            _loaded_module("component_a"),
+            event_type=event_type,
+            payload_schema={
+                "type": "object",
+                "required": ["item_id"],
+                "properties": {"item_id": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        )
+        consumer = _loaded_module(
+            "component_b",
+            reactions=[_handler_target_reaction(event_type, handler_method="on_event")],
+            handler=Handler(),
+        )
+        router = _router([producer, consumer])
+
+        await router.handle_event(
+            event_type,
+            {
+                "id": "evt-valid",
+                "type": event_type,
+                "source": {"layer": "module", "module_id": "component_a", "action_id": "create"},
+                "tenant": {"app_id": "app-1", "tenant_id": "tenant-1"},
+                "payload": {"item_id": "item-1"},
+            },
+        )
+
+        assert called == [("component_a", {"item_id": "item-1"})]
 
 
 # ---------------------------------------------------------------------------
@@ -729,6 +1084,40 @@ class TestEmitPlatformReaction:
         assert "my_capability" in invoker_calls
 
     @pytest.mark.asyncio
+    async def test_declared_workflow_capability_reaction_uses_capability_id(self):
+        invoker_calls = []
+
+        async def event_emitter(event_type, payload):
+            pass
+
+        async def capability_invoker(capability_id, envelope, reaction):
+            invoker_calls.append((capability_id, reaction["target"]))
+            return {"workflow_id": "OrderReviewWorkflow"}
+
+        reaction = _reaction_model(
+            "domain.orders.created",
+            id="orders.workflow",
+            target={"kind": "capability", "capability_id": "orders-review-workflow"},
+        )
+        mod = _with_definition(
+            _loaded_module("orders", reactions=[reaction]),
+            capabilities=[
+                SimpleNamespace(
+                    capability_id="orders-review-workflow",
+                    kind="workflow",
+                    target="OrderReviewWorkflow",
+                )
+            ],
+        )
+        router = _router([mod], event_emitter=event_emitter, capability_invoker=capability_invoker)
+
+        await router.handle_event("domain.orders.created", _envelope(payload={"order_id": "o-1"}))
+
+        assert invoker_calls == [
+            ("orders-review-workflow", {"kind": "capability", "capability_id": "orders-review-workflow"})
+        ]
+
+    @pytest.mark.asyncio
     async def test_service_adapter_target_invokes_adapter_and_emits_result(self):
         RecordingServiceAdapter.calls = []
         emitted = []
@@ -749,3 +1138,142 @@ class TestEmitPlatformReaction:
         event_type, event = emitted[0]
         assert event_type == "platform.reaction.service_adapter_dispatched"
         assert event["payload"]["result"] == {"success": True, "seen": "owner/app"}
+
+    @pytest.mark.asyncio
+    async def test_service_adapter_receives_provenance_only_when_signature_accepts_it(self):
+        RecordingProvenanceServiceAdapter.calls = []
+
+        async def event_emitter(event_type, payload):
+            pass
+
+        reaction = _service_adapter_target_reaction(
+            "hosted.hosting.ci_provision.requested",
+            reaction_id="ci.react",
+            adapter=f"{__name__}:RecordingProvenanceServiceAdapter",
+        )
+        mod = _loaded_module("hosting", reactions=[reaction])
+        router = _router([mod], event_emitter=event_emitter)
+
+        await router.handle_event(
+            "hosted.hosting.ci_provision.requested",
+            _envelope(payload={"build_registry_id": "owner/app"}),
+        )
+
+        assert RecordingProvenanceServiceAdapter.calls == [
+            {
+                "payload": {"build_registry_id": "owner/app"},
+                "event_type": "test.event",
+                "reaction_id": "ci.react",
+            }
+        ]
+
+
+class TestEventReactionProvenance:
+    def test_structured_envelope_normalizes_source_scope_and_correlation(self):
+        provenance = normalize_module_event_provenance(
+            "domain.tasks.created",
+            {
+                "id": "evt-1",
+                "type": "domain.tasks.created",
+                "source": {
+                    "layer": "module",
+                    "app_id": "app-1",
+                    "module_id": "tasks",
+                    "capability_id": "tasks.create",
+                },
+                "tenant": {"app_id": "app-1", "tenant_id": "tenant-1", "workspace_id": "ws-1"},
+                "actor": {"type": "user", "id": "user-1"},
+                "correlation": {"correlation_id": "corr-1", "causation_id": "cause-1"},
+                "payload": {"secret_token": "do-not-copy"},
+            },
+        )
+
+        assert provenance.event_id == "evt-1"
+        assert provenance.event_type == "domain.tasks.created"
+        assert provenance.producer_layer == "module"
+        assert provenance.producer_module_id == "tasks"
+        assert provenance.producer_action_id == "create"
+        assert provenance.app_id == "app-1"
+        assert provenance.tenant_id == "tenant-1"
+        assert provenance.workspace_id == "ws-1"
+        assert provenance.actor_id == "user-1"
+        assert provenance.correlation_id == "corr-1"
+        assert provenance.causation_id == "cause-1"
+        assert provenance.envelope_shape == "structured"
+        assert provenance.trust_shape == "module_envelope"
+        assert "secret_token" not in provenance.to_dict()
+
+    def test_flat_legacy_envelope_continues_working_and_is_classified(self):
+        provenance = normalize_module_event_provenance(
+            "domain.tasks.created",
+            {
+                "app_id": "app-flat",
+                "tenant_id": "tenant-flat",
+                "user_id": "user-flat",
+                "correlation_id": "corr-flat",
+                "task_id": "task-1",
+            },
+        )
+
+        assert provenance.event_id is None
+        assert provenance.event_type == "domain.tasks.created"
+        assert provenance.app_id == "app-flat"
+        assert provenance.tenant_id == "tenant-flat"
+        assert provenance.actor_id == "user-flat"
+        assert provenance.correlation_id == "corr-flat"
+        assert provenance.envelope_shape == "legacy_flat"
+        assert provenance.trust_shape == "legacy_flat"
+
+    def test_reaction_provenance_keeps_unenforced_manifest_fields_observable(self):
+        provenance = normalize_module_reaction_provenance(
+            {
+                "id": "tasks.react",
+                "module_id": "tasks",
+                "target": {"kind": "handler", "handler_method": "on_created"},
+                "idempotency_key": "task_id",
+                "permissions": ["tasks.react"],
+            }
+        )
+
+        assert provenance.reaction_id == "tasks.react"
+        assert provenance.source_module_id == "tasks"
+        assert provenance.target_kind == "handler"
+        assert provenance.target_ref == "on_created"
+        assert provenance.idempotency_key == "task_id"
+        assert provenance.declared_permissions == ("tasks.react",)
+        assert provenance.permissions_enforced is False
+        assert provenance.idempotency_enforced is False
+
+    @pytest.mark.asyncio
+    async def test_reaction_audit_is_payload_free_and_hook_failure_is_best_effort(self, monkeypatch):
+        seen = []
+
+        async def failing_audit_hook(audit):
+            seen.append(audit)
+            raise RuntimeError("audit sink down")
+
+        registry = PlatformHookRegistry()
+        registry._register_bundle(PlatformExtensionBundle(module_reaction_audit=failing_audit_hook))
+        monkeypatch.setattr(PlatformHookRegistry, "_instance", registry)
+
+        called = []
+
+        class Handler:
+            async def on_event(self, ctx, **kwargs):
+                called.append(kwargs)
+
+        reaction = _handler_target_reaction("domain.audit.test")
+        mod = _loaded_module("audit_mod", reactions=[reaction], handler=Handler())
+        router = _router([mod])
+
+        await router.handle_event(
+            "domain.audit.test",
+            _envelope(payload={"secret_token": "do-not-log", "value": 1}),
+        )
+
+        assert called == [{"secret_token": "do-not-log", "value": 1}]
+        assert len(seen) == 1
+        audit_dict = seen[0].to_dict()
+        assert audit_dict["outcome"] == "ok"
+        assert "payload" not in audit_dict
+        assert "secret_token" not in str(audit_dict)

@@ -1,4 +1,4 @@
-schema_version: mozaiks.page.v1
+schema_version: mozaiks.app_page.v1
 name: orders
 route: /orders
 title: Orders
@@ -61,4 +61,3 @@ sections:
         title: No orders yet
         message: Paid orders appear here after checkout completes.
 roles: null
-extensions: null

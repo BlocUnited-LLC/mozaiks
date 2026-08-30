@@ -21,6 +21,10 @@ from factory_app.workflows._shared.generated_ui_contract import (
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_ai_config,
 )
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    validate_page_schema,
+)
 from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
@@ -443,7 +447,7 @@ VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
 VALID_CUSTOM_PAGE_EXTENSIONS = {".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
-VALID_SHELL_ACTION_SURFACES = {"studio", "app_studio", "workflow_session", "transition", "public", "page"}
+VALID_SHELL_ACTION_SURFACES = {"studio", "app", "user", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
     "surface",
     "surfaces",
@@ -1715,7 +1719,11 @@ def save_app_schema(
     if not manifest_dict.get("app_name"):
         raise ValueError("manifest.app_name is required")
 
-    page_list = [_normalize_page_schema(page) for page in _normalize_list(_to_plain(pages))]
+    raw_page_list = _normalize_list(_to_plain(pages))
+    for page in raw_page_list:
+        if isinstance(page, dict) and "extensions" in page:
+            raise ValueError("AppPageSchema.extensions is removed and must not be emitted")
+    page_list = [_normalize_page_schema(page) for page in raw_page_list]
     if page_list and not isinstance(page_list, list):
         raise ValueError("save_app_schema: pages must be a list")
     _repair_missing_submit_hrefs(page_list, context_variables)
@@ -1765,6 +1773,14 @@ def save_app_schema(
                 section,
                 path=f"pages[{page.get('name')}].sections[{section_index}]",
             )
+        try:
+            validate_page_schema(page)
+        except PageSchemaValidationError as exc:
+            formatted = "; ".join(
+                f"{diagnostic.location}: {diagnostic.code}"
+                for diagnostic in exc.diagnostics
+            )
+            raise ValueError(f"Page '{page.get('name')}' violates mozaiks.app_page.v1: {formatted}") from exc
 
     if not page_list and custom_route_bundle is None:
         raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")
@@ -1849,8 +1865,8 @@ def save_app_schema(
         if context_variables and hasattr(context_variables, "set"):
             context_variables.set("generated_app_dir", str(output_dir))
     except Exception as exc:
-        # Log but don't fail — context_variables are already set; filesystem is best-effort
-        _logger.warning("Could not write schema files to disk: %s", exc)
+        _logger.exception("Could not write schema files to disk")
+        raise RuntimeError("Could not write schema files to disk") from exc
 
     msg = (agent_message or "App schema persisted.").strip()
     files_written = f"\nFiles written: {', '.join(written)}" if written else ""

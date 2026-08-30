@@ -49,6 +49,49 @@ class ControlPlaneCapabilityConfig(BaseModel):
     llm_config: dict[str, Any] | None = None
 
 
+class ControlPlaneCodingProviderBudget(BaseModel):
+    """Hard execution bounds for one coding provider.
+
+    These are ceilings the runtime enforces outside the model — the provider
+    cannot raise them, and exceeding one fails the attempt closed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_files: int = Field(default=3, ge=1, le=50)
+    max_diff_bytes: int = Field(default=262_144, ge=1024, le=16_777_216)
+    max_wall_seconds: int = Field(default=600, ge=30, le=3600)
+    max_retries: int = Field(default=1, ge=0, le=3)
+
+
+class ControlPlaneACPProviderConfig(BaseModel):
+    """Configuration for the ACP-backed CLI coding provider.
+
+    Declarative surface only: provider ids, adapter selection, and budgets.
+    Credentials, model env vars, and adapter connection details never live in
+    refinement policy — they are supplied through the host environment and
+    secret manager at spawn time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    adapter: Literal["claude_code", "codex", "opencode"] = "claude_code"
+    budget: ControlPlaneCodingProviderBudget = Field(default_factory=ControlPlaneCodingProviderBudget)
+
+
+class ControlPlaneCodingProvidersConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    acp: ControlPlaneACPProviderConfig = Field(default_factory=ControlPlaneACPProviderConfig)
+
+
+class ControlPlaneCodingCapabilityConfig(ControlPlaneCapabilityConfig):
+    """Coding capability config: the shared capability gate plus provider policy."""
+
+    providers: ControlPlaneCodingProvidersConfig = Field(default_factory=ControlPlaneCodingProvidersConfig)
+
+
 class ControlPlaneConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,7 +100,7 @@ class ControlPlaneConfig(BaseModel):
     profile: str | None = None
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
-    coding: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    coding: ControlPlaneCodingCapabilityConfig = Field(default_factory=ControlPlaneCodingCapabilityConfig)
     contract_surface: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     scope: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 

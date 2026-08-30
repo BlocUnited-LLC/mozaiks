@@ -39,6 +39,7 @@ from mozaiksai.core.artifacts import (
     ArtifactStore,
     ArtifactValidationStatus,
     ArtifactVersionDoc,
+    BuildRecord,
     get_artifact_content_store,
     get_artifact_store,
 )
@@ -223,6 +224,8 @@ def _build_review_snapshot(review_record: RefinementReviewRecord) -> dict[str, A
         "source_bundle_path": review_record.source_bundle_path,
         "staging_area": review_record.staging_area,
         "affected_bundle_paths": list(review_record.affected_bundle_paths or []),
+        "write_back_mode": review_record.write_back_mode,
+        "write_back_target": review_record.write_back_target,
     }
 
 
@@ -273,12 +276,12 @@ async def _resolve_source_artifact_version(
 ) -> ArtifactVersionDoc | None:
     resolved_source_id = str(source_artifact_version_id or "").strip()
     if resolved_source_id:
-        source_version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=resolved_source_id)
+        source_version = await artifact_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
         return source_version
-    versions = await artifact_store.list_artifact_versions(
+    versions = await artifact_store.list_build_records(
         app_id=app_id,
-        artifact_kind="app_bundle",
-        artifact_key=artifact_key,
+        build_family="app_bundle",
+        build_key=artifact_key,
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,
         limit=1,
     )
@@ -435,18 +438,46 @@ async def create_draft_app_bundle_from_staged_refinement(
     review_record: RefinementReviewRecord,
     validation_evidence: ValidationEvidence | dict[str, Any] | list[str] | None,
     *,
+    record_store: Any | None = None,
     artifact_store: ArtifactStore | None = None,
     content_store: ArtifactContentStore | None = None,
+    source_build_record_id: str | None = None,
     source_artifact_version_id: str | None = None,
     canonical_inputs_version: Mapping[str, str] | None = None,
     app_id: str | None = None,
     artifact_key: str = "app_bundle",
+    build_key: str | None = None,
     generated_artifacts_root: Path | str | None = None,
     promotion_result: RefinementPromotionResult | None = None,
     policy_decisions: Sequence[PromotionPolicyDecision | Mapping[str, Any]] | None = None,
-) -> DraftAppBundleArtifactVersionResult:
-    if str(plan.artifact_kind or "").strip() != "app_bundle":
-        raise DraftAppBundleArtifactVersionError("Draft app bundle creation only supports artifact_kind='app_bundle'.")
+) -> DraftAppBundleArtifactVersionResult | DraftAppBundleBuildRecordResult:
+    """Create a draft app bundle from a staged refinement workspace.
+
+    When ``record_store`` is provided, uses the BuildRecord API and returns
+    :class:`DraftAppBundleBuildRecordResult`.  Otherwise uses the prior
+    ArtifactVersionDoc API and returns :class:`DraftAppBundleArtifactVersionResult`.
+    """
+    if record_store is not None:
+        return await _create_draft_app_bundle_build_record(
+            plan,
+            staging_result,
+            scoped_result,
+            review_record,
+            validation_evidence,
+            record_store=record_store,
+            content_store=content_store,
+            source_build_record_id=source_build_record_id,
+            source_artifact_version_id=source_artifact_version_id,
+            canonical_inputs_version=canonical_inputs_version,
+            app_id=app_id,
+            artifact_key=artifact_key,
+            build_key=build_key,
+            generated_artifacts_root=generated_artifacts_root,
+            promotion_result=promotion_result,
+            policy_decisions=policy_decisions,
+        )
+    if str(plan.build_family or "").strip() != "app_bundle":
+        raise DraftAppBundleArtifactVersionError("Draft app bundle creation only supports build_family='app_bundle'.")
     if plan.execution_mode != "staged":
         raise DraftAppBundleArtifactVersionError("Draft app bundle creation requires a staged execution plan.")
     if plan.mutation_allowed is not False or staging_result.mutation_allowed is not False:
@@ -498,9 +529,9 @@ async def create_draft_app_bundle_from_staged_refinement(
         raise DraftAppBundleArtifactVersionError(
             f"Source artifact version not found: {source_artifact_version_id}"
         )
-    if source_version is not None and source_version.artifact_kind != "app_bundle":
+    if source_version is not None and source_version.build_family != "app_bundle":
         raise DraftAppBundleArtifactVersionError(
-            f"Source artifact version must be app_bundle; received {source_version.artifact_kind!r}."
+            f"Source artifact version must be app_bundle; received {source_version.build_family!r}."
         )
 
     resolved_source_artifact_version_id = (
@@ -553,11 +584,11 @@ async def create_draft_app_bundle_from_staged_refinement(
         bundle_hmac_sha256=bundle_hmac_sha256,
     )
 
-    artifact_version = await artifact_store.create_artifact_version(
+    artifact_version = await artifact_store.create_build_record(
         app_id=resolved_app_id,
-        artifact_kind="app_bundle",
-        artifact_key=artifact_key,
-        parent_version_id=resolved_source_artifact_version_id,
+        build_family="app_bundle",
+        build_key=artifact_key,
+        parent_build_record_id=resolved_source_artifact_version_id,
         canonical_inputs_version=resolved_canonical_inputs_version,
         files_manifest=[entry.model_dump(mode="python") for entry in files_manifest],
         source_workflow=source_workflow or None,
@@ -635,9 +666,9 @@ async def create_draft_app_bundle_from_staged_refinement(
                     exc_info=True,
                 )
                 raise
-            refreshed = await artifact_store.get_artifact_version(
+            refreshed = await artifact_store.get_build_record(
                 app_id=resolved_app_id,
-                artifact_version_id=artifact_version.id,
+                build_record_id=artifact_version.id,
             )
             if refreshed is not None:
                 artifact_version = refreshed
@@ -646,9 +677,9 @@ async def create_draft_app_bundle_from_staged_refinement(
         request_id=plan.request_id,
         app_id=resolved_app_id,
         artifact_version_id=artifact_version.id,
-        artifact_kind=artifact_version.artifact_kind,
-        artifact_key=artifact_version.artifact_key,
-        parent_version_id=artifact_version.parent_version_id,
+        artifact_kind=artifact_version.build_family,
+        artifact_key=artifact_version.build_key,
+        parent_version_id=artifact_version.parent_build_record_id,
         lifecycle_status=artifact_version.lifecycle_status,
         validation_status=artifact_version.validation_status,
         artifact_path=artifact_path.as_posix(),
@@ -703,17 +734,17 @@ async def accept_staged_refinement_artifact_version(
         )
 
     artifact_store = artifact_store or get_artifact_store()
-    artifact_version = await artifact_store.get_artifact_version(
+    artifact_version = await artifact_store.get_build_record(
         app_id=resolved_app_id,
-        artifact_version_id=str(draft_artifact_version_id or "").strip(),
+        build_record_id=str(draft_artifact_version_id or "").strip(),
     )
     if artifact_version is None:
         raise AcceptedStagedAppBundleArtifactVersionError(
             f"Draft artifact version not found: {draft_artifact_version_id}"
         )
-    if artifact_version.artifact_kind != "app_bundle":
+    if artifact_version.build_family != "app_bundle":
         raise AcceptedStagedAppBundleArtifactVersionError(
-            f"Staged refinement acceptance only supports artifact_kind='app_bundle'; received {artifact_version.artifact_kind!r}."
+            f"Staged refinement acceptance only supports build_family='app_bundle'; received {artifact_version.build_family!r}."
         )
     if artifact_version.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
         raise AcceptedStagedAppBundleArtifactVersionError(
@@ -774,6 +805,10 @@ async def accept_staged_refinement_artifact_version(
         raise AcceptedStagedAppBundleArtifactVersionError(
             "Draft artifact metadata does not reflect promotion_allowed=true."
         )
+    if str(review_snapshot.get("write_back_mode") or "").strip() != loaded_review.write_back_mode:
+        raise AcceptedStagedAppBundleArtifactVersionError(
+            "Draft artifact metadata write_back_mode does not match the staged refinement review record."
+        )
 
     accepted_by_resolved = str(accepted_by or loaded_review.reviewer or review_record.reviewer or "").strip() or None
     accepted_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -789,9 +824,9 @@ async def accept_staged_refinement_artifact_version(
         validation_status=artifact_version.validation_status,
     )
 
-    accepted_version = await artifact_store.accept_artifact_version(
+    accepted_version = await artifact_store.accept_build_record(
         app_id=resolved_app_id,
-        artifact_version_id=artifact_version.id,
+        build_record_id=artifact_version.id,
         commit_metadata=commit_metadata_update,
     )
     if accepted_version is None:
@@ -803,9 +838,9 @@ async def accept_staged_refinement_artifact_version(
         request_id=resolved_request_id,
         app_id=resolved_app_id,
         artifact_version_id=accepted_version.id,
-        artifact_kind=accepted_version.artifact_kind,
-        artifact_key=accepted_version.artifact_key,
-        parent_version_id=accepted_version.parent_version_id,
+        artifact_kind=accepted_version.build_family,
+        artifact_key=accepted_version.build_key,
+        parent_version_id=accepted_version.parent_build_record_id,
         lifecycle_status=accepted_version.lifecycle_status,
         validation_status=accepted_version.validation_status,
         accepted_by=accepted_by_resolved,
@@ -823,4 +858,483 @@ __all__ = [
     "DraftAppBundleArtifactVersionResult",
     "accept_staged_refinement_artifact_version",
     "create_draft_app_bundle_from_staged_refinement",
+    # New BuildRecord API
+    "AcceptedStagedAppBundleBuildRecordError",
+    "AcceptedStagedAppBundleBuildRecordResult",
+    "DraftAppBundleBuildRecordError",
+    "DraftAppBundleBuildRecordResult",
+    "accept_staged_refinement_build_record",
 ]
+
+
+# ── New BuildRecord-based API ──────────────────────────────────────────────────
+
+class DraftAppBundleBuildRecordError(ValueError):
+    """Raised when a staged refinement cannot be converted into a draft app bundle build record."""
+
+
+class AcceptedStagedAppBundleBuildRecordError(ValueError):
+    """Raised when a staged refinement draft app bundle build record cannot be accepted."""
+
+
+class DraftAppBundleBuildRecordResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str
+    app_id: str
+    build_record_id: str
+    build_family: str
+    build_key: str
+    parent_build_record_id: str | None = None
+    lifecycle_status: ArtifactLifecycleStatus
+    validation_status: ArtifactValidationStatus
+    artifact_path: str
+    content_ref: str | None = None
+    content_backend: str | None = None
+    bundle_sha256: str
+    bundle_size_bytes: int
+    files_manifest: list[ArtifactFileManifestEntry] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    build_record: BuildRecord
+
+
+class AcceptedStagedAppBundleBuildRecordResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str
+    app_id: str
+    build_record_id: str
+    build_family: str
+    build_key: str
+    parent_build_record_id: str | None = None
+    lifecycle_status: ArtifactLifecycleStatus
+    validation_status: ArtifactValidationStatus
+    accepted_by: str | None = None
+    accepted_at: str
+    refinement_review_status: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    build_record: BuildRecord
+
+
+async def _resolve_source_build_record(
+    *,
+    record_store: Any,
+    app_id: str,
+    source_build_record_id: str | None,
+    build_key: str,
+) -> BuildRecord | None:
+    resolved_source_id = str(source_build_record_id or "").strip()
+    if resolved_source_id:
+        if hasattr(record_store, "get_build_record"):
+            source_record: BuildRecord | None = await record_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
+            return source_record
+        elif hasattr(record_store, "get_build_record"):
+            doc = await record_store.get_build_record(app_id=app_id, build_record_id=resolved_source_id)
+            if doc is None:
+                return None
+            return BuildRecord.model_validate(doc.model_dump(mode="python") if hasattr(doc, "model_dump") else doc)
+        return None
+    if hasattr(record_store, "list_build_records"):
+        records = await record_store.list_build_records(
+            app_id=app_id,
+            build_family="app_bundle",
+            build_key=build_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+            limit=1,
+        )
+        return records[0] if records else None
+    return None
+
+
+async def _create_draft_app_bundle_build_record(
+    plan: RefinementExecutionPlan,
+    staging_result: RefinementStagingResult,
+    scoped_result: ScopedRefinementResult,
+    review_record: RefinementReviewRecord,
+    validation_evidence: ValidationEvidence | dict[str, Any] | list[str] | None,
+    *,
+    record_store: Any,
+    content_store: ArtifactContentStore | None = None,
+    source_build_record_id: str | None = None,
+    source_artifact_version_id: str | None = None,
+    canonical_inputs_version: Mapping[str, str] | None = None,
+    app_id: str | None = None,
+    artifact_key: str = "app_bundle",
+    build_key: str | None = None,
+    generated_artifacts_root: Path | str | None = None,
+    promotion_result: RefinementPromotionResult | None = None,
+    policy_decisions: Sequence[PromotionPolicyDecision | Mapping[str, Any]] | None = None,
+) -> DraftAppBundleBuildRecordResult:
+    """Create a draft build record from a staged refinement workspace (new BuildRecord API)."""
+    resolved_build_family = str(plan.build_family or "").strip()
+    if resolved_build_family != "app_bundle":
+        raise DraftAppBundleBuildRecordError("Draft app bundle creation only supports build_family='app_bundle'.")
+    if plan.execution_mode != "staged":
+        raise DraftAppBundleBuildRecordError("Draft app bundle creation requires a staged execution plan.")
+    if plan.mutation_allowed is not False or staging_result.mutation_allowed is not False:
+        raise DraftAppBundleBuildRecordError("Draft app bundle creation requires mutation_allowed=false on plan and staging result.")
+    if scoped_result.mutation_allowed is not False or scoped_result.source_mutated is not False:
+        raise DraftAppBundleBuildRecordError("Draft app bundle creation requires a non-mutating scoped execution result.")
+    if scoped_result.execution_mode != "scoped_staging" or scoped_result.mutation_scope != "staging_only":
+        raise DraftAppBundleBuildRecordError("Draft app bundle creation requires a scoped staging execution result.")
+
+    if plan.request_id != staging_result.request_id or plan.request_id != review_record.request_id or plan.request_id != scoped_result.request_id:
+        raise DraftAppBundleBuildRecordError("Plan, staging, review, and scoped execution request_id values must match.")
+
+    staging_area = Path(staging_result.staging_area)
+    if not staging_area.exists() or not staging_area.is_dir():
+        raise DraftAppBundleBuildRecordError(f"Staging area does not exist: {staging_area}")
+    if staging_area.is_symlink():
+        raise DraftAppBundleBuildRecordError("Staging area cannot be a symlink.")
+    staging_area = staging_area.resolve()
+
+    workspace_area = _resolve_inside(staging_area, staging_area / WORKSPACE_DIRNAME)
+    if not workspace_area.exists() or not workspace_area.is_dir():
+        raise DraftAppBundleBuildRecordError(f"Staging workspace does not exist: {workspace_area}")
+    if workspace_area.is_symlink():
+        raise DraftAppBundleBuildRecordError("Staging workspace cannot be a symlink.")
+
+    loaded_review = _load_review_record(staging_area=staging_area, review_record=review_record)
+    loaded_execution = _load_execution_result(staging_area=staging_area, scoped_result=scoped_result)
+
+    resolved_source_bundle_path = str(staging_result.source_bundle_path or "").strip() or None
+    if resolved_source_bundle_path is not None:
+        source_root = Path(resolved_source_bundle_path)
+        if not source_root.exists() or not source_root.is_dir():
+            raise DraftAppBundleBuildRecordError(f"Source bundle path does not exist or is not a directory: {source_root}")
+        if source_root.is_symlink():
+            raise DraftAppBundleBuildRecordError("Source bundle path cannot be a symlink.")
+
+    resolved_app_id = str(app_id or plan.app_id or "").strip()
+    if not resolved_app_id:
+        raise DraftAppBundleBuildRecordError("app_id is required to create a draft build record.")
+
+    resolved_build_key = str(build_key or artifact_key or "app_bundle").strip()
+
+    # Resolve record store (new API) or fall back to default store
+    effective_record_store = record_store or get_artifact_store()
+
+    source_record = await _resolve_source_build_record(
+        record_store=effective_record_store,
+        app_id=resolved_app_id,
+        source_build_record_id=source_build_record_id or source_artifact_version_id,
+        build_key=resolved_build_key,
+    )
+    if (source_build_record_id or source_artifact_version_id) and source_record is None:
+        raise DraftAppBundleBuildRecordError(
+            f"Source build record not found: {source_build_record_id or source_artifact_version_id}"
+        )
+    if source_record is not None and source_record.build_family != "app_bundle":
+        raise DraftAppBundleBuildRecordError(
+            f"Source build record must be app_bundle; received {source_record.build_family!r}."
+        )
+
+    resolved_source_id = (
+        str(source_build_record_id or source_artifact_version_id or "").strip()
+        or (source_record.id if source_record is not None else None)
+    )
+    resolved_canonical_inputs_version = dict(canonical_inputs_version or {})
+    if source_record is not None:
+        base_inputs = dict(source_record.canonical_inputs_version or {})
+        base_inputs.update(resolved_canonical_inputs_version)
+        resolved_canonical_inputs_version = base_inputs
+
+    bundle_root = _resolve_generated_artifacts_root(generated_artifacts_root)
+    safe_app_id = _safe_path_segment(resolved_app_id, fallback="local-app")
+    safe_request_id = _safe_path_segment(plan.request_id, fallback="refinement")
+    artifact_dir = bundle_root / "apps" / safe_app_id / "refinements" / safe_request_id / "app"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = artifact_dir / "artifact.zip"
+
+    files_manifest, bundle_sha256, bundle_size_bytes = _bundle_workspace(
+        workspace_root=workspace_area,
+        bundle_path=artifact_path,
+    )
+
+    bundle_bytes = artifact_path.read_bytes()
+    bundle_hmac_sha256 = sign_artifact(bundle_bytes)
+
+    validation = normalize_validation_evidence(validation_evidence)
+    validation_status = _validation_status_from_evidence(validation)
+    policy = _normalized_policy_decisions(promotion_result=promotion_result, policy_decisions=policy_decisions)
+    source_workflow = str(plan.target_workflow or plan.workflow_sequence or "refinement_control_plane").strip()
+
+    metadata = _build_refinement_metadata(
+        plan=plan,
+        staging_result=staging_result,
+        review_record=loaded_review,
+        scoped_result=loaded_execution,
+        validation_evidence=validation,
+        policy_decisions=policy,
+        source_artifact_version_id=resolved_source_id,
+        canonical_inputs_version=resolved_canonical_inputs_version,
+        bundle_path=artifact_path,
+        workspace_dir=workspace_area,
+        bundle_sha256=bundle_sha256,
+        bundle_size_bytes=bundle_size_bytes,
+        content_ref=None,
+        content_backend=None,
+        app_id=resolved_app_id,
+        files_manifest=files_manifest,
+        bundle_hmac_sha256=bundle_hmac_sha256,
+    )
+    # Embed artifact_path in top-level metadata for workspace loading
+    metadata["artifact_path"] = artifact_path.as_posix()
+
+    build_record = await effective_record_store.create_build_record(
+        app_id=resolved_app_id,
+        build_family="app_bundle",
+        build_key=resolved_build_key,
+        parent_build_record_id=resolved_source_id,
+        canonical_inputs_version=resolved_canonical_inputs_version,
+        files_manifest=[entry.model_dump(mode="python") for entry in files_manifest],
+        source_workflow=source_workflow or None,
+        source_chat_id=None,
+        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+        validation_status=validation_status,
+        commit_metadata={
+            "message": f"{source_workflow or 'refinement'}: app_bundle draft from staged refinement",
+            "source_workflow": source_workflow or None,
+            "metadata": metadata,
+        },
+    )
+
+    content_store = content_store or get_artifact_content_store()
+    content_ref = None
+    content_backend = content_store.backend_name
+    if content_backend != "local":
+        try:
+            content_ref = await content_store.put_bundle(
+                artifact_path.read_bytes(),
+                app_id=resolved_app_id,
+                artifact_version_id=build_record.id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "CONTENT_STORE_PUT_BUNDLE_FAILED app=%s record=%s backend=%s: %s",
+                resolved_app_id,
+                build_record.id,
+                content_backend,
+                exc,
+                exc_info=True,
+            )
+            content_ref = None
+            content_backend = None  # type: ignore[assignment]
+        else:
+            refreshed_metadata = _build_refinement_metadata(
+                plan=plan,
+                staging_result=staging_result,
+                review_record=loaded_review,
+                scoped_result=loaded_execution,
+                validation_evidence=validation,
+                policy_decisions=policy,
+                source_artifact_version_id=resolved_source_id,
+                canonical_inputs_version=resolved_canonical_inputs_version,
+                bundle_path=artifact_path,
+                workspace_dir=workspace_area,
+                bundle_sha256=bundle_sha256,
+                bundle_size_bytes=bundle_size_bytes,
+                content_ref=content_ref,
+                content_backend=content_store.backend_name,
+                app_id=resolved_app_id,
+                files_manifest=files_manifest,
+                bundle_hmac_sha256=bundle_hmac_sha256,
+            )
+            refreshed_metadata["artifact_path"] = artifact_path.as_posix()
+            refreshed_metadata["content_ref"] = content_ref
+            refreshed_metadata["content_backend"] = content_store.backend_name
+            try:
+                await effective_record_store.set_validation_status(
+                    app_id=resolved_app_id,
+                    build_record_id=build_record.id,
+                    validation_status=validation_status,
+                    commit_metadata={
+                        "message": f"{source_workflow or 'refinement'}: app_bundle draft from staged refinement",
+                        "source_workflow": source_workflow or None,
+                        "metadata": refreshed_metadata,
+                    },
+                )
+            except Exception as status_exc:
+                logger.error(
+                    "BUILD_RECORD_STATUS_UPDATE_FAILED app=%s record=%s content_ref=%s: %s — "
+                    "bundle is in content store but DB record has stale metadata",
+                    resolved_app_id, build_record.id, content_ref, status_exc,
+                    exc_info=True,
+                )
+                raise
+            refreshed = await effective_record_store.get_build_record(
+                app_id=resolved_app_id,
+                build_record_id=build_record.id,
+            )
+            if refreshed is not None:
+                build_record = refreshed
+
+    final_metadata = _commit_metadata_payload(build_record.commit_metadata)
+
+    return DraftAppBundleBuildRecordResult(
+        request_id=plan.request_id,
+        app_id=resolved_app_id,
+        build_record_id=build_record.id,
+        build_family=build_record.build_family,
+        build_key=build_record.build_key,
+        parent_build_record_id=build_record.parent_build_record_id,
+        lifecycle_status=build_record.lifecycle_status,
+        validation_status=build_record.validation_status,
+        artifact_path=artifact_path.as_posix(),
+        content_ref=content_ref,
+        content_backend=content_backend if content_ref is not None else None,
+        bundle_sha256=bundle_sha256,
+        bundle_size_bytes=bundle_size_bytes,
+        files_manifest=list(files_manifest),
+        metadata=final_metadata,
+        build_record=build_record,
+    )
+
+
+async def accept_staged_refinement_build_record(
+    *,
+    app_id: str,
+    draft_build_record_id: str,
+    review_record: RefinementReviewRecord,
+    request_id: str,
+    record_store: Any | None = None,
+    artifact_store: ArtifactStore | None = None,
+    accepted_by: str | None = None,
+    notes: str | None = None,
+    allow_validation_override: bool = False,
+) -> AcceptedStagedAppBundleBuildRecordResult:
+    resolved_app_id = str(app_id or "").strip()
+    resolved_request_id = str(request_id or "").strip()
+    if not resolved_app_id:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "app_id is required to accept a staged refinement build record."
+        )
+    if not resolved_request_id:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "request_id is required to accept a staged refinement build record."
+        )
+
+    effective_store = record_store or artifact_store or get_artifact_store()
+    build_record = await effective_store.get_build_record(
+        app_id=resolved_app_id,
+        build_record_id=str(draft_build_record_id or "").strip(),
+    )
+    if build_record is None:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            f"Draft build record not found: {draft_build_record_id}"
+        )
+    if build_record.build_family != "app_bundle":
+        raise AcceptedStagedAppBundleBuildRecordError(
+            f"Staged refinement acceptance only supports build_family='app_bundle'; received {build_record.build_family!r}."
+        )
+    if build_record.lifecycle_status != ArtifactLifecycleStatus.DRAFT:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            f"Staged refinement acceptance requires a DRAFT artifact version; received {build_record.lifecycle_status.value!r}."
+        )
+    if build_record.validation_status == ArtifactValidationStatus.FAILED:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Staged refinement acceptance requires passing validation; validation_status='failed'."
+        )
+    if build_record.validation_status != ArtifactValidationStatus.PASSED and not allow_validation_override:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Staged refinement acceptance requires validation_status='passed' or an explicit validation override."
+        )
+
+    metadata_payload = _commit_metadata_payload(build_record.commit_metadata)
+    refinement_metadata = metadata_payload.get("refinement")
+    if not isinstance(refinement_metadata, dict):
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Draft app bundle artifact version is missing staged refinement metadata."
+        )
+
+    refinement_request_id = str(refinement_metadata.get("request_id") or "").strip()
+    if refinement_request_id != resolved_request_id:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "request_id mismatch between the staged refinement metadata and the acceptance request."
+        )
+
+    review_snapshot = refinement_metadata.get("review")
+    if not isinstance(review_snapshot, dict):
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Draft app bundle artifact version is missing staged refinement review metadata."
+        )
+
+    # Validate write_back_mode
+    write_back_mode = str(review_snapshot.get("write_back_mode") or "").strip()
+    if write_back_mode and write_back_mode != "generated_artifact":
+        raise AcceptedStagedAppBundleBuildRecordError(
+            f"write_back_mode mismatch: expected 'generated_artifact', got {write_back_mode!r}."
+        )
+
+    staging_area = str(review_record.staging_area or "").strip()
+    if not staging_area:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Staged refinement review record is missing a staging_area."
+        )
+    loaded_review = _load_review_record(staging_area=Path(staging_area), review_record=review_record)
+    if loaded_review.request_id != resolved_request_id:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "request_id mismatch between the provided review record and the acceptance request."
+        )
+    if loaded_review.status != "promotion_ready":
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Staged refinement can only be accepted when the review status is promotion_ready."
+        )
+    if loaded_review.promotion_allowed is not True:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Staged refinement can only be accepted when promotion_allowed is true."
+        )
+
+    if str(review_snapshot.get("status") or "").strip() != "promotion_ready":
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Draft artifact metadata does not reflect promotion_ready review status."
+        )
+    if review_snapshot.get("promotion_allowed") is not True:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            "Draft artifact metadata does not reflect promotion_allowed=true."
+        )
+
+    accepted_by_resolved = str(accepted_by or loaded_review.reviewer or review_record.reviewer or "").strip() or None
+    accepted_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    commit_metadata_update = _build_acceptance_commit_metadata(
+        commit_metadata=build_record.commit_metadata,
+        accepted_by=accepted_by_resolved,
+        accepted_at=accepted_at,
+        request_id=resolved_request_id,
+        review_status=loaded_review.status,
+        notes=notes,
+        validation_override=allow_validation_override
+        and build_record.validation_status != ArtifactValidationStatus.PASSED,
+        validation_status=build_record.validation_status,
+    )
+
+    accepted_record = await effective_store.accept_build_record(
+        app_id=resolved_app_id,
+        build_record_id=build_record.id,
+        commit_metadata=commit_metadata_update,
+    )
+    if accepted_record is None:
+        raise AcceptedStagedAppBundleBuildRecordError(
+            f"Draft build record could not be accepted: {draft_build_record_id}"
+        )
+
+    return AcceptedStagedAppBundleBuildRecordResult(
+        request_id=resolved_request_id,
+        app_id=resolved_app_id,
+        build_record_id=accepted_record.id,
+        build_family=accepted_record.build_family,
+        build_key=accepted_record.build_key,
+        parent_build_record_id=accepted_record.parent_build_record_id,
+        lifecycle_status=accepted_record.lifecycle_status,
+        validation_status=accepted_record.validation_status,
+        accepted_by=accepted_by_resolved,
+        accepted_at=accepted_at,
+        refinement_review_status=loaded_review.status,
+        metadata=_commit_metadata_payload(accepted_record.commit_metadata),
+        build_record=accepted_record,
+    )
+
+
+# Module-level re-exports for named access
+AcceptedStagedAppBundleBuildRecordError = AcceptedStagedAppBundleBuildRecordError  # re-exported
+accept_staged_refinement_artifact_version = accept_staged_refinement_artifact_version  # re-exported

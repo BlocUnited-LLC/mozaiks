@@ -66,6 +66,11 @@ PYTEST_GATE_TARGETS = [
     "tests/test_platform_module_dispatch.py",
     "tests/test_module_executor_dispatch.py",
     "tests/test_app_validation_strategy.py",
+    # Governance and self-host acceptance
+    "tests/test_package_content_guard.py",
+    "tests/test_governance_guardrails.py",
+    "tests/test_oss_boundary_policy.py",
+    "tests/test_selfhost_clean_install.py",
 ]
 
 QUICK_PYTEST_TARGETS = [
@@ -198,7 +203,7 @@ def _base_env() -> dict[str, str]:
 
 def _source_hygiene_excluded(path: Path) -> bool:
     relative = path.relative_to(REPO_ROOT).as_posix()
-    if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in path.parts):
+    if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in Path(relative).parts):
         return True
     return any(
         relative == prefix or relative.startswith(f"{prefix}/")

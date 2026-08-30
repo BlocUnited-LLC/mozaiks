@@ -151,7 +151,10 @@ def _apply_managed_capability_templates(
     if not isinstance(capability_packs, list):
         return code_files
 
-    template_files = resolve_managed_capability_templates(capability_packs)
+    template_files = resolve_managed_capability_templates(
+        capability_packs,
+        context_variables=context_variables,
+    )
     if not template_files:
         return code_files
 
@@ -361,6 +364,11 @@ async def assemble_app_tasks(
     result = await assemble_features(
         app_id=str(app_id),
         feature_outputs=feature_outputs,
+        build_timestamp=(
+            context_variables.get("build_timestamp")
+            if context_variables and hasattr(context_variables, "get")
+            else None
+        ),
     )
 
     # Merge module_interface.yaml files generated from agent_backend_integration tasks.

@@ -9,6 +9,12 @@ and build state management — belongs to Studio. This command should not expand
 to duplicate those surfaces. If you need to review output, compare versions,
 track history, or promote artifacts, use Studio.
 
+``gen`` only supports workflows that are genuinely one-shot: a single prompt
+in, artifacts out. Conversational (interview-driven) workflows hand control
+back to the user mid-run, and the CLI has no way to carry a reply — such runs
+always stall at ``WORKFLOW_AWAITING_INPUT`` after spending real tokens
+(issue #383). Those are refused before execution and redirected to Studio.
+
 Usage:
     mozaiks gen workflow --prompt "description of what you want"
     mozaiks gen app --prompt "description of your app"
@@ -72,6 +78,41 @@ def _check_api_key() -> bool:
         if os.environ.get(key):
             return True
     return False
+
+
+def _warn_if_no_mongo():
+    """Warn loudly (without failing) when MONGO_URI is unset.
+
+    Local generation without Mongo is a legitimate flow, but the operator
+    should know that build records, artifacts, and usage events will not
+    persist anywhere.
+    """
+    if not os.environ.get("MONGO_URI"):
+        _print(
+            "Warning: MONGO_URI is not set. Generation will still run, but "
+            "build records, artifacts, and usage events will NOT persist.",
+            style="bold yellow",
+        )
+
+
+def _init_logging():
+    """Initialise real logging so workflow-engine INFO records reach the operator.
+
+    Without this, the engine's degradation warnings (middleware import
+    failures, zero-turn runs) are swallowed and gen can exit "successfully"
+    after a silent no-op (issue #379). Also creates the file log sinks.
+    """
+    try:
+        from logs.logging_config import setup_development_logging
+
+        setup_development_logging()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        import logging
+
+        logging.basicConfig(level=logging.INFO)
+        logging.getLogger(__name__).warning(
+            "Could not initialise mozaiks logging (%s); using basicConfig.", exc
+        )
 
 
 def _find_generator_source() -> Path | None:
@@ -381,6 +422,13 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
     dst = staging_root / workflow_name
     dst.mkdir(parents=True, exist_ok=True)
 
+    # Middleware and hooks reference helpers as ../_shared/... relative to the
+    # workflow directory; stage the sibling _shared tree or every such import
+    # fails in the temp staging root and generation silently degrades.
+    shared_src = source_dir / "_shared"
+    if shared_src.is_dir():
+        shutil.copytree(shared_src, staging_root / "_shared", dirs_exist_ok=True)
+
     for item in src.iterdir():
         if item.is_dir():
             # For tools directory, we need to adapt Python files
@@ -415,8 +463,96 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
     return dst
 
 
+# ── Conversational-workflow detection (issue #383) ─────────────────
+# A workflow that can hand the conversational turn back to the user cannot
+# be driven to completion by `mozaiks gen`, which has exactly one prompt and
+# no way to reply. Detect that *property* from the workflow's own declarative
+# config rather than matching on a workflow name, so any interview-driven
+# workflow is covered and genuinely one-shot workflows still run.
 
-def _setup_environment(repo_root: Path, staging_workflows: Path):
+STUDIO_COMMAND = "mozaiks studio --dir . --open"
+ALLOW_INTERACTIVE_FLAG = "--allow-interactive"
+
+# Transition targets that yield the turn to the human participant.
+_USER_TRANSITION_TARGETS = {"reverttousertarget", "usertarget"}
+
+
+def _detect_conversational_signals(workflow_dir: Path) -> list[str]:
+    """Return declarative signals that *workflow_dir* can await a user reply.
+
+    Signals, each read straight from the workflow's own config:
+
+    * ``orchestrator.yaml``'s ``human_in_the_loop: true`` — the workflow
+      declares that a human participates in the run.
+    * a ``transition_graph.yaml`` rule whose ``target_agent`` is ``user`` or
+      whose ``transition_target`` reverts to the user — the graph declares an
+      edge that parks the run on a human turn.
+
+    An empty list means nothing in the config can hand control to a user, so
+    the workflow is safe to run one-shot.
+    """
+    signals: list[str] = []
+
+    orchestrator = _safe_load_yaml(workflow_dir / "orchestrator.yaml")
+    if orchestrator.get("human_in_the_loop") is True:
+        signals.append("orchestrator.yaml declares human_in_the_loop: true")
+
+    graph = _safe_load_yaml(workflow_dir / "transition_graph.yaml")
+    rules = graph.get("transition_rules")
+    if isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            source = str(rule.get("source_agent", "")).strip()
+            target = str(rule.get("target_agent", "")).strip()
+            transition_target = str(rule.get("transition_target", "")).strip()
+            if target.lower() == "user" or transition_target.lower() in _USER_TRANSITION_TARGETS:
+                signals.append(
+                    "transition_graph.yaml hands control to the user "
+                    f"({source or '?'} -> {target or transition_target})"
+                )
+
+    return signals
+
+
+def _safe_load_yaml(path: Path) -> dict[str, Any]:
+    """Load a YAML mapping, returning ``{}`` for missing or unreadable files."""
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _refuse_conversational_workflow(workflow_name: str, signals: list[str]) -> None:
+    """Print the honest redirect for a workflow the CLI cannot drive."""
+    _print_error(
+        f"{workflow_name} is a conversational workflow: it asks clarifying "
+        "questions and waits for your reply."
+    )
+    _print_info(
+        "`mozaiks gen` takes a single --prompt and cannot carry a reply, so this "
+        "run would stall waiting for input after spending tokens and writing no "
+        "files. Refusing before any model call."
+    )
+    _print("\nDetected from the workflow's own config:", style="bold")
+    for signal in signals[:4]:
+        _print_info(f"  - {signal}")
+
+    _print("\nRun this generation in Studio instead:", style="bold")
+    _print_info(f"  {STUDIO_COMMAND}")
+    _print_info("  Studio drives the conversation and supports replies.")
+    _print(
+        f"\nTo start the run anyway and drive it elsewhere, pass {ALLOW_INTERACTIVE_FLAG} "
+        "(the run will still pause at the first question).",
+        style="dim",
+    )
+
+
+def _setup_environment(repo_root: Path, staging_workflows: Path, output_dir: Path):
     """Configure sys.path and env vars for workflow execution."""
     for p in (str(repo_root), str(repo_root / "mozaiksai")):
         if p not in sys.path:
@@ -424,6 +560,11 @@ def _setup_environment(repo_root: Path, staging_workflows: Path):
 
     # Point the workflow manager at our staging directory
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(staging_workflows)
+
+    # Point artifact-writing tools (workflow_converter et al.) at the CLI
+    # output directory, so the post-run empty-output check inspects the
+    # directory the tools actually write to (issue #379).
+    os.environ["MOZAIKS_GENERATED_ARTIFACTS_PATH"] = str(output_dir)
 
 
 # ── Runner ─────────────────────────────────────────────────────────
@@ -509,6 +650,79 @@ def _create_output_structure(output_dir: Path, mode: str):
         (output_dir / "frontend").mkdir(exist_ok=True)
 
 
+def _report_run_outcome(result: dict[str, Any], output_dir: Path, mode: str) -> int:
+    """Assert on the orchestration result and report success or a loud failure.
+
+    ``mozaiks gen`` used to treat any non-exception return as success; a run
+    that failed, paused for user input, or never executed a single agent turn
+    still printed "Generation complete!" (issue #379). Success now requires an
+    actually-completed run with agent activity and files on disk.
+    """
+    if not result.get("success"):
+        _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")
+        return 1
+
+    raw_payload = result.get("result")
+    payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+
+    if payload.get("failed") or payload.get("error"):
+        _print_error(
+            f"Workflow run failed: {payload.get('error') or 'unknown workflow error'} "
+            "— check the logs above."
+        )
+        return 1
+
+    if payload.get("awaiting_user_input"):
+        _print_error(
+            "Workflow paused waiting for a user reply — this is not a completed "
+            "generation. Drive this workflow from Studio, which supports replies."
+        )
+        return 1
+
+    if not payload.get("run_completed"):
+        _print_error(
+            f"Workflow did not complete (run_status: {payload.get('run_status', 'unknown')}). "
+            "Treating this as a failed generation."
+        )
+        return 1
+
+    agents_created = payload.get("agents_created")
+    agent_turns = payload.get("agent_turns")
+    if agent_turns == 0:
+        _print_error(
+            "Workflow completed but no agent ever produced a reply — this is "
+            "the silent no-op from issue #379. Check the logs above for "
+            "middleware or agent-creation failures."
+        )
+        return 1
+
+    written = [f for f in sorted(output_dir.rglob("*")) if f.is_file()]
+    if not written:
+        _print_error(
+            "Generation finished but wrote no files under the artifact root "
+            f"({output_dir}). Agents ran, but no tool persisted any output "
+            "there — check the logs above for tool failures."
+        )
+        return 1
+
+    _print_success("Generation complete!")
+    if agents_created is not None or agent_turns is not None:
+        _print_info(f"agents={agents_created} turns={agent_turns}")
+    _print_info(f"Files written to: {output_dir}")
+
+    _print("\nGenerated files:", style="bold")
+    for f in written:
+        _print_info(f"  {f.relative_to(output_dir)}")
+
+    _print("\nNext steps:", style="bold")
+    _print_info(f"  cd {output_dir}")
+    _print_info("  # Review and customise the generated files")
+    if mode == "app":
+        _print_info("  Promote the generated app bundle into an active app root before running it")
+        _print_info("  Open Studio: python -m mozaiks studio --dir . --open")
+    return 0
+
+
 def run(args):
     """Execute the gen command."""
     mode = args.mode
@@ -529,6 +743,9 @@ def run(args):
         _print_error("No LLM API key found.")
         _print_info("Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_OPENAI_API_KEY")
         return 1
+
+    _warn_if_no_mongo()
+    _init_logging()
 
     source_path = _find_generator_source()
     if not source_path:
@@ -553,10 +770,17 @@ def run(args):
     staging_dir = Path(tempfile.mkdtemp(prefix="mozaiks_gen_"))
     try:
         _print_info("Staging AgentGenerator workflow...")
-        _stage_workflow(source_path, staging_dir, "AgentGenerator")
+        staged_workflow = _stage_workflow(source_path, staging_dir, "AgentGenerator")
+
+        # Refuse interview-driven workflows before any LLM call (issue #383).
+        if not getattr(args, "allow_interactive", False):
+            signals = _detect_conversational_signals(staged_workflow)
+            if signals:
+                _refuse_conversational_workflow("AgentGenerator", signals)
+                return 1
 
         # Set up runtime environment pointing at staged workflows
-        _setup_environment(repo_root, staging_dir)
+        _setup_environment(repo_root, staging_dir, output_dir)
 
         _create_output_structure(output_dir, mode)
 
@@ -568,10 +792,14 @@ def run(args):
         _print("\nGenerating... (this may take a few minutes)\n", style="yellow")
 
         if RICH_AVAILABLE:
+            # transient=True clears the spinner when done; rich's live display
+            # redirects stdout/stderr by default, so workflow log lines print
+            # above the spinner instead of being garbled or swallowed.
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console,
+                transient=True,
             ) as progress:
                 task = progress.add_task("Running AgentGenerator...", total=None)
                 result = asyncio.run(
@@ -594,25 +822,7 @@ def run(args):
                 )
             )
 
-        if result.get("success"):
-            _print_success("Generation complete!")
-            _print_info(f"Files written to: {output_dir}")
-
-            _print("\nGenerated files:", style="bold")
-            for f in sorted(output_dir.rglob("*")):
-                if f.is_file():
-                    _print_info(f"  {f.relative_to(output_dir)}")
-
-            _print("\nNext steps:", style="bold")
-            _print_info(f"  cd {output_dir}")
-            _print_info("  # Review and customise the generated files")
-            if mode == "app":
-                _print_info("  Promote the generated app bundle into an active app root before running it")
-                _print_info("  Open Studio: python -m mozaiks studio --dir . --open")
-            return 0
-        else:
-            _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")
-            return 1
+        return _report_run_outcome(result, output_dir, mode)
 
     except KeyboardInterrupt:
         _print("\n\nGeneration cancelled.", style="yellow")

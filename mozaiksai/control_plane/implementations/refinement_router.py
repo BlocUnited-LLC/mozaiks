@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
@@ -32,9 +32,9 @@ _logger = logging.getLogger("mozaiksai.control_plane.implementations.refinement_
 # Topological order for stale-family priority: earliest dependency restarts first.
 _STALE_PRIORITY: list[str] = [
     "concept",
-    "brand",
+    "theme_capture",
     "design_docs",
-    "experience_spec",
+    "subscription_contract",
     "workflow_bundle",
     "app_bundle",
 ]
@@ -42,9 +42,9 @@ _STALE_PRIORITY: list[str] = [
 # Maps a stale artifact family to the canonical sequence that rebuilds it and its dependents.
 _STALE_SEQUENCE_MAP: dict[str, str] = {
     "concept": "full_rebuild",
-    "brand": "theme_revision",
+    "theme_capture": "theme_revision",
     "design_docs": "design_revision",
-    "experience_spec": "app_surface_revision",
+    "subscription_contract": "subscription_revision",
     "workflow_bundle": "workflow_revision",
     "app_bundle": "app_revision",
 }
@@ -263,9 +263,9 @@ class RefinementRequest(BaseModel):
 
     request_kind: str = "refinement"
     declared_change_class: ChangeClass | None = None
-    artifact_kind: str
-    artifact_key: str | None = None
-    artifact_version_id: str | None = None
+    build_family: str
+    build_key: str | None = None
+    build_record_id: str | None = None
     raw_user_request: str = ""
     source_surface: str | None = None
     app_id: str | None = None
@@ -273,18 +273,47 @@ class RefinementRequest(BaseModel):
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("artifact_kind")
+    @field_validator("build_family")
     @classmethod
-    def _normalize_artifact_kind(cls, value: Any) -> str:
+    def _normalize_build_family(cls, value: Any) -> str:
         if isinstance(value, Enum):
             value = value.value
         normalized = str(value or "").strip().lower()
         if not normalized:
-            raise ValueError("artifact_kind is required")
+            raise ValueError("build_family is required")
         return normalized
 
-    def normalized_artifact_key(self) -> str:
-        return str(self.artifact_key or self.artifact_kind).strip() or self.artifact_kind
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        for old, new in (
+            ("artifact_kind", "build_family"),
+            ("artifact_key", "build_key"),
+            ("artifact_version_id", "build_record_id"),
+            ("default_artifact_kind", "build_family"),
+        ):
+            if old in values:
+                if new not in values:
+                    values[new] = values[old]
+                values.pop(old, None)
+        return values
+
+    @property
+    def artifact_kind(self) -> str:
+        return self.build_family
+
+    @property
+    def artifact_key(self) -> str | None:
+        return self.build_key
+
+    @property
+    def artifact_version_id(self) -> str | None:
+        return self.build_record_id
+
+    def normalized_build_key(self) -> str:
+        return str(self.build_key or self.build_family).strip() or self.build_family
 
     @property
     def request_id(self) -> str:
@@ -296,9 +325,9 @@ class RefinementRequest(BaseModel):
             [
                 str(self.app_id or ""),
                 str(self.user_id or ""),
-                self.artifact_kind,
-                self.normalized_artifact_key(),
-                str(self.artifact_version_id or ""),
+                self.build_family,
+                self.normalized_build_key(),
+                str(self.build_record_id or ""),
                 self.raw_user_request,
             ]
         )
@@ -353,7 +382,7 @@ class RefinementRoutingDecision(BaseModel):
 
 @dataclass(frozen=True)
 class ArtifactRoutePolicy:
-    artifact_kind: str
+    build_family: str
     label: str
     patch: ControlPlaneChangeRouteManifest
     design: ControlPlaneChangeRouteManifest
@@ -369,21 +398,21 @@ class RefinementTriggerRouteResolver:
         self._pack_loader = pack_loader
 
     @staticmethod
-    def _artifact_label(artifact_kind: str, policy: ArtifactRoutePolicy | None = None) -> str:
-        return str(policy.label if policy is not None else artifact_kind).replace("_", " ")
+    def _artifact_label(build_family: str, policy: ArtifactRoutePolicy | None = None) -> str:
+        return str(policy.label if policy is not None else build_family).replace("_", " ")
 
     def _load_pack(self) -> LoadedControlPlanePack:
         loaded = self._pack_loader()
         return loaded if isinstance(loaded, LoadedControlPlanePack) else LoadedControlPlanePack.model_validate(loaded)
 
-    def _policy_for(self, artifact_kind: str) -> ArtifactRoutePolicy:
+    def _policy_for(self, build_family: str) -> ArtifactRoutePolicy:
         pack = self._load_pack()
-        policy = pack.routing_for_artifact(artifact_kind)
+        policy = pack.routing_for_artifact(build_family)
         if policy is None:
-            configured = ", ".join(sorted(artifact.artifact_kind for artifact in pack.manifest.routing.artifacts))
+            configured = ", ".join(sorted(artifact.build_family for artifact in pack.manifest.routing.artifacts))
             raise RuntimeError(
                 "No refinement routing is configured for "
-                f"artifact_kind '{artifact_kind}'. Add it to harness.yaml routing.artifacts. "
+                f"build_family '{build_family}'. Add it to harness.yaml routing.artifacts. "
                 f"Configured kinds: {configured or 'none'}."
             )
         return self._to_policy(policy)
@@ -391,16 +420,16 @@ class RefinementTriggerRouteResolver:
     @staticmethod
     def _to_policy(policy: ControlPlaneArtifactRoutingManifest) -> ArtifactRoutePolicy:
         return ArtifactRoutePolicy(
-            artifact_kind=policy.artifact_kind,
-            label=str(policy.label or policy.artifact_kind).strip() or policy.artifact_kind,
+            build_family=policy.build_family,
+            label=str(policy.label or policy.build_family).strip() or policy.build_family,
             patch=policy.routes.patch,
             design=policy.routes.design,
             feature=policy.routes.feature,
             core=policy.routes.core,
         )
 
-    def _families_for_route(self, route: ControlPlaneChangeRouteManifest, artifact_kind: str) -> list[str]:
-        return self._sequence_families(route.workflow_sequence) or [artifact_kind]
+    def _families_for_route(self, route: ControlPlaneChangeRouteManifest, build_family: str) -> list[str]:
+        return self._sequence_families(route.workflow_sequence) or [build_family]
 
     @staticmethod
     def _sequence_workflows(sequence_id: str | None) -> list[str]:
@@ -504,17 +533,17 @@ class RefinementTriggerRouteResolver:
         paths = RefinementTriggerRouteResolver._manifest_paths_from_extra(request.extra)
         if paths:
             return paths
-        if not request.app_id or not request.artifact_version_id:
+        if not request.app_id or not request.build_record_id:
             return []
         try:
             from mozaiksai.core.artifacts.store import ArtifactStore
 
-            artifact = await ArtifactStore().get_artifact_version(
+            artifact = await ArtifactStore().get_build_record(
                 app_id=request.app_id,
-                artifact_version_id=request.artifact_version_id,
+                build_record_id=request.build_record_id,
             )
         except Exception as exc:
-            _logger.debug("ARTIFACT_FILES_LOOKUP_FAILED app=%s artifact=%s: %s", request.app_id, request.artifact_version_id, exc)
+            _logger.debug("ARTIFACT_FILES_LOOKUP_FAILED app=%s artifact=%s: %s", request.app_id, request.build_record_id, exc)
             return []
         if artifact is None:
             return []
@@ -1296,11 +1325,11 @@ class RefinementTriggerRouteResolver:
         families: list[str],
     ) -> list[str]:
         family_set = set(families)
-        if "experience_spec" not in family_set and "app_bundle" not in family_set:
+        if "design_docs" not in family_set and "app_bundle" not in family_set:
             return []
         manifest_paths = await self._manifest_paths_for_request(request)
         paths: list[str] = []
-        if "experience_spec" in family_set:
+        if "design_docs" in family_set and intent.change_class == ChangeClass.DESIGN:
             paths.extend(
                 self._experience_spec_bundle_paths(
                     request=request,
@@ -1424,11 +1453,11 @@ class RefinementTriggerRouteResolver:
 
     async def _derive_change_intent(self, request: RefinementRequest) -> ChangeIntent:
         classification = await self._classifier.classify(
-            artifact_kind=request.artifact_kind,
-            artifact_key=request.artifact_key,
+            build_family=request.build_family,
+            build_key=request.build_key,
             raw_user_request=request.raw_user_request,
             declared_change_class=request.declared_change_class.value if request.declared_change_class else None,
-            artifact_version_id=request.artifact_version_id,
+            build_record_id=request.build_record_id,
             source_surface=request.source_surface,
             app_id=request.app_id,
             user_id=request.user_id,
@@ -1438,10 +1467,10 @@ class RefinementTriggerRouteResolver:
         change_class = ChangeClass(classification.change_class)
         source = "llm"
         signals = [str(signal).strip() for signal in classification.signals if str(signal).strip()]
-        policy = self._policy_for(request.artifact_kind)
+        policy = self._policy_for(request.build_family)
         route = policy.route_for(change_class)
-        families = set(self._families_for_route(route, request.artifact_kind))
-        label = self._artifact_label(request.artifact_kind, policy)
+        families = set(self._families_for_route(route, request.build_family))
+        label = self._artifact_label(request.build_family, policy)
 
         if change_class == ChangeClass.CORE:
             return ChangeIntent(
@@ -1490,10 +1519,10 @@ class RefinementTriggerRouteResolver:
         )
 
     async def _derive_impact_set(self, request: RefinementRequest, intent: ChangeIntent) -> ImpactSet:
-        policy = self._policy_for(request.artifact_kind)
+        policy = self._policy_for(request.build_family)
         route = policy.route_for(intent.change_class)
-        families = self._families_for_route(route, request.artifact_kind)
-        label = self._artifact_label(request.artifact_kind, policy)
+        families = self._families_for_route(route, request.build_family)
+        label = self._artifact_label(request.build_family, policy)
         workflow_id = self._route_workflow_id(route)
         affected_workflows = self._affected_workflows_for_route(route)
         if intent.change_class == ChangeClass.CORE:
@@ -1533,9 +1562,9 @@ class RefinementTriggerRouteResolver:
         change_intent: ChangeIntent,
         impact_set: ImpactSet,
     ) -> RefinementRoutingDecision:
-        policy = self._policy_for(request.artifact_kind)
+        policy = self._policy_for(request.build_family)
         route = policy.route_for(change_intent.change_class)
-        label = self._artifact_label(request.artifact_kind, policy)
+        label = self._artifact_label(request.build_family, policy)
         workflow_id = self._route_workflow_id(route)
 
         if change_intent.change_class == ChangeClass.CORE:
@@ -1695,7 +1724,9 @@ class RefinementTriggerRouteResolver:
         context_seed: dict[str, Any] = {
             "build_mode": "revision",
             "revision_scope": change_intent.change_class.value,
-            "artifact_kind": request.artifact_kind,
+            "build_family": request.build_family,
+            "artifact_kind": request.build_family,
+            "artifact_key": request.build_key,
             "refinement_request": request.raw_user_request,
             "refinement_request_meta": request.model_dump(mode="python"),
             "screen": request.source_surface,
@@ -1705,8 +1736,9 @@ class RefinementTriggerRouteResolver:
             "app_context_required": True,
         }
         context_seed.update(await self._current_app_context_seed(request))
-        if request.artifact_version_id:
-            context_seed["artifact_version_id"] = request.artifact_version_id
+        if request.build_record_id:
+            context_seed["build_record_id"] = request.build_record_id
+            context_seed["artifact_version_id"] = request.build_record_id
         # When the app is in 'review' (pre-promotion), revisions must operate on
         # the generated bundle path rather than the active workspace root.
         lifecycle_state = request.extra.get("lifecycle_state")
@@ -1746,7 +1778,7 @@ class RefinementTriggerRouteResolver:
             context_seed["preserve_families"] = (
                 list(preserve_families)
                 if isinstance(preserve_families, list)
-                else ["brand"]
+                else ["theme_capture"]
             )
             previous_brand_ref = request.extra.get("previous_brand_ref")
             if isinstance(previous_brand_ref, str) and previous_brand_ref.strip():
@@ -1841,9 +1873,9 @@ class RefinementTriggerRouteResolver:
             impact_set=impact_set,
         )
         _logger.info(
-            "Routing decision: change_class=%s artifact_kind=%s -> workflow=%s restart=%s",
+            "Routing decision: change_class=%s build_family=%s -> workflow=%s restart=%s",
             change_intent.change_class,
-            request.artifact_kind,
+            request.build_family,
             decision.workflow_id,
             decision.is_full_restart,
         )
@@ -1875,12 +1907,20 @@ class RefinementTriggerRouteResolver:
         if isinstance(revision_id, str) and revision_id.strip():
             request_payload["extra"]["revision_id"] = revision_id.strip()
 
-        default_artifact_kind = self._load_pack().manifest.routing.default_artifact_kind
-        request_payload.setdefault("artifact_kind", default_artifact_kind)
-        request_payload["artifact_key"] = (
-            str(request_payload.get("artifact_key") or request_payload.get("artifact_kind") or default_artifact_kind)
+        default_build_family = self._load_pack().manifest.routing.default_build_family
+        resolved_build_family = str(
+            request_payload.get("build_family")
+            or request_payload.get("artifact_kind")
+            or request_payload.get("default_artifact_kind")
+            or default_build_family
+        ).strip().lower()
+        if not resolved_build_family:
+            resolved_build_family = default_build_family
+        request_payload["build_family"] = resolved_build_family
+        request_payload["build_key"] = (
+            str(request_payload.get("build_key") or request_payload.get("build_family") or default_build_family)
             .strip()
-            or default_artifact_kind
+            or request_payload["build_family"]
         )
         request_payload["app_id"] = str(app_id or "").strip() or None
         request_payload["user_id"] = str(user_id or "").strip() or None
@@ -1934,7 +1974,7 @@ class RefinementTriggerRouteResolver:
 
     def supported_artifact_kinds(self) -> list[str]:
         pack = self._load_pack()
-        configured = [artifact.artifact_kind for artifact in pack.manifest.routing.artifacts]
+        configured = [artifact.build_family for artifact in pack.manifest.routing.artifacts]
         return sorted(configured or [ArtifactKind.APP_BUNDLE.value])
 
     def supported_change_classes(self) -> list[str]:

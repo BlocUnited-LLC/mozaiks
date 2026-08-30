@@ -117,7 +117,7 @@ async def test_refinement_control_plane_smoke_routes_experience_refinement_witho
     assert len(classifier.calls) == 1
     assert decision.workflow_id == "DesignDocs"
     assert decision.workflow_sequence == "app_surface_revision"
-    assert decision.impact_set.affected_declarative_families == ["experience_spec", "app_bundle"]
+    assert decision.impact_set.affected_declarative_families == ["design_docs", "app_bundle"]
     assert "ui/pages/dashboard.yaml" in decision.impact_set.affected_bundle_paths
     assert "ui/route_manifest.json" in decision.impact_set.affected_bundle_paths
     assert "config/shell.json" not in decision.impact_set.affected_bundle_paths

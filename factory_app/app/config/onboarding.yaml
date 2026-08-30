@@ -1,0 +1,20 @@
+version: 1
+# Factory app onboarding steps for the shared OSS tour overlay.
+steps:
+  - id: create_app
+    selector: 'a[href="/apps"]'
+    title: Create your first app
+    description: Hit Create App from here any time to describe what you want to build. Mozaiks scaffolds the modules, pages, and deployment for you.
+    placement: bottom
+
+  - id: explore_apps
+    selector: 'a[href="/usage"]'
+    title: Track your usage
+    description: Monitor LLM token usage and cost across all your apps in one place.
+    placement: bottom
+
+  - id: open_support
+    selector: 'a[href="/support"]'
+    title: Get help any time
+    description: Open a support conversation directly from the Support page.
+    placement: bottom

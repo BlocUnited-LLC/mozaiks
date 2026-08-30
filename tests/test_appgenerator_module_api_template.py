@@ -164,6 +164,14 @@ class TestModuleApiRequestShape:
 
 class TestModuleApiStructuredErrors:
 
+    def test_module_and_workflow_errors_share_one_strict_payload_parser(self):
+        """Both request paths reject primitive/array JSON and share one parser."""
+        js = _template_js()
+        assert "function parseErrorPayload(body)" in js
+        assert "Array.isArray(body)" in js
+        assert "Array.isArray(detail)" in js
+        assert js.count("const payload = parseErrorPayload(body)") == 2
+
     def test_json_parse_attempt_on_error_body(self):
         """Template attempts to parse the error body as JSON."""
         js = _template_js()
@@ -177,10 +185,17 @@ class TestModuleApiStructuredErrors:
         )
 
     def test_error_code_attached_to_error(self):
-        """err.error_code is attached when the body contains error_code."""
+        """err.error_code is read from the unwrapped payload, not the raw body.
+
+        FastAPI nests HTTPException detail, so `body.error_code` is always
+        undefined for a real backend error.
+        """
         js = _template_js()
-        assert "err.error_code = body.error_code" in js or "err.error_code=body.error_code" in js, (
-            "err.error_code must be assigned from body.error_code on non-ok responses"
+        assert "err.error_code = payload.error_code" in js, (
+            "err.error_code must be assigned from the unwrapped payload"
+        )
+        assert "body.error_code" not in js, (
+            "reading body.error_code ignores FastAPI's 'detail' nesting"
         )
 
     def test_code_field_attached_to_error(self):
@@ -190,19 +205,15 @@ class TestModuleApiStructuredErrors:
             "err.code must be assigned from body.code on non-ok responses"
         )
 
-    def test_error_message_prefers_body_error(self):
-        """Error message prefers body.error over body.message and fallback."""
+    def test_error_message_prefers_payload_error(self):
+        """Error message prefers the unwrapped payload's error field."""
         js = _template_js()
-        assert "body?.error" in js or "body.error" in js, (
-            "Error message must prefer body.error"
-        )
+        assert "payload?.error" in js, "Error message must prefer payload.error"
 
-    def test_error_message_falls_back_to_body_message(self):
-        """Error message falls back to body.message when error is absent."""
+    def test_error_message_falls_back_to_payload_message(self):
+        """Error message falls back to payload.message when error is absent."""
         js = _template_js()
-        assert "body?.message" in js or "body.message" in js, (
-            "Error message must fall back to body.message"
-        )
+        assert "payload?.message" in js, "Error message must fall back to payload.message"
 
     def test_non_json_body_handled_gracefully(self):
         """Non-JSON error bodies (HTML gateway errors) are handled without crashing."""
@@ -220,11 +231,31 @@ class TestModuleApiStructuredErrors:
             "err.status must be assigned from response.status"
         )
 
-    def test_data_preserves_full_body(self):
-        """err.data preserves the full parsed body for caller inspection."""
+    def test_data_preserves_unwrapped_payload(self):
+        """err.data carries the unwrapped payload for caller inspection.
+
+        Callers branch on err.data.error_code, so it must hold the same level
+        the structured fields were read from.
+        """
         js = _template_js()
-        assert "err.data = body" in js or "err.data=body" in js, (
-            "err.data must be assigned to the full parsed body"
+        assert "err.data = payload" in js, (
+            "err.data must be assigned the unwrapped payload"
+        )
+
+    def test_detail_envelope_is_unwrapped(self):
+        """The unwrap itself — the fix for a denial reaching the user as a raw
+        'Module action failed: ... 402' instead of an upgrade prompt."""
+        js = _template_js()
+        assert "body.detail" in js, "template must inspect the FastAPI 'detail' envelope"
+        assert "const payload" in js, "template must bind an unwrapped payload"
+
+    def test_entitlement_detector_accepts_http_402(self):
+        """402 is the canonical denial signal and must be recognised on status
+        alone, so a reshaped or unreadable body still routes to the upgrade
+        path."""
+        js = _template_js()
+        assert "err?.status === 402" in js, (
+            "isEntitlementRequiredError must treat HTTP 402 as a denial"
         )
 
     def test_no_secret_shaped_named_attrs(self):

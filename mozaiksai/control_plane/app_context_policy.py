@@ -14,6 +14,7 @@ from mozaiksai.control_plane.app_context import (
     AppContextSummary,
 )
 from mozaiksai.control_plane.app_context_impact import AppContextImpactHints
+from mozaiksai.control_plane.contracts import RefinementLane
 
 APP_CONTEXT_REQUIRED_BLOCK_WARNING = (
     "Current App Intelligence context must be indexed and current before refinement can proceed."
@@ -169,11 +170,11 @@ def _risky_signals(
     lane = str(refinement_lane or "").strip().lower()
     normalized_change_class = str(change_class or "").strip().lower()
 
-    if lane in {"data_model_migration", "integration", "managed_capability_change"}:
+    if lane in {RefinementLane.DATA_MODEL_MIGRATION.value, RefinementLane.INTEGRATION.value, RefinementLane.MANAGED_CAPABILITY_CHANGE.value}:
         signals.append(lane)
-    if lane in {"architecture_replan", "conceptual_reframe"} or normalized_change_class == "core":
+    if lane in {RefinementLane.ARCHITECTURE_REPLAN.value, RefinementLane.CONCEPTUAL_REFRAME.value} or normalized_change_class == "core":
         signals.append("conceptual_or_architecture_replan")
-    if lane == "feature_addition" and _touches_module_or_backend(affected_bundle_paths):
+    if lane == RefinementLane.FEATURE_ADDITION.value and _touches_module_or_backend(affected_bundle_paths):
         signals.append("module_backend_feature_addition")
     if _touches_sensitive_boundary(affected_bundle_paths):
         signals.append("sensitive_boundary_change")
@@ -227,9 +228,9 @@ def _is_brownfield_source_affecting(
 ) -> bool:
     if summary is None or summary.mode != "brownfield":
         return False
-    if lane in {"ui_patch", "experience_design"} and not _touches_module_or_backend(paths):
+    if lane in {RefinementLane.UI_PATCH.value, RefinementLane.EXPERIENCE_DESIGN.value} and not _touches_module_or_backend(paths):
         return False
-    return bool(paths) or lane in {"data_model_migration", "integration", "feature_addition"}
+    return bool(paths) or lane in {RefinementLane.DATA_MODEL_MIGRATION.value, RefinementLane.INTEGRATION.value, RefinementLane.FEATURE_ADDITION.value}
 
 
 def _paths_overlap(path: str, boundary_path: str) -> bool:

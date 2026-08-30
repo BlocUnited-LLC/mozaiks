@@ -146,23 +146,49 @@ operator validation override that is recorded in artifact metadata.
 ## Studio Surface
 
 Studio must show visible App Intelligence state before source-editing work.
-Workflow startup emits a chat-feed activity row such as "Obtaining app
-context..." and updates it through ready or failed. When indexing completes,
-the workflow emits a compact inline App Intelligence brief into the chat feed
-and keeps the detailed App Intelligence overview in the artifact panel.
+Workflow startup emits a persistent chat-feed progress card that updates in
+place through ready, partial, blocked, or failed. The card keeps completed
+indexing stages visible so users can see that Mozaiks is still reading source
+and has not started editing files. When indexing completes,
+ExistingAppDiscovery emits `AppIntelligenceOverviewCard` in the artifact panel.
+The chat feed keeps the completed progress card as the durable readiness
+marker, then the discovery agent translates the indexed context into a
+feature-first response.
+
+The progress card may show:
 
 - readiness: missing, queued, indexing, ready, stale, degraded, or failed
 - current indexing phase and progress
-- detected primary framework
-- indexed file count
-- graph node and edge counts
-- detected frameworks
-- validation commands available to the refinement harness
-- warnings from scan, parser, graph, health, and stale-context checks
+- user-safe scanner notes when source access is partial or intentionally bounded
+
+`AppIntelligenceOverviewCard` is a workflow-owned artifact-panel UI surface, not
+a framework-wide artifact kind. In ExistingAppDiscovery it renders the
+`DiscoveryArtifactAssemblerAgent`'s structured synthesis of App Intelligence
+facts into a product-facing presentation view model with:
+
+- a concise application summary
+- major existing features
+- a short handoff to the discovery agent's next question
+
+It does not duplicate indexing readiness with header status pills; readiness
+belongs in the completed chat-feed progress card. Enhancement recommendations
+belong in `ValueEngine` after the user selects Add AI Workflows or Build App
+Features.
+
+Repository metrics, source chunk counts, symbol counts, graph node/edge counts,
+artifact ids, source refs, raw paths, scanner warning codes, language counts,
+and file-role counts stay in state, logs, APIs, agent context, or a separate
+developer diagnostics surface. They must not render in the default artifact.
+
+Default App Intelligence artifacts are read-only insight surfaces. They should
+not include readiness badges, priority badges, repeated per-card CTAs,
+suggested-workflow blocks, or bottom decision panels unless the workflow
+explicitly emits a response-required artifact for user selection.
 
 This makes indexing a visible transition state instead of a silent chat delay
-or a side-panel-only flash, and it leaves a durable transcript record of what
-agents could see before they edited or advised on the app.
+or a side-panel-only flash, and it leaves a durable transcript marker plus a
+reviewable artifact showing what Mozaiks understood before value planning
+begins.
 
 ## Workflow Journey
 

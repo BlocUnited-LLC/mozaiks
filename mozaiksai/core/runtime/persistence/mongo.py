@@ -21,19 +21,6 @@ def _default_database_name() -> str:
     ).strip() or DEFAULT_APP_DATABASE_NAME
 
 
-def _normalize_index_keys(raw_keys: Any) -> list[tuple[str, int]]:
-    keys = list(raw_keys or [])
-    normalized: list[tuple[str, int]] = []
-    for item in keys:
-        if not isinstance(item, (list, tuple)) or len(item) != 2:
-            raise ValueError("index keys must be [field, direction] pairs")
-        field, direction = item
-        normalized.append((str(field), int(direction)))
-    if not normalized:
-        raise ValueError("index keys are required")
-    return normalized
-
-
 class MongoPersistenceCollection:
     """Mongo-backed collection wrapper for future generated module repositories.
 
@@ -119,25 +106,18 @@ class MongoPersistenceCollection:
         cursor = self._collection.aggregate(scoped_pipeline)
         return await cursor.to_list(length=None)  # type: ignore[no-any-return]
 
-    async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> None:
-        if not indexes:
-            return
-        existing_names: set[str] = set()
-        try:
-            existing = await self._collection.list_indexes().to_list(length=None)
-            existing_names = {str(item.get("name")) for item in existing if isinstance(item, Mapping) and item.get("name")}
-        except Exception:
-            existing_names = set()
+    async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> list[Any]:
+        """Materialize and verify declared indexes before reporting readiness."""
 
-        for spec in indexes:
-            keys = _normalize_index_keys(spec.get("keys"))
-            name = spec.get("name")
-            kwargs = {key: value for key, value in dict(spec).items() if key not in {"keys", "name"}}
-            if name:
-                if str(name) in existing_names:
-                    continue
-                kwargs["name"] = str(name)
-            await self._collection.create_index(keys, **kwargs)
+        if not indexes:
+            return []
+        from .indexes import _ensure_raw_collection_indexes
+
+        return await _ensure_raw_collection_indexes(
+            self._collection,
+            [dict(spec) for spec in indexes],
+            collection_label=str(getattr(self._collection, "name", "collection")),
+        )
 
 
 class MongoPersistenceContext:

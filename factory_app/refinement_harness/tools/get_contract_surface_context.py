@@ -50,7 +50,7 @@ async def get_contract_surface_context(
     return {
         "present": True,
         "app_id": tool_context.app_id,
-        "artifact_version_id": artifact.id,
+        "build_record_id": artifact.id,
         "raw_user_request": raw_user_request,
         "context_graph": context_graph_catalog,
         "file_count": context_graph_catalog.get("file_count", 0),

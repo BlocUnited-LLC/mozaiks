@@ -303,6 +303,19 @@ def test_appgenerator_selection_wiring_includes_messaging_pack() -> None:
     assert packs["messaging"]["capability_kind"] == "operator_pack"
 
 
+# ---------------------------------------------------------------------------
+# Account-data (GDPR) contract
+# ---------------------------------------------------------------------------
+
+def test_messages_backend_ships_account_data_handler() -> None:
+    handler = TEMPLATES / "modules" / "messages" / "backend" / "account_data_handler.py"
+    assert handler.exists(), "account_data_handler.py must exist alongside user_data_scope=true"
+    source = handler.read_text(encoding="utf-8")
+    assert "class AccountDataHandler" in source
+    assert "async def delete_user_data" in source
+    assert "async def export_user_data" in source
+
+
 def test_messaging_pack_does_not_generate_announcement_or_contacts_module() -> None:
     """Announcements are hosted-only. Contacts belong to the social pack."""
     generated_paths = {

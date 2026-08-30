@@ -25,7 +25,7 @@
           },
           {
             "primitive": "ActionButton",
-            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\", \"entitlement_gate\": \"reports.export\"}]}",
+            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\"}]}",
             "section_id_hint": "export-action",
             "title_hint": null
           }
@@ -69,6 +69,7 @@
       ],
       "appearance_hint": "techy"
     },
+    "monetization_provider": "entitlement_dispatch",
     "capability_packs": [
       {
         "capability_pack_id": "analytics_pack",
@@ -87,6 +88,25 @@
         "operations": [
           "view_report",
           "export_report"
+        ],
+        "required_integrations": [],
+        "agentic_extensions": []
+      },
+      {
+        "capability_pack_id": "entitlement_dispatch",
+        "surface_id": "entitlement_dispatch",
+        "surface_kind": "module",
+        "pack_type": "entitlement_dispatch",
+        "label": "Entitlement Dispatch",
+        "summary": "Self-managed OSS subscription assignment and entitlement enforcement module.",
+        "implementation_mode": "deterministic",
+        "primary_entities": [
+          "SubscriptionAssignment"
+        ],
+        "primary_pages": [],
+        "operations": [
+          "assign_subscription",
+          "get_entitlements"
         ],
         "required_integrations": [],
         "agentic_extensions": []

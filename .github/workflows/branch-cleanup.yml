@@ -1,0 +1,90 @@
+name: Branch Cleanup
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly safety net for branches "Automatically delete head branches" can't
+    # catch: PRs closed without merging (abandoned work).
+    - cron: "0 9 * * 1"
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    name: Delete stale merged/closed branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+      - name: Delete stale merged/closed branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Grace period before deleting an abandoned (closed, not merged) branch,
+          # in case it gets reopened. Merged branches are already covered by the
+          # repo's auto-delete-on-merge setting, but are deleted here too as a
+          # backstop for merges that predate/bypass that setting.
+          CLOSED_GRACE_DAYS=3
+          now=$(date +%s)
+
+          gh pr list --state all --limit 1000 --json headRefName,state,number,updatedAt > /tmp/prs.json
+
+          deleted=()
+          flagged=()
+
+          for ref in $(git branch -r | grep -v 'HEAD' | sed 's|origin/||'); do
+            if [ "$ref" == "main" ]; then
+              continue
+            fi
+
+            pr=$(jq -r --arg b "$ref" '[.[] | select(.headRefName == $b)] | sort_by(.number) | last // empty' /tmp/prs.json)
+            if [ -z "$pr" ]; then
+              flagged+=("$ref (no PR history)")
+              continue
+            fi
+
+            state=$(echo "$pr" | jq -r '.state')
+            updated_at=$(echo "$pr" | jq -r '.updatedAt')
+            updated_epoch=$(date -d "$updated_at" +%s)
+            age_days=$(( (now - updated_epoch) / 86400 ))
+
+            if [ "$state" == "OPEN" ]; then
+              continue
+            elif [ "$state" == "MERGED" ]; then
+              echo "Deleting merged branch: $ref"
+              git push origin --delete "$ref" || true
+              deleted+=("$ref (merged)")
+            elif [ "$state" == "CLOSED" ]; then
+              if [ "$age_days" -ge "$CLOSED_GRACE_DAYS" ]; then
+                echo "Deleting abandoned branch: $ref (closed ${age_days}d ago)"
+                git push origin --delete "$ref" || true
+                deleted+=("$ref (closed, ${age_days}d ago)")
+              else
+                flagged+=("$ref (closed ${age_days}d ago, still in grace period)")
+              fi
+            fi
+          done
+
+          {
+            echo "## Branch Cleanup Summary"
+            echo ""
+            echo "### Deleted (${#deleted[@]})"
+            if [ "${#deleted[@]}" -eq 0 ]; then echo "_none_"; else printf -- '- %s\n' "${deleted[@]}"; fi
+            echo ""
+            echo "### Left for manual review (${#flagged[@]})"
+            if [ "${#flagged[@]}" -eq 0 ]; then echo "_none_"; else printf -- '- %s\n' "${flagged[@]}"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

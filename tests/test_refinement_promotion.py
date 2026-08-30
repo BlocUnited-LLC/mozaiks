@@ -45,7 +45,7 @@ def _build_plan(
     paths = ["ui/pages/dashboard.yaml"] if affected_paths is None else affected_paths
     return dry_run.build_refinement_execution_plan_from_route(
         request=request,
-        artifact_kind="app_bundle",
+        build_family="app_bundle",
         change_class=change_class,
         workflow_id="AppGenerator",
         workflow_sequence=workflow_sequence,
@@ -94,7 +94,7 @@ def _reviewed_workspace(
         request_id=request_id,
     )
     staging_result = create_refinement_staging_workspace(plan, source_bundle_path=source, staging_root=staging_root)
-    create_refinement_review_record(staging_result)
+    create_refinement_review_record(staging_result, write_back_mode="local_workspace")
     approve_refinement_staging(staging_result.staging_area, reviewer="operator-1")
     review_record = load_refinement_review_record(staging_result.staging_area)
     return source, plan, staging_result, review_record
@@ -246,6 +246,47 @@ def test_confirm_false_prevents_mutation(tmp_path: Path) -> None:
 
     assert source_file.read_text(encoding="utf-8") == before
     assert load_refinement_review_record(staging_result.staging_area).status == "promotion_ready"
+
+
+def test_generated_artifact_review_blocks_direct_source_mutation(tmp_path: Path) -> None:
+    staging_root = tmp_path / ".refinement_staging"
+    source = _source_bundle(tmp_path)
+    plan = _build_plan(
+        staging_root,
+        request="Fix a dashboard label.",
+        change_class="patch",
+        workflow_sequence="app_revision",
+        affected_declarative_families=[],
+        affected_paths=["ui/pages/dashboard.yaml"],
+        request_id="req_generated_writeback",
+    )
+    staging_result = create_refinement_staging_workspace(plan, source_bundle_path=source, staging_root=staging_root)
+    create_refinement_review_record(staging_result)
+    approve_refinement_staging(staging_result.staging_area, reviewer="operator-1")
+    review_record = mark_refinement_promotion_ready(staging_result.staging_area, reviewer="operator-1")
+    execution_result = apply_scoped_refinement_changes(
+        plan=plan,
+        staging_result=staging_result,
+        changes=[
+            ScopedRefinementChange(
+                path="ui/pages/dashboard.yaml",
+                new_content="title: Updated Dashboard\n",
+                reason="Generated-artifact review must not write source directly.",
+            )
+        ],
+    )
+
+    with pytest.raises(RefinementPromotionError, match="write_back_mode='local_workspace'"):
+        promote_refinement_staging(
+            plan,
+            staging_result,
+            review_record,
+            execution_result,
+            source_bundle_path=source,
+            confirm=True,
+            dry_run=False,
+            backup=True,
+        )
 
 
 def test_review_status_approved_is_not_enough(tmp_path: Path) -> None:

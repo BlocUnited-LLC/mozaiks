@@ -239,7 +239,7 @@ async def resolve_carry_forward_preservation(
         workspace = await load_artifact_workspace(
             artifact_store=store,
             app_id=app_id,
-            artifact_version_id=prev_ref,
+            build_record_id=prev_ref,
             content_store=cs,
         )
     except Exception as exc:

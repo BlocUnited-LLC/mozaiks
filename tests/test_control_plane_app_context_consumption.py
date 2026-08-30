@@ -42,14 +42,14 @@ class _MemoryArtifactStore:
         self.versions: dict[str, ArtifactVersionDoc] = {}
         self._counter = 0
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> ArtifactVersionDoc:
         self._counter += 1
         version_id = f"av_{self._counter}"
         doc = ArtifactVersionDoc(
             _id=version_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs.get("build_family") or kwargs.get("artifact_kind"),
+            build_key=kwargs.get("build_key") or kwargs.get("artifact_key"),
             version_number=self._counter,
             lineage_root_id=version_id,
             source_workflow=kwargs.get("source_workflow"),
@@ -63,35 +63,43 @@ class _MemoryArtifactStore:
         self.versions[doc.id] = doc
         return doc
 
+    async def get_build_record(
+        self,
+        *,
+        app_id: str,
+        build_record_id: str,
+    ) -> ArtifactVersionDoc | None:
+        doc = self.versions.get(build_record_id)
+        if doc is None or doc.app_id != app_id:
+            return None
+        return doc
+
     async def get_artifact_version(
         self,
         *,
         app_id: str,
         artifact_version_id: str,
     ) -> ArtifactVersionDoc | None:
-        doc = self.versions.get(artifact_version_id)
-        if doc is None or doc.app_id != app_id:
-            return None
-        return doc
+        return await self.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
     ) -> ArtifactVersionDoc | None:
-        doc = await self.get_artifact_version(
+        doc = await self.get_build_record(
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if doc is None:
             return None
         for version in self.versions.values():
             if (
                 version.app_id == app_id
-                and version.artifact_kind == doc.artifact_kind
-                and version.artifact_key == doc.artifact_key
+                and version.build_family == doc.build_family
+                and version.build_key == doc.build_key
                 and version.id != doc.id
                 and version.lifecycle_status is ArtifactLifecycleStatus.CURRENT
             ):
@@ -101,21 +109,21 @@ class _MemoryArtifactStore:
             doc.commit_metadata = commit_metadata
         return doc
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
     ) -> list[ArtifactVersionDoc]:
         rows = [doc for doc in self.versions.values() if doc.app_id == app_id]
-        if artifact_kind is not None:
-            rows = [doc for doc in rows if doc.artifact_kind == artifact_kind]
-        if artifact_key is not None:
-            rows = [doc for doc in rows if doc.artifact_key == artifact_key]
+        if build_family is not None:
+            rows = [doc for doc in rows if doc.build_family == build_family]
+        if build_key is not None:
+            rows = [doc for doc in rows if doc.build_key == build_key]
         if lifecycle_status is not None:
             rows = [doc for doc in rows if doc.lifecycle_status is lifecycle_status]
         return sorted(rows, key=lambda doc: doc.version_number, reverse=True)[:limit]
@@ -125,8 +133,8 @@ def _greenfield_bundle() -> ArtifactVersionDoc:
     return ArtifactVersionDoc(
         _id="av_app_bundle_1",
         app_id="greenfield_app",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
+        build_family="app_bundle",
+        build_key="app_bundle",
         version_number=1,
         lineage_root_id="av_app_bundle_1",
         lifecycle_status=ArtifactLifecycleStatus.CURRENT,

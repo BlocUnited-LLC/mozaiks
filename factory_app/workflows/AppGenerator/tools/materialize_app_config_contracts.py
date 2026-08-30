@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.generator_support.connector_request import (
     collect_integration_needs,
 )
@@ -63,7 +64,7 @@ def _subscriptions_config_file(context_variables: Any) -> dict[str, Any] | None:
         raw = _context_get(context_variables, key)
         if isinstance(raw, dict):
             cfg = raw.get("subscription_config_file")
-            if isinstance(cfg, dict) and cfg.get("schema_version") == "mozaiks.subscriptions.v1":
+            if isinstance(cfg, dict):
                 return cfg
     return None
 
@@ -81,52 +82,14 @@ def _materialize_subscriptions_yaml(*, context_variables: Any) -> str | None:
     if cfg is None:
         return None
 
-    # Rebuild the document deterministically so field order matches the runtime
-    # loader's expected shape (mozaiksai.core.runtime.app.subscriptions_loader).
-    doc: dict[str, Any] = {"schema_version": "mozaiks.subscriptions.v1"}
-    if cfg.get("label"):
-        doc["label"] = str(cfg["label"])
-    if cfg.get("default_plan_id"):
-        doc["default_plan_id"] = str(cfg["default_plan_id"])
-
-    assignment_store = cfg.get("assignment_store")
-    if isinstance(assignment_store, dict) and assignment_store.get("data_alias"):
-        store: dict[str, Any] = {"data_alias": str(assignment_store["data_alias"])}
-        for field in (
-            "app_id_field", "tenant_id_field", "workspace_id_field", "user_id_field",
-            "plan_id_field", "status_field", "starts_at_field", "expires_at_field",
-            "capabilities_field", "plan_snapshot_field",
-        ):
-            if assignment_store.get(field) is not None:
-                store[field] = str(assignment_store[field])
-        active_statuses = assignment_store.get("active_statuses")
-        if isinstance(active_statuses, list) and active_statuses:
-            store["active_statuses"] = [str(s) for s in active_statuses]
-        doc["assignment_store"] = store
-
-    plans = cfg.get("plans")
-    if isinstance(plans, list):
-        plan_docs: list[dict[str, Any]] = []
-        for plan in plans:
-            if not isinstance(plan, dict) or not plan.get("plan_id"):
-                continue
-            plan_doc: dict[str, Any] = {"plan_id": str(plan["plan_id"])}
-            if plan.get("label"):
-                plan_doc["label"] = str(plan["label"])
-            if plan.get("description"):
-                plan_doc["description"] = str(plan["description"])
-            capabilities = plan.get("capabilities")
-            plan_doc["capabilities"] = [str(c) for c in capabilities] if isinstance(capabilities, list) else []
-            plan_docs.append(plan_doc)
-        doc["plans"] = plan_docs
-
-    for list_key in ("token_wallets", "top_up_products", "add_on_products", "usage_charge_policies"):
-        val = cfg.get(list_key)
-        doc[list_key] = [_safe_dict(item) if isinstance(item, dict) else _safe_scalar(item) for item in val] if isinstance(val, list) else []
-
-    pricing_catalog = cfg.get("pricing_catalog")
-    if isinstance(pricing_catalog, dict):
-        doc["pricing_catalog"] = _safe_dict(pricing_catalog)
+    # Validate and serialize through the canonical runtime contract rather than
+    # reconstructing selected fields. This preserves every supported v1/v2
+    # field and fails closed when a future field or schema version is not yet
+    # understood instead of silently dropping it from the generated bundle.
+    doc = SubscriptionsConfig.model_validate(cfg).model_dump(
+        mode="json",
+        exclude_unset=True,
+    )
 
     return str(yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True))
 

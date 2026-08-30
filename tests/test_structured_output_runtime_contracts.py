@@ -262,7 +262,9 @@ def test_get_llm_for_workflow_keeps_response_format_for_strict_safe_models() -> 
 
     async def _fake_get_llm_config(*, response_format=None, extra_config=None, cache=True):
         seen["response_format"] = response_format
-        return None, {"config_list": [], "tools": [], "response_format": response_format}
+        # response_format is NOT stored in the returned dict; enforcement is via
+        # Agent(response_schema=...) in factory.py.
+        return None, {"config_list": [], "tools": []}
 
     original = _structured_mod.get_llm_config
     _structured_mod.get_llm_config = _fake_get_llm_config
@@ -276,8 +278,10 @@ def test_get_llm_for_workflow_keeps_response_format_for_strict_safe_models() -> 
     finally:
         _structured_mod.get_llm_config = original
 
+    # get_llm_for_workflow must forward the correct strict model to get_llm_config.
     assert seen["response_format"] is expected_model
-    assert cfg["response_format"] is expected_model
+    # response_format is NOT stored in the returned dict (it's dead in llm_config_to_ag2_config).
+    assert "response_format" not in cfg
 
 
 def test_designdocs_agent_output_supports_provider_strict_response_format() -> None:

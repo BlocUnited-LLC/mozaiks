@@ -85,11 +85,18 @@ Example::
 """
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from mozaiksai.core.taxonomy import (
+    SemanticCategory,
+    validate_identifier_grammar,
+    validate_registered_identifier,
+)
 
 # ---------------------------------------------------------------------------
 # Validation helpers
@@ -97,7 +104,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 _PLAN_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 _PRODUCT_ID_RE = re.compile(r"^[a-z0-9_-]+$")
-_CAPABILITY_ID_RE = re.compile(r"^[a-z0-9_.]+$")
 _METER_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _WALLET_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _DATA_ALIAS_RE = re.compile(r"^[a-z0-9_.-]+$")
@@ -107,6 +113,10 @@ _CAPABILITY_GROUP_RE = re.compile(r"^[a-z0-9_.-]+$")
 _ROUTE_RE = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*(?:\?[A-Za-z0-9._~!$&'()*+,;=:@/?%-]*)?$")
 
 _CONFIG_PATH = Path("config") / "subscriptions.yaml"
+
+
+def _validate_capability_identifier(value: str) -> str:
+    return validate_identifier_grammar(SemanticCategory.CAPABILITY, value)
 
 
 # ---------------------------------------------------------------------------
@@ -152,11 +162,7 @@ class UsageLimitDef(BaseModel):
         value = value.strip()
         if not value:
             return None
-        if not _CAPABILITY_ID_RE.match(value):
-            raise ValueError(
-                f"capability_id must match [a-z0-9_.]+, got {value!r}"
-            )
-        return value
+        return _validate_capability_identifier(value)
 
 
 class TokenWalletRecoveryDef(BaseModel):
@@ -432,11 +438,7 @@ class AddOnProductDef(BaseModel):
         value = value.strip()
         if not value:
             return None
-        if not _CAPABILITY_ID_RE.match(value):
-            raise ValueError(
-                f"capability_id must match [a-z0-9_.]+, got {value!r}"
-            )
-        return value
+        return _validate_capability_identifier(value)
 
     @field_validator("capability_groups", mode="before")
     @classmethod
@@ -546,15 +548,23 @@ class PlanDef(BaseModel):
         if not isinstance(value, list):
             raise ValueError("capabilities must be a list")
         result: list[str] = []
+        seen: set[str] = set()
+        duplicates: list[str] = []
         for raw in value:
             cap = str(raw).strip()
             if not cap:
                 continue
-            if not _CAPABILITY_ID_RE.match(cap):
-                raise ValueError(
-                    f"capability_id must match [a-z0-9_.]+, got {cap!r}"
-                )
-            result.append(cap)
+            _validate_capability_identifier(cap)
+            if cap in seen:
+                duplicates.append(cap)
+            else:
+                seen.add(cap)
+                result.append(cap)
+        if duplicates:
+            raise ValueError(
+                f"plan capabilities must be unique; duplicate capability_ids: "
+                f"{sorted(set(duplicates))}"
+            )
         return result
 
 
@@ -1148,7 +1158,11 @@ class SubscriptionsConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def load_subscriptions_config(app_root: Path) -> SubscriptionsConfig | None:
+def load_subscriptions_config(
+    app_root: Path,
+    *,
+    taxonomy_advisory: bool = False,
+) -> SubscriptionsConfig | None:
     """Load app/config/subscriptions.yaml.
 
     Returns:
@@ -1176,11 +1190,35 @@ def load_subscriptions_config(app_root: Path) -> SubscriptionsConfig | None:
         )
 
     try:
-        return SubscriptionsConfig.model_validate(raw)
+        config = SubscriptionsConfig.model_validate(raw)
+        if taxonomy_advisory:
+            _validate_subscription_taxonomy(config)
+        return config
     except Exception as exc:
         raise SubscriptionsLoadError(
             f"Invalid config/subscriptions.yaml: {exc}"
         ) from exc
+
+
+def _validate_subscription_taxonomy(config: SubscriptionsConfig) -> None:
+    """Resolve every capability reference without mutating the validated input."""
+
+    def _walk(value: object, key: str | None = None) -> Iterator[str]:
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                yield from _walk(child, str(child_key))
+        elif isinstance(value, list):
+            for child in value:
+                yield from _walk(child, key)
+        elif isinstance(value, str) and key in {"capability_id", "required_capability", "capabilities"}:
+            yield value
+
+    for capability_id in sorted(set(_walk(config.model_dump(mode="python")))):
+        validate_registered_identifier(
+            SemanticCategory.CAPABILITY,
+            capability_id,
+            advisory=True,
+        )
 
 
 __all__ = [

@@ -41,10 +41,12 @@ def build_runtime_context_payload(
 
     raw_ctx: dict[str, Any] | None = None
     if context_variables is not None:
-        if hasattr(context_variables, "data") and isinstance(context_variables.data, dict):
-            raw_ctx = dict(context_variables.data)
+        if hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+            snap = context_variables.snapshot()
+            raw_ctx = dict(snap) if isinstance(snap, dict) else None
         elif hasattr(context_variables, "to_dict") and callable(context_variables.to_dict):
-            raw_ctx = dict(context_variables.to_dict())
+            data = context_variables.to_dict()
+            raw_ctx = dict(data) if isinstance(data, dict) else None
         elif isinstance(context_variables, dict):
             raw_ctx = dict(context_variables)
 

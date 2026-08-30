@@ -348,7 +348,7 @@ async def test_experience_spec_impact_uses_glob_hints_without_file_manifest() ->
     decision = await resolver.route(request)
 
     assert decision.workflow_sequence == "app_surface_revision"
-    assert decision.impact_set.affected_declarative_families == ["experience_spec", "app_bundle"]
+    assert decision.impact_set.affected_declarative_families == ["design_docs", "app_bundle"]
     assert decision.impact_set.affected_bundle_paths == [
         "ui/pages/*.yaml",
         "ui/route_manifest.json",
@@ -366,7 +366,7 @@ async def test_experience_spec_impact_uses_concrete_page_paths_from_manifest() -
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
+                "build_family": "app_bundle",
                 "raw_user_request": "Replace the dashboard experience.",
                 "extra": {
                     "files_manifest": [
@@ -401,7 +401,7 @@ async def test_experience_spec_impact_uses_artifact_version_file_manifest(monkey
     monkeypatch.setattr(store_mod.ArtifactStore, "__init__", lambda self: None)
     monkeypatch.setattr(
         store_mod.ArtifactStore,
-        "get_artifact_version",
+        "get_build_record",
         AsyncMock(
             return_value=SimpleNamespace(
                 files_manifest=[
@@ -421,8 +421,8 @@ async def test_experience_spec_impact_uses_artifact_version_file_manifest(monkey
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
-                "artifact_kind": "app_bundle",
-                "artifact_version_id": "av_app_1",
+                "build_family": "app_bundle",
+                "build_record_id": "av_app_1",
                 "raw_user_request": "Move the dashboard into top navigation.",
             }
         },
@@ -1460,9 +1460,10 @@ async def test_stale_route_prioritizes_concept_over_downstream_families(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_stale_route_handles_experience_spec_as_design_owned_surface(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When experience_spec is stale, route to DesignDocs via app_surface_revision."""
-    _patch_artifact_store(monkeypatch, ["experience_spec"])
+async def test_stale_route_handles_theme_capture_as_persisted_theme_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_artifact_store(monkeypatch, ["theme_capture"])
 
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
@@ -1475,11 +1476,11 @@ async def test_stale_route_handles_experience_spec_as_design_owned_surface(monke
     decision = await resolver.route(request)
 
     assert classifier.call_count == 0
-    assert decision.workflow_id == "DesignDocs"
-    assert decision.workflow_sequence == "app_surface_revision"
+    assert decision.workflow_id == "ThemeCapture"
+    assert decision.workflow_sequence == "theme_revision"
     assert decision.change_intent.source == "stale_upstream"
-    assert "experience_spec" in decision.change_intent.signals
-    assert decision.impact_set.affected_declarative_families == ["experience_spec", "app_bundle"]
+    assert "theme_capture" in decision.change_intent.signals
+    assert decision.impact_set.affected_declarative_families == ["theme_capture", "app_bundle"]
     assert decision.is_full_restart is False
 
 
@@ -1544,7 +1545,7 @@ async def test_conceptual_replan_context_seed_has_pivot_description() -> None:
 
 @pytest.mark.asyncio
 async def test_conceptual_replan_context_seed_has_default_preserve_families() -> None:
-    """conceptual_replan seeds preserve_families defaulting to ['brand'] when not in extra."""
+    """conceptual_replan defaults preservation to the persisted theme family."""
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="core",
@@ -1566,7 +1567,7 @@ async def test_conceptual_replan_context_seed_has_default_preserve_families() ->
     decision = await resolver.route(request)
 
     assert decision.workflow_sequence == "conceptual_replan"
-    assert decision.context_seed["preserve_families"] == ["brand"]
+    assert decision.context_seed["preserve_families"] == ["theme_capture"]
 
 
 @pytest.mark.asyncio
@@ -2557,3 +2558,136 @@ def test_docs_do_not_say_carry_forward_is_only_manual() -> None:
     )
     doc = doc_path.read_text(encoding="utf-8").lower()
     assert "only manually" not in doc
+
+
+# ---------------------------------------------------------------------------
+# subscription_contract build family routing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_subscription_contract_patch_routes_to_subscription_patch() -> None:
+    resolver = _factory_resolver(
+        _FakeChangeClassifier(
+            change_class="patch",
+            rationale="Rename the pro plan label.",
+        )
+    )
+    request = resolver.request_from_payload(
+        payload={
+            "refinement_request": {
+                "artifact_kind": "subscription_contract",
+                "raw_user_request": "Rename the Pro plan to Team.",
+            }
+        },
+        app_id="app_1",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    assert decision.workflow_sequence == "subscription_patch"
+    assert decision.impact_set.affected_declarative_families == [
+        "subscription_contract",
+        "app_bundle",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_subscription_contract_design_routes_to_subscription_revision() -> None:
+    resolver = _factory_resolver(
+        _FakeChangeClassifier(
+            change_class="design",
+            rationale="Restructure the plan tiers and gated capabilities.",
+        )
+    )
+    request = resolver.request_from_payload(
+        payload={
+            "refinement_request": {
+                "artifact_kind": "subscription_contract",
+                "raw_user_request": "Split the pro tier into pro and enterprise with different gates.",
+            }
+        },
+        app_id="app_1",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    assert decision.workflow_sequence == "subscription_revision"
+    assert decision.impact_set.affected_declarative_families == [
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle",
+    ]
+
+
+def _factory_registry() -> dict:
+    registry_path = (
+        Path(__file__).resolve().parents[1]
+        / "factory_app" / "workflows" / "extended_orchestration" / "extension_registry.json"
+    )
+    return json.loads(registry_path.read_text(encoding="utf-8"))
+
+
+def _factory_harness_routes() -> dict:
+    harness_path = (
+        Path(__file__).resolve().parents[1]
+        / "factory_app" / "refinement_harness" / "config" / "harness.yaml"
+    )
+    return yaml.safe_load(harness_path.read_text(encoding="utf-8"))
+
+
+def test_every_harness_route_sequence_exists_in_extension_registry() -> None:
+    """Route → sequence closure: harness.yaml must never reference a sequence
+    that extension_registry.json does not declare."""
+    harness = _factory_harness_routes()
+    registry = _factory_registry()
+    declared = {seq["id"] for seq in registry["workflow_sequences"]}
+
+    for artifact in harness["routing"]["artifacts"]:
+        for change_class, route in artifact["routes"].items():
+            sequence_id = route["workflow_sequence"]
+            assert sequence_id in declared, (
+                f"harness.yaml routes {artifact['build_family']}/{change_class} to "
+                f"'{sequence_id}' which extension_registry.json does not declare"
+            )
+
+
+def test_every_persisted_refinable_family_has_a_harness_route() -> None:
+    """Family → route closure: every artifact family the harness is expected to
+    refine must have explicit routes, so refinements never silently fall back
+    to the app_bundle default and skip that family's owning workflow."""
+    harness = _factory_harness_routes()
+    routed = {artifact["build_family"] for artifact in harness["routing"]["artifacts"]}
+    expected = {
+        "concept",
+        "design_docs",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle",
+        "theme_capture",
+    }
+    missing = expected - routed
+    assert not missing, (
+        f"harness.yaml routing.artifacts is missing families {sorted(missing)}; "
+        "unrouted families silently fall back to default_build_family routes"
+    )
+
+
+def test_sequences_claiming_subscription_contract_run_the_contract_designer() -> None:
+    """A sequence that claims to refresh subscription_contract must actually run
+    SubscriptionContractDesigner in its steps."""
+    registry = _factory_registry()
+    for seq in registry["workflow_sequences"]:
+        if "subscription_contract" not in (seq.get("affected_declarative_families") or []):
+            continue
+        step_workflows = {
+            workflow
+            for step in seq["steps"]
+            for workflow in (step.get("workflows") or [])
+        }
+        assert "SubscriptionContractDesigner" in step_workflows, (
+            f"sequence '{seq['id']}' claims subscription_contract in "
+            "affected_declarative_families but never runs SubscriptionContractDesigner"
+        )

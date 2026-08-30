@@ -74,6 +74,12 @@ class ActivityFeedService:
             **app_scope(ctx),
         }
         await self._repo.insert(ctx, doc)
+        await ctx.emit("domain.social.activity.recorded", {
+            "event_id": doc["event_id"],
+            "activity_type": doc["activity_type"],
+            "actor_id": doc["actor_id"],
+            "created_at": doc["created_at"],
+        })
         return {"success": True, "event_id": doc["event_id"]}
 
     # ── Reaction handlers (called by reactions.yaml routing) ──────────────────

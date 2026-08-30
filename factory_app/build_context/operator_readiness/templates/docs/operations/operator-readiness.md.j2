@@ -1,0 +1,18 @@
+# Operator Readiness
+
+This workspace uses the `{{ readiness_profile }}` readiness profile.
+
+## Mode
+
+- Evidence mode: `{{ evidence_mode | default("local_no_spend") }}`
+- Evidence ledger: `{{ evidence_ledger_path | default("docs/operations/evidence-log.json") }}`
+
+## Local checks
+
+- Launch readiness: `{{ launch_check_command | default("python scripts/check_launch_readiness.py --json") }}`
+- Monetization readiness: `{{ monetization_check_command | default("python scripts/check_monetization_readiness.py --json") }}`
+
+## Boundary
+
+Local evidence proves the workspace was checked in a no-spend mode. It does not
+replace staging or production verification.

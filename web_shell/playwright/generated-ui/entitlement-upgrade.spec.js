@@ -24,7 +24,30 @@
  *     generated-ui/entitlement-upgrade.spec.js
  */
 
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { expect, test } from '@playwright/test'
+
+// The denial response is NOT hand-written here. It is loaded from the same
+// fixture that tests/test_module_error_envelope_contract.py asserts against the
+// real router construction, so this mock cannot drift from the backend.
+//
+// It had drifted: this spec mocked a flat body with status 403, while the
+// backend returns {"detail": {...}} with status 402. The spec passed and
+// certified a response the backend has never produced — which is why every real
+// denial fell through to a raw "Module action failed" message in generated apps.
+const ENVELOPE_FIXTURE = JSON.parse(
+  readFileSync(
+    resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../tests/fixtures/module_error_envelope.json'
+    ),
+    'utf-8'
+  )
+)
+const ENTITLEMENT_DENIAL = ENVELOPE_FIXTURE.entitlement_required
 
 // ---------------------------------------------------------------------------
 // Helper: suppress expected console noise from mocked API failures
@@ -85,16 +108,16 @@ async function mockShellAndTheme(page) {
 }
 
 async function mockEntitlementDenial(page, { upgradePath } = {}) {
-  const extra = upgradePath ? { upgrade_route: upgradePath } : {}
+  // Build from the fixture so status and nesting always match the backend.
+  const detail = {
+    ...ENTITLEMENT_DENIAL.body.detail,
+    ...(upgradePath ? { upgrade_route: upgradePath } : {}),
+  }
   await page.route('**/api/modules/premium_reports/generate_report', (route) =>
     route.fulfill({
-      status: 403,
+      status: ENTITLEMENT_DENIAL.status,
       contentType: 'application/json',
-      body: JSON.stringify({
-        error: 'Entitlement required for premium_reports.generate_report: premium.reports.generate',
-        error_code: 'ENTITLEMENT_REQUIRED',
-        ...extra,
-      }),
+      body: JSON.stringify({ detail }),
     })
   )
 }

@@ -41,93 +41,93 @@ from mozaiksai.core.app_context.store import (
     register_app_context_version,
 )
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecord,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class _MemoryArtifactStore:
+class _MemoryBuildRecordStore:
     def __init__(self) -> None:
-        self.versions: dict[str, ArtifactVersionDoc] = {}
+        self.versions: dict[str, BuildRecord] = {}
         self._counter = 0
 
-    async def create_artifact_version(self, **kwargs: Any) -> ArtifactVersionDoc:
+    async def create_build_record(self, **kwargs: Any) -> BuildRecord:
         self._counter += 1
-        version_id = f"av_{self._counter}"
-        doc = ArtifactVersionDoc(
-            _id=version_id,
+        record_id = f"br_{self._counter}"
+        doc = BuildRecord(
+            _id=record_id,
             app_id=kwargs["app_id"],
-            artifact_kind=kwargs["artifact_kind"],
-            artifact_key=kwargs["artifact_key"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
             version_number=self._counter,
-            lineage_root_id=version_id,
+            lineage_root_id=record_id,
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
             canonical_inputs_version=kwargs.get("canonical_inputs_version") or {},
-            lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
-            validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
+            lifecycle_status=kwargs.get("lifecycle_status", BuildRecordStatus.DRAFT),
+            validation_status=kwargs.get("validation_status", BuildRecordValidationStatus.PENDING),
             files_manifest=kwargs.get("files_manifest") or [],
             commit_metadata=kwargs.get("commit_metadata") or {},
         )
         self.versions[doc.id] = doc
         return doc
 
-    async def get_artifact_version(
+    async def get_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
-    ) -> ArtifactVersionDoc | None:
-        doc = self.versions.get(artifact_version_id)
+        build_record_id: str,
+    ) -> BuildRecord | None:
+        doc = self.versions.get(build_record_id)
         if doc is None or doc.app_id != app_id:
             return None
         return doc
 
-    async def accept_artifact_version(
+    async def accept_build_record(
         self,
         *,
         app_id: str,
-        artifact_version_id: str,
+        build_record_id: str,
         commit_metadata: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc | None:
-        doc = await self.get_artifact_version(
+    ) -> BuildRecord | None:
+        doc = await self.get_build_record(
             app_id=app_id,
-            artifact_version_id=artifact_version_id,
+            build_record_id=build_record_id,
         )
         if doc is None:
             return None
         for version in self.versions.values():
             if (
                 version.app_id == app_id
-                and version.artifact_kind == doc.artifact_kind
-                and version.artifact_key == doc.artifact_key
+                and version.build_family == doc.build_family
+                and version.build_key == doc.build_key
                 and version.id != doc.id
-                and version.lifecycle_status is ArtifactLifecycleStatus.CURRENT
+                and version.lifecycle_status is BuildRecordStatus.CURRENT
             ):
-                version.lifecycle_status = ArtifactLifecycleStatus.SUPERSEDED
-        doc.lifecycle_status = ArtifactLifecycleStatus.CURRENT
+                version.lifecycle_status = BuildRecordStatus.SUPERSEDED
+        doc.lifecycle_status = BuildRecordStatus.CURRENT
         if commit_metadata is not None:
             doc.commit_metadata = commit_metadata
         return doc
 
-    async def list_artifact_versions(
+    async def list_build_records(
         self,
         *,
         app_id: str,
-        artifact_kind: str | None = None,
-        artifact_key: str | None = None,
-        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        build_family: str | None = None,
+        build_key: str | None = None,
+        lifecycle_status: BuildRecordStatus | None = None,
         limit: int = 50,
         **_kwargs: Any,
-    ) -> list[ArtifactVersionDoc]:
+    ) -> list[BuildRecord]:
         rows = [doc for doc in self.versions.values() if doc.app_id == app_id]
-        if artifact_kind is not None:
-            rows = [doc for doc in rows if doc.artifact_kind == artifact_kind]
-        if artifact_key is not None:
-            rows = [doc for doc in rows if doc.artifact_key == artifact_key]
+        if build_family is not None:
+            rows = [doc for doc in rows if doc.build_family == build_family]
+        if build_key is not None:
+            rows = [doc for doc in rows if doc.build_key == build_key]
         if lifecycle_status is not None:
             rows = [doc for doc in rows if doc.lifecycle_status is lifecycle_status]
         return sorted(rows, key=lambda doc: doc.version_number, reverse=True)[:limit]
@@ -311,7 +311,7 @@ def test_refresh_plan_does_not_execute_workflows() -> None:
 
 
 async def test_refresh_plan_does_not_change_current_context() -> None:
-    store = _MemoryArtifactStore()
+    store = _MemoryBuildRecordStore()
     context_version = AppContextVersion(
         context_version_id="ctx_ops_stale",
         app_id="ops_studio",

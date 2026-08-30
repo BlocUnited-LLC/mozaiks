@@ -60,6 +60,31 @@ function extractWorkflowRecords(payload) {
   return [];
 }
 
+const _WORKFLOW_CACHE_KEY = '__mzk_workflow_cache__';
+const _WORKFLOW_CACHE_TTL_MS = 10_000; // 10 s — survives HMR reloads, expires before a real re-fetch is needed
+
+function _readSessionCache() {
+  try {
+    const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(_WORKFLOW_CACHE_KEY) : null;
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > _WORKFLOW_CACHE_TTL_MS) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function _writeSessionCache(data) {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem(_WORKFLOW_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+    }
+  } catch {
+    // sessionStorage unavailable (e.g. private browsing quota); ignore
+  }
+}
+
 class WorkflowConfig {
   constructor() {
     this.configs = new Map();
@@ -68,12 +93,38 @@ class WorkflowConfig {
     this.fetchPromise = null;
     this.warnedNoWorkflow = false;
     this.autoFetchAttempted = false;
+
+    // Rehydrate from session cache on construction so HMR reloads don't re-fetch
+    const cached = _readSessionCache();
+    if (cached) {
+      this._applyWorkflowRecords(cached);
+    }
+  }
+
+  _applyWorkflowRecords(workflows) {
+    this.configs.clear();
+    for (const workflow of workflows) {
+      this.configs.set(workflow.workflow_name, workflow);
+      const lowerKey = workflow.workflow_name.toLowerCase();
+      if (!this.configs.has(lowerKey)) this.configs.set(lowerKey, workflow);
+    }
+    if (workflows.length > 0) {
+      const entryPointWorkflow = workflows.find((w) => w?.entry_point === true)?.workflow_name;
+      this.defaultWorkflow = entryPointWorkflow || workflows[0].workflow_name;
+    } else {
+      this.defaultWorkflow = null;
+    }
+    this.warnedNoWorkflow = false;
   }
 
   /**
    * Fetch workflow configurations from backend
    */
   async fetchWorkflowConfigs() {
+    // If already populated from session cache, skip the network round-trip
+    if (this.configs.size > 0 && _readSessionCache()) {
+      return;
+    }
     if (this.fetchInProgress) {
       return this.fetchPromise; // wait for the real in-flight fetch to finish
     }
@@ -108,20 +159,8 @@ class WorkflowConfig {
           const data = await response.json();
           const workflows = extractWorkflowRecords(data);
 
-
-          this.configs.clear();
-          for (const workflow of workflows) {
-            this.configs.set(workflow.workflow_name, workflow);
-            const lowerKey = workflow.workflow_name.toLowerCase();
-            if (!this.configs.has(lowerKey)) this.configs.set(lowerKey, workflow);
-          }
-          if (workflows.length > 0) {
-            const entryPointWorkflow = workflows.find((workflow) => workflow?.entry_point === true)?.workflow_name;
-            this.defaultWorkflow = entryPointWorkflow || workflows[0].workflow_name;
-          } else {
-            this.defaultWorkflow = null;
-          }
-          this.warnedNoWorkflow = false;
+          this._applyWorkflowRecords(workflows);
+          _writeSessionCache(workflows);
           return; // success
         } catch (error) {
           lastError = error;

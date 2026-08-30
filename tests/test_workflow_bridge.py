@@ -292,6 +292,7 @@ async def test_handle_user_input_from_api_prefers_live_ag2_network_channel(monke
         {
             "chat_id": "chat-1",
             "app_id": "app-1",
+            "workflow_name": "ValueEngine",
             "variables": {"target_user": "founders"},
         }
     ]
@@ -300,6 +301,92 @@ async def test_handle_user_input_from_api_prefers_live_ag2_network_channel(monke
         "chat.text",
         "awaiting_reply",
         "run_complete",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_live_ag2_context_persistence_failure_propagates(monkeypatch) -> None:
+    class _FailingPersistenceManager(_FakePersistenceManager):
+        async def persist_context_variables(self, **kwargs):  # noqa: ANN003
+            self.persisted_context.append(kwargs)
+            raise RuntimeError("context update failed")
+
+    persistence_manager = _FailingPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
+
+    async def _context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _context_updates)
+
+    with pytest.raises(RuntimeError, match="context update failed"):
+        await transport._continue_live_ag2_workflow_run(
+            live_run=live_run,
+            chat_id="chat-1",
+            user_id="user-1",
+            workflow_name="ValueEngine",
+            message="continue",
+            app_id="app-1",
+        )
+
+    assert persistence_manager.persisted_context == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "workflow_name": "ValueEngine",
+            "variables": {"target_user": "founders"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_user_text_context_fetch_failure_propagates() -> None:
+    class _FailingFetchPersistenceManager(_FakePersistenceManager):
+        async def fetch_chat_session_extra_context(self, **_kwargs):  # noqa: ANN003
+            raise RuntimeError("context fetch failed")
+
+    transport = _DummyTransport(_FailingFetchPersistenceManager())
+
+    with pytest.raises(RuntimeError, match="context fetch failed"):
+        await transport._apply_user_text_context_updates(
+            chat_id="chat-1",
+            workflow_name="ValueEngine",
+            app_id="app-1",
+            user_input="continue",
+        )
+
+
+@pytest.mark.asyncio
+async def test_user_text_context_update_failure_propagates() -> None:
+    class _FailingUpdatePersistenceManager(_FakePersistenceManager):
+        async def persist_context_variables(self, **kwargs):  # noqa: ANN003
+            self.persisted_context.append(kwargs)
+            raise RuntimeError("context update failed")
+
+    class _DerivedContextManager:
+        def apply_user_text(self, _candidate: str) -> dict[str, str]:
+            return {"target_user": "founders"}
+
+    persistence_manager = _FailingUpdatePersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    transport._derived_context_managers["chat-1"] = _DerivedContextManager()
+
+    with pytest.raises(RuntimeError, match="context update failed"):
+        await transport._apply_user_text_context_updates(
+            chat_id="chat-1",
+            workflow_name="ValueEngine",
+            app_id="app-1",
+            user_input="founders",
+        )
+
+    assert persistence_manager.persisted_context == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "workflow_name": "ValueEngine",
+            "variables": {"target_user": "founders"},
+        }
     ]
 
 

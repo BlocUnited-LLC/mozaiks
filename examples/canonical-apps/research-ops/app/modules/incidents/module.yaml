@@ -1,0 +1,22 @@
+schema_version: mozaiks.module.v1
+module:
+  id: incidents
+  display_name: Incidents
+  version: 1.0.0
+  handler: backend.handler:IncidentsHandler
+actions:
+  - id: create_incident
+    description: Create an operational incident.
+    handler_method: create_incident
+    input_schema:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+        status: { type: string, enum: [open, investigating, resolved] }
+    output_schema: { type: object }
+  - id: list_incidents
+    description: List operational incidents.
+    handler_method: list_incidents
+    input_schema: { type: object }
+    output_schema: { type: object }

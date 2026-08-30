@@ -245,9 +245,9 @@ class TestPageFromPlan:
         result = _page_from_plan(page, "detail_page")
         assert result["page_type"] == "detail"
 
-    def test_layout_defaults_to_stack(self):
+    def test_layout_defaults_to_full_width(self):
         result = _page_from_plan({}, "p")
-        assert result["layout"] == "stack"
+        assert result["layout"] == "full-width"
 
     def test_navigation_id_is_stem(self):
         result = _page_from_plan({}, "my_page")

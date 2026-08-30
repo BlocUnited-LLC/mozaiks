@@ -77,7 +77,7 @@ function profileTrace(event, details = {}) {
 }
 
 function profileWarn(event, details = {}) {
-  try { console.warn('[mozaiks-profile]', event, details); } catch (_) {}
+  try { console.warn('⚠️ [mozaiks-profile]', event, details); } catch (_) {}
 }
 
 // ---------------------------------------------------------------------------

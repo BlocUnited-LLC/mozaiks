@@ -106,3 +106,5 @@ export { MozaiksEmbed, applyThemeToContainer } from './embed/index.js';
 // ---------------------------------------------------------------------------
 
 export { PageRenderer, PageFrame } from './ui/page-renderer/index.js';
+export { OnboardingTour } from './ui/index.js';
+export { parseOnboardingConfigSource } from './ui/index.js';

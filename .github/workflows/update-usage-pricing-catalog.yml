@@ -41,7 +41,7 @@ jobs:
           commit-message: "Update generated usage pricing catalog"
           title: "Update generated usage pricing catalog"
           body: |
-            Refreshes `pricing/catalogs/usage-pricing.generated.json` from LiteLLM's model price reference.
+            Refreshes `ai-pricing/catalogs/usage-pricing.generated.json` from LiteLLM's model price reference.
 
             This catalog is provider cost-basis data only. App/customer markups remain in `app/config/subscriptions.yaml`.
           labels: dependencies

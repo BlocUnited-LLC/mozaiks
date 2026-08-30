@@ -16,7 +16,7 @@ Typical triggers:
 - `factory_app/workflows/ExistingAppDiscovery/**`
 - build lifecycle hooks in `factory_app/workflows/_shared/platform/build_lifecycle.py`
 - artifact routing, generated artifact ownership, or workflow integration contracts
-- shared workflow tools, hooks, or cross-workflow build glue
+- shared workflow tools, hooks, reusable workflow UI, or cross-workflow build glue
 - build refinement integration that references `workflow_sequence`
 
 Inspect first:
@@ -42,6 +42,7 @@ Inspect first:
   - `middleware.yaml`
 - the relevant shared workflow surfaces when build lifecycle or shared tools change:
   - `factory_app/workflows/_shared/platform/build_lifecycle.py`
+  - `factory_app/workflows/_shared/ui/**` for reusable workflow React components
   - any affected `factory_app/workflows/_shared/**` helper
 - generated artifact contracts when AppGenerator or AgentGenerator is affected:
   - `factory_app/build_context/AppGenerator/file_contracts.yaml`
@@ -57,6 +58,9 @@ Build input structure:
 - Do not recreate `factory_app/workflows/_shared/catalogs/`.
 - Do not add one-off catalog family folders such as `patternbook/` for a single workflow unless there is a real organization need and the file is still declared in `assets[]`.
 - Do not put large static prompt catalogs in `context_variables.yaml`; hooks inject them deterministically.
+- Reusable workflow React components belong under `factory_app/workflows/_shared/ui/` when multiple factory workflows consume them.
+- Shared workflow UI is not auto-registered; each consuming workflow must import and re-export/register it from its own `factory_app/workflows/{WorkflowName}/ui/index.js`.
+- Do not import UI from a sibling workflow folder. Move shared UI into `_shared/ui/`, or keep a workflow-specific wrapper in the owning workflow's `ui/` folder.
 - Reusable OSS build packs are named build contexts, not placeholder manifests. Add a pack only when `context.yaml` contains a `pack:` descriptor plus useful capabilities/facades and declares real `assets[]`.
 - Pack instructions are `assets[]` with `kind: contract`.
 - Pack template directories are `assets[]` with `kind: templates`; they mirror generated app structure: `templates/modules/...`, `templates/services/...`, `templates/ui/...`, `templates/config/...`. YAML in template assets is generated app declarative output, not a build-context contracts lane.
@@ -121,6 +125,9 @@ Common change types:
 9. Changing shared workflow tools or hooks:
    - inspect the affected workflow `middleware.yaml` or shared tool file plus the nearest hook or workflow-contract tests
    - keep shared helpers generic; do not bury product-specific policy in shared builder tooling
+10. Changing shared workflow UI:
+   - inspect `factory_app/workflows/_shared/ui/**`, every consuming workflow `ui/index.js`, and `tests/test_workflow_ui_tool_contracts.py`
+   - keep component registration workflow-local even when the implementation is shared
 
 Focused testing guidance:
 

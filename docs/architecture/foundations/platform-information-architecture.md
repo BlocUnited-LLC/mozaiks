@@ -49,8 +49,15 @@ Owns:
 - create-app entry
 - aggregate usage
 - aggregate operations and health
+- workspace branding and shell defaults
 - host-provided billing or commercial controls when the host exposes them
 - workspace-level settings and team controls
+
+Does not own as a visible concept:
+
+- personal profile fields
+- user-specific identity editing
+- app-domain pages that belong in App Studio
 
 ### App Studio
 

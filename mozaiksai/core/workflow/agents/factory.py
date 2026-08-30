@@ -11,6 +11,7 @@ from functools import wraps
 from typing import Any
 
 from ag2 import Agent
+from ag2.middleware.builtin import RetryMiddleware
 
 from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
 from mozaiksai.core.media.ag2 import (
@@ -20,12 +21,14 @@ from mozaiksai.core.media.ag2 import (
 )
 from mozaiksai.core.media.middleware import build_ag2_media_harvest_middleware
 
+from ..context.authority import CONTEXT_BRIDGE_WRITER, ContextAuthorityPolicy
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
 )
 from ..context.context_utils import (
     context_to_dict as _context_to_dict,
 )
+from ..context.frozen import detach, freeze
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -58,6 +61,28 @@ def _safe_context_keys(context_dict: dict[str, Any]) -> list[str]:
             continue
         keys.append(key)
     return keys
+
+
+def _supports_ag2_native_web_tools(
+    llm_config: Mapping[str, Any] | None,
+    model_config: Any | None = None,
+) -> bool:
+    """Return whether AG2 native hosted web tools fit the active provider.
+
+    AG2's WebSearchTool/WebFetchTool are provider-native tool schemas, not
+    normal Python function tools. OpenAI Chat Completions rejects those schemas;
+    OpenAI Responses accepts them.
+    """
+
+    config = dict(llm_config or {})
+    entry = ((config.get("config_list") or [{}])[0] or {})
+    api_type = str(entry.get("api_type") or "openai").strip().lower()
+    if api_type != "openai":
+        return bool(config.get("ag2_native_web_tools"))
+    if bool(config.get("use_responses_api") or config.get("responses_api")):
+        return True
+    model_config_name = type(model_config).__name__ if model_config is not None else ""
+    return model_config_name == "OpenAIResponsesConfig"
 
 
 def _log_existing_app_discovery_projection(
@@ -127,50 +152,104 @@ class ContextVariablesBridge:
     conditions see the same state that tools just wrote.
     """
 
-    __slots__ = ("_data", "_pending_set", "_pending_delete")
+    __slots__ = (
+        "__data",
+        "_pending_set",
+        "_pending_delete",
+        "_authority_policy",
+        "_writer_id",
+        "_mozaiks_context_authority_policy",
+    )
 
-    def __init__(self, data: dict[str, Any]) -> None:
-        self._data = data
+    def __init__(
+        self,
+        data: dict[str, Any],
+        *,
+        authority_policy: ContextAuthorityPolicy | None = None,
+        writer_id: str = CONTEXT_BRIDGE_WRITER,
+    ) -> None:
+        self.__data: dict[str, Any] = detach(data)  # type: ignore[assignment]
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
+        self._authority_policy = authority_policy
+        self._writer_id = writer_id
+        self._mozaiks_context_authority_policy = authority_policy
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+        return freeze(self.__data.get(key, default))
 
     def set(self, key: str, value: Any) -> None:
         self[key] = value
 
     def __getitem__(self, key: str) -> Any:
-        return self._data[key]
+        return freeze(self.__data[key])
 
     def __setitem__(self, key: str, value: Any) -> None:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
-        self._data[clean_key] = value
-        self._pending_set[clean_key] = value
+        if self._authority_policy is not None:
+            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
+        self.__data[clean_key] = detach(value)
+        self._pending_set[clean_key] = detach(value)
         self._pending_delete.discard(clean_key)
 
     def pop(self, key: str, default: Any = None) -> Any:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
-        existed = clean_key in self._data
-        value = self._data.pop(clean_key, default)
+        if self._authority_policy is not None:
+            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="delete")  # type: ignore[arg-type]
+        existed = clean_key in self.__data
+        value = self.__data.pop(clean_key, default)
         if existed:
             self._pending_set.pop(clean_key, None)
             self._pending_delete.add(clean_key)
-        return value
+        return detach(value)
 
     def delete(self, key: str) -> None:
         self.pop(key, None)
 
     def __contains__(self, key: str) -> bool:
-        return key in self._data
+        return key in self.__data
+
+    def __iter__(self):
+        return iter(self.__data)
+
+    def keys(self):
+        """Return canonical context keys (strings are immutable — no wrapping needed)."""
+        return self.__data.keys()
+
+    def items(self):
+        """Return (key, frozen_value) pairs. Values are recursively immutable views."""
+        return ((k, freeze(v)) for k, v in self.__data.items())
+
+    def values(self):
+        """Return frozen values. Each value is a recursively immutable view."""
+        return (freeze(v) for v in self.__data.values())
 
     def to_dict(self) -> dict[str, Any]:
-        return dict(self._data)
+        return self.snapshot()
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a deep copy of canonical state with no shared references.
+
+        Use this for serialization, persistence, logging, and prompt rendering.
+        The returned dict is a plain mutable copy — mutations to it cannot
+        reach canonical state. Only ScopedContextWriter / ContextAuthorityPolicy
+        can mutate canonical state.
+        """
+        return detach(self.__data)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        raise AttributeError(
+            "ContextVariablesBridge.data has been removed to prevent mutable-reference "
+            "exposure. Use bridge.snapshot() for a detached serializable copy, "
+            "bridge[key] / bridge.get(key) for frozen reads, or bridge.keys() to "
+            "iterate keys."
+        )
 
     def clear_context_updates(self) -> None:
         self._pending_set.clear()
@@ -178,15 +257,11 @@ class ContextVariablesBridge:
 
     def consume_context_updates(self) -> dict[str, Any]:
         updates = {
-            "set": dict(self._pending_set),
+            "set": detach(self._pending_set),
             "delete": sorted(self._pending_delete),
         }
         self.clear_context_updates()
         return updates
-
-    @property
-    def data(self) -> dict[str, Any]:
-        return self._data
 
 
 # ------------------------------------------------------------------
@@ -264,6 +339,69 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
         return sync_wrapper
 
 
+def _structured_outputs_required(agent_config: Mapping[str, Any]) -> bool:
+    if "structured_outputs_required" not in agent_config:
+        raise ValueError(
+            "Agent config must explicitly declare structured_outputs_required as true or false"
+        )
+    value = agent_config.get("structured_outputs_required")
+    if not isinstance(value, bool):
+        raise ValueError("Agent config structured_outputs_required must be a boolean")
+    return value is True
+
+
+def _required_structured_agent_names(
+    agent_configs: Mapping[str, Any],
+    *,
+    local_agent_names: Sequence[str],
+) -> set[str]:
+    local_names = set(local_agent_names)
+    return {
+        str(agent_name)
+        for agent_name, agent_config in agent_configs.items()
+        if agent_name in local_names
+        and isinstance(agent_config, Mapping)
+        and _structured_outputs_required(agent_config)
+    }
+
+
+def _prepare_response_schema_for_agent(
+    *,
+    workflow_name: str,
+    agent_name: str,
+    agent_config: Mapping[str, Any],
+    structured_model_cls: Any,
+    llm_config_dict: Mapping[str, Any] | None,
+) -> Any:
+    if structured_model_cls is None:
+        if _structured_outputs_required(agent_config):
+            raise ValueError(
+                f"[AGENTS] Agent '{agent_name}' in workflow '{workflow_name}' declares "
+                "structured_outputs_required: true but has no structured output registry entry"
+            )
+        return None
+
+    api_type = (
+        ((llm_config_dict or {}).get("config_list") or [{}])[0].get("api_type")
+        or "openai"
+    ).lower()
+    if api_type in ("openai", "azure"):
+        supports_strict, offending_path = supports_provider_response_format(structured_model_cls)
+        if not supports_strict:
+            if _structured_outputs_required(agent_config):
+                raise ValueError(
+                    f"[AGENTS] Agent '{agent_name}' in workflow '{workflow_name}' requires "
+                    "structured outputs, but its model cannot be prepared for provider "
+                    f"strict response_schema: {offending_path} uses an open-ended object field"
+                )
+            return None
+        return get_provider_response_model(structured_model_cls)
+
+    # Anthropic / Gemini / Ollama: pass the schema directly; AG2 routes it
+    # through the provider's structured-output/tool mechanism.
+    return structured_model_cls
+
+
 # ------------------------------------------------------------------
 # AGENT CREATION
 # ------------------------------------------------------------------
@@ -306,12 +444,14 @@ async def create_agents(
         ctx_dict = context_variables
     elif hasattr(context_variables, "to_dict"):
         ctx_dict = context_variables.to_dict()
-    elif hasattr(context_variables, "data") and isinstance(getattr(context_variables, "data", None), dict):
-        ctx_dict = context_variables.data
+    elif hasattr(context_variables, "snapshot") and callable(getattr(context_variables, "snapshot", None)):
+        ctx_dict = context_variables.snapshot()
     else:
         ctx_dict = {}
 
-    context_bridge = ContextVariablesBridge(ctx_dict)
+    authority_policy = getattr(context_variables, "_mozaiks_context_authority_policy", None)
+    context_bridge = ContextVariablesBridge(ctx_dict, authority_policy=authority_policy)
+    context_bridge._mozaiks_context_authority_policy = authority_policy
 
     a2a_specs = load_a2a_agent_specs(workflow_config)
     local_agent_names = [n for n in agent_configs if n not in a2a_specs]
@@ -337,9 +477,19 @@ async def create_agents(
 
     auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
 
+    required_structured_agents = _required_structured_agent_names(
+        agent_configs,
+        local_agent_names=local_agent_names,
+    )
     try:
         structured_registry = get_structured_outputs_for_workflow(workflow_name)
-    except Exception:
+    except Exception as err:
+        if required_structured_agents:
+            raise ValueError(
+                f"[AGENTS] Workflow '{workflow_name}' has required structured-output agents "
+                f"{sorted(required_structured_agents)} but its structured output registry "
+                f"could not load: {err}"
+            ) from err
         structured_registry = {}
 
     context_dict: dict[str, Any] = {}
@@ -467,10 +617,16 @@ async def create_agents(
                     shell_err,
                 )
 
+        native_web_tools_supported = _supports_ag2_native_web_tools(
+            llm_config_dict,
+            model_config,
+        )
+
         # Inject AG2 built-in WebSearchTool when agent declares web_search: true.
-        # Allows market research agents to do real-time search without custom tool code.
+        # These are provider-native hosted tools; skip them for providers such as
+        # OpenAI Chat Completions that only accept function tools.
         web_tools: list[Any] = []
-        if not auto_tool_call_enabled and agent_config.get("web_search"):
+        if not auto_tool_call_enabled and agent_config.get("web_search") and native_web_tools_supported:
             try:
                 from ag2.tools import WebSearchTool
                 web_tools.append(WebSearchTool())
@@ -481,10 +637,16 @@ async def create_agents(
                     agent_name,
                     ws_err,
                 )
+        elif not auto_tool_call_enabled and agent_config.get("web_search"):
+            logger.warning(
+                "[AGENTS] web_search requested for '%s' but skipped: provider-native "
+                "AG2 web tools require a supported Responses-style provider",
+                agent_name,
+            )
 
         # Inject AG2 built-in WebFetchTool when agent declares web_fetch: true.
         # Allows agents to retrieve full page content from URLs discovered via search.
-        if not auto_tool_call_enabled and agent_config.get("web_fetch"):
+        if not auto_tool_call_enabled and agent_config.get("web_fetch") and native_web_tools_supported:
             try:
                 from ag2.tools import WebFetchTool
                 web_tools.append(WebFetchTool())
@@ -495,6 +657,12 @@ async def create_agents(
                     agent_name,
                     wf_err,
                 )
+        elif not auto_tool_call_enabled and agent_config.get("web_fetch"):
+            logger.warning(
+                "[AGENTS] web_fetch requested for '%s' but skipped: provider-native "
+                "AG2 web tools require a supported Responses-style provider",
+                agent_name,
+            )
 
         # Inject DuckDuckSearchTool when agent declares duck_search: true.
         # No API key required — works with any model. Good fit for interview and
@@ -554,30 +722,13 @@ async def create_agents(
         except Exception as middleware_err:
             logger.debug("[AGENTS] Prompt middleware pre-load failed for '%s': %s", agent_name, middleware_err)
 
-        # Determine response schema for structured outputs
-        beta_response_schema = None
-        if structured_model_cls is not None:
-            # OpenAI strict structured outputs reject Dict[str, Any] fields.
-            # Anthropic (tool_use), Gemini, and Ollama have no such restriction —
-            # AG2 converts the Pydantic schema to a tool input schema internally,
-            # which handles freeform object fields. Only apply the strict-field
-            # gate for OpenAI providers; pass response_schema unconditionally for
-            # all other providers.
-            try:
-                _api_type = (
-                    ((llm_config_dict or {}).get("config_list") or [{}])[0].get("api_type") or "openai"
-                ).lower()
-                _openai_strict = _api_type in ("openai", "azure")
-                if _openai_strict:
-                    supports_strict, _ = supports_provider_response_format(structured_model_cls)
-                    if supports_strict:
-                        beta_response_schema = get_provider_response_model(structured_model_cls)
-                else:
-                    # Anthropic / Gemini / Ollama — pass the schema directly;
-                    # AG2 routes it through the provider's native mechanism.
-                    beta_response_schema = structured_model_cls
-            except Exception:
-                beta_response_schema = None
+        beta_response_schema = _prepare_response_schema_for_agent(
+            workflow_name=workflow_name,
+            agent_name=agent_name,
+            agent_config=agent_config,
+            structured_model_cls=structured_model_cls,
+            llm_config_dict=llm_config_dict,
+        )
 
         middleware = []
         observers = []
@@ -663,6 +814,12 @@ async def create_agents(
                     context_bridge=context_bridge,
                 )
             )
+
+        # RetryMiddleware covers provider/network exceptions raised during the
+        # AG2 LLM call. Schema correction is owned by AG2 AgentReply.content();
+        # this factory only supplies the validated response_schema.
+        if beta_response_schema is not None:
+            middleware.append(RetryMiddleware(max_retries=2))
 
         # Create beta Agent
         agent = Agent(

@@ -16,11 +16,11 @@ import yaml
 logger = logging.getLogger(__name__)
 
 from mozaiksai.core.artifacts.models import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ArtifactVersionDoc,
+    BuildRecord,
+    BuildRecordStatus,
+    BuildRecordValidationStatus,
 )
-from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
+from mozaiksai.core.artifacts.store import BuildRecordStore, get_build_record_store
 
 from .indexer import index_file_map, persist_app_context_index
 from .models import (
@@ -78,7 +78,7 @@ GREENFIELD_APP_CONTEXT_ARTIFACT_KINDS = (
 @dataclass(frozen=True)
 class RegisteredAppContextVersion:
     context_version: AppContextVersion
-    artifact_version: ArtifactVersionDoc
+    artifact_version: BuildRecord
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,7 @@ def build_brownfield_app_context_version(
             artifact_kind=artifact_kind,
             artifact_key=artifact_kind,
             artifact_version_id=str(artifact_version_refs[artifact_kind]),
-            lifecycle_status=ArtifactLifecycleStatus.DRAFT.value,
+            lifecycle_status=BuildRecordStatus.DRAFT.value,
         )
         for artifact_kind in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
     ]
@@ -151,7 +151,7 @@ def build_brownfield_app_context_version(
             artifact_kind=artifact_kind,
             artifact_key=artifact_kind,
             artifact_version_id=str(version_id),
-            lifecycle_status=ArtifactLifecycleStatus.DRAFT.value,
+            lifecycle_status=BuildRecordStatus.DRAFT.value,
         )
         for artifact_kind, version_id in sorted(artifact_version_refs.items())
         if artifact_kind not in BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS
@@ -186,7 +186,7 @@ def build_brownfield_app_context_version(
 
 def build_greenfield_app_context_from_app_bundle(
     *,
-    app_bundle_artifact: ArtifactVersionDoc | Any,
+    app_bundle_artifact: BuildRecord | Any,
     files_manifest: list[dict[str, Any]] | None = None,
     app_id: str | None = None,
     indexed_at: datetime | None = None,
@@ -195,7 +195,7 @@ def build_greenfield_app_context_from_app_bundle(
     resolved_app_id = str(app_id or getattr(app_bundle_artifact, "app_id", "") or "").strip()
     if not resolved_app_id:
         raise ValueError("app_id is required")
-    if getattr(app_bundle_artifact, "artifact_kind", None) != "app_bundle":
+    if getattr(app_bundle_artifact, "build_family", None) != "app_bundle":
         raise ValueError("greenfield app context requires an app_bundle artifact")
 
     artifact_id = str(getattr(app_bundle_artifact, "id", "") or "")
@@ -216,7 +216,7 @@ def build_greenfield_app_context_from_app_bundle(
         indexed_at=resolved_indexed_at,
         metadata={
             "artifact_kind": "app_bundle",
-            "artifact_key": str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+            "artifact_key": str(getattr(app_bundle_artifact, "build_key", "app_bundle")),
             "artifact_version_id": artifact_id,
         },
     )
@@ -280,15 +280,15 @@ def build_greenfield_app_context_from_app_bundle(
 
 async def register_greenfield_app_context_version(
     *,
-    app_bundle_artifact: ArtifactVersionDoc | Any,
-    artifact_store: ArtifactStore | None = None,
+    app_bundle_artifact: BuildRecord | Any,
+    artifact_store: BuildRecordStore | None = None,
     files_manifest: list[dict[str, Any]] | None = None,
     source_workflow: str | None = None,
     source_chat_id: str | None = None,
     make_current: bool = True,
 ) -> RegisteredAppContextVersion:
     """Persist greenfield app-context artifacts and register a current AppContextVersion."""
-    store = artifact_store or get_artifact_store()
+    store = artifact_store or get_build_record_store()
     drafts = build_greenfield_app_context_from_app_bundle(
         app_bundle_artifact=app_bundle_artifact,
         files_manifest=files_manifest,
@@ -299,7 +299,7 @@ async def register_greenfield_app_context_version(
             app_id=drafts.app_id,
             artifact_version_id=str(app_bundle_artifact.id),
             artifact_kind="app_bundle",
-            artifact_key=str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+            artifact_key=str(getattr(app_bundle_artifact, "build_key", "app_bundle")),
             file_map=source_file_map,
             source="greenfield_app_bundle",
             source_ref=drafts.application_inventory.source_refs[0],
@@ -339,7 +339,7 @@ async def register_greenfield_app_context_version(
 
     app_bundle_ref = ArtifactRef(
         artifact_kind="app_bundle",
-        artifact_key=str(getattr(app_bundle_artifact, "artifact_key", "app_bundle")),
+        artifact_key=str(getattr(app_bundle_artifact, "build_key", "app_bundle")),
         artifact_version_id=str(app_bundle_artifact.id),
         lifecycle_status=_lifecycle_value(getattr(app_bundle_artifact, "lifecycle_status", None)),
         source_ref_id="src_app_bundle",
@@ -359,7 +359,7 @@ async def register_greenfield_app_context_version(
                     artifact_kind=artifact_kind,
                     artifact_key=artifact_kind,
                     artifact_version_id=version_id,
-                    lifecycle_status=ArtifactLifecycleStatus.DRAFT.value,
+                    lifecycle_status=BuildRecordStatus.DRAFT.value,
                 )
                 for artifact_kind, version_id in artifact_version_refs.items()
             ],
@@ -389,7 +389,7 @@ async def register_greenfield_app_context_version(
     )
 
 
-def _greenfield_source_file_map_from_artifact(app_bundle_artifact: ArtifactVersionDoc | Any) -> dict[str, str]:
+def _greenfield_source_file_map_from_artifact(app_bundle_artifact: BuildRecord | Any) -> dict[str, str]:
     metadata = _artifact_metadata(app_bundle_artifact)
     workspace_dir = metadata.get("workspace_dir")
     if workspace_dir:
@@ -406,7 +406,7 @@ def _greenfield_source_file_map_from_artifact(app_bundle_artifact: ArtifactVersi
     return {}
 
 
-def _artifact_metadata(artifact: ArtifactVersionDoc | Any) -> dict[str, Any]:
+def _artifact_metadata(artifact: BuildRecord | Any) -> dict[str, Any]:
     commit_metadata = getattr(artifact, "commit_metadata", None)
     metadata = getattr(commit_metadata, "metadata", None)
     if isinstance(metadata, dict):
@@ -465,20 +465,20 @@ def _normalize_indexed_source_path(path: Any) -> str | None:
 async def register_app_context_version(
     context_version: AppContextVersion,
     *,
-    artifact_store: ArtifactStore | None = None,
+    artifact_store: BuildRecordStore | None = None,
     source_workflow: str | None = None,
     source_chat_id: str | None = None,
     make_current: bool = False,
 ) -> RegisteredAppContextVersion:
     """Persist an AppContextVersion as an ArtifactVersion."""
-    store = artifact_store or get_artifact_store()
+    store = artifact_store or get_build_record_store()
     payload = context_version.model_dump(mode="json")
     raw = _json_bytes(payload)
 
-    artifact_version = await store.create_artifact_version(
+    artifact_version = await store.create_build_record(
         app_id=context_version.app_id,
-        artifact_kind=APP_CONTEXT_VERSION_ARTIFACT_KIND,
-        artifact_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
+        build_family=APP_CONTEXT_VERSION_ARTIFACT_KIND,
+        build_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
         files_manifest=[
             {
                 "path": f"app_context/{context_version.context_version_id}.json",
@@ -489,8 +489,8 @@ async def register_app_context_version(
         ],
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=ArtifactValidationStatus.PENDING,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
         commit_metadata={
             "message": f"AppContextVersion: {context_version.context_version_id}",
             "source_workflow": source_workflow,
@@ -507,7 +507,7 @@ async def register_app_context_version(
     if make_current:
         current = await set_current_app_context_version(
             app_id=context_version.app_id,
-            artifact_version_id=artifact_version.id,
+            build_record_id=artifact_version.id,
             artifact_store=store,
         )
         if current is not None:
@@ -522,24 +522,24 @@ async def register_app_context_version(
 async def set_current_app_context_version(
     *,
     app_id: str,
-    artifact_version_id: str,
-    artifact_store: ArtifactStore | None = None,
-) -> ArtifactVersionDoc | None:
+    build_record_id: str,
+    artifact_store: BuildRecordStore | None = None,
+) -> BuildRecord | None:
     """Mark one AppContextVersion artifact as CURRENT for an app."""
-    store = artifact_store or get_artifact_store()
-    artifact = await store.get_artifact_version(
+    store = artifact_store or get_build_record_store()
+    artifact = await store.get_build_record(
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
     )
     if artifact is None:
         return None
-    if artifact.artifact_kind != APP_CONTEXT_VERSION_ARTIFACT_KIND:
+    if artifact.build_family != APP_CONTEXT_VERSION_ARTIFACT_KIND:
         raise ValueError(
             "current app context selection requires an app_context_version artifact"
         )
-    return await store.accept_artifact_version(
+    return await store.accept_build_record(
         app_id=app_id,
-        artifact_version_id=artifact_version_id,
+        build_record_id=build_record_id,
     )
 
 
@@ -548,7 +548,7 @@ async def get_app_context_version(
     app_id: str,
     context_version_id: str | None = None,
     artifact_version_id: str | None = None,
-    artifact_store: ArtifactStore | None = None,
+    artifact_store: BuildRecordStore | None = None,
 ) -> AppContextVersion | None:
     """Load an AppContextVersion by canonical context id or artifact version id."""
     resolved_app_id = str(app_id or "").strip()
@@ -559,15 +559,15 @@ async def get_app_context_version(
     if not resolved_context_version_id and not resolved_artifact_version_id:
         raise ValueError("context_version_id or artifact_version_id is required")
 
-    store = artifact_store or get_artifact_store()
+    store = artifact_store or get_build_record_store()
     if resolved_artifact_version_id:
-        artifact = await store.get_artifact_version(
+        artifact = await store.get_build_record(
             app_id=resolved_app_id,
-            artifact_version_id=resolved_artifact_version_id,
+            build_record_id=resolved_artifact_version_id,
         )
         if artifact is None:
             return None
-        if artifact.artifact_kind != APP_CONTEXT_VERSION_ARTIFACT_KIND:
+        if artifact.build_family != APP_CONTEXT_VERSION_ARTIFACT_KIND:
             raise ValueError("artifact_version_id does not reference an app_context_version artifact")
         context_version = _app_context_version_from_artifact(artifact)
         if (
@@ -578,10 +578,10 @@ async def get_app_context_version(
             return None
         return context_version
 
-    versions = await store.list_artifact_versions(
+    versions = await store.list_build_records(
         app_id=resolved_app_id,
-        artifact_kind=APP_CONTEXT_VERSION_ARTIFACT_KIND,
-        artifact_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
+        build_family=APP_CONTEXT_VERSION_ARTIFACT_KIND,
+        build_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
         limit=100,
     )
     for artifact in versions:
@@ -594,15 +594,15 @@ async def get_app_context_version(
 async def get_current_app_context_version(
     *,
     app_id: str,
-    artifact_store: ArtifactStore | None = None,
+    artifact_store: BuildRecordStore | None = None,
 ) -> AppContextVersion | None:
     """Load the CURRENT AppContextVersion payload for an app."""
-    store = artifact_store or get_artifact_store()
-    versions = await store.list_artifact_versions(
+    store = artifact_store or get_build_record_store()
+    versions = await store.list_build_records(
         app_id=app_id,
-        artifact_kind=APP_CONTEXT_VERSION_ARTIFACT_KIND,
-        artifact_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
-        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        build_family=APP_CONTEXT_VERSION_ARTIFACT_KIND,
+        build_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
+        lifecycle_status=BuildRecordStatus.CURRENT,
         limit=1,
     )
     if not versions:
@@ -614,7 +614,7 @@ async def get_current_app_context_version(
     return AppContextVersion.model_validate(payload)
 
 
-def _app_context_version_from_artifact(artifact: ArtifactVersionDoc | Any) -> AppContextVersion | None:
+def _app_context_version_from_artifact(artifact: BuildRecord | Any) -> AppContextVersion | None:
     payload = _summary_payload(artifact)
     if payload is None:
         return None
@@ -646,15 +646,15 @@ async def _persist_context_payload_artifact(
     artifact_key: str,
     payload: Any,
     path: str,
-    artifact_store: ArtifactStore,
+    artifact_store: BuildRecordStore,
     source_workflow: str | None,
     source_chat_id: str | None,
-) -> ArtifactVersionDoc:
+) -> BuildRecord:
     raw = _json_bytes(payload)
-    return await artifact_store.create_artifact_version(
+    return await artifact_store.create_build_record(
         app_id=app_id,
-        artifact_kind=artifact_kind,
-        artifact_key=artifact_key,
+        build_family=artifact_kind,
+        build_key=artifact_key,
         files_manifest=[
             {
                 "path": path,
@@ -665,8 +665,8 @@ async def _persist_context_payload_artifact(
         ],
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
-        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
-        validation_status=ArtifactValidationStatus.PENDING,
+        lifecycle_status=BuildRecordStatus.DRAFT,
+        validation_status=BuildRecordValidationStatus.PENDING,
         commit_metadata={
             "message": f"AppContext: {artifact_kind}",
             "source_workflow": source_workflow,
@@ -681,7 +681,7 @@ async def _persist_context_payload_artifact(
     )
 
 
-def _summary_payload(artifact: ArtifactVersionDoc | Any) -> Any:
+def _summary_payload(artifact: BuildRecord | Any) -> Any:
     metadata = getattr(getattr(artifact, "commit_metadata", None), "metadata", None)
     if isinstance(metadata, dict):
         return metadata.get("summary_payload")

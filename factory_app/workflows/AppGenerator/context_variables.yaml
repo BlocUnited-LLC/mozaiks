@@ -1,4 +1,13 @@
 definitions:
+  build_timestamp:
+    type: string
+    description: >
+      Canonical timezone-aware ISO-8601 timestamp shared by every provenance
+      artifact in one deterministic app materialization. The launcher may seed
+      it for replay; otherwise provenance producers resolve current UTC.
+    source:
+      type: state
+      default: null
   platform_user_email:
     type: string
     description: >
@@ -310,9 +319,12 @@ definitions:
     type: string
     description: >
       Selected brownfield build path from brownfield_path_selector. One of
-      "light_integration" (overlay-only generation via AgentGenerator +
-      AppGenerator) or "full_migration" (DesignDocs + full pipeline grounded
-      in AdoptionPlan scope). Null for greenfield builds.
+      "light_integration" (Add AI Workflows: preserve the existing app as
+      source of truth and generate app-aware AI workflows, chat surfaces, and
+      only required safe adapters around approved capabilities) or
+      "full_migration" (Build App Features: generate Mozaiks-owned modules,
+      workflows, pages, data contracts, and extended functionality for
+      explicitly approved expansion scope). Null for greenfield builds.
     source:
       type: state
       default: null
@@ -571,8 +583,8 @@ definitions:
       collection: ArtifactVersions
       query_template:
         app_id: '{{runtime.app_id}}'
-        artifact_kind: subscription_contract
-        artifact_key: subscription_contract
+        build_family: subscription_contract
+        build_key: subscription_contract
         lifecycle_status: current
       fields:
       - commit_metadata
@@ -827,6 +839,18 @@ definitions:
     source:
       type: computed
       default: []
+  workflow_integration_repair_failure_fingerprint:
+    type: string
+    description: Stable digest of the last workflow-integration failure evidence.
+    source:
+      type: computed
+      default: null
+  workflow_integration_repair_no_progress:
+    type: boolean
+    description: True when a repair pass reproduces the identical workflow-integration failure.
+    source:
+      type: computed
+      default: false
   workflow_integration_repair_result:
     type: object
     description: Full workflow integration repair scheduling result.
@@ -873,6 +897,18 @@ definitions:
     source:
       type: computed
       default: []
+  bundle_repair_failure_fingerprint:
+    type: string
+    description: Stable digest of the last targeted generated-bundle failure evidence.
+    source:
+      type: computed
+      default: null
+  bundle_repair_no_progress:
+    type: boolean
+    description: True when a repair pass reproduces the identical targeted bundle failure.
+    source:
+      type: computed
+      default: false
   bundle_repair_result:
     type: object
     description: Full generated-bundle scanner repair scheduling result.
@@ -974,6 +1010,17 @@ definitions:
     source:
       type: build_context
       default: []
+  readiness_profile:
+    type: string
+    description: >
+      Deterministic operator readiness classification emitted by AppPlanAgent.
+      Values: none, basic_app, saas_app, host_operator_platform, or
+      marketplace_platform. Downstream template renderers and operator helper
+      packs use this to choose the no-spend launch profile. Empty/none in OSS
+      mode or when the app does not need a readiness pack.
+    source:
+      type: computed
+      default: none
   capability_registry:
     type: object
     description: >
@@ -1391,7 +1438,16 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
     - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint
@@ -1435,7 +1491,16 @@ agents:
     - previous_app_bundle_ref
     - carry_forward_modules
     - llm_profile
+    - app_context_required
+    - current_app_context_version_id
+    - app_context_summary
     - app_type
+    - app_intelligence_ready
+    - app_intelligence_status
+    - app_intelligence_summary
+    - app_intelligence_health
+    - app_intelligence_catalog
+    - source_context_catalog
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint
@@ -1466,6 +1531,7 @@ agents:
     - ready_connector_services
     - missing_connector_services
     - capability_packs
+    - readiness_profile
     - brownfield_build_path
     - adoption_plan
     - ownership_boundary

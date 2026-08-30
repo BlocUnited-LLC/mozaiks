@@ -61,7 +61,7 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
         "\n".join(
             [
                 "async def echo_tool(*, context=None):",
-                "    return {'checkpoint': context.checkpoint, 'artifact_kind': context.artifact_kind}",
+                "    return {'checkpoint': context.checkpoint, 'build_family': context.build_family}",
             ]
         ),
         encoding="utf-8",
@@ -94,11 +94,11 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
 
     result = await executor.execute_tool(
         ControlPlaneToolCall(tool_id="echo_tool", target="request_submitted"),
-        context=ControlPlaneToolContext(checkpoint="request_submitted", artifact_kind="app_bundle"),
+        context=ControlPlaneToolContext(checkpoint="request_submitted", build_family="app_bundle"),
     )
 
     assert result.success is True
-    assert result.output == {"checkpoint": "request_submitted", "artifact_kind": "app_bundle"}
+    assert result.output == {"checkpoint": "request_submitted", "build_family": "app_bundle"}
 
 
 class _FakeChangeRequest:
@@ -107,15 +107,15 @@ class _FakeChangeRequest:
 
 
 class _FakeArtifactStore:
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
         return ArtifactVersionDoc(
-            _id=artifact_version_id,
+            _id=build_record_id,
             app_id=app_id,
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
+            build_family="app_bundle",
+            build_key="app_bundle",
             version_number=4,
             lineage_root_id="av_root",
-            parent_version_id="av_parent",
+            parent_build_record_id="av_parent",
             lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             validation_status=ArtifactValidationStatus.PASSED,
             source_workflow="AppGenerator",
@@ -124,10 +124,10 @@ class _FakeArtifactStore:
             },
         )
 
-    async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
+    async def list_build_records(self, **kwargs):  # noqa: ANN003
         return []
 
-    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
         return [
             _FakeChangeRequest(ChangeClassification.FEATURE),
             _FakeChangeRequest(ChangeClassification.PATCH),
@@ -176,10 +176,10 @@ def _revision_pack() -> LoadedControlPlanePack:
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.refinement_harness.v1",
             routing=ControlPlaneRoutingManifest(
-                default_artifact_kind="business_plan_bundle",
+                default_build_family="business_plan_bundle",
                 artifacts=[
                     ControlPlaneArtifactRoutingManifest(
-                        artifact_kind="business_plan_bundle",
+                        build_family="business_plan_bundle",
                         label="business plan bundle",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
                             patch=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_patch"),
@@ -189,7 +189,7 @@ def _revision_pack() -> LoadedControlPlanePack:
                         ),
                     ),
                     ControlPlaneArtifactRoutingManifest(
-                        artifact_kind="executive_summary",
+                        build_family="executive_summary",
                         label="executive summary",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
                             patch=ControlPlaneChangeRouteManifest(workflow_sequence="executive_summary_patch"),
@@ -207,16 +207,16 @@ def _revision_pack() -> LoadedControlPlanePack:
 
 
 class _RevisionArtifactStore(_FakeArtifactStore):
-    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
-        if artifact_version_id == "av_bp_2":
+    async def get_build_record(self, *, app_id: str, build_record_id: str):
+        if build_record_id == "av_bp_2":
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="business_plan_bundle",
-                artifact_key="business_plan_bundle",
+                build_family="business_plan_bundle",
+                build_key="business_plan_bundle",
                 version_number=2,
                 lineage_root_id="av_bp_root",
-                parent_version_id="av_bp_1",
+                parent_build_record_id="av_bp_1",
                 canonical_inputs_version={
                     "market_research": "av_market_1",
                     "customer_persona": "av_persona_1",
@@ -233,26 +233,26 @@ class _RevisionArtifactStore(_FakeArtifactStore):
                     }
                 },
             )
-        if artifact_version_id == "av_exec_1":
+        if build_record_id == "av_exec_1":
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="executive_summary",
-                artifact_key="executive_summary",
+                build_family="executive_summary",
+                build_key="executive_summary",
                 version_number=1,
                 lineage_root_id="av_exec_root",
-                parent_version_id=None,
+                parent_build_record_id=None,
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="ExecutiveSummary",
                 commit_metadata={"metadata": {}},
             )
-        if artifact_version_id == "av_market_1":
+        if build_record_id == "av_market_1":
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="market_research",
-                artifact_key="market_research",
+                build_family="market_research",
+                build_key="market_research",
                 version_number=1,
                 lineage_root_id="av_market_1",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
@@ -267,12 +267,12 @@ class _RevisionArtifactStore(_FakeArtifactStore):
                     }
                 },
             )
-        if artifact_version_id == "av_persona_1":
+        if build_record_id == "av_persona_1":
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="customer_persona",
-                artifact_key="customer_persona",
+                build_family="customer_persona",
+                build_key="customer_persona",
                 version_number=1,
                 lineage_root_id="av_persona_1",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
@@ -288,19 +288,19 @@ class _RevisionArtifactStore(_FakeArtifactStore):
             )
         return None
 
-    async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
-        artifact_kind = kwargs.get("artifact_kind")
-        if artifact_kind == "business_plan_bundle":
-            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_bp_2")
+    async def list_build_records(self, **kwargs):  # noqa: ANN003
+        build_family = kwargs.get("build_family")
+        if build_family == "business_plan_bundle":
+            artifact = await self.get_build_record(app_id=kwargs["app_id"], build_record_id="av_bp_2")
             return [artifact] if artifact is not None else []
-        if artifact_kind == "executive_summary":
-            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_exec_1")
+        if build_family == "executive_summary":
+            artifact = await self.get_build_record(app_id=kwargs["app_id"], build_record_id="av_exec_1")
             return [artifact] if artifact is not None else []
-        if artifact_kind == "market_research":
-            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_market_1")
+        if build_family == "market_research":
+            artifact = await self.get_build_record(app_id=kwargs["app_id"], build_record_id="av_market_1")
             return [artifact] if artifact is not None else []
-        if artifact_kind == "customer_persona":
-            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_persona_1")
+        if build_family == "customer_persona":
+            artifact = await self.get_build_record(app_id=kwargs["app_id"], build_record_id="av_persona_1")
             return [artifact] if artifact is not None else []
         return []
 
@@ -308,15 +308,15 @@ class _RevisionArtifactStore(_FakeArtifactStore):
         return ChangeRequestDoc(
             _id=change_request_id,
             app_id=app_id,
-            artifact_kind="business_plan_bundle",
-            artifact_key="business_plan_bundle",
-            artifact_version_id="av_bp_2",
+            build_family="business_plan_bundle",
+            build_key="business_plan_bundle",
+            build_record_id="av_bp_2",
             raw_user_request="Target enterprise banks instead of small businesses.",
             classification=ChangeClassification.CORE,
             refinement_request=RefinementRequestPayload(
-                artifact_kind="business_plan_bundle",
-                artifact_key="business_plan_bundle",
-                artifact_version_id="av_bp_2",
+                build_family="business_plan_bundle",
+                build_key="business_plan_bundle",
+                build_record_id="av_bp_2",
                 raw_user_request="Target enterprise banks instead of small businesses.",
                 app_id=app_id,
             ),
@@ -337,7 +337,7 @@ class _RevisionArtifactStore(_FakeArtifactStore):
             ),
         )
 
-    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+    async def list_change_requests(self, *, app_id: str, build_record_id: str | None = None, artifact_version_id: str | None = None, limit: int):
         return [
             await self.get_change_request(app_id=app_id, change_request_id="cr_1"),
         ]
@@ -349,9 +349,9 @@ async def test_revision_context_tool_assembles_runtime_session_and_artifact_stat
         checkpoint="request_submitted",
         app_id="app_1",
         user_id="user_1",
-        artifact_kind="business_plan_bundle",
-        artifact_key="business_plan_bundle",
-        artifact_version_id="av_bp_2",
+        build_family="business_plan_bundle",
+        build_key="business_plan_bundle",
+        build_record_id="av_bp_2",
         requested_workflow_id="FinalMemoAssembly",
         raw_user_request="Target enterprise banks instead of small businesses.",
     )
@@ -364,18 +364,18 @@ async def test_revision_context_tool_assembles_runtime_session_and_artifact_stat
     )
 
     assert revision_context["present"] is True
-    assert revision_context["routing"]["current_artifact"]["routes"]["core"]["workflow_sequence"] == "business_plan_core"
+    assert revision_context["routing"]["current_build_route"]["routes"]["core"]["workflow_sequence"] == "business_plan_core"
     assert revision_context["session"]["sequence_status"] == "revising"
     assert revision_context["session"]["active_change_request_id"] == "cr_1"
-    assert revision_context["current_artifact"]["artifact_version_id"] == "av_bp_2"
-    assert revision_context["current_artifact"]["summary_payload"]["target_customer"] == "Enterprise banks"
-    assert revision_context["current_artifact"]["input_artifacts"]["market_research"]["artifact_version_id"] == "av_market_1"
+    assert revision_context["current_build_record"]["build_record_id"] == "av_bp_2"
+    assert revision_context["current_build_record"]["summary_payload"]["target_customer"] == "Enterprise banks"
+    assert revision_context["current_build_record"]["input_artifacts"]["market_research"]["build_record_id"] == "av_market_1"
     assert revision_context["active_change_request"]["classification"] == "core"
-    assert revision_context["tracked_artifacts"][0]["artifact_kind"] == "business_plan_bundle"
+    assert revision_context["tracked_build_records"][0]["build_family"] == "business_plan_bundle"
     assert any(
-        artifact["artifact_kind"] == "market_research"
+        artifact["build_family"] == "market_research"
         and artifact["summary_payload"]["segment"] == "Enterprise banking"
-        for artifact in revision_context["tracked_artifacts"]
+        for artifact in revision_context["tracked_build_records"]
         if artifact.get("present")
     )
     assert revision_context["recent_change_requests"][0]["change_request_id"] == "cr_1"
@@ -396,15 +396,15 @@ async def test_workspace_scope_tool_reads_artifact_zip_and_related_files(tmp_pat
         archive.writestr("GeneratedApp/package.json", '{"name":"demo"}\n')
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=2,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -417,9 +417,9 @@ async def test_workspace_scope_tool_reads_artifact_zip_and_related_files(tmp_pat
         context=ControlPlaneToolContext(
             checkpoint="coding_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_zip_1",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_zip_1",
             extra={"selected_file_paths": ["src/App.jsx"]},
         ),
         artifact_store=_ZipArtifactStore(),
@@ -451,15 +451,15 @@ async def test_workspace_catalog_tool_ranks_request_matched_files(tmp_path: Path
         )
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=5,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -472,9 +472,9 @@ async def test_workspace_catalog_tool_ranks_request_matched_files(tmp_path: Path
         context=ControlPlaneToolContext(
             checkpoint="scope_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_zip_2",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_zip_2",
             raw_user_request="Add export csv controls to the dashboard",
         ),
         artifact_store=_ZipArtifactStore(),
@@ -500,15 +500,15 @@ async def test_context_graph_catalog_tool_ranks_graph_files_from_artifact_zip(tm
         )
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=6,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -521,9 +521,9 @@ async def test_context_graph_catalog_tool_ranks_graph_files_from_artifact_zip(tm
         context=ControlPlaneToolContext(
             checkpoint="scope_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_graph_1",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_graph_1",
             raw_user_request="Add export csv controls to the dashboard",
         ),
         artifact_store=_ZipArtifactStore(),
@@ -557,15 +557,15 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
         )
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=10,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -578,9 +578,9 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
         context=ControlPlaneToolContext(
             checkpoint="scope_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_intelligence_1",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_intelligence_1",
             raw_user_request="Update reports email export",
         ),
         artifact_store=_ZipArtifactStore(),
@@ -607,15 +607,15 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
         )
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=7,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -628,9 +628,9 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
         context=ControlPlaneToolContext(
             checkpoint="coding_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_graph_2",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_graph_2",
             raw_user_request="Update the app header behavior",
             extra={"selected_file_paths": ["src/App.jsx"]},
         ),
@@ -659,15 +659,15 @@ async def test_source_context_tools_search_read_and_related_files_from_artifact_
         )
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=8,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -679,9 +679,9 @@ async def test_source_context_tools_search_read_and_related_files_from_artifact_
     context = ControlPlaneToolContext(
         checkpoint="coding_requested",
         app_id="app_1",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
-        artifact_version_id="av_source_1",
+        build_family="app_bundle",
+        build_key="app_bundle",
+        build_record_id="av_source_1",
         raw_user_request="Update dashboard metrics loading",
     )
     store = _ZipArtifactStore()
@@ -722,15 +722,15 @@ async def test_contract_surface_context_uses_canonical_context_graph_loader(tmp_
         )
 
     class _ZipArtifactStore(_FakeArtifactStore):
-        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        async def get_build_record(self, *, app_id: str, build_record_id: str):
             return ArtifactVersionDoc(
-                _id=artifact_version_id,
+                _id=build_record_id,
                 app_id=app_id,
-                artifact_kind="app_bundle",
-                artifact_key="app_bundle",
+                build_family="app_bundle",
+                build_key="app_bundle",
                 version_number=9,
                 lineage_root_id="av_root",
-                parent_version_id="av_parent",
+                parent_build_record_id="av_parent",
                 lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 validation_status=ArtifactValidationStatus.PASSED,
                 source_workflow="AppGenerator",
@@ -743,9 +743,9 @@ async def test_contract_surface_context_uses_canonical_context_graph_loader(tmp_
         context=ControlPlaneToolContext(
             checkpoint="contract_surface_requested",
             app_id="app_1",
-            artifact_kind="app_bundle",
-            artifact_key="app_bundle",
-            artifact_version_id="av_contract_graph",
+            build_family="app_bundle",
+            build_key="app_bundle",
+            build_record_id="av_contract_graph",
             raw_user_request="Update reports export csv action",
         ),
         artifact_store=_ZipArtifactStore(),

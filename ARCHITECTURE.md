@@ -86,6 +86,18 @@ Mozaiks is a **persistent intent-orchestration runtime**. It covers the full lif
 
 Most AI products treat each interaction as isolated. Mozaiks treats every interaction as part of a living system. Users do not move linearly — they revise, branch, change foundational assumptions, ask for local edits, and continue unfinished work. The system needs to know the difference between a small patch and a change that invalidates everything downstream.
 
+The product-facing application lifecycle has two run types:
+
+- **Genesis Build** — the first complete build journey for an app. It creates
+  the app's first canonical, validated artifact lineage.
+- **Refinement Run** — any later change against that lineage. It loads current
+  artifact state, scopes the impact, stages a new version, and returns it for
+  review.
+
+The Refinement Engine is the internal continuity and routing layer that executes
+Refinement Runs. A `core` Refinement Run may re-enter at `ValueEngine`, but it does
+not become another Genesis Build unless the user creates a new app lineage.
+
 This means:
 - **Workflows are execution primitives**, not the top-level product abstraction
 - **Artifacts are durable, versioned state** — not disposable chat outputs
@@ -108,6 +120,8 @@ Customer-facing terminology follows a different layer:
 - `Studio` is an internal host/composition term
 - visible UX should prefer `Apps`, `Build`, `Operations`, `Integrations`, and
   `Admin`
+- app creation and evolution should use `Genesis Build` and `Refinement Run`;
+  `refinement` remains the internal engine and contract term
 - `Hub`, `Studio` as a top-level product area, and `Adapters` should not be
   treated as long-term customer-facing IA
 
@@ -235,7 +249,9 @@ Quality gates:
 - `factory_app/workflows/{WorkflowName}/*.yaml` — workflow-owned runtime YAML,
   prompts, agent rosters, transitions, structured outputs, tool bindings, and
   middleware
-- `factory_app/workflows/_shared/` — shared factory prompt/catalog helpers
+- `factory_app/workflows/_shared/` — shared factory builder implementation
+  consumed by multiple factory workflows, including deterministic Python
+  helpers and reusable workflow UI components
 - `factory_app/build_context/{context_name}/context.yaml` — named build-context
   registries for static catalogs, contracts, reusable packs, and templates
 - `factory_app/refinement_harness/` — declarative builder harness pack

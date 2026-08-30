@@ -1,0 +1,8 @@
+{
+  "appId": "research-ops",
+  "appName": "Research Operations",
+  "version": "1.0.0",
+  "description": "Workflow and operator-surface reference app.",
+  "authRequired": false,
+  "startup": { "landing_spot": "/research" }
+}

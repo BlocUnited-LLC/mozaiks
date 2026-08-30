@@ -1,0 +1,22 @@
+schema_version: mozaiks.app_page.v1
+name: projects
+route: /projects
+title: Projects
+page_type: record_list
+layout: full-width
+roles: [user, admin]
+sections:
+  - id: projects-header
+    primitive: PageHeader
+    config:
+      title: Projects
+      subtitle: Create and track active work.
+  - id: projects-table
+    primitive: DataTable
+    config:
+      api_endpoint: /api/modules/projects/list_projects
+      data_key: items
+      columns:
+        - { key: name, label: Project }
+        - { key: status, label: Status, type: badge }
+      empty: { title: No projects, message: Create a project to begin. }

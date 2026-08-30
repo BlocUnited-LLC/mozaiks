@@ -102,10 +102,9 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
 
     assert result == {
         "change_request_id": "cr_123",
-        "affected_artifact_kinds": ["design_docs", "app_bundle"],
-        "invalidated_artifact_version_ids": ["av_design_1", "av_app_1"],
-        # experience_spec, subscription_contract, and workflow_bundle depend on design_docs.
-        "downstream_staled_families": ["experience_spec", "subscription_contract", "workflow_bundle"],
+        "affected_build_families": ["design_docs", "app_bundle"],
+        "invalidated_build_record_ids": ["av_design_1", "av_app_1"],
+        "downstream_staled_families": ["subscription_contract", "workflow_bundle"],
     }
     assert artifact_store.calls == [
         {
@@ -122,12 +121,6 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
     ]
     # Downstream propagation should have staled design_docs dependents.
     assert artifact_store.family_calls == [
-        {
-            "app_id": "app_1",
-            "artifact_kind": "experience_spec",
-            "artifact_key": "experience_spec",
-            "reason": "change_request:cr_123",
-        },
         {
             "app_id": "app_1",
             "artifact_kind": "subscription_contract",

@@ -32,7 +32,7 @@ def _source_bundle(tmp_path: Path) -> Path:
 def _build_plan(tmp_path: Path, *, request_id: str = 'req_worker_001', affected_paths: list[str] | None = None):
     return dry_run.build_refinement_execution_plan_from_route(
         request='Update the dashboard title.',
-        artifact_kind='app_bundle',
+        build_family='app_bundle',
         change_class='patch',
         workflow_id='AppGenerator',
         workflow_sequence='app_revision',

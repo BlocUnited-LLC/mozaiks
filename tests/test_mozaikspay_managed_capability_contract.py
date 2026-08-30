@@ -127,6 +127,35 @@ plans:
 """
 
 
+def _golden_gated_reports_module_yaml() -> str:
+    return """
+schema_version: mozaiks.module.v1
+module:
+  id: reports
+  display_name: Reports
+  version: 1.0.0
+  description: Golden gated feature module
+  handler: backend.handler:ReportsHandler
+permissions:
+  - id: reports.read
+    description: Read generated reports.
+actions:
+  - id: generate_report
+    description: Generate a report for the current workspace.
+    handler_method: generate_report
+    entitlement_gate: reports.generate
+    permissions: [reports.read]
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+"""
+
+
 def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
     pack_descriptor = dict(_read_yaml(_CONTEXT_YAML)["pack"])
     pack_descriptor.setdefault("pack_source_path", str(_PACK_ROOT))
@@ -137,6 +166,9 @@ def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
     }
     files["app.json"] = '{"name":"Golden MozaiksPay SaaS","version":"1.0.0"}\n'
     files["config/subscriptions.yaml"] = _golden_subscriptions_yaml()
+    # A real SaaS bundle gates at least one feature action behind a sold
+    # capability; the scanner rejects capability catalogs with zero gates.
+    files["modules/reports/module.yaml"] = _golden_gated_reports_module_yaml()
 
     deployment_env = _deployment_env_for_capability_packs(capability_packs)
     files.update(
@@ -211,7 +243,7 @@ class TestContextYaml:
         mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
         assert mozaikspay is not None
         assert mozaikspay["kind"] == "api_key"
-        assert mozaikspay["provider"] == "mozaikspay"
+        assert mozaikspay["provider"] == "mozaiks_pay"
         assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
         secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "api_key")
         assert secret_field["frontend_safe"] is False
@@ -229,6 +261,18 @@ class TestContractYaml:
         c = _read_yaml(_CONTRACT_YAML)
         assert c["contract_id"] == "mozaikspay"
         assert c["contract_type"] == "build_pack_instructions"
+
+    def test_contract_declares_canonical_provider_identity(self):
+        c = _read_yaml(_CONTRACT_YAML)
+        provider = c["canonical_provider"]
+
+        assert provider["provider_id"] == "mozaiks_pay"
+        assert provider["provider_pack_id"] == "mozaikspay"
+        assert provider["api_contract_version"] == "mozaiks.provider_api_contract.v1"
+        assert provider["fulfillment_boundary"] == "BillingFulfillmentCommand"
+        assert provider["entitlement_boundary"] == "EntitlementPort"
+        assert provider["activation_requires_explicit_selection"] is False
+        assert provider["activation_requires_credentials"] is True
 
     def test_required_outputs_declared(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -261,7 +305,21 @@ class TestContractYaml:
         requirements = c.get("required_integrations") or []
         mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
         assert mozaikspay is not None
+        assert mozaikspay["provider"] == "mozaiks_pay"
         assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
+
+    def test_runtime_connector_contract_names_selection_and_fulfillment_boundaries(self):
+        c = _read_yaml(_CONTRACT_YAML)
+        connector = c["runtime_connector_contract"]
+
+        assert connector["canonical_provider_id"] == "mozaiks_pay"
+        assert connector["selection_field"] == "AppBuildPlan.monetization_provider"
+        assert connector["selection_value"] == "mozaiks_pay"
+        assert connector["required_selected_pack_id"] == "mozaikspay"
+        assert "entitlement_dispatch" in connector["mutually_exclusive_with"]
+        assert connector["idempotency"]["replay_boundary"] == "BillingFulfillmentService"
+        assert connector["callback_verification"]["fail_closed"] is True
+        assert connector["entitlement_sync"]["normalized_command"] == "BillingFulfillmentCommand"
 
     def test_provider_api_contract_forbids_provider_neutral_internal_ids(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -368,7 +426,12 @@ class TestMozaiksPayClientTemplate:
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
         assert "_CONNECTOR_SERVICE = \"mozaikspay\"" in content
         assert "_PROVIDER_API_PREFIX = \"/api/mozaikspay/v1\"" in content
+        assert "_CONTRACT_VERSION = \"mozaiks.provider_api_contract.v1\"" in content
+        assert "X-MozaiksPay-Contract-Version" in content
+        assert "def readiness(" in content
+        assert "_MAX_RETRIES = 2" in content
         assert "/subscription/status" in content
+        assert "/health" in content
         assert "/billing-portal/session" in content
         assert "settings.api_key" in content
         assert "X-MozaiksPay-Client-Id" in content
@@ -417,6 +480,18 @@ class TestBillingPortalModuleYaml:
         action_ids = {a["id"] for a in doc.get("actions", [])}
         assert {"get_subscription_status", "get_usage_status", "open_billing_portal"} <= action_ids
 
+    def test_list_plans_is_public_readonly(self):
+        doc = _read_yaml(_MODULE_YAML)
+        list_plans = next(a for a in doc["actions"] if a["id"] == "list_plans")
+        assert list_plans.get("api_surface") == "public_readonly", (
+            "list_plans feeds the public /pricing landing page and must be "
+            "anonymously dispatchable"
+        )
+        assert not list_plans.get("permissions"), (
+            "list_plans must not require permissions — the /pricing page renders "
+            "before authentication"
+        )
+
     def test_no_raw_provider_credentials_in_output_schema(self):
         content = _MODULE_YAML.read_text(encoding="utf-8")
         for forbidden in ("payment_provider_customer_id", "payment_provider_subscription_id", "PAYMENT_PROVIDER_"):
@@ -454,7 +529,7 @@ class TestPageYamls:
 
     def test_billing_page_schema_version(self):
         doc = _read_yaml(_BILLING_PAGE)
-        assert doc.get("schema_version") == "mozaiks.page.v1"
+        assert doc.get("schema_version") == "mozaiks.app_page.v1"
 
     def test_usage_page_calls_billing_portal_actions(self):
         content = _USAGE_PAGE.read_text(encoding="utf-8")
@@ -462,7 +537,7 @@ class TestPageYamls:
 
     def test_usage_page_schema_version(self):
         doc = _read_yaml(_USAGE_PAGE)
-        assert doc.get("schema_version") == "mozaiks.page.v1"
+        assert doc.get("schema_version") == "mozaiks.app_page.v1"
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +564,7 @@ class TestGoldenGeneratedMozaiksPaySaasBundle:
             "config/subscriptions.yaml",
             "ui/pages/billing.yaml",
             "ui/pages/usage.yaml",
+            "ui/pages/pricing.yaml",
             ".env.example",
             "deployment.manifest.json",
         } <= set(files)
