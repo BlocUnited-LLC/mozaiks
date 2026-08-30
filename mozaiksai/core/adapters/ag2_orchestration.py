@@ -109,7 +109,7 @@ class AG2OrchestrationAdapter:
                 user_id=request.user_id,
                 initial_message=request.initial_message,
                 initial_agent_name_override=request.initial_agent_name_override,
-                **request.extra,
+                **self._with_network_store(request.app_id, request.chat_id, request.extra),
             )
 
             return self._interpret_result(request, result)
@@ -148,18 +148,10 @@ class AG2OrchestrationAdapter:
     async def resume(self, request: ResumeRequest) -> RunResult:
         """Resume a paused workflow.
 
-        Under the hood this is the same orchestration entrypoint, with
-        ``initial_agent_name_override`` set to ``resume_agent``.
-
-        In the current runtime, Mozaiks re-enters the orchestration loop for the
-        same ``chat_id`` after loading canonical AG2 run-stream events through
-        the workflow bootstrap layer. If ``injected_context`` is provided, it is
-        persisted before re-entry so the next agent sees it in
-        ``context_variables``.
-
-        The installed AG2 Network API does not expose durable channel resume, so
-        this remains a runtime-managed re-entry boundary rather than a wrapper
-        over ``Hub.resume()``.
+        The Network runner reopens the chat-scoped AG2 KnowledgeStore, lets AG2
+        hydrate the Hub/WAL, and reattaches the human and Agent identities. If
+        ``injected_context`` is provided, it is persisted before reconnection so
+        the next turn sees it in ``context_variables``.
         """
         try:
             # If injected_context is provided (e.g. task batch results),
@@ -171,6 +163,8 @@ class AG2OrchestrationAdapter:
                 run_workflow_orchestration,
             )
 
+            extra = self._with_network_store(request.app_id, request.chat_id, request.extra)
+            extra["resume_existing_only"] = True
             result = await run_workflow_orchestration(
                 workflow_name=request.workflow_name,
                 app_id=request.app_id,
@@ -178,7 +172,7 @@ class AG2OrchestrationAdapter:
                 user_id=request.user_id,
                 initial_message=None,
                 initial_agent_name_override=request.resume_agent,
-                **request.extra,
+                **extra,
             )
 
             return self._interpret_result(
@@ -257,6 +251,18 @@ class AG2OrchestrationAdapter:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _with_network_store(app_id: str, chat_id: str, extra: dict[str, Any]) -> dict[str, Any]:
+        resolved = dict(extra)
+        if "knowledge_store" not in resolved:
+            from mozaiksai.core.adapters.ag2_knowledge_store import MongoAG2KnowledgeStore
+
+            resolved["knowledge_store"] = MongoAG2KnowledgeStore(
+                app_id=app_id,
+                chat_id=chat_id,
+            )
+        return resolved
 
     def _interpret_result(
         self, request: RunRequest, raw: dict[str, Any] | None
