@@ -1401,7 +1401,7 @@ def test_plan_limit_meter_and_product_content_is_projected() -> None:
     assert meter.unit == "exports"
     product = _payload_for(result, SemanticNodeKind.PRODUCT, "extra_exports")
     assert product.title == "Extra exports"
-    assert product.prices == ()  # corpus declares no price: nothing invented
+    assert product.prices is None  # corpus declares no price: absence stays explicit
 
 
 def test_prices_project_as_integer_minor_units_with_iso_currency() -> None:

@@ -13,7 +13,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from enum import StrEnum
-from typing import Any, Literal
+from types import NoneType
+from typing import Any, Literal, get_args
 
 import yaml
 from pydantic import Field
@@ -548,7 +549,12 @@ class _Builder:
         payloads: dict[str, SemanticPayloadBase] = {}
         for node_id, node in self.nodes.items():
             model = PAYLOAD_MODEL_BY_KIND[node.kind]
-            fields = self.content.get(node_id, {})
+            fields = {
+                field_name: None
+                for field_name, field in model.model_fields.items()
+                if field.is_required() and NoneType in get_args(field.annotation)
+            }
+            fields.update(self.content.get(node_id, {}))
             try:
                 payloads[node_id] = build_semantic_payload(
                     model,

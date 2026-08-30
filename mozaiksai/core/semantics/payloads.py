@@ -345,7 +345,7 @@ class SemanticPayloadBase(SemanticsModel):
 
 class SurfacePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.SURFACE] = SemanticNodeKind.SURFACE
-    description: str | None = None
+    description: str | None
 
     @field_validator("description")
     @classmethod
@@ -357,8 +357,8 @@ class SurfacePayload(SemanticPayloadBase):
 
 class PagePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PAGE] = SemanticNodeKind.PAGE
-    title: str | None = None
-    intent: str | None = None
+    title: str | None
+    intent: str | None
     layout_id: str | None = None
     sections: tuple[PageSectionEntry, ...] = Field(default_factory=tuple)
 
@@ -388,8 +388,8 @@ class PagePayload(SemanticPayloadBase):
 
 class SectionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.SECTION] = SemanticNodeKind.SECTION
-    title: str | None = None
-    intent: str | None = None
+    title: str | None
+    intent: str | None
     entries: tuple[SectionContentEntry, ...] = Field(default_factory=tuple)
 
     @field_validator("title", "intent")
@@ -407,7 +407,7 @@ class SectionPayload(SemanticPayloadBase):
 
 class ModulePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.MODULE] = SemanticNodeKind.MODULE
-    description: str | None = None
+    description: str | None
 
     @field_validator("description")
     @classmethod
@@ -419,7 +419,7 @@ class ModulePayload(SemanticPayloadBase):
 
 class ActionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.ACTION] = SemanticNodeKind.ACTION
-    description: str | None = None
+    description: str | None
     request_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
     response_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
     emits: tuple[str, ...] = Field(default_factory=tuple)
@@ -458,7 +458,7 @@ class ActionPayload(SemanticPayloadBase):
 
 class CapabilityPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.CAPABILITY] = SemanticNodeKind.CAPABILITY
-    description: str | None = None
+    description: str | None
 
     @field_validator("description")
     @classmethod
@@ -470,7 +470,7 @@ class CapabilityPayload(SemanticPayloadBase):
 
 class PermissionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PERMISSION] = SemanticNodeKind.PERMISSION
-    description: str | None = None
+    description: str | None
 
     @field_validator("description")
     @classmethod
@@ -482,7 +482,7 @@ class PermissionPayload(SemanticPayloadBase):
 
 class EventPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.EVENT] = SemanticNodeKind.EVENT
-    description: str | None = None
+    description: str | None
     payload_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
 
     @field_validator("description")
@@ -504,8 +504,8 @@ class EventPayload(SemanticPayloadBase):
 
 class ReactionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.REACTION] = SemanticNodeKind.REACTION
-    description: str | None = None
-    consumed_event: str | None = None
+    description: str | None
+    consumed_event: str | None
 
     @field_validator("description")
     @classmethod
@@ -524,8 +524,8 @@ class ReactionPayload(SemanticPayloadBase):
 
 class NotificationPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.NOTIFICATION] = SemanticNodeKind.NOTIFICATION
-    template_text: str | None = None
-    channel: NotificationChannel | None = None
+    template_text: str | None
+    channel: NotificationChannel | None
 
     @field_validator("template_text")
     @classmethod
@@ -537,8 +537,8 @@ class NotificationPayload(SemanticPayloadBase):
 
 class DataCollectionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.DATA_COLLECTION] = SemanticNodeKind.DATA_COLLECTION
-    description: str | None = None
-    fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
+    description: str | None
+    fields: tuple[TypedFieldSpec, ...] | None
     indexes: tuple[IndexSpec, ...] = Field(default_factory=tuple)
 
     @field_validator("description")
@@ -550,7 +550,11 @@ class DataCollectionPayload(SemanticPayloadBase):
 
     @field_validator("fields")
     @classmethod
-    def _fields(cls, value: tuple[TypedFieldSpec, ...]) -> tuple[TypedFieldSpec, ...]:
+    def _fields(
+        cls, value: tuple[TypedFieldSpec, ...] | None
+    ) -> tuple[TypedFieldSpec, ...] | None:
+        if value is None:
+            return None
         ordered = tuple(sorted(value, key=lambda item: item.name))
         names = [item.name for item in ordered]
         if len(names) != len(set(names)):
@@ -568,7 +572,7 @@ class DataCollectionPayload(SemanticPayloadBase):
 
     @model_validator(mode="after")
     def _index_closure(self) -> DataCollectionPayload:
-        declared = {field.name for field in self.fields}
+        declared = {field.name for field in self.fields or ()}
         for index in self.indexes:
             for name in index.field_names:
                 if name not in declared:
@@ -578,9 +582,9 @@ class DataCollectionPayload(SemanticPayloadBase):
 
 class DataAliasPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.DATA_ALIAS] = SemanticNodeKind.DATA_ALIAS
-    alias: str | None = None
-    collection: str | None = None
-    owner_node_id: str | None = None
+    alias: str | None
+    collection: str | None
+    owner_node_id: str | None
 
     @field_validator("alias", "collection")
     @classmethod
@@ -599,8 +603,8 @@ class DataAliasPayload(SemanticPayloadBase):
 
 class WorkflowPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.WORKFLOW] = SemanticNodeKind.WORKFLOW
-    description: str | None = None
-    startup_mode: WorkflowStartupMode | None = None
+    description: str | None
+    startup_mode: WorkflowStartupMode | None
 
     @field_validator("description")
     @classmethod
@@ -612,8 +616,8 @@ class WorkflowPayload(SemanticPayloadBase):
 
 class TriggerPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.TRIGGER] = SemanticNodeKind.TRIGGER
-    description: str | None = None
-    trigger_kind: TriggerKind | None = None
+    description: str | None
+    trigger_kind: TriggerKind | None
     event_id: str | None = None
     endpoint_path: str | None = None
     capability_id: str | None = None
@@ -678,8 +682,8 @@ class TriggerPayload(SemanticPayloadBase):
 
 class PlanPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PLAN] = SemanticNodeKind.PLAN
-    title: str | None = None
-    prices: tuple[PriceSpec, ...] = Field(default_factory=tuple)
+    title: str | None
+    prices: tuple[PriceSpec, ...] | None
     granted_capabilities: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator("title")
@@ -691,7 +695,9 @@ class PlanPayload(SemanticPayloadBase):
 
     @field_validator("prices")
     @classmethod
-    def _prices(cls, value: tuple[PriceSpec, ...]) -> tuple[PriceSpec, ...]:
+    def _prices(cls, value: tuple[PriceSpec, ...] | None) -> tuple[PriceSpec, ...] | None:
+        if value is None:
+            return None
         return _sorted_prices(value)
 
     @field_validator("granted_capabilities")
@@ -712,9 +718,9 @@ class PlanPayload(SemanticPayloadBase):
 
 class ProductPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PRODUCT] = SemanticNodeKind.PRODUCT
-    title: str | None = None
-    description: str | None = None
-    prices: tuple[PriceSpec, ...] = Field(default_factory=tuple)
+    title: str | None
+    description: str | None
+    prices: tuple[PriceSpec, ...] | None
 
     @field_validator("title", "description")
     @classmethod
@@ -725,14 +731,16 @@ class ProductPayload(SemanticPayloadBase):
 
     @field_validator("prices")
     @classmethod
-    def _prices(cls, value: tuple[PriceSpec, ...]) -> tuple[PriceSpec, ...]:
+    def _prices(cls, value: tuple[PriceSpec, ...] | None) -> tuple[PriceSpec, ...] | None:
+        if value is None:
+            return None
         return _sorted_prices(value)
 
 
 class MeterPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.METER] = SemanticNodeKind.METER
-    description: str | None = None
-    unit: str | None = None
+    description: str | None
+    unit: str | None
 
     @field_validator("description")
     @classmethod
@@ -751,8 +759,8 @@ class MeterPayload(SemanticPayloadBase):
 
 class LimitPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.LIMIT] = SemanticNodeKind.LIMIT
-    description: str | None = None
-    limit_value: int | None = Field(default=None, ge=0, strict=True)
+    description: str | None
+    limit_value: int | None = Field(ge=0, strict=True)
     period: BillingPeriod | None = None
 
     @field_validator("description")
@@ -765,8 +773,8 @@ class LimitPayload(SemanticPayloadBase):
 
 class DeploymentTargetPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.DEPLOYMENT_TARGET] = SemanticNodeKind.DEPLOYMENT_TARGET
-    target_kind: DeploymentTargetKind | None = None
-    profile_id: str | None = None
+    target_kind: DeploymentTargetKind | None
+    profile_id: str | None
     output_hints: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator("profile_id")

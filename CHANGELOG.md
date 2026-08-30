@@ -55,8 +55,10 @@ This project follows a practical pre-1.0 changelog format:
   ordering as explicit dense positions, plan/limit/meter/product facts
   (integer minor-unit prices, ISO-4217 currency), module/action/permission/
   event descriptions, and endpoint trigger bindings. Content is never
-  invented — payload prose fields are now optional-truthful (`None` when the
-  source carries no such fact) while structural rules stay strict, and facts
+  invented — payload content fields are required-nullable (`None` when the
+  source carries no such fact, omission is invalid), and absent collections
+  remain distinct from explicitly empty collections while structural rules
+  stay strict. Facts
   owned by edges or taxonomy are never duplicated into payloads. Navigation
   ordering, plan catalog ordering, intra-section binding composition, and
   renderer file lists remain explicit typed gaps. The source/graph fact
