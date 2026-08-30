@@ -155,7 +155,7 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
 @pytest.mark.asyncio
 async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
     from mozaiksai.core.workflow.execution.run_bootstrap import (
-        bootstrap_run_messages as _bootstrap_run_messages,
+        prepare_network_trigger,
     )
 
     class _Persistence:
@@ -170,7 +170,7 @@ async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
 
     logger = SimpleNamespace(info=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
 
-    _, initial_messages = await _bootstrap_run_messages(
+    trigger = await prepare_network_trigger(
         persistence_manager=_Persistence(),
         config={
             "initial_message": "InterviewAgent: Greet the user and ask questions.",
@@ -181,18 +181,17 @@ async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
         workflow_name="AppGenerator",
         user_id="user-1",
         initial_message="Generate from seeded context.",
-        initial_agent_name="AppSchemaAgent",
         wf_logger=logger,
         suppress_config_seed=True,
     )
 
-    assert [message["content"] for message in initial_messages] == ["Generate from seeded context."]
+    assert trigger == "Generate from seeded context."
 
 
 @pytest.mark.asyncio
 async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
     from mozaiksai.core.workflow.execution.run_bootstrap import (
-        bootstrap_run_messages as _bootstrap_run_messages,
+        prepare_network_trigger,
     )
 
     class _Persistence:
@@ -207,7 +206,7 @@ async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
 
     logger = SimpleNamespace(info=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
 
-    _, initial_messages = await _bootstrap_run_messages(
+    trigger = await prepare_network_trigger(
         persistence_manager=_Persistence(),
         config={
             "initial_message": "InterviewAgent: Greet the user and ask questions.",
@@ -218,12 +217,8 @@ async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
         workflow_name="AppGenerator",
         user_id="user-1",
         initial_message="User prompt.",
-        initial_agent_name="InterviewAgent",
         wf_logger=logger,
     )
 
-    assert [message["content"] for message in initial_messages] == [
-        "InterviewAgent: Greet the user and ask questions.",
-        "User prompt.",
-    ]
+    assert trigger == "InterviewAgent: Greet the user and ask questions.\n\nUser prompt."
 

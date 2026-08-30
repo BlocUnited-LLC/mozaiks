@@ -15,13 +15,7 @@ class WorkflowLaunchTaxonomy(TypedDict):
 
 _HIDDEN_INITIAL_MESSAGE_SENDERS = {
     "",
-    "_user",
-    "agentmanager",
-    "chat_manager",
-    "manager",
     "user",
-    "userproxy",
-    "userproxyagent",
 }
 
 _WORKFLOW_INTERACTION_MODES: set[str] = {

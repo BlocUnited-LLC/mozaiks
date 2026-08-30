@@ -488,8 +488,8 @@ class UnifiedEventDispatcher:
                     wf_config = workflow_manager.get_config(workflow_name)
                     workflow_startup_mode = str(wf_config.get("workflow_startup_mode", "")).strip().lower() if wf_config else ""
                     sender_lower = str(agent_name or "").lower()
-                    # Suppress if userdriven mode AND sender looks like a user proxy
-                    if workflow_startup_mode == "userdriven" and sender_lower in {"user", "userproxy", "chat_manager", "manager"}:
+                    # Suppress the synthetic user trigger for user-driven workflows.
+                    if workflow_startup_mode == "userdriven" and sender_lower == "user":
                         event_dict['_mozaiks_hide'] = True
                         logger.debug("[USERDRIVEN_TRIGGER] Suppressing synthetic '.' trigger from %s (startup_mode=%s)", agent_name, workflow_startup_mode)
                         return {

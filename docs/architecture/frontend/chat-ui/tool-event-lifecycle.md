@@ -73,19 +73,17 @@ has component type `UserInputRequest` and carries no explicit prompt, the
 frontend suppresses the "Awaiting Workflow Reply" composer banner. The banner
 only renders when the agent provides an explicit prompt or requests a named
 component other than `UserInputRequest` — i.e., an intentional interaction, not
-a routine AG2 group-feedback turn. The pending `tool_call_response` callback
+  a routine AG2 Network human turn. The pending `tool_call_response` callback
 remains registered and active regardless.
 
 `chat.input_request` is not emitted to browser clients for runtime-managed
 interactive input.
 
-AG2's generic "Please give feedback to chat_manager..." handoff prompt is the
-actual response handoff signal. The runtime suppresses that raw prompt
-text. If AG2 emits it immediately after a real user reply and there is no new
-assistant question to show, the runtime now auto-resumes internally instead of
-surfacing a second fake pending interaction. Otherwise the pending input request
-stays live so the user can answer through the normal workflow composer or
-`tool_call_response`.
+An AG2 Network human turn is represented by the channel expecting its registered
+`HumanClient`. The runtime surfaces that state as `chat.awaiting_reply`; it does
+not fabricate a manager prompt or auto-submit an empty reply. The pending input
+request stays live so the user can answer through the normal workflow composer
+or `tool_call_response`.
 
 When the AG2 run slice ends after emitting one of these input requests, the
 runtime emits `chat.run_complete` with `status=0` and

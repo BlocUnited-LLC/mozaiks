@@ -51,7 +51,6 @@ class ChatMessage(BaseModel):
     timestamp: datetime
     event_type: str = Field("message.created")
     event_id: str
-    is_user_proxy: bool = False
     agent_name: str | None = None
 
 

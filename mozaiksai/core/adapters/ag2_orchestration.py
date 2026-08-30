@@ -243,7 +243,6 @@ class AG2OrchestrationAdapter:
             "supports_resume": True,
             "supports_task_batches": True,
             "supports_cancel": True,
-            "supports_bidirectional_stream": False,  # ← flips when AG2 ships it
             "supports_structured_outputs": True,
             "supports_network_transition_graph": True,
         }

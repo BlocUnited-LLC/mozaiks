@@ -34,7 +34,12 @@ import mozaiksai.core.workflow.orchestration_patterns as orchestration_patterns_
 import mozaiksai.core.workflow.outputs.structured as structured_outputs_module
 import mozaiksai.core.workflow.task_batches as task_batches_module
 import mozaiksai.core.workflow.workflow_manager as workflow_manager_module
-from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
+from mozaiksai.core.adapters.ag2_network_runner import (
+    AG2NetworkRunner,
+    AG2NetworkRunnerRequest,
+    _closed_reason_from_wal,
+    _resume_pending_agent_turns,
+)
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.adapter import create_context_container
@@ -46,6 +51,43 @@ from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 class _Reply:
     def __init__(self, body: str) -> None:
         self.body = body
+
+
+@pytest.mark.anyio
+async def test_resume_pending_agent_turns_replays_each_attached_identity() -> None:
+    class _Client:
+        def __init__(self, replayed: int) -> None:
+            self.replayed = replayed
+            self.calls = 0
+
+        async def resume_pending_turns(self) -> int:
+            self.calls += 1
+            return self.replayed
+
+    planner = _Client(2)
+    worker = _Client(0)
+
+    total = await _resume_pending_agent_turns(
+        agent_clients={"PlannerAgent": planner, "WorkerAgent": worker},
+        workflow_name="DurableResumeSmoke",
+        chat_id="chat-durable-resume",
+    )
+
+    assert total == 2
+    assert planner.calls == 1
+    assert worker.calls == 1
+
+
+def test_pending_turn_recovery_detects_a_closed_channel() -> None:
+    wal = [
+        SimpleNamespace(event_type=EV_PACKET, event_data={}),
+        SimpleNamespace(
+            event_type=EV_CHANNEL_CLOSED,
+            event_data={"reason": "workflow_complete"},
+        ),
+    ]
+
+    assert _closed_reason_from_wal(wal) == (True, "workflow_complete")
 
 
 class _DeterministicAgent(Agent):
@@ -1291,7 +1333,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     assert result is not None
     assert result["run_completed"] is True
     assert captured["initial_agent_name"] == "PackBuildCoordinator"
-    assert captured["initial_message"] == "user (user): Approved, proceed."
+    assert captured["initial_message"] == "Approved, proceed."
     assert persistence.completed == [("chat-reentry", "app-1")]
 
 

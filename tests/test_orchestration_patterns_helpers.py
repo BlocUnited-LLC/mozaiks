@@ -4,16 +4,6 @@ Pure helper unit tests for:
 
 Covers sync pure helpers (no IO/async):
 
-  _messages_to_network_prompt:
-    - empty list → "."
-    - message with content → "name (role): content"
-    - message with no role → default role "user"
-    - message with no name → uses role as name
-    - message with no content → skipped
-    - non-dict entry → skipped
-    - multiple messages → joined with "\n\n"
-    - all messages empty → "."
-
   _next_agent_after_trigger:
     - empty transition_rules → None
     - no matching source → None
@@ -25,77 +15,11 @@ Covers sync pure helpers (no IO/async):
 from __future__ import annotations
 
 from mozaiksai.core.workflow.orchestration_patterns import (
-    _messages_to_network_prompt,
     _next_agent_after_trigger,
 )
 
 # ---------------------------------------------------------------------------
-# 1. _messages_to_network_prompt
-# ---------------------------------------------------------------------------
-
-class TestMessagesToNetworkPrompt:
-    def test_empty_list_returns_dot(self):
-        assert _messages_to_network_prompt([]) == "."
-
-    def test_single_message_formatted(self):
-        messages = [{"role": "user", "content": "Hello"}]
-        result = _messages_to_network_prompt(messages)
-        assert "user (user): Hello" == result
-
-    def test_name_takes_priority_over_role(self):
-        messages = [{"role": "assistant", "name": "PlannerAgent", "content": "Let me plan"}]
-        result = _messages_to_network_prompt(messages)
-        assert "PlannerAgent (assistant): Let me plan" == result
-
-    def test_no_role_defaults_to_user(self):
-        messages = [{"content": "A message"}]
-        result = _messages_to_network_prompt(messages)
-        assert "user (user): A message" == result
-
-    def test_no_name_uses_role_as_name(self):
-        messages = [{"role": "assistant", "content": "Response here"}]
-        result = _messages_to_network_prompt(messages)
-        assert "assistant (assistant): Response here" == result
-
-    def test_empty_content_skipped(self):
-        messages = [{"role": "user", "content": ""}]
-        result = _messages_to_network_prompt(messages)
-        assert result == "."
-
-    def test_whitespace_content_skipped(self):
-        messages = [{"role": "user", "content": "   "}]
-        result = _messages_to_network_prompt(messages)
-        assert result == "."
-
-    def test_non_dict_entry_skipped(self):
-        messages = ["not-a-dict", {"role": "user", "content": "Hello"}]
-        result = _messages_to_network_prompt(messages)
-        assert "user (user): Hello" == result
-
-    def test_multiple_messages_joined_with_double_newline(self):
-        messages = [
-            {"role": "user", "content": "First"},
-            {"role": "assistant", "content": "Second"},
-        ]
-        result = _messages_to_network_prompt(messages)
-        parts = result.split("\n\n")
-        assert len(parts) == 2
-        assert "First" in parts[0]
-        assert "Second" in parts[1]
-
-    def test_all_empty_content_messages_returns_dot(self):
-        messages = [{"role": "user", "content": ""}, {"role": "user"}]
-        result = _messages_to_network_prompt(messages)
-        assert result == "."
-
-    def test_none_content_skipped(self):
-        messages = [{"role": "user", "content": None}]
-        result = _messages_to_network_prompt(messages)
-        assert result == "."
-
-
-# ---------------------------------------------------------------------------
-# 2. _next_agent_after_trigger
+# _next_agent_after_trigger
 # ---------------------------------------------------------------------------
 
 class TestNextAgentAfterTrigger:

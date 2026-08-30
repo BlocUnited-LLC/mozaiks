@@ -34,8 +34,7 @@ from mozaiksai.core.workflow.execution.network_graph import (
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from .context import DerivedContextManager
-from .execution.run_bootstrap import bootstrap_run_messages, merge_persisted_extra_context
-from .messages import normalize_to_strict_ag2 as _normalize_to_strict_ag2
+from .execution.run_bootstrap import merge_persisted_extra_context, prepare_network_trigger
 from .orchestration_utils import _load_workflow_config
 
 logger = logging.getLogger(__name__)
@@ -53,27 +52,11 @@ __all__ = [
 # AG2 Network orchestration helpers
 # ---------------------------------------------------------------------------
 
-_SPECIAL_USER_AGENT_NAMES = frozenset({"user", "user_proxy", "userproxy", "userproxyagent"})
+_SPECIAL_USER_AGENT_NAMES = frozenset({"user"})
 
 
 def _normalized_agent_name(value: str) -> str:
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
-
-def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
-    """Render persisted Mozaiks messages into one AG2 workflow-channel prompt."""
-
-    rendered: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        content = str(message.get("content") or "").strip()
-        if not content:
-            continue
-        role = str(message.get("role") or "user").strip() or "user"
-        name = str(message.get("name") or role).strip() or role
-        rendered.append(f"{name} ({role}): {content}")
-    return "\n\n".join(rendered).strip() or "."
-
 
 async def _fetch_chat_session_extra_context(
     persistence_manager: Any,
@@ -787,8 +770,8 @@ async def run_workflow_orchestration(
             workflow_name_upper, workflow_startup_mode, initial_agent_name,
         )
 
-        # 2) Bootstrap run from canonical AG2 event history or launch input
-        has_persisted_events, initial_messages = await bootstrap_run_messages(
+        # 2) Prepare the new trigger; AG2 Hub hydration owns Network history.
+        network_trigger = await prepare_network_trigger(
             persistence_manager=persistence_manager,
             config=config,
             chat_id=chat_id,
@@ -796,12 +779,9 @@ async def run_workflow_orchestration(
             workflow_name=workflow_name,
             user_id=user_id,
             initial_message=initial_message,
-            initial_agent_name=initial_agent_name,
             wf_logger=wf_logger,
             resume_existing_only=resume_existing_only,
         )
-        resumed_mode = bool(has_persisted_events)
-
         # 3) Cache seed
         try:
             cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
@@ -1088,15 +1068,11 @@ async def run_workflow_orchestration(
         except Exception as hw_err:
             wf_logger.debug("[%s] Transition graph validation failed: %s", workflow_name_upper, hw_err)
 
-        # 8) Normalize initial messages
-        initial_messages = _normalize_to_strict_ag2(initial_messages, default_user_name="user")
-
         wf_lifecycle_logger.info(
             "[%s] Starting beta agent orchestration",
             workflow_name_upper,
             agent_count=len(agents),
             max_turns=max_turns,
-            is_resume=resumed_mode,
         )
 
         emitted_structured_result_ids: set[int] = set()
@@ -1120,7 +1096,7 @@ async def run_workflow_orchestration(
             )
 
         # 10) Execute AG2 Network workflow channel
-        network_prompt = _messages_to_network_prompt(initial_messages)
+        network_prompt = network_trigger
         agent_text_context_deriver = (
             getattr(derived_context_manager, "preview_agent_text_updates", None)
             if derived_context_manager is not None

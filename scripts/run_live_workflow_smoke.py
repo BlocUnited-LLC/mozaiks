@@ -204,7 +204,7 @@ def _extract_assistant_message(events: list[dict[str, Any]]) -> str | None:
             continue
         data = event.get("data") or {}
         sender = str(data.get("agent") or data.get("sender") or data.get("name") or "").strip()
-        if sender.lower() in {"user", "userproxy", "chat_manager", "manager"}:
+        if sender.lower() == "user":
             continue
         content = data.get("content") or data.get("full_content")
         if isinstance(content, str) and content.strip():
@@ -438,18 +438,6 @@ def _is_input_request_tool_call(data: dict[str, Any]) -> bool:
         or payload_component_type == "userinputrequest"
         or tool_name == "userinputrequest"
     )
-
-
-def _is_generic_feedback_pending_input(pending_input: dict[str, Any] | None) -> bool:
-    if not isinstance(pending_input, dict):
-        return False
-    raw_payload = pending_input.get("raw_payload")
-    raw_prompt = ""
-    if isinstance(raw_payload, dict):
-        raw_prompt = str(raw_payload.get("prompt") or "").strip()
-    prompt = str(pending_input.get("prompt") or "").strip()
-    candidate = raw_prompt or prompt
-    return candidate.lower().startswith("please give feedback to ")
 
 
 def _assistant_reply_matches(rule: dict[str, str], message: str) -> bool:
@@ -945,24 +933,6 @@ async def run_live_workflow_smoke(
         app_connectors: list[dict[str, Any]] = []
         try:
             coll = await pm._coll()
-            run_status_value = str((workflow_result or {}).get("run_status") or "").strip().lower()
-            if run_status_value == "paused":
-                pending_input = await _pending_input_provider()
-                if _is_generic_feedback_pending_input(pending_input):
-                    try:
-                        workflow_result = await asyncio.wait_for(
-                            app.state.transport.handle_user_input_from_api(
-                                chat_id=chat_id,
-                                user_id=user_id,
-                                workflow_name=workflow_name,
-                                message="",
-                                app_id=app_id,
-                            ),
-                            timeout=60.0,
-                        )
-                    except Exception:
-                        pass
-
             final_doc = await coll.find_one({"_id": chat_id, "app_id": app_id})
             saw_terminal_completion = any(_is_terminal_completion_event(event) for event in events)
             workflow_completed = str((workflow_result or {}).get("run_status") or "").strip().lower() == "completed"

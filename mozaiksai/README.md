@@ -187,13 +187,9 @@ python scripts/run_live_workflow_smoke.py --workflow ValueEngine --workflows-roo
 `interaction_type=input_request` and by `chat.awaiting_reply` / non-terminal
 `chat.run_complete` workflow pauses that hand control back to the composer
 without an explicit UI tool. They do not send speculative free-form workflow
-chat messages. AG2 handoff prompts such as
-`Please give feedback to chat_manager...` still use the pending input-request
-lane; the runtime suppresses the raw prompt text. If AG2 emits a bare generic
-feedback prompt immediately after a real user reply, the runtime auto-resumes
-internally instead of surfacing a second fake user-facing pause. In `chat-ui`,
-generic text input requests default to the main composer (`display=composer`),
-and raw AG2 user-handoff pauses now surface as `chat.awaiting_reply`.
+chat messages. In `chat-ui`, generic text input requests default to the main
+composer (`display=composer`), and AG2 Network human turns surface as
+`chat.awaiting_reply`.
 
 When a workflow also needs structured tool responses, prefer
 `--tool-response-file` over ad hoc text fallbacks. The file is a JSON object:

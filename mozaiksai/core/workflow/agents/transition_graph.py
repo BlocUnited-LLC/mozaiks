@@ -35,7 +35,7 @@ def _validate_transition_rules(workflow_name: str, agents: dict[str, Any]) -> di
         "errors": [],
     }
 
-    _special_sources = {"user", "User", "user_proxy", "userproxy", "userproxyagent"}
+    _special_sources = {"user", "User"}
     _special_targets = _special_sources | {"terminate", "Terminate", "TERMINATE"}
 
     for rule in rules:
