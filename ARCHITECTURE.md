@@ -90,12 +90,12 @@ The product-facing application lifecycle has two run types:
 
 - **Genesis Build** — the first complete build journey for an app. It creates
   the app's first canonical, validated artifact lineage.
-- **Revision Run** — any later change against that lineage. It loads current
+- **Refinement Run** — any later change against that lineage. It loads current
   artifact state, scopes the impact, stages a new version, and returns it for
   review.
 
 The Refinement Engine is the internal continuity and routing layer that executes
-Revision Runs. A `core` Revision Run may re-enter at `ValueEngine`, but it does
+Refinement Runs. A `core` Refinement Run may re-enter at `ValueEngine`, but it does
 not become another Genesis Build unless the user creates a new app lineage.
 
 This means:
@@ -120,7 +120,7 @@ Customer-facing terminology follows a different layer:
 - `Studio` is an internal host/composition term
 - visible UX should prefer `Apps`, `Build`, `Operations`, `Integrations`, and
   `Admin`
-- app creation and evolution should use `Genesis Build` and `Revision Run`;
+- app creation and evolution should use `Genesis Build` and `Refinement Run`;
   `refinement` remains the internal engine and contract term
 - `Hub`, `Studio` as a top-level product area, and `Adapters` should not be
   treated as long-term customer-facing IA

@@ -9,7 +9,7 @@ the smallest safe next step.
 !!! tip "New to these concepts?"
     For the product-level introduction to how the first build and later changes
     fit together, start with
-    [Genesis Builds and Revision Runs](../../getting-started/genesis-builds-and-revision-runs.md).
+    [Genesis Builds and Refinement Runs](../../getting-started/genesis-builds-and-refinement-runs.md).
 
 ## The Four Change Classes
 

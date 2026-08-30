@@ -16,8 +16,8 @@ handoffs.
 The goal is simple:
 
 - a Genesis Build creates the first canonical shape
-- Revision Runs adjust that shape safely and quickly
-- the Refinement Engine decides when a Revision Run is small, scoped,
+- Refinement Runs adjust that shape safely and quickly
+- the Refinement Engine decides when a Refinement Run is small, scoped,
   design-only, or concept-breaking
 
 The Refinement Engine uses `app/config/ai.json` for runtime startup,
@@ -46,10 +46,10 @@ outdated refinement paths.
 
 ## Core Decision
 
-Mozaiks must treat **Genesis Build** and **Revision Run** as separate product
+Mozaiks must treat **Genesis Build** and **Refinement Run** as separate product
 lifecycle modes. Internal architecture continues to use `generation` for the
 Genesis Build path and `refinement` for the engine, routing, workers, and
-contracts that execute Revision Runs.
+contracts that execute Refinement Runs.
 
 A Genesis Build is the compiler path:
 
@@ -57,7 +57,7 @@ A Genesis Build is the compiler path:
 2. `DesignDocs` defines frontend/backend/database/ui schema intent
 3. `AgentGenerator` and `AppGenerator` generate the first concrete artifacts
 
-A Revision Run is the edit path:
+A Refinement Run is the edit path:
 
 1. load the latest persisted artifact version
 2. classify the requested change
@@ -65,7 +65,7 @@ A Revision Run is the edit path:
 4. run refinement agents against scoped files or scoped plans
 5. validate and persist a new artifact version
 
-A `core` Revision Run may restart from `ValueEngine`, but it remains part of the
+A `core` Refinement Run may restart from `ValueEngine`, but it remains part of the
 same app lineage. Only creating a new app lineage starts another Genesis Build.
 
 Do **not** re-run `AgentGenerator` or `AppGenerator` from the top for every tweak.

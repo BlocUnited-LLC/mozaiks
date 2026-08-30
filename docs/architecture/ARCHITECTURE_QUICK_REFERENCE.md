@@ -29,9 +29,9 @@ The implementation policy for deterministic generated contracts is
 * Validation remains deterministic.
 * Evaluation complements validation; it does not replace validation.
 * A Genesis Build creates an app's first canonical artifact lineage; every
-  subsequent change in that lineage is a Revision Run.
+  subsequent change in that lineage is a Refinement Run.
 * The Refinement Engine is the internal routing and continuity layer for
-  Revision Runs; `refinement` remains the implementation and contract term.
+  Refinement Runs; `refinement` remains the implementation and contract term.
 * Operator intelligence enters through public OSS seams.
 * Do not duplicate canonical owners.
 
