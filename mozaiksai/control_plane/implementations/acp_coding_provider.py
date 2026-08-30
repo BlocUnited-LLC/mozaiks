@@ -10,10 +10,11 @@ Authority model: the provider receives an explicitly scoped
 holds no routing, scope, acceptance, or promotion authority, and nothing in
 this module trusts the CLI agent: the workspace contains only copies of the
 scoped files, the subprocess environment is an explicit allowlist, the agent's
-question/permission channels are closed (``elicitation_policy="decline"``,
-terminal capability not advertised), and every accepted change comes from the
-post-run hash harvest — never from the agent's own claims. Out-of-scope edits
-reject the whole proposal.
+permission requests are auto-resolved only inside that disposable workspace,
+the terminal capability is not advertised, and every accepted change comes
+from the post-run hash harvest — never from the agent's own claims. Out-of-scope
+edits reject the whole proposal. Pinned AG2 ACP exposes no elicitation/question
+client capability.
 
 This provider is dark by default: ``refinement_policy.yaml``'s
 ``coding.providers.acp.enabled`` is ``false``, the ``ag2[acp]`` extra is
@@ -116,10 +117,9 @@ def build_acp_agent_config(
     default is True) so no MCP gateway is started; ``allow_terminal=False``
     because agent-requested terminal commands inherit the full host
     environment in ag2 1.0.2 (``ag2/acp/bridge.py:123``); and
-    ``elicitation_policy="decline"`` so the question capability is never
-    advertised in headless execution. ``permission_policy="auto"`` is safe
-    only because the blast radius is the disposable workspace plus the
-    harvest filter.
+    pinned AG2 ACP exposes no elicitation/question client capability.
+    ``permission_policy="auto"`` is safe only because the blast radius is the
+    disposable workspace plus the harvest filter.
     """
     if not acp_available():  # pragma: no cover - guarded by caller
         raise RuntimeError(f"ag2[acp] extra is not installed: {_ACP_IMPORT_ERROR}")
@@ -137,7 +137,6 @@ def build_acp_agent_config(
         fs_root=str(workspace_root),
         env=env or None,
         permission_policy="auto",
-        elicitation_policy="decline",
         expose_tools=False,
         allow_terminal=False,
         turn_timeout=float(turn_timeout_seconds),

@@ -87,7 +87,6 @@ class _FakeConfigFactory:
             cwd=str(workspace_root),
             fs_root=str(workspace_root),
             permission_policy="auto",
-            elicitation_policy="decline",
             expose_tools=False,
             allow_terminal=False,
             turn_timeout=float(turn_timeout_seconds),
@@ -282,7 +281,6 @@ def test_build_acp_agent_config_is_hardened(tmp_path: Path) -> None:
     assert config.cwd == str(tmp_path)
     assert config.fs_root == str(tmp_path)
     assert config.permission_policy == "auto"
-    assert config.elicitation_policy == "decline"
     assert config.expose_tools is False
     assert config.allow_terminal is False
     assert config.turn_timeout == 300.0

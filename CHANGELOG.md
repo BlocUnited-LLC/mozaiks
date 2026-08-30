@@ -206,6 +206,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **ACP coding-provider configuration now matches the pinned AG2 API**:
+  hardened headless execution no longer passes an unsupported elicitation
+  option when constructing Claude Code, Codex, or OpenCode ACP configs.
 - **Generated custom-route clients now recognize real entitlement denials**:
   module-action and workflow-start failures unwrap FastAPI's structured
   `detail` envelope, so HTTP 402 responses reach the app's upgrade flow while
