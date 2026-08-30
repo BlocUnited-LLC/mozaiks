@@ -94,6 +94,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         Path("mozaiksai/core/semantics/graph.py"),
         Path("mozaiksai/core/semantics/refs.py"),
         Path("mozaiksai/core/semantics/resolver.py"),
+        # Slice 3E: the offline projection emits graph v2 + typed payloads.
+        # It stays outside production imports itself (proven by the Slice 3
+        # hygiene test scanning for offline_projection references).
+        Path("mozaiksai/core/semantics/offline_projection.py"),
     }
 )
 _FORBIDDEN_PRODUCTION_MODULES = frozenset({"mozaiksai.core.semantics.payloads"})

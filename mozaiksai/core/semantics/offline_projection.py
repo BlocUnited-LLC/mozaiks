@@ -1,8 +1,11 @@
-"""ADR 0007 Slice 3 deterministic, offline-only source projection.
+"""ADR 0007 Slice 3E deterministic, offline-only source projection.
 
 Production generators, runtimes, hosts, workflows, Studio, and control-plane
 code must not import this module. It accepts current contract shapes, projects
-only graph-v1 facts, and reports every other source fact as typed coverage.
+graph-v2 identity plus typed payload content, and reports every other source
+fact as typed coverage. Content is never invented: a payload field is set only
+when the source carries that fact, and facts that edges or taxonomy already
+own are never duplicated into payloads.
 """
 
 from __future__ import annotations
@@ -19,12 +22,24 @@ from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.graph import (
     SemanticEdge,
     SemanticEdgeKind,
-    SemanticGraph,
+    SemanticGraphV2,
     SemanticNode,
     SemanticNodeKind,
+    SemanticNodeV2,
     TaxonomyReference,
-    build_semantic_graph,
-    validate_semantic_graph_taxonomy_closure,
+    build_semantic_graph_v2,
+    validate_semantic_graph_v2_taxonomy_closure,
+)
+from mozaiksai.core.semantics.payloads import (
+    PAYLOAD_MODEL_BY_KIND,
+    BillingPeriod,
+    PageSectionEntry,
+    PriceSpec,
+    SemanticPayloadBase,
+    TriggerKind,
+    build_semantic_payload,
+    semantic_payload_ref,
+    validate_semantic_graph_v2_payload_closure,
 )
 from mozaiksai.core.semantics.refs import ExecutionAccessScopeRef, SemanticsModel
 from mozaiksai.core.taxonomy import (
@@ -33,8 +48,8 @@ from mozaiksai.core.taxonomy import (
     validate_identifier_grammar,
 )
 
-PROJECTION_SCHEMA_VERSION: Literal["mozaiks.semantic_projection.v1"] = (
-    "mozaiks.semantic_projection.v1"
+PROJECTION_SCHEMA_VERSION: Literal["mozaiks.semantic_projection.v2"] = (
+    "mozaiks.semantic_projection.v2"
 )
 
 
@@ -77,14 +92,17 @@ class ProjectionCoverage(SemanticsModel):
 
 
 class SemanticFactSet(SemanticsModel):
-    nodes: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...]
+    """Node facts carry (node_id, kind, taxonomy refs, payload content digest)."""
+
+    nodes: tuple[tuple[str, str, tuple[tuple[str, str], ...], str], ...]
     edges: tuple[tuple[str, str, str, str | None], ...]
 
 
 class ProjectionResult(SemanticsModel):
-    schema_version: Literal["mozaiks.semantic_projection.v1"] = PROJECTION_SCHEMA_VERSION
+    schema_version: Literal["mozaiks.semantic_projection.v2"] = PROJECTION_SCHEMA_VERSION
     source_digest: str
-    graph: SemanticGraph
+    graph: SemanticGraphV2
+    payloads: tuple[SemanticPayloadBase, ...]
     source_facts: SemanticFactSet
     represented_facts: SemanticFactSet
     gaps: tuple[ProjectionGap, ...]
@@ -468,6 +486,7 @@ class _Builder:
         ] = {}
         self.gaps: list[ProjectionGap] = []
         self.observations: dict[tuple[str, str, str], str] = {}
+        self.content: dict[str, dict[str, Any]] = {}
 
     def mark(
         self,
@@ -495,6 +514,63 @@ class _Builder:
         self.gaps.append(
             ProjectionGap(kind=kind, source_path=path, reason=reason, adr_slice=adr_slice)
         )
+
+    def content_field(self, node_id: str, field: str, value: Any, path: str) -> None:
+        """Record one typed payload content fact for a node, never inventing.
+
+        ``None`` records nothing (absent source content stays absent). The same
+        field stated twice with different values is a contradiction, not a
+        merge.
+        """
+        if value is None:
+            return
+        existing = self.content.setdefault(node_id, {})
+        if field in existing and existing[field] != value:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.CONTRADICTORY,
+                        source_path=path,
+                        reason=f"conflicting payload content {field!r} for {node_id!r}",
+                    )
+                ]
+            )
+        existing[field] = value
+        self.mark(path, identity="typed semantic payload content field")
+
+    def build_payloads(self, version: int) -> dict[str, SemanticPayloadBase]:
+        """Build the typed payload for every projected node.
+
+        Every node gets exactly one payload of its kind; content fields hold
+        only what the source stated. Content that fails the payload contract is
+        a projection failure, not a silent drop.
+        """
+        payloads: dict[str, SemanticPayloadBase] = {}
+        for node_id, node in self.nodes.items():
+            model = PAYLOAD_MODEL_BY_KIND[node.kind]
+            fields = self.content.get(node_id, {})
+            try:
+                payloads[node_id] = build_semantic_payload(
+                    model,
+                    node_id=node_id,
+                    payload_version=version,
+                    scope=self.scope,
+                    **fields,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.AMBIGUOUS,
+                            source_path="$",
+                            reason=(
+                                f"payload content for node {node_id!r} failed the "
+                                f"{model.__name__} contract: {exc}"
+                            ),
+                        )
+                    ]
+                ) from exc
+        return payloads
 
     def observe(self, concept: str, identity: Any, field: str, value: Any, path: str) -> None:
         if value is None:
@@ -697,8 +773,8 @@ class _Builder:
                     ProjectionGapKind.UNSUPPORTED,
                     f"{base}.surface_kind",
                     (
-                        f"surface_kind {kind!r} is current application semantics but "
-                        "SemanticGraph v1 cannot retain that realization classification"
+                        f"surface_kind {kind!r} is current application semantics but no typed "
+                        "payload field retains that realization classification"
                     ),
                     adr_slice=5,
                 )
@@ -764,7 +840,8 @@ class _Builder:
             self.gap(
                 ProjectionGapKind.UNSUPPORTED,
                 f"{root}.pages",
-                "ordered page/navigation semantics are not representable by SemanticGraph v1",
+                "page navigation ordering has no typed semantic payload field; "
+                "navigation modeling remains deferred",
                 adr_slice=5,
             )
         for i, raw in enumerate(pages):
@@ -782,7 +859,9 @@ class _Builder:
                 )
             path = f"{root}.pages[{i}].name" if item.get("name") else f"{root}.pages[{i}].route"
             self.observe("page", identity, "route", item.get("route"), f"{root}.pages[{i}].route")
-            self.node(SemanticNodeKind.PAGE, identity, path=path, group=f"{root}.pages")
+            page = self.node(SemanticNodeKind.PAGE, identity, path=path, group=f"{root}.pages")
+            self.content_field(page, "title", item.get("title"), f"{root}.pages[{i}].title")
+            self.content_field(page, "intent", item.get("purpose"), f"{root}.pages[{i}].purpose")
         for i, raw in enumerate(_as_list(plan.get("entities"))):
             item = _mapping(raw)
             if item.get("name"):
@@ -829,12 +908,20 @@ class _Builder:
                     if item.get("target_id")
                     else f"{root}.deployment_targets[{i}].deployment_profile"
                 )
-                self.node(
+                target = self.node(
                     SemanticNodeKind.DEPLOYMENT_TARGET,
                     identity,
                     path=path,
                     group=f"{root}.deployment_targets",
                 )
+                profile = item.get("deployment_profile")
+                if isinstance(profile, str) and re.fullmatch(r"[a-z][a-z0-9_]*", profile):
+                    self.content_field(
+                        target,
+                        "profile_id",
+                        profile,
+                        f"{root}.deployment_targets[{i}].deployment_profile",
+                    )
 
     def project_pages(self, pages: Any, root: str) -> None:
         for i, raw in enumerate(_as_list(pages)):
@@ -853,6 +940,8 @@ class _Builder:
             key = next(key for key in ("page_id", "name", "route") if item.get(key))
             self.observe("page", identity, "route", item.get("route"), f"{root}[{i}].route")
             page = self.node(SemanticNodeKind.PAGE, identity, path=f"{root}[{i}].{key}", group=root)
+            self.content_field(page, "title", item.get("title"), f"{root}[{i}].title")
+            self.content_field(page, "intent", item.get("description"), f"{root}[{i}].description")
             sections = _as_list(item.get("sections"))
             if item.get("schema_version") == "mozaiks.app_page.v1" and not sections:
                 raise ProjectionError(
@@ -864,13 +953,7 @@ class _Builder:
                         )
                     ]
                 )
-            if len(sections) > 1:
-                self.gap(
-                    ProjectionGapKind.UNSUPPORTED,
-                    f"{root}[{i}].sections",
-                    "ordered page-section semantics are not representable by SemanticGraph v1",
-                    adr_slice=5,
-                )
+            section_entries: list[PageSectionEntry] = []
             for j, raw_section in enumerate(sections):
                 section = _mapping(raw_section)
                 section_id = section.get("id") or section.get("section_id")
@@ -889,7 +972,28 @@ class _Builder:
                         path=f"{root}[{i}].sections[{j}].{key}",
                         group=f"{root}[{i}].sections",
                     )
+                    section_entries.append(
+                        PageSectionEntry(position=len(section_entries), section_node_id=child)
+                    )
+                    self.content_field(
+                        child,
+                        "title",
+                        section.get("title"),
+                        f"{root}[{i}].sections[{j}].title",
+                    )
+                    self.content_field(
+                        child,
+                        "intent",
+                        section.get("description"),
+                        f"{root}[{i}].sections[{j}].description",
+                    )
                 self._page_bindings(section, page, f"{root}[{i}].sections[{j}]")
+            if section_entries:
+                # The declared source order is the semantic order: it survives
+                # as explicit dense positions in the page payload.
+                self.content_field(
+                    page, "sections", tuple(section_entries), f"{root}[{i}].sections"
+                )
             auth = _mapping(_mapping(item.get("meta")).get("routeAuth"))
             if auth:
                 self._bind_action(
@@ -913,14 +1017,15 @@ class _Builder:
                         # _API_PATH_RE); only /api/modules/{module}/{action} names a
                         # declared module action. Other valid paths — the committed
                         # /api/notifications route, for one — are real bindings that
-                        # graph v1 has no node kind for, so they are typed gaps
+                        # no projected payload entry yet exists for, so they are typed gaps
                         # rather than a hard failure or an invented action target.
                         self.gap(
                             ProjectionGapKind.UNSUPPORTED,
                             child_path,
                             (
-                                "valid non-module page API binding has no SemanticGraph v1 "
-                                "target; only /api/modules/{module}/{action} names a declared action"
+                                "valid non-module page API binding is not yet projected into "
+                                "section payload entries; only /api/modules/{module}/{action} "
+                                "names a declared action"
                             ),
                             adr_slice=5,
                         )
@@ -1091,6 +1196,15 @@ class _Builder:
                 else f"{base}.module.id",
                 group=root,
             )
+            module_description = _mapping(manifest.get("module")).get("description")
+            self.content_field(
+                module,
+                "description",
+                module_description,
+                f"{base}.manifest.module.description"
+                if bundle.get("manifest")
+                else f"{base}.module.description",
+            )
             bundles.append((str(module_id), bundle, manifest, base))
             declarations = (
                 ("actions", "id", SemanticNodeKind.ACTION, True),
@@ -1113,6 +1227,12 @@ class _Builder:
                             path=f"{base}.manifest.{field}[{j}].{key}",
                             group=f"{base}.{field}",
                             taxonomy=taxonomy,
+                        )
+                        self.content_field(
+                            child,
+                            "description",
+                            _mapping(raw_item).get("description"),
+                            f"{base}.manifest.{field}[{j}].description",
                         )
                         self.edge(
                             SemanticEdgeKind.DECLARES,
@@ -1147,6 +1267,13 @@ class _Builder:
                             group=f"{base}.{companion}",
                             taxonomy=taxonomy,
                         )
+                        if "description" in PAYLOAD_MODEL_BY_KIND[kind].model_fields:
+                            self.content_field(
+                                child,
+                                "description",
+                                _mapping(raw_item).get("description"),
+                                f"{base}.{companion}.{list_key}[{j}].description",
+                            )
                         edge_kind = (
                             SemanticEdgeKind.EMITS
                             if kind is SemanticNodeKind.EVENT
@@ -1198,13 +1325,36 @@ class _Builder:
                             group=f"{base}.{companion}",
                         )
 
+    def _price_spec(self, item: dict[str, Any], period: BillingPeriod | None) -> PriceSpec | None:
+        """Map a source price mapping to a typed spec, never guessing.
+
+        Only integer minor units, a resolvable ISO-4217 code, and an explicit
+        billing period produce a spec; anything else stays deferred coverage.
+        """
+        price = _mapping(item.get("price"))
+        amount = price.get("amount_cents")
+        currency = str(price.get("currency") or "").strip().upper()
+        if not isinstance(amount, int) or isinstance(amount, bool) or not currency or period is None:
+            return None
+        try:
+            return PriceSpec(amount_minor_units=amount, currency=currency, period=period)
+        except ValueError:
+            return None
+
+    _CADENCE_PERIODS = {
+        "monthly": BillingPeriod.MONTHLY,
+        "yearly": BillingPeriod.YEARLY,
+        "one_time": BillingPeriod.ONE_TIME,
+    }
+
     def project_subscriptions(self, config: dict[str, Any], root: str) -> None:
         plans = _as_list(config.get("plans"))
         if len(plans) > 1:
             self.gap(
                 ProjectionGapKind.UNSUPPORTED,
                 f"{root}.plans",
-                "ordered plan presentation semantics are not representable by SemanticGraph v1",
+                "plan presentation ordering has no typed semantic payload field; "
+                "catalog ordering remains deferred",
                 adr_slice=5,
             )
         for i, raw_plan in enumerate(plans):
@@ -1226,6 +1376,7 @@ class _Builder:
                 path=f"{root}.plans[{i}].plan_id",
                 group=f"{root}.plans",
             )
+            self.content_field(plan, "title", item.get("label"), f"{root}.plans[{i}].label")
             for j, cap_id in enumerate(_as_list(item.get("capabilities"))):
                 cap = self.node(
                     SemanticNodeKind.CAPABILITY,
@@ -1250,12 +1401,27 @@ class _Builder:
                         path=f"{root}.plans[{i}].usage_limits[{j}].meter_id",
                         group=f"{root}.plans[{i}].usage_limits",
                     )
+                    self.content_field(
+                        meter,
+                        "unit",
+                        limit.get("unit"),
+                        f"{root}.plans[{i}].usage_limits[{j}].unit",
+                    )
                     limit_node = self.node(
                         SemanticNodeKind.LIMIT,
                         f"{plan_id}_{limit['meter_id']}",
                         path=f"{root}.plans[{i}].usage_limits[{j}].monthly_limit",
                         group=f"{root}.plans[{i}].usage_limits",
                     )
+                    monthly_limit = limit.get("monthly_limit")
+                    if isinstance(monthly_limit, int) and not isinstance(monthly_limit, bool):
+                        limit_path = f"{root}.plans[{i}].usage_limits[{j}].monthly_limit"
+                        self.content_field(limit_node, "limit_value", monthly_limit, limit_path)
+                        # The source field is monthly by declaration, so the
+                        # period is stated fact, not inference.
+                        self.content_field(
+                            limit_node, "period", BillingPeriod.MONTHLY, limit_path
+                        )
                     self.edge(
                         SemanticEdgeKind.GATES,
                         plan,
@@ -1276,14 +1442,34 @@ class _Builder:
             ("products", "product_id"),
         ):
             for i, raw_product in enumerate(_as_list(config.get(field))):
-                identity = _mapping(raw_product).get(id_key)
+                item = _mapping(raw_product)
+                identity = item.get(id_key)
                 if identity:
-                    self.node(
+                    product = self.node(
                         SemanticNodeKind.PRODUCT,
                         identity,
                         path=f"{root}.{field}[{i}].{id_key}",
                         group=f"{root}.{field}",
                     )
+                    self.content_field(
+                        product, "title", item.get("label"), f"{root}.{field}[{i}].label"
+                    )
+                    period: BillingPeriod | None
+                    if field == "top_up_products":
+                        # A token top-up is a one-time cash purchase by
+                        # contract definition (TokenTopUpPriceDef), so the
+                        # period is stated by the source contract itself.
+                        period = BillingPeriod.ONE_TIME
+                    else:
+                        cadence = str(
+                            item.get("cadence") or item.get("billing_mode") or ""
+                        ).strip()
+                        period = self._CADENCE_PERIODS.get(cadence)
+                    spec = self._price_spec(item, period)
+                    if spec is not None:
+                        self.content_field(
+                            product, "prices", (spec,), f"{root}.{field}[{i}].price"
+                        )
 
     def project_workflows(self, workflows: Any, root: str) -> None:
         items = (
@@ -1362,9 +1548,13 @@ class _Builder:
             self.gap(
                 ProjectionGapKind.UNSUPPORTED,
                 path,
-                "orchestrator.yaml contains workflow behavior beyond graph-v1 identity and trigger relationships",
+                "orchestrator.yaml contains workflow behavior beyond graph identity, "
+                "trigger relationships, and typed workflow payload content",
                 adr_slice=5,
             )
+            description = orchestration.get("description")
+            if isinstance(description, str):
+                self.content_field(workflow, "description", description, path)
             for raw_trigger in _as_list(orchestration.get("triggers")):
                 trigger_item = _mapping(raw_trigger)
                 identity = (
@@ -1378,6 +1568,20 @@ class _Builder:
                     path=path,
                     group=f"{base}.orchestrator.triggers",
                 )
+                # Event and capability trigger bindings are owned by CONSUMES/
+                # GATES edges; duplicating them into payload fields would give
+                # one fact two authorities. Endpoint bindings have no edge
+                # representation, so a well-formed route path is payload
+                # content.
+                endpoint = trigger_item.get("endpoint")
+                if (
+                    not trigger_item.get("event")
+                    and isinstance(endpoint, str)
+                    and endpoint.startswith("/")
+                    and " " not in endpoint
+                ):
+                    self.content_field(trigger, "trigger_kind", TriggerKind.ENDPOINT, path)
+                    self.content_field(trigger, "endpoint_path", endpoint, path)
                 self.edge(
                     SemanticEdgeKind.BINDS,
                     trigger,
@@ -1403,13 +1607,13 @@ class _Builder:
                     )
 
     def project_provenance(self, value: Any, root: str) -> None:
-        """Classify accepted provenance roots that carry no graph-v1 identity.
+        """Classify accepted provenance roots that carry no semantic-graph identity.
 
         ``build_context`` is declared pack provenance and ``workflows`` is
         recorded execution metadata on an AppBuildPlan envelope. Both are real
         parts of current recorded sources, so they are accepted rather than
         rejected as unknown roots — but neither declares application semantics
-        that SemanticGraph v1 can hold, so every leaf becomes an explicit typed
+        that the semantic graph can hold, so every leaf becomes an explicit typed
         gap instead of an invented node.
         """
         authority = _SOURCE_AUTHORITIES[root][2]
@@ -1417,7 +1621,7 @@ class _Builder:
             self.gap(
                 ProjectionGapKind.UNSUPPORTED,
                 leaf_path,
-                f"{authority} is not SemanticGraph v1 application semantics",
+                f"{authority} is not semantic-graph application semantics",
                 adr_slice=5,
             )
 
@@ -1466,7 +1670,7 @@ class _Builder:
                     None,
                     None,
                     None,
-                    "none; graph v1 cannot retain this complete fact",
+                    "none; the graph and payload contracts cannot retain this complete fact",
                 )
                 disposition, fully, reason, adr_slice = (
                     ProjectionDisposition.DEFERRED,
@@ -1502,18 +1706,18 @@ class _Builder:
                 )
             else:
                 node = edge = taxonomy = None
-                identity = "none; SemanticGraph v1 has no payload field for this fact"
+                identity = "none; no typed payload field is projected for this fact"
                 gap_kind = (
                     ProjectionGapKind.UNSUPPORTED
                     if leaf in _KNOWN_DEFERRED
                     else ProjectionGapKind.AMBIGUOUS
                 )
                 reason = (
-                    "source fact is not representable by Slice 2 identity-only nodes"
+                    "source fact is not yet projected into typed payload content"
                     if gap_kind is ProjectionGapKind.UNSUPPORTED
                     else (
                         "field is not in this projection's classified set; it is reported "
-                        "rather than projected, and carries no SemanticGraph v1 identity "
+                        "rather than projected, and carries no semantic-graph identity "
                         "until it is classified"
                     )
                 )
@@ -1555,7 +1759,7 @@ class _Builder:
                     source_symbol=symbol,
                     current_authority=authority,
                     disposition=ProjectionDisposition.DEFERRED,
-                    stable_identity_derivation="none; the source container carries ordering or compound semantics absent from graph v1",
+                    stable_identity_derivation="none; the source container carries ordering or compound semantics without a typed payload home",
                     scope_source="project_semantic_graph(scope=ExecutionAccessScopeRef)",
                     fully_representable=False,
                     absence_valid=value in (None, [], {}),
@@ -1568,14 +1772,20 @@ class _Builder:
         return tuple(sorted(rows, key=lambda row: row.source_path))
 
 
-def extract_semantic_facts(graph: SemanticGraph) -> SemanticFactSet:
-    """Extract represented facts independently from the built graph."""
+def extract_semantic_facts(graph: SemanticGraphV2) -> SemanticFactSet:
+    """Extract represented facts independently from the built graph.
+
+    The node fact tuple includes the pinned payload content digest, so the
+    source/graph equivalence proof covers projected content, not just
+    identity.
+    """
     return SemanticFactSet(
         nodes=tuple(
             (
                 node.node_id,
                 node.kind.value,
                 tuple((ref.category.value, ref.identifier) for ref in node.taxonomy_references),
+                node.payload_ref.content_digest,
             )
             for node in graph.nodes
         ),
@@ -1588,7 +1798,9 @@ def extract_semantic_facts(graph: SemanticGraph) -> SemanticFactSet:
     )
 
 
-def _source_facts(builder: _Builder) -> SemanticFactSet:
+def _source_facts(
+    builder: _Builder, payloads: Mapping[str, SemanticPayloadBase]
+) -> SemanticFactSet:
     """Extract source candidates before graph construction (non-circular proof side)."""
     return SemanticFactSet(
         nodes=tuple(
@@ -1597,6 +1809,7 @@ def _source_facts(builder: _Builder) -> SemanticFactSet:
                     node.node_id,
                     node.kind.value,
                     tuple((ref.category.value, ref.identifier) for ref in node.taxonomy_references),
+                    payloads[node.node_id].payload_digest,
                 )
                 for node in builder.nodes.values()
             )
@@ -1736,7 +1949,7 @@ def project_semantic_graph(
     for provenance_root in sorted(_PROVENANCE_ROOTS & set(plain)):
         builder.project_provenance(plain[provenance_root], provenance_root)
     if not builder.nodes:
-        # Distinguish "this input carries only graph-v1-unrepresentable
+        # Distinguish "this input carries only unrepresentable
         # provenance" from "this input declares nothing at all". Reporting the
         # former as a missing semantic identity misnames the cause.
         provenance_only = bool(_PROVENANCE_ROOTS & set(plain)) and not (
@@ -1749,7 +1962,7 @@ def project_semantic_graph(
                         kind=ProjectionGapKind.UNSUPPORTED,
                         source_path=root,
                         reason=(
-                            f"{_SOURCE_AUTHORITIES[root][2]} carries no SemanticGraph v1 "
+                            f"{_SOURCE_AUTHORITIES[root][2]} carries no semantic-graph "
                             "identity; it is accepted and classified as typed gaps but "
                             "cannot by itself produce a graph"
                         ),
@@ -1768,15 +1981,30 @@ def project_semantic_graph(
             ]
         )
     builder.resolve_edges()
-    graph = build_semantic_graph(
+    payloads = builder.build_payloads(version)
+    nodes_v2 = [
+        SemanticNodeV2(
+            node_id=node.node_id,
+            kind=node.kind,
+            taxonomy_references=node.taxonomy_references,
+            node_references=node.node_references,
+            payload_ref=semantic_payload_ref(payloads[node.node_id]),
+        )
+        for node in builder.nodes.values()
+    ]
+    graph = build_semantic_graph_v2(
         graph_id=graph_id,
         version=version,
         scope=scope,
-        nodes=list(builder.nodes.values()),
+        nodes=nodes_v2,
         edges=list(builder.edges.values()),
     )
-    validate_semantic_graph_taxonomy_closure(graph, builder.registry)
-    source_facts, represented_facts = _source_facts(builder), extract_semantic_facts(graph)
+    validate_semantic_graph_v2_taxonomy_closure(graph, builder.registry)
+    validate_semantic_graph_v2_payload_closure(graph, payloads.values())
+    source_facts, represented_facts = (
+        _source_facts(builder, payloads),
+        extract_semantic_facts(graph),
+    )
     if source_facts != represented_facts:
         raise ProjectionError(
             [
@@ -1794,6 +2022,9 @@ def project_semantic_graph(
     return ProjectionResult(
         source_digest=canonical_digest(plain),
         graph=graph,
+        payloads=tuple(
+            sorted(payloads.values(), key=lambda payload: payload.node_id)
+        ),
         source_facts=source_facts,
         represented_facts=represented_facts,
         gaps=gaps,
