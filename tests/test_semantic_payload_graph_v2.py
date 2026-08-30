@@ -623,28 +623,43 @@ def test_forged_payload_axes_fail_cold_validation_atomically(construction: str) 
 
     invalid_sections = tuple(forge(entry, position=0) for entry in page.sections)
     cases = {
-        "stale digest": forge(page, title="Forged"),
-        "invalid field": forge(page, title=""),
-        "invalid ordering": forge(page, sections=invalid_sections),
-        "wrong kind": forge(page, payload_kind=SemanticNodeKind.MODULE),
-        "wrong node": forge(page, node_id="mozaiks.page.other"),
-        "wrong version": forge(page, payload_version=2),
-        "wrong scope": forge(page, scope=_OTHER_SCOPE),
+        "stale digest": (forge(page, title="Forged"), "payload_digest does not match"),
+        "invalid field": (forge(page, title=""), "title must be non-empty text"),
+        "invalid ordering": (
+            forge(page, sections=invalid_sections),
+            "sections positions must be dense",
+        ),
+        "wrong kind": (
+            forge(page, payload_kind=SemanticNodeKind.MODULE),
+            "Extra inputs are not permitted",
+        ),
+        "wrong node": (
+            forge(page, node_id="mozaiks.page.other"),
+            "payload_digest does not match",
+        ),
+        "wrong version": (
+            forge(page, payload_version=2),
+            "payload_digest does not match",
+        ),
+        "wrong scope": (
+            forge(page, scope=_OTHER_SCOPE),
+            "payload_digest does not match",
+        ),
     }
 
-    for label, forged_page in cases.items():
+    sentinel = next(payload for payload in payloads if payload is not page)
+    for label, (forged_page, match) in cases.items():
         resolver = SemanticReferenceResolver()
+        resolver.register_semantic_payload(sentinel)
         before = resolver._subjects.copy()
-        with pytest.raises(ReferenceResolutionError, match="cold validation"):
+        with pytest.raises(ReferenceResolutionError, match=match):
             resolver.register_semantic_payload(forged_page)
         assert resolver._subjects == before, label
-
-    resolver = SemanticReferenceResolver()
-    resolver.register_semantic_payload(page)
-    resolved = resolver.resolve_semantic_payload(
-        semantic_payload_ref(page), requesting_scope=page.scope
-    )
-    assert resolved.model_dump(mode="json") == page.model_dump(mode="json")
+        resolver.register_semantic_payload(page)
+        resolved = resolver.resolve_semantic_payload(
+            semantic_payload_ref(page), requesting_scope=page.scope
+        )
+        assert resolved.model_dump(mode="json") == page.model_dump(mode="json")
 
 
 @pytest.mark.parametrize("construction", ["model_copy", "model_construct"])
@@ -725,10 +740,16 @@ def test_payload_closure_cold_validates_payloads_graphs_and_nested_nodes(
 def test_duplicate_identity_fails_closed() -> None:
     resolver, graph, payloads = _registered_resolver()
     page = next(p for p in payloads if p.node_id == "mozaiks.page.home")
+    before = resolver._subjects.copy()
     with pytest.raises(ReferenceResolutionError, match="immutable"):
         resolver.register_semantic_payload(page)
+    assert resolver._subjects == before
+
+    before = resolver._subjects.copy()
     with pytest.raises(ReferenceResolutionError, match="immutable"):
         resolver.register_semantic_graph_v2(graph)
+    assert resolver._subjects == before
+
     with pytest.raises(SemanticPayloadError, match="duplicate payload supplied"):
         validate_semantic_graph_v2_payload_closure(graph, [*payloads, page])
 
