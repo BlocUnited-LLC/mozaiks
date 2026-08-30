@@ -12,6 +12,36 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Distributed same-chat exclusion is now enforced (issue #426, sub-slice A)**:
+  the MongoDB chat lock at
+  `mozaiksai/core/runtime/persistence/distributed_lock.py` — previously dead
+  code with zero call sites — is rebuilt as a renewable chat execution lease
+  and wired into every production start/resume/restart path (the
+  `handle_user_input_from_api` funnel: HTTP input, WebSocket start/switch
+  handlers, host auto-start, journey spawns, and live paused-run
+  continuation). At most one runtime instance can execute a mutable run for a
+  given `(app_id, chat_id)` at a time; distinct chats and tenants proceed
+  independently, and read-only paths (history replay, reconnect) take no
+  lock. The lease is renewed for the length of the protected operation,
+  released at a durably persisted terminal or human-waiting boundary
+  (including on exceptions and cancellation), and a stale holder can never
+  delete a successor's lease. After confirmed lease loss (failed or
+  unprovable renewal), further durable session/WAL writes for that chat are
+  refused in-process. Operating modes are explicit: `required`
+  (fail-closed distributed exclusion whenever database persistence is
+  enabled; acquisition also fails closed if the unique lock index cannot be
+  verified, instead of degrading to a cosmetic lock) and `local` (explicit
+  single-process serialization only), overridable via
+  `MOZAIKS_CHAT_LOCK_MODE`. Contention, unavailable authority, renewal loss,
+  and release failure each emit distinct diagnostics (`CHAT_LOCK_BUSY`,
+  `CHAT_LOCK_AUTHORITY_UNAVAILABLE`, `CHAT_LOCK_RENEWAL_LOST`,
+  `CHAT_LOCK_RELEASE_FAILED`). Lock documents now live in the same system
+  database as the chat state they protect. One residual window remains
+  documented and out of this slice: storage-level fencing tokens for a
+  single in-flight write by a holder stalled past its TTL.
+
 ### Added
 
 - **Typed semantic payloads + Merkle-rooted graph v2 (ADR 0007 Slice 2E)**:

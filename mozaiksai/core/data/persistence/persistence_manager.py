@@ -32,6 +32,7 @@ from pymongo import ReturnDocument, UpdateOne
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
+from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from ..models import WorkflowStatus, WorkflowUIState
@@ -573,6 +574,7 @@ class AG2PersistenceManager:
 
         if not isinstance(variables, dict) or not variables:
             return
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
 
         from mozaiksai.core.workflow.context.authority import ContextAuthorityError
 
@@ -728,6 +730,9 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        # Raise (not swallow) on confirmed lease loss: a stale holder must not
+        # write terminal state over a successor's run.
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
             now = datetime.now(UTC)
@@ -983,6 +988,7 @@ class AG2PersistenceManager:
         text = str(content or "").strip()
         if not text:
             return
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
 
         merged_metadata = dict(metadata or {})
         if agent_name:
@@ -1020,6 +1026,7 @@ class AG2PersistenceManager:
         text = str(content or "").strip()
         if not text:
             return
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
 
         event = TextInput(text)
         if metadata:
@@ -1705,6 +1712,7 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
             await coll.update_one(

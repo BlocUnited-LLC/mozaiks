@@ -77,3 +77,20 @@ def app_root() -> Path:
     """Pytest fixture: active app workspace root. Skips if not configured."""
     return active_app_root()
 
+
+@pytest.fixture(autouse=True)
+def _isolate_chat_lock_state():
+    """Reset the chat execution lock's process-level state before each test.
+
+    The lock module keeps process-global state (configured mode, held local
+    locks, the lease registry). A test that runs host startup pins `required`
+    mode, and an abandoned background task can leave a local lock held for a
+    reused chat id — either would silently change the behavior of every later
+    test. Entering each test with clean lock state keeps tests
+    order-independent.
+    """
+    from mozaiksai.core.runtime.persistence.distributed_lock import reset_chat_lock_state
+
+    reset_chat_lock_state()
+    yield
+
