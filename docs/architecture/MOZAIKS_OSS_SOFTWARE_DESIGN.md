@@ -553,9 +553,9 @@ Once a canonical structured plan exists, downstream behavior should be as determ
 
 Generation and refinement are phases of the same canonical application lifecycle.
 
-The product-facing names for those phases are **Genesis Build** and **Revision
+The product-facing names for those phases are **Genesis Build** and **Refinement
 Run**. A Genesis Build creates the first canonical artifact lineage for an app.
-Every later change against that lineage is a Revision Run, including a `core`
+Every later change against that lineage is a Refinement Run, including a `core`
 change that re-enters at `ValueEngine`. A new Genesis Build starts only when a
 new app lineage is created. Internal architecture continues to use
 `generation`, `refinement`, and `Refinement Engine` for the mechanisms that

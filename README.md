@@ -26,7 +26,7 @@ AI-native software products.
 
 It brings together three things that usually live in separate tools:
 
-- **Mozaiks Studio** for creating apps, running revisions, and managing them.
+- **Mozaiks Studio** for creating apps, continuing builds, and managing them.
 - **AI workflow orchestration powered by [AG2](https://github.com/ag2ai/ag2)** for planning, tool use, human
   review, and generation.
 - **Generated app files** with modules, pages, workflows, config, and brand
@@ -36,20 +36,20 @@ The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
 artifacts, validates them against strict contracts, and keeps runtime concerns
 separate from builder workflows.
 
-## Genesis Builds and Revision Runs
+## Genesis Builds and Refinement Runs
 
 Every Mozaiks app begins with one **Genesis Build**: the first complete journey
 from product intent to a staged, validated app. It establishes the app's first
 canonical artifact lineage.
 
-Every later change is a **Revision Run**. Mozaiks starts from the app's current
+Every later change is a **Refinement Run**. Mozaiks starts from the app's current
 artifacts and history, determines what the request affects, and re-enters only
 the parts of the build needed to stage a safe new version for review. A small
-copy fix and a major product rethink are both Revision Runs; their scope and
+copy fix and a major product rethink are both Refinement Runs; their scope and
 route are different, but neither discards the app's lineage.
 
-Internally, the Refinement Engine classifies and routes Revision Runs. Genesis
-Build and Revision Run are the product-facing lifecycle terms.
+Internally, the Refinement Engine classifies and routes Refinement Runs. Genesis
+Build and Refinement Run are the product-facing lifecycle terms.
 
 ## Quickstart
 
@@ -119,8 +119,8 @@ want to build. The workflow walks you through the build steps and stages the
 generated artifacts for review. In-progress builds stay in **Apps**, so you can
 always pick up where you left off.
 
-After promotion, describe any later change to start a Revision Run against the
-app you already have. See [Genesis Builds and Revision Runs](https://docs.mozaiks.ai/getting-started/genesis-builds-and-revision-runs/)
+After promotion, describe any later change to start a Refinement Run against the
+app you already have. See [Genesis Builds and Refinement Runs](https://docs.mozaiks.ai/getting-started/genesis-builds-and-refinement-runs/)
 for examples ranging from a typo fix to a major product rethink.
 
 ### Troubleshooting
@@ -134,7 +134,7 @@ MongoDB instance, and set an LLM API key before running builds.
 | Guide | What it covers |
 |---|---|
 | [Use Studio](https://docs.mozaiks.ai/studio/) | The workspace and app-dashboard pages |
-| [Genesis Builds and Revision Runs](https://docs.mozaiks.ai/getting-started/genesis-builds-and-revision-runs/) | Create the first version, then make safe changes without starting over |
+| [Genesis Builds and Refinement Runs](https://docs.mozaiks.ai/getting-started/genesis-builds-and-refinement-runs/) | Create the first version, then make safe changes without starting over |
 | [Add a Workflow](https://docs.mozaiks.ai/guides/adding-workflows/01-overview/) | Extend an app with a custom AI workflow |
 | [Add a Module](https://docs.mozaiks.ai/guides/adding-modules/01-overview/) | Add a self-contained backend capability |
 | [Add a Page](https://docs.mozaiks.ai/guides/adding-pages/01-overview/) | Add new pages and routes to your app workspace |

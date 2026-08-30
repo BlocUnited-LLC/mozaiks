@@ -183,7 +183,7 @@ effect of handler code.
 
 - `DesignDocs` owns the typed `data_contract`
 - `AppGenerator` stages `data/contract.json`
-- Revision Runs may stage `data/migrations/{migration_id}.json`
+- Refinement Runs may stage `data/migrations/{migration_id}.json`
 - generated module repos use `backend/schemas.py` for typed document shapes and
   `backend/repo.py` for persistence operations
 - the runtime injects `ctx.persistence` into module actions when `app_id` exists;
