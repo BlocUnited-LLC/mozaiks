@@ -17,7 +17,7 @@ import asyncio
 import inspect
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import Any, cast
 
@@ -34,8 +34,7 @@ from mozaiksai.core.workflow.execution.network_graph import (
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from .context import DerivedContextManager
-from .execution.run_bootstrap import bootstrap_run_messages, merge_persisted_extra_context
-from .messages import normalize_to_strict_ag2 as _normalize_to_strict_ag2
+from .execution.run_bootstrap import merge_persisted_extra_context, prepare_network_trigger
 from .orchestration_utils import _load_workflow_config
 
 logger = logging.getLogger(__name__)
@@ -53,27 +52,11 @@ __all__ = [
 # AG2 Network orchestration helpers
 # ---------------------------------------------------------------------------
 
-_SPECIAL_USER_AGENT_NAMES = frozenset({"user", "user_proxy", "userproxy", "userproxyagent"})
+_SPECIAL_USER_AGENT_NAMES = frozenset({"user"})
 
 
 def _normalized_agent_name(value: str) -> str:
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
-
-def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
-    """Render persisted Mozaiks messages into one AG2 workflow-channel prompt."""
-
-    rendered: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        content = str(message.get("content") or "").strip()
-        if not content:
-            continue
-        role = str(message.get("role") or "user").strip() or "user"
-        name = str(message.get("name") or role).strip() or role
-        rendered.append(f"{name} ({role}): {content}")
-    return "\n\n".join(rendered).strip() or "."
-
 
 async def _fetch_chat_session_extra_context(
     persistence_manager: Any,
@@ -661,6 +644,8 @@ async def _run_ag2_network_phase(
     agent_text_context_deriver: Callable[[str, str], dict[str, Any]] | None = None,
     knowledge_store: Any = None,
     context_authority_policy: Any = None,
+    resume_existing_only: bool = False,
+    resume_context_updates: Mapping[str, Any] | None = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -670,13 +655,15 @@ async def _run_ag2_network_phase(
             agents=agents,
             transition_rules=transition_rules,
             initial_agent_name=initial_agent_name,
-            initial_message=initial_message,
+            initial_message=None if resume_existing_only else initial_message,
             context_variables=context_variables,
             structured_registry=structured_registry,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
+            resume_existing_only=resume_existing_only,
+            resume_context_updates=dict(resume_context_updates or {}),
         )
     )
 
@@ -739,6 +726,7 @@ async def run_workflow_orchestration(
     agents_factory: Callable | None = None,
     context_factory: Callable | None = None,
     knowledge_store: Any = None,
+    resume_existing_only: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     start_time = perf_counter()
@@ -782,8 +770,8 @@ async def run_workflow_orchestration(
             workflow_name_upper, workflow_startup_mode, initial_agent_name,
         )
 
-        # 2) Bootstrap run from canonical AG2 event history or launch input
-        has_persisted_events, initial_messages = await bootstrap_run_messages(
+        # 2) Prepare the new trigger; AG2 Hub hydration owns Network history.
+        network_trigger = await prepare_network_trigger(
             persistence_manager=persistence_manager,
             config=config,
             chat_id=chat_id,
@@ -791,11 +779,9 @@ async def run_workflow_orchestration(
             workflow_name=workflow_name,
             user_id=user_id,
             initial_message=initial_message,
-            initial_agent_name=initial_agent_name,
             wf_logger=wf_logger,
+            resume_existing_only=resume_existing_only,
         )
-        resumed_mode = bool(has_persisted_events)
-
         # 3) Cache seed
         try:
             cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
@@ -1082,15 +1068,11 @@ async def run_workflow_orchestration(
         except Exception as hw_err:
             wf_logger.debug("[%s] Transition graph validation failed: %s", workflow_name_upper, hw_err)
 
-        # 8) Normalize initial messages
-        initial_messages = _normalize_to_strict_ag2(initial_messages, default_user_name="user")
-
         wf_lifecycle_logger.info(
             "[%s] Starting beta agent orchestration",
             workflow_name_upper,
             agent_count=len(agents),
             max_turns=max_turns,
-            is_resume=resumed_mode,
         )
 
         emitted_structured_result_ids: set[int] = set()
@@ -1114,7 +1096,7 @@ async def run_workflow_orchestration(
             )
 
         # 10) Execute AG2 Network workflow channel
-        network_prompt = _messages_to_network_prompt(initial_messages)
+        network_prompt = network_trigger
         agent_text_context_deriver = (
             getattr(derived_context_manager, "preview_agent_text_updates", None)
             if derived_context_manager is not None
@@ -1146,6 +1128,8 @@ async def run_workflow_orchestration(
                 agent_text_context_deriver=agent_text_context_deriver,
                 knowledge_store=knowledge_store,
                 context_authority_policy=context_authority_policy,
+                resume_existing_only=resume_existing_only,
+                resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
             )
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
@@ -1217,6 +1201,8 @@ async def run_workflow_orchestration(
                         agent_text_context_deriver=agent_text_context_deriver,
                         knowledge_store=knowledge_store,
                         context_authority_policy=context_authority_policy,
+                        resume_existing_only=resume_existing_only,
+                        resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
                     )
                 else:
                     runner_result = first_phase_result
@@ -1236,6 +1222,8 @@ async def run_workflow_orchestration(
                 agent_text_context_deriver=agent_text_context_deriver,
                 knowledge_store=knowledge_store,
                 context_authority_policy=context_authority_policy,
+                resume_existing_only=resume_existing_only,
+                resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
             )
 
         structured_validation_failed = _structured_output_validation_failed(runner_result)

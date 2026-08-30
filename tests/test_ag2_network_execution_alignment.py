@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from ag2 import Agent
+from ag2.events.input_events import TextInput
 from ag2.knowledge import MemoryKnowledgeStore
 from ag2.network import (
     EV_CHANNEL_CLOSED,
@@ -33,7 +34,12 @@ import mozaiksai.core.workflow.orchestration_patterns as orchestration_patterns_
 import mozaiksai.core.workflow.outputs.structured as structured_outputs_module
 import mozaiksai.core.workflow.task_batches as task_batches_module
 import mozaiksai.core.workflow.workflow_manager as workflow_manager_module
-from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
+from mozaiksai.core.adapters.ag2_network_runner import (
+    AG2NetworkRunner,
+    AG2NetworkRunnerRequest,
+    _closed_reason_from_wal,
+    _resume_pending_agent_turns,
+)
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.adapter import create_context_container
@@ -45,6 +51,43 @@ from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 class _Reply:
     def __init__(self, body: str) -> None:
         self.body = body
+
+
+@pytest.mark.anyio
+async def test_resume_pending_agent_turns_replays_each_attached_identity() -> None:
+    class _Client:
+        def __init__(self, replayed: int) -> None:
+            self.replayed = replayed
+            self.calls = 0
+
+        async def resume_pending_turns(self) -> int:
+            self.calls += 1
+            return self.replayed
+
+    planner = _Client(2)
+    worker = _Client(0)
+
+    total = await _resume_pending_agent_turns(
+        agent_clients={"PlannerAgent": planner, "WorkerAgent": worker},
+        workflow_name="DurableResumeSmoke",
+        chat_id="chat-durable-resume",
+    )
+
+    assert total == 2
+    assert planner.calls == 1
+    assert worker.calls == 1
+
+
+def test_pending_turn_recovery_detects_a_closed_channel() -> None:
+    wal = [
+        SimpleNamespace(event_type=EV_PACKET, event_data={}),
+        SimpleNamespace(
+            event_type=EV_CHANNEL_CLOSED,
+            event_data={"reason": "workflow_complete"},
+        ),
+    ]
+
+    assert _closed_reason_from_wal(wal) == (True, "workflow_complete")
 
 
 class _DeterministicAgent(Agent):
@@ -657,6 +700,96 @@ async def test_ag2_network_runner_continues_paused_channel_with_user_message() -
 
 
 @pytest.mark.anyio
+async def test_ag2_network_runner_hydrates_and_continues_same_channel_after_restart() -> None:
+    store = MemoryKnowledgeStore()
+    transition_rules = [
+        {
+            "source_agent": "ValueInterviewAgent",
+            "target_agent": "user",
+            "transition_type": "after_turn",
+        },
+        {
+            "source_agent": "user",
+            "target_agent": "terminate",
+            "transition_type": "after_turn",
+        },
+    ]
+
+    first = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="DurableResumeSmoke",
+            chat_id="chat-durable-resume",
+            app_id="app-durable-resume",
+            agents={
+                "ValueInterviewAgent": _DeterministicAgent(
+                    "ValueInterviewAgent",
+                    "Which audience should we target?",
+                )
+            },
+            transition_rules=transition_rules,
+            initial_agent_name="ValueInterviewAgent",
+            initial_message="Start the interview.",
+            knowledge_store=store,
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert first.status is RunStatus.PAUSED
+    assert first.live_run is not None
+    first_channel_id = first.channel_id
+    first_wal_size = len(first.wal)
+    await first.live_run.close()
+
+    reconnected = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="DurableResumeSmoke",
+            chat_id="chat-durable-resume",
+            app_id="app-durable-resume",
+            agents={
+                "ValueInterviewAgent": _DeterministicAgent(
+                    "ValueInterviewAgent",
+                    "This reply must not start a fresh channel.",
+                )
+            },
+            transition_rules=transition_rules,
+            initial_agent_name="ValueInterviewAgent",
+            initial_message=None,
+            knowledge_store=store,
+            resume_existing_only=True,
+            resume_context_updates={"approved_audience": "founders"},
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert reconnected.status is RunStatus.PAUSED
+    assert reconnected.channel_id == first_channel_id
+    assert len(reconnected.wal) == first_wal_size + 1
+    assert reconnected.context_variables["approved_audience"] == "founders"
+    assert reconnected.live_run is not None
+    await reconnected.live_run.close()
+
+    continued = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="DurableResumeSmoke",
+            chat_id="chat-durable-resume",
+            app_id="app-durable-resume",
+            agents={
+                "ValueInterviewAgent": _DeterministicAgent(
+                    "ValueInterviewAgent",
+                    "This reply must not start a fresh channel.",
+                )
+            },
+            transition_rules=transition_rules,
+            initial_agent_name="ValueInterviewAgent",
+            initial_message="Founders building agentic software.",
+            knowledge_store=store,
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert continued.status is RunStatus.COMPLETED
+    assert continued.channel_id == first_channel_id
+    assert EV_CHANNEL_CLOSED in [entry["event_type"] for entry in continued.wal]
+
+
+@pytest.mark.anyio
 async def test_ag2_network_runner_commits_multiple_context_updates_and_deletes() -> None:
     context: dict[str, Any] = {"obsolete": "old", "route": "draft"}
     planner_agent = _ContextOperationAgent(
@@ -1045,7 +1178,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
             self.persisted_context: dict[str, Any] | None = None
 
         async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
-            return [{"event_type": "text"}]
+            return [TextInput("Approved, proceed.")]
 
         def project_run_events_to_messages(self, events: list[Any]) -> list[dict[str, Any]]:
             return [{"role": "user", "name": "user", "content": "Approved, proceed."}]
@@ -1200,7 +1333,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     assert result is not None
     assert result["run_completed"] is True
     assert captured["initial_agent_name"] == "PackBuildCoordinator"
-    assert captured["initial_message"] == "user (user): Approved, proceed."
+    assert captured["initial_message"] == "Approved, proceed."
     assert persistence.completed == [("chat-reentry", "app-1")]
 
 

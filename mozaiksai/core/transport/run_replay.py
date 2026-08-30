@@ -239,7 +239,7 @@ class WorkflowRunReplayer:
                     and role == "user"
                     and bool(hidden_initial_message)
                     and content.strip() == str(hidden_initial_message).strip()
-                    and agent_name in {"", "user", "userproxy", "userproxyagent", "chat_manager", "manager", "agentmanager", "_user"}
+                    and agent_name in {"", "user"}
                 )
                 if is_marked_initial_message or is_unmarked_initial_message:
                     self.logger.debug(

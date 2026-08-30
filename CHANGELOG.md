@@ -206,6 +206,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **AG2 Network restart continuation now resumes interrupted agent turns.**
+  Reopened chat-scoped Hubs reattach canonical Network identities and invoke
+  AG2 pending-turn recovery before accepting further input. Workflow launch
+  triggers now remain plain Network text instead of reconstructed Classic-style
+  role/name messages, and retired user-proxy/manager identity aliases are no
+  longer accepted by runtime routing or replay.
+
+- **Continue Build now resumes the durable AG2 Network channel**: runtime
+  continuation reopens the chat-scoped AG2 KnowledgeStore, hydrates the Hub
+  WAL and transition state, and reattaches existing agent and human identities
+  instead of projecting transcript messages into a new Network channel.
 - **Generated custom-route clients now recognize real entitlement denials**:
   module-action and workflow-start failures unwrap FastAPI's structured
   `detail` envelope, so HTTP 402 responses reach the app's upgrade flow while

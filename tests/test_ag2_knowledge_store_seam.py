@@ -22,6 +22,7 @@ from mozaiksai.core.adapters.ag2_network_runner import (
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
 )
+from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
 
 # ---------------------------------------------------------------------------
 # Minimal AG2-compatible fake KnowledgeStore
@@ -219,6 +220,19 @@ class TestCustomStoreReachesHub:
 # ---------------------------------------------------------------------------
 
 class TestRunIsolation:
+    def test_runtime_store_namespace_is_distinct_per_chat(self) -> None:
+        first = AG2OrchestrationAdapter._with_network_store("app-1", "chat-1", {})[
+            "knowledge_store"
+        ]
+        second = AG2OrchestrationAdapter._with_network_store("app-1", "chat-2", {})[
+            "knowledge_store"
+        ]
+
+        assert first._app_id == second._app_id == "app-1"
+        assert first._chat_id == "chat-1"
+        assert second._chat_id == "chat-2"
+        assert first is not second
+
     def test_two_distinct_requests_have_independent_stores(self) -> None:
         store_a = FakeKnowledgeStore(name="a")
         store_b = FakeKnowledgeStore(name="b")

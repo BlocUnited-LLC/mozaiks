@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 
 import pytest
+from ag2.events.input_events import TextInput
 
 from mozaiksai.core.workflow.execution.run_bootstrap import (
-    bootstrap_run_messages as _bootstrap_run_messages,
+    prepare_network_trigger,
 )
 
 
@@ -44,7 +45,7 @@ class _FailingSessionPersistenceManager(_StubPersistenceManager):
 async def test_run_bootstrap_keeps_direct_initial_message_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
 
-    has_persisted_events, initial_messages = await _bootstrap_run_messages(
+    trigger = await prepare_network_trigger(
         persistence_manager=pm,
         config={},
         chat_id="chat-new",
@@ -52,19 +53,10 @@ async def test_run_bootstrap_keeps_direct_initial_message_out_of_persisted_trans
         workflow_name="RuntimeSmoke",
         user_id="user-1",
         initial_message="Hello runtime",
-        initial_agent_name=None,
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert has_persisted_events is False
-    assert initial_messages == [
-        {
-            "role": "user",
-            "name": "user",
-            "content": "Hello runtime",
-            "_mozaiks_seed_kind": "initial_message",
-        }
-    ]
+    assert trigger == "Hello runtime"
     assert pm.created_sessions == [
         {
             "chat_id": "chat-new",
@@ -80,7 +72,7 @@ async def test_run_bootstrap_keeps_direct_initial_message_out_of_persisted_trans
 async def test_run_bootstrap_keeps_config_seed_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
 
-    has_persisted_events, initial_messages = await _bootstrap_run_messages(
+    trigger = await prepare_network_trigger(
         persistence_manager=pm,
         config={"initial_message": "Seed from config"},
         chat_id="chat-seed",
@@ -88,19 +80,10 @@ async def test_run_bootstrap_keeps_config_seed_out_of_persisted_transcript() -> 
         workflow_name="RuntimeSmoke",
         user_id="user-1",
         initial_message=None,
-        initial_agent_name=None,
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert has_persisted_events is False
-    assert initial_messages == [
-        {
-            "role": "user",
-            "name": "user",
-            "content": "Seed from config",
-            "_mozaiks_seed_kind": "initial_message",
-        }
-    ]
+    assert trigger == "Seed from config"
     assert pm.persisted_batches == []
 
 
@@ -109,7 +92,7 @@ async def test_run_bootstrap_propagates_required_session_creation_failure() -> N
     pm = _FailingSessionPersistenceManager()
 
     with pytest.raises(RuntimeError, match="required session persistence unavailable"):
-        await _bootstrap_run_messages(
+        await prepare_network_trigger(
             persistence_manager=pm,
             config={},
             chat_id="chat-create-fails",
@@ -117,7 +100,6 @@ async def test_run_bootstrap_propagates_required_session_creation_failure() -> N
             workflow_name="RuntimeSmoke",
             user_id="user-1",
             initial_message="Hello runtime",
-            initial_agent_name=None,
             wf_logger=logging.getLogger("test.orchestration.seed"),
         )
 
@@ -134,7 +116,7 @@ async def test_run_bootstrap_propagates_required_session_creation_failure() -> N
 @pytest.mark.asyncio
 async def test_run_bootstrap_uses_latest_user_event_as_trigger_without_reinjecting_config_seed() -> None:
     pm = _StubPersistenceManager(
-        run_events=[object()],
+        run_events=[TextInput("Polymarket for AI startups")],
         event_messages=[
             {
                 "role": "assistant",
@@ -145,7 +127,7 @@ async def test_run_bootstrap_uses_latest_user_event_as_trigger_without_reinjecti
         ]
     )
 
-    has_persisted_events, initial_messages = await _bootstrap_run_messages(
+    trigger = await prepare_network_trigger(
         persistence_manager=pm,
         config={"initial_message": "Seed from config"},
         chat_id="chat-resume-seed",
@@ -153,14 +135,10 @@ async def test_run_bootstrap_uses_latest_user_event_as_trigger_without_reinjecti
         workflow_name="RuntimeSmoke",
         user_id="user-1",
         initial_message=None,
-        initial_agent_name=None,
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert has_persisted_events is True
-    assert initial_messages == [
-        {"role": "user", "name": "user", "content": "Polymarket for AI startups", "_mozaiks_seed_kind": "ag2_event_trigger"},
-    ]
+    assert trigger == "Polymarket for AI startups"
     assert pm.persisted_batches == []
 
 
@@ -168,7 +146,7 @@ async def test_run_bootstrap_uses_latest_user_event_as_trigger_without_reinjecti
 async def test_run_bootstrap_skips_persist_for_userdriven_trigger_seed() -> None:
     pm = _StubPersistenceManager()
 
-    has_persisted_events, initial_messages = await _bootstrap_run_messages(
+    trigger = await prepare_network_trigger(
         persistence_manager=pm,
         config={"workflow_startup_mode": "UserDriven"},
         chat_id="chat-userdriven",
@@ -176,18 +154,9 @@ async def test_run_bootstrap_skips_persist_for_userdriven_trigger_seed() -> None
         workflow_name="RuntimeSmoke",
         user_id="user-1",
         initial_message=None,
-        initial_agent_name=None,
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert has_persisted_events is False
-    assert initial_messages == [
-        {
-            "role": "user",
-            "name": "user",
-            "content": ".",
-            "_mozaiks_seed_kind": "userdriven_trigger",
-        }
-    ]
+    assert trigger == "."
     assert pm.persisted_batches == []
 

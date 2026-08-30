@@ -17,6 +17,7 @@ class RuntimeCollections:
     CHAT_SESSIONS = "ChatSessions"
     AG2_STREAM_EVENTS = "AG2StreamEvents"
     AG2_STREAM_HEADS = "AG2StreamHeads"
+    AG2_NETWORK_KNOWLEDGE = "AG2NetworkKnowledge"
     GENERAL_CHAT_SESSIONS = "GeneralChatSessions"
     GENERAL_CHAT_COUNTERS = "GeneralChatCounters"
     MEDIA_ASSETS = "MediaAssets"
