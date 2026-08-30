@@ -17,21 +17,16 @@ def merge_persisted_extra_context(context: Any, extra_ctx: dict[str, Any]) -> No
     _hydrate_persisted_context(context, extra_ctx)
 
 
-def _hidden_config_seed(config: dict[str, Any], *, suppress: bool) -> dict[str, Any] | None:
+def _hidden_config_seed(config: dict[str, Any], *, suppress: bool) -> str | None:
     if suppress:
         return None
     seed = config.get("initial_message")
     if not isinstance(seed, str) or not seed.strip():
         return None
-    return {
-        "role": "user",
-        "name": "user",
-        "content": seed.strip(),
-        "_mozaiks_seed_kind": "initial_message",
-    }
+    return seed.strip()
 
 
-def _latest_user_event(events: list[Any]) -> dict[str, Any] | None:
+def _latest_user_event(events: list[Any]) -> str | None:
     from ag2.events.input_events import TextInput
 
     for event in reversed(events):
@@ -40,16 +35,11 @@ def _latest_user_event(events: list[Any]) -> dict[str, Any] | None:
         content = str(getattr(event, "content", "") or "").strip()
         if not content:
             continue
-        return {
-            "role": "user",
-            "name": "user",
-            "content": content,
-            "_mozaiks_seed_kind": "ag2_event_trigger",
-        }
+        return content
     return None
 
 
-async def bootstrap_run_messages(
+async def prepare_network_trigger(
     persistence_manager: Any,
     config: dict[str, Any],
     chat_id: str,
@@ -57,42 +47,35 @@ async def bootstrap_run_messages(
     workflow_name: str,
     user_id: str | None,
     initial_message: str | None,
-    initial_agent_name: str | None,
     wf_logger: Any,
     suppress_config_seed: bool = False,
     resume_existing_only: bool = False,
-) -> tuple[bool, list[dict[str, Any]]]:
-    """Return ``(has_run_events, launch_messages)`` for AG2 Network.
+) -> str:
+    """Return the text that starts or continues the AG2 Network channel.
 
-    Existing run events contribute only the newly queued user trigger. They are
-    never replayed as Network history; Hub hydration owns that state.
+    Existing UI run events contribute only the newly queued user trigger. They
+    are never replayed as Network history; Hub hydration owns that state.
     """
-    _ = initial_agent_name
     run_events = await persistence_manager.load_run_events(chat_id=chat_id, app_id=app_id) or []
     has_persisted_events = bool(run_events)
-    seed_messages: list[dict[str, Any]] = []
+    trigger_parts: list[str] = []
 
     if has_persisted_events:
         latest_user = None if resume_existing_only else _latest_user_event(run_events)
-        seed_messages = [latest_user] if latest_user else []
+        trigger_parts = [latest_user] if latest_user else []
         wf_logger.debug(
             "[RUN_BOOTSTRAP] Existing chat %s uses AG2 Hub hydration: events=%d trigger_messages=%d",
             chat_id,
             len(run_events),
-            len(seed_messages),
+            len(trigger_parts),
         )
 
     if not has_persisted_events:
         hidden_seed = _hidden_config_seed(config, suppress=suppress_config_seed)
         if hidden_seed:
-            seed_messages.append(hidden_seed)
+            trigger_parts.append(hidden_seed)
         if initial_message:
-            seed_messages.append({
-                "role": "user",
-                "name": "user",
-                "content": initial_message,
-                "_mozaiks_seed_kind": "initial_message",
-            })
+            trigger_parts.append(initial_message)
 
         current_user_id = user_id or "system_user"
         await persistence_manager.create_chat_session(
@@ -102,18 +85,13 @@ async def bootstrap_run_messages(
             user_id=current_user_id,
         )
 
-    if not seed_messages and config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
-        seed_messages = [{
-            "role": "user",
-            "name": "user",
-            "content": ".",
-            "_mozaiks_seed_kind": "userdriven_trigger",
-        }]
+    if not trigger_parts and config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
+        trigger_parts = ["."]
 
-    return has_persisted_events, seed_messages
+    return "\n\n".join(part.strip() for part in trigger_parts if part.strip()) or "."
 
 
 __all__ = [
-    "bootstrap_run_messages",
+    "prepare_network_trigger",
     "merge_persisted_extra_context",
 ]

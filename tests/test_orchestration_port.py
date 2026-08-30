@@ -129,7 +129,7 @@ class TestOrchestrationPortProtocol:
         assert caps["supports_resume"] is True
         assert caps["supports_task_batches"] is True
         assert caps["supports_cancel"] is True
-        assert caps["supports_bidirectional_stream"] is False
+        assert "supports_bidirectional_stream" not in caps
         assert caps["supports_network_transition_graph"] is True
 
     def test_interpret_result_completed(self):

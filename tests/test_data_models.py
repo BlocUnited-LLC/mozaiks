@@ -12,7 +12,6 @@ Covers:
     - extra fields rejected (extra="forbid")
     - role enum accepts user/assistant
     - event_type defaults to "message.created"
-    - is_user_proxy defaults to False
     - agent_name defaults to None
 
   WorkflowUIArtifactState:
@@ -143,10 +142,6 @@ class TestChatMessage:
     def test_event_type_defaults_to_message_created(self):
         msg = ChatMessage.model_validate(_chat_message())
         assert msg.event_type == "message.created"
-
-    def test_is_user_proxy_defaults_to_false(self):
-        msg = ChatMessage.model_validate(_chat_message())
-        assert msg.is_user_proxy is False
 
     def test_agent_name_defaults_to_none(self):
         msg = ChatMessage.model_validate(_chat_message())

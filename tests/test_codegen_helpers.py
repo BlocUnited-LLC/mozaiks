@@ -4,7 +4,7 @@ Code generation pure helper unit tests.
 Covers helpers from:
   - refinement_harness_codegen.py: _dump_yaml, _safe_prompt_id, _safe_prompt_path
   - app_backend_admin_codegen.py: _indent_block, _render_admin_config_module
-  - orchestration_patterns.py: _messages_to_network_prompt, _next_agent_after_trigger
+  - orchestration_patterns.py: _next_agent_after_trigger
 
   _dump_yaml:
     - dict with keys → valid YAML string
@@ -37,14 +37,6 @@ Covers helpers from:
     - payload dict appears in output
     - returns module as a string (not bytes)
 
-  _messages_to_network_prompt:
-    - empty list → "."
-    - single message → formatted "name (role): content"
-    - multiple messages → joined with "\n\n"
-    - empty content messages → skipped
-    - message with no name → role used as name
-    - message with no role → "user" used as default
-
   _next_agent_after_trigger:
     - no matching rule → None
     - matching rule → target_agent returned
@@ -67,7 +59,6 @@ from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import 
     _safe_prompt_path,
 )
 from mozaiksai.core.workflow.orchestration_patterns import (
-    _messages_to_network_prompt,
     _next_agent_after_trigger,
 )
 
@@ -241,64 +232,7 @@ class TestRenderAdminConfigModule:
 
 
 # ---------------------------------------------------------------------------
-# 6. _messages_to_network_prompt
-# ---------------------------------------------------------------------------
-
-class TestMessagesToNetworkPrompt:
-    def test_empty_list_returns_dot(self):
-        assert _messages_to_network_prompt([]) == "."
-
-    def test_single_message(self):
-        msgs = [{"role": "user", "name": "Alice", "content": "Hello"}]
-        result = _messages_to_network_prompt(msgs)
-        assert "Alice (user): Hello" in result
-
-    def test_multiple_messages_joined_with_double_newline(self):
-        msgs = [
-            {"role": "user", "name": "Alice", "content": "Hi"},
-            {"role": "assistant", "name": "Bot", "content": "Hello!"},
-        ]
-        result = _messages_to_network_prompt(msgs)
-        assert "\n\n" in result
-        assert "Alice (user): Hi" in result
-        assert "Bot (assistant): Hello!" in result
-
-    def test_empty_content_skipped(self):
-        msgs = [
-            {"role": "user", "name": "Alice", "content": ""},
-            {"role": "user", "name": "Bob", "content": "Valid"},
-        ]
-        result = _messages_to_network_prompt(msgs)
-        assert "Alice" not in result
-        assert "Bob (user): Valid" in result
-
-    def test_whitespace_content_skipped(self):
-        msgs = [{"role": "user", "content": "   "}]
-        result = _messages_to_network_prompt(msgs)
-        assert result == "."
-
-    def test_no_name_uses_role(self):
-        msgs = [{"role": "user", "content": "Hello"}]
-        result = _messages_to_network_prompt(msgs)
-        assert "user (user): Hello" in result
-
-    def test_no_role_uses_user_default(self):
-        msgs = [{"name": "Alice", "content": "Hello"}]
-        result = _messages_to_network_prompt(msgs)
-        assert "Alice (user): Hello" in result
-
-    def test_non_dict_messages_skipped(self):
-        msgs = ["not_a_dict", {"role": "user", "content": "Valid"}]
-        result = _messages_to_network_prompt(msgs)
-        assert "Valid" in result
-
-    def test_all_empty_returns_dot(self):
-        msgs = [{"role": "user", "content": ""}]
-        assert _messages_to_network_prompt(msgs) == "."
-
-
-# ---------------------------------------------------------------------------
-# 7. _next_agent_after_trigger
+# 6. _next_agent_after_trigger
 # ---------------------------------------------------------------------------
 
 class TestNextAgentAfterTrigger:

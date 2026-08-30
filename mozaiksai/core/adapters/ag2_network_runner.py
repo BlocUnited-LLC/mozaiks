@@ -174,6 +174,46 @@ async def _attach_human_client(
     return human
 
 
+async def _resume_pending_agent_turns(
+    *,
+    agent_clients: Mapping[str, Any],
+    workflow_name: str,
+    chat_id: str,
+) -> int:
+    """Re-fire turns that AG2 persisted as pending before process loss."""
+
+    total = 0
+    for name, client in agent_clients.items():
+        replayed = int(await client.resume_pending_turns())
+        total += replayed
+        if replayed:
+            logger.info(
+                "AG2_PENDING_TURNS_RESUMED workflow=%s chat=%s agent=%s count=%d",
+                workflow_name,
+                chat_id,
+                name,
+                replayed,
+            )
+    return total
+
+
+def _closed_reason_from_wal(wal: Sequence[Any]) -> tuple[bool, str | None]:
+    """Return the terminal channel reason after pending-turn recovery, if any."""
+
+    closed_envelope = next(
+        (
+            envelope
+            for envelope in reversed(wal)
+            if str(getattr(envelope, "event_type", "") or "") == EV_CHANNEL_CLOSED
+        ),
+        None,
+    )
+    if closed_envelope is None:
+        return False, None
+    reason = str((getattr(closed_envelope, "event_data", {}) or {}).get("reason") or "")
+    return True, reason or None
+
+
 @dataclass(slots=True)
 class AG2NetworkRunnerRequest:
     """Already-loaded workflow execution inputs for the AG2 Network runner."""
@@ -419,6 +459,20 @@ class AG2NetworkRunner:
                 )
 
             if existing_channel is not None:
+                resumed_pending_turns = await _resume_pending_agent_turns(
+                    agent_clients=agent_clients,
+                    workflow_name=request.workflow_name,
+                    chat_id=request.chat_id,
+                )
+                if resumed_pending_turns:
+                    resumed_wal = await hub.read_wal(channel.channel_id)
+                    channel_closed, close_reason = _closed_reason_from_wal(resumed_wal)
+                    if channel_closed:
+                        return await _snapshot_result(
+                            status=RunStatus.COMPLETED,
+                            close_reason=close_reason,
+                        )
+
                 live_run = _AG2LiveWorkflowRun(
                     workflow_name=request.workflow_name,
                     chat_id=request.chat_id,

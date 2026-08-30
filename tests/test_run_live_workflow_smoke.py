@@ -18,7 +18,6 @@ from scripts.run_live_workflow_smoke import (
     _configure_event_loop_policy,
     _extract_final_context,
     _extract_latest_structured_output,
-    _is_generic_feedback_pending_input,
     _is_input_request_tool_call,
     _load_context_file,
     _load_prompt_file,
@@ -244,17 +243,6 @@ def test_is_input_request_tool_call_detects_canonical_payloads() -> None:
             "payload": {"interaction_type": "ui_surface"},
         }
     )
-
-
-def test_is_generic_feedback_pending_input_detects_ag2_feedback_prompt() -> None:
-    assert _is_generic_feedback_pending_input(
-        {
-            "raw_payload": {
-                "prompt": "Please give feedback to chat_manager. Press enter to skip and use auto-reply, or type 'exit' to stop the conversation: "
-            }
-        }
-    )
-    assert not _is_generic_feedback_pending_input({"prompt": "Which urgency level should we use?"})
 
 
 class _FakeWebSocket:

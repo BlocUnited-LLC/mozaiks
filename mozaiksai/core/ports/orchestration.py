@@ -168,7 +168,6 @@ class OrchestrationPort(Protocol):
                 "version": "0.11.2",
                 "supports_pause": True,
                 "supports_task_batches": True,
-                "supports_bidirectional_stream": False,
                 "supports_cancel": True,
             }
         """

@@ -29,7 +29,7 @@ from mozaiksai.core.workflow.context.authority import (
 )
 
 _SPECIAL_TERMINATE = frozenset({"terminate"})
-_SPECIAL_USER = frozenset({"user", "user_proxy", "userproxy", "userproxyagent"})
+_SPECIAL_USER = frozenset({"user"})
 _SUPPORTED_CONDITION_TYPES = frozenset({"context_equals", "context_expression", "tool_called"})
 
 
