@@ -497,7 +497,7 @@ def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
         PlanPayload: ("title", "prices"),
         ProductPayload: ("title", "description", "prices"),
         MeterPayload: ("description", "unit"),
-        LimitPayload: ("description", "limit_value"),
+        LimitPayload: ("description", "limit_value", "period"),
         DeploymentTargetPayload: ("target_kind", "profile_id"),
     }
     for model, field_names in required_nullable.items():

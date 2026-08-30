@@ -761,7 +761,7 @@ class LimitPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.LIMIT] = SemanticNodeKind.LIMIT
     description: str | None
     limit_value: int | None = Field(ge=0, strict=True)
-    period: BillingPeriod | None = None
+    period: BillingPeriod | None
 
     @field_validator("description")
     @classmethod
