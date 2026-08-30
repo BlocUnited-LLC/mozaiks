@@ -255,8 +255,8 @@ _acquisition_indexes_verified = False
 def _is_unique_resource_index(spec: dict[str, Any]) -> bool:
     if not spec.get("unique"):
         return False
-    key = spec.get("key")
-    pairs = list(key.items()) if hasattr(key, "items") else list(key or [])
+    key = spec.get("key") or []
+    pairs = list(key.items()) if hasattr(key, "items") else list(key)
     return [(str(field), int(direction)) for field, direction in pairs] == [("resource", 1)]
 
 
