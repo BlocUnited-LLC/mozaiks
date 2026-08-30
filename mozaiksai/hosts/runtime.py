@@ -51,7 +51,10 @@ from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.event_bus import get_event_bus
 from mozaiksai.core.runtime.persistence.artifact_version import ensure_artifact_version_indexes
-from mozaiksai.core.runtime.persistence.distributed_lock import ensure_lock_indexes
+from mozaiksai.core.runtime.persistence.distributed_lock import (
+    configure_chat_lock,
+    ensure_lock_indexes,
+)
 from mozaiksai.core.runtime.persistence.startup_policy import get_database_startup_policy
 from mozaiksai.core.startup.validation import run_startup_checks
 from mozaiksai.core.transport.handlers.workflow_handlers import _background_task_failure_callback
@@ -360,6 +363,11 @@ async def _runtime_startup() -> None:
         ensure_idempotency_indexes(),
         ensure_artifact_version_indexes(),
     )
+
+    # Pin the chat execution lock mode for this host process: `required`
+    # (fail-closed distributed exclusion) whenever database persistence is
+    # enabled, `local` (explicit single-process boundary) otherwise.
+    configure_chat_lock()
 
     # Connect distributed cache (Redis) — falls back to in-memory silently.
     await get_redis_cache().connect()

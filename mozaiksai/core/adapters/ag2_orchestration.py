@@ -57,6 +57,7 @@ from mozaiksai.core.ports.orchestration import (
     RunResult,
     RunStatus,
 )
+from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
 
 logger = get_core_logger("ag2_orchestration_adapter")
 
@@ -311,6 +312,9 @@ class AG2OrchestrationAdapter:
         """
         if not request.injected_context:
             return
+        # Guard before the try: a lease-loss refusal must abort the resume,
+        # never degrade into the warning path below.
+        assert_chat_mutable(app_id=request.app_id, chat_id=request.chat_id)
         try:
             from mozaiksai.core.data.persistence import AG2PersistenceManager
             from mozaiksai.core.multitenant import build_app_scope_filter

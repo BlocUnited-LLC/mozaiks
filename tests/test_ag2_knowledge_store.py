@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from mozaiksai.core.adapters.ag2_knowledge_store import MongoAG2KnowledgeStore
+from mozaiksai.core.runtime.persistence import distributed_lock as dl
 
 
 class _Cursor:
@@ -109,3 +110,37 @@ async def test_mongo_ag2_knowledge_store_returns_noop_subscription() -> None:
 
     subscription = await store.on_change("/channels", lambda _path: None)
     await subscription.close()
+
+
+@pytest.mark.asyncio
+async def test_mongo_ag2_knowledge_store_refuses_mutation_after_lease_loss() -> None:
+    resource = dl.chat_lock_resource("app-1", "chat-1")
+    lease = dl.ChatLease(
+        resource=resource,
+        holder_id="stale-holder",
+        mode=dl.ChatLockMode.REQUIRED,
+        collection=None,
+        ttl_seconds=60,
+    )
+    lease._mark_lost("test")
+    dl._process_leases[resource] = lease
+    collection = _Collection()
+    store = MongoAG2KnowledgeStore(
+        app_id="app-1",
+        chat_id="chat-1",
+        collection=collection,
+    )
+
+    try:
+        for operation in (
+            store.write("/hub/state", "state"),
+            store.append("/channels/wal", "entry"),
+            store.delete("/hub"),
+        ):
+            with pytest.raises(dl.ChatLeaseLostError):
+                await operation
+        assert collection.update_calls == []
+        assert collection.append_calls == []
+        assert collection.delete_calls == []
+    finally:
+        dl.reset_chat_lock_state()
