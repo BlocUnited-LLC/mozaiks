@@ -28,7 +28,10 @@ The implementation policy for deterministic generated contracts is
 * `AppBuildPlan` is the post-reasoning deterministic materialization boundary.
 * Validation remains deterministic.
 * Evaluation complements validation; it does not replace validation.
-* Refinement is part of the core application lifecycle.
+* A Genesis Build creates an app's first canonical artifact lineage; every
+  subsequent change in that lineage is a Revision Run.
+* The Refinement Engine is the internal routing and continuity layer for
+  Revision Runs; `refinement` remains the implementation and contract term.
 * Operator intelligence enters through public OSS seams.
 * Do not duplicate canonical owners.
 
