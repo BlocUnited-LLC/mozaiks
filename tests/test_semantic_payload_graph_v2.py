@@ -102,6 +102,11 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # payloads. It is offline-only; its own non-importability is proven
         # by the hygiene scan in tests/test_compilation_plan.py.
         Path("mozaiksai/core/semantics/compilation_plan.py"),
+        # Slice 4C: the offline materializer renders page bytes from graph v2
+        # + payloads + the plan. It is offline-only; its structural isolation
+        # and non-importability are proven by its own proof suite and the
+        # hygiene scan in tests/test_compilation_plan.py.
+        Path("mozaiksai/core/semantics/materialization.py"),
     }
 )
 _FORBIDDEN_PRODUCTION_MODULES = frozenset({"mozaiksai.core.semantics.payloads"})

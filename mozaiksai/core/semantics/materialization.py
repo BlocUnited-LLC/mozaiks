@@ -302,11 +302,11 @@ def render_app_ui_page_schema_unit(
             f"unit {unit.unit_id!r} disposition {unit.disposition.value!r} is not render"
         )
     footprint = {source.node_id for source in unit.sources}
-    pages = [
-        payload_by_node[node_id]
-        for node_id in sorted(footprint)
-        if isinstance(payload_by_node.get(node_id), PagePayload)
-    ]
+    pages: list[PagePayload] = []
+    for node_id in sorted(footprint):
+        candidate = payload_by_node.get(node_id)
+        if isinstance(candidate, PagePayload):
+            pages.append(candidate)
     if len(pages) != 1:
         raise MaterializationError(
             f"unit {unit.unit_id!r} footprint must pin exactly one page payload, "
@@ -337,7 +337,7 @@ def render_app_ui_page_schema_unit(
             f"page {page.node_id!r} is not renderer-input complete; missing "
             f"{missing or ['sections']}"
         )
-    declaratives = []
+    declaratives: list[AppPageSection] = []
     for entry in page.sections:
         if entry.section_node_id not in footprint:
             raise MaterializationError(

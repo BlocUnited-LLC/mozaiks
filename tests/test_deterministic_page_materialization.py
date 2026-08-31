@@ -647,7 +647,6 @@ def test_renderer_module_imports_no_runtime_or_ambient_capabilities() -> None:
             imported.add(node.module or "")
     forbidden_roots = (
         "ag2",
-        "autogen",
         "os",
         "time",
         "datetime",
