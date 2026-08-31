@@ -209,6 +209,107 @@ def test_malformed_declared_runtime_section_fails_instead_of_becoming_absent() -
         )
 
 
+def test_pricing_catalog_runtime_state_cannot_enter_semantic_closure() -> None:
+    page = {
+        "schema_version": "mozaiks.app_page.v1",
+        "name": "pricing",
+        "route": "/pricing",
+        "title": "Pricing",
+        "page_type": "landing",
+        "layout": "full-width",
+        "sections": [
+            {
+                "id": "catalog",
+                "primitive": "PricingCatalog",
+                "config": {
+                    "plans": [
+                        {
+                            "plan_id": "pro",
+                            "label": "Pro",
+                            "managed_ai": {"display": "100K AI tokens"},
+                            "usage_limits": [
+                                {
+                                    "label": "AI tokens",
+                                    "monthly_limit_display": "100K/month",
+                                }
+                            ],
+                            "pricing": {"display": "$29", "interval": "month"},
+                        }
+                    ],
+                    "groups": [
+                        {
+                            "group_id": "platform",
+                            "label": "Platform",
+                            "kind": "subscription",
+                            "plan_ids": ["pro"],
+                        }
+                    ],
+                    "add_ons": [
+                        {
+                            "add_on_id": "priority_review",
+                            "label": "Priority review",
+                            "price": {"display": "$25", "interval": "one_time"},
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    result = project_semantic_graph(
+        {"pages": [page]},
+        graph_id="pricing-closure",
+        version=1,
+        scope=_corpus_graph()[0].scope,
+        taxonomy_registry=_pinned_registry(),
+    )
+    section = next(
+        payload for payload in result.payloads if payload.payload_kind.value == "section"
+    )
+    node = next(node for node in result.graph.nodes if node.node_id == section.node_id)
+    assert node.payload_ref.content_digest == section.payload_digest
+    plan = derive_compilation_plan(
+        graph=result.graph,
+        payloads=result.payloads,
+        registry=_registry(),
+    )
+    page_unit = next(unit for unit in plan.units if unit.family_kind == "app_ui_page_schema")
+    assert any(source.node_id == section.node_id for source in page_unit.sources)
+
+    attacked = page.copy()
+    attacked["sections"] = [
+        {
+            **page["sections"][0],
+            "config": {
+                "plans": [
+                    {
+                        "plan_id": "pro",
+                        "label": "Pro",
+                        "managed_ai": {
+                            "display": "100K AI tokens",
+                            "agent_id": "live-agent",
+                            "channel": {
+                                "websocket": {"connected": True},
+                                "wal": [{"envelope_id": "env-1"}],
+                            },
+                            "model": {"identifier": "live-model"},
+                            "checkpoint_path": "/tmp/ag2.chk",
+                            "passport": {"tenant_id": "foreign-tenant"},
+                        },
+                    }
+                ]
+            },
+        }
+    ]
+    with pytest.raises(ProjectionError, match="AppPageSection contract"):
+        project_semantic_graph(
+            {"pages": [attacked]},
+            graph_id="pricing-smuggling",
+            version=1,
+            scope=result.graph.scope,
+            taxonomy_registry=_pinned_registry(),
+        )
+
+
 def test_page_payload_rejects_custom_route_only_page_type_and_unsafe_route() -> None:
     _graph, payloads = _corpus_graph()
     page = next(payload for payload in payloads if payload.payload_kind.value == "page")

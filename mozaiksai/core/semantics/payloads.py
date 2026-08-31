@@ -6,7 +6,8 @@ graph-v2 node pins its payload by full identity through
 content a node's graph identity cannot — canonical artifact identifiers,
 titles, intent text, typed field shapes, prices, ordered entries, and selected
 normative runtime declaratives.  Runtime declaratives retain their existing
-typed model validation; payloads add no generic metadata escape hatch.
+typed model validation; authoritative payload closure never admits an untyped
+``dict[str, Any]`` escape hatch.
 
 Ordering rule: order-bearing collections (page sections, section entries) use
 explicit dense ``position`` integers, so canonical sorting cannot destroy
