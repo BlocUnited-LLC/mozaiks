@@ -514,7 +514,7 @@ jobs:
       - name: Build and smoke-run representative generated app
         env:
           MOZAIKS_RUN_GENERATED_APP_DOCKER_SMOKE: '1'
-        run: pytest -q --reruns 0 tests/test_generated_app_container_smoke.py
+        run: pytest -q --no-cov --reruns 0 tests/test_generated_app_container_smoke.py
 
       - name: Setup Helm
         uses: azure/setup-helm@v5
