@@ -48,6 +48,9 @@ def test_deploy_target_spec_validates_generic_container() -> None:
     assert errors == []
     assert spec["target_kind"] == "container"
     assert spec["provider_profile"]["name"] == "generic"
+    assert spec["runtime"]["start_command"] == (
+        "mozaiks serve . --host platform --listen 0.0.0.0 --port 8000"
+    )
     assert spec["ci_secret_requirements"]["required"][0]["name"] == "REGISTRY_PUSH_TOKEN"
     assert spec["readiness_requirements"]["checks"][0]["id"] == "runtime_environment"
     for path in ENV_EXAMPLE_PATHS:
