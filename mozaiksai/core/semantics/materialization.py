@@ -325,14 +325,27 @@ def render_app_ui_page_schema_unit(
             f"unit {unit.unit_id!r} instance identity {unit.placeholder_values!r} does "
             f"not match page canonical id {page.page_id!r}"
         )
-    required = {
-        "route": page.route,
-        "title": page.title,
-        "page_type": page.page_type,
-        "layout": page.layout,
-    }
-    missing = sorted(name for name, value in required.items() if not value)
-    if missing or not page.sections:
+    route = page.route
+    title = page.title
+    page_type = page.page_type
+    layout = page.layout
+    if (
+        route is None
+        or title is None
+        or page_type is None
+        or layout is None
+        or not page.sections
+    ):
+        missing = sorted(
+            name
+            for name, value in (
+                ("route", route),
+                ("title", title),
+                ("page_type", page_type),
+                ("layout", layout),
+            )
+            if value is None
+        )
         raise MaterializationError(
             f"page {page.node_id!r} is not renderer-input complete; missing "
             f"{missing or ['sections']}"
@@ -354,10 +367,10 @@ def render_app_ui_page_schema_unit(
     schema = AppPageSchema(
         schema_version="mozaiks.app_page.v1",
         name=page.page_id,
-        route=page.route,
-        title=page.title,
-        page_type=page.page_type,
-        layout=page.layout,
+        route=route,
+        title=title,
+        page_type=page_type,
+        layout=layout,
         shell_mode=page.shell_mode,
         roles=None if page.roles is None else list(page.roles),
         navigation=page.navigation,

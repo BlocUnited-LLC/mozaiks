@@ -471,6 +471,43 @@ def test_binding_pinned_to_a_different_graph_is_rejected() -> None:
         )
 
 
+def test_renderer_rejects_page_missing_required_fields() -> None:
+    """The runtime completeness guard fails closed on absent required facts."""
+    from mozaiksai.core.semantics.compilation_plan import FamilyInstancePlan, PlanSource
+    from mozaiksai.core.semantics.payloads import PagePayload, build_semantic_payload
+
+    page = build_semantic_payload(
+        PagePayload,
+        node_id="mozaiks.page.incomplete",
+        payload_version=1,
+        scope=_SCOPE,
+        page_id="incomplete",
+        route=None,
+        title="Incomplete",
+        intent=None,
+        page_type=None,
+        layout="full-width",
+        shell_mode=None,
+        roles=None,
+        navigation=None,
+        meta=None,
+    )
+    unit = FamilyInstancePlan(
+        unit_id="app_ui_page_schema/incomplete/aaaaaaaaaaaa",
+        family_kind=PAGE_SCHEMA_FAMILY,
+        family_identity_digest="a" * 64,
+        disposition=PlanDisposition.RENDER,
+        source_scope="declared",
+        placeholder_values=(("page_id", "incomplete"),),
+        sources=(PlanSource(node_id=page.node_id, payload_digest=page.payload_digest),),
+        materializer="page_schema_executor",
+    )
+    with pytest.raises(MaterializationError, match="not renderer-input complete"):
+        render_app_ui_page_schema_unit(
+            unit=unit, payload_by_node={page.node_id: page}
+        )
+
+
 def test_registry_identity_mismatch_is_rejected() -> None:
     result, plan = _build(_source())
     extended = build_app_layout_registry(())
