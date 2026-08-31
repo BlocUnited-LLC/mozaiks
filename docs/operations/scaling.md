@@ -14,7 +14,7 @@ How to scale Mozaiks horizontally to handle higher workflow concurrency and user
 
 All runtime instances share:
 - **MongoDB** — all session state, chat history, artifacts, audit logs
-- **Redis** (optional) — JWKS cache, app context cache, workflow queue
+- **Redis** (optional) — JWKS cache and app context cache
 - **Object store** (optional) — large artifact blobs (S3/MinIO)
 
 Each instance is stateless — any instance can serve any request.
@@ -26,24 +26,32 @@ must reconnect if instance A restarts. This is handled automatically by the chat
 
 ## Workflow Concurrency
 
-### Per-instance (default)
+### Explicit local mode
 
 ```bash
 MOZAIKS_MAX_PARALLEL_WORKFLOWS=4  # per-instance concurrency limit
+MOZAIKS_WORKFLOW_ADMISSION_MODE=local
 ```
 
-With 4 instances: up to 16 concurrent workflows globally (no coordination).
+Local mode is single-process and non-durable. Do not use it as a horizontal
+execution-safety boundary.
 
-### Global queue (recommended for production)
+### Durable admission (required for persisted/production hosts)
 
-Enable MongoDB-backed global queue:
+Persisted and production hosts resolve this mode automatically. It can also be
+selected explicitly:
 
 ```bash
-WORKFLOW_QUEUE_BACKEND=mongo
-WORKFLOW_QUEUE_MAX_CONCURRENCY=20  # global limit across all instances
+MOZAIKS_WORKFLOW_ADMISSION_MODE=required
 ```
 
-This ensures fair scheduling regardless of how many instances are running.
+MongoDB records immutable admission identity before mutable workflow execution,
+atomically rejects duplicate consumers, renews holder-scoped claims, and fails
+closed when the queue or its required indexes cannot be verified. The ingress
+instance claims its own item because WebSocket delivery remains instance-sticky;
+there is no autonomous cross-instance polling or orphan adoption in this slice.
+`MOZAIKS_MAX_PARALLEL_WORKFLOWS` remains a per-process resource throttle and is
+not the durable admission authority.
 
 ---
 

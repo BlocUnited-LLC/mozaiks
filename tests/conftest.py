@@ -79,8 +79,8 @@ def app_root() -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_chat_lock_state():
-    """Reset the chat execution lock's process-level state before each test.
+def _isolate_execution_authority_state(monkeypatch: pytest.MonkeyPatch):
+    """Reset process-global chat-lock and workflow-admission state per test.
 
     The lock module keeps process-global state (configured mode, held local
     locks, the lease registry). A test that runs host startup pins `required`
@@ -89,8 +89,19 @@ def _isolate_chat_lock_state():
     test. Entering each test with clean lock state keeps tests
     order-independent.
     """
+    from mozaiksai.core.runtime.execution_admission import reset_local_workflow_admission
     from mozaiksai.core.runtime.persistence.distributed_lock import reset_chat_lock_state
+    from mozaiksai.core.workflow.queue import reset_workflow_admission_state
 
     reset_chat_lock_state()
+    reset_workflow_admission_state()
+    reset_local_workflow_admission()
+    # Tests and embedded transports are explicitly single-process unless a
+    # focused admission test opts into required mode. This prevents a
+    # developer .env MONGO_URI from silently changing unrelated test meaning.
+    monkeypatch.setenv("MOZAIKS_WORKFLOW_ADMISSION_MODE", "local")
     yield
+    reset_chat_lock_state()
+    reset_workflow_admission_state()
+    reset_local_workflow_admission()
 

@@ -524,7 +524,7 @@ def _coerce_work_result(value: WorkResult | Mapping[str, Any]) -> WorkResult:
 
 
 def _workspace_id(item: QueueItem) -> str | None:
-    value = item.payload.get("workspace_id") if isinstance(item.payload, Mapping) else None
+    value = item.workspace_id
     text = str(value or "").strip()
     return text or None
 

@@ -3,9 +3,9 @@
 # DESCRIPTION: Durable global workflow queue with crash-safe leases, fencing,
 #              bounded retries, and dead-letter state.
 #
-#              Replaces per-instance concurrency limits with a globally fair
-#              scheduler. Workflow runs are enqueued and dequeued by workers
-#              on any instance, respecting the global concurrency limit.
+#              Production ingress uses targeted claims so the instance that
+#              owns the live transport also owns execution. The process-local
+#              semaphore remains a resource throttle, not admission authority.
 #
 # State Machine
 # -------------
@@ -22,9 +22,11 @@
 #
 # Delivery Guarantee
 # ------------------
-# Lease-based at-least-once processing with fenced completion.
+# Lease-based processing with holder-scoped completion. Automatic recovery is
+# allowed only before execution_started_at. An expired started claim is
+# dead-lettered rather than replayed without a side-effect idempotency proof.
 #
-# Each claim receives a unique ``claim_token`` (fencing token). ``complete()``
+# Each claim receives a unique holder token. ``complete()``
 # and ``fail()`` only succeed for the current claim_token holder.  A stale
 # worker whose lease expired cannot complete or fail the newer attempt.
 #
@@ -46,20 +48,20 @@
 # to enable TTL-based retention cleanup.  Active work (PENDING, CLAIMED,
 # RETRYABLE) has ``expires_at=None`` and is never deleted by the TTL sweeper.
 #
-# Backends:
-#   MongoWorkflowQueue  -- MongoDB collection (default, no extra infra)
-#   NoOpWorkflowQueue   -- preserves per-instance semaphore behavior (no durability)
+# Modes:
+#   required -- MongoDB is authoritative and failures close admission
+#   local    -- explicit single-process, non-durable execution boundary
 #
 # Configuration (env vars):
-#   WORKFLOW_QUEUE_BACKEND          -- "mongo" | "noop" (default: "noop")
-#   WORKFLOW_QUEUE_MAX_CONCURRENCY  -- global max concurrent workflows (default: 20)
+#   MOZAIKS_WORKFLOW_ADMISSION_MODE -- "required" | "local"
 #   WORKFLOW_QUEUE_ITEM_TTL_SECONDS -- max age of a queued item before it expires (default: 3600)
-#   WORKFLOW_QUEUE_POLL_INTERVAL    -- worker poll interval in seconds (default: 1.0)
 #   WORKFLOW_QUEUE_LEASE_SECONDS    -- claim lease duration (default: 300, bounds: [10, 3600])
 # ==============================================================================
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -67,14 +69,17 @@ from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
+
 from logs.logging_config import get_core_logger
+from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 
 logger = get_core_logger("workflow_queue")
 
-_BACKEND = os.getenv("WORKFLOW_QUEUE_BACKEND", "noop").strip().lower()
 _MAX_CONCURRENCY = int(os.getenv("WORKFLOW_QUEUE_MAX_CONCURRENCY", "20").strip() or "20")
 _ITEM_TTL = int(os.getenv("WORKFLOW_QUEUE_ITEM_TTL_SECONDS", "3600").strip() or "3600")
-_POLL_INTERVAL = float(os.getenv("WORKFLOW_QUEUE_POLL_INTERVAL", "1.0").strip() or "1.0")
 _DEFAULT_LEASE_SECONDS = int(
     (os.getenv("WORKFLOW_QUEUE_LEASE_SECONDS") or "300").strip() or "300"
 )
@@ -86,8 +91,41 @@ _DEFAULT_MAX_ATTEMPTS: int = 3
 _MIN_MAX_ATTEMPTS: int = 1
 _MAX_MAX_ATTEMPTS: int = 25
 
-_QUEUE_DB = os.getenv("MOZAIKS_APP_DATABASE_NAME", "mozaiks_apps")
-_QUEUE_COLLECTION = "workflow_queue"
+_QUEUE_DB = SYSTEM_DATABASE
+_QUEUE_COLLECTION = RuntimeCollections.WORKFLOW_QUEUE
+
+
+class QueueAuthorityUnavailableError(RuntimeError):
+    """Mongo admission authority could not prove a queue transition."""
+
+
+class QueueIdentityConflictError(RuntimeError):
+    """An admission id was replayed with different immutable identity."""
+
+
+def canonical_admission_id(
+    *,
+    tenant_id: str,
+    workspace_id: str,
+    app_id: str,
+    chat_id: str,
+    workflow_name: str,
+    run_id: str,
+    operation_id: str,
+) -> str:
+    """Return the immutable, payload-independent identity for one admission."""
+    fields = {
+        "v": 1,
+        "tenant_id": tenant_id,
+        "workspace_id": workspace_id,
+        "app_id": app_id,
+        "chat_id": chat_id,
+        "workflow_name": workflow_name,
+        "run_id": run_id,
+        "operation_id": operation_id,
+    }
+    encoded = json.dumps(fields, sort_keys=True, separators=(",", ":")).encode()
+    return "wqa_" + hashlib.sha256(encoded).hexdigest()
 
 
 class QueueItemStatus(StrEnum):
@@ -123,6 +161,10 @@ class QueueItem:
     app_id: str
     user_id: str | None = None
     tenant_id: str | None = None
+    workspace_id: str | None = None
+    run_id: str | None = None
+    operation_id: str | None = None
+    request_digest: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
     priority: int = 0                    # Higher = executed first
     item_id: str = field(default_factory=lambda: str(uuid4()))
@@ -142,6 +184,8 @@ class QueueItem:
     last_failed_at: str | None = None
     dead_lettered_at: str | None = None
     error_category: str | None = None
+    execution_started_at: str | None = None
+    completed_result: dict[str, Any] | None = None
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -151,6 +195,10 @@ class QueueItem:
             "app_id": self.app_id,
             "user_id": self.user_id,
             "tenant_id": self.tenant_id,
+            "workspace_id": self.workspace_id,
+            "run_id": self.run_id or self.chat_id,
+            "operation_id": self.operation_id or self.item_id,
+            "request_digest": self.request_digest,
             "payload": self.payload,
             "priority": self.priority,
             "enqueued_at": self.enqueued_at,
@@ -167,6 +215,8 @@ class QueueItem:
             "last_failed_at": self.last_failed_at,
             "dead_lettered_at": self.dead_lettered_at,
             "error_category": self.error_category,
+            "execution_started_at": self.execution_started_at,
+            "completed_result": self.completed_result,
         }
 
     @classmethod
@@ -198,6 +248,10 @@ class QueueItem:
             app_id=doc["app_id"],
             user_id=doc.get("user_id"),
             tenant_id=doc.get("tenant_id"),
+            workspace_id=doc.get("workspace_id"),
+            run_id=doc.get("run_id") or doc["chat_id"],
+            operation_id=doc.get("operation_id") or str(_id),
+            request_digest=doc.get("request_digest"),
             payload=doc.get("payload", {}),
             priority=int(doc.get("priority", 0)),
             enqueued_at=doc.get("enqueued_at", ""),
@@ -214,6 +268,8 @@ class QueueItem:
             last_failed_at=doc.get("last_failed_at"),
             dead_lettered_at=doc.get("dead_lettered_at"),
             error_category=doc.get("error_category"),
+            execution_started_at=doc.get("execution_started_at"),
+            completed_result=doc.get("completed_result"),
         )
 
 
@@ -340,7 +396,7 @@ class WorkflowQueue(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# No-op (existing per-instance semaphore behaviour -- default)
+# No-op (explicit local single-process behavior)
 # ---------------------------------------------------------------------------
 
 class NoOpWorkflowQueue:
@@ -428,7 +484,8 @@ class MongoWorkflowQueue:
 
     _instance_id: str = str(uuid4())
 
-    def __init__(self, *, _now_fn: Any | None = None) -> None:
+    def __init__(self, *, client: Any | None = None, _now_fn: Any | None = None) -> None:
+        self._client = client
         self._now_fn = _now_fn if _now_fn is not None else lambda: datetime.now(UTC)
 
     def _now(self) -> datetime:
@@ -436,14 +493,18 @@ class MongoWorkflowQueue:
 
     def _col(self, name: str = _QUEUE_COLLECTION) -> Any | None:
         try:
-            from mozaiksai.core.core_config import get_mongo_client
-
-            client = get_mongo_client()
+            client = self._client or get_mongo_client()
             if client is None:
                 return None
             return client[_QUEUE_DB][name]
         except Exception:
             return None
+
+    def _required_col(self) -> Any:
+        collection = self._col()
+        if collection is None:
+            raise QueueAuthorityUnavailableError("Mongo workflow queue collection unavailable")
+        return collection
 
     async def ensure_indexes(self) -> None:
         """Create required indexes.  Safe to call on every startup.
@@ -452,10 +513,13 @@ class MongoWorkflowQueue:
         DEAD_LETTER) where the field is non-null.  Active work has
         ``expires_at=None`` and is never touched by the TTL sweeper.
         """
-        col = self._col()
-        if col is None:
-            return
+        col = self._required_col()
         try:
+            await col.create_index(
+                [("tenant_id", 1), ("workspace_id", 1), ("app_id", 1), ("operation_id", 1)],
+                name="wq_scope_operation_idx",
+                background=True,
+            )
             # Primary eligibility index for claim_next.
             await col.create_index(
                 [("status", 1), ("priority", -1), ("enqueued_at", 1)],
@@ -481,8 +545,23 @@ class MongoWorkflowQueue:
                 name="wq_ttl_idx",
                 background=True,
             )
+            indexes = await col.list_indexes().to_list(length=None)
+            names = {str(spec.get("name")) for spec in indexes}
+            required = {
+                "wq_scope_operation_idx",
+                "wq_claim_idx",
+                "wq_lease_expiry_idx",
+                "wq_retry_idx",
+                "wq_ttl_idx",
+            }
+            if not required.issubset(names):
+                raise QueueAuthorityUnavailableError(
+                    f"workflow queue indexes not verified: {sorted(required - names)}"
+                )
         except Exception as exc:
-            logger.warning("WorkflowQueue index creation failed: %s", exc)
+            raise QueueAuthorityUnavailableError(
+                f"workflow queue index creation or verification failed: {exc}"
+            ) from exc
 
     async def enqueue(
         self,
@@ -493,19 +572,203 @@ class MongoWorkflowQueue:
     ) -> str:
         item.max_attempts = _validated_max_attempts(max_attempts)
         item.retry_delay_seconds = max(0, int(retry_delay_seconds))
-        col = self._col()
-        if col is None:
-            return item.item_id
+        col = self._required_col()
+        document = item.to_document()
+        immutable_fields = (
+            "_id",
+            "tenant_id",
+            "workspace_id",
+            "app_id",
+            "chat_id",
+            "workflow_name",
+            "run_id",
+            "operation_id",
+            "request_digest",
+            "user_id",
+        )
         try:
-            await col.insert_one(item.to_document())
+            await col.insert_one(document)
             logger.debug(
                 "QUEUE_ENQUEUED item_id=%s workflow=%s",
                 item.item_id,
                 item.workflow_name,
             )
+        except DuplicateKeyError:
+            existing = await col.find_one({"_id": item.item_id})
+            if not isinstance(existing, dict):
+                raise QueueAuthorityUnavailableError(
+                    "duplicate admission could not be read back"
+                ) from None
+            mismatched = [
+                name for name in immutable_fields if existing.get(name) != document.get(name)
+            ]
+            if mismatched:
+                raise QueueIdentityConflictError(
+                    f"admission identity conflict for {item.item_id}: {mismatched}"
+                ) from None
+        except (QueueAuthorityUnavailableError, QueueIdentityConflictError):
+            raise
         except Exception as exc:
-            logger.error("QUEUE_ENQUEUE_FAIL: %s", exc)
+            raise QueueAuthorityUnavailableError(f"workflow admission failed: {exc}") from exc
         return item.item_id
+
+    async def get(self, item_id: str) -> QueueItem | None:
+        """Read one durable admission, failing closed on authority errors."""
+        try:
+            doc = await self._required_col().find_one({"_id": item_id})
+        except QueueAuthorityUnavailableError:
+            raise
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(f"workflow admission read failed: {exc}") from exc
+        return QueueItem.from_document(doc) if isinstance(doc, dict) else None
+
+    async def claim_item(
+        self,
+        item_id: str,
+        worker_id: str,
+        *,
+        lease_seconds: int = _DEFAULT_LEASE_SECONDS,
+    ) -> ClaimResult:
+        """Atomically claim one ingress-owned admission.
+
+        Expired claims are reclaimable only before execution started. Once an
+        owner crossed the side-effect boundary, automatic replay is forbidden.
+        """
+        col = self._required_col()
+        now = self._now()
+        now_iso = now.isoformat()
+        token = str(uuid4())
+        lease_exp = (now + timedelta(seconds=_bounded_lease(lease_seconds))).isoformat()
+        query = {
+            "_id": item_id,
+            "$expr": {
+                "$lt": [
+                    {"$ifNull": ["$attempt_count", 0]},
+                    {"$ifNull": ["$max_attempts", _DEFAULT_MAX_ATTEMPTS]},
+                ]
+            },
+            "$or": [
+                {"status": QueueItemStatus.PENDING.value},
+                {
+                    "status": QueueItemStatus.RETRYABLE.value,
+                    "$or": [
+                        {"next_attempt_at": None},
+                        {"next_attempt_at": {"$lte": now_iso}},
+                    ],
+                },
+                {
+                    "status": QueueItemStatus.CLAIMED.value,
+                    "lease_expires_at": {"$lte": now_iso},
+                    "execution_started_at": None,
+                },
+            ],
+        }
+        try:
+            doc = await col.find_one_and_update(
+                query,
+                {
+                    "$set": {
+                        "status": QueueItemStatus.CLAIMED.value,
+                        "claimed_by": worker_id,
+                        "claim_token": token,
+                        "claimed_at": now_iso,
+                        "lease_expires_at": lease_exp,
+                    },
+                    "$inc": {"attempt_count": 1},
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(f"workflow claim failed: {exc}") from exc
+        if not isinstance(doc, dict):
+            return ClaimResult(claimed=False)
+        item = QueueItem.from_document(doc)
+        return ClaimResult(True, item, token, item.attempt_count)
+
+    async def mark_execution_started(self, item_id: str, *, claim_token: str) -> bool:
+        """Cross the no-retry side-effect boundary for the current holder."""
+        now_iso = self._now().isoformat()
+        try:
+            result = await self._required_col().update_one(
+                {
+                    "_id": item_id,
+                    "status": QueueItemStatus.CLAIMED.value,
+                    "claim_token": claim_token,
+                    "lease_expires_at": {"$gt": now_iso},
+                    "execution_started_at": None,
+                },
+                {"$set": {"execution_started_at": now_iso}},
+            )
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(
+                f"workflow side-effect boundary could not be recorded: {exc}"
+            ) from exc
+        return bool(result.modified_count == 1)
+
+    async def dead_letter_exhausted(self, item_id: str) -> bool:
+        """Terminally close an expired pre-start claim with no attempts left."""
+        now = self._now()
+        now_iso = now.isoformat()
+        retain_until = (now + timedelta(seconds=_ITEM_TTL)).isoformat()
+        try:
+            result = await self._required_col().update_one(
+                {
+                    "_id": item_id,
+                    "status": QueueItemStatus.CLAIMED.value,
+                    "lease_expires_at": {"$lte": now_iso},
+                    "$expr": {
+                        "$gte": [
+                            {"$ifNull": ["$attempt_count", 0]},
+                            {"$ifNull": ["$max_attempts", _DEFAULT_MAX_ATTEMPTS]},
+                        ]
+                    },
+                },
+                {
+                    "$set": {
+                        "status": QueueItemStatus.DEAD_LETTER.value,
+                        "dead_lettered_at": now_iso,
+                        "last_failed_at": now_iso,
+                        "error_category": "claim_attempts_exhausted",
+                        "next_attempt_at": None,
+                        "expires_at": retain_until,
+                    }
+                },
+            )
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(
+                f"exhausted workflow claim could not be dead-lettered: {exc}"
+            ) from exc
+        return bool(result.modified_count == 1)
+
+    async def dead_letter_expired_started(self, item_id: str) -> bool:
+        """Terminally refuse automatic replay after an expired started claim."""
+        now = self._now()
+        now_iso = now.isoformat()
+        retain_until = (now + timedelta(seconds=_ITEM_TTL)).isoformat()
+        try:
+            result = await self._required_col().update_one(
+                {
+                    "_id": item_id,
+                    "status": QueueItemStatus.CLAIMED.value,
+                    "lease_expires_at": {"$lte": now_iso},
+                    "execution_started_at": {"$ne": None},
+                },
+                {
+                    "$set": {
+                        "status": QueueItemStatus.DEAD_LETTER.value,
+                        "dead_lettered_at": now_iso,
+                        "last_failed_at": now_iso,
+                        "error_category": "expired_after_execution_started",
+                        "next_attempt_at": None,
+                        "expires_at": retain_until,
+                    }
+                },
+            )
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(
+                f"expired workflow claim could not be dead-lettered: {exc}"
+            ) from exc
+        return bool(result.modified_count == 1)
 
     async def claim_next(
         self,
@@ -518,13 +781,14 @@ class MongoWorkflowQueue:
         Eligible items are:
           - ``PENDING``
           - ``RETRYABLE`` with ``next_attempt_at <= now``
-          - ``CLAIMED`` with ``lease_expires_at <= now`` (crash recovery)
+          - pre-start ``CLAIMED`` with ``lease_expires_at <= now``
+
+        Every claim is also constrained by the item's finite attempt budget.
+        Authority failure is distinct from an empty or contended queue.
 
         Returns ``ClaimResult(claimed=True, ...)`` on success.
         """
-        col = self._col()
-        if col is None:
-            return ClaimResult(claimed=False)
+        col = self._required_col()
 
         now = self._now()
         now_iso = now.isoformat()
@@ -535,18 +799,28 @@ class MongoWorkflowQueue:
         try:
             doc = await col.find_one_and_update(
                 {
+                    "$expr": {
+                        "$lt": [
+                            {"$ifNull": ["$attempt_count", 0]},
+                            {"$ifNull": ["$max_attempts", _DEFAULT_MAX_ATTEMPTS]},
+                        ]
+                    },
                     "$or": [
                         # Normal pending items.
                         {"status": QueueItemStatus.PENDING.value},
                         # Retry-eligible items.
                         {
                             "status": QueueItemStatus.RETRYABLE.value,
-                            "next_attempt_at": {"$lte": now_iso},
+                            "$or": [
+                                {"next_attempt_at": None},
+                                {"next_attempt_at": {"$lte": now_iso}},
+                            ],
                         },
                         # Crash recovery: lease expired on a claimed item.
                         {
                             "status": QueueItemStatus.CLAIMED.value,
                             "lease_expires_at": {"$lte": now_iso},
+                            "execution_started_at": None,
                         },
                     ],
                 },
@@ -561,7 +835,7 @@ class MongoWorkflowQueue:
                     "$inc": {"attempt_count": 1},
                 },
                 sort=[("priority", -1), ("enqueued_at", 1)],
-                return_document=True,
+                return_document=ReturnDocument.AFTER,
             )
             if doc is None:
                 return ClaimResult(claimed=False)
@@ -579,23 +853,27 @@ class MongoWorkflowQueue:
                 attempt_count=item.attempt_count,
             )
         except Exception as exc:
-            logger.error("QUEUE_CLAIM_FAIL: %s", exc)
-            return ClaimResult(claimed=False)
+            raise QueueAuthorityUnavailableError(f"workflow claim failed: {exc}") from exc
 
-    async def complete(self, item_id: str, *, claim_token: str) -> bool:
+    async def complete(
+        self,
+        item_id: str,
+        *,
+        claim_token: str,
+        result: dict[str, Any] | None = None,
+    ) -> bool:
         """Mark a claimed item as completed.
 
         Only succeeds for the current ``claim_token`` holder.
         Sets ``expires_at`` to enable TTL-based retention cleanup.
         """
-        col = self._col()
-        if col is None:
-            return False
+        col = self._required_col()
         try:
             now = self._now()
             now_iso = now.isoformat()
             retain_until = (now + timedelta(seconds=_ITEM_TTL)).isoformat()
-            result = await col.update_one(
+            outcome = result
+            update_result = await col.update_one(
                 {
                     "_id": item_id,
                     "status": QueueItemStatus.CLAIMED.value,
@@ -606,13 +884,15 @@ class MongoWorkflowQueue:
                         "status": QueueItemStatus.COMPLETED.value,
                         "completed_at": now_iso,
                         "expires_at": retain_until,
+                        "completed_result": outcome,
                     },
                 },
             )
-            return bool(result.modified_count == 1)
+            return bool(update_result.modified_count == 1)
         except Exception as exc:
-            logger.error("QUEUE_COMPLETE_FAIL item_id=%s: %s", item_id, exc)
-            return False
+            raise QueueAuthorityUnavailableError(
+                f"workflow completion failed for {item_id}: {exc}"
+            ) from exc
 
     async def fail(
         self,
@@ -642,9 +922,7 @@ class MongoWorkflowQueue:
         to determine the new status; a fenced ``update_one`` performs the
         actual transition.
         """
-        col = self._col()
-        if col is None:
-            return None
+        col = self._required_col()
 
         now = self._now()
         now_iso = now.isoformat()
@@ -710,8 +988,9 @@ class MongoWorkflowQueue:
             )
             return new_status
         except Exception as exc:
-            logger.error("QUEUE_FAIL_FAIL item_id=%s: %s", item_id, exc)
-            return None
+            raise QueueAuthorityUnavailableError(
+                f"workflow failure transition failed for {item_id}: {exc}"
+            ) from exc
 
     async def dead_letter(
         self,
@@ -721,9 +1000,7 @@ class MongoWorkflowQueue:
         error_category: str | None = None,
     ) -> bool:
         """Terminally dead-letter a CLAIMED item using the fencing token."""
-        col = self._col()
-        if col is None:
-            return False
+        col = self._required_col()
 
         now = self._now()
         now_iso = now.isoformat()
@@ -748,8 +1025,9 @@ class MongoWorkflowQueue:
             )
             return bool(result.modified_count == 1)
         except Exception as exc:
-            logger.error("QUEUE_DEAD_LETTER_FAIL item_id=%s: %s", item_id, exc)
-            return False
+            raise QueueAuthorityUnavailableError(
+                f"workflow dead-letter transition failed for {item_id}: {exc}"
+            ) from exc
 
     async def renew_lease(
         self,
@@ -763,9 +1041,7 @@ class MongoWorkflowQueue:
         Only succeeds if the lease has not yet expired and ``claim_token``
         matches.
         """
-        col = self._col()
-        if col is None:
-            return False
+        col = self._required_col()
 
         now = self._now()
         now_iso = now.isoformat()
@@ -784,34 +1060,35 @@ class MongoWorkflowQueue:
             )
             return bool(result.modified_count == 1)
         except Exception as exc:
-            logger.error("QUEUE_RENEW_FAIL item_id=%s: %s", item_id, exc)
-            return False
+            raise QueueAuthorityUnavailableError(
+                f"workflow claim renewal failed for {item_id}: {exc}"
+            ) from exc
 
     async def active_count(self) -> int:
-        col = self._col()
-        if col is None:
-            return 0
+        col = self._required_col()
         try:
             return int(
                 await col.count_documents(
                     {"status": QueueItemStatus.CLAIMED.value}
                 )
             )
-        except Exception:
-            return 0
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(
+                f"workflow active-count read failed: {exc}"
+            ) from exc
 
     async def queue_depth(self) -> int:
-        col = self._col()
-        if col is None:
-            return 0
+        col = self._required_col()
         try:
             return int(
                 await col.count_documents(
                     {"status": QueueItemStatus.PENDING.value}
                 )
             )
-        except Exception:
-            return 0
+        except Exception as exc:
+            raise QueueAuthorityUnavailableError(
+                f"workflow queue-depth read failed: {exc}"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -821,17 +1098,70 @@ class MongoWorkflowQueue:
 _queue: WorkflowQueue | None = None
 
 
+class WorkflowAdmissionMode(StrEnum):
+    REQUIRED = "required"
+    LOCAL = "local"
+
+
+_configured_admission_mode: WorkflowAdmissionMode | None = None
+
+
+def configure_workflow_admission(
+    mode: WorkflowAdmissionMode | str | None = None,
+    *,
+    client: Any | None = None,
+) -> WorkflowAdmissionMode:
+    """Pin durable admission for persisted/production hosts and local otherwise."""
+    global _configured_admission_mode, _queue
+    raw = str(mode or os.getenv("MOZAIKS_WORKFLOW_ADMISSION_MODE") or "").strip().lower()
+    if raw:
+        resolved = WorkflowAdmissionMode(raw)
+    else:
+        from mozaiksai.core.runtime.persistence.startup_policy import (
+            database_persistence_is_enabled,
+            get_database_startup_policy,
+        )
+
+        resolved = (
+            WorkflowAdmissionMode.REQUIRED
+            if database_persistence_is_enabled(get_database_startup_policy())
+            else WorkflowAdmissionMode.LOCAL
+        )
+    _configured_admission_mode = resolved
+    _queue = (
+        MongoWorkflowQueue(client=client)
+        if resolved is WorkflowAdmissionMode.REQUIRED
+        else NoOpWorkflowQueue()
+    )
+    logger.info("Workflow admission mode configured: %s", resolved)
+    return resolved
+
+
+def get_workflow_admission_mode() -> WorkflowAdmissionMode:
+    if _configured_admission_mode is not None:
+        return _configured_admission_mode
+    raw = (os.getenv("MOZAIKS_WORKFLOW_ADMISSION_MODE") or "").strip().lower()
+    return WorkflowAdmissionMode(raw) if raw else WorkflowAdmissionMode.LOCAL
+
+
+def reset_workflow_admission_state() -> None:
+    """Test hook for the configured queue and local admission registry."""
+    global _configured_admission_mode, _queue
+    _configured_admission_mode = None
+    _queue = None
+
+
 def get_workflow_queue() -> WorkflowQueue:
     """Return the configured global workflow queue (process-wide singleton)."""
     global _queue
     if _queue is None:
-        if _BACKEND == "mongo":
+        if get_workflow_admission_mode() is WorkflowAdmissionMode.REQUIRED:
             _queue = MongoWorkflowQueue()
         else:
             _queue = NoOpWorkflowQueue()
         logger.info(
-            "WorkflowQueue backend: %s (max_concurrency=%d)",
-            _BACKEND,
+            "Workflow admission mode: %s (local_max_concurrency=%d)",
+            get_workflow_admission_mode(),
             _MAX_CONCURRENCY,
         )
     return _queue
@@ -844,7 +1174,14 @@ __all__ = [
     "QueueItem",
     "QueueItemStatus",
     "WorkflowQueue",
+    "WorkflowAdmissionMode",
+    "QueueAuthorityUnavailableError",
+    "QueueIdentityConflictError",
+    "canonical_admission_id",
+    "configure_workflow_admission",
     "get_workflow_queue",
+    "get_workflow_admission_mode",
+    "reset_workflow_admission_state",
     "_DEFAULT_MAX_ATTEMPTS",
     "_MIN_MAX_ATTEMPTS",
     "_MAX_MAX_ATTEMPTS",

@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -223,6 +224,99 @@ class WorkflowBridgeMixin:
         return updated
 
     async def handle_user_input_from_api(
+        self,
+        chat_id: str,
+        user_id: str | None,
+        workflow_name: str,
+        message: str | None,
+        app_id: str,
+        initial_agent_name_override: str | None = None,
+        *,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+        operation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Admit one immutable execution turn before any mutable run work."""
+        from mozaiksai.core.runtime.execution_admission import (
+            WorkflowAdmissionBusyError,
+            WorkflowAdmissionDeadLetterError,
+            WorkflowAdmissionExpiredError,
+            WorkflowAdmissionRejectedError,
+            WorkflowAdmissionRequest,
+            WorkflowClaimLostError,
+            execute_with_workflow_admission,
+        )
+        from mozaiksai.core.workflow.queue import (
+            QueueAuthorityUnavailableError,
+            QueueIdentityConflictError,
+        )
+
+        get_conn_meta = getattr(self, "_get_conn_meta", None)
+        conn = get_conn_meta(chat_id) if callable(get_conn_meta) else {}
+        trusted_tenant = str(tenant_id or conn.get("tenant_id") or app_id)
+        trusted_workspace = str(workspace_id or conn.get("workspace_id") or app_id)
+        resolved_operation = str(operation_id or "").strip()
+        if not resolved_operation:
+            pm = self._get_or_create_persistence_manager()
+            get_version = getattr(pm, "get_session_version", None)
+            version = await get_version(chat_id, app_id) if callable(get_version) else 0
+            message_digest = hashlib.sha256(str(message or "").encode()).hexdigest()
+            resolved_operation = (
+                f"turn:{int(version or 0)}:{message_digest}:"
+                f"{str(initial_agent_name_override or '')}"
+            )
+
+        request = WorkflowAdmissionRequest(
+            tenant_id=trusted_tenant,
+            workspace_id=trusted_workspace,
+            app_id=app_id,
+            chat_id=chat_id,
+            workflow_name=workflow_name,
+            run_id=chat_id,
+            operation_id=resolved_operation,
+            request_digest=hashlib.sha256(
+                (
+                    f"message={str(message or '')}\n"
+                    f"initial_agent={str(initial_agent_name_override or '')}"
+                ).encode()
+            ).hexdigest(),
+            user_id=user_id,
+        )
+
+        async def _execute() -> dict[str, Any]:
+            return await self._handle_user_input_after_admission(
+                chat_id=chat_id,
+                user_id=user_id,
+                workflow_name=workflow_name,
+                message=message,
+                app_id=app_id,
+                initial_agent_name_override=initial_agent_name_override,
+            )
+
+        try:
+            return await execute_with_workflow_admission(request, _execute)
+        except WorkflowAdmissionBusyError:
+            code, route, status = "WORKFLOW_QUEUE_BUSY", "queue_busy", "busy"
+            detail = "This execution is already admitted elsewhere."
+        except QueueAuthorityUnavailableError:
+            code, route, status = "WORKFLOW_QUEUE_UNAVAILABLE", "queue_unavailable", "error"
+            detail = "Workflow admission authority is unavailable."
+        except (WorkflowAdmissionRejectedError, QueueIdentityConflictError):
+            code, route, status = "WORKFLOW_QUEUE_REJECTED", "queue_rejected", "error"
+            detail = "This execution admission cannot be replayed."
+        except WorkflowAdmissionExpiredError:
+            code, route, status = "WORKFLOW_QUEUE_EXPIRED", "queue_expired", "error"
+            detail = "A prior execution claim expired after execution started."
+        except WorkflowAdmissionDeadLetterError:
+            code, route, status = "WORKFLOW_QUEUE_DEAD_LETTER", "queue_dead_letter", "error"
+            detail = "This execution admission is dead-lettered."
+        except WorkflowClaimLostError:
+            code, route, status = "WORKFLOW_QUEUE_CLAIM_LOST", "queue_claim_lost", "error"
+            detail = "Workflow execution ownership was lost."
+        await self.send_error(error_message=detail, error_code=code, chat_id=chat_id)
+        return {"status": status, "chat_id": chat_id, "message": detail, "route": route}
+
+    async def _handle_user_input_after_admission(
         self,
         chat_id: str,
         user_id: str | None,

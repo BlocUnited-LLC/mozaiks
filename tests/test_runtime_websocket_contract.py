@@ -275,6 +275,8 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
             "suppress_history_replay": False,
+            "tenant_id": "app_1",
+            "workspace_id": "app_1",
         }
     ]
     assert harness.added_workflows == [
@@ -476,6 +478,9 @@ async def test_runtime_websocket_endpoint_auto_starts_empty_agent_driven_chat(mo
             "workflow_name": "AgentGenerator",
             "message": None,
             "app_id": "app_1",
+            "tenant_id": "app_1",
+            "workspace_id": "app_1",
+            "operation_id": "start:chat_agent_1",
         }
     ]
     assert harness.transport.connections["chat_agent_1"]["autostarted"] is True
@@ -579,6 +584,8 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
             "suppress_history_replay": False,
+            "tenant_id": "app_1",
+            "workspace_id": "app_1",
         }
     ]
     assert harness.transport.ui_events == [
@@ -661,6 +668,8 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
             "suppress_history_replay": False,
+            "tenant_id": "app_1",
+            "workspace_id": "app_1",
         }
     ]
     assert harness.transport.ui_events == [
@@ -769,6 +778,8 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
             "suppress_history_replay": False,
+            "tenant_id": "app_1",
+            "workspace_id": "app_1",
         }
     ]
     assert harness.transport.ui_events == [
@@ -863,6 +874,8 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_with_r
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
             "token_exp": 0,
             "suppress_history_replay": False,
+            "tenant_id": "app_1",
+            "workspace_id": "app_1",
         }
     ]
     assert harness.transport.ui_events[0][0]["workflow_name"] == "ValueEngine"

@@ -52,9 +52,19 @@ class _FakeMongoAdmin:
         return {"ok": 1}
 
 
+class _FakeIndexCursor:
+    def __init__(self, names: set[str]) -> None:
+        self.names = names
+
+    async def to_list(self, *, length: int | None = None) -> list[dict[str, str]]:
+        del length
+        return [{"name": name} for name in sorted(self.names)]
+
+
 class _FakeMongoClient:
     def __init__(self) -> None:
         self.admin = _FakeMongoAdmin()
+        self.index_names: set[str] = {"_id_"}
 
     def __getitem__(self, _name: str) -> _FakeMongoClient:
         return self
@@ -64,6 +74,13 @@ class _FakeMongoClient:
 
     async def command(self, *_args: Any, **_kwargs: Any) -> dict[str, int]:
         return {"ok": 1}
+
+    async def create_index(self, *_args: Any, name: str, **_kwargs: Any) -> str:
+        self.index_names.add(name)
+        return name
+
+    def list_indexes(self) -> _FakeIndexCursor:
+        return _FakeIndexCursor(self.index_names)
 
     def close(self) -> None:
         return None

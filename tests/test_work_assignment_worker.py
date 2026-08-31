@@ -231,7 +231,6 @@ def _outside_result(assignment: WorkAssignment) -> WorkResult:
 def _item(assignment: WorkAssignment, **payload_overrides: Any) -> QueueItem:
     payload = {
         WORK_ASSIGNMENT_PAYLOAD_KEY: assignment.model_dump(mode="json"),
-        "workspace_id": "workspace-1",
     }
     payload.update(payload_overrides)
     return QueueItem(
@@ -240,6 +239,7 @@ def _item(assignment: WorkAssignment, **payload_overrides: Any) -> QueueItem:
         app_id="app-1",
         user_id="user-1",
         tenant_id="tenant-1",
+        workspace_id="workspace-1",
         payload=payload,
     )
 

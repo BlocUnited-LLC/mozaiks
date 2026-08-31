@@ -14,6 +14,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Durable workflow execution admission is now wired (issue #426, sub-slice B)**:
+  persisted and production hosts record immutable tenant/workspace/app/chat/
+  workflow/run/operation identity in MongoDB before mutable session, WAL, AG2,
+  model, or tool execution. Exact replay returns the recorded outcome instead
+  of starting a second run; claims renew and complete only for their current
+  holder, authority and index failures fail closed, and bounded retry/dead-letter
+  states stay distinct. Expired claims may be recovered only before execution
+  starts; once side effects are possible, replay dead-letters rather than
+  re-spending tokens without an idempotency proof. Explicit `local` mode remains
+  available as a clearly non-durable single-process boundary. The existing chat
+  execution lease remains the per-chat mutation authority after admission.
+
 - **Distributed same-chat exclusion is now enforced (issue #426, sub-slice A)**:
   the MongoDB chat lock at
   `mozaiksai/core/runtime/persistence/distributed_lock.py` — previously dead

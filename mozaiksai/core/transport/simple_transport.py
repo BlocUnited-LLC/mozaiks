@@ -1552,6 +1552,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         ws_id: int | None = None,
         token_exp: int = 0,
         suppress_history_replay: bool = False,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
         if self._owner_loop is None:
@@ -1615,6 +1617,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "user_id": user_id,
             "workflow_name": workflow_name,
             "app_id": app_id,
+            "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
             "active": True,
             "ws_id": ws_id,  # Track WebSocket ID for session switching
             "token_exp": token_exp,  # JWT expiry (unix epoch); 0 means no expiry check

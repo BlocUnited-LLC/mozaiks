@@ -66,6 +66,12 @@ from mozaiksai.core.transport.request_middleware import (
 from mozaiksai.core.transport.security_headers import SecurityHeadersMiddleware
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.idempotency import ensure_idempotency_indexes
+from mozaiksai.core.workflow.queue import (
+    MongoWorkflowQueue,
+    WorkflowAdmissionMode,
+    configure_workflow_admission,
+    get_workflow_queue,
+)
 from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_tools,
     get_workflow_transport,
@@ -358,6 +364,19 @@ async def _runtime_startup() -> None:
     )
 
     # Ensure enterprise infrastructure indexes exist.
+    admission_mode = configure_workflow_admission(client=mongo_client)
+    admission_queue = get_workflow_queue()
+    admission_ready = (
+        admission_mode is WorkflowAdmissionMode.LOCAL
+        or isinstance(admission_queue, MongoWorkflowQueue)
+    )
+    if admission_mode is WorkflowAdmissionMode.REQUIRED:
+        if not isinstance(admission_queue, MongoWorkflowQueue):
+            raise RuntimeError("required workflow admission is not Mongo-backed")
+        await admission_queue.ensure_indexes()
+    app.state.workflow_admission_ready = admission_ready
+    app.state.workflow_admission_mode = admission_mode.value
+
     await asyncio.gather(
         ensure_lock_indexes(),
         ensure_idempotency_indexes(),
@@ -460,6 +479,18 @@ async def health_readiness(request: Request):
         degraded = True
     else:
         checks["transport"] = "ok"
+
+    admission_mode = getattr(request.app.state, "workflow_admission_mode", "local")
+    admission_ready = getattr(
+        request.app.state,
+        "workflow_admission_ready",
+        admission_mode == WorkflowAdmissionMode.LOCAL.value,
+    )
+    if not admission_ready:
+        checks["workflow_admission"] = f"error:{admission_mode}"
+        degraded = True
+    else:
+        checks["workflow_admission"] = f"ok:{admission_mode}"
 
     # Platform startup degradation — set when module loading fails unexpectedly.
     startup_degraded = getattr(request.app.state, "startup_degraded", False)
@@ -1156,6 +1187,9 @@ async def websocket_endpoint(
                         workflow_name=resolved_workflow_name,
                         message=None,
                         app_id=app_id,
+                        tenant_id=str(getattr(ws_user, "tenant_id", None) or app_id),
+                        workspace_id=str(getattr(ws_user, "workspace_id", None) or app_id),
+                        operation_id=f"start:{resolved_chat_id}",
                     )
                 )
                 simple_transport._background_tasks[resolved_chat_id] = _agent_start_task
@@ -1189,6 +1223,8 @@ async def websocket_endpoint(
             ws_id=ws_id,
             token_exp=_token_exp,
             suppress_history_replay=suppress_history_replay,
+            tenant_id=str(getattr(ws_user, "tenant_id", None) or app_id),
+            workspace_id=str(getattr(ws_user, "workspace_id", None) or app_id),
         )
     except Exception as ownership_err:
         wf_logger.warning("WS_CHAT_PREP_FAILED: %s", ownership_err)
@@ -1247,6 +1283,9 @@ async def handle_user_input(
         workflow_name=workflow_name,
         message=message,
         app_id=app_id,
+        tenant_id=str(principal.tenant_id or app_id),
+        workspace_id=str(principal.workspace_id or app_id),
+        operation_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return {"status": "Message received and is being processed.", "result": result}
 

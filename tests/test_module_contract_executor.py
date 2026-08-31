@@ -72,7 +72,8 @@ def _item(assignment: WorkAssignment) -> QueueItem:
         app_id="app-1",
         user_id="user-1",
         tenant_id="tenant-1",
-        payload={WORK_ASSIGNMENT_PAYLOAD_KEY: assignment.model_dump(mode="json"), "workspace_id": "workspace-1"},
+        workspace_id="workspace-1",
+        payload={WORK_ASSIGNMENT_PAYLOAD_KEY: assignment.model_dump(mode="json")},
     )
 
 

@@ -3786,6 +3786,8 @@ async def websocket_endpoint(
             app_id=app_id,
             ws_id=ws_id,
             suppress_history_replay=suppress_history_replay,
+            tenant_id=str(getattr(ws_user, "tenant_id", None) or app_id),
+            workspace_id=str(getattr(ws_user, "workspace_id", None) or app_id),
         )
     finally:
         session_registry.remove_session(ws_id)
