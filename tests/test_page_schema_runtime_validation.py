@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
@@ -11,7 +11,10 @@ from fastapi.testclient import TestClient
 
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.page_schema import (
+    _TOP_LEVEL_CONFIG_MODELS,
     PAGE_SCHEMA_VERSION,
+    AppPageChildSection,
+    AppPageSection,
     PageSchemaValidationError,
     load_and_validate_page_schema,
     validate_page_schema,
@@ -98,6 +101,161 @@ def test_malformed_primitive_configuration_fails() -> None:
         validate_page_schema(page)
 
     assert any("missing" in diagnostic.code for diagnostic in exc_info.value.diagnostics)
+
+
+def _pricing_catalog_config() -> dict[str, Any]:
+    return {
+        "plans": [
+            {
+                "plan_id": "pro",
+                "label": "Pro",
+                "description": "For growing teams.",
+                "price_display": "$29",
+                "cta_label": "Choose Pro",
+                "highlights": ["Unlimited projects"],
+                "managed_ai": {"display": "100K AI tokens"},
+                "usage_limits": [
+                    {"label": "AI tokens", "monthly_limit_display": "100K/month"}
+                ],
+                "pricing": {"display": "$29", "interval": "month"},
+                "is_default": False,
+            }
+        ],
+        "groups": [
+            {
+                "group_id": "platform",
+                "label": "Platform",
+                "description": "Core plans.",
+                "kind": "subscription",
+                "plan_ids": ["pro"],
+                "capability_groups": ["platform"],
+                "add_on_ids": ["priority_review"],
+            }
+        ],
+        "add_ons": [
+            {
+                "id": "priority",
+                "add_on_id": "priority_review",
+                "label": "Priority review",
+                "description": "Faster review.",
+                "price_display": "$25",
+                "price": {"display": "$25", "interval": "one_time"},
+                "cta_label": "Add review",
+                "highlights": ["One-time purchase"],
+            }
+        ],
+    }
+
+
+def test_pricing_catalog_inline_entries_are_closed_and_preserve_valid_shapes() -> None:
+    page = _valid_page(
+        sections=[
+            {
+                "id": "pricing",
+                "primitive": "PricingCatalog",
+                "config": _pricing_catalog_config(),
+            }
+        ]
+    )
+
+    validated = validate_page_schema(page)
+
+    assert validated.sections[0].config == _pricing_catalog_config()
+    for value in ([], None):
+        config = {"plans": value, "groups": value, "add_ons": value}
+        validated = validate_page_schema(
+            _valid_page(
+                sections=[
+                    {"id": "pricing", "primitive": "PricingCatalog", "config": config}
+                ]
+            )
+        )
+        expected = config if value == [] else {}
+        assert validated.sections[0].config == expected
+
+
+@pytest.mark.parametrize(
+    "malformed_config",
+    [
+        {"plans": [{"plan_id": "pro", "label": "Pro", "agent_id": "live-agent"}]},
+        {
+            "plans": [
+                {
+                    "plan_id": "pro",
+                    "label": "Pro",
+                    "managed_ai": {
+                        "display": "100K",
+                        "channel": {"websocket": {"connected": True}},
+                    },
+                }
+            ]
+        },
+        {
+            "groups": [
+                {
+                    "group_id": "platform",
+                    "label": "Platform",
+                    "checkpoint": {"path": "/tmp/runtime.chk"},
+                }
+            ]
+        },
+        {
+            "add_ons": [
+                {
+                    "label": "Priority",
+                    "price": {"display": "$25", "envelope": {"wal_id": "wal-1"}},
+                }
+            ]
+        },
+        {"plans": [{"plan_id": "pro", "label": "Pro", "price_display": {"usd": 29}}]},
+    ],
+)
+def test_pricing_catalog_rejects_open_runtime_state(malformed_config: dict[str, Any]) -> None:
+    with pytest.raises(PageSchemaValidationError):
+        validate_page_schema(
+            _valid_page(
+                sections=[
+                    {
+                        "id": "pricing",
+                        "primitive": "PricingCatalog",
+                        "config": malformed_config,
+                    }
+                ]
+            )
+        )
+
+
+def test_primitive_config_model_graph_has_no_terminal_any_escape_hatch() -> None:
+    models = {AppPageSection, AppPageChildSection, *_TOP_LEVEL_CONFIG_MODELS.values()}
+    visited: set[type] = set()
+    any_fields: set[tuple[str, str]] = set()
+
+    def contains_any(annotation: Any) -> bool:
+        return annotation is Any or any(contains_any(arg) for arg in get_args(annotation))
+
+    def visit(model: type) -> None:
+        if model in visited or not hasattr(model, "model_fields"):
+            return
+        visited.add(model)
+        for name, field in model.model_fields.items():
+            if contains_any(field.annotation):
+                any_fields.add((model.__name__, name))
+            visit_annotation(field.annotation)
+
+    def visit_annotation(annotation: Any) -> None:
+        candidate = getattr(annotation, "__origin__", None) or annotation
+        if isinstance(candidate, type) and hasattr(candidate, "model_fields"):
+            visit(candidate)
+        for argument in get_args(annotation):
+            visit_annotation(argument)
+
+    for model in models:
+        visit(model)
+
+    assert any_fields == {
+        ("AppPageSection", "config"),
+        ("AppPageChildSection", "config"),
+    }
 
 
 def test_unknown_runtime_field_fails() -> None:

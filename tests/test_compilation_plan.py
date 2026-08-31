@@ -47,7 +47,7 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-_GOLDEN_PLAN_DIGEST = "19a296c255fb07ba4f19ddb23ed847e4a626efcdef623239081e63c11df67562"
+_GOLDEN_PLAN_DIGEST = "cb402f62734fdfd559ef5589ddd9335ae749a5d1217eefcd48d86b7995ed6e9c"
 
 
 def _registry():
@@ -243,12 +243,11 @@ def test_case_fold_and_prefix_collisions_fail_closed() -> None:
 def test_dependency_cycles_fail_closed() -> None:
     plan = _plan()
     document = _document(plan)
-    with_deps = [u for u in document["units"] if u["depends_on_units"]]
-    dependent = with_deps[0]
-    dependency_id = dependent["depends_on_units"][0]
-    dependency = next(u for u in document["units"] if u["unit_id"] == dependency_id)
-    dependency["depends_on_units"] = [dependent["unit_id"]]
-    with pytest.raises(ValidationError, match="dependency cycle|plan_digest"):
+    first, second = document["units"][:2]
+    first["depends_on_units"] = [second["unit_id"]]
+    second["depends_on_units"] = [first["unit_id"]]
+    _redigest(document)
+    with pytest.raises(ValidationError, match="dependency cycle"):
         CompilationPlan.model_validate(document)
 
     document = _document(plan)
@@ -385,19 +384,20 @@ def test_digest_propagates_payload_to_graph_to_plan() -> None:
         if unit.source_scope is PlanSourceScope.GRAPH_WIDE
     }
     assert graph_wide and graph_wide <= affected
-    # ...reverse dependents of affected units are affected...
-    route_manifest = {
-        unit.unit_id
-        for unit in changed.units
-        if unit.family_kind == "app_ui_route_manifest"
-    }
-    assert route_manifest and route_manifest <= affected
+    # Unsupported route-manifest rendering stays a typed gap rather than a
+    # false dependent renderer unit.
+    assert not any(unit.family_kind == "app_ui_route_manifest" for unit in changed.units)
+    assert any(
+        gap.family_kind == "app_ui_route_manifest"
+        and gap.code.value == "renderer_input_undeclared"
+        for gap in changed.gaps
+    )
     # ...and unrelated declared units with unchanged footprints stay reusable.
     module_units = {
         unit.unit_id
         for unit in changed.units
-        if unit.family_kind == "module_manifest"
-        and unit.disposition is PlanDisposition.RENDER
+        if unit.family_kind == "module_backend_handler"
+        and unit.disposition is PlanDisposition.PRESERVE_UNOWNED
     }
     assert module_units and module_units <= set(closure.reusable)
     assert not closure.added and not closure.removed
@@ -573,6 +573,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
     only as deterministic registry declarations for a later binding slice.
     """
     from mozaiksai.core.semantics.compilation_plan import (
+        PlanEdgeSource,
         PlanGap,
         PlanOutput,
         PlanSource,
@@ -601,12 +602,20 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "placeholder_values",
             "outputs",
             "sources",
+            "edge_sources",
             "depends_on_units",
             "materializer",
             "base_plan_digest",
         },
         PlanOutput: {"path_scope", "path"},
         PlanSource: {"node_id", "payload_digest"},
+        PlanEdgeSource: {
+            "kind",
+            "source_node_id",
+            "target_node_id",
+            "discriminator",
+            "edge_identity",
+        },
         PlanGap: {"code", "family_kind", "path_template", "subject", "adr_slice"},
         RegenerationClosure: {
             "base_plan_digest",
@@ -672,6 +681,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         | allowed_fields[FamilyInstancePlan]
         | allowed_fields[PlanOutput]
         | allowed_fields[PlanSource]
+        | allowed_fields[PlanEdgeSource]
         | allowed_fields[PlanGap]
         | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}
         | {"source_scope", "code", "subject"}
@@ -971,6 +981,7 @@ def test_blocker5_reverse_dependency_and_graph_wide_propagation() -> None:
                 if graph_wide or source_digest is None
                 else [{"node_id": "mozaiks.node.x", "payload_digest": source_digest}]
             ),
+            "edge_sources": [],
             "depends_on_units": list(deps),
             "materializer": "app_generator",
             "base_plan_digest": None,

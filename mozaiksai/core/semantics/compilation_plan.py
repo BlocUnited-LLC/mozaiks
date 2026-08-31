@@ -19,9 +19,10 @@ Completeness rule: every registry family row is either disposed
 inapplicable) or carried as an explicit typed ``PlanGap`` with a closed reason
 code. Omission is never an implicit decision. Conditions that graph-v2
 semantics cannot decide, placeholders whose joint binding no typed graph
-relationship proves, and renderer resolution are typed gaps deferred to the
-implementation-binding slice — the plan never invents a semantic fact, and a
-validated unit can never carry an unresolved ``{placeholder}``.
+relationship proves, and incomplete renderer inputs are typed gaps. Renderer
+implementation/version selection remains in the separate implementation
+binding — the plan never invents a semantic fact, and a validated unit can
+never carry an unresolved ``{placeholder}``.
 
 Every authoritative field obeys a closed value domain (enums or canonical
 lowercase identifier grammar); the document carries no free-form prose, so
@@ -50,8 +51,13 @@ from typing import Any, Literal
 from pydantic import Field, field_validator, model_validator
 
 from mozaiksai.core.semantics.canonical import canonical_digest
-from mozaiksai.core.semantics.graph import SemanticGraphV2, SemanticNodeKind
+from mozaiksai.core.semantics.graph import (
+    SemanticEdgeKind,
+    SemanticGraphV2,
+    SemanticNodeKind,
+)
 from mozaiksai.core.semantics.payloads import (
+    PagePayload,
     SemanticPayloadBase,
     parse_semantic_payload,
     validate_semantic_graph_v2_payload_closure,
@@ -132,6 +138,7 @@ class RegistryFamilyRow(SemanticsModel):
     path_template: str
     materializer: str
     dependency_families: tuple[str, ...] = Field(default_factory=tuple)
+    semantic_input_kinds: tuple[str, ...] = Field(default_factory=tuple)
 
     @field_validator(
         "kind", "owner", "requirement", "multiplicity", "condition", "path_scope", "materializer"
@@ -152,6 +159,14 @@ class RegistryFamilyRow(SemanticsModel):
             sorted({_identifier(item, field_name="dependency_families") for item in value})
         )
 
+    @field_validator("semantic_input_kinds")
+    @classmethod
+    def _semantic_inputs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            return tuple(sorted({SemanticNodeKind(item).value for item in value}))
+        except ValueError as exc:
+            raise ValueError("semantic_input_kinds contains an unknown node kind") from exc
+
     @property
     def identity_payload(self) -> dict[str, Any]:
         return {
@@ -164,6 +179,7 @@ class RegistryFamilyRow(SemanticsModel):
             "path_template": self.path_template,
             "materializer": self.materializer,
             "dependency_families": list(self.dependency_families),
+            "semantic_input_kinds": list(self.semantic_input_kinds),
         }
 
     @property
@@ -261,6 +277,10 @@ def snapshot_layout_registry(registry: Any) -> LayoutRegistrySnapshot:
                 dependency_families=tuple(
                     getattr(item, "value", item) for item in family.dependency_families
                 ),
+                semantic_input_kinds=tuple(
+                    getattr(item, "value", item)
+                    for item in getattr(family, "semantic_input_kinds", ())
+                ),
             )
             for family in families
         )
@@ -322,6 +342,8 @@ class PlanGapCode(StrEnum):
     PLACEHOLDER_UNDERIVABLE = "placeholder_underivable"
     PLACEHOLDER_RELATIONSHIP_UNPROVABLE = "placeholder_relationship_unprovable"
     RENDERER_RESOLUTION_DEFERRED = "renderer_resolution_deferred"
+    RENDERER_INPUT_UNDECLARED = "renderer_input_undeclared"
+    RENDERER_INPUT_INCOMPLETE = "renderer_input_incomplete"
 
 
 class PlanGap(SemanticsModel):
@@ -372,6 +394,50 @@ class PlanSource(SemanticsModel):
         return _validate_digest(value, field_name="payload_digest")
 
 
+class PlanEdgeSource(SemanticsModel):
+    """One complete graph relationship whose facts can affect rendered bytes."""
+
+    kind: SemanticEdgeKind
+    source_node_id: str
+    target_node_id: str
+    discriminator: str | None = None
+    edge_identity: str
+
+    @field_validator("source_node_id", "target_node_id")
+    @classmethod
+    def _endpoint(cls, value: str) -> str:
+        return validate_node_id_grammar(value)
+
+    @field_validator("discriminator")
+    @classmethod
+    def _discriminator(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            raise ValueError("discriminator must be non-empty when present")
+        return text
+
+    @field_validator("edge_identity")
+    @classmethod
+    def _identity(cls, value: str) -> str:
+        return _validate_digest(value, field_name="edge_identity")
+
+    @model_validator(mode="after")
+    def _identity_matches_facts(self) -> PlanEdgeSource:
+        expected = canonical_digest(
+            {
+                "kind": self.kind.value,
+                "source_node_id": self.source_node_id,
+                "target_node_id": self.target_node_id,
+                "discriminator": self.discriminator,
+            }
+        )
+        if self.edge_identity != expected:
+            raise ValueError("edge_identity does not match edge source facts")
+        return self
+
+
 class PlanOutput(SemanticsModel):
     """One planned output path inside its registry path scope."""
 
@@ -408,6 +474,7 @@ class FamilyInstancePlan(SemanticsModel):
     placeholder_values: tuple[tuple[str, str], ...] = Field(default_factory=tuple)
     outputs: tuple[PlanOutput, ...] = Field(default_factory=tuple)
     sources: tuple[PlanSource, ...] = Field(default_factory=tuple)
+    edge_sources: tuple[PlanEdgeSource, ...] = Field(default_factory=tuple)
     depends_on_units: tuple[str, ...] = Field(default_factory=tuple)
     materializer: str
     base_plan_digest: str | None = None
@@ -471,6 +538,15 @@ class FamilyInstancePlan(SemanticsModel):
             raise ValueError("duplicate source node identities in one unit")
         return ordered
 
+    @field_validator("edge_sources")
+    @classmethod
+    def _edge_sources(cls, value: tuple[PlanEdgeSource, ...]) -> tuple[PlanEdgeSource, ...]:
+        ordered = tuple(sorted(value, key=lambda item: item.edge_identity))
+        identities = [item.edge_identity for item in ordered]
+        if len(identities) != len(set(identities)):
+            raise ValueError("duplicate edge source identities in one unit")
+        return ordered
+
     @field_validator("depends_on_units")
     @classmethod
     def _deps(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -487,7 +563,9 @@ class FamilyInstancePlan(SemanticsModel):
             raise ValueError(
                 "base_plan_digest is required exactly when disposition is reuse_from_base"
             )
-        if self.source_scope is PlanSourceScope.GRAPH_WIDE and self.sources:
+        if self.source_scope is PlanSourceScope.GRAPH_WIDE and (
+            self.sources or self.edge_sources
+        ):
             raise ValueError("graph_wide units must not also declare explicit sources")
         for output in self.outputs:
             if output.path_scope in _INSTANCE_PATH_SCOPES and not self.placeholder_values:
@@ -514,6 +592,7 @@ class FamilyInstancePlan(SemanticsModel):
                 {"node_id": source.node_id, "payload_digest": source.payload_digest}
                 for source in self.sources
             ],
+            "edge_sources": [source.model_dump(mode="json") for source in self.edge_sources],
             "depends_on_units": list(self.depends_on_units),
             "materializer": self.materializer,
             "base_plan_digest": self.base_plan_digest,
@@ -727,12 +806,6 @@ _FAMILY_SOURCE_KINDS: dict[str, tuple[SemanticNodeKind, ...]] = {
 }
 
 
-def _node_local_identity(node_id: str) -> str:
-    parts = validate_node_id_grammar(node_id).split(".")
-    local = "_".join(parts[2:]) if len(parts) > 2 else parts[-1]
-    return local.replace(".", "_").replace("-", "_")
-
-
 def _cold_validate_inputs(
     graph: SemanticGraphV2, payloads: Iterable[SemanticPayloadBase]
 ) -> tuple[SemanticGraphV2, dict[str, SemanticPayloadBase]]:
@@ -788,6 +861,120 @@ def derive_compilation_plan(
                     )
                 )
         return tuple(collected)
+
+    node_by_id = {node.node_id: node for node in verified_graph.nodes}
+
+    def _renderer_footprint(
+        row: RegistryFamilyRow, *, root_node_id: str | None = None
+    ) -> tuple[tuple[PlanSource, ...], tuple[PlanEdgeSource, ...]]:
+        allowed = {SemanticNodeKind(kind) for kind in row.semantic_input_kinds}
+        if not allowed:
+            return (), ()
+        if root_node_id is None:
+            selected = {
+                node.node_id for node in verified_graph.nodes if node.kind in allowed
+            }
+        else:
+            selected = {root_node_id}
+            root_payload = payload_by_node[root_node_id]
+            if isinstance(root_payload, PagePayload):
+                selected.update(
+                    entry.section_node_id
+                    for entry in root_payload.sections
+                    if node_by_id[entry.section_node_id].kind in allowed
+                )
+            for edge in verified_graph.edges:
+                if edge.source_node_id == root_node_id:
+                    other = edge.target_node_id
+                elif edge.target_node_id == root_node_id:
+                    other = edge.source_node_id
+                else:
+                    continue
+                if node_by_id[other].kind in allowed:
+                    selected.add(other)
+            expandable = {
+                SemanticNodeKind.ACTION,
+                SemanticNodeKind.TRIGGER,
+                SemanticNodeKind.REACTION,
+                SemanticNodeKind.NOTIFICATION,
+            }
+            for linked_id in tuple(selected):
+                if node_by_id[linked_id].kind not in expandable:
+                    continue
+                for edge in verified_graph.edges:
+                    if edge.source_node_id == linked_id:
+                        other = edge.target_node_id
+                    elif edge.target_node_id == linked_id:
+                        other = edge.source_node_id
+                    else:
+                        continue
+                    if node_by_id[other].kind in allowed:
+                        selected.add(other)
+        sources = tuple(
+            PlanSource(
+                node_id=node_id,
+                payload_digest=payload_by_node[node_id].payload_digest,
+            )
+            for node_id in sorted(selected)
+        )
+        edge_sources = tuple(
+            PlanEdgeSource(
+                kind=edge.kind,
+                source_node_id=edge.source_node_id,
+                target_node_id=edge.target_node_id,
+                discriminator=edge.discriminator,
+                edge_identity=edge.edge_identity,
+            )
+            for edge in verified_graph.edges
+            if edge.source_node_id in selected and edge.target_node_id in selected
+        )
+        return sources, edge_sources
+
+    def _placeholder_value(placeholder: str, node_id: str) -> str:
+        identity_fields = {
+            "page_id": "page_id",
+            "module_id": "module_id",
+            "workflow_id": "workflow_id",
+        }
+        field = identity_fields[placeholder]
+        value = str(getattr(payload_by_node[node_id], field, "") or "").strip()
+        if _VALUE_RE.fullmatch(value) is None:
+            raise CompilationPlanError(
+                f"payload {node_id!r} lacks canonical renderer identity {field!r}"
+            )
+        return value
+
+    def _renderer_inputs_complete(
+        row: RegistryFamilyRow, *, root_node_id: str | None
+    ) -> bool:
+        """Recognize only the bounded corpus whose semantic facts are closed.
+
+        Other declared footprints are useful dependency evidence, but they do
+        not imply byte-complete renderer inputs.  Those families remain typed
+        gaps until a later prerequisite explicitly closes their normative
+        source models.
+        """
+        if row.kind != "app_ui_page_schema" or root_node_id is None:
+            return False
+        page = payload_by_node[root_node_id]
+        if not isinstance(page, PagePayload):
+            return False
+        if not all(
+            (
+                page.page_id,
+                page.route,
+                page.title,
+                page.page_type,
+                page.layout,
+                page.sections,
+            )
+        ):
+            return False
+        return all(
+            getattr(payload_by_node.get(entry.section_node_id), "declarative", None)
+            is not None
+            for entry in page.sections
+        )
 
     units: dict[str, FamilyInstancePlan] = {}
     gaps: list[PlanGap] = []
@@ -877,11 +1064,12 @@ def derive_compilation_plan(
             nodes_by_kind.get(kind) for kind in trigger_kinds
         )
         disposition = (
-            PlanDisposition.EXTERNAL_HANDOFF
+            PlanDisposition.PRESERVE_UNOWNED
+            if row.materializer in {"human_authored", "preserved_opaque"}
+            else PlanDisposition.EXTERNAL_HANDOFF
             if row.path_scope == "deployment_derived" or row.owner == "download_renderer"
             else PlanDisposition.RENDER
         )
-
         if not condition_met:
             _add_unit(
                 FamilyInstancePlan(
@@ -895,17 +1083,34 @@ def derive_compilation_plan(
             )
             continue
 
+        if disposition is PlanDisposition.RENDER and not row.semantic_input_kinds:
+            _gap(row, PlanGapCode.RENDERER_INPUT_UNDECLARED, adr_slice=4)
+            continue
+
         if bindable:
             placeholder = next(iter(bindable))
             node_kind = _INSTANCE_PLACEHOLDERS[placeholder]
             for node in nodes_by_kind.get(node_kind, ()):
-                local = _node_local_identity(node.node_id)
+                local = _placeholder_value(placeholder, node.node_id)
+                if disposition is PlanDisposition.RENDER and not _renderer_inputs_complete(
+                    row, root_node_id=node.node_id
+                ):
+                    _gap(
+                        row,
+                        PlanGapCode.RENDERER_INPUT_INCOMPLETE,
+                        subject=local,
+                        adr_slice=4,
+                    )
+                    continue
                 values = ((placeholder, local),)
                 path = row.path_template.replace("{" + placeholder + "}", local)
                 # Scope-implied instances keep the template text unchanged;
                 # their instance identity lives in placeholder_values and the
                 # collision domain, not the relative path.
 
+                unit_sources, unit_edge_sources = _renderer_footprint(
+                    row, root_node_id=node.node_id
+                )
                 unit = FamilyInstancePlan(
                     unit_id=f"{row.kind}/{local}/{row_digest[:12]}",
                     family_kind=row.kind,
@@ -914,19 +1119,27 @@ def derive_compilation_plan(
                     source_scope=PlanSourceScope.DECLARED,
                     placeholder_values=values,
                     outputs=(PlanOutput(path_scope=row.path_scope, path=path),),
-                    sources=(
+                    sources=unit_sources
+                    or (
                         PlanSource(
                             node_id=node.node_id,
                             payload_digest=payload_by_node[node.node_id].payload_digest,
                         ),
                     ),
+                    edge_sources=unit_edge_sources,
                     materializer=row.materializer,
                 )
                 _add_unit(unit)
                 unit_instance_index[(row.kind, values)] = unit.unit_id
         else:
+            if disposition is PlanDisposition.RENDER and not _renderer_inputs_complete(
+                row, root_node_id=None
+            ):
+                _gap(row, PlanGapCode.RENDERER_INPUT_INCOMPLETE, adr_slice=4)
+                continue
             source_kinds = _FAMILY_SOURCE_KINDS.get(row.condition, ())
-            graph_wide = not trigger_kinds and not source_kinds
+            declared_sources, declared_edge_sources = _renderer_footprint(row)
+            graph_wide = not trigger_kinds and not source_kinds and not row.semantic_input_kinds
             unit = FamilyInstancePlan(
                 unit_id=f"{row.kind}/{row_digest[:12]}",
                 family_kind=row.kind,
@@ -936,7 +1149,12 @@ def derive_compilation_plan(
                     PlanSourceScope.GRAPH_WIDE if graph_wide else PlanSourceScope.DECLARED
                 ),
                 outputs=(PlanOutput(path_scope=row.path_scope, path=row.path_template),),
-                sources=() if graph_wide else _sources_for(source_kinds),
+                sources=(
+                    ()
+                    if graph_wide
+                    else declared_sources or _sources_for(source_kinds)
+                ),
+                edge_sources=() if graph_wide else declared_edge_sources,
                 materializer=row.materializer,
             )
             _add_unit(unit)
@@ -1051,6 +1269,7 @@ def _reuse_signature(unit: FamilyInstancePlan, plan: CompilationPlan) -> Any:
         unit.placeholder_values,
         tuple((output.path_scope, output.path) for output in unit.outputs),
         tuple((source.node_id, source.payload_digest) for source in unit.sources),
+        tuple(source.edge_identity for source in unit.edge_sources),
         unit.depends_on_units,
         unit.materializer,
         plan.graph_digest if unit.source_scope is PlanSourceScope.GRAPH_WIDE else None,
@@ -1132,6 +1351,7 @@ __all__ = [
     "PlanDisposition",
     "PlanGap",
     "PlanGapCode",
+    "PlanEdgeSource",
     "PlanOutput",
     "PlanSource",
     "PlanSourceScope",

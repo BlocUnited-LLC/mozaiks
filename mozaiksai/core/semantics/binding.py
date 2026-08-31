@@ -1,24 +1,32 @@
 """Immutable ``mozaiks.implementation_binding.v1`` contract.
 
 An implementation binding maps graph-authored requirements to verified
-capability-pack identities and digests, renderer/adapter identities and
-versions, and deployment-target implementation profiles.  Structurally it can
-only *select* implementations for requirement nodes that already exist in the
-pinned graph: it carries no fields that could add pages, actions, events,
-entitlements, data requirements, or provider obligations, and validation
-rejects any selection whose requirement node is absent from, or of the wrong
-kind for, the graph.  No private strategy, build-context input, or provider
-choice becomes a second semantic authority.
+capability-pack identities and digests, registry-owned artifact families to
+renderer implementation/version identities, and deployment-target
+implementation profiles. Capability and deployment selections can only name
+typed requirement nodes in the pinned graph. Renderer selections can only
+name existing layout-registry families under their declared materializer and
+must target graph v2. No selection can add semantic facts, registry rows,
+private strategy, build-context input, or provider policy.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from pydantic import Field, field_validator, model_validator
 
+from mozaiksai.core.runtime.app.layout_registry import (
+    AppLayoutRegistry,
+    MaterializerIdentifier,
+    default_app_layout_registry,
+)
 from mozaiksai.core.semantics.canonical import canonical_digest
-from mozaiksai.core.semantics.graph import SemanticGraph, SemanticNodeKind, _validate_node_id
+from mozaiksai.core.semantics.graph import (
+    SemanticGraph,
+    SemanticNodeKind,
+    _validate_node_id,
+)
 from mozaiksai.core.semantics.refs import (
     ExecutionAccessScopeRef,
     SemanticGraphRef,
@@ -36,10 +44,21 @@ IMPLEMENTATION_BINDING_SCHEMA_VERSION: Literal["mozaiks.implementation_binding.v
 CAPABILITY_PACK_REQUIREMENT_KINDS = frozenset(
     {SemanticNodeKind.CAPABILITY, SemanticNodeKind.MODULE}
 )
-RENDERER_REQUIREMENT_KINDS = frozenset(
-    {SemanticNodeKind.SURFACE, SemanticNodeKind.PAGE, SemanticNodeKind.SECTION}
+RENDERER_GRAPH_SCHEMA_VERSION: Literal["mozaiks.semantic_graph.v2"] = (
+    "mozaiks.semantic_graph.v2"
 )
 DEPLOYMENT_REQUIREMENT_KINDS = frozenset({SemanticNodeKind.DEPLOYMENT_TARGET})
+
+
+class _GraphSubject(Protocol):
+    """Structural surface shared by immutable graph v1 and graph v2."""
+
+    schema_version: str
+    graph_id: str
+    version: int
+    scope: ExecutionAccessScopeRef
+    graph_digest: str
+    nodes: tuple[Any, ...]
 
 
 class ImplementationBindingError(ValueError):
@@ -70,22 +89,60 @@ class CapabilityPackSelection(_Selection):
         return _validate_digest(value, field_name="pack_digest")
 
 
-class RendererSelection(_Selection):
-    renderer_id: str
-    renderer_version: str
+class RendererSelection(SemanticsModel):
+    """Bind registry materializer categories to deterministic implementations.
 
-    @field_validator("renderer_id")
-    @classmethod
-    def _renderer_id(cls, value: str) -> str:
-        return _validate_identifier(value, field_name="renderer_id")
+    Artifact families remain owned by ``layout_registry``.  This selection
+    merely pins an implementation identity/version for rows whose declared
+    materializer matches, and explicitly states graph-v2 compatibility.
+    """
 
-    @field_validator("renderer_version")
+    materializer_id: MaterializerIdentifier
+    implementation_id: str
+    implementation_version: str
+    artifact_families: tuple[str, ...] = Field(min_length=1)
+    graph_schema_versions: tuple[Literal["mozaiks.semantic_graph.v2"], ...] = (
+        RENDERER_GRAPH_SCHEMA_VERSION,
+    )
+
+    @field_validator("implementation_id")
     @classmethod
-    def _renderer_version(cls, value: str) -> str:
+    def _implementation_id(cls, value: str) -> str:
+        return _validate_identifier(value, field_name="implementation_id")
+
+    @field_validator("implementation_version")
+    @classmethod
+    def _implementation_version(cls, value: str) -> str:
         text = str(value or "").strip()
         if not text:
-            raise ValueError("renderer_version must be non-empty")
+            raise ValueError("implementation_version must be non-empty")
         return text
+
+    @field_validator("artifact_families")
+    @classmethod
+    def _families(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        from mozaiksai.core.taxonomy import SemanticCategory, validate_identifier_grammar
+
+        ordered = tuple(
+            sorted(
+                {
+                    validate_identifier_grammar(SemanticCategory.ARTIFACT_FAMILY, item)
+                    for item in value
+                }
+            )
+        )
+        if len(ordered) != len(value):
+            raise ValueError("artifact_families must be unique")
+        return ordered
+
+    @field_validator("graph_schema_versions")
+    @classmethod
+    def _graph_versions(
+        cls, value: tuple[Literal["mozaiks.semantic_graph.v2"], ...]
+    ) -> tuple[Literal["mozaiks.semantic_graph.v2"], ...]:
+        if value != (RENDERER_GRAPH_SCHEMA_VERSION,):
+            raise ValueError("renderer implementations must explicitly target graph v2")
+        return value
 
 
 class DeploymentProfileSelection(_Selection):
@@ -144,7 +201,20 @@ class ImplementationBinding(SemanticsModel):
     @field_validator("renderer_selections")
     @classmethod
     def _renderers(cls, value):
-        return _sorted_unique(value, category="renderer")
+        ordered = tuple(
+            sorted(
+                value,
+                key=lambda item: (
+                    item.materializer_id.value,
+                    item.implementation_id,
+                    item.implementation_version,
+                ),
+            )
+        )
+        families = [family for item in ordered for family in item.artifact_families]
+        if len(families) != len(set(families)):
+            raise ValueError("one artifact family cannot select multiple renderer implementations")
+        return ordered
 
     @field_validator("deployment_profile_selections")
     @classmethod
@@ -197,7 +267,11 @@ def build_implementation_binding(**fields: Any) -> ImplementationBinding:
         "renderer_selections": tuple(
             sorted(
                 tuple(fields.get("renderer_selections", ())),
-                key=lambda item: item.requirement_node_id,
+                key=lambda item: (
+                    item.materializer_id.value,
+                    item.implementation_id,
+                    item.implementation_version,
+                ),
             )
         ),
         "deployment_profile_selections": tuple(
@@ -229,7 +303,10 @@ def build_implementation_binding(**fields: Any) -> ImplementationBinding:
 
 
 def validate_implementation_binding_against_graph(
-    binding: ImplementationBinding, graph: SemanticGraph
+    binding: ImplementationBinding,
+    graph: SemanticGraph | _GraphSubject,
+    *,
+    layout_registry: AppLayoutRegistry | None = None,
 ) -> None:
     """Fail closed unless every selection satisfies an existing typed requirement.
 
@@ -252,7 +329,6 @@ def validate_implementation_binding_against_graph(
     known = {node.node_id: node for node in graph.nodes}
     checks = (
         ("capability-pack", binding.capability_pack_selections, CAPABILITY_PACK_REQUIREMENT_KINDS),
-        ("renderer", binding.renderer_selections, RENDERER_REQUIREMENT_KINDS),
         ("deployment-profile", binding.deployment_profile_selections, DEPLOYMENT_REQUIREMENT_KINDS),
     )
     for category, selections, allowed_kinds in checks:
@@ -271,6 +347,33 @@ def validate_implementation_binding_against_graph(
                     f"{sorted(kind.value for kind in allowed_kinds)}"
                 )
 
+    if binding.renderer_selections and graph.schema_version != RENDERER_GRAPH_SCHEMA_VERSION:
+        raise ImplementationBindingError(
+            "renderer implementation selections require a semantic graph v2 subject"
+        )
+    registry = layout_registry or default_app_layout_registry()
+    rows_by_kind: dict[str, list] = {}
+    for row in registry.families:
+        rows_by_kind.setdefault(row.kind.value, []).append(row)
+    for renderer in binding.renderer_selections:
+        for family in renderer.artifact_families:
+            rows = rows_by_kind.get(family)
+            if not rows:
+                raise ImplementationBindingError(
+                    f"renderer selection targets unregistered artifact family {family!r}"
+                )
+            mismatched = [
+                row.materializer.value
+                for row in rows
+                if row.materializer is not renderer.materializer_id
+            ]
+            if mismatched:
+                raise ImplementationBindingError(
+                    f"renderer selection for {family!r} claims materializer "
+                    f"{renderer.materializer_id.value!r}, but layout_registry declares "
+                    f"{sorted(set(mismatched))!r}"
+                )
+
 
 __all__ = [
     "CAPABILITY_PACK_REQUIREMENT_KINDS",
@@ -280,7 +383,7 @@ __all__ = [
     "IMPLEMENTATION_BINDING_SCHEMA_VERSION",
     "ImplementationBinding",
     "ImplementationBindingError",
-    "RENDERER_REQUIREMENT_KINDS",
+    "RENDERER_GRAPH_SCHEMA_VERSION",
     "RendererSelection",
     "build_implementation_binding",
     "validate_implementation_binding_against_graph",

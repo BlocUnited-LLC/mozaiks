@@ -343,6 +343,54 @@ class AppSegmentedBarConfig(PageContractModel):
     segments: list[AppSegment]
 
 
+class AppPricingCatalogManagedAI(PageContractModel):
+    display: str | None = None
+
+
+class AppPricingCatalogUsageLimit(PageContractModel):
+    label: str | None = None
+    monthly_limit_display: str | None = None
+
+
+class AppPricingCatalogPrice(PageContractModel):
+    display: str | None = None
+    interval: str | None = None
+
+
+class AppPricingCatalogPlan(PageContractModel):
+    plan_id: str
+    label: str
+    description: str | None = None
+    price_display: str | None = None
+    cta_label: str | None = None
+    highlights: list[str] | None = None
+    managed_ai: AppPricingCatalogManagedAI | None = None
+    usage_limits: list[AppPricingCatalogUsageLimit] | None = None
+    pricing: AppPricingCatalogPrice | None = None
+    is_default: bool | None = None
+
+
+class AppPricingCatalogGroup(PageContractModel):
+    group_id: str
+    label: str
+    description: str | None = None
+    kind: Literal["subscription", "service", "add_on", "mixed"] | None = None
+    plan_ids: list[str] | None = None
+    capability_groups: list[str] | None = None
+    add_on_ids: list[str] | None = None
+
+
+class AppPricingCatalogAddOn(PageContractModel):
+    id: str | None = None
+    add_on_id: str | None = None
+    label: str
+    description: str | None = None
+    price_display: str | None = None
+    price: AppPricingCatalogPrice | None = None
+    cta_label: str | None = None
+    highlights: list[str] | None = None
+
+
 class AppPricingCatalogConfig(DataBackedConfig):
     title: str | None = None
     subtitle: str | None = None
@@ -355,9 +403,9 @@ class AppPricingCatalogConfig(DataBackedConfig):
     highlighted_plan_id: str | None = None
     plan_action_label: str | None = None
     add_on_action_label: str | None = None
-    plans: list[dict[str, Any]] | None = None
-    groups: list[dict[str, Any]] | None = None
-    add_ons: list[dict[str, Any]] | None = None
+    plans: list[AppPricingCatalogPlan] | None = None
+    groups: list[AppPricingCatalogGroup] | None = None
+    add_ons: list[AppPricingCatalogAddOn] | None = None
     plan_action: AppPageAction | None = None
     add_on_action: AppPageAction | None = None
 

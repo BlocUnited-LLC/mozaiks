@@ -3,9 +3,11 @@
 Exactly one strict payload variant exists per :class:`SemanticNodeKind`; a
 graph-v2 node pins its payload by full identity through
 :class:`~mozaiksai.core.semantics.refs.SemanticPayloadRef`.  Payloads carry the
-content a node's identity cannot — titles, intent text, typed field shapes,
-prices, ordered entries — never a second copy of identity facts the node
-already owns, and never untyped ``dict[str, Any]`` escape hatches.
+content a node's graph identity cannot — canonical artifact identifiers,
+titles, intent text, typed field shapes, prices, ordered entries, and selected
+normative runtime declaratives.  Runtime declaratives retain their existing
+typed model validation; authoritative payload closure never admits an untyped
+``dict[str, Any]`` escape hatch.
 
 Ordering rule: order-bearing collections (page sections, section entries) use
 explicit dense ``position`` integers, so canonical sorting cannot destroy
@@ -28,6 +30,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, TypeAdapter, ValidationInfo, field_validator, model_validator
 
+from mozaiksai.core.runtime.app.page_schema import (
+    AppPageMeta,
+    AppPageNavigation,
+    AppPageSection,
+)
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.graph import SemanticGraphV2, SemanticNodeKind
 from mozaiksai.core.semantics.portable_path import validate_portable_path
@@ -47,6 +54,7 @@ SEMANTIC_PAYLOAD_SCHEMA_VERSION: Literal["mozaiks.semantic_payload.v1"] = (
 
 _MAX_TEXT_CHARS = 4000
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+_PAGE_ROUTE = re.compile(r"^/[A-Za-z0-9_./:{}?-]*$")
 _ENTRYPOINT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # ISO 4217 Maintenance Agency List One (current currencies and funds),
 # captured for this schema version on 2026-08-29.  Shape validation alone is
@@ -357,10 +365,46 @@ class SurfacePayload(SemanticPayloadBase):
 
 class PagePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.PAGE] = SemanticNodeKind.PAGE
+    page_id: str
+    route: str | None
     title: str | None
     intent: str | None
+    page_type: Literal[
+        "record_list",
+        "record_detail",
+        "analytics_dashboard",
+        "workflow_board",
+        "activity_feed",
+        "gallery",
+        "wizard",
+        "split_view",
+        "settings",
+        "landing",
+    ] | None
+    layout: Literal["grid", "sidebar", "full-width", "split"] | None
+    shell_mode: Literal[
+        "standard", "workspace", "conversation", "focused", "immersive", "public"
+    ] | None
+    roles: tuple[str, ...] | None
+    navigation: AppPageNavigation | None
+    meta: AppPageMeta | None
     layout_id: str | None = None
     sections: tuple[PageSectionEntry, ...] = Field(default_factory=tuple)
+
+    @field_validator("page_id")
+    @classmethod
+    def _page_id(cls, value: str) -> str:
+        return _field_name(value, field_name="page_id")
+
+    @field_validator("route")
+    @classmethod
+    def _route(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if ".." in text or _PAGE_ROUTE.fullmatch(text) is None:
+            raise ValueError(f"route must be a safe absolute app route, got {value!r}")
+        return text
 
     @field_validator("title", "intent")
     @classmethod
@@ -376,6 +420,16 @@ class PagePayload(SemanticPayloadBase):
             return None
         return _field_name(value, field_name="layout_id")
 
+    @field_validator("roles")
+    @classmethod
+    def _roles(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        normalized = tuple(sorted({_field_name(item, field_name="role") for item in value}))
+        if len(normalized) != len(value):
+            raise ValueError("roles must be unique")
+        return normalized
+
     @field_validator("sections")
     @classmethod
     def _sections(cls, value: tuple[PageSectionEntry, ...]) -> tuple[PageSectionEntry, ...]:
@@ -388,9 +442,19 @@ class PagePayload(SemanticPayloadBase):
 
 class SectionPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.SECTION] = SemanticNodeKind.SECTION
+    section_id: str
     title: str | None
     intent: str | None
+    declarative: AppPageSection | None
     entries: tuple[SectionContentEntry, ...] = Field(default_factory=tuple)
+
+    @field_validator("section_id")
+    @classmethod
+    def _section_id(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if re.fullmatch(r"[a-z][a-z0-9_-]*", text) is None:
+            raise ValueError("section_id must be a lowercase declarative identifier")
+        return text
 
     @field_validator("title", "intent")
     @classmethod
@@ -404,10 +468,22 @@ class SectionPayload(SemanticPayloadBase):
     def _entries(cls, value: tuple[SectionContentEntry, ...]) -> tuple[SectionContentEntry, ...]:
         return _ordered_dense(value, field_name="entries")
 
+    @model_validator(mode="after")
+    def _declarative_identity(self) -> SectionPayload:
+        if self.declarative is not None and self.declarative.id != self.section_id:
+            raise ValueError("declarative section id must match section_id")
+        return self
+
 
 class ModulePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.MODULE] = SemanticNodeKind.MODULE
+    module_id: str
     description: str | None
+
+    @field_validator("module_id")
+    @classmethod
+    def _module_id(cls, value: str) -> str:
+        return _field_name(value, field_name="module_id")
 
     @field_validator("description")
     @classmethod
@@ -603,8 +679,14 @@ class DataAliasPayload(SemanticPayloadBase):
 
 class WorkflowPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.WORKFLOW] = SemanticNodeKind.WORKFLOW
+    workflow_id: str
     description: str | None
     startup_mode: WorkflowStartupMode | None
+
+    @field_validator("workflow_id")
+    @classmethod
+    def _workflow_id(cls, value: str) -> str:
+        return _field_name(value, field_name="workflow_id")
 
     @field_validator("description")
     @classmethod
