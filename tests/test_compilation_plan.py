@@ -522,3 +522,117 @@ def test_derived_plan_families_cover_produced_plan_owned_paths() -> None:
             uncovered.append(f"{path} -> {kind}")
     assert classified, "fixture paths must classify against the registry"
     assert uncovered == []
+
+
+def test_plan_models_carry_no_live_runtime_identifiers() -> None:
+    """Amended Slice 4B boundary: the plan is provider-neutral and offline.
+
+    The model field universe is closed and none of it names or can carry live
+    execution-engine state — no agent/participant identity, transport channel,
+    message envelope, connection, inbox/log, delivery/retry/reconnect state,
+    live model assignment, or task-checkpoint location. Execution needs exist
+    only as deterministic registry declarations for a later binding slice.
+    """
+    from mozaiksai.core.semantics.compilation_plan import (
+        PlanGap,
+        PlanOutput,
+        PlanSource,
+        RegenerationClosure,
+    )
+
+    allowed_fields = {
+        CompilationPlan: {
+            "schema_version",
+            "graph_id",
+            "graph_version",
+            "scope",
+            "graph_digest",
+            "registry_schema_version",
+            "registry_digest",
+            "units",
+            "gaps",
+            "plan_digest",
+        },
+        FamilyInstancePlan: {
+            "unit_id",
+            "family_kind",
+            "family_identity_digest",
+            "disposition",
+            "placeholder_values",
+            "outputs",
+            "sources",
+            "depends_on_units",
+            "materializer",
+            "base_plan_digest",
+        },
+        PlanOutput: {"path_scope", "path"},
+        PlanSource: {"node_id", "payload_digest"},
+        PlanGap: {"family_kind", "path_template", "reason", "adr_slice"},
+        RegenerationClosure: {
+            "base_plan_digest",
+            "successor_plan_digest",
+            "affected",
+            "reusable",
+            "added",
+            "removed",
+        },
+    }
+    forbidden_tokens = (
+        "agent",
+        "passport",
+        "channel",
+        "envelope",
+        "hub",
+        "inbox",
+        "wal",
+        "checkpoint",
+        "retry",
+        "reconnect",
+        "delivery",
+        "connection",
+        "session",
+        "model_assignment",
+    )
+    for model, fields in allowed_fields.items():
+        assert set(model.model_fields) == fields, model.__name__
+        for name in fields:
+            assert not any(token in name for token in forbidden_tokens), name
+
+    source = (ROOT / "mozaiksai/core/semantics/compilation_plan.py").read_text(
+        encoding="utf-8"
+    ).lower()
+    for token in (
+        "passport",
+        "envelope",
+        "channel",
+        "inbox",
+        "reconnect",
+        "task_checkpoint",
+        "agent_id",
+        "model_assignment",
+        "websocket",
+    ):
+        assert token not in source, token
+
+    # The canonical payload's key universe is closed too: a derived plan
+    # cannot smuggle live identifiers through untyped keys.
+    def _keys(value, into):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                into.add(key)
+                _keys(item, into)
+        elif isinstance(value, list):
+            for item in value:
+                _keys(item, into)
+
+    seen: set[str] = set()
+    _keys(_plan().canonical_payload(), seen)
+    expected = (
+        allowed_fields[CompilationPlan]
+        | allowed_fields[FamilyInstancePlan]
+        | allowed_fields[PlanOutput]
+        | allowed_fields[PlanSource]
+        | allowed_fields[PlanGap]
+        | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}
+    )
+    assert seen <= expected, sorted(seen - expected)

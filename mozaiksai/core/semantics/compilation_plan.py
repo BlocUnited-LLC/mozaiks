@@ -18,9 +18,13 @@ extensions) and renderer resolution are typed gaps deferred to the
 implementation-binding slice — the plan never invents a semantic fact.
 
 This module is deterministic substrate: no filesystem, no network, no AG2
-imports, no model calls, no runtime or capability authority. The active
-agent-produced ``AppBuildPlan`` remains the sole operational plan until the
-Slice 5 cutover; nothing in production imports this module.
+imports, no model calls, no runtime or capability authority. The plan carries
+no live runtime identifiers of any execution engine: execution needs appear
+only as provider-neutral deterministic requirements (registry materializer
+declarations, dependency order, dispositions) that the authority-cutover
+slice may later bind onto runtime adapters and workflow transitions. The
+active agent-produced ``AppBuildPlan`` remains the sole operational plan until
+the Slice 5 cutover; nothing in production imports this module.
 """
 
 from __future__ import annotations
