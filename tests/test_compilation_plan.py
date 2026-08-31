@@ -47,7 +47,7 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-_GOLDEN_PLAN_DIGEST = "b99aafc84caa39a867f2bf7eb09a0dbfed51f7b94de4e2219d7a64728e28226a"
+_GOLDEN_PLAN_DIGEST = "19a296c255fb07ba4f19ddb23ed847e4a626efcdef623239081e63c11df67562"
 
 
 def _registry():
@@ -72,7 +72,12 @@ def test_one_aggregate_plan_per_immutable_graph_identity() -> None:
     assert plan.scope == graph.scope
     assert plan.graph_digest == graph.graph_digest
     registry = _registry()
-    assert plan.registry_digest == registry.registry_digest
+    from mozaiksai.core.semantics.compilation_plan import snapshot_layout_registry
+
+    # Blocker-1 semantics: the plan pins the RECOMPUTED snapshot identity,
+    # never the registry object's claimed digest.
+    assert plan.registry_digest == snapshot_layout_registry(registry).snapshot_digest
+    assert plan.registry_digest != registry.registry_digest
     assert plan.registry_schema_version == str(registry.schema_version)
     # Same immutable inputs -> byte-identical plan.
     again = derive_compilation_plan(graph=graph, payloads=payloads, registry=_registry())
@@ -266,30 +271,33 @@ def test_stale_plan_digest_is_rejected() -> None:
 
 
 def test_every_registry_row_is_disposed_or_explicitly_gapped() -> None:
+    from mozaiksai.core.semantics.compilation_plan import snapshot_layout_registry
+
     plan = _plan()
-    registry = _registry()
+    snapshot = snapshot_layout_registry(_registry())
+    assert plan.registry_digest == snapshot.snapshot_digest
     disposed = {unit.family_identity_digest for unit in plan.units}
     gapped = {(gap.family_kind, gap.path_template) for gap in plan.gaps}
-    for family in registry.ordered_families():
-        digest = canonical_digest(family.identity_payload)
-        covered = digest in disposed or (
-            (family.kind.value, family.path_template) in gapped
-        )
-        assert covered, (family.kind.value, family.path_template)
+    for row in snapshot.rows:
+        covered = row.row_digest in disposed or ((row.kind, row.path_template) in gapped)
+        assert covered, (row.kind, row.path_template)
 
 
 def test_binding_conditions_are_typed_gaps_never_guesses() -> None:
-    from mozaiksai.core.semantics.compilation_plan import _BINDING_CONDITIONS
+    from mozaiksai.core.semantics.compilation_plan import _BINDING_CONDITIONS, PlanGapCode
 
     plan = _plan()
-    reasons = "\n".join(gap.reason for gap in plan.gaps)
+    deferred_subjects = {
+        gap.subject
+        for gap in plan.gaps
+        if gap.code is PlanGapCode.BINDING_CONDITION_DEFERRED
+    }
     registry_conditions = {
         family.condition.value for family in _registry().ordered_families()
     }
-    expected = sorted(_BINDING_CONDITIONS & registry_conditions)
+    expected = _BINDING_CONDITIONS & registry_conditions
     assert expected, "registry must carry binding-owned conditions"
-    for condition in expected:
-        assert condition in reasons, condition
+    assert expected <= deferred_subjects
     assert all(gap.adr_slice in (4, 5, 6, 7) for gap in plan.gaps)
 
 
@@ -302,13 +310,13 @@ def test_unknown_layout_family_condition_becomes_a_typed_gap() -> None:
     class _NovelFamily:
         kind = type("K", (), {"value": "novel_family"})()
         requirement = type("R", (), {"value": "conditional"})()
+        multiplicity = type("Mu", (), {"value": "single"})()
         condition = _NovelCondition()
         path_scope = type("S", (), {"value": "app_bundle_root"})()
         path_template = "novel/output.yaml"
         materializer = type("M", (), {"value": "unknown"})()
         owner = type("O", (), {"value": "app_workspace"})()
         dependency_families = ()
-        identity_payload = {"kind": "novel_family", "path_template": "novel/output.yaml"}
 
     class _NovelRegistry:
         schema_version = registry.schema_version
@@ -319,15 +327,23 @@ def test_unknown_layout_family_condition_becomes_a_typed_gap() -> None:
 
     graph, payloads = _corpus_graph()
     plan = derive_compilation_plan(graph=graph, payloads=payloads, registry=_NovelRegistry())
+    from mozaiksai.core.semantics.compilation_plan import PlanGapCode
+
     assert any(
-        gap.family_kind == "novel_family" and "no graph-v2 derivation rule" in gap.reason
+        gap.family_kind == "novel_family"
+        and gap.code is PlanGapCode.CONDITION_UNDERIVABLE
+        and gap.subject == "when_something_new"
         for gap in plan.gaps
     )
 
 
 def test_renderer_resolution_is_an_explicit_gap_and_units_cannot_claim_one() -> None:
+    from mozaiksai.core.semantics.compilation_plan import PlanGapCode
+
     plan = _plan()
-    assert any("renderer resolution" in gap.reason for gap in plan.gaps)
+    assert any(
+        gap.code is PlanGapCode.RENDERER_RESOLUTION_DEFERRED for gap in plan.gaps
+    )
     assert "renderer" not in FamilyInstancePlan.model_fields
     assert "renderer_version" not in FamilyInstancePlan.model_fields
 
@@ -347,24 +363,45 @@ def test_dispositions_are_complete_and_external_handoff_covers_deployment() -> N
 
 
 def test_digest_propagates_payload_to_graph_to_plan() -> None:
+    from mozaiksai.core.semantics.compilation_plan import PlanSourceScope
+
     base = _plan()
     changed = _plan(home_title="Home!")
     assert base.graph_digest != changed.graph_digest
     assert base.plan_digest != changed.plan_digest
     closure = plan_regeneration_closure(base, changed)
-    # The page payload changed: exactly the units sourcing that node flip to
-    # affected; everything else stays reusable. Nothing is omitted.
+    affected = set(closure.affected)
+    # Directly sourced units are affected...
     page_units = {
         unit.unit_id
         for unit in changed.units
         if any(source.node_id == "mozaiks.page.home" for source in unit.sources)
     }
-    assert page_units
-    assert set(closure.affected) == page_units
-    assert not closure.added and not closure.removed
-    assert set(closure.affected) | set(closure.reusable) == {
-        unit.unit_id for unit in changed.units
+    assert page_units and page_units <= affected
+    # ...graph-wide consumers are affected by any graph change...
+    graph_wide = {
+        unit.unit_id
+        for unit in changed.units
+        if unit.source_scope is PlanSourceScope.GRAPH_WIDE
     }
+    assert graph_wide and graph_wide <= affected
+    # ...reverse dependents of affected units are affected...
+    route_manifest = {
+        unit.unit_id
+        for unit in changed.units
+        if unit.family_kind == "app_ui_route_manifest"
+    }
+    assert route_manifest and route_manifest <= affected
+    # ...and unrelated declared units with unchanged footprints stay reusable.
+    module_units = {
+        unit.unit_id
+        for unit in changed.units
+        if unit.family_kind == "module_manifest"
+        and unit.disposition is PlanDisposition.RENDER
+    }
+    assert module_units and module_units <= set(closure.reusable)
+    assert not closure.added and not closure.removed
+    assert affected | set(closure.reusable) == {unit.unit_id for unit in changed.units}
 
 
 def test_regeneration_closure_partitions_everything() -> None:
@@ -383,6 +420,7 @@ def test_reuse_from_base_requires_base_plan_digest() -> None:
             family_kind="app_manifest",
             family_identity_digest=unit.family_identity_digest,
             disposition=PlanDisposition.REUSE_FROM_BASE,
+            source_scope="declared",
             materializer="none",
         )
     with pytest.raises(ValidationError, match="reuse_from_base"):
@@ -391,6 +429,7 @@ def test_reuse_from_base_requires_base_plan_digest() -> None:
             family_kind="app_manifest",
             family_identity_digest=unit.family_identity_digest,
             disposition=PlanDisposition.RENDER,
+            source_scope="declared",
             materializer="none",
             base_plan_digest="a" * 64,
         )
@@ -558,6 +597,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "family_kind",
             "family_identity_digest",
             "disposition",
+            "source_scope",
             "placeholder_values",
             "outputs",
             "sources",
@@ -567,7 +607,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         },
         PlanOutput: {"path_scope", "path"},
         PlanSource: {"node_id", "payload_digest"},
-        PlanGap: {"family_kind", "path_template", "reason", "adr_slice"},
+        PlanGap: {"code", "family_kind", "path_template", "subject", "adr_slice"},
         RegenerationClosure: {
             "base_plan_digest",
             "successor_plan_digest",
@@ -634,5 +674,411 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         | allowed_fields[PlanSource]
         | allowed_fields[PlanGap]
         | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}
+        | {"source_scope", "code", "subject"}
     )
     assert seen <= expected, sorted(seen - expected)
+
+
+# ---------------------------------------------------------------------------
+# Correction round: regressions reproducing the five independent-review attacks
+# ---------------------------------------------------------------------------
+
+
+def _redigest(document: dict) -> dict:
+    """Recompute plan_digest the way the model does — the attacker's move."""
+    body = {key: value for key, value in document.items() if key != "plan_digest"}
+    document["plan_digest"] = canonical_digest(body)
+    return document
+
+
+def test_blocker1_registry_identity_is_recomputed_not_trusted() -> None:
+    from mozaiksai.core.semantics.compilation_plan import (
+        LayoutRegistrySnapshot,
+        snapshot_layout_registry,
+    )
+
+    real = _registry()
+    graph, payloads = _corpus_graph()
+
+    class _Forged:
+        """Different row content, same claimed digest as the real registry."""
+
+        schema_version = real.schema_version
+        registry_digest = real.registry_digest  # the retained/forged claim
+
+        def ordered_families(self):
+            rows = list(real.ordered_families())
+
+            class _Swapped:
+                kind = rows[0].kind
+                owner = rows[0].owner
+                requirement = rows[0].requirement
+                multiplicity = rows[0].multiplicity
+                condition = rows[0].condition
+                path_scope = rows[0].path_scope
+                path_template = "forged/other_output.json"
+                materializer = rows[0].materializer
+                dependency_families = rows[0].dependency_families
+
+            return (_Swapped(), *rows[1:])
+
+    honest = derive_compilation_plan(graph=graph, payloads=payloads, registry=real)
+    forged = derive_compilation_plan(graph=graph, payloads=payloads, registry=_Forged())
+    # Distinct registry semantics can never hide under one registry identity.
+    assert forged.registry_digest != honest.registry_digest
+    assert forged.plan_digest != honest.plan_digest
+
+    # A snapshot that retains its digest while a row changes fails closed.
+    snapshot = snapshot_layout_registry(real)
+    document = snapshot.model_dump(mode="json")
+    document["rows"][0]["path_template"] = "forged/other_output.json"
+    with pytest.raises(ValidationError, match="snapshot_digest does not match"):
+        LayoutRegistrySnapshot.model_validate(document)
+
+    # Rows outside the closed domains are rejected, not consumed.
+    class _BadRow:
+        kind = "Bad Kind!"
+        owner = "app_workspace"
+        requirement = "conditional"
+        multiplicity = "single"
+        condition = "always"
+        path_scope = "app_bundle_root"
+        path_template = "x/y.json"
+        materializer = "app_generator"
+        dependency_families = ()
+
+    class _BadRegistry:
+        schema_version = real.schema_version
+
+        def ordered_families(self):
+            return (_BadRow(),)
+
+    with pytest.raises(CompilationPlanError, match="closed snapshot domains"):
+        derive_compilation_plan(graph=graph, payloads=payloads, registry=_BadRegistry())
+
+    # Internally inconsistent registries (dangling dependency) are rejected.
+    class _DanglingRow(_BadRow):
+        kind = "lonely_family"
+        dependency_families = ("missing_family",)
+
+    class _DanglingRegistry:
+        schema_version = real.schema_version
+
+        def ordered_families(self):
+            return (_DanglingRow(),)
+
+    with pytest.raises(CompilationPlanError, match="internally inconsistent"):
+        derive_compilation_plan(
+            graph=graph, payloads=payloads, registry=_DanglingRegistry()
+        )
+
+
+def test_blocker2_multi_placeholder_rows_gap_instead_of_leaking_braces() -> None:
+    import re as _re
+
+    from mozaiksai.core.semantics.compilation_plan import (
+        PlanGapCode,
+        PlanOutput,
+        snapshot_layout_registry,
+    )
+
+    plan = _plan()
+    # The built-in registry carries real multi-placeholder rows (for example
+    # modules/{module_id}/ui/admin/{page_id}.jsx): every such row must be an
+    # explicit typed gap and no validated output may carry a brace.
+    snapshot = snapshot_layout_registry(_registry())
+    multi_rows = [
+        row
+        for row in snapshot.rows
+        if len(set(_re.findall(r"\{([a-z][a-z0-9_]*)\}", row.path_template))) > 1
+        and row.requirement != "prohibited"  # prohibited rows dispose as units
+    ]
+    assert multi_rows, "registry must contain multi-placeholder rows for this proof"
+    gapped = {
+        (gap.family_kind, gap.path_template)
+        for gap in plan.gaps
+        if gap.code
+        in (
+            PlanGapCode.PLACEHOLDER_RELATIONSHIP_UNPROVABLE,
+            PlanGapCode.PLACEHOLDER_UNDERIVABLE,
+            PlanGapCode.BINDING_CONDITION_DEFERRED,
+            PlanGapCode.STAGING_TRANSPORT_EXCLUDED,
+        )
+    }
+    for row in multi_rows:
+        assert (row.kind, row.path_template) in gapped, row.path_template
+    for unit in plan.units:
+        for output in unit.outputs:
+            assert "{" not in output.path and "}" not in output.path
+
+    # A unit output can never carry an unresolved placeholder at all.
+    with pytest.raises(ValidationError, match="unresolved placeholder"):
+        PlanOutput(path_scope="app_bundle_root", path="modules/reports/ui/{page_id}.jsx")
+
+    # Deterministic gap emission independent of payload input ordering.
+    graph, payloads = _corpus_graph()
+    again = derive_compilation_plan(
+        graph=graph, payloads=list(reversed(payloads)), registry=_registry()
+    )
+    assert [g.model_dump(mode="json") for g in again.gaps] == [
+        g.model_dump(mode="json") for g in plan.gaps
+    ]
+
+
+def test_blocker3_cross_instance_physical_ownership_conflicts_fail() -> None:
+    plan = _plan()
+
+    # THE review attack: a page unit and a module unit both claim
+    # ui/pages/home.yaml in the app bundle root, with the document re-digested
+    # so the digest check cannot save us — physical ownership must.
+    document = _document(plan)
+    render_units = [
+        u for u in document["units"] if u["outputs"] and u["placeholder_values"]
+    ]
+    page_like = render_units[0]
+    module_like = next(
+        u
+        for u in render_units
+        if u["placeholder_values"] != page_like["placeholder_values"]
+    )
+    for victim in (page_like, module_like):
+        victim["outputs"] = [
+            {"path_scope": "app_bundle_root", "path": "ui/pages/home.yaml"}
+        ]
+    _redigest(document)
+    with pytest.raises(ValidationError, match="duplicate output ownership"):
+        CompilationPlan.model_validate(document)
+
+    # Duplicate unit identities cannot slip through a re-digested document.
+    document = _document(plan)
+    clone = copy.deepcopy(document["units"][0])
+    document["units"].append(clone)
+    _redigest(document)
+    with pytest.raises(ValidationError, match="duplicate unit identities"):
+        CompilationPlan.model_validate(document)
+
+    # Case-fold and prefix collisions across DIFFERENT units in one global root.
+    for second_path in ("UI/Pages/Home.YAML", "ui/pages/home.yaml/extra.txt"):
+        document = _document(plan)
+        units = [
+            u
+            for u in document["units"]
+            if u["outputs"] and u["outputs"][0]["path_scope"] == "app_bundle_root"
+        ]
+        units[0]["outputs"] = [
+            {"path_scope": "app_bundle_root", "path": "ui/pages/home.yaml"}
+        ]
+        units[1]["outputs"] = [{"path_scope": "app_bundle_root", "path": second_path}]
+        _redigest(document)
+        with pytest.raises(
+            ValidationError, match="output collision|duplicate output ownership"
+        ):
+            CompilationPlan.model_validate(document)
+
+    # Genuinely distinct instance roots remain valid: the same relative path
+    # under two different module instances is two physical destinations.
+    document = _document(plan)
+    module_units = [
+        u
+        for u in document["units"]
+        if u["outputs"] and u["outputs"][0]["path_scope"] == "module_relative"
+    ]
+    assert module_units, "corpus must produce module-relative units"
+    second = copy.deepcopy(module_units[0])
+    second["unit_id"] = second["unit_id"] + "-second"
+    second["placeholder_values"] = [["module_id", "second_module"]]
+    second["depends_on_units"] = []
+    document["units"].append(second)
+    _redigest(document)
+    validated = CompilationPlan.model_validate(document)
+    assert validated.plan_digest == document["plan_digest"]
+
+
+def test_blocker4_closed_domains_reject_runtime_identifier_smuggling() -> None:
+    plan = _plan()
+    hostile = "resume AG2 channel_id=chan-live envelope_id=env-live"
+
+    # Through a gap subject (the review's attack surface, now grammar-closed).
+    document = _document(plan)
+    document["gaps"][0]["subject"] = hostile
+    _redigest(document)
+    with pytest.raises(ValidationError, match="subject must be a lowercase identifier"):
+        CompilationPlan.model_validate(document)
+
+    # Through a unit materializer.
+    document = _document(plan)
+    document["units"][0]["materializer"] = hostile
+    _redigest(document)
+    with pytest.raises(
+        ValidationError, match="materializer must be a lowercase identifier"
+    ):
+        CompilationPlan.model_validate(document)
+
+    # Through a placeholder value.
+    document = _document(plan)
+    with_values = next(u for u in document["units"] if u["placeholder_values"])
+    with_values["placeholder_values"] = [["module_id", hostile]]
+    _redigest(document)
+    with pytest.raises(ValidationError, match="outside the closed domain"):
+        CompilationPlan.model_validate(document)
+
+    # Registration cold-validates: a forged in-memory object whose digest was
+    # re-computed over hostile content never registers.
+    resolver = SemanticReferenceResolver()
+    document = _document(plan)
+    document["gaps"][0]["subject"] = hostile
+    _redigest(document)
+    forged = CompilationPlan.model_construct(
+        **{
+            **{name: getattr(plan, name) for name in CompilationPlan.model_fields},
+            "gaps": tuple(
+                type(plan.gaps[0]).model_construct(**{**gap_fields, "subject": hostile})
+                if index == 0
+                else plan.gaps[index]
+                for index, gap_fields in enumerate(
+                    {name: getattr(gap, name) for name in type(gap).model_fields}
+                    for gap in plan.gaps
+                )
+            ),
+            "plan_digest": document["plan_digest"],
+        }
+    )
+    with pytest.raises(ReferenceResolutionError, match="cold validation"):
+        resolver.register_compilation_plan(forged)
+
+
+def test_blocker5_reverse_dependency_and_graph_wide_propagation() -> None:
+    from mozaiksai.core.semantics.compilation_plan import PlanSourceScope
+
+    def _mini_unit(
+        unit_id: str,
+        *,
+        source_digest: str | None,
+        deps: tuple[str, ...] = (),
+        graph_wide: bool = False,
+        path: str,
+    ) -> dict:
+        return {
+            "unit_id": unit_id,
+            "family_kind": "app_config",
+            "family_identity_digest": canonical_digest(unit_id),
+            "disposition": "render",
+            "source_scope": "graph_wide" if graph_wide else "declared",
+            "placeholder_values": [],
+            "outputs": [{"path_scope": "app_bundle_root", "path": path}],
+            "sources": (
+                []
+                if graph_wide or source_digest is None
+                else [{"node_id": "mozaiks.node.x", "payload_digest": source_digest}]
+            ),
+            "depends_on_units": list(deps),
+            "materializer": "app_generator",
+            "base_plan_digest": None,
+        }
+
+    def _mini_plan(graph_digest: str, units: list[dict]) -> CompilationPlan:
+        document = {
+            "schema_version": "mozaiks.compilation_plan.v1",
+            "graph_id": "mini",
+            "graph_version": 1,
+            "scope": _SCOPE.model_dump(mode="json"),
+            "graph_digest": graph_digest,
+            "registry_schema_version": "mozaiks.app_layout.v2",
+            "registry_digest": canonical_digest("registry"),
+            "units": units,
+            "gaps": [],
+        }
+        return CompilationPlan.model_validate(_redigest(document))
+
+    d1, d2 = canonical_digest("payload-1"), canonical_digest("payload-2")
+    g1, g2 = canonical_digest("graph-1"), canonical_digest("graph-2")
+
+    def _fleet(graph_digest: str, a_source: str, last: dict) -> CompilationPlan:
+        return _mini_plan(
+            graph_digest,
+            [
+                _mini_unit("a/1", source_digest=a_source, path="a.json"),
+                _mini_unit(
+                    "b/1",
+                    source_digest=canonical_digest("b"),
+                    deps=("a/1",),
+                    path="b.json",
+                ),
+                _mini_unit(
+                    "c/1",
+                    source_digest=canonical_digest("c"),
+                    deps=("b/1",),
+                    path="c.json",
+                ),
+                _mini_unit("g/1", source_digest=None, graph_wide=True, path="g.json"),
+                _mini_unit("z/1", source_digest=canonical_digest("z"), path="z.json"),
+                last,
+            ],
+        )
+
+    base = _fleet(
+        g1, d1, _mini_unit("gone/1", source_digest=canonical_digest("gone"), path="gone.json")
+    )
+    successor = _fleet(
+        g2, d2, _mini_unit("new/1", source_digest=canonical_digest("new"), path="new.json")
+    )
+    closure = plan_regeneration_closure(base, successor)
+    # Direct change, transitive reverse-dependency chain, and graph-wide unit
+    # are all affected; the independent unit is provably reusable.
+    assert set(closure.affected) == {"a/1", "b/1", "c/1", "g/1"}
+    assert closure.reusable == ("z/1",)
+    assert closure.added == ("new/1",)
+    assert closure.removed == ("gone/1",)
+
+    # Graph-only change (no payload change): exactly the graph-wide unit moves.
+    successor_graph_only = _fleet(
+        g2, d1, _mini_unit("gone/1", source_digest=canonical_digest("gone"), path="gone.json")
+    )
+    closure2 = plan_regeneration_closure(base, successor_graph_only)
+    assert set(closure2.affected) == {"g/1"}
+    assert set(closure2.reusable) == {"a/1", "b/1", "c/1", "z/1", "gone/1"}
+
+    # Real derivation cross-check: a graph-only change (extra edge, unchanged
+    # payloads) affects graph-wide units and leaves independent declared
+    # instance units reusable.
+    from mozaiksai.core.semantics.graph import (
+        SemanticEdge,
+        SemanticEdgeKind,
+        build_semantic_graph_v2,
+    )
+
+    graph, payloads = _corpus_graph()
+    surface = next(n for n in graph.nodes if n.kind.value == "surface")
+    module = next(n for n in graph.nodes if n.kind.value == "module")
+    extra_edge = SemanticEdge(
+        kind=SemanticEdgeKind.OWNS,
+        source_node_id=surface.node_id,
+        target_node_id=module.node_id,
+    )
+    changed_graph = build_semantic_graph_v2(
+        graph_id=graph.graph_id,
+        version=graph.version,
+        scope=graph.scope,
+        nodes=graph.nodes,
+        edges=(*graph.edges, extra_edge),
+        namespace_grants=graph.namespace_grants,
+    )
+    base_plan = derive_compilation_plan(graph=graph, payloads=payloads, registry=_registry())
+    edge_plan = derive_compilation_plan(
+        graph=changed_graph, payloads=payloads, registry=_registry()
+    )
+    closure3 = plan_regeneration_closure(base_plan, edge_plan)
+    graph_wide_ids = {
+        u.unit_id for u in edge_plan.units if u.source_scope is PlanSourceScope.GRAPH_WIDE
+    }
+    assert graph_wide_ids <= set(closure3.affected)
+    independent_instance_ids = {
+        u.unit_id
+        for u in edge_plan.units
+        if u.source_scope is PlanSourceScope.DECLARED
+        and u.placeholder_values
+        and not u.depends_on_units
+        and u.disposition is PlanDisposition.RENDER
+    }
+    assert independent_instance_ids
+    assert independent_instance_ids & set(closure3.reusable) == independent_instance_ids
