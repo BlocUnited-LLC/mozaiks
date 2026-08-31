@@ -14,6 +14,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Renderer-input closure prerequisite (ADR 0007 Slice 4C, offline-only)**:
+  graph-v2 page payloads now retain the canonical page identifier, route,
+  page type, layout, shell mode, roles, navigation, metadata, and validated
+  runtime section declaratives required to reconstruct the bounded page-schema
+  corpus without invention. CompilationPlan units pin complete canonical
+  linked-node and edge footprints; renderer-incomplete families remain typed
+  gaps, while opaque executable/model-authored UTF-8 bytes are preserved
+  exactly under digest-matched `ChildContractRef` identities. The existing
+  layout registry now declares truthful materializer categories, and the
+  implementation binding pins graph-v2-compatible materializer/family
+  implementation versions. This adds no renderer, production cutover, or
+  capability advertisement; AppBuildPlan remains runtime authority.
+
 - **Aggregate CompilationPlan derivation (ADR 0007 Slice 4B, offline-only)**:
   one deterministic authoritative plan per immutable graph identity, derived
   solely from validated graph-v2 semantics, typed payloads, and the sole

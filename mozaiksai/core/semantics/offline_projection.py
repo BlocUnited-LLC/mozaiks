@@ -19,6 +19,7 @@ from typing import Any, Literal, get_args
 import yaml
 from pydantic import Field
 
+from mozaiksai.core.runtime.app.page_schema import AppPageSection
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.graph import (
     SemanticEdge,
@@ -604,6 +605,7 @@ class _Builder:
         path: str,
         group: str,
         taxonomy: tuple[SemanticCategory, str] | None = None,
+        renderer_identity: Any | None = None,
     ) -> str:
         node_id = _node_id(kind, identity)
         if (group, node_id) in self.node_groups:
@@ -660,6 +662,20 @@ class _Builder:
                 ]
             )
         self.nodes[node_id] = candidate
+        renderer_identity_fields = {
+            SemanticNodeKind.PAGE: "page_id",
+            SemanticNodeKind.SECTION: "section_id",
+            SemanticNodeKind.MODULE: "module_id",
+            SemanticNodeKind.WORKFLOW: "workflow_id",
+        }
+        renderer_identity_field = renderer_identity_fields.get(kind)
+        if renderer_identity_field is not None:
+            source_identity = (
+                _slug(identity)
+                if renderer_identity is None
+                else str(renderer_identity).strip()
+            )
+            self.content_field(node_id, renderer_identity_field, source_identity, path)
         self.mark(
             path,
             node=kind,
@@ -866,6 +882,7 @@ class _Builder:
             path = f"{root}.pages[{i}].name" if item.get("name") else f"{root}.pages[{i}].route"
             self.observe("page", identity, "route", item.get("route"), f"{root}.pages[{i}].route")
             page = self.node(SemanticNodeKind.PAGE, identity, path=path, group=f"{root}.pages")
+            self.content_field(page, "route", item.get("route"), f"{root}.pages[{i}].route")
             self.content_field(page, "title", item.get("title"), f"{root}.pages[{i}].title")
             self.content_field(page, "intent", item.get("purpose"), f"{root}.pages[{i}].purpose")
         for i, raw in enumerate(_as_list(plan.get("entities"))):
@@ -946,8 +963,19 @@ class _Builder:
             key = next(key for key in ("page_id", "name", "route") if item.get(key))
             self.observe("page", identity, "route", item.get("route"), f"{root}[{i}].route")
             page = self.node(SemanticNodeKind.PAGE, identity, path=f"{root}[{i}].{key}", group=root)
+            self.content_field(page, "route", item.get("route"), f"{root}[{i}].route")
             self.content_field(page, "title", item.get("title"), f"{root}[{i}].title")
             self.content_field(page, "intent", item.get("description"), f"{root}[{i}].description")
+            self.content_field(page, "page_type", item.get("page_type"), f"{root}[{i}].page_type")
+            self.content_field(page, "layout", item.get("layout"), f"{root}[{i}].layout")
+            self.content_field(
+                page, "shell_mode", item.get("shell_mode"), f"{root}[{i}].shell_mode"
+            )
+            self.content_field(page, "roles", item.get("roles"), f"{root}[{i}].roles")
+            self.content_field(
+                page, "navigation", item.get("navigation"), f"{root}[{i}].navigation"
+            )
+            self.content_field(page, "meta", item.get("meta"), f"{root}[{i}].meta")
             sections = _as_list(item.get("sections"))
             if item.get("schema_version") == "mozaiks.app_page.v1" and not sections:
                 raise ProjectionError(
@@ -970,6 +998,7 @@ class _Builder:
                         f"{identity}_{section_id}",
                         path=f"{root}[{i}].sections[{j}].{key}",
                         group=f"{root}[{i}].sections",
+                        renderer_identity=section_id,
                     )
                     self.edge(
                         SemanticEdgeKind.RENDERS,
@@ -993,6 +1022,30 @@ class _Builder:
                         section.get("description"),
                         f"{root}[{i}].sections[{j}].description",
                     )
+                    try:
+                        declarative = AppPageSection.model_validate(section)
+                    except ValueError as exc:
+                        if item.get("schema_version") == "mozaiks.app_page.v1":
+                            raise ProjectionError(
+                                [
+                                    ProjectionGap(
+                                        kind=ProjectionGapKind.AMBIGUOUS,
+                                        source_path=f"{root}[{i}].sections[{j}]",
+                                        reason=(
+                                            "declared runtime page section failed the "
+                                            f"AppPageSection contract: {exc}"
+                                        ),
+                                    )
+                                ]
+                            ) from exc
+                        declarative = None
+                    if declarative is not None:
+                        self.content_field(
+                            child,
+                            "declarative",
+                            declarative,
+                            f"{root}[{i}].sections[{j}]",
+                        )
                 self._page_bindings(section, page, f"{root}[{i}].sections[{j}]")
             if section_entries:
                 # The declared source order is the semantic order: it survives

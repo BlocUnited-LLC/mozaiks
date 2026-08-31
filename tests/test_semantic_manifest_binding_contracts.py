@@ -17,7 +17,6 @@ from mozaiksai.core.semantics import (
     DeploymentProfileSelection,
     ExecutionAccessScopeRef,
     ImplementationBindingRef,
-    RendererSelection,
     SemanticEdge,
     SemanticEdgeKind,
     SemanticGraphRef,
@@ -80,13 +79,7 @@ def _binding(graph, **overrides):
                 pack_digest=DIGEST,
             ),
         ),
-        "renderer_selections": (
-            RendererSelection(
-                requirement_node_id="mozaiks.pages.home",
-                renderer_id="page_schema_renderer",
-                renderer_version="1.0.0",
-            ),
-        ),
+        "renderer_selections": (),
         "deployment_profile_selections": (
             DeploymentProfileSelection(
                 requirement_node_id="mozaiks.targets.default",
@@ -261,11 +254,11 @@ def test_binding_cannot_select_against_wrong_node_kind() -> None:
     graph = _graph()
     binding = _binding(
         graph,
-        renderer_selections=(
-            RendererSelection(
+        capability_pack_selections=(
+            CapabilityPackSelection(
                 requirement_node_id="mozaiks.events.paid",
-                renderer_id="page_schema_renderer",
-                renderer_version="1.0.0",
+                pack_id="mozaikspay",
+                pack_digest=DIGEST,
             ),
         ),
     )

@@ -211,8 +211,8 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden Merkle-root vector: pinned digests for the full-corpus v2 graph and
 # its archived fixture.  Independent of host, process, and input order.
-_GOLDEN_GRAPH_DIGEST = "a4eaa86709134dc5677a0b67b99e00a02b0cedfa4b45d39e37ade35f4f8b85f4"
-_GOLDEN_ARCHIVE_DIGEST = "sha256:53b569a6c62e9ae4c1ce0bed9b86cd2eed5a18147f5bdb531cd763c7bafff20b"
+_GOLDEN_GRAPH_DIGEST = "adb01417eac21a97cd3061ed5a9216a6d6501447699c228e4e85bfe83bdf602f"
+_GOLDEN_ARCHIVE_DIGEST = "sha256:8e95d5bcce6b61528a46a1f09a18ab6766ffbfaa58905461c626fd6de31018ea"
 
 
 def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str = "Home"):
@@ -231,8 +231,16 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             node_id="mozaiks.page.home",
             payload_version=1,
             scope=scope,
+            page_id="home",
+            route="/home",
             title=home_title,
             intent="Landing page",
+            page_type="landing",
+            layout="full-width",
+            shell_mode=None,
+            roles=None,
+            navigation=None,
+            meta=None,
             sections=(
                 PageSectionEntry(position=1, section_node_id="mozaiks.section.pricing"),
                 PageSectionEntry(position=0, section_node_id="mozaiks.section.hero"),
@@ -243,8 +251,14 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             node_id="mozaiks.section.hero",
             payload_version=1,
             scope=scope,
+            section_id="hero",
             title="Hero",
             intent="Welcome banner",
+            declarative={
+                "id": "hero",
+                "primitive": "PageHeader",
+                "config": {"title": "Welcome"},
+            },
             entries=(
                 SectionContentEntry(
                     position=0, entry_kind=SectionEntryKind.TEXT, text="Welcome"
@@ -262,6 +276,7 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             node_id="mozaiks.module.reports",
             payload_version=1,
             scope=scope,
+            module_id="reports",
             description="Reporting module",
         ),
         SemanticNodeKind.ACTION: build_semantic_payload(
@@ -341,6 +356,7 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             node_id="mozaiks.workflow.digest",
             payload_version=1,
             scope=scope,
+            workflow_id="digest",
             description="Weekly digest workflow",
             startup_mode=WorkflowStartupMode.EVENT_DRIVEN,
         ),
@@ -419,8 +435,14 @@ def _pricing_section(scope: ExecutionAccessScopeRef = _SCOPE) -> SectionPayload:
         node_id="mozaiks.section.pricing",
         payload_version=1,
         scope=scope,
+        section_id="pricing",
         title="Pricing",
         intent="Plans overview",
+        declarative={
+            "id": "pricing",
+            "primitive": "PageHeader",
+            "config": {"title": "Pricing"},
+        },
     )
 
 
@@ -485,8 +507,18 @@ def test_each_kind_round_trips_through_the_discriminated_union(
 def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
     required_nullable = {
         SurfacePayload: ("description",),
-        PagePayload: ("title", "intent"),
-        SectionPayload: ("title", "intent"),
+        PagePayload: (
+            "route",
+            "title",
+            "intent",
+            "page_type",
+            "layout",
+            "shell_mode",
+            "roles",
+            "navigation",
+            "meta",
+        ),
+        SectionPayload: ("title", "intent", "declarative"),
         ModulePayload: ("description",),
         ActionPayload: ("description",),
         CapabilityPayload: ("description",),
@@ -537,6 +569,7 @@ def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
         node_id="mozaiks.module.explicit_absence",
         payload_version=1,
         scope=_SCOPE,
+        module_id="explicit_absence",
         description=None,
     )
     assert explicit_absence.description is None
@@ -1084,8 +1117,16 @@ def test_order_bearing_input_permutations_do_not_change_page_or_section_digests(
         node_id=page.node_id,
         payload_version=page.payload_version,
         scope=page.scope,
+        page_id=page.page_id,
+        route=page.route,
         title=page.title,
         intent=page.intent,
+        page_type=page.page_type,
+        layout=page.layout,
+        shell_mode=page.shell_mode,
+        roles=page.roles,
+        navigation=page.navigation,
+        meta=page.meta,
         sections=tuple(reversed(page.sections)),
     )
     assert permuted_page.payload_digest == page.payload_digest
@@ -1099,8 +1140,10 @@ def test_order_bearing_input_permutations_do_not_change_page_or_section_digests(
         node_id=section.node_id,
         payload_version=section.payload_version,
         scope=section.scope,
+        section_id=section.section_id,
         title=section.title,
         intent=section.intent,
+        declarative=section.declarative,
         entries=tuple(reversed(section.entries)),
     )
     assert permuted_section.payload_digest == section.payload_digest
@@ -1150,8 +1193,16 @@ def test_meaningful_page_and_section_order_changes_identity() -> None:
         node_id=page.node_id,
         payload_version=page.payload_version,
         scope=page.scope,
+        page_id=page.page_id,
         title=page.title,
         intent=page.intent,
+        route=page.route,
+        page_type=page.page_type,
+        layout=page.layout,
+        shell_mode=page.shell_mode,
+        roles=page.roles,
+        navigation=page.navigation,
+        meta=page.meta,
         sections=tuple(
             entry.model_copy(update={"position": 1 - entry.position})
             for entry in page.sections
@@ -1168,8 +1219,10 @@ def test_meaningful_page_and_section_order_changes_identity() -> None:
         node_id=section.node_id,
         payload_version=section.payload_version,
         scope=section.scope,
+        section_id=section.section_id,
         title=section.title,
         intent=section.intent,
+        declarative=section.declarative,
         entries=tuple(
             entry.model_copy(update={"position": 1 - entry.position})
             for entry in section.entries
@@ -1192,8 +1245,16 @@ def test_negative_duplicate_sparse_and_non_dense_positions_fail_closed() -> None
                 node_id=page.node_id,
                 payload_version=page.payload_version,
                 scope=page.scope,
+                page_id=page.page_id,
+                route=page.route,
                 title=page.title,
                 intent=page.intent,
+                page_type=page.page_type,
+                layout=page.layout,
+                shell_mode=page.shell_mode,
+                roles=page.roles,
+                navigation=page.navigation,
+                meta=page.meta,
                 sections=tuple(
                     entry.model_copy(update={"position": position})
                     for entry, position in zip(page.sections, positions, strict=True)
