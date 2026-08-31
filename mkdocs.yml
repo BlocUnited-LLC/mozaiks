@@ -206,6 +206,7 @@ nav:
           - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
           - Refinement Engine: architecture/workflows/refinement-engine.md
+          - AppGenerator Context Debt: architecture/workflows/appgenerator-context-debt.md
           - End-to-End App Editing Loop: architecture/workflows/e2e-app-editing-loop.md
           - Refinement Harness Architecture: architecture/workflows/refinement-harness-architecture.md
           - Session Router: architecture/workflows/session-router.md
@@ -304,3 +305,4 @@ nav:
       - adr/0005-reference-factory-and-proprietary-build-intelligence-boundary.md
       - adr/0006-provider-neutral-bounded-multi-workflow-journey-execution.md
       - adr/0007-generalized-semantic-compiler.md
+      - adr/0008-deterministic-engineering-context.md

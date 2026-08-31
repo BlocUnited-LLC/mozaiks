@@ -14,6 +14,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **ADR 0008 (Proposed): Deterministic Engineering Context** — documents the
+  entitlement contract for software-engineering assignments (Mozaiks owns
+  WHAT an assignment may know; AG2 owns HOW it becomes runtime context), the
+  prompt/schema/Skills authoring policy, retrieval grants, symbolic context
+  budget classes, the determinism boundary, AppGenerator decomposition and
+  user-facing-state rules, the superseded-mechanism cleanup discipline, and
+  slice placement (no 4C impact; Slice 5 landing-zone grammars; post-Slice-5
+  implementation; Slice 6 closure-driven scoping). Companion evidence
+  inventory at docs/architecture/workflows/appgenerator-context-debt.md.
+  Documentation only — no runtime behavior changes.
+
 - **Deterministic offline page materialization (ADR 0007 Slice 4C)**: a pure
   renderer materializes canonical `app_ui_page_schema` bytes from a validated
   graph-v2 payload closure, its CompilationPlan unit's complete source
