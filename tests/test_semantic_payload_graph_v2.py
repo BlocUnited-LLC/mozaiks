@@ -98,6 +98,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # It stays outside production imports itself (proven by the Slice 3
         # hygiene test scanning for offline_projection references).
         Path("mozaiksai/core/semantics/offline_projection.py"),
+        # Slice 4B: the aggregate CompilationPlan derives from graph v2 +
+        # payloads. It is offline-only; its own non-importability is proven
+        # by the hygiene scan in tests/test_compilation_plan.py.
+        Path("mozaiksai/core/semantics/compilation_plan.py"),
     }
 )
 _FORBIDDEN_PRODUCTION_MODULES = frozenset({"mozaiksai.core.semantics.payloads"})

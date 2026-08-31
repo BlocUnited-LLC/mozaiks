@@ -12,6 +12,26 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **Aggregate CompilationPlan derivation (ADR 0007 Slice 4B, offline-only)**:
+  one deterministic authoritative plan per immutable graph identity, derived
+  solely from validated graph-v2 semantics, typed payloads, and the sole
+  layout registry. Embedded family-instance plans are non-authoritative
+  subdocuments (no reference type, registration, or execution surface of
+  their own); every registry family row is disposed (render /
+  reuse-from-base / preserve-unowned / input-only / external-handoff /
+  inapplicable) or carried as an explicit typed gap — binding-owned
+  conditions and renderer resolution defer to the next slice, never guessed.
+  Portable-path output ownership with case-fold and prefix collision
+  rejection, dependency ordering from the registry's total order, complete
+  digest closure (payload -> graph -> plan Merkle chain), and a pure
+  regeneration-closure function that partitions plan units into
+  affected/reusable/added/removed for Refinement Runs without touching
+  production refinement authority. The agent-produced AppBuildPlan remains
+  the sole active operational plan; no production code consumes the new
+  contract and no capability is advertised.
+
 ### Fixed
 
 - **Distributed same-chat exclusion is now enforced (issue #426, sub-slice A)**:
