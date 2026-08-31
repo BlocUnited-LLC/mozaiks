@@ -42,7 +42,11 @@ Covers the CI secret requirements helpers and render helpers:
     - custom port from spec in ports line
     - static boilerplate present (services, env_file, build context)
 """
+
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     DEFAULT_RUNTIME_PORT,
@@ -54,10 +58,10 @@ from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     _render_env_example,
 )
 
+
 # ---------------------------------------------------------------------------
 # 1. _empty_ci_secret_requirements
 # ---------------------------------------------------------------------------
-
 class TestEmptyCiSecretRequirements:
     def test_returns_dict(self):
         result = _empty_ci_secret_requirements()
@@ -80,7 +84,6 @@ class TestEmptyCiSecretRequirements:
 # ---------------------------------------------------------------------------
 # 2. _default_ci_secret_requirements
 # ---------------------------------------------------------------------------
-
 class TestDefaultCiSecretRequirements:
     def test_include_workflow_false_returns_empty(self):
         result = _default_ci_secret_requirements(include_workflow=False)
@@ -139,7 +142,6 @@ class TestDefaultCiSecretRequirements:
 # ---------------------------------------------------------------------------
 # 3. _normalize_ci_secret_requirements
 # ---------------------------------------------------------------------------
-
 class TestNormalizeCiSecretRequirements:
     def test_none_returns_empty(self):
         result = _normalize_ci_secret_requirements(None)
@@ -245,7 +247,6 @@ class TestNormalizeCiSecretRequirements:
 # ---------------------------------------------------------------------------
 # 4. _render_env_example
 # ---------------------------------------------------------------------------
-
 class TestRenderEnvExample:
     def test_empty_spec_produces_header(self):
         result = _render_env_example({})
@@ -297,7 +298,6 @@ class TestRenderEnvExample:
 # ---------------------------------------------------------------------------
 # 5. _render_dockerfile
 # ---------------------------------------------------------------------------
-
 class TestRenderDockerfile:
     def test_default_port_in_expose(self):
         result = _render_dockerfile({})
@@ -326,7 +326,34 @@ class TestRenderDockerfile:
 
     def test_cmd_line(self):
         result = _render_dockerfile({})
-        assert "CMD" in result
+        command = json.loads(
+            next(
+                line.removeprefix("CMD ") for line in result.splitlines() if line.startswith("CMD ")
+            )
+        )
+        assert command == [
+            "mozaiks",
+            "serve",
+            ".",
+            "--host",
+            "platform",
+            "--listen",
+            "0.0.0.0",
+            "--port",
+            str(DEFAULT_RUNTIME_PORT),
+        ]
+
+        pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+        assert 'mozaiks = "mozaiks_cli.main:main"' in pyproject
+
+    def test_custom_port_in_start_command(self):
+        result = _render_dockerfile({"runtime": {"container_port": 9000}})
+        command = json.loads(
+            next(
+                line.removeprefix("CMD ") for line in result.splitlines() if line.startswith("CMD ")
+            )
+        )
+        assert command[-2:] == ["--port", "9000"]
 
     def test_runtime_none_uses_default_port(self):
         spec = {"runtime": None}
@@ -342,7 +369,6 @@ class TestRenderDockerfile:
 # ---------------------------------------------------------------------------
 # 6. _render_compose
 # ---------------------------------------------------------------------------
-
 class TestRenderCompose:
     def test_default_port_in_ports_line(self):
         result = _render_compose({})

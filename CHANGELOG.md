@@ -80,6 +80,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Generated application containers now boot through the packaged OSS platform host**:
+  AppGenerator's provider-neutral Dockerfile uses
+  `mozaiks serve . --host platform` with the declared listen address and
+  container port, so a standalone exported workspace starts without an
+  undeclared repository-local launcher. CI resolves the packaged CLI
+  entrypoint and smoke-tests a representative materialized app image against
+  MongoDB through health, page, and module-action requests.
+
 - **Distributed same-chat exclusion is now enforced (issue #426, sub-slice A)**:
   the MongoDB chat lock at
   `mozaiksai/core/runtime/persistence/distributed_lock.py` — previously dead
@@ -813,9 +821,9 @@ This project follows a practical pre-1.0 changelog format:
 ### Fixed
 
 - Ask-mode human-support escalation now short-circuits the LLM turn after rendering the support handoff UI, so users do not receive an extra assistant answer after requesting an operator.
-- **`infra/docker/Dockerfile` no longer references removed root files** (`run_server.py`, `shared_app.py`, `workflows/`, `config/`): it now installs the real `mozaiks` package from `pyproject.toml` (fixing missing runtime dependencies such as `jsonschema` and `limits` that the old `requirements.txt`-based build silently dropped) and serves the first-party `factory_app/` workspace via `mozaiks serve . --host studio`. Verified with a local `docker build` + container smoke test against MongoDB.
+- **`infra/docker/Dockerfile` no longer references removed root launcher and workspace files**: it now installs the real `mozaiks` package from `pyproject.toml` (fixing missing runtime dependencies such as `jsonschema` and `limits` that the old `requirements.txt`-based build silently dropped) and serves the first-party `factory_app/` workspace via `mozaiks serve . --host studio`. Verified with a local `docker build` + container smoke test against MongoDB.
 - **Helm chart liveness probe pointed at a 404** (`infra/helm/mozaiks/values.yaml`): `livenessProbe.httpGet.path` was `/api/health/liveness`, which does not exist; the real route is `/api/health/live` (`mozaiksai/hosts/runtime.py`). Verified by rendering the chart and confirming both probe paths resolve.
-- **`infra/compose/docker-compose.yml` dev `app` service used a broken `watchmedo`/`run_server.py` command** with no `watchdog` dependency installed: replaced with `mozaiks serve . --host studio --reload`, plus a `PYTHONPATH=/app` override so the bind-mounted repo shadows the image's installed first-party packages for live-reload dev. Verified end to end against a real container.
+- **`infra/compose/docker-compose.yml` dev `app` service used a broken removed-launcher command** with no `watchdog` dependency installed: replaced with `mozaiks serve . --host studio --reload`, plus a `PYTHONPATH=/app` override so the bind-mounted repo shadows the image's installed first-party packages for live-reload dev. Verified end to end against a real container.
 
 ### Added
 

@@ -88,6 +88,21 @@ _ENV_EXAMPLE_PATHS = (
 )
 
 
+def _platform_start_command(port: int) -> list[str]:
+    """Return the packaged OSS platform-host command for a generated workspace."""
+    return [
+        "mozaiks",
+        "serve",
+        ".",
+        "--host",
+        "platform",
+        "--listen",
+        "0.0.0.0",
+        "--port",
+        str(port),
+    ]
+
+
 def _bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -709,7 +724,7 @@ def build_deploy_target_spec(
         "runtime": {
             "container_port": DEFAULT_RUNTIME_PORT,
             "health_path": DEFAULT_HEALTH_PATH,
-            "start_command": None,
+            "start_command": " ".join(_platform_start_command(DEFAULT_RUNTIME_PORT)),
         },
         "artifact_outputs": outputs,
         "auth": auth,
@@ -1081,6 +1096,7 @@ def _render_env_examples(spec: dict[str, Any]) -> dict[str, str]:
 def _render_dockerfile(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
+    start_command = json.dumps(_platform_start_command(port), separators=(",", ":"))
     return "\n".join(
         [
             "FROM python:3.13-slim",
@@ -1089,7 +1105,7 @@ def _render_dockerfile(spec: dict[str, Any]) -> str:
             "RUN pip install --no-cache-dir -r requirements.txt",
             "COPY . .",
             f"EXPOSE {port}",
-            "CMD [\"python\", \"run_server.py\"]",
+            f"CMD {start_command}",
             "",
         ]
     )
