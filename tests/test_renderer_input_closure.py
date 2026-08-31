@@ -518,25 +518,32 @@ def test_opaque_artifact_preserves_exact_bytes_and_matches_plan_ownership() -> N
 
 def test_unsupported_renderer_families_remain_explicit_typed_gaps() -> None:
     plan = _plan()
-    incomplete = {
+    non_executable = {
         gap.family_kind
         for gap in plan.gaps
-        if gap.code is PlanGapCode.RENDERER_INPUT_INCOMPLETE
+        if gap.code
+        in {
+            PlanGapCode.ASSIGNMENT_UNDECLARED,
+            PlanGapCode.ASSIGNMENT_AMBIGUOUS,
+            PlanGapCode.VALIDATOR_UNDECLARED,
+            PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED,
+            PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE,
+        }
     }
     assert {
         "module_manifest",
         "app_data_contract",
         "app_subscription_config",
         "workflow_manifest",
-    } <= incomplete
+    } <= non_executable
     assert any(
         gap.family_kind == "app_manifest"
-        and gap.code is PlanGapCode.RENDERER_INPUT_UNDECLARED
+        and gap.code is PlanGapCode.ASSIGNMENT_UNDECLARED
         for gap in plan.gaps
     )
     assert not any(
-        unit.disposition is PlanDisposition.RENDER
-        and unit.family_kind in incomplete | {"app_manifest"}
+        unit.disposition is PlanDisposition.AGENT_AUTHOR
+        and unit.family_kind in non_executable | {"app_manifest"}
         for unit in plan.units
     )
 

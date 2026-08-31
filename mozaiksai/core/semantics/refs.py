@@ -157,6 +157,33 @@ class CompilationPlanRef(_ScopedRef):
     )
 
 
+class PlanUnitRef(SemanticsModel):
+    """Subordinate reference to a cold-validated unit in one aggregate plan."""
+
+    ref_schema_version: Literal["mozaiks.plan_unit_ref.v1"] = "mozaiks.plan_unit_ref.v1"
+    compilation_plan_ref: CompilationPlanRef
+    unit_id: str
+    unit_digest: str
+
+    @field_validator("unit_id")
+    @classmethod
+    def _unit_id(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if not text or any(part in {"", ".", ".."} for part in text.split("/")):
+            raise ValueError("unit_id must be a normalized plan-unit identifier")
+        if any(
+            re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", part) is None
+            for part in text.split("/")
+        ):
+            raise ValueError("unit_id must be a normalized plan-unit identifier")
+        return text
+
+    @field_validator("unit_digest")
+    @classmethod
+    def _unit_digest(cls, value: str) -> str:
+        return _validate_digest(value, field_name="unit_digest")
+
+
 class BuildContextBindingRef(_ScopedRef):
     """Reference contract only; binding content assembly is later-slice work."""
 
@@ -315,6 +342,7 @@ __all__ = [
     "ExecutionAccessScopeRef",
     "ImplementationBindingRef",
     "MUTABLE_ALIASES",
+    "PlanUnitRef",
     "RefDocumentType",
     "RefinementPatchRef",
     "SemanticGraphRef",

@@ -252,9 +252,10 @@ class ArtifactFamily(LayoutModel):
     @field_validator("assignment_kinds")
     @classmethod
     def _normalize_assignment_kinds(cls, value: tuple[AssignmentKind, ...]) -> tuple[AssignmentKind, ...]:
-        # Sorted + deduplicated so declaration order can never alter identity
-        # payloads or registry_digest.
-        return tuple(sorted(set(value), key=lambda kind: kind.value))
+        parsed = tuple(AssignmentKind(item) for item in value)
+        if len(parsed) != len(set(parsed)):
+            raise ValueError("assignment_kinds must be unique")
+        return tuple(sorted(parsed, key=lambda kind: kind.value))
 
     @field_validator("allowed_stub_kinds")
     @classmethod

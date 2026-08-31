@@ -50,6 +50,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from mozaiksai.core.runtime.app.layout_registry import ValidatorIdentifier
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.graph import (
     SemanticEdgeKind,
@@ -68,6 +69,14 @@ from mozaiksai.core.semantics.refs import (
     SemanticsModel,
     _validate_digest,
     validate_node_id_grammar,
+)
+from mozaiksai.core.workflow.assignment_kinds import (
+    AssignmentKind,
+    assignment_contract_descriptor,
+)
+from mozaiksai.core.workflow.work_contracts import (
+    StructuredOutputContractRef,
+    build_structured_output_contract_ref,
 )
 
 COMPILATION_PLAN_SCHEMA_VERSION: Literal["mozaiks.compilation_plan.v1"] = (
@@ -137,6 +146,8 @@ class RegistryFamilyRow(SemanticsModel):
     path_scope: str
     path_template: str
     materializer: str
+    assignment_kinds: tuple[AssignmentKind, ...]
+    validator: ValidatorIdentifier
     dependency_families: tuple[str, ...] = Field(default_factory=tuple)
     semantic_input_kinds: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -167,6 +178,14 @@ class RegistryFamilyRow(SemanticsModel):
         except ValueError as exc:
             raise ValueError("semantic_input_kinds contains an unknown node kind") from exc
 
+    @field_validator("assignment_kinds", mode="before")
+    @classmethod
+    def _assignment_kinds(cls, value: Any) -> tuple[AssignmentKind, ...]:
+        parsed = tuple(AssignmentKind(item) for item in value)
+        if len(parsed) != len(set(parsed)):
+            raise ValueError("assignment_kinds must be unique")
+        return tuple(sorted(parsed, key=lambda item: item.value))
+
     @property
     def identity_payload(self) -> dict[str, Any]:
         return {
@@ -178,6 +197,8 @@ class RegistryFamilyRow(SemanticsModel):
             "path_scope": self.path_scope,
             "path_template": self.path_template,
             "materializer": self.materializer,
+            "assignment_kinds": [kind.value for kind in self.assignment_kinds],
+            "validator": self.validator.value,
             "dependency_families": list(self.dependency_families),
             "semantic_input_kinds": list(self.semantic_input_kinds),
         }
@@ -274,6 +295,10 @@ def snapshot_layout_registry(registry: Any) -> LayoutRegistrySnapshot:
                 path_scope=getattr(family.path_scope, "value", family.path_scope),
                 path_template=family.path_template,
                 materializer=getattr(family.materializer, "value", family.materializer),
+                assignment_kinds=tuple(
+                    getattr(item, "value", item) for item in family.assignment_kinds
+                ),
+                validator=getattr(family.validator, "value", family.validator),
                 dependency_families=tuple(
                     getattr(item, "value", item) for item in family.dependency_families
                 ),
@@ -313,6 +338,7 @@ class PlanDisposition(StrEnum):
     """Complete disposition vocabulary from the ADR aggregate-authority rule."""
 
     RENDER = "render"
+    AGENT_AUTHOR = "agent_author"
     REUSE_FROM_BASE = "reuse_from_base"
     PRESERVE_UNOWNED = "preserve_unowned"
     INPUT_ONLY = "input_only"
@@ -344,6 +370,11 @@ class PlanGapCode(StrEnum):
     RENDERER_RESOLUTION_DEFERRED = "renderer_resolution_deferred"
     RENDERER_INPUT_UNDECLARED = "renderer_input_undeclared"
     RENDERER_INPUT_INCOMPLETE = "renderer_input_incomplete"
+    ASSIGNMENT_UNDECLARED = "assignment_undeclared"
+    ASSIGNMENT_AMBIGUOUS = "assignment_ambiguous"
+    VALIDATOR_UNDECLARED = "validator_undeclared"
+    OUTPUT_CONTRACT_UNRESOLVED = "output_contract_unresolved"
+    SOURCE_FOOTPRINT_INCOMPLETE = "source_footprint_incomplete"
 
 
 class PlanGap(SemanticsModel):
@@ -477,6 +508,9 @@ class FamilyInstancePlan(SemanticsModel):
     edge_sources: tuple[PlanEdgeSource, ...] = Field(default_factory=tuple)
     depends_on_units: tuple[str, ...] = Field(default_factory=tuple)
     materializer: str
+    assignment_kind: AssignmentKind | None = None
+    validator: ValidatorIdentifier
+    required_structured_output_ref: StructuredOutputContractRef | None = None
     base_plan_digest: str | None = None
 
     @field_validator("unit_id")
@@ -567,6 +601,23 @@ class FamilyInstancePlan(SemanticsModel):
             self.sources or self.edge_sources
         ):
             raise ValueError("graph_wide units must not also declare explicit sources")
+        executable = self.disposition is PlanDisposition.AGENT_AUTHOR
+        if executable != (
+            self.assignment_kind is not None
+            and self.validator is not ValidatorIdentifier.NONE
+            and self.required_structured_output_ref is not None
+        ):
+            raise ValueError("executable metadata is required exactly for agent_author units")
+        if not executable and (
+            self.assignment_kind is not None or self.required_structured_output_ref is not None
+        ):
+            raise ValueError("non-agent units cannot carry executable metadata")
+        if executable and (
+            self.source_scope is not PlanSourceScope.DECLARED
+            or not self.sources
+            or not self.outputs
+        ):
+            raise ValueError("agent_author requires declared non-empty sources and outputs")
         for output in self.outputs:
             if output.path_scope in _INSTANCE_PATH_SCOPES and not self.placeholder_values:
                 raise ValueError(
@@ -595,8 +646,19 @@ class FamilyInstancePlan(SemanticsModel):
             "edge_sources": [source.model_dump(mode="json") for source in self.edge_sources],
             "depends_on_units": list(self.depends_on_units),
             "materializer": self.materializer,
+            "assignment_kind": self.assignment_kind.value if self.assignment_kind else None,
+            "validator": self.validator.value,
+            "required_structured_output_ref": (
+                self.required_structured_output_ref.model_dump(mode="json")
+                if self.required_structured_output_ref
+                else None
+            ),
             "base_plan_digest": self.base_plan_digest,
         }
+
+    @property
+    def unit_digest(self) -> str:
+        return canonical_digest(self.identity_payload)
 
 
 class CompilationPlan(SemanticsModel):
@@ -805,6 +867,10 @@ _FAMILY_SOURCE_KINDS: dict[str, tuple[SemanticNodeKind, ...]] = {
     "when_module_declared": (SemanticNodeKind.MODULE,),
 }
 
+_AGENT_AUTHORED_MATERIALIZERS = frozenset(
+    {"app_generator", "module_contract_executor", "workflow_generator"}
+)
+
 
 def _cold_validate_inputs(
     graph: SemanticGraphV2, payloads: Iterable[SemanticPayloadBase]
@@ -831,6 +897,7 @@ def derive_compilation_plan(
     graph: SemanticGraphV2,
     payloads: Iterable[SemanticPayloadBase],
     registry: Any,
+    structured_output_configs: Mapping[str, Any] | None = None,
 ) -> CompilationPlan:
     """Derive the single aggregate plan for one immutable graph identity.
 
@@ -840,6 +907,7 @@ def derive_compilation_plan(
     input object is never read.
     """
     verified_graph, payload_by_node = _cold_validate_inputs(graph, payloads)
+    output_configs = dict(structured_output_configs or {})
     snapshot = (
         registry
         if isinstance(registry, LayoutRegistrySnapshot)
@@ -1019,6 +1087,7 @@ def derive_compilation_plan(
                     disposition=PlanDisposition.INAPPLICABLE,
                     source_scope=PlanSourceScope.DECLARED,
                     materializer=row.materializer,
+                    validator=row.validator,
                 )
             )
             continue
@@ -1063,13 +1132,6 @@ def derive_compilation_plan(
         condition_met = not trigger_kinds or any(
             nodes_by_kind.get(kind) for kind in trigger_kinds
         )
-        disposition = (
-            PlanDisposition.PRESERVE_UNOWNED
-            if row.materializer in {"human_authored", "preserved_opaque"}
-            else PlanDisposition.EXTERNAL_HANDOFF
-            if row.path_scope == "deployment_derived" or row.owner == "download_renderer"
-            else PlanDisposition.RENDER
-        )
         if not condition_met:
             _add_unit(
                 FamilyInstancePlan(
@@ -1079,9 +1141,46 @@ def derive_compilation_plan(
                     disposition=PlanDisposition.INAPPLICABLE,
                     source_scope=PlanSourceScope.DECLARED,
                     materializer=row.materializer,
+                    validator=row.validator,
                 )
             )
             continue
+
+        assignment_kind: AssignmentKind | None = None
+        output_ref: StructuredOutputContractRef | None = None
+        if row.materializer in {"human_authored", "preserved_opaque"}:
+            disposition = PlanDisposition.PRESERVE_UNOWNED
+        elif row.path_scope == "deployment_derived" or row.owner == "download_renderer":
+            disposition = PlanDisposition.EXTERNAL_HANDOFF
+        elif row.materializer == "page_schema_executor":
+            disposition = PlanDisposition.RENDER
+        elif row.materializer in _AGENT_AUTHORED_MATERIALIZERS:
+            if not row.assignment_kinds:
+                _gap(row, PlanGapCode.ASSIGNMENT_UNDECLARED, adr_slice=5)
+                continue
+            if len(row.assignment_kinds) != 1:
+                _gap(row, PlanGapCode.ASSIGNMENT_AMBIGUOUS, adr_slice=5)
+                continue
+            if row.validator is ValidatorIdentifier.NONE:
+                _gap(row, PlanGapCode.VALIDATOR_UNDECLARED, adr_slice=5)
+                continue
+            assignment_kind = row.assignment_kinds[0]
+            descriptor = assignment_contract_descriptor(assignment_kind)
+            if descriptor is None:
+                _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
+                continue
+            try:
+                output_ref = build_structured_output_contract_ref(
+                    workflow_name=descriptor.workflow_name,
+                    model_id=descriptor.structured_output_model_id,
+                    configs=output_configs,
+                )
+            except (TypeError, ValueError):
+                _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
+                continue
+            disposition = PlanDisposition.AGENT_AUTHOR
+        else:
+            disposition = PlanDisposition.RENDER
 
         if disposition is PlanDisposition.RENDER and not row.semantic_input_kinds:
             _gap(row, PlanGapCode.RENDERER_INPUT_UNDECLARED, adr_slice=4)
@@ -1111,6 +1210,20 @@ def derive_compilation_plan(
                 unit_sources, unit_edge_sources = _renderer_footprint(
                     row, root_node_id=node.node_id
                 )
+                resolved_sources = unit_sources or (
+                    PlanSource(
+                        node_id=node.node_id,
+                        payload_digest=payload_by_node[node.node_id].payload_digest,
+                    ),
+                )
+                if disposition is PlanDisposition.AGENT_AUTHOR and not resolved_sources:
+                    _gap(
+                        row,
+                        PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE,
+                        subject=local,
+                        adr_slice=5,
+                    )
+                    continue
                 unit = FamilyInstancePlan(
                     unit_id=f"{row.kind}/{local}/{row_digest[:12]}",
                     family_kind=row.kind,
@@ -1119,15 +1232,12 @@ def derive_compilation_plan(
                     source_scope=PlanSourceScope.DECLARED,
                     placeholder_values=values,
                     outputs=(PlanOutput(path_scope=row.path_scope, path=path),),
-                    sources=unit_sources
-                    or (
-                        PlanSource(
-                            node_id=node.node_id,
-                            payload_digest=payload_by_node[node.node_id].payload_digest,
-                        ),
-                    ),
+                    sources=resolved_sources,
                     edge_sources=unit_edge_sources,
                     materializer=row.materializer,
+                    validator=row.validator,
+                    assignment_kind=assignment_kind,
+                    required_structured_output_ref=output_ref,
                 )
                 _add_unit(unit)
                 unit_instance_index[(row.kind, values)] = unit.unit_id
@@ -1140,6 +1250,14 @@ def derive_compilation_plan(
             source_kinds = _FAMILY_SOURCE_KINDS.get(row.condition, ())
             declared_sources, declared_edge_sources = _renderer_footprint(row)
             graph_wide = not trigger_kinds and not source_kinds and not row.semantic_input_kinds
+            resolved_sources = (
+                () if graph_wide else declared_sources or _sources_for(source_kinds)
+            )
+            if disposition is PlanDisposition.AGENT_AUTHOR and (
+                graph_wide or not resolved_sources
+            ):
+                _gap(row, PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE, adr_slice=5)
+                continue
             unit = FamilyInstancePlan(
                 unit_id=f"{row.kind}/{row_digest[:12]}",
                 family_kind=row.kind,
@@ -1149,13 +1267,12 @@ def derive_compilation_plan(
                     PlanSourceScope.GRAPH_WIDE if graph_wide else PlanSourceScope.DECLARED
                 ),
                 outputs=(PlanOutput(path_scope=row.path_scope, path=row.path_template),),
-                sources=(
-                    ()
-                    if graph_wide
-                    else declared_sources or _sources_for(source_kinds)
-                ),
+                sources=resolved_sources,
                 edge_sources=() if graph_wide else declared_edge_sources,
                 materializer=row.materializer,
+                validator=row.validator,
+                assignment_kind=assignment_kind,
+                required_structured_output_ref=output_ref,
             )
             _add_unit(unit)
             unit_instance_index[(row.kind, ())] = unit.unit_id
