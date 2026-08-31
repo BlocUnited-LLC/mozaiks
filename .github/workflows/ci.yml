@@ -108,7 +108,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Download shard coverage data
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: coverage-shard-*
           merge-multiple: true
