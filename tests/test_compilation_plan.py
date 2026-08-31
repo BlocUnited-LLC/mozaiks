@@ -508,6 +508,10 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         Path("mozaiksai/core/semantics/compilation_plan.py"),
         Path("mozaiksai/core/semantics/resolver.py"),
         Path("mozaiksai/core/semantics/refs.py"),
+        # Slice 4C offline materializer: consumes the plan inside the
+        # semantics layer only; its own proof suite asserts it has no
+        # production, AG2, or ambient-capability imports.
+        Path("mozaiksai/core/semantics/materialization.py"),
     }
     for root in (ROOT / "mozaiksai", ROOT / "factory_app"):
         for path in root.rglob("*.py"):

@@ -14,6 +14,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Deterministic offline page materialization (ADR 0007 Slice 4C)**: a pure
+  renderer materializes canonical `app_ui_page_schema` bytes from a validated
+  graph-v2 payload closure, its CompilationPlan unit's complete source
+  footprint, and the accepted graph-v2 ImplementationBinding — with one
+  canonical serialization (declaration-order YAML, omitted absent facts,
+  UTF-8/LF, no timestamps or provenance) proven byte-identical across
+  repeated runs, reordered inputs, and fresh processes. Implementation
+  resolution fails closed on any missing, wrong-family, wrong-materializer,
+  wrong-version, or wrong-graph binding with no fallback to historical
+  generators. `preserve_unowned` units place exact digest-verified bytes via
+  the existing `ChildContractRef` identity (empty files preserved, tampering
+  rejected); unsupported families stay typed gaps or explicit
+  handoff/deferred/unsupplied reports — nothing is silently omitted or
+  invented. Selective rematerialization drives the 4B regeneration closure: a
+  linked semantic section change rerenders only the affected page unit while
+  every unaffected output is reused byte-for-byte, and the proof suite
+  validates, loads, and boots both the base and successor bundles through the
+  real acceptance gate, `AppLoader`, and platform lifespan. Offline-only:
+  no AG2 imports, no AppBuildPlan consultation, no production wiring — the
+  agent-produced `AppBuildPlan` remains the sole operational authority until
+  the Slice 5 cutover.
+
 - **Renderer-input closure prerequisite (ADR 0007 Slice 4C, offline-only)**:
   graph-v2 page payloads now retain the canonical page identifier, route,
   page type, layout, shell mode, roles, navigation, metadata, and validated

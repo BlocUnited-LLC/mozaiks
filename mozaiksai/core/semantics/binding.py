@@ -51,14 +51,30 @@ DEPLOYMENT_REQUIREMENT_KINDS = frozenset({SemanticNodeKind.DEPLOYMENT_TARGET})
 
 
 class _GraphSubject(Protocol):
-    """Structural surface shared by immutable graph v1 and graph v2."""
+    """Structural surface shared by immutable graph v1 and graph v2.
 
-    schema_version: str
-    graph_id: str
-    version: int
-    scope: ExecutionAccessScopeRef
-    graph_digest: str
-    nodes: tuple[Any, ...]
+    Members are read-only properties so frozen graph models with narrower
+    field types (graph v2's ``Literal`` schema version and typed node tuple)
+    satisfy the protocol covariantly.
+    """
+
+    @property
+    def schema_version(self) -> str: ...
+
+    @property
+    def graph_id(self) -> str: ...
+
+    @property
+    def version(self) -> int: ...
+
+    @property
+    def scope(self) -> ExecutionAccessScopeRef: ...
+
+    @property
+    def graph_digest(self) -> str: ...
+
+    @property
+    def nodes(self) -> tuple[Any, ...]: ...
 
 
 class ImplementationBindingError(ValueError):
