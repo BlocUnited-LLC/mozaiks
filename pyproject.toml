@@ -25,7 +25,7 @@ classifiers = [
 keywords = ["mozaiks", "ag2", "ai", "agents", "workflows", "multi-tenant", "runtime"]
 
 dependencies = [
-    "ag2[a2a,openai,tracing]==1.0.2",
+    "ag2[a2a,openai,tracing]==1.0.3",
     "a2a-sdk[grpc]>=1.1.0,<2",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
@@ -52,21 +52,21 @@ dependencies = [
 
 [project.optional-dependencies]
 gemini = [
-    "ag2[gemini]==1.0.2",
+    "ag2[gemini]==1.0.3",
 ]
 anthropic = [
-    "ag2[anthropic]==1.0.2",
+    "ag2[anthropic]==1.0.3",
 ]
 # ACP-backed CLI coding provider (Codex, Claude Code, OpenCode) for the
 # refinement control plane. The adapter binaries (e.g. the
 # @agentclientprotocol/claude-agent-acp npm package) are deployment-time
 # dependencies and are NOT installed by this extra.
 acp-coding = [
-    "ag2[acp]==1.0.2",
+    "ag2[acp]==1.0.3",
     # ag2 1.0.2 allows agent-client-protocol <0.13, but 0.12.1 removed
     # acp.task.DefaultMessageDispatcher, which ag2's dispatch imports.
     # Pin the last compatible version; re-check at every ag2 upgrade.
-    "agent-client-protocol==0.12.0",
+    "agent-client-protocol==0.12.1",
 ]
 azure = [
     "azure-identity>=1.15.0",
@@ -86,8 +86,8 @@ dev = [
     # extra-free installs skip them via importorskip. The
     # agent-client-protocol pin matches the acp-coding extra (0.12.1 breaks
     # ag2 1.0.2's dispatcher import).
-    "ag2[acp]==1.0.2",
-    "agent-client-protocol==0.12.0",
+    "ag2[acp]==1.0.3",
+    "agent-client-protocol==0.12.1",
 ]
 docs = [
     "mkdocs>=1.6.1,<2.0",
