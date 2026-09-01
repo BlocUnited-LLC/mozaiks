@@ -10,6 +10,11 @@ body:
         Thanks for taking the time to report a bug. Please search
         [existing issues](https://github.com/BlocUnited-LLC/mozaiks/issues) first
         to avoid duplicates.
+
+        If you are running from source, please sync with current `main` and
+        confirm the problem still reproduces before starting an implementation.
+        Mozaiks moves quickly, and older reports or suggested fixes may already
+        have been superseded.
   - type: textarea
     id: description
     attributes:
@@ -42,6 +47,14 @@ body:
       placeholder: e.g. 0.3.0, or a commit SHA if running from source
     validations:
       required: true
+  - type: checkboxes
+    id: current-main
+    attributes:
+      label: Current-main verification
+      description: Required when reporting against source rather than a released version.
+      options:
+        - label: If I am running from source, I synced with current `main` and confirmed the bug still reproduces there.
+          required: true
   - type: input
     id: python-version
     attributes:
