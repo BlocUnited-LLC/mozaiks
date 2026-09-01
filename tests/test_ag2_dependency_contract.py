@@ -7,7 +7,10 @@ import re
 import tomllib
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
+WATCHPOINTS = ROOT / "docs" / "architecture" / "workflows" / "ag2-watchpoints.yaml"
 AG2_REQUIREMENT = re.compile(r"^ag2(?:\[[^]]+\])?==(?P<version>[^;\s]+)$", re.IGNORECASE)
 
 
@@ -36,10 +39,16 @@ def _requirements_txt_ag2_version() -> str:
     return match.group("version")
 
 
+def _watchpoint_ag2_baseline() -> str:
+    manifest = yaml.safe_load(WATCHPOINTS.read_text(encoding="utf-8"))
+    return str(manifest["ag2_baseline"])
+
+
 def test_ag2_dependency_declarations_and_installed_runtime_match() -> None:
     versions = set(_declared_ag2_versions())
     assert len(versions) == 1, f"mixed AG2 versions declared: {sorted(versions)}"
 
     (declared_version,) = versions
     assert _requirements_txt_ag2_version() == declared_version
+    assert _watchpoint_ag2_baseline() == declared_version
     assert importlib.metadata.version("ag2") == declared_version
