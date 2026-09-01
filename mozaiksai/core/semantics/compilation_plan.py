@@ -74,7 +74,7 @@ from mozaiksai.core.workflow.assignment_kinds import (
     AssignmentKind,
     assignment_contract_descriptor,
 )
-from mozaiksai.core.workflow.work_contracts import (
+from mozaiksai.core.workflow.structured_output_contracts import (
     StructuredOutputContractRef,
     build_structured_output_contract_ref,
 )

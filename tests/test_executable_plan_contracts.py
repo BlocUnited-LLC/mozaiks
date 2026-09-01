@@ -37,7 +37,7 @@ from mozaiksai.core.workflow.assignment_kinds import (
     ASSIGNMENT_CONTRACT_DESCRIPTORS,
     AssignmentKind,
 )
-from mozaiksai.core.workflow.work_contracts import (
+from mozaiksai.core.workflow.structured_output_contracts import (
     StructuredOutputContractRef,
     build_structured_output_contract_ref,
     resolve_structured_output_contract_ref,
@@ -431,11 +431,13 @@ def test_agent_author_has_no_slice_4c_materialization_path() -> None:
 def test_slice_5a_substrate_is_production_unwired() -> None:
     allowed = {
         "mozaiksai/core/semantics/compilation_plan.py",
+        "mozaiksai/core/semantics/composition_ledger.py",
         "mozaiksai/core/semantics/__init__.py",
         "mozaiksai/core/semantics/materialization.py",
         "mozaiksai/core/semantics/resolver.py",
         "mozaiksai/core/semantics/refs.py",
         "mozaiksai/core/workflow/plan_assignment_compiler.py",
+        "mozaiksai/core/workflow/assignment_artifacts.py",
     }
     tokens = ("AGENT_AUTHOR", "PlanUnitRef", "ApprovedAssignmentSpec", "compile_approved_plan")
     offenders: list[str] = []

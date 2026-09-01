@@ -15,7 +15,7 @@ from mozaiksai.core.workflow.plan_assignment_compiler import (
     ApprovedPlan,
     compile_approved_plan,
 )
-from mozaiksai.core.workflow.work_contracts import StructuredOutputContractRef
+from mozaiksai.core.workflow.structured_output_contracts import StructuredOutputContractRef
 from tests.test_compilation_plan import _corpus_graph, _registry
 
 

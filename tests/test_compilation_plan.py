@@ -537,6 +537,9 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         # semantics layer only; its own proof suite asserts it has no
         # production, AG2, or ambient-capability imports.
         Path("mozaiksai/core/semantics/materialization.py"),
+        # Slice 5B offline composition consumes the aggregate plan only
+        # after assignment/materialization output has been validated.
+        Path("mozaiksai/core/semantics/composition_ledger.py"),
         Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
     }
     for root in (ROOT / "mozaiksai", ROOT / "factory_app"):

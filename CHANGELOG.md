@@ -38,6 +38,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Offline assignment artifact composition (ADR 0007 Slice 5B)**: added a
+  pure Factory-participant admission resolver, closed structured-output and
+  validator-backed `AssignmentArtifactResult`, and a content-free canonical
+  `CompositionLedger` paired with runtime bundle bytes. Composition now proves
+  exact plan-unit/path accounting, collision-free ownership, base-artifact
+  reuse, and explicit removal in offline tests. The obsolete parallel
+  `WorkAssignment` worker/executor/retry prototype was removed. Production
+  remains unwired: AppBuildPlan still owns live planning and AG2 still owns
+  participant identity and task lifecycle.
+
 - **Offline executable plan contracts (ADR 0007 Slice 5A)**: CompilationPlan
   registry snapshots and family units now pin closed assignment-kind,
   validator, and workflow structured-output identities for bounded
