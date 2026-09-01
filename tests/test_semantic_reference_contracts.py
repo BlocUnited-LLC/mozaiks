@@ -37,7 +37,6 @@ SCOPED_REF_TYPES = [
     CompilationPlanRef,
     BuildContextBindingRef,
     RefinementPatchRef,
-    ArtifactRevisionRef,
 ]
 
 
@@ -62,9 +61,7 @@ def test_scoped_refs_pin_all_identity_fields(ref_type) -> None:
 
 
 @pytest.mark.parametrize("ref_type", SCOPED_REF_TYPES)
-@pytest.mark.parametrize(
-    "missing", ["subject_id", "subject_version", "content_digest", "scope"]
-)
+@pytest.mark.parametrize("missing", ["subject_id", "subject_version", "content_digest", "scope"])
 def test_missing_immutable_identity_fields_fail_closed(ref_type, missing) -> None:
     fields = {
         "subject_id": "subject-1",
@@ -88,6 +85,27 @@ def test_refs_are_immutable(ref_type) -> None:
     ref = _ref(ref_type)
     with pytest.raises(pydantic.ValidationError):
         ref.subject_version = 2
+
+
+def test_artifact_revision_ref_replaces_opaque_subject_shape() -> None:
+    ref = ArtifactRevisionRef(scope=SCOPE, app_id="app-1", revision_digest=DIGEST)
+    assert set(type(ref).model_fields) == {
+        "ref_schema_version",
+        "scope",
+        "app_id",
+        "revision_digest",
+    }
+    with pytest.raises(pydantic.ValidationError):
+        ArtifactRevisionRef(
+            scope=SCOPE,
+            app_id="app-1",
+            revision_digest=DIGEST,
+            subject_version=1,
+        )
+    with pytest.raises(pydantic.ValidationError):
+        ArtifactRevisionRef(scope=SCOPE, app_id="app-1")
+    with pytest.raises(pydantic.ValidationError):
+        ref.revision_digest = "1" * 64
 
 
 @pytest.mark.parametrize("alias", ["latest", "current", "head", "tip", "newest"])
@@ -284,13 +302,15 @@ def test_resolver_has_no_bare_id_lookup_surface() -> None:
         "register_semantic_graph_v2",
         "register_semantic_payload",
         "register_application_manifest",
+        "register_artifact_revision",
         "register_implementation_binding",
         "register_taxonomy_namespace",
         "register_opaque_subject",
         "resolve",
-            "resolve_manifest_ref",
-            "resolve_plan_unit",
-            "resolve_semantic_payload",
+        "resolve_artifact_revision",
+        "resolve_manifest_ref",
+        "resolve_plan_unit",
+        "resolve_semantic_payload",
         "resolve_taxonomy_namespace",
     }
 

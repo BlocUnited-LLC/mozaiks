@@ -168,9 +168,18 @@ def test_manifest_rejects_cross_scope_references() -> None:
     with pytest.raises(pydantic.ValidationError, match="cross-scope"):
         build_application_manifest(**fields)
 
+
+def test_manifest_rejects_foreign_app_artifact_revision_ref() -> None:
     fields = _manifest_fields()
     fields["artifact_revision_ref"] = ArtifactRevisionRef(
-        subject_id="rev-1", subject_version=1, content_digest=DIGEST, scope=OTHER_SCOPE
+        scope=fields["scope"], app_id="another-app", revision_digest=DIGEST
+    )
+    with pytest.raises(pydantic.ValidationError, match="foreign-app"):
+        build_application_manifest(**fields)
+
+    fields = _manifest_fields()
+    fields["artifact_revision_ref"] = ArtifactRevisionRef(
+        scope=OTHER_SCOPE, app_id="app-1", revision_digest=DIGEST
     )
     with pytest.raises(pydantic.ValidationError, match="cross-scope"):
         build_application_manifest(**fields)

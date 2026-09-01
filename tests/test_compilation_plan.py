@@ -539,8 +539,11 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         Path("mozaiksai/core/semantics/materialization.py"),
         # Slice 5B offline composition consumes the aggregate plan only
         # after assignment/materialization output has been validated.
-        Path("mozaiksai/core/semantics/composition_ledger.py"),
-        Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
+            Path("mozaiksai/core/semantics/composition_ledger.py"),
+            # Slice 5C offline immutable revision closure and persistence owner.
+            Path("mozaiksai/core/semantics/artifact_revision.py"),
+            Path("mozaiksai/core/artifacts/revision_store.py"),
+            Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
     }
     for root in (ROOT / "mozaiksai", ROOT / "factory_app"):
         for path in root.rglob("*.py"):

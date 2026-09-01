@@ -297,7 +297,7 @@ scope mismatch fails closed.
 
 In particular, `ApplicationManifestRef`, `SemanticGraphRef`,
 `ImplementationBindingRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
-`RefinementPatchRef`, and `ArtifactRevisionRef` pin immutable versions and
+`RefinementPatchRef`, and `ArtifactRevisionRef` pin immutable identities and
 digests. `TaxonomyNamespaceRef` pins namespace identifier, version, and digest.
 Typed child-contract refs additionally pin artifact family, canonical relative
 path, contract schema version, and content digest. No ref may resolve by a bare
@@ -792,20 +792,40 @@ cannot require an OSS fork, a hidden service call, or a hidden Cloud dependency.
 ## ArtifactRevisionRef And Atomic Publication
 
 An `ArtifactRevision` is an immutable candidate byte set and provenance record.
-Its ref pins revision id, immutable version, digest, execution-access scope,
-`SemanticGraphRef`, `CompilationPlanRef`, `BuildContextBindingRef`,
-`ImplementationBindingRef`, renderer-registry version/digest, and a canonical
-files manifest. Promotion never mutates those fields or turns a mismatched
+Its identity binds application scope, exact parent (or explicit Genesis
+absence), `SemanticGraphRef`, `ImplementationBindingRef`,
+`CompilationPlanRef`, `CompositionLedger` digest, final bundle digest, and
+immutable validation-evidence digest. Exact artifact content digests remain
+transitively bound by the ledger rather than being copied into a second
+manifest authority. Promotion never mutates a revision or turns a mismatched
 candidate into a valid one.
 
-The single publication authority is an ownership-scoped compare-and-swap of
-the current `ApplicationManifestRef`. A successful commit publishes one new
-immutable manifest version containing the new graph/revision pair. It compares
-the expected prior manifest, graph, and revision refs immediately before the
-swap; a stale base or partial-store failure publishes neither ref and leaves
-the new revision unpromoted. Retry of the same commit is idempotent. Rollback
-uses the same operation to select a previously consistent manifest/graph/
-revision tuple, so there are never two independently current authorities.
+`ArtifactRevisionRef` is deliberately subordinate and minimal: schema version,
+`ExecutionAccessScopeRef`, application id, and revision digest only. Cold
+resolution loads the canonical revision by that full server-owned scope and
+digest, recomputes its identity, and verifies the complete referenced
+graph/binding/plan/ledger/evidence/content closure. It carries no copied body,
+mutable alias, sequence, filesystem path, or storage-backend identity.
+
+The single mutable publication authority is one `ApplicationPublication` row
+per execution scope and application. It contains a required-nullable current
+`ArtifactRevisionRef` and monotonically increasing generation. Promotion first
+persists and cold-verifies the immutable closure, then performs one backend-
+atomic compare-and-swap against the expected prior revision and generation. A
+stale base or partial-store failure leaves CURRENT unchanged; an unreferenced
+immutable candidate may remain safely. Retry of an already committed revision
+is an idempotent no-op. Rollback, when production wiring lands, uses the same
+CAS selection rather than mutating revision content or creating a second
+CURRENT authority.
+
+Revision and publication identity are deliberately source-control independent.
+Neither contract contains a repository, provider, branch, commit, pull request,
+or editor identity, and immutable bytes live in Mozaiks artifact/content
+storage. A workspace may be materialized locally or containerized without Git.
+Optional Git synchronization is a downstream export/projection of an accepted
+`ArtifactRevision`; externally changed source must re-enter as candidate content
+and pass validation plus revision creation before publication. A Git commit is
+never the canonical Mozaiks CURRENT authority.
 
 ## RefinementPatchRef
 
@@ -956,7 +976,7 @@ compiler may reference or consume it but does not become its source of truth.
 | `save_app_schema.py` hand validators | Parallel page/manifest validation | **replaced** | Collapse onto runtime models once the renderer path lands. |
 | Control-plane glob taxonomies (`refinement_router.py`, `dry_run.py`, `promotion_policy.py`, `validation_runner.py`) | Path→family inference | **replaced** | Graph-region queries over the renderer registry. |
 | `AppContextGraph` / `AppContextVersion` | Observed/indexed artifact view | separate authority, retained | Gains `semantic_graph_ref` sibling; stays downstream. |
-| `mozaiksai/core/artifacts/store.py` (`BuildRecordStore`) + `mozaiksai/control_plane/artifact_promotion.py` | Build records, lineage, promotion evidence | retained, extended | `ArtifactRevision` binds to existing lineage; revisions record graph/plan/binding digests; one current-manifest CAS publishes or rolls back a consistent graph/revision pair. |
+| `mozaiksai/core/artifacts/store.py` (`BuildRecordStore`) + `mozaiksai/control_plane/artifact_promotion.py` | Current production build records, lineage, and promotion evidence | retained through offline Slice 5C; app-bundle publication authority replaced at Slice 5D | Slice 5C adds immutable `ArtifactRevision` closure and isolated `ApplicationPublication` CAS without production importers. Slice 5D rewires app publication, makes AppContext a derived revision-keyed projection, and deletes the old app-bundle CURRENT/fallback paths atomically. |
 | `mozaiksai/core/data/persistence/artifact_store.py` (`BuilderArtifactStore`) | Typed builder artifact collections | direction decided at slice 5 | Becomes a projection of graph/artifact records or a typed view; no dual authority retained. |
 | Validation and acceptance gates (`app_validation.py`, `validation_runner.py`, bundle scanner) | Deterministic artifact validation | retained | Consume registry/graph instead of private path predicates. |
 | `factory_app/eval/` | Deterministic bundle scoring | separate authority, retained | Scores rendered output; gains archetype-corpus equivalence fixtures. |
@@ -1052,8 +1072,8 @@ journey capability.
 | **3E. Fresh-main graph-v2 projection evolution** — after the independently reviewed Slice 3 change lands, evolve its offline adapters to emit typed payload documents and graph-v2 refs | No authority change; current stage outputs and `AppBuildPlan` remain comparison inputs | Every prior typed gap is either represented by a strict payload variant or remains an explicit blocking gap; graph/payload closure and re-extraction equivalence across the corpus | Do not branch from the unmerged Slice 3 PR. Rollback: delete the graph-v2 adapter evolution. No live models or ADR 0006 interaction. |
 | **4B. Aggregate CompilationPlan derivation** — derive one aggregate plan containing non-authoritative artifact-family-instance subplans; project assignments and task-batch inputs from it | No production authority change: agent-produced `AppBuildPlan` remains current and the aggregate plan is offline-only | Complete family dispositions; derived-vs-produced plan equivalence; global DAG and path ownership; stable aggregate and family digests; partial regeneration/reuse closure; proof that family plans cannot resolve or execute independently and binding cannot widen graph semantics | Begin identifying plan mirrors and dead converter normalizers for cutover, but delete no active authority. Rollback: delete the candidate plan path. No live models, capability advertisement, or ADR 0006 dependency. |
 | **4C. Offline deterministic renderer equivalence** — bind graph-v2 payloads and aggregate-plan family instances to registry renderers; AgentGenerator regains a renderer layer | No production authority change; candidate renderers run only against offline corpus fixtures and never beside a live build | Stable renderer order; byte-identical child contracts; loader/validator and route/component/action closure; AppGenerator and AgentGenerator equivalence; changed semantic closure changes only affected families | Retain current generation and promotion. Rollback: delete candidate renderers and comparison flag. No live models, capability advertisement, or ADR 0006 dependency. |
-| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph version + build record become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; current-manifest CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/manifest persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
-| **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected paired publication; rollback rehearsal through the current-manifest CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent manifest/graph/revision tuple. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
+| **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph + immutable artifact revision become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; `ApplicationPublication` CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/publication persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
+| **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected publication; rollback rehearsal through `ApplicationPublication` CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent graph/revision closure. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
 | **7. Retirement** — remove obsolete schemas, glob taxonomies, aliases, converter paths, transitional adapters, comparison fixtures, and development flags | One semantic authority; one registry per concern | Repository hygiene guard extended to ban retired names (pattern: `scripts/production_readiness_gate.py`); full suite; generated-app acceptance | Deletions complete. Rollback: deployment rollback before deletion only; no dual-read shim reintroduced. No live-model change. ADR 0006 slice interleaving agreed before this point. |
 
 ## Acceptance Criteria For Implementation

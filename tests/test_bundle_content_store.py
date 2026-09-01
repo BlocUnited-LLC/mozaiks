@@ -18,6 +18,7 @@ Coverage:
 
 Total: 22 tests — no real MongoDB required.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +32,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mozaiksai.core.artifacts.content_store import (
+    ContentIntegrityError,
     ContentNotFoundError,
     GridFSBundleContentStore,
     LocalBundleContentStore,
@@ -40,6 +42,7 @@ from mozaiksai.core.artifacts.content_store import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_zip_bytes(entries: dict[str, str]) -> bytes:
     """Build an in-memory zip from a filename→content dict."""
@@ -68,6 +71,7 @@ def _run_async(awaitable):
 # TestContentNotFoundError
 # ---------------------------------------------------------------------------
 
+
 class TestContentNotFoundError:
     def test_is_exception_subclass(self):
         err = ContentNotFoundError("ref not found")
@@ -79,13 +83,12 @@ class TestContentNotFoundError:
 # TestLocalBundleContentStore
 # ---------------------------------------------------------------------------
 
+
 class TestLocalBundleContentStore:
     def test_put_returns_absolute_path_string(self, tmp_path):
         store = LocalBundleContentStore(root=tmp_path)
         data = _make_zip_bytes({"file.txt": "hello"})
-        ref = _run_async(
-            store.put_bundle(data, app_id="app1", build_record_id="br1")
-        )
+        ref = _run_async(store.put_bundle(data, app_id="app1", build_record_id="br1"))
         assert isinstance(ref, str)
         assert Path(ref).is_absolute()
         assert Path(ref).exists()
@@ -105,16 +108,12 @@ class TestLocalBundleContentStore:
 
     def test_exists_false_for_missing(self, tmp_path):
         store = LocalBundleContentStore(root=tmp_path)
-        assert _run_async(
-            store.exists(str(tmp_path / "does_not_exist.zip"))
-        ) is False
+        assert _run_async(store.exists(str(tmp_path / "does_not_exist.zip"))) is False
 
     def test_get_raises_content_not_found_for_missing(self, tmp_path):
         store = LocalBundleContentStore(root=tmp_path)
         with pytest.raises(ContentNotFoundError):
-            _run_async(
-                store.get_bundle(str(tmp_path / "ghost.zip"))
-            )
+            _run_async(store.get_bundle(str(tmp_path / "ghost.zip")))
 
     def test_delete_removes_file_returns_true(self, tmp_path):
         store = LocalBundleContentStore(root=tmp_path)
@@ -125,14 +124,13 @@ class TestLocalBundleContentStore:
 
     def test_delete_missing_returns_false(self, tmp_path):
         store = LocalBundleContentStore(root=tmp_path)
-        assert _run_async(
-            store.delete(str(tmp_path / "absent.zip"))
-        ) is False
+        assert _run_async(store.delete(str(tmp_path / "absent.zip"))) is False
 
 
 # ---------------------------------------------------------------------------
 # TestLocalChecksum
 # ---------------------------------------------------------------------------
+
 
 class TestLocalChecksum:
     def test_verify_checksum_correct(self, tmp_path):
@@ -150,14 +148,62 @@ class TestLocalChecksum:
 
     def test_verify_checksum_missing_ref_returns_false(self, tmp_path):
         store = LocalBundleContentStore(root=tmp_path)
-        assert _run_async(
-            store.verify_checksum(str(tmp_path / "missing.zip"), "a" * 64)
-        ) is False
+        assert _run_async(store.verify_checksum(str(tmp_path / "missing.zip"), "a" * 64)) is False
+
+
+class TestImmutableExactByteBlobs:
+    def test_put_get_and_duplicate_are_content_addressed(self, tmp_path):
+        store = LocalBundleContentStore(root=tmp_path)
+        data = b"line one\r\nline two\r\n"
+        digest = hashlib.sha256(data).hexdigest()
+        assert _run_async(store.put_blob(data, expected_digest=digest)) == digest
+        assert _run_async(store.put_blob(data, expected_digest=digest)) == digest
+        assert _run_async(store.get_verified_blob(digest)) == data
+        assert _run_async(store.has_verified_blob(digest)) is True
+
+    def test_lf_and_crlf_remain_distinct_exact_content(self, tmp_path):
+        store = LocalBundleContentStore(root=tmp_path)
+        lf = b"value\n"
+        crlf = b"value\r\n"
+        lf_digest = hashlib.sha256(lf).hexdigest()
+        crlf_digest = hashlib.sha256(crlf).hexdigest()
+        assert lf_digest != crlf_digest
+        _run_async(store.put_blob(lf, expected_digest=lf_digest))
+        _run_async(store.put_blob(crlf, expected_digest=crlf_digest))
+        assert _run_async(store.get_verified_blob(lf_digest)) == lf
+        assert _run_async(store.get_verified_blob(crlf_digest)) == crlf
+
+    def test_wrong_claim_and_modified_blob_fail_closed(self, tmp_path):
+        store = LocalBundleContentStore(root=tmp_path)
+        data = b"trusted"
+        digest = hashlib.sha256(data).hexdigest()
+        with pytest.raises(ContentIntegrityError, match="expected_digest"):
+            _run_async(store.put_blob(data, expected_digest="f" * 64))
+
+        _run_async(store.put_blob(data, expected_digest=digest))
+        path = tmp_path / "sha256" / digest[:2] / digest
+        path.write_bytes(b"modified at same immutable location")
+        with pytest.raises(ContentIntegrityError, match="expected_digest"):
+            _run_async(store.get_verified_blob(digest))
+
+    def test_missing_blob_is_not_present(self, tmp_path):
+        store = LocalBundleContentStore(root=tmp_path)
+        digest = "a" * 64
+        assert _run_async(store.has_verified_blob(digest)) is False
+        with pytest.raises(ContentNotFoundError):
+            _run_async(store.get_verified_blob(digest))
+
+    @pytest.mark.parametrize("digest", ["A" * 64, "a" * 63, f" {'a' * 64}"])
+    def test_malformed_digest_is_not_normalized(self, tmp_path, digest):
+        store = LocalBundleContentStore(root=tmp_path)
+        with pytest.raises(ContentIntegrityError, match="lowercase SHA-256"):
+            _run_async(store.put_blob(b"content", expected_digest=digest))
 
 
 # ---------------------------------------------------------------------------
 # TestReadBundleZipBytes
 # ---------------------------------------------------------------------------
+
 
 class TestReadBundleZipBytes:
     def test_read_bytes_matches_read_path(self, tmp_path):
@@ -165,6 +211,7 @@ class TestReadBundleZipBytes:
             read_bundle_zip,
             read_bundle_zip_bytes,
         )
+
         entries = {"app/module.yaml": "id: mymod\n", "app/handler.py": "pass"}
         data = _make_zip_bytes(entries)
         zip_path = tmp_path / "bundle.zip"
@@ -183,9 +230,13 @@ class TestReadBundleZipBytes:
         workspace = tmp_path / "workspace"
         (workspace / "app").mkdir(parents=True)
         (workspace / "node_modules" / "pkg").mkdir(parents=True)
-        (workspace / "app" / "main.py").write_text("def main():\n    return True\n", encoding="utf-8")
+        (workspace / "app" / "main.py").write_text(
+            "def main():\n    return True\n", encoding="utf-8"
+        )
         (workspace / ".env").write_text("API_KEY=raw", encoding="utf-8")
-        (workspace / "node_modules" / "pkg" / "index.js").write_text("module.exports = {}", encoding="utf-8")
+        (workspace / "node_modules" / "pkg" / "index.js").write_text(
+            "module.exports = {}", encoding="utf-8"
+        )
 
         file_map = read_workspace_dir(workspace)
         assert file_map == {"app/main.py": "def main():\n    return True\n"}
@@ -207,15 +258,18 @@ class TestReadBundleZipBytes:
 # TestGetBundleContentStore
 # ---------------------------------------------------------------------------
 
+
 class TestGetBundleContentStore:
     def _reset_singleton(self):
         import mozaiksai.core.artifacts.content_store as cs_mod
+
         cs_mod._bundle_content_store = None
 
     def test_default_is_local_instance(self):
         self._reset_singleton()
         with patch.dict("os.environ", {}, clear=False):
             import os
+
             os.environ.pop("MOZAIKS_BUNDLE_CONTENT_BACKEND", None)
             store = get_bundle_content_store()
         assert isinstance(store, LocalBundleContentStore)
@@ -248,6 +302,7 @@ class TestGetBundleContentStore:
 # ---------------------------------------------------------------------------
 # TestBundleWorkspaceContentRef
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestBundleWorkspaceContentRef:
