@@ -10,15 +10,15 @@ Related boundary: [AG2 Ownership Boundary](ag2-ownership-boundary.md).
 
 Reviewed against:
 
-- AG2 docs, 2026-06-08 pages:
-  - <https://docs.ag2.ai/latest/docs/beta/network/quick_start/>
-  - <https://docs.ag2.ai/latest/docs/beta/network/hub_and_identity/>
-  - <https://docs.ag2.ai/latest/docs/beta/network/agent_clients/>
-  - <https://docs.ag2.ai/latest/docs/beta/network/adapters_overview/>
-  - <https://docs.ag2.ai/latest/docs/beta/network/task_observation/>
-  - <https://docs.ag2.ai/latest/docs/beta/tasks/>
-  - <https://docs.ag2.ai/latest/docs/beta/task_delegation/>
-- Installed AG2 package inspected locally: `ag2==1.0.0`.
+- AG2 1.0.3 docs, reviewed 2026-09-01:
+  - <https://docs.ag2.ai/docs/user-guide/network/quick_start/>
+  - <https://docs.ag2.ai/docs/user-guide/network/hub_and_identity/>
+  - <https://docs.ag2.ai/docs/user-guide/network/agent_clients/>
+  - <https://docs.ag2.ai/docs/user-guide/network/adapters_overview/>
+  - <https://docs.ag2.ai/docs/user-guide/network/task_observation/>
+  - <https://docs.ag2.ai/docs/user-guide/tasks/>
+  - <https://docs.ag2.ai/docs/user-guide/agent_harness/>
+- Installed AG2 package inspected locally: `ag2==1.0.3`.
 
 Important AG2 facts:
 
@@ -190,7 +190,11 @@ Target worker execution options, in preference order:
    WAL replay, and task observation are needed.
 2. Use `Agent.as_tool()` or AG2 sub-task delegation only when the parent LLM
    should decide delegation dynamically.
-3. Direct `Agent.ask(...)` is not a task-batch execution path.
+3. A bare direct `Agent.ask(...)` is not a task-batch lifecycle. The current
+   narrow `AG2TaskBatchRunner` path is valid because an AG2 `Task` owns the
+   lifecycle and standalone stream while `Agent.ask(...)` performs the one
+   already-authorized worker turn. It does not claim Hub channels, scheduling,
+   delegation, or `TaskMirror` behavior.
 
 ### 6. Lifecycle Hooks
 
@@ -298,6 +302,10 @@ Current checkpoint:
 - Worker task context is passed through the scoped worker turn variables and
   dependencies; this standalone path does not create a per-task AG2 Network
   channel or WAL.
+- AG2 1.0.3 continues to expose both public primitives used here: `Task` for
+  lifecycle/observation and `Agent.ask(...)` for the preselected worker turn.
+  Deterministic success, failure, timeout, cancellation, and repeatability tests
+  prove this bounded composition without treating a bare ask as task execution.
 - `run_workflow_orchestration(...)` supports task-batch workflows through
   phased AG2 Network execution: trigger-agent phase, deterministic task
   lifecycle-wrapped worker turns, then downstream continuation phase with batch

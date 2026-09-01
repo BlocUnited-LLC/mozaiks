@@ -12,6 +12,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Upgraded the AG2 runtime to 1.0.3, including ACP 0.12.1 compatibility and corrected usage-event accounting coverage.
+
 ### Fixed
 
 - **Structured-output caches now invalidate on workflow reload**: the compiled

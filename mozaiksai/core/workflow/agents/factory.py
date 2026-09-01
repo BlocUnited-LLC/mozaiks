@@ -413,7 +413,7 @@ async def create_agents(
 ) -> dict[str, Agent]:
     """Create AG2 Agent instances for a workflow."""
 
-    logger.debug("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
+    logger.debug("[AGENTS] Creating AG2 agents for workflow: %s", workflow_name)
 
     from time import perf_counter
 
@@ -700,7 +700,7 @@ async def create_agents(
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
         ] + shell_tools + web_tools + image_generation_tools
 
-        # Load workflow-local AG2 1.0 beta prompt middleware declarations.
+        # Load workflow-local AG2 1.0 prompt middleware declarations.
         prompt_middleware_functions: list[Callable] = []
         try:
             from ..execution.middleware import _resolve_import, load_prompt_middleware_entries
@@ -851,7 +851,7 @@ async def create_agents(
         agents[agent_name] = agent
 
     duration = perf_counter() - start_time
-    logger.debug("[AGENTS] Created %d beta agents for '%s' in %.2fs", len(agents), workflow_name, duration)
+    logger.debug("[AGENTS] Created %d AG2 agents for '%s' in %.2fs", len(agents), workflow_name, duration)
 
     return agents
 
@@ -861,7 +861,7 @@ async def create_agents(
 # ------------------------------------------------------------------
 
 def list_agent_middleware(agent: Any) -> dict[str, list[str]]:
-    """Return Mozaiks prompt middleware registered as AG2 1.0 beta middleware."""
+    """Return Mozaiks prompt middleware registered as AG2 1.0 middleware."""
     out: dict[str, list[str]] = {}
     middleware_functions = getattr(agent, "_mozaiks_prompt_middleware", [])
     if middleware_functions:

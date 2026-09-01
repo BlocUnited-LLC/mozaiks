@@ -40,7 +40,7 @@ Current implemented workflow-run persistence contract:
   longer available.
 - AG2 agent-turn, LLM-call, tool-call, and HITL telemetry is emitted through AG2
   beta `TelemetryMiddleware` as OpenTelemetry spans.
-- LLM token usage is emitted by Mozaiks AG2 1.0 beta usage middleware as
+- LLM token usage is emitted by Mozaiks AG2 1.0 usage middleware as
   `chat.usage_delta` events and stored in `RuntimeUsageEvents`. This ledger is
   measurement-only. It does not enforce entitlements, quotas, pricing, or
   hosted billing.

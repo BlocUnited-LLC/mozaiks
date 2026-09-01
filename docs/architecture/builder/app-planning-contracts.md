@@ -214,7 +214,7 @@ Important rule:
 - tasks that plan do not write bundle paths
 - tasks that write bundle paths must declare which declarative family they own
 
-This is what lets AG2 1.0 beta workflow runs operate as constrained implementation workers
+This is what lets AG2 1.0 workflow runs operate as constrained implementation workers
 instead of becoming the architecture themselves.
 
 ## `BuildGraph`

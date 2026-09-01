@@ -1397,7 +1397,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         })
 
     async def _handle_resume_request(self, chat_id: str, last_client_index: int, websocket) -> None:
-        """Resume protocol for persisted AG2 1.0 beta workflow runs.
+        """Resume protocol for persisted AG2 1.0 workflow runs.
 
         We DO NOT compute sequence diffs via a bespoke diff endpoint anymore.
         Instead we:

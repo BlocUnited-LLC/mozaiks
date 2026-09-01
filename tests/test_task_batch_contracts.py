@@ -11,6 +11,7 @@ from ag2.annotations import CONTEXT_OPTION_NAME, Inject
 from ag2.context import ConversationContext
 from ag2.network.policies import CHANNEL_STATE_DEP
 from ag2.stream import MemoryStream
+from ag2.testing import TestConfig
 from pydantic import BaseModel
 
 from mozaiksai.core.adapters.ag2_task_batch_runner import (
@@ -243,6 +244,23 @@ async def test_ag2_task_batch_runner_emits_authentic_start_and_completion_eviden
     assert "run_subtasks" not in repr(ask_kwargs)
     assert "background_agent_tool" not in repr(ask_kwargs)
     assert "dynamic_agent" not in repr(ask_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_ag2_task_batch_runner_composes_task_with_public_agent_ask() -> None:
+    agent = Agent(
+        "WorkerAgent",
+        prompt="deterministic test worker",
+        config=TestConfig('{"ok": true}'),
+    )
+
+    result = await AG2TaskBatchRunner().run(_runner_request(agent))
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.output == {"ok": True}
+    assert result.lifecycle_status == "completed"
+    assert result.close_reason == "agent_ask_completed"
+    assert _event_names(result) == ["TaskStarted", "TaskCompleted"]
 
 
 @pytest.mark.asyncio

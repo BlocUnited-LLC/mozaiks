@@ -19,9 +19,9 @@ comparison intended to answer:
 
 External references:
 
-- [AG2 AG-UI overview](https://docs.ag2.ai/latest/docs/beta/ag-ui/)
-- [AG2 CopilotKit quickstart](https://docs.ag2.ai/latest/docs/beta/ag-ui/copilotkit-quickstart/)
-- [AG2 backend deep dive](https://docs.ag2.ai/latest/docs/beta/ag-ui/backend-deepdive/)
+- [AG2 AG-UI overview](https://docs.ag2.ai/docs/user-guide/ag-ui/)
+- [AG2 CopilotKit quickstart](https://docs.ag2.ai/docs/user-guide/ag-ui/copilotkit-quickstart/)
+- [AG2 backend deep dive](https://docs.ag2.ai/docs/user-guide/ag-ui/backend-deepdive/)
 - [AG-UI overview](https://docs.ag-ui.com/introduction)
 - [AG-UI events](https://docs.ag-ui.com/concepts/events)
 - [AG-UI state management](https://docs.ag-ui.com/concepts/state)

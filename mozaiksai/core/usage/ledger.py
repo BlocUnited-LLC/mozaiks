@@ -3,7 +3,7 @@ from __future__ import annotations
 """Neutral runtime usage ledger.
 
 The ledger stores factual usage measurements so local OSS and Studio dashboards
-can query token usage from AG2 1.0 beta usage events. It is not a billing authority
+can query token usage from AG2 1.0 usage events. It is not a billing authority
 and does not enforce subscriptions or entitlements.
 """
 
