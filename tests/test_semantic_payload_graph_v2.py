@@ -77,6 +77,7 @@ from mozaiksai.core.semantics.payloads import (
 )
 from mozaiksai.core.semantics.refs import (
     ExecutionAccessScopeRef,
+    RefDocumentType,
     SemanticPayloadRef,
 )
 from mozaiksai.core.semantics.resolver import (
@@ -107,6 +108,9 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # and non-importability are proven by its own proof suite and the
         # hygiene scan in tests/test_compilation_plan.py.
         Path("mozaiksai/core/semantics/materialization.py"),
+        # Slice 5A: the replacement assignment compiler is an explicitly
+        # offline substrate consumer of pinned payload and plan-unit refs.
+        Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
     }
 )
 _FORBIDDEN_PRODUCTION_MODULES = frozenset({"mozaiksai.core.semantics.payloads"})
@@ -810,7 +814,9 @@ def test_forged_graph_axes_and_nested_nodes_fail_registration_atomically(
     for payload in payloads:
         resolver.register_semantic_payload(payload)
     resolver.register_semantic_graph_v2(graph)
-    registered = resolver._subjects[(graph.graph_id, graph.version)].content
+    registered = resolver._subjects[
+        (RefDocumentType.SEMANTIC_GRAPH, graph.graph_id, graph.version)
+    ].content
     assert registered.model_dump(mode="json") == graph.model_dump(mode="json")
 
 

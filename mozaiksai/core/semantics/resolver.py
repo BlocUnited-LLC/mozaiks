@@ -23,6 +23,7 @@ from mozaiksai.core.semantics.refs import (
     BuildContextBindingRef,
     ChildContractRef,
     ExecutionAccessScopeRef,
+    PlanUnitRef,
     RefDocumentType,
     RefinementPatchRef,
     SemanticPayloadRef,
@@ -58,10 +59,10 @@ class SemanticReferenceResolver:
     """
 
     def __init__(self) -> None:
-        self._subjects: dict[tuple[str, int], _Subject] = {}
+        self._subjects: dict[tuple[RefDocumentType, str, int], _Subject] = {}
 
     def _register(self, subject: _Subject) -> None:
-        key = (subject.subject_id, subject.version)
+        key = (subject.kind, subject.subject_id, subject.version)
         existing = self._subjects.get(key)
         if existing is not None:
             raise ReferenceResolutionError(
@@ -135,7 +136,9 @@ class SemanticReferenceResolver:
         self, ref: SemanticPayloadRef, *, requesting_scope: ExecutionAccessScopeRef
     ) -> SemanticPayloadBase:
         """Verify document type, node binding, kind, version, digest, and scope."""
-        subject = self._subjects.get((ref.node_id, ref.payload_version))
+        subject = self._subjects.get(
+            (RefDocumentType.SEMANTIC_PAYLOAD, ref.node_id, ref.payload_version)
+        )
         if subject is None:
             raise ReferenceResolutionError(
                 f"no semantic payload for node {ref.node_id!r} at immutable version "
@@ -220,6 +223,27 @@ class SemanticReferenceResolver:
                 content=verified,
             )
         )
+
+    def resolve_plan_unit(
+        self, ref: PlanUnitRef, *, requesting_scope: ExecutionAccessScopeRef
+    ) -> Any:
+        """Resolve only through the registered aggregate and verify unit identity."""
+        from mozaiksai.core.semantics.canonical import canonical_digest
+
+        verified_ref = PlanUnitRef.model_validate(ref.model_dump(mode="json"))
+        content = self.resolve(
+            verified_ref.compilation_plan_ref, requesting_scope=requesting_scope
+        )
+        if not isinstance(content, CompilationPlan):
+            raise ReferenceResolutionError("compilation plan ref did not resolve to a plan")
+        try:
+            verified_plan = CompilationPlan.model_validate(content.model_dump(mode="json"))
+            unit = verified_plan.unit(verified_ref.unit_id)
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(f"plan unit failed cold resolution: {exc}") from exc
+        if canonical_digest(unit.identity_payload) != verified_ref.unit_digest:
+            raise ReferenceResolutionError("plan unit digest mismatch")
+        return unit
 
     def register_taxonomy_namespace(self, namespace: TaxonomyNamespace, digest: str) -> None:
         ref = TaxonomyNamespaceRef(
@@ -310,8 +334,25 @@ class SemanticReferenceResolver:
 
     def resolve(self, ref: _ScopedRef, *, requesting_scope: ExecutionAccessScopeRef) -> Any:
         """Verify type, exact version, digest, and scope; return stored content."""
-        subject = self._subjects.get((ref.subject_id, ref.subject_version))
+        subject = self._subjects.get(
+            (type(ref).document_type, ref.subject_id, ref.subject_version)
+        )
         if subject is None:
+            conflicting = next(
+                (
+                    candidate
+                    for (kind, subject_id, version), candidate in self._subjects.items()
+                    if subject_id == ref.subject_id
+                    and version == ref.subject_version
+                    and kind is not type(ref).document_type
+                ),
+                None,
+            )
+            if conflicting is not None:
+                raise ReferenceResolutionError(
+                    f"document type mismatch: ref expects {type(ref).document_type.value!r}, "
+                    f"stored subject is {conflicting.kind.value!r}"
+                )
             raise ReferenceResolutionError(
                 f"no subject {ref.subject_id!r} at immutable version "
                 f"{ref.subject_version}; refs never fall back to another version"
@@ -354,7 +395,9 @@ class SemanticReferenceResolver:
         return content
 
     def resolve_taxonomy_namespace(self, ref: TaxonomyNamespaceRef) -> TaxonomyNamespace:
-        subject = self._subjects.get((ref.namespace_id, ref.namespace_version))
+        subject = self._subjects.get(
+            (RefDocumentType.TAXONOMY_NAMESPACE, ref.namespace_id, ref.namespace_version)
+        )
         if subject is None:
             raise ReferenceResolutionError(
                 f"no taxonomy namespace {ref.namespace_id!r} at version {ref.namespace_version}"

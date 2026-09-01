@@ -7,7 +7,10 @@ not grow drifting private task taxonomies.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 
 
 class AssignmentKind(StrEnum):
@@ -52,6 +55,46 @@ REGISTERED_ASSIGNMENT_KINDS: frozenset[AssignmentKind] = (
 )
 
 
+@dataclass(frozen=True)
+class AssignmentContractDescriptor:
+    """Locator for one proven workflow-owned structured-output contract."""
+
+    assignment_kind: AssignmentKind
+    workflow_name: str
+    structured_output_model_id: str
+
+
+_ASSIGNMENT_CONTRACT_DESCRIPTORS: tuple[AssignmentContractDescriptor, ...] = tuple(
+    AssignmentContractDescriptor(kind, "AppGenerator", model_id)
+    for kind, model_id in (
+        (AssignmentKind.SUBSCRIPTION_CONFIG, "ConfigMiddlewareOutput"),
+        (AssignmentKind.SERVICE_FOUNDATION, "ConfigMiddlewareOutput"),
+        (AssignmentKind.MODULE_CONTRACT, "ConfigMiddlewareOutput"),
+        (AssignmentKind.PERSISTENCE_CONTRACT, "DatabaseOutput"),
+        (AssignmentKind.DATA_MIGRATIONS, "DatabaseOutput"),
+        (AssignmentKind.DATA_MODELS, "ModelOutput"),
+        (AssignmentKind.BUSINESS_SERVICES, "ServiceOutput"),
+        (AssignmentKind.REFINEMENT_HARNESS, "RefinementHarnessOutput"),
+        (AssignmentKind.API_SURFACE, "ControllerOutput"),
+        (AssignmentKind.PAGE_BUNDLE, "AppSchemaOutput"),
+    )
+)
+ASSIGNMENT_CONTRACT_DESCRIPTORS: Mapping[
+    AssignmentKind, AssignmentContractDescriptor
+] = MappingProxyType(
+    {
+        descriptor.assignment_kind: descriptor
+        for descriptor in _ASSIGNMENT_CONTRACT_DESCRIPTORS
+    }
+)
+
+
+def assignment_contract_descriptor(
+    kind: AssignmentKind | str,
+) -> AssignmentContractDescriptor | None:
+    return ASSIGNMENT_CONTRACT_DESCRIPTORS.get(AssignmentKind(kind))
+
+
 def registered_assignment_kind_values() -> frozenset[str]:
     return frozenset(kind.value for kind in REGISTERED_ASSIGNMENT_KINDS)
 
@@ -65,6 +108,9 @@ __all__ = [
     "REGISTERED_ASSIGNMENT_KINDS",
     "WORK_INTEGRATION_EXTENSION_KINDS",
     "AssignmentKind",
+    "AssignmentContractDescriptor",
+    "ASSIGNMENT_CONTRACT_DESCRIPTORS",
+    "assignment_contract_descriptor",
     "app_build_assignment_kind_values",
     "registered_assignment_kind_values",
 ]

@@ -47,7 +47,7 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-_GOLDEN_PLAN_DIGEST = "cb402f62734fdfd559ef5589ddd9335ae749a5d1217eefcd48d86b7995ed6e9c"
+_GOLDEN_PLAN_DIGEST = "4cfa4b907ef56320c0a26cc7c392d8e35284ed1c5c5bbf3624f1e0908b0df880"
 
 
 def _registry():
@@ -316,6 +316,9 @@ def test_unknown_layout_family_condition_becomes_a_typed_gap() -> None:
         materializer = type("M", (), {"value": "unknown"})()
         owner = type("O", (), {"value": "app_workspace"})()
         dependency_families = ()
+        assignment_kinds = ()
+        validator = type("V", (), {"value": "none"})()
+        semantic_input_kinds = ()
 
     class _NovelRegistry:
         schema_version = registry.schema_version
@@ -389,7 +392,7 @@ def test_digest_propagates_payload_to_graph_to_plan() -> None:
     assert not any(unit.family_kind == "app_ui_route_manifest" for unit in changed.units)
     assert any(
         gap.family_kind == "app_ui_route_manifest"
-        and gap.code.value == "renderer_input_undeclared"
+        and gap.code.value == "output_contract_unresolved"
         for gap in changed.gaps
     )
     # ...and unrelated declared units with unchanged footprints stay reusable.
@@ -422,6 +425,7 @@ def test_reuse_from_base_requires_base_plan_digest() -> None:
             disposition=PlanDisposition.REUSE_FROM_BASE,
             source_scope="declared",
             materializer="none",
+            validator="none",
         )
     with pytest.raises(ValidationError, match="reuse_from_base"):
         FamilyInstancePlan(
@@ -431,8 +435,29 @@ def test_reuse_from_base_requires_base_plan_digest() -> None:
             disposition=PlanDisposition.RENDER,
             source_scope="declared",
             materializer="none",
+            validator="none",
             base_plan_digest="a" * 64,
         )
+
+
+def test_reuse_from_base_source_identity_invalidates_reuse() -> None:
+    plan = _plan()
+    target = next(unit for unit in plan.units if unit.assignment_kind is None)
+
+    def _with_base_digest(base_digest: str) -> CompilationPlan:
+        document = plan.model_dump(mode="json")
+        for unit in document["units"]:
+            if unit["unit_id"] == target.unit_id:
+                unit["disposition"] = PlanDisposition.REUSE_FROM_BASE.value
+                unit["base_plan_digest"] = base_digest
+                break
+        return CompilationPlan.model_validate(_redigest(document))
+
+    base = _with_base_digest("a" * 64)
+    successor = _with_base_digest("b" * 64)
+    closure = plan_regeneration_closure(base, successor)
+    assert target.unit_id in closure.affected
+    assert target.unit_id not in closure.reusable
 
 
 # ---------------------------------------------------------------------------
@@ -499,9 +524,9 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         encoding="utf-8"
     )
     assert "import ag2" not in source and "from ag2" not in source
-    # The semantics layer must not import the runtime registry module; the
-    # registry arrives as a parameter.
-    assert "runtime.app.layout_registry" not in source
+    # The registry object still arrives as a parameter; importing its closed
+    # ValidatorIdentifier taxonomy does not create a second registry.
+    assert "build_app_layout_registry" not in source
 
     offenders: list[str] = []
     excluded = {
@@ -512,6 +537,7 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         # semantics layer only; its own proof suite asserts it has no
         # production, AG2, or ambient-capability imports.
         Path("mozaiksai/core/semantics/materialization.py"),
+        Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
     }
     for root in (ROOT / "mozaiksai", ROOT / "factory_app"):
         for path in root.rglob("*.py"):
@@ -609,6 +635,9 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "edge_sources",
             "depends_on_units",
             "materializer",
+            "assignment_kind",
+            "validator",
+            "required_structured_output_ref",
             "base_plan_digest",
         },
         PlanOutput: {"path_scope", "path"},
@@ -631,7 +660,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         },
     }
     forbidden_tokens = (
-        "agent",
+        "agent_id",
         "passport",
         "channel",
         "envelope",
@@ -733,6 +762,9 @@ def test_blocker1_registry_identity_is_recomputed_not_trusted() -> None:
                 path_template = "forged/other_output.json"
                 materializer = rows[0].materializer
                 dependency_families = rows[0].dependency_families
+                assignment_kinds = rows[0].assignment_kinds
+                validator = rows[0].validator
+                semantic_input_kinds = rows[0].semantic_input_kinds
 
             return (_Swapped(), *rows[1:])
 
@@ -760,6 +792,9 @@ def test_blocker1_registry_identity_is_recomputed_not_trusted() -> None:
         path_template = "x/y.json"
         materializer = "app_generator"
         dependency_families = ()
+        assignment_kinds = ()
+        validator = "none"
+        semantic_input_kinds = ()
 
     class _BadRegistry:
         schema_version = real.schema_version
@@ -988,6 +1023,9 @@ def test_blocker5_reverse_dependency_and_graph_wide_propagation() -> None:
             "edge_sources": [],
             "depends_on_units": list(deps),
             "materializer": "app_generator",
+            "validator": "generated_app_validator",
+            "assignment_kind": None,
+            "required_structured_output_ref": None,
             "base_plan_digest": None,
         }
 

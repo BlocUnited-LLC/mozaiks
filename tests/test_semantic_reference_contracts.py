@@ -288,8 +288,9 @@ def test_resolver_has_no_bare_id_lookup_surface() -> None:
         "register_taxonomy_namespace",
         "register_opaque_subject",
         "resolve",
-        "resolve_manifest_ref",
-        "resolve_semantic_payload",
+            "resolve_manifest_ref",
+            "resolve_plan_unit",
+            "resolve_semantic_payload",
         "resolve_taxonomy_namespace",
     }
 

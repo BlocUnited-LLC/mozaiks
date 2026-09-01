@@ -501,6 +501,7 @@ def test_renderer_rejects_page_missing_required_fields() -> None:
         placeholder_values=(("page_id", "incomplete"),),
         sources=(PlanSource(node_id=page.node_id, payload_digest=page.payload_digest),),
         materializer="page_schema_executor",
+        validator="generated_app_validator",
     )
     with pytest.raises(MaterializationError, match="not renderer-input complete"):
         render_app_ui_page_schema_unit(
