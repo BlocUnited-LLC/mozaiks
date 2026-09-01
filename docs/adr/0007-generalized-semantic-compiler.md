@@ -24,8 +24,8 @@ test between representations:
   `loader.py`).
 
 Studio re-normalizes the same shapes again, and the control plane derives its
-own work-contract projections (`mozaiksai/core/workflow/work_contracts.py`,
-`mozaiksai/core/workflow/plan_assignment_compiler.py`).
+own assignment projections
+(`mozaiksai/core/workflow/plan_assignment_compiler.py`).
 
 Because that semantic authority is missing, safety became path-shaped:
 `mozaiksai/control_plane/implementations/refinement_router.py`,
@@ -241,6 +241,20 @@ for graph v2. Production semantic authority, persistence, promotion behavior,
 and capability advertisement remain unchanged until Slice 5. None of these
 decisions authorizes live models or relaxes the ADR 0006 interlock.
 
+Slice 5B adds only the offline artifact-composition boundary. A cold-validated
+`CompiledAssignment` resolves ephemerally to exactly one logical Factory
+participant through the workflow's existing structured-output bindings. AG2
+continues to own runtime participant identity and task lifecycle. Successful
+candidate bytes become authoritative only after the pinned structured-output
+model and Mozaiks validators produce a closed `AssignmentArtifactResult`.
+`CompositionLedger` then accounts for every plan unit and every physical
+artifact identity, including exact base reuse and explicit removals; the
+ledger contains digests, not bytes, while `CanonicalComposedBundle` carries
+runtime bytes. This substrate is not imported by production workflows,
+execution adapters, materialization, persistence, promotion, or refinement.
+`AppBuildPlan` therefore remains production planning authority until the
+atomic Slice 5D cutover.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,
@@ -301,7 +315,7 @@ Required properties:
 - **Deterministic canonical serialization.** One canonical byte serialization
   (stable key order, normalized scalars, closed input set) defined once and
   reused for digesting, following the proven patterns of
-  `layout_registry`'s stable digest and `work_contracts.stable_digest`.
+  `layout_registry` and the narrow structured-output contract digest helper.
   Serializing the same graph twice is byte-identical. The serialization covers
   every semantically relevant schema field; no field may be omitted from the
   digest by convention. The exact scalar normalization, Unicode, number,
@@ -452,9 +466,9 @@ contracts are rendered views; they are not competing generation-time semantic
 authorities. The generator-side YAML mirrors of runtime contracts (the module
 and page families inside `factory_app/workflows/AppGenerator/structured_outputs.yaml`,
 and AgentGenerator's per-file output models) are retired once agents emit
-graph-node payloads validated directly against the runtime models — a
-mechanism already proven by the companion-model validation in
-`mozaiksai/core/workflow/module_contract_executor.py`.
+graph-node payloads validated directly against the runtime models — using the
+same cold-resolved canonical structured-output system that pins executable
+assignment output contracts.
 
 These authorities operate at different times. For compiler-managed surfaces,
 the `SemanticGraph` is authoritative when semantic intent disagrees with a
@@ -938,7 +952,7 @@ compiler may reference or consume it but does not become its source of truth.
 | `layout_registry.py` | Artifact families, paths, validators, security classes | **extended** into the renderer registry | Gains renderer/stub/dependency declarations; becomes the single path→family authority repo-wide. |
 | Capability-pack/deployment/provider selection currently spread across `AppBuildPlan`, context variables, pack resolvers, and download renderers | Mix of semantic choice and concrete implementation resolution | **split by authority** | Semantic requirements move into graph nodes; deterministic concrete resolution becomes `ImplementationBindingRef`; no loose selection input survives. |
 | `AppBuildPlan` (structured output + `app_build_plan.py`) | Agent-authored build plan | **replaced** by derived `CompilationPlan` | Offline equivalence fixture during migration; retired at cutover. |
-| Generator YAML mirrors in `structured_outputs.yaml` (module/page families, AgentGenerator per-file models) | Generation-time re-declaration of runtime contracts | **replaced** | Agents emit graph-node payloads validated against runtime models (per `module_contract_executor.py` pattern). |
+| Generator YAML mirrors in `structured_outputs.yaml` (module/page families, AgentGenerator per-file models) | Generation-time re-declaration of runtime contracts | **replaced** | Agents emit graph-node payloads validated against canonical runtime models through the pinned structured-output contract boundary. |
 | `save_app_schema.py` hand validators | Parallel page/manifest validation | **replaced** | Collapse onto runtime models once the renderer path lands. |
 | Control-plane glob taxonomies (`refinement_router.py`, `dry_run.py`, `promotion_policy.py`, `validation_runner.py`) | Path→family inference | **replaced** | Graph-region queries over the renderer registry. |
 | `AppContextGraph` / `AppContextVersion` | Observed/indexed artifact view | separate authority, retained | Gains `semantic_graph_ref` sibling; stays downstream. |

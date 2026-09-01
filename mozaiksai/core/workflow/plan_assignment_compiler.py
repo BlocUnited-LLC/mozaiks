@@ -18,7 +18,7 @@ from mozaiksai.core.semantics.refs import PlanUnitRef, SemanticPayloadRef
 from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
 
 from .assignment_kinds import AssignmentKind
-from .work_contracts import (
+from .structured_output_contracts import (
     StructuredOutputContractRef,
     resolve_structured_output_contract_ref,
     stable_digest,

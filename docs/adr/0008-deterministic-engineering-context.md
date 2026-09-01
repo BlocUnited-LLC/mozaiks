@@ -251,11 +251,12 @@ records the concrete, evidence-backed findings.
 ### Slice placement
 
 - ADR 0007 Slice 4C: no engineering-context implementation.
-- Slice 5: assignment projection must populate the existing landing zones
-  (`dependency_context_refs`, `required_validators`,
-  `required_structured_output_id`, `allowed_agent_ids`) with
-  manifest-compatible grammars. Slice 5 must not introduce free-form
-  reference or validator identifiers that would later require migration.
+- Slice 5A/5B: assignment projection closes semantic and dependent plan-unit
+  context refs, validator identifiers, structured-output contract refs, and
+  base revision identity. Logical Factory participant admission is ephemeral;
+  runtime participant identity remains AG2-owned and is not a context
+  entitlement field. Slice 5 must not introduce free-form reference or
+  validator identifiers that would later require migration.
 - Post-Slice-5 bounded slice: the likely implementation point for the
   entitlement contract, skills, grants, and budget classes.
 - Slice 6: plan/refinement closure becomes the context-scope authority for
