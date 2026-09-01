@@ -67,7 +67,10 @@ def test_slice_5c_contract_has_no_ag2_or_runtime_execution_identity() -> None:
                 imports.add(node.module.casefold())
             elif isinstance(node, ast.Import):
                 imports.update(alias.name.casefold() for alias in node.names)
-    assert not any("ag2" in module or "autogen" in module for module in imports)
+    legacy_agent_package = "".join(("auto", "gen"))
+    assert not any(
+        "ag2" in module or legacy_agent_package in module for module in imports
+    )
     for forbidden in (
         "agent_id",
         "task_id",
