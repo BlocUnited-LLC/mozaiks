@@ -521,6 +521,35 @@ def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type
     
     return models, registry
 
+def invalidate_workflow_structured_outputs(workflow_name: str) -> None:
+    """Drop all compiled structured-output state for one workflow.
+
+    The workflow manager calls this whenever it reloads or unloads a
+    workflow's configuration so compiled Pydantic models never outlive the
+    config they were built from. Cache keys preserve the raw casing callers
+    passed to load_workflow_structured_outputs, while the manager normalizes
+    names to lowercase, so matching here is case-insensitive.
+    """
+    normalized = str(workflow_name or "").strip().lower()
+    if not normalized:
+        return
+    stale_keys = {key for key in _workflow_models if key.lower() == normalized}
+    for key in stale_keys:
+        for model_cls in _workflow_models[key].values():
+            _provider_response_model_cache.pop(model_cls, None)
+    for cache in (_workflow_models, _workflow_registries, _workflow_structured_agents):
+        for key in [k for k in cache if k.lower() == normalized]:
+            del cache[key]
+
+
+def invalidate_all_workflow_structured_outputs() -> None:
+    """Drop all compiled structured-output state for every workflow."""
+    _workflow_models.clear()
+    _workflow_registries.clear()
+    _workflow_structured_agents.clear()
+    _provider_response_model_cache.clear()
+
+
 def get_structured_outputs_for_workflow(workflow_name: str) -> dict[str, type]:
     """Get structured outputs registry for a specific workflow."""
     _, registry = load_workflow_structured_outputs(workflow_name)

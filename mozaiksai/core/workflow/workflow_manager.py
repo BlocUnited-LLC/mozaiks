@@ -607,6 +607,14 @@ class UnifiedWorkflowManager:
         
         # Reload the workflow completely
         try:
+            # Local import: outputs.structured imports this module at import time.
+            from .outputs.structured import invalidate_workflow_structured_outputs
+
+            # Evict the prior config and compiled structured-output models before
+            # re-reading from disk so a replacement config that fails validation
+            # fails closed instead of leaving the prior config's models live.
+            self._config_cache.pop(normalized_name, None)
+            invalidate_workflow_structured_outputs(workflow_name)
             workflow_info = self._load_single_workflow(workflow_name)
             return workflow_info.to_dict()
         except Exception as e:
@@ -615,14 +623,18 @@ class UnifiedWorkflowManager:
     
     def unload_workflow(self, workflow_name: str) -> None:
         """Unload a workflow (remove from active workflows)"""
+        # Local import: outputs.structured imports this module at import time.
+        from .outputs.structured import invalidate_workflow_structured_outputs
+
         normalized_name = workflow_name.lower()
-        
+
         if normalized_name in self._workflows:
             del self._workflows[normalized_name]
-        
+
         if normalized_name in self._config_cache:
             del self._config_cache[normalized_name]
-        
+
+        invalidate_workflow_structured_outputs(workflow_name)
         logger.info("Unloaded workflow: %s", workflow_name)
     
     def get_workflow_info(self, workflow_name: str) -> dict[str, Any] | None:
@@ -765,10 +777,14 @@ class UnifiedWorkflowManager:
     
     def refresh_all(self) -> dict[str, Any]:
         """Refresh all workflows and return summary"""
+        # Local import: outputs.structured imports this module at import time.
+        from .outputs.structured import invalidate_all_workflow_structured_outputs
+
         logger.info("Refreshing all workflows...")
         self._workflows.clear()
         self._workflow_paths.clear()
         self._config_cache.clear()
+        invalidate_all_workflow_structured_outputs()
         self._load_all_workflows()
         return self.get_status_summary()
 
