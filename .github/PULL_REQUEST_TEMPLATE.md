@@ -3,6 +3,10 @@
   maintainers have what they need to review efficiently. See CONTRIBUTING.md
   for the full contribution path.
 
+  Before implementing a bug fix, sync with current main and confirm the issue
+  still reproduces. Mozaiks moves quickly, and an older report or suggested
+  implementation may already have been superseded.
+
   Using an AI coding agent? That is welcome — see .github/AI_POLICY.md. The
   short version: make sure this description matches what the diff actually
   does, and that you can explain the change in review.
@@ -14,6 +18,17 @@
 ## Related issue
 
 <!-- Link the issue this PR addresses, e.g. "Closes #123". Write "N/A" if none. -->
+
+## Current-main verification
+
+- [ ] I synced/rebased onto current `main` before implementing this change.
+- [ ] For a bug fix, I confirmed the reported failure still reproduces on current `main`, or I explained below why reproduction is not applicable.
+
+<!--
+  For bug fixes, briefly state how you reproduced the problem on current main.
+  If the original issue no longer reproduces, do not carry forward an obsolete
+  local fix; comment on the issue/PR so maintainers can close it as superseded.
+-->
 
 ## Summary
 
