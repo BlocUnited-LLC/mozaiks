@@ -610,15 +610,26 @@ class UnifiedWorkflowManager:
             # Local import: outputs.structured imports this module at import time.
             from .outputs.structured import invalidate_workflow_structured_outputs
 
-            # Evict the prior config and compiled structured-output models before
-            # re-reading from disk so a replacement config that fails validation
-            # fails closed instead of leaving the prior config's models live.
+            # Evict the prior config, the prior loaded-workflow record, and the
+            # compiled structured-output models before re-reading from disk so a
+            # replacement config that fails validation fails closed on every
+            # lifecycle surface instead of leaving the prior workflow reported
+            # as successfully loaded.
             self._config_cache.pop(normalized_name, None)
+            self._workflows.pop(normalized_name, None)
             invalidate_workflow_structured_outputs(workflow_name)
             workflow_info = self._load_single_workflow(workflow_name)
             return workflow_info.to_dict()
         except Exception as e:
             logger.error("WORKFLOW_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
+            workflow_path = self.resolve_workflow_path(workflow_name)
+            self._workflows[normalized_name] = WorkflowInfo(
+                name=workflow_name,
+                config={},
+                path=str(workflow_path or (self.workflows_base_path / workflow_name)),
+                status="error",
+                error=str(e),
+            )
             return {"error": str(e)}
     
     def unload_workflow(self, workflow_name: str) -> None:
@@ -645,7 +656,7 @@ class UnifiedWorkflowManager:
     
     def list_loaded_workflows(self) -> list[str]:
         """List all currently loaded workflows"""
-        return [info.name for info in self._workflows.values()]
+        return [info.name for info in self._workflows.values() if info.status == "loaded"]
     
     def get_ui_tools(self, workflow_name: str) -> dict[str, Any]:
         return {k: v for k, v in getattr(self, '_ui_registry', {}).items() if v.get('workflow_name') == workflow_name}
@@ -1016,6 +1027,14 @@ def get_workflow_manager() -> UnifiedWorkflowManager:
 def initialize_workflows(base_path: str | None = None) -> dict[str, dict[str, Any]]:
     """Initialize workflows with custom base path"""
     global _unified_workflow_manager, workflow_manager
+
+    # Local import: outputs.structured imports this module at import time.
+    from .outputs.structured import invalidate_all_workflow_structured_outputs
+
+    # Reinitialization can rebind the manager to a different workflow root, so
+    # every compiled structured-output model may describe replaced config.
+    # Drop them all before rebuilding; the drop also holds if the rebuild fails.
+    invalidate_all_workflow_structured_outputs()
 
     # Preserve object identity so modules that imported `workflow_manager`
     # by value don't retain stale references after reinitialization.

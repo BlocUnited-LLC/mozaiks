@@ -277,6 +277,62 @@ def test_malformed_replacement_config_fails_closed(isolated_manager, tmp_path):
         _so.load_workflow_structured_outputs("CacheProbe")
 
 
+def test_failed_reload_leaves_every_lifecycle_surface_consistent(isolated_manager, tmp_path):
+    workflow_dir = _write_workflow(tmp_path, "CacheProbe")
+    _load(isolated_manager, "CacheProbe")
+    _so.load_workflow_structured_outputs("CacheProbe")
+    assert "CacheProbe" in isolated_manager.list_loaded_workflows()
+
+    (workflow_dir / "agents.yaml").write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    info = isolated_manager.reload_workflow("CacheProbe")
+    assert info.get("error")
+
+    # Every lifecycle surface must agree: the workflow is not successfully
+    # loaded anywhere after the replacement config failed validation.
+    assert isolated_manager.get_config("CacheProbe") == {}
+    workflow_info = isolated_manager.get_workflow_info("CacheProbe")
+    assert workflow_info is not None
+    assert workflow_info["status"] == "error"
+    assert workflow_info["error"]
+    assert workflow_info["config"] == {}
+    assert "CacheProbe" not in isolated_manager.list_loaded_workflows()
+    assert "CacheProbe" not in isolated_manager.get_all_workflow_names()
+    summary = isolated_manager.get_status_summary()
+    assert summary["loaded_workflows"] == 0
+    assert summary["error_workflows"] == 1
+    assert "CacheProbe" not in _so._workflow_models
+    with pytest.raises(ValueError):
+        _so.load_workflow_structured_outputs("CacheProbe")
+
+
+def test_initialize_workflows_root_switch_invalidates_all(isolated_manager, tmp_path):
+    root_a = tmp_path / "root_a"
+    root_b = tmp_path / "root_b"
+    _write_workflow(root_a, "CacheProbe", field_name="field_a", registry_agent="ProbeAgent")
+    _write_workflow(root_b, "CacheProbe", field_name="field_b", registry_agent="OtherAgent")
+
+    _wm_mod.initialize_workflows(base_path=str(root_a))
+    models_a, _ = _so.load_workflow_structured_outputs("CacheProbe")
+    probe_cls_a = models_a["ProbeOutput"]
+    assert list(probe_cls_a.model_fields) == ["field_a"]
+    schema_a = json.dumps(probe_cls_a.model_json_schema(), sort_keys=True)
+    _so._provider_response_model_cache[probe_cls_a] = probe_cls_a
+
+    _wm_mod.initialize_workflows(base_path=str(root_b))
+
+    config_b = isolated_manager.get_config("CacheProbe")
+    assert list(config_b["structured_outputs"]["models"]["ProbeOutput"]["fields"]) == ["field_b"]
+    models_b, registry_b = _so.load_workflow_structured_outputs("CacheProbe")
+    assert list(models_b["ProbeOutput"].model_fields) == ["field_b"]
+    assert list(registry_b) == ["OtherAgent"]
+    assert _so.get_structured_output_agents("CacheProbe") == ["OtherAgent"]
+    assert models_b["ProbeOutput"] is not probe_cls_a
+    schema_b = json.dumps(models_b["ProbeOutput"].model_json_schema(), sort_keys=True)
+    assert schema_a != schema_b
+    # Stale provider response-model entries built from the replaced class are gone.
+    assert probe_cls_a not in _so._provider_response_model_cache
+
+
 def test_loader_failure_writes_no_partial_cache(isolated_manager, monkeypatch):
     # A registry row naming an unknown model is rejected by the manager's YAML
     # contract at load time, so inject it at the get_config seam: the loader
