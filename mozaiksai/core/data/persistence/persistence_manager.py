@@ -10,7 +10,7 @@ AG2 stream storage:
   * PersistenceManager: Mongo client + indexes (runtime-owned only)
   * AG2PersistenceManager: ChatSessions + AG2 run stream projections
 
-AG2 1.0 beta telemetry is middleware-based OpenTelemetry instrumentation and lives
+AG2 1.0 telemetry is middleware-based OpenTelemetry instrumentation and lives
 in ``mozaiksai.core.observability``. Do not add agent-turn telemetry collectors
 or in-memory performance counters here.
 """
@@ -303,7 +303,7 @@ class AG2PersistenceManager:
     and session/journey correlation metadata.
 
     LLM token usage belongs to RuntimeUsageEvents. Agent turn, LLM-call,
-    tool-call, and HITL telemetry spans belong to AG2 1.0 beta
+    tool-call, and HITL telemetry spans belong to AG2 1.0
     TelemetryMiddleware/OpenTelemetry.
     """
 

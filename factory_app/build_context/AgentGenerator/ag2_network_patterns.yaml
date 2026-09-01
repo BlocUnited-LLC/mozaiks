@@ -1,8 +1,8 @@
 version: 1
-description: Canonical AG2 1.0 beta Network patternbook for generated Mozaiks workflows.
+description: Canonical AG2 1.0 Network patternbook for generated Mozaiks workflows.
 authority: factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml
 global_rules:
-  - Workflow YAML remains the authoring contract; runtime compiles it to AG2 1.0 beta Network objects.
+  - Workflow YAML remains the authoring contract; runtime compiles it to AG2 1.0 Network objects.
   - Handoff conditions are deterministic only. Do not generate llm or string_llm condition types.
   - LLM reasoning can classify intent by setting context variables or returning structured output before routing.
   - Tools mutate workflow state or return typed routing objects; transition_graph.yaml must stay declarative and verifiable.
@@ -316,7 +316,7 @@ patterns:
         - non_coordinator_default_return
       terminal_rule: Coordinator calls finish(summary) to close the workflow.
     generator_notes:
-      - This is AG2 1.0 beta's replacement for open-ended manager selection.
+      - This is AG2 1.0's replacement for open-ended manager selection.
       - Generate handoff(to) and finish(summary) tools when the full WorkflowAdapter path is available.
       - Until typed routing tools are enabled for a host, prefer Context-Aware Routing or Pipeline.
     examples:

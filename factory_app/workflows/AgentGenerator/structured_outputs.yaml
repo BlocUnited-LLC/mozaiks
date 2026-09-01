@@ -68,7 +68,7 @@ models:
         type: literal
         values:
         - prompt_middleware
-        description: Mozaiks prompt-injection trigger compiled to AG2 1.0 beta middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
+        description: Mozaiks prompt-injection trigger compiled to AG2 1.0 middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
       purpose:
         type: str
         description: Brief explanation of why this middleware is needed (<=140 chars).
@@ -1458,7 +1458,7 @@ models:
       initial_agent:
         type: str
         description: Name of the first agent that receives control when the workflow
-          starts (maps to the AG2 1.0 beta Network initial speaker).
+          starts (maps to the AG2 1.0 Network initial speaker).
       visual_agents:
         type: optional_list
         items: str

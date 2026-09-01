@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""AG2 1.0 beta middleware that emits Mozaiks runtime usage events.
+"""AG2 1.0 middleware that emits Mozaiks runtime usage events.
 
 OpenTelemetry spans are handled by AG2's built-in TelemetryMiddleware. This
 middleware keeps a separate, queryable runtime ledger by emitting neutral
@@ -85,7 +85,7 @@ def _required_tokens_for_call(context_variables: Any) -> int:
 
 
 class MozaiksUsageMiddleware(BaseMiddleware):
-    """Emit factual usage deltas after AG2 1.0 beta LLM calls."""
+    """Emit factual usage deltas after AG2 1.0 LLM calls."""
 
     def __init__(
         self,
@@ -167,7 +167,7 @@ def build_ag2_usage_middleware(
     context_variables: Any,
     model_name: str | None = None,
 ) -> Middleware:
-    """Build AG2 1.0 beta middleware for neutral runtime usage metering."""
+    """Build AG2 1.0 middleware for neutral runtime usage metering."""
 
     return Middleware(
         MozaiksUsageMiddleware,

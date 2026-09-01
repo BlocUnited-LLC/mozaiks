@@ -200,14 +200,14 @@ Rules:
   compile to a source-scoped AG2 `ContextEquals` condition.
 - `context_expression` routes require `context_expression` using Mozaiks
   `${context_variable}` syntax over declared context references; they compile
-  to a registered AG2 1.0 beta `TransitionCondition`.
+  to a registered AG2 1.0 `TransitionCondition`.
 - `tool_called` routes require `tool_name`; they compile to a source-scoped AG2
   `ToolCalled` condition.
 - Same-source condition rules must appear before fallback `after_turn` rules
   because AG2 evaluates lower priority first.
 - LLM intent classification belongs in the Refinement Engine before a workflow run
   is started or resumed.
-- The runtime compiles these rules into an AG2 1.0 beta `TransitionGraph` and
+- The runtime compiles these rules into an AG2 1.0 `TransitionGraph` and
   resolves each turn through `WorkflowAdapter`.
 - AgentGenerator derives pattern-specific transition rules from
   `factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml`.
@@ -400,7 +400,7 @@ prompt_middleware:
 ```
 
 Rules:
-- Prompt middleware declarations are compiled to AG2 1.0 beta middleware.
+- Prompt middleware declarations are compiled to AG2 1.0 middleware.
 - Use lifecycle tools for side effects and structured outputs/runtime
   validators for output validation.
 

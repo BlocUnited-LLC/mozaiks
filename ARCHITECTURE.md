@@ -544,7 +544,7 @@ App workspaces and generated app output must not bundle their own copies of Reac
 **What it does:** Executes multi-agent AI workflows using AG2.
 
 **Key responsibilities:**
-- Run AI workflow executions with AG2 1.0 beta agents and transition graphs
+- Run AI workflow executions with AG2 1.0 agents and transition graphs
 - Stream events to frontend via WebSocket
 - Persist chat sessions to MongoDB
 - Handle tool calls from agents

@@ -4,7 +4,7 @@ Mozaiks uses one canonical system database for runtime state and builder
 artifacts. Generated/hosted app business collections are separate from these
 framework-owned collections and should be scoped by app/module contracts.
 
-AG2 1.0 beta telemetry is exported through OpenTelemetry spans. Runtime token usage
+AG2 1.0 telemetry is exported through OpenTelemetry spans. Runtime token usage
 measurements are stored separately in RuntimeUsageEvents.
 """
 

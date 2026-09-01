@@ -308,7 +308,7 @@ export default function AppUsagePage() {
           ) : (
             <StudioInlineEmptyState
               title="No usage breakdown available yet"
-              description="This view becomes informative once AG2 1.0 beta workflow agents produce metered LLM calls."
+              description="This view becomes informative once AG2 1.0 workflow agents produce metered LLM calls."
             />
           )}
         </Panel>

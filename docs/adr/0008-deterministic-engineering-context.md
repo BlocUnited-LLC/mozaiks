@@ -36,7 +36,7 @@ contract:
   first and retrieve exact sources through tools — but the only test of it is
   a string-presence check, not behavior.
 
-AG2 1.0.2 (pinned) supplies the runtime primitives: fragment system prompts
+AG2 1.0.3 (pinned) supplies the runtime primitives: fragment system prompts
 and dynamic prompt hooks, `SkillPlugin`/`SkillsToolkit` progressive
 disclosure, caller-supplied `AssemblyPolicy`, `TokenBudgetPolicy`,
 `CompactStrategy`/`CompactTrigger`, deterministic `ViewPolicy` projections,

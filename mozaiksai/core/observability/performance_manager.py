@@ -1,4 +1,4 @@
-"""AG2 1.0 beta telemetry and metrics wiring for Mozaiks workflow agents.
+"""AG2 1.0 telemetry and metrics wiring for Mozaiks workflow agents.
 
 AG2 owns agent turn, LLM-call, tool-call, and human-input telemetry through
 ``TelemetryMiddleware`` (OTEL spans) and ``MetricsMiddleware`` (Prometheus
@@ -53,7 +53,7 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class AG2TelemetryConfig:
-    """Runtime configuration for AG2 1.0 beta telemetry middleware."""
+    """Runtime configuration for AG2 1.0 telemetry middleware."""
 
     enabled: bool = False
     capture_content: bool = False
@@ -137,7 +137,7 @@ def build_ag2_telemetry_middleware(
     model_name: str | None = None,
     config: AG2TelemetryConfig | None = None,
 ) -> Any | None:
-    """Create AG2 ``TelemetryMiddleware`` wrapped as AG2 1.0 beta middleware.
+    """Create AG2 ``TelemetryMiddleware`` wrapped as AG2 1.0 middleware.
 
     Returns ``None`` when disabled or when tracing extras are not installed.
     """

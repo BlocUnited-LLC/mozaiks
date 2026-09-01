@@ -48,5 +48,5 @@ transition_rules:
 - Keep `transition_graph.yaml`, `context_variables.yaml`, and `tools.yaml` as
   the three-file routing unit. Do not inline routing logic in agent prompts or
   tool implementations.
-- Workflow-local handoffs compile to AG2 1.0 beta Network `TransitionGraph`; they
+- Workflow-local handoffs compile to AG2 1.0 Network `TransitionGraph`; they
   do not run LLM classification during transition evaluation.

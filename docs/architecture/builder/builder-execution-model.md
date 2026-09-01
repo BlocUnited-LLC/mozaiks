@@ -104,7 +104,7 @@ This is where actual file writing happens.
 
 ## AG2 Implementation Note
 
-The builder may be implemented as a set of AG2 1.0 beta workflow runs.
+The builder may be implemented as a set of AG2 1.0 workflow runs.
 
 That is compatible with this model only if:
 

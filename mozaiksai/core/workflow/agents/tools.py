@@ -279,7 +279,7 @@ def load_agent_tool_functions(
     """Discover and import per-agent tool functions for a workflow.
 
     Reads workflows/<workflow_name>/tools.yaml and returns a mapping of
-    agent_name -> list[callable] so callers can bind tools during AG2 1.0 beta
+    agent_name -> list[callable] so callers can bind tools during AG2 1.0
     agent construction.
 
     Loads ALL tools (both Agent_Tool and UI_Tool types) as agent functions.

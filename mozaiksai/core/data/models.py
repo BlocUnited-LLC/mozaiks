@@ -5,7 +5,7 @@
 """Pydantic schemas for workflow session persistence.
 
 ChatSessions is a durable run index and UI-state projection. AG2 stream history
-is persisted through the AG2 stream storage adapter. AG2 1.0 beta middleware emits
+is persisted through the AG2 stream storage adapter. AG2 1.0 middleware emits
 token usage into RuntimeUsageEvents and telemetry spans into OpenTelemetry.
 
 ChatSessions Stored Fields (superset; some optional):

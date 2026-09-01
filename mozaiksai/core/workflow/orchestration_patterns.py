@@ -2,7 +2,7 @@
 # FILE: mozaiksai/core/workflow/orchestration_patterns.py
 # DESCRIPTION: Workflow orchestration entry point.
 #
-# Wires together the AG2 1.0 beta agent factory, run bootstrap, AG2 Network
+# Wires together the AG2 1.0 agent factory, run bootstrap, AG2 Network
 # execution, persistence, transport, lifecycle, and observability into a single
 # async function that callers use to start or re-enter a workflow run.
 #

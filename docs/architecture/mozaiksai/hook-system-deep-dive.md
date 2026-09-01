@@ -2,8 +2,8 @@
 
 ## Overview
 
-Mozaiks uses `middleware.yaml` for AG2 1.0 beta prompt injection. Runtime execution
-is AG2 1.0 beta middleware, not prior hook registration style.
+Mozaiks uses `middleware.yaml` for AG2 1.0 prompt injection. Runtime execution
+is AG2 1.0 middleware, not prior hook registration style.
 
 Canonical declarations live in:
 

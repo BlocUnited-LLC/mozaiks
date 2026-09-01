@@ -16,7 +16,7 @@ Responsibilities:
     - cancel() → delegates to SimpleTransport.pause_background_workflow()
     - capabilities() → reports engine version and supported features
 
-This adapter does not own workflow-specific task planning. AG2 1.0 beta provides the
+This adapter does not own workflow-specific task planning. AG2 1.0 provides the
 agent and network execution substrate; Mozaiks owns deterministic contracts
 around AG2, such as workflow YAML loading, structured-output validation, context
 persistence, artifact materialization, and task-batch dependency contracts.

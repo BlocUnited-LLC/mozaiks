@@ -1,7 +1,7 @@
-"""AG2 1.0 beta middleware support for Mozaiks workflow prompt injection.
+"""AG2 1.0 middleware support for Mozaiks workflow prompt injection.
 
 Mozaiks uses ``middleware.yaml`` as the declarative authoring file for
-workflow-local prompt middleware. Entries are compiled into agent-level AG2 1.0 beta
+workflow-local prompt middleware. Entries are compiled into agent-level AG2 1.0
 middleware that mutates ``Context.prompt`` before the model call.
 """
 
@@ -27,7 +27,7 @@ logger = logging.getLogger("middleware_loader")
 
 
 class MozaiksPromptMiddleware(BaseMiddleware):
-    """Run Mozaiks prompt middleware declarations via AG2 1.0 beta middleware."""
+    """Run Mozaiks prompt middleware declarations via AG2 1.0 middleware."""
 
     def __init__(
         self,
@@ -252,7 +252,7 @@ def build_prompt_middleware(
     base_system_message: str,
     context_bridge: Any,
 ) -> Middleware:
-    """Build the AG2 1.0 beta middleware factory for Mozaiks prompt middleware."""
+    """Build the AG2 1.0 middleware factory for Mozaiks prompt middleware."""
 
     return Middleware(
         MozaiksPromptMiddleware,

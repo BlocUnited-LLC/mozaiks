@@ -121,7 +121,7 @@ Internally, the builder may still use specialized workflows for:
 - bundle compilation
 - validation
 
-In practice, those internal workflows may be AG2 1.0 beta workflow runs.
+In practice, those internal workflows may be AG2 1.0 workflow runs.
 
 That is acceptable only if they stay behind typed builder contracts such as:
 
