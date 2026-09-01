@@ -1356,7 +1356,8 @@ class RegenerationClosure(SemanticsModel):
 
     Directly changed units are found from complete reuse signatures (family
     row identity, disposition, outputs, placeholders, materializer, declared
-    sources, and — for graph-wide units — the graph identity itself), then
+    sources, authoring/output-contract identity, base-plan source identity,
+    and — for graph-wide units — the graph identity itself), then
     affectedness propagates through the reverse dependency DAG: a dependent of
     an affected unit can never remain reusable, because no contract proves its
     output independent of the changed dependency. Every successor unit lands
@@ -1378,6 +1379,29 @@ class RegenerationClosure(SemanticsModel):
         return _validate_digest(value, field_name="plan digest")
 
 
+def _structured_output_contract_identity(
+    ref: StructuredOutputContractRef | None,
+) -> tuple[str, str, str, str] | None:
+    """Return the closed identity of one executable output contract."""
+    if ref is None:
+        return None
+    return (
+        ref.ref_schema_version,
+        ref.workflow_name,
+        ref.model_id,
+        ref.schema_digest,
+    )
+
+
+def _authoring_contract_identity(unit: FamilyInstancePlan) -> Any:
+    """Return identities that can change how this unit must be authored."""
+    return (
+        unit.validator.value,
+        unit.assignment_kind.value if unit.assignment_kind else None,
+        _structured_output_contract_identity(unit.required_structured_output_ref),
+    )
+
+
 def _reuse_signature(unit: FamilyInstancePlan, plan: CompilationPlan) -> Any:
     return (
         unit.family_identity_digest,
@@ -1389,6 +1413,8 @@ def _reuse_signature(unit: FamilyInstancePlan, plan: CompilationPlan) -> Any:
         tuple(source.edge_identity for source in unit.edge_sources),
         unit.depends_on_units,
         unit.materializer,
+        _authoring_contract_identity(unit),
+        unit.base_plan_digest,
         plan.graph_digest if unit.source_scope is PlanSourceScope.GRAPH_WIDE else None,
     )
 

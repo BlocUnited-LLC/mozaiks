@@ -20,7 +20,10 @@ This project follows a practical pre-1.0 changelog format:
   `agent_author` units. Aggregate-only `PlanUnitRef` resolution, exact semantic
   source/dependency context references, and the replacement
   `ApprovedAssignmentSpec` compiler derive paths and dependencies solely from
-  cold-validated plan authority. The substrate remains deliberately unwired:
+  cold-validated plan authority. Regeneration reuse also pins the complete
+  authoring contract, including the resolved structured-output schema digest,
+  so a contract change cannot silently reuse stale agent-authored bytes. The
+  substrate remains deliberately unwired:
   AppBuildPlan is still the sole production planning authority, AG2 executes no
   new work, and deterministic Slice 4C materialization rejects `agent_author`.
 

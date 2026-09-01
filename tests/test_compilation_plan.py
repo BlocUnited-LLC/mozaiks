@@ -440,6 +440,26 @@ def test_reuse_from_base_requires_base_plan_digest() -> None:
         )
 
 
+def test_reuse_from_base_source_identity_invalidates_reuse() -> None:
+    plan = _plan()
+    target = next(unit for unit in plan.units if unit.assignment_kind is None)
+
+    def _with_base_digest(base_digest: str) -> CompilationPlan:
+        document = plan.model_dump(mode="json")
+        for unit in document["units"]:
+            if unit["unit_id"] == target.unit_id:
+                unit["disposition"] = PlanDisposition.REUSE_FROM_BASE.value
+                unit["base_plan_digest"] = base_digest
+                break
+        return CompilationPlan.model_validate(_redigest(document))
+
+    base = _with_base_digest("a" * 64)
+    successor = _with_base_digest("b" * 64)
+    closure = plan_regeneration_closure(base, successor)
+    assert target.unit_id in closure.affected
+    assert target.unit_id not in closure.reusable
+
+
 # ---------------------------------------------------------------------------
 # Traceability
 # ---------------------------------------------------------------------------

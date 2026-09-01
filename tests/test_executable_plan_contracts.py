@@ -20,6 +20,7 @@ from mozaiksai.core.semantics.compilation_plan import (
     PlanGapCode,
     RegistryFamilyRow,
     derive_compilation_plan,
+    plan_regeneration_closure,
     snapshot_layout_registry,
 )
 from mozaiksai.core.semantics.materialization import MaterializationError, _materialize_unit
@@ -149,6 +150,68 @@ def test_registry_metadata_mutation_propagates_to_snapshot_and_plan_identity() -
     forward_plan = derive_compilation_plan(graph=graph, payloads=payloads, registry=forward)
     reverse_plan = derive_compilation_plan(graph=graph, payloads=payloads, registry=reverse)
     assert forward_plan.plan_digest == reverse_plan.plan_digest
+
+
+def test_structured_output_schema_identity_invalidates_agent_author_reuse() -> None:
+    graph, payloads = _corpus_graph()
+
+    def _derive(config: dict[str, object]):
+        return derive_compilation_plan(
+            graph=graph,
+            payloads=payloads,
+            registry=_registry(),
+            structured_output_configs={"AppGenerator": config},
+        )
+
+    def _target(plan):
+        return next(
+            unit
+            for unit in plan.units
+            if unit.disposition is PlanDisposition.AGENT_AUTHOR
+            and unit.required_structured_output_ref is not None
+            and unit.required_structured_output_ref.model_id
+            == "ConfigMiddlewareOutput"
+        )
+
+    base = _derive(APP_GENERATOR_CONFIG)
+    base_target = _target(base)
+
+    unchanged = _derive(copy.deepcopy(APP_GENERATOR_CONFIG))
+    unchanged_closure = plan_regeneration_closure(base, unchanged)
+    assert base_target.unit_id in unchanged_closure.reusable
+
+    reordered = copy.deepcopy(APP_GENERATOR_CONFIG)
+    reordered["models"] = dict(reversed(tuple(reordered["models"].items())))
+    reordered_plan = _derive(reordered)
+    reordered_target = _target(reordered_plan)
+    assert reordered_target.unit_digest == base_target.unit_digest
+    assert base_target.unit_id in plan_regeneration_closure(
+        base, reordered_plan
+    ).reusable
+
+    unrelated = copy.deepcopy(APP_GENERATOR_CONFIG)
+    unrelated_field = next(
+        iter(unrelated["models"]["DownloadRequest"]["fields"].values())
+    )
+    unrelated_field["description"] = "Unrelated contract mutation."
+    unrelated_plan = _derive(unrelated)
+    unrelated_target = _target(unrelated_plan)
+    assert unrelated_target.unit_digest == base_target.unit_digest
+    assert base_target.unit_id in plan_regeneration_closure(
+        base, unrelated_plan
+    ).reusable
+
+    changed = copy.deepcopy(APP_GENERATOR_CONFIG)
+    changed["models"]["ConfigMiddlewareOutput"]["fields"]["agent_message"][
+        "description"
+    ] += " Authoritative schema mutation."
+    changed_plan = _derive(changed)
+    changed_target = _target(changed_plan)
+    changed_closure = plan_regeneration_closure(base, changed_plan)
+    assert changed_target.unit_id == base_target.unit_id
+    assert changed_target.unit_digest != base_target.unit_digest
+    assert base_target.unit_id in changed_closure.affected
+    assert base_target.unit_id not in changed_closure.reusable
 
 
 @pytest.mark.parametrize(
