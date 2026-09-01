@@ -18,6 +18,7 @@ def test_reload_workflow_skips_module_reload_when_module_was_evicted(monkeypatch
         )
     }
     manager._ui_registry = {}
+    manager._config_cache = {}
 
     def fail_reload(_module):
         raise AssertionError("importlib.reload should not be called for evicted workflow modules")

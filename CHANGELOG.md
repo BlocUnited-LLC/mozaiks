@@ -12,6 +12,26 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Structured-output caches now invalidate on workflow reload**: the compiled
+  Pydantic model, registry, and structured-agent caches in
+  `mozaiksai.core.workflow.outputs.structured` were never invalidated by
+  `reload_workflow`, `unload_workflow`, or `refresh_all`, so after a YAML
+  reload the workflow manager served the new configuration while
+  structured-output validation kept enforcing models compiled from the old
+  one. The structured-output subsystem now owns an explicit invalidation seam
+  (`invalidate_workflow_structured_outputs` /
+  `invalidate_all_workflow_structured_outputs`) that atomically drops all
+  compiled state for a workflow, and the manager invokes it from every
+  configuration-changing lifecycle operation — `reload_workflow`,
+  `unload_workflow`, `refresh_all`, and `initialize_workflows` (root
+  switches/reinitialization). A reload whose replacement configuration fails
+  validation now fails closed on every lifecycle surface: the prior config,
+  loaded-workflow record, and compiled models are evicted, and the manager
+  records one explicit error-state entry instead of continuing to report the
+  prior workflow as successfully loaded.
+
 ### Added
 
 - **Offline executable plan contracts (ADR 0007 Slice 5A)**: CompilationPlan
