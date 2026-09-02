@@ -12,6 +12,40 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Generated Mongo documents no longer break HTTP responses**: module action
+  results are normalized at the ModuleExecutor boundary so BSON `ObjectId`
+  *values* become their stable 24-character hexadecimal strings wherever
+  they occur as values — `_id`, ordinary fields, nested documents, and
+  arrays — and `Decimal128` values become their lossless decimal strings.
+  JSON object keys must already be exact strings: an `ObjectId` key, like
+  every other non-string mapping key, is rejected with a typed
+  `MODULE_RESULT_NOT_JSON_SAFE` outcome — no key normalization or coercion
+  occurs, so no post-normalization key collision is possible; the key domain
+  is closed before iteration. Generated apps that list or read Mongo-backed
+  records — whose documents carry a driver-generated `ObjectId` `_id` —
+  previously produced a bare HTTP 500 at serialization on every read path
+  (module routes, profile panels/tabs, page hydration). Datetimes and other
+  JSON-encodable values keep their existing wire semantics through explicit
+  closed conversions, unknown value types fail closed with the same typed
+  outcome (no repr leaks), cyclic or absurdly nested results are rejected
+  instead of exhausting the stack, and the response-size gate now measures
+  the exact strictly-encoded UTF-8 bytes (no `default=str` masking). Input
+  documents are not mutated. The container domain is closed to exact
+  `dict`/`list`/`tuple`: sets and frozensets (no deterministic JSON form),
+  container subclasses, custom Mappings, and generators are rejected before
+  any iteration can run hostile code, and BSON `Int64` converts to the exact
+  builtin int. Non-finite `Decimal` values (NaN/Infinity), failing pydantic
+  serializers, malformed UTF-8 bytes, and unexpected conversion failures all
+  surface as the same typed error — never a raw exception — with hostile
+  payload contents kept out of error messages. The size gate's encoding is
+  byte-for-byte identical to what Starlette's `JSONResponse` emits (compact
+  separators, `ensure_ascii=False`, UTF-8), verified against real
+  `TestClient` response bodies, so a result at the limit passes and one byte
+  over fails.
+
+
 ### Changed
 
 - Upgraded the AG2 runtime to 1.0.3, including ACP 0.12.1 compatibility and corrected usage-event accounting coverage.
