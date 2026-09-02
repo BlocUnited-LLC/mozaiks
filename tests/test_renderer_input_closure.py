@@ -393,6 +393,7 @@ def test_unrelated_workflow_change_leaves_page_and_opaque_module_units_reusable(
         workflow_id=workflow.workflow_id,
         description="Changed workflow description",
         startup_mode=workflow.startup_mode,
+        topology=workflow.topology,
     )
     changed_graph, changed_payloads = _replace_payload(graph, payloads, replacement)
     changed = derive_compilation_plan(

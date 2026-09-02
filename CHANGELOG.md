@@ -38,6 +38,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Typed application and workflow semantic input closure (ADR 0007 Slice
+  5D-0A)**: graph-v2 now has closed application, provider-neutral auth,
+  application-integration, and logical workflow-topology payloads plus finite
+  optional-family selection/absence evidence. The offline projector consumes
+  current application schema, persisted integration-declaration, and workflow
+  bundle contracts without consulting `AppBuildPlan`, Git, hosted state, or
+  AG2 runtime identity. The sole layout registry records the corresponding
+  future source footprints. Production planning, rendering, execution,
+  persistence/publication, and capability advertisement remain unchanged;
+  downstream assignment and renderer gaps remain explicit for Slice 5D-0B.
+
 - **Offline immutable artifact revisions (ADR 0007 Slice 5C)**: added a closed,
   content-addressed `ArtifactRevision` contract binding graph, implementation
   binding, CompilationPlan, CompositionLedger, validation evidence, exact

@@ -56,6 +56,11 @@ _MAX_TEXT_CHARS = 4000
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 _PAGE_ROUTE = re.compile(r"^/[A-Za-z0-9_./:{}?-]*$")
 _ENTRYPOINT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CANONICAL_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_ENV_HANDLE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_SEMVER = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"
+)
 # ISO 4217 Maintenance Agency List One (current currencies and funds),
 # captured for this schema version on 2026-08-29.  Shape validation alone is
 # insufficient: unassigned uppercase triples such as ``ZZZ`` fail closed.
@@ -98,6 +103,13 @@ def _field_name(value: str, *, field_name: str) -> str:
     text = str(value or "").strip()
     if _FIELD_NAME.fullmatch(text) is None:
         raise ValueError(f"{field_name} must be a lowercase snake_case name, got {value!r}")
+    return text
+
+
+def _canonical_id(value: str, *, field_name: str) -> str:
+    text = str(value or "").strip()
+    if _CANONICAL_ID.fullmatch(text) is None:
+        raise ValueError(f"{field_name} must be a lowercase canonical identifier, got {value!r}")
     return text
 
 
@@ -144,6 +156,9 @@ class WorkflowStartupMode(StrEnum):
     ON_DEMAND = "on_demand"
     EVENT_DRIVEN = "event_driven"
     SCHEDULED = "scheduled"
+    AGENT_DRIVEN = "agent_driven"
+    USER_DRIVEN = "user_driven"
+    BACKEND_ONLY = "backend_only"
 
 
 class TriggerKind(StrEnum):
@@ -164,9 +179,242 @@ class DeploymentTargetKind(StrEnum):
     SERVERLESS = "serverless"
 
 
+class OptionalFamilyKind(StrEnum):
+    AUTH = "auth"
+    INTEGRATIONS = "integrations"
+    CUSTOM_ROUTES = "custom_routes"
+    THEME = "theme"
+    SHELL = "shell"
+    ASSETS = "assets"
+    DATA = "data"
+    WORKFLOWS = "workflows"
+
+
+class OptionalFamilySelectionStatus(StrEnum):
+    SELECTED = "selected"
+    ABSENT_BY_DECLARATION = "absent_by_declaration"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class AuthStrategyKind(StrEnum):
+    PUBLIC = "public"
+    BASIC_LOGIN = "basic_login"
+    ROLE_BASED = "role_based"
+    FEDERATED = "federated"
+
+
+class IntegrationKind(StrEnum):
+    API_KEY = "api_key"
+    OAUTH = "oauth"
+    OIDC = "oidc"
+    WEBHOOK = "webhook"
+    SERVICE = "service"
+    DATABASE = "database"
+
+
+class IntegrationRequirementPhase(StrEnum):
+    BUILD = "build"
+    RUNTIME = "runtime"
+    DEPLOYMENT = "deployment"
+
+
+class IntegrationConfigValueKind(StrEnum):
+    TEXT = "text"
+    URL = "url"
+    SECRET = "secret"
+
+
+class WorkflowTransitionKind(StrEnum):
+    AFTER_TURN = "after_turn"
+    CONTEXT_EQUALS = "context_equals"
+    TOOL_CALLED = "tool_called"
+
+
+class WorkflowTransitionTargetKind(StrEnum):
+    PARTICIPANT = "participant"
+    HUMAN = "human"
+    TERMINATE = "terminate"
+
+
 # ---------------------------------------------------------------------------
 # Typed sub-shapes
 # ---------------------------------------------------------------------------
+
+
+class OptionalFamilySelection(SemanticsModel):
+    family: OptionalFamilyKind
+    status: OptionalFamilySelectionStatus
+
+
+class IntegrationConfigRequirement(SemanticsModel):
+    name: str
+    value_kind: IntegrationConfigValueKind
+    required: bool
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if _FIELD_NAME.fullmatch(text) is None and _ENV_HANDLE.fullmatch(text) is None:
+            raise ValueError("integration configuration names must be snake_case or ENV_STYLE")
+        return text
+
+
+class WorkflowParticipant(SemanticsModel):
+    participant_id: str
+
+    @field_validator("participant_id")
+    @classmethod
+    def _participant_id(cls, value: str) -> str:
+        return _field_name(value, field_name="participant_id")
+
+
+class WorkflowTransition(SemanticsModel):
+    source_participant_id: str
+    target_kind: WorkflowTransitionTargetKind
+    target_participant_id: str | None
+    transition_kind: WorkflowTransitionKind
+    condition_key: str | None
+    condition_value: str | int | bool | None
+    tool_name: str | None
+
+    @field_validator("source_participant_id")
+    @classmethod
+    def _source(cls, value: str) -> str:
+        return _field_name(value, field_name="source_participant_id")
+
+    @field_validator("target_participant_id")
+    @classmethod
+    def _target(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _field_name(value, field_name="target_participant_id")
+
+    @field_validator("condition_key", "tool_name")
+    @classmethod
+    def _optional_names(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        return _field_name(value, field_name=str(info.field_name))
+
+    @field_validator("condition_value")
+    @classmethod
+    def _condition_value(cls, value: str | int | bool | None) -> str | int | bool | None:
+        if isinstance(value, str):
+            return _text(value, field_name="condition_value")
+        return value
+
+    @model_validator(mode="after")
+    def _shape(self) -> WorkflowTransition:
+        if (self.target_kind is WorkflowTransitionTargetKind.PARTICIPANT) != (
+            self.target_participant_id is not None
+        ):
+            raise ValueError("only participant transition targets carry target_participant_id")
+        if self.transition_kind is WorkflowTransitionKind.AFTER_TURN:
+            if self.condition_key is not None or self.condition_value is not None or self.tool_name is not None:
+                raise ValueError("after_turn transitions cannot declare condition fields")
+        elif self.transition_kind is WorkflowTransitionKind.CONTEXT_EQUALS:
+            if self.condition_key is None or self.condition_value is None or self.tool_name is not None:
+                raise ValueError("context_equals requires condition_key/value only")
+        elif self.transition_kind is WorkflowTransitionKind.TOOL_CALLED:
+            if self.tool_name is None or self.condition_key is not None or self.condition_value is not None:
+                raise ValueError("tool_called requires tool_name only")
+        return self
+
+    @property
+    def routing_decision_identity(self) -> tuple[object, ...]:
+        """Canonical authored decision key, excluding its target outcome."""
+        identity: tuple[object, ...] = (
+            self.source_participant_id,
+            self.transition_kind.value,
+        )
+        if self.transition_kind is WorkflowTransitionKind.CONTEXT_EQUALS:
+            condition_value = self.condition_value
+            identity += (
+                self.condition_key,
+                type(condition_value).__name__,
+                condition_value,
+            )
+        elif self.transition_kind is WorkflowTransitionKind.TOOL_CALLED:
+            identity += (self.tool_name,)
+        return identity
+
+    @property
+    def target_outcome(self) -> tuple[str, str | None]:
+        return self.target_kind.value, self.target_participant_id
+
+
+class WorkflowTopology(SemanticsModel):
+    max_turns: int = Field(ge=1, le=500, strict=True)
+    human_input_required: bool
+    initial_participant_id: str | None
+    participants: tuple[WorkflowParticipant, ...]
+    transitions: tuple[WorkflowTransition, ...]
+
+    @field_validator("initial_participant_id")
+    @classmethod
+    def _initial(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _field_name(value, field_name="initial_participant_id")
+
+    @field_validator("participants")
+    @classmethod
+    def _participants(
+        cls, value: tuple[WorkflowParticipant, ...]
+    ) -> tuple[WorkflowParticipant, ...]:
+        ordered = tuple(sorted(value, key=lambda item: item.participant_id))
+        identities = [item.participant_id for item in ordered]
+        if len(identities) != len(set(identities)):
+            raise ValueError("duplicate workflow participants")
+        return ordered
+
+    @field_validator("transitions")
+    @classmethod
+    def _transitions(
+        cls, value: tuple[WorkflowTransition, ...]
+    ) -> tuple[WorkflowTransition, ...]:
+        ordered = tuple(
+            sorted(
+                value,
+                key=lambda item: (
+                    item.source_participant_id,
+                    item.target_participant_id or "",
+                    item.transition_kind.value,
+                    item.condition_key or "",
+                    str(item.condition_value),
+                    item.tool_name or "",
+                ),
+            )
+        )
+        if len(ordered) != len(set(ordered)):
+            raise ValueError("duplicate workflow transitions")
+        outcomes_by_decision: dict[tuple[object, ...], tuple[str, str | None]] = {}
+        for transition in ordered:
+            decision = transition.routing_decision_identity
+            outcome = transition.target_outcome
+            existing = outcomes_by_decision.get(decision)
+            if existing is not None and existing != outcome:
+                raise ValueError(
+                    "conflicting workflow transitions for one routing decision"
+                )
+            outcomes_by_decision[decision] = outcome
+        return ordered
+
+    @model_validator(mode="after")
+    def _closure(self) -> WorkflowTopology:
+        participants = {item.participant_id for item in self.participants}
+        if self.initial_participant_id is not None and self.initial_participant_id not in participants:
+            raise ValueError("initial_participant_id must reference a declared participant")
+        for transition in self.transitions:
+            if transition.source_participant_id not in participants:
+                raise ValueError("transition source must reference a declared participant")
+            if (
+                transition.target_participant_id is not None
+                and transition.target_participant_id not in participants
+            ):
+                raise ValueError("transition target must reference a declared participant")
+        return self
 
 
 class TypedFieldSpec(SemanticsModel):
@@ -349,6 +597,123 @@ class SemanticPayloadBase(SemanticsModel):
         if include_digest:
             payload["payload_digest"] = self.payload_digest
         return payload
+
+
+class ApplicationPayload(SemanticPayloadBase):
+    payload_kind: Literal[SemanticNodeKind.APPLICATION] = SemanticNodeKind.APPLICATION
+    application_id: str
+    display_name: str
+    description: str | None
+    tagline: str | None
+    value_proposition: str | None
+    version: str
+    default_route: str
+    optional_families: tuple[OptionalFamilySelection, ...]
+
+    @field_validator("application_id")
+    @classmethod
+    def _application_id(cls, value: str) -> str:
+        return _canonical_id(value, field_name="application_id")
+
+    @field_validator("display_name")
+    @classmethod
+    def _display_name(cls, value: str) -> str:
+        return _text(value, field_name="display_name")
+
+    @field_validator("description", "tagline", "value_proposition")
+    @classmethod
+    def _optional_text(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        return _text(value, field_name=str(info.field_name))
+
+    @field_validator("version")
+    @classmethod
+    def _version(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if _SEMVER.fullmatch(text) is None:
+            raise ValueError("version must be a semantic version")
+        return text
+
+    @field_validator("default_route")
+    @classmethod
+    def _default_route(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if _PAGE_ROUTE.fullmatch(text) is None:
+            raise ValueError("default_route must be an app-local route")
+        return text
+
+    @field_validator("optional_families")
+    @classmethod
+    def _optional_families(
+        cls, value: tuple[OptionalFamilySelection, ...]
+    ) -> tuple[OptionalFamilySelection, ...]:
+        ordered = tuple(sorted(value, key=lambda item: item.family.value))
+        families = [item.family for item in ordered]
+        if len(families) != len(set(families)):
+            raise ValueError("duplicate optional family selections")
+        if set(families) != set(OptionalFamilyKind):
+            raise ValueError("optional_families must state every closed optional family")
+        return ordered
+
+
+class AuthPayload(SemanticPayloadBase):
+    payload_kind: Literal[SemanticNodeKind.AUTH] = SemanticNodeKind.AUTH
+    auth_required: bool
+    strategy: AuthStrategyKind
+    roles: tuple[str, ...]
+
+    @field_validator("roles")
+    @classmethod
+    def _roles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(sorted(_field_name(item, field_name="role") for item in value))
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("duplicate auth roles")
+        return normalized
+
+    @model_validator(mode="after")
+    def _coherence(self) -> AuthPayload:
+        if self.strategy is AuthStrategyKind.PUBLIC:
+            if self.auth_required or self.roles:
+                raise ValueError("public auth cannot require auth or logical roles")
+        elif not self.auth_required:
+            raise ValueError("non-public auth strategy requires auth_required=true")
+        if self.strategy is AuthStrategyKind.ROLE_BASED and not self.roles:
+            raise ValueError("role_based auth requires at least one logical role")
+        return self
+
+
+class IntegrationPayload(SemanticPayloadBase):
+    payload_kind: Literal[SemanticNodeKind.INTEGRATION] = SemanticNodeKind.INTEGRATION
+    integration_id: str
+    integration_kind: IntegrationKind
+    purpose: str | None
+    required_at: IntegrationRequirementPhase
+    optional: bool
+    config_requirements: tuple[IntegrationConfigRequirement, ...]
+
+    @field_validator("integration_id")
+    @classmethod
+    def _integration_id(cls, value: str) -> str:
+        return _canonical_id(value, field_name="integration_id")
+
+    @field_validator("purpose")
+    @classmethod
+    def _purpose(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _text(value, field_name="purpose")
+
+    @field_validator("config_requirements")
+    @classmethod
+    def _config_requirements(
+        cls, value: tuple[IntegrationConfigRequirement, ...]
+    ) -> tuple[IntegrationConfigRequirement, ...]:
+        ordered = tuple(sorted(value, key=lambda item: item.name))
+        names = [item.name for item in ordered]
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate integration configuration requirements")
+        return ordered
 
 
 class SurfacePayload(SemanticPayloadBase):
@@ -682,6 +1047,7 @@ class WorkflowPayload(SemanticPayloadBase):
     workflow_id: str
     description: str | None
     startup_mode: WorkflowStartupMode | None
+    topology: WorkflowTopology | None
 
     @field_validator("workflow_id")
     @classmethod
@@ -896,12 +1262,15 @@ class StubDeclarationPayload(SemanticPayloadBase):
 
 
 SemanticPayload = Annotated[
-    SurfacePayload | PagePayload | SectionPayload | ModulePayload | ActionPayload | CapabilityPayload | PermissionPayload | EventPayload | ReactionPayload | NotificationPayload | DataCollectionPayload | DataAliasPayload | WorkflowPayload | TriggerPayload | PlanPayload | ProductPayload | MeterPayload | LimitPayload | DeploymentTargetPayload | StubDeclarationPayload,
+    ApplicationPayload | AuthPayload | IntegrationPayload | SurfacePayload | PagePayload | SectionPayload | ModulePayload | ActionPayload | CapabilityPayload | PermissionPayload | EventPayload | ReactionPayload | NotificationPayload | DataCollectionPayload | DataAliasPayload | WorkflowPayload | TriggerPayload | PlanPayload | ProductPayload | MeterPayload | LimitPayload | DeploymentTargetPayload | StubDeclarationPayload,
     Field(discriminator="payload_kind"),
 ]
 
 #: Exactly one variant per node kind; enum-completeness is test-enforced.
 PAYLOAD_MODEL_BY_KIND: dict[SemanticNodeKind, type[SemanticPayloadBase]] = {
+    SemanticNodeKind.APPLICATION: ApplicationPayload,
+    SemanticNodeKind.AUTH: AuthPayload,
+    SemanticNodeKind.INTEGRATION: IntegrationPayload,
     SemanticNodeKind.SURFACE: SurfacePayload,
     SemanticNodeKind.PAGE: PagePayload,
     SemanticNodeKind.SECTION: SectionPayload,
@@ -1030,6 +1399,9 @@ __all__ = [
     "PAYLOAD_MODEL_BY_KIND",
     "SEMANTIC_PAYLOAD_SCHEMA_VERSION",
     "ActionPayload",
+    "ApplicationPayload",
+    "AuthPayload",
+    "AuthStrategyKind",
     "BillingPeriod",
     "CapabilityPayload",
     "DataAliasPayload",
@@ -1040,11 +1412,19 @@ __all__ = [
     "FieldType",
     "HttpMethod",
     "IndexSpec",
+    "IntegrationConfigRequirement",
+    "IntegrationConfigValueKind",
+    "IntegrationKind",
+    "IntegrationPayload",
+    "IntegrationRequirementPhase",
     "LimitPayload",
     "MeterPayload",
     "ModulePayload",
     "NotificationChannel",
     "NotificationPayload",
+    "OptionalFamilyKind",
+    "OptionalFamilySelection",
+    "OptionalFamilySelectionStatus",
     "PagePayload",
     "PageSectionEntry",
     "PermissionPayload",
@@ -1064,7 +1444,12 @@ __all__ = [
     "TriggerPayload",
     "TypedFieldSpec",
     "WorkflowPayload",
+    "WorkflowParticipant",
     "WorkflowStartupMode",
+    "WorkflowTopology",
+    "WorkflowTransition",
+    "WorkflowTransitionKind",
+    "WorkflowTransitionTargetKind",
     "build_semantic_payload",
     "parse_semantic_payload",
     "semantic_payload_ref",
