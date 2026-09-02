@@ -16,16 +16,20 @@ This project follows a practical pre-1.0 changelog format:
 
 - **Generated Mongo documents no longer break HTTP responses**: module action
   results are normalized at the ModuleExecutor boundary so BSON `ObjectId`
-  values (including `_id`, nested documents, list items, and mapping keys)
-  become their stable hex strings and `Decimal128` becomes its lossless
-  decimal string. Generated apps that list or read Mongo-backed records —
-  whose documents carry a driver-generated `ObjectId` `_id` — previously
-  produced a bare HTTP 500 at serialization on every read path (module
-  routes, profile panels/tabs, page hydration). Datetimes and other
+  *values* become their stable 24-character hexadecimal strings wherever
+  they occur as values — `_id`, ordinary fields, nested documents, and
+  arrays — and `Decimal128` values become their lossless decimal strings.
+  JSON object keys must already be exact strings: an `ObjectId` key, like
+  every other non-string mapping key, is rejected with a typed
+  `MODULE_RESULT_NOT_JSON_SAFE` outcome — no key normalization or coercion
+  occurs, so no post-normalization key collision is possible; the key domain
+  is closed before iteration. Generated apps that list or read Mongo-backed
+  records — whose documents carry a driver-generated `ObjectId` `_id` —
+  previously produced a bare HTTP 500 at serialization on every read path
+  (module routes, profile panels/tabs, page hydration). Datetimes and other
   JSON-encodable values keep their existing wire semantics through explicit
-  closed conversions, unknown types and non-string mapping keys fail closed
-  with a typed `MODULE_RESULT_NOT_JSON_SAFE` outcome (no silent key
-  collisions, no repr leaks), cyclic or absurdly nested results are rejected
+  closed conversions, unknown value types fail closed with the same typed
+  outcome (no repr leaks), cyclic or absurdly nested results are rejected
   instead of exhausting the stack, and the response-size gate now measures
   the exact strictly-encoded UTF-8 bytes (no `default=str` masking). Input
   documents are not mutated. The container domain is closed to exact
