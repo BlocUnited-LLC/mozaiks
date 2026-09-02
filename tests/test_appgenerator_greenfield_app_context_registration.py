@@ -360,3 +360,101 @@ def test_appgenerator_context_registration_has_no_graph_database_or_proprietary_
         for term in forbidden_terms:
             assert term.lower() not in text
 
+
+async def test_auto_tool_failure_traversal_never_claims_completion(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Full path: auto-tool catch -> error result -> completion hook -> typed failure.
+
+    The auto-tool handler converts the raised required-lineage failure into an
+    error tool result; the AppGenerator completion hook must then record the
+    typed failed lifecycle outcome, never build.completed/review, and no
+    partial state may look like a successful CURRENT lineage.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from factory_app.workflows.AppGenerator.tools.platform import (
+        build_lifecycle as lifecycle_mod,
+    )
+    from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
+
+    store = _MemoryArtifactStore()
+    _patch_artifact_store(monkeypatch, store)
+
+    async def _fail_registration(**_kwargs: Any) -> None:
+        raise RuntimeError("context store unavailable")
+
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "register_greenfield_app_context_version",
+        _fail_registration,
+    )
+
+    app_dir = tmp_path / "GeneratedApp"
+    written_paths = _write_generated_app(app_dir)
+    zip_path = tmp_path / "GeneratedApp.zip"
+    zip_path.write_bytes(b"fake bundle bytes")
+    context = _Context({"app_bundle_acceptance_status": "passed"})
+
+    async def _terminal_tool(**kwargs: Any) -> dict[str, Any]:
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="field_service",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            chat_id="chat_greenfield",
+            bundle_name="GeneratedApp",
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=kwargs["context_variables"],
+        )
+        return {"status": "success"}
+
+    handler = AutoToolEventHandler.__new__(AutoToolEventHandler)
+    binding = SimpleNamespace(
+        function=_terminal_tool, agent_name="DownloadAgent", tool_name="generate_and_download"
+    )
+    result, status = await handler._invoke_tool(binding, {"context_variables": context})
+
+    # The real shared catch converted the failure into an error tool result.
+    assert status == "error"
+    assert result == {"status": "error", "message": "tool_execution_failed"}
+
+    # No success/download/ready claim exists anywhere in workflow state.
+    assert context.data.get("download_status") != "ready"
+    assert context.data.get("app_download_ready") is not True
+    assert context.data.get("greenfield_app_context_registered") is not True
+
+    # Completion hook: typed failed outcome, never build.completed/review.
+    shared_completed = AsyncMock()
+    failed = AsyncMock(return_value="outbox_failed")
+    with (
+        patch.object(lifecycle_mod, "_shared_emit_build_completed", shared_completed),
+        patch.object(lifecycle_mod, "emit_build_failed", failed),
+    ):
+        outcome = await lifecycle_mod.emit_build_completed(
+            app_id="field_service",
+            chat_id="chat_greenfield",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            context_variables=context,
+        )
+    assert outcome == "outbox_failed"
+    shared_completed.assert_not_awaited()
+    failed.assert_awaited_once()
+
+    # Partial state: the bundle record exists only as a non-current draft and
+    # no CURRENT AppContextVersion lineage was created.
+    bundle_calls = [c for c in store.create_calls if c["build_family"] == "app_bundle"]
+    assert bundle_calls and all(
+        str(getattr(c["lifecycle_status"], "value", c["lifecycle_status"])) == "draft"
+        for c in bundle_calls
+    )
+    assert not [c for c in store.create_calls if c["build_family"] == "app_context_version"]
+
+    # Retry is deterministic: it fails identically and cannot mint CURRENT state.
+    result2, status2 = await handler._invoke_tool(binding, {"context_variables": context})
+    assert status2 == "error" and result2["status"] == "error"
+    assert not [c for c in store.create_calls if c["build_family"] == "app_context_version"]

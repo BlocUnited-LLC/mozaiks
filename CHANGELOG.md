@@ -68,7 +68,15 @@ This project follows a practical pre-1.0 changelog format:
   registration — the CURRENT lineage hosting and refinement resolve — no
   longer fails open during `generate_and_download`: a required lineage
   persistence failure now fails the build instead of returning a
-  downloadable bundle whose lineage does not exist.
+  downloadable bundle whose lineage does not exist. Retired-index removal
+  verifies the complete historical index definition before dropping — an
+  unrelated index reusing a retired name fails the store closed instead of
+  being deleted — and a failed index migration leaves the store unavailable
+  rather than best-effort. Greenfield app-bundle records now start as drafts
+  and are promoted to CURRENT only after their required lineage registers,
+  and the AppGenerator completion hook emits the typed build-failed outcome
+  instead of build.completed/review when the terminal download tool did not
+  reach its success state.
 
 
 ### Changed

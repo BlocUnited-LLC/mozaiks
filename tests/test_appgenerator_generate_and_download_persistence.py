@@ -58,10 +58,15 @@ class _FakeStore:
 class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls = []
+        self.accepted_ids = []
 
     async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
         return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
+
+    async def accept_build_record(self, *, app_id, build_record_id, commit_metadata=None):
+        self.accepted_ids.append(build_record_id)
+        return type("ArtifactVersion", (), {"id": build_record_id})()
 
 
 def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:

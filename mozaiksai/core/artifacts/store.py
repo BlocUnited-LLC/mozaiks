@@ -34,6 +34,8 @@ ArtifactValidationStatus = BuildRecordValidationStatus
 
 logger = get_workflow_logger("artifact_store")
 
+_DATABASE_NAME = "mozaiksai"
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -52,15 +54,39 @@ class BuildRecordStore:
         async with self._init_lock:
             if self.client is not None:
                 return
-            self.client = get_mongo_client()
-            await self._ensure_indexes()
+            candidate = get_mongo_client()
+            # The store becomes available only after the complete index
+            # contract verifies; a failed migration must not leave a client
+            # behind that skips verification on the next call.
+            await self._ensure_indexes(client=candidate)
+            self.client = candidate
 
     # Retired unique indexes keyed on fields BuildRecord documents never carry
     # (every record produced null tuples, so distinct build families collided
-    # with E11000). Dropped by exact name before canonical materialization.
-    _RETIRED_INDEXES: dict[str, tuple[str, ...]] = {
-        "ArtifactVersions": ("av_app_kind_key_version",),
-        "ArtifactVersionCounters": ("avc_app_kind_key",),
+    # with E11000). Each retired index is identified by its COMPLETE historical
+    # definition, never by name alone: dropping is destructive DDL, and an
+    # unrelated operator index that merely reuses a retired name must fail the
+    # store closed instead of being deleted.
+    _RETIRED_INDEX_CONTRACT: dict[str, list[dict[str, Any]]] = {
+        "ArtifactVersions": [
+            {
+                "name": "av_app_kind_key_version",
+                "keys": [
+                    ("app_id", 1),
+                    ("artifact_kind", 1),
+                    ("artifact_key", 1),
+                    ("version_number", -1),
+                ],
+                "unique": True,
+            },
+        ],
+        "ArtifactVersionCounters": [
+            {
+                "name": "avc_app_kind_key",
+                "keys": [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1)],
+                "unique": True,
+            },
+        ],
     }
 
     # BuildRecord identity is (app_id, build_family, build_key, version_number);
@@ -121,37 +147,66 @@ class BuildRecordStore:
         ],
     }
 
-    async def _ensure_indexes(self) -> None:
-        """Materialize the store's index contract through the canonical verifier.
+    async def _ensure_indexes(self, *, client: Any) -> None:
+        """Verify and materialize the store's complete index contract.
 
-        Any pre-existing index whose definition conflicts with the declared
-        contract fails the store closed rather than being accepted by name.
+        Runs as a full preflight before any destructive action: every present
+        retired-name candidate is compared against its exact historical
+        definition first. Only exact matches are dropped; a same-name index
+        with any other definition fails the store closed with a typed
+        index-contract error, and no unrelated index is ever deleted. The
+        canonical indexes are then installed/verified through the canonical
+        runtime index verifier; a same-name canonical index with a different
+        definition also fails closed.
         """
         from mozaiksai.core.runtime.persistence.indexes import (
+            DatabaseIndexApplyError,
             _ensure_raw_collection_indexes,
+            _index_mismatches,
+            _normalize_index_spec,
         )
 
-        for collection_name, retired_names in self._RETIRED_INDEXES.items():
-            collection = await self._coll(collection_name)
-            existing = {
-                str(row.get("name") or "")
+        database = client[_DATABASE_NAME]
+
+        # Preflight: verify every retired-name candidate everywhere before
+        # executing a single drop.
+        verified_drops: list[tuple[Any, str]] = []
+        for collection_name, retired_specs in self._RETIRED_INDEX_CONTRACT.items():
+            collection = database[collection_name]
+            existing_rows = {
+                str(row.get("name") or ""): dict(row)
                 for row in await collection.list_indexes().to_list(length=None)
             }
-            for retired in retired_names:
-                if retired in existing:
-                    await collection.drop_index(retired)
+            for raw_spec in retired_specs:
+                spec = _normalize_index_spec(
+                    dict(raw_spec), f"{collection_name}.retired[{raw_spec['name']}]"
+                )
+                present = existing_rows.get(spec.name)
+                if present is None:
+                    continue
+                mismatch = "; ".join(_index_mismatches(present, spec))
+                if mismatch:
+                    raise DatabaseIndexApplyError(
+                        f"Refusing to drop index {spec.name!r} on "
+                        f"{collection_name!r}: existing definition does not "
+                        f"match the retired contract ({mismatch}). Resolve the "
+                        "conflicting index manually; the store fails closed."
+                    )
+                verified_drops.append((collection, spec.name))
+
+        for collection, index_name in verified_drops:
+            await collection.drop_index(index_name)
 
         for collection_name, specs in self._INDEX_CONTRACT.items():
-            collection = await self._coll(collection_name)
             await _ensure_raw_collection_indexes(
-                collection,
+                database[collection_name],
                 specs,
                 collection_label=collection_name,
             )
 
     async def _coll(self, name: str):
         await self._ensure_client()
-        return self.client["mozaiksai"][name]  # type: ignore[index]
+        return self.client[_DATABASE_NAME][name]  # type: ignore[index]
 
     async def _next_build_record_version_number(self, *, app_id: str, build_family: str, build_key: str) -> int:
         counters = await self._coll("ArtifactVersionCounters")

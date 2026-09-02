@@ -90,6 +90,21 @@ async def _persist_app_bundle_artifact(
     )
 
 
+def _context_value(context_variables: Any, key: str) -> Any:
+    if context_variables is None:
+        return None
+    getter = getattr(context_variables, "get", None)
+    if callable(getter):
+        try:
+            return getter(key)
+        except TypeError:
+            return getter(key, None)
+    data = getattr(context_variables, "data", None)
+    if isinstance(data, dict):
+        return data.get(key)
+    return None
+
+
 async def emit_build_completed(
     *,
     app_id: str,
@@ -97,15 +112,36 @@ async def emit_build_completed(
     chat_id: str | None = None,
     user_id: str | None = None,
     workflow_name: str,
+    context_variables: Any = None,
     **kwargs: Any,
 ) -> str | None:
-    """Emit build.completed and persist the app_bundle summary artifact."""
+    """Emit build.completed only for runs that produced their terminal outputs.
+
+    generate_and_download sets ``download_status="ready"`` as the canonical
+    terminal success marker. When the workflow run ends without it — the
+    terminal tool failed (including failures the auto-tool handler converted
+    into an error tool result), was cancelled, or never produced a bundle —
+    the completion hook must not claim build.completed/review; it records the
+    existing typed failed lifecycle outcome instead.
+    """
+    if _context_value(context_variables, "download_status") != "ready":
+        return await emit_build_failed(
+            app_id=app_id,
+            execution_id=execution_id,
+            chat_id=chat_id,
+            user_id=user_id,
+            workflow_name=workflow_name,
+            error="required build outputs missing: generate_and_download did not reach its terminal success state",
+            **kwargs,
+        )
+
     outbox_event_id = await _shared_emit_build_completed(
         app_id=app_id,
         execution_id=execution_id,
         chat_id=chat_id,
         user_id=user_id,
         workflow_name=workflow_name,
+        context_variables=context_variables,
         **kwargs,
     )
 

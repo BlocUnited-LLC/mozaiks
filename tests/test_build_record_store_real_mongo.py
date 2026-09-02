@@ -48,7 +48,7 @@ async def test_two_build_families_do_not_collide_real_mongo() -> None:
     database_name = f"mozaiks_build_record_test_{uuid4().hex}"
     try:
         store = _store(client, database_name)
-        await store._ensure_indexes()
+        await store._ensure_indexes(client=store.client)
 
         first = await store.create_build_record(
             app_id="app-families",
@@ -76,7 +76,7 @@ async def test_duplicate_canonical_identity_rejects_real_mongo() -> None:
     database_name = f"mozaiks_build_record_test_{uuid4().hex}"
     try:
         store = _store(client, database_name)
-        await store._ensure_indexes()
+        await store._ensure_indexes(client=store.client)
         record = await store.create_build_record(
             app_id="app-dup",
             build_family="app_bundle",
@@ -117,7 +117,7 @@ async def test_retired_obsolete_indexes_are_dropped_real_mongo() -> None:
         )
 
         store = _store(client, database_name)
-        await store._ensure_indexes()
+        await store._ensure_indexes(client=store.client)
 
         version_indexes = {
             str(row["name"]): row
@@ -156,6 +156,98 @@ async def test_retired_obsolete_indexes_are_dropped_real_mongo() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unrelated_same_name_index_survives_and_store_fails_closed_real_mongo() -> None:
+    """A foreign index reusing a retired name must never be dropped."""
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_build_record_test_{uuid4().hex}"
+    try:
+        versions = client[database_name]["ArtifactVersions"]
+        await versions.create_index(
+            [("security_boundary", 1)],
+            name="av_app_kind_key_version",
+        )
+
+        store = _store(client, database_name)
+        with pytest.raises(DatabaseIndexApplyError, match="Refusing to drop"):
+            await store._ensure_indexes(client=store.client)
+
+        surviving = {
+            str(row["name"]): row
+            for row in await versions.list_indexes().to_list(length=None)
+        }
+        assert "av_app_kind_key_version" in surviving
+        assert list(surviving["av_app_kind_key_version"]["key"].items()) == [
+            ("security_boundary", 1)
+        ]
+        # Initialization failed before installing anything canonical.
+        assert "av_app_family_key_version" not in surviving
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("keys", "options", "reason"),
+    [
+        (
+            [("app_id", 1), ("artifact_kind", 1)],
+            {"unique": True},
+            "partial key match",
+        ),
+        (
+            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1), ("version_number", -1)],
+            {},
+            "same keys wrong unique",
+        ),
+        (
+            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1), ("version_number", -1)],
+            {"unique": True, "sparse": True},
+            "same keys wrong option",
+        ),
+    ],
+)
+async def test_retired_name_with_divergent_definition_fails_closed_real_mongo(
+    keys, options, reason
+) -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_build_record_test_{uuid4().hex}"
+    try:
+        versions = client[database_name]["ArtifactVersions"]
+        await versions.create_index(keys, name="av_app_kind_key_version", **options)
+
+        store = _store(client, database_name)
+        with pytest.raises(DatabaseIndexApplyError, match="Refusing to drop"):
+            await store._ensure_indexes(client=store.client)
+
+        surviving = {
+            str(row["name"]) for row in await versions.list_indexes().to_list(length=None)
+        }
+        assert "av_app_kind_key_version" in surviving, reason
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_initialization_is_idempotent_real_mongo() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_build_record_test_{uuid4().hex}"
+    try:
+        store = _store(client, database_name)
+        await store._ensure_indexes(client=store.client)
+        await store._ensure_indexes(client=store.client)
+        versions = client[database_name]["ArtifactVersions"]
+        names = {
+            str(row["name"]) for row in await versions.list_indexes().to_list(length=None)
+        }
+        assert "av_app_family_key_version" in names
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
 async def test_mismatched_canonical_definition_fails_closed_real_mongo() -> None:
     client = AsyncIOMotorClient(_MONGO_URI)
     database_name = f"mozaiks_build_record_test_{uuid4().hex}"
@@ -170,7 +262,7 @@ async def test_mismatched_canonical_definition_fails_closed_real_mongo() -> None
 
         store = _store(client, database_name)
         with pytest.raises(DatabaseIndexApplyError):
-            await store._ensure_indexes()
+            await store._ensure_indexes(client=store.client)
     finally:
         await client.drop_database(database_name)
         client.close()

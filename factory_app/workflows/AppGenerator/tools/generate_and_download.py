@@ -651,11 +651,11 @@ async def _register_app_bundle_artifact_version(
             parent_version_id = None
             validation_status_raw = None
 
-    lifecycle_status = (
-        ArtifactLifecycleStatus.DRAFT
-        if parent_version_id
-        else ArtifactLifecycleStatus.CURRENT
-    )
+    # Every bundle record starts as DRAFT: a greenfield record becomes CURRENT
+    # only after its required AppContextVersion lineage registered, so a
+    # failed registration can never leave a published-looking record behind.
+    lifecycle_status = ArtifactLifecycleStatus.DRAFT
+    promote_after_lineage = not parent_version_id
 
     normalized_status = str(validation_status_raw or "").strip().lower()
     validation_status = ArtifactValidationStatus.PENDING
@@ -771,7 +771,7 @@ async def _register_app_bundle_artifact_version(
             context_variables.set("artifact_version_id", artifact_version.id)
         except Exception:
             pass
-    await _register_greenfield_app_context_for_bundle(
+    registered_context = await _register_greenfield_app_context_for_bundle(
         app_bundle_artifact=artifact_version,
         artifact_store=artifact_store,
         files_manifest=files_manifest,
@@ -779,6 +779,17 @@ async def _register_app_bundle_artifact_version(
         chat_id=chat_id,
         context_variables=context_variables,
     )
+    del registered_context
+    if promote_after_lineage:
+        accepted = await artifact_store.accept_build_record(
+            app_id=str(app_id),
+            build_record_id=artifact_version.id,
+        )
+        if accepted is None:
+            raise RuntimeError(
+                "app_bundle promotion failed: record vanished before acceptance"
+            )
+        artifact_version = accepted
     return artifact_version
 
 
