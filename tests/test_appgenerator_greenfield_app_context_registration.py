@@ -283,10 +283,15 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
         assert (app_dir / rel_path).read_text(encoding="utf-8") == content
 
 
-async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
+async def test_appgenerator_greenfield_context_registration_failure_fails_the_build(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    """Required CURRENT lineage persistence failure must fail bundle registration.
+
+    Hosting and refinement resolve the CURRENT AppContextVersion; the build
+    must not claim success while that lineage does not exist.
+    """
     store = _MemoryArtifactStore()
     _patch_artifact_store(monkeypatch, store)
 
@@ -305,25 +310,25 @@ async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context({"app_bundle_acceptance_status": "passed"})
 
-    app_bundle = await generate_and_download_module._register_app_bundle_artifact_version(
-        app_id="field_service",
-        user_id="user_123",
-        workflow_name="AppGenerator",
-        chat_id="chat_greenfield",
-        bundle_name="GeneratedApp",
-        zip_path=zip_path,
-        app_dir=app_dir,
-        written_paths=written_paths,
-        context_variables=context,
-    )
+    with pytest.raises(RuntimeError, match="context store unavailable"):
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="field_service",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            chat_id="chat_greenfield",
+            bundle_name="GeneratedApp",
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=context,
+        )
 
-    assert app_bundle.id == "av_app_bundle_1"
-    assert context.data["artifact_version_id"] == "av_app_bundle_1"
-    assert "context store unavailable" in context.data["app_context_registration_warning"]
-    assert {call["build_family"] for call in store.create_calls} == {"app_bundle"}
+    assert context.data.get("greenfield_app_context_registered") is not True
+    assert context.data.get("download_status") != "ready"
+    assert context.data.get("app_download_ready") is not True
 
 
-async def test_appgenerator_greenfield_context_contract_errors_can_be_strict() -> None:
+async def test_appgenerator_greenfield_context_contract_errors_fail_closed() -> None:
     store = _MemoryArtifactStore()
 
     with pytest.raises(ValueError, match="app_id is required"):
@@ -334,7 +339,6 @@ async def test_appgenerator_greenfield_context_contract_errors_can_be_strict() -
             workflow_name="AppGenerator",
             chat_id="chat_greenfield",
             context_variables=_Context(),
-            raise_on_contract_error=True,
         )
 
 

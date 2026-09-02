@@ -56,6 +56,19 @@ This project follows a practical pre-1.0 changelog format:
   separators, `ensure_ascii=False`, UTF-8), verified against real
   `TestClient` response bodies, so a result at the limit passes and one byte
   over fails.
+- **BuildRecord identity indexes and required build lineage now behave
+  honestly**: BuildRecordStore's unique indexes were declared on retired
+  fields no record carries, so the second build family for an app collided
+  with `E11000`; the store now declares one canonical index contract on
+  `(app_id, build_family, build_key, version_number)` materialized through
+  the canonical runtime index verifier (mismatched pre-existing definitions
+  fail the store closed), drops the retired index names, and the obsolete
+  field query paths (silent no-op staleness propagation and dead
+  artifact-kind reads) are removed. Greenfield AppContextVersion
+  registration — the CURRENT lineage hosting and refinement resolve — no
+  longer fails open during `generate_and_download`: a required lineage
+  persistence failure now fails the build instead of returning a
+  downloadable bundle whose lineage does not exist.
 
 
 ### Changed

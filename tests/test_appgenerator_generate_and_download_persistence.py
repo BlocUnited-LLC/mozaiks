@@ -127,7 +127,25 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     assert (tmp_path / "data" / "migrations" / "m_1.json").exists()
 
 
+class _StubGreenfieldRegistration:
+    def __init__(self) -> None:
+        self.context_version = type("ContextVersion", (), {"context_version_id": "acv_1"})()
+        self.artifact_version = type("ArtifactVersion", (), {"id": "av_context_1"})()
+
+
+def _stub_greenfield_registration(monkeypatch) -> None:
+    async def _register(**_kwargs):
+        return _StubGreenfieldRegistration()
+
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "register_greenfield_app_context_version",
+        _register,
+    )
+
+
 def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
+    _stub_greenfield_registration(monkeypatch)
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
@@ -191,6 +209,7 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
 
 
 def test_register_app_bundle_artifact_version_marks_failed_acceptance(monkeypatch, tmp_path: Path) -> None:
+    _stub_greenfield_registration(monkeypatch)
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)

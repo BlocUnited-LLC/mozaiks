@@ -580,38 +580,22 @@ async def _register_greenfield_app_context_for_bundle(
     workflow_name: str,
     chat_id: str | None,
     context_variables: Any | None,
-    raise_on_contract_error: bool = False,
-) -> Any | None:
-    try:
-        registered = await register_greenfield_app_context_version(
-            app_bundle_artifact=app_bundle_artifact,
-            artifact_store=artifact_store,
-            files_manifest=files_manifest,
-            source_workflow=workflow_name,
-            source_chat_id=chat_id,
-            make_current=True,
-        )
-    except (TypeError, ValueError) as exc:
-        if raise_on_contract_error:
-            raise
-        wf_logger = get_workflow_logger(
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=getattr(app_bundle_artifact, "app_id", None),
-        )
-        wf_logger.warning("Greenfield app-context registration skipped: %s", exc)
-        _context_set(context_variables, "app_context_registration_warning", str(exc))
-        return None
-    except Exception as exc:
-        wf_logger = get_workflow_logger(
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=getattr(app_bundle_artifact, "app_id", None),
-        )
-        wf_logger.warning("Greenfield app-context registration failed: %s", exc)
-        _context_set(context_variables, "app_context_registration_warning", str(exc))
-        return None
+) -> Any:
+    """Register the CURRENT AppContextVersion lineage for a generated bundle.
 
+    This registration is required publication lineage: hosting and refinement
+    resolve the CURRENT AppContextVersion, so a failure here must fail the
+    build instead of returning a downloadable bundle whose lineage does not
+    exist.
+    """
+    registered = await register_greenfield_app_context_version(
+        app_bundle_artifact=app_bundle_artifact,
+        artifact_store=artifact_store,
+        files_manifest=files_manifest,
+        source_workflow=workflow_name,
+        source_chat_id=chat_id,
+        make_current=True,
+    )
     _context_set(context_variables, "app_context_version_id", registered.context_version.context_version_id)
     _context_set(context_variables, "app_context_artifact_version_id", registered.artifact_version.id)
     _context_set(context_variables, "greenfield_app_context_registered", True)
