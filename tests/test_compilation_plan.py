@@ -47,7 +47,7 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-_GOLDEN_PLAN_DIGEST = "4cfa4b907ef56320c0a26cc7c392d8e35284ed1c5c5bbf3624f1e0908b0df880"
+_GOLDEN_PLAN_DIGEST = "e670c094d29182b85d9f3b98c2745a81ec439f6dbf4dd64d80fdfa0116da5bf7"
 
 
 def _registry():

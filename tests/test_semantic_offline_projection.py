@@ -29,6 +29,14 @@ from mozaiksai.core.semantics.offline_projection import (
     extract_semantic_facts,
     project_semantic_graph,
 )
+from mozaiksai.core.semantics.payloads import (
+    ApplicationPayload,
+    AuthPayload,
+    IntegrationPayload,
+    OptionalFamilyKind,
+    OptionalFamilySelectionStatus,
+    WorkflowPayload,
+)
 from mozaiksai.core.semantics.refs import ExecutionAccessScopeRef
 from mozaiksai.core.session.build_context_schema import validate_pack_context
 from mozaiksai.core.taxonomy import (
@@ -166,6 +174,18 @@ def _corpus_source() -> dict:
             "generation_order": ["modules", "pages"],
         },
         "app_schema": {
+            "manifest": {
+                "app_name": "Reports App",
+                "description": "Create and distribute reports.",
+                "tagline": None,
+                "value_proposition": "Reliable reporting for teams.",
+                "version": "1.0.0",
+                "auth_strategy": "role-based",
+                "roles": ["admin", "member"],
+                "default_route": "/reports",
+                "pages": ["Reports"],
+                "custom_routes": [],
+            },
             "pages": [
                 {
                     "name": "Reports",
@@ -186,7 +206,11 @@ def _corpus_source() -> dict:
                     ],
                 }
             ],
+            "custom_route_bundle": None,
             "theme_config_patch": {"theme": {"mode": "dark"}},
+            "shell_config": None,
+            "asset_manifest": None,
+            "data_contract": None,
         },
         "design_docs": {
             "agent_message": "Design corpus",
@@ -267,6 +291,25 @@ def _corpus_source() -> dict:
                 {"product_id": "extra_exports", "label": "Extra exports", "token_amount": 100}
             ],
         },
+        "integrations": [
+            {
+                "app_id": "slice-3-corpus",
+                "service": "resend",
+                "kind": "api_key",
+                "purpose": "Send report-ready notifications",
+                "required_at": "runtime",
+                "optional": False,
+                "required_fields": [
+                    {
+                        "name": "RESEND_API_KEY",
+                        "type": "secret",
+                        "required": True,
+                        "frontend_safe": False,
+                    }
+                ],
+                "connector_status": "not_configured",
+            }
+        ],
         "subscription_contract": {
             "contract_required": True,
             "rationale": "Reports are metered",
@@ -303,7 +346,20 @@ triggers:
     event: domain.reports.generated
     description: Resume after generation
 """,
-                    }
+                    },
+                    {
+                        "filename": "agents.yaml",
+                        "content": "agents:\n  - name: ReportAgent\n",
+                    },
+                    {
+                        "filename": "transition_graph.yaml",
+                        "content": (
+                            "transition_rules:\n"
+                            "  - source_agent: ReportAgent\n"
+                            "    target_agent: terminate\n"
+                            "    transition_type: after_turn\n"
+                        ),
+                    },
                 ],
             }
         ],
@@ -386,6 +442,9 @@ def test_independent_source_expectations_equal_every_graph_fact() -> None:
         return f"mozaiks.{kind}.{slug}_{canonical_digest(identity)[:12]}"
 
     specs = {
+        "application": ("application", "slice-3-corpus", ()),
+        "auth": ("auth", "slice-3-corpus", ()),
+        "integration": ("integration", "resend", ()),
         "surface_reports": ("surface", "reports", ()),
         "surface_billing": ("surface", "billing", ()),
         "module_reports": ("module", "reports", ()),
@@ -443,6 +502,10 @@ def test_independent_source_expectations_equal_every_graph_fact() -> None:
             ("binds", "limit", "meter"),
             ("owns", "module_reports", "collection"),
             ("renders", "page_reports", "section"),
+            ("declares", "application", "page_reports"),
+            ("declares", "application", "auth"),
+            ("declares", "application", "integration"),
+            ("declares", "application", "workflow"),
         }
     }
     identity_facts = {(nid, kind, refs) for nid, kind, refs, _digest in result.represented_facts.nodes}
@@ -708,7 +771,7 @@ triggers:
     capability_id: reports.export
 """,
             },
-            {"filename": "agents.yaml", "content": "agents: []\n"},
+            {"filename": "agents.yaml", "content": "agents:\n  - name: ReportAgent\n"},
         ],
     }
     module_bundle = {"manifest": module, "events": events, "reactions": reactions}
@@ -727,7 +790,13 @@ triggers:
         taxonomy_registry=_pinned_registry(),
     )
     assert result.source_facts == extract_semantic_facts(result.graph)
-    assert any(gap.source_path == "agent_workflows[0].files" for gap in result.gaps)
+    workflow = next(
+        payload
+        for payload in result.payloads
+        if payload.payload_kind is SemanticNodeKind.WORKFLOW
+    )
+    assert workflow.topology is not None
+    assert not any(gap.source_path == "agent_workflows[0].files" for gap in result.gaps)
     assert any(gap.source_path.endswith("ownership_boundaries[0].ownership") for gap in result.gaps)
     mapped = dict(source)
     mapped["modules"] = {"reports": module_bundle}
@@ -1433,8 +1502,8 @@ def test_residual_gaps_are_typed_and_never_claim_v1_limits() -> None:
     reasons = [gap.reason for gap in result.gaps]
     assert any("navigation ordering has no typed semantic payload field" in r for r in reasons)
     assert any(
-        "beyond graph identity, trigger relationships, and typed workflow payload content" in r
-        for r in reasons
+        gap.source_path.endswith("pattern_id") and gap.kind is ProjectionGapKind.UNSUPPORTED
+        for gap in result.gaps
     )
     for text in reasons + [row.reason for row in result.coverage] + [
         row.stable_identity_derivation for row in result.coverage
@@ -1480,3 +1549,243 @@ def test_conflicting_payload_content_fails_closed() -> None:
     source["subscription_contract"]["subscription_config_file"]["plans"][0]["label"] = "Premium"
     with pytest.raises(ProjectionError, match="conflicting payload content"):
         _project(source)
+
+
+def test_application_auth_and_integration_facts_round_trip_without_open_state() -> None:
+    result = _project()
+    application = _payload_for(result, SemanticNodeKind.APPLICATION, "slice_3_corpus")
+    auth = _payload_for(result, SemanticNodeKind.AUTH, "slice_3_corpus")
+    integration = _payload_for(result, SemanticNodeKind.INTEGRATION, "resend")
+    assert isinstance(application, ApplicationPayload)
+    assert application.model_dump(mode="json", include={
+        "application_id",
+        "display_name",
+        "description",
+        "tagline",
+        "value_proposition",
+        "version",
+        "default_route",
+    }) == {
+        "application_id": "slice-3-corpus",
+        "display_name": "Reports App",
+        "description": "Create and distribute reports.",
+        "tagline": None,
+        "value_proposition": "Reliable reporting for teams.",
+        "version": "1.0.0",
+        "default_route": "/reports",
+    }
+    assert isinstance(auth, AuthPayload)
+    assert auth.auth_required is True
+    assert auth.strategy.value == "role_based"
+    assert auth.roles == ("admin", "member")
+    assert isinstance(integration, IntegrationPayload)
+    assert integration.integration_id == "resend"
+    assert integration.config_requirements[0].name == "RESEND_API_KEY"
+    serialized = integration.model_dump(mode="json")
+    assert "connector_status" not in serialized
+    assert "workspace_status" not in serialized
+    assert "declared_at" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("app_schema", "manifest", "app_name"), "Reports Pro"),
+        (("app_schema", "manifest", "auth_strategy"), "public"),
+        (("integrations", 0, "purpose"), "Deliver transactional email"),
+    ],
+)
+def test_application_fact_mutations_reroot_only_through_canonical_payloads(
+    path: tuple[str | int, ...], value: object
+) -> None:
+    baseline = _project()
+    source = _corpus_source()
+    cursor: object = source
+    for part in path[:-1]:
+        cursor = cursor[part]  # type: ignore[index]
+    cursor[path[-1]] = value  # type: ignore[index]
+    if path[-1] == "auth_strategy":
+        cursor["roles"] = []  # type: ignore[index]
+    changed = _project(source)
+    assert changed.graph.graph_digest != baseline.graph.graph_digest
+
+
+def test_malformed_or_open_application_and_auth_facts_fail_closed() -> None:
+    for field, value in (("version", "v1"), ("runtime_session_id", "session-1")):
+        source = _corpus_source()
+        source["app_schema"]["manifest"][field] = value
+        with pytest.raises(ProjectionError):
+            _project(source)
+
+    contradictory = _corpus_source()
+    contradictory["app_schema"]["manifest"]["auth_strategy"] = "public"
+    with pytest.raises(ProjectionError, match="public auth"):
+        _project(contradictory)
+
+    unknown_strategy = _corpus_source()
+    unknown_strategy["app_schema"]["manifest"]["auth_strategy"] = "passport-session"
+    with pytest.raises(ProjectionError, match="closed provider-neutral vocabulary"):
+        _project(unknown_strategy)
+
+
+def test_integration_secret_or_provider_state_smuggling_fails_before_payload_authority() -> None:
+    source = _corpus_source()
+    source["integrations"][0]["access_token"] = "live-token"
+    with pytest.raises(ProjectionError, match="unknown integration declaration field"):
+        _project(source)
+
+    source = _corpus_source()
+    source["integrations"][0]["required_fields"][0]["value"] = "secret-value"
+    with pytest.raises(ProjectionError, match="not structurally closed"):
+        _project(source)
+
+
+def test_optional_family_selection_distinguishes_selected_absent_and_not_applicable() -> None:
+    source = _corpus_source()
+    source["app_schema"]["manifest"]["auth_strategy"] = "public"
+    source["app_schema"]["manifest"]["roles"] = []
+    source["integrations"] = []
+    result = _project(source)
+    application = _payload_for(result, SemanticNodeKind.APPLICATION, "slice_3_corpus")
+    statuses = {item.family: item.status for item in application.optional_families}
+    assert statuses[OptionalFamilyKind.AUTH] is OptionalFamilySelectionStatus.NOT_APPLICABLE
+    assert statuses[OptionalFamilyKind.THEME] is OptionalFamilySelectionStatus.SELECTED
+    assert (
+        statuses[OptionalFamilyKind.INTEGRATIONS]
+        is OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
+    )
+    assert (
+        statuses[OptionalFamilyKind.CUSTOM_ROUTES]
+        is OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
+    )
+
+
+def test_missing_optional_selection_evidence_fails_closed() -> None:
+    source = _corpus_source()
+    del source["integrations"]
+    with pytest.raises(ProjectionError, match="selection evidence is required"):
+        _project(source)
+
+
+def test_workflow_topology_round_trip_allows_cycles_but_rejects_foreign_targets() -> None:
+    source = _corpus_source()
+    source["agent_workflows"][0]["files"][1]["content"] = (
+        "agents:\n  - name: ReportAgent\n  - name: ReviewAgent\n"
+    )
+    source["agent_workflows"][0]["files"][2]["content"] = (
+        "transition_rules:\n"
+        "  - source_agent: ReportAgent\n"
+        "    target_agent: ReviewAgent\n"
+        "    transition_type: after_turn\n"
+        "  - source_agent: ReviewAgent\n"
+        "    target_agent: ReportAgent\n"
+        "    transition_type: after_turn\n"
+    )
+    result = _project(source)
+    workflow = _payload_for(result, SemanticNodeKind.WORKFLOW, "report_builder")
+    assert isinstance(workflow, WorkflowPayload)
+    assert workflow.topology is not None
+    assert {item.participant_id for item in workflow.topology.participants} == {
+        "reportagent",
+        "reviewagent",
+    }
+    assert len(workflow.topology.transitions) == 2
+
+    source["agent_workflows"][0]["files"][2]["content"] = (
+        "transition_rules:\n"
+        "  - source_agent: ReportAgent\n"
+        "    target_agent: MissingAgent\n"
+        "    transition_type: after_turn\n"
+    )
+    with pytest.raises(ProjectionError, match="referentially closed"):
+        _project(source)
+
+
+def test_ag2_runtime_identity_cannot_enter_workflow_semantic_topology() -> None:
+    source = _corpus_source()
+    content = source["agent_workflows"][0]["files"][0]["content"]
+    source["agent_workflows"][0]["files"][0]["content"] = (
+        content + "channel_id: live-channel\n"
+    )
+    with pytest.raises(ProjectionError, match="runtime-only field"):
+        _project(source)
+
+
+def test_new_payload_json_schemas_are_recursively_closed_and_evaluation_free() -> None:
+    forbidden_names = {
+        "campaign",
+        "conversion",
+        "evaluation",
+        "portfolio",
+        "revenue",
+        "rating",
+        "passport",
+        "channel_id",
+        "session_id",
+    }
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            assert value != {}, "empty schema node is an unconstrained Any escape hatch"
+            assert value.get("additionalProperties") is not True
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    for model in (ApplicationPayload, AuthPayload, IntegrationPayload, WorkflowPayload):
+        assert forbidden_names.isdisjoint(model.model_fields)
+        walk(model.model_json_schema())
+
+
+def test_reordered_integration_declarations_do_not_change_graph_identity() -> None:
+    source = _corpus_source()
+    second = copy.deepcopy(source["integrations"][0])
+    second.update({"service": "slack", "purpose": "Send team alerts"})
+    source["integrations"].append(second)
+    forward = _project(source)
+    source["integrations"].reverse()
+    reverse = _project(source)
+    assert forward.graph.graph_digest == reverse.graph.graph_digest
+
+
+def test_new_application_input_authority_never_consults_app_build_plan() -> None:
+    baseline = _project()
+    source = _corpus_source()
+    del source["app_build_plan"]
+    without_plan = _project(source)
+    for kind in (
+        SemanticNodeKind.APPLICATION,
+        SemanticNodeKind.AUTH,
+        SemanticNodeKind.INTEGRATION,
+        SemanticNodeKind.WORKFLOW,
+    ):
+        baseline_payloads = {
+            payload.node_id: payload.payload_digest
+            for payload in baseline.payloads
+            if payload.payload_kind is kind
+        }
+        projected_payloads = {
+            payload.node_id: payload.payload_digest
+            for payload in without_plan.payloads
+            if payload.payload_kind is kind
+        }
+        assert projected_payloads == baseline_payloads
+
+
+def test_target_input_gaps_are_closed_while_downstream_output_gaps_remain_explicit() -> None:
+    result = _project()
+    target_fragments = (
+        "manifest.auth_strategy",
+        "manifest.roles",
+        "integrations[",
+        "workflow topology requires",
+    )
+    assert not any(
+        fragment in f"{gap.source_path} {gap.reason}"
+        for gap in result.gaps
+        for fragment in target_fragments
+    )
+    assert any(gap.source_path.endswith("pattern_id") for gap in result.gaps)
+    assert any(gap.source_path.endswith("filename") for gap in result.gaps)

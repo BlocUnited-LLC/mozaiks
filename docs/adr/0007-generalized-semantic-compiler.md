@@ -255,6 +255,34 @@ execution adapters, materialization, persistence, promotion, or refinement.
 `AppBuildPlan` therefore remains production planning authority until the
 atomic Slice 5D cutover.
 
+Slice 5D-0A closes the application-input side of that future cutover without
+claiming executability. `ApplicationPayload`, `AuthPayload`, and
+`IntegrationPayload` are strict graph-v2 variants. Application identity and
+manifest intent project from the current `AppSchemaOutput.manifest`; active
+application integration intent projects from the existing persisted
+application integration declarations while connector/readiness state remains
+outside semantic identity. Authentication uses a finite provider-neutral
+strategy vocabulary and never carries credentials, provider account identity,
+or runtime session state.
+
+`WorkflowPayload` may now pin a closed logical topology: bounded turn intent,
+human-input requirement, declared logical participants, initial participant,
+and finite transition forms. Prompt bodies, models, channels, AG2 participant
+objects, envelopes, WAL cursors, runtime retries, and other execution state are
+not semantic topology. Cycles are permitted when every endpoint closes over a
+declared logical participant; unresolved participants and unsupported
+condition forms fail closed.
+
+Application payloads also record a complete finite selection statement for
+the optional auth, integration, custom-route, theme, shell, asset, data, and
+workflow families. `selected`, `absent_by_declaration`, and `not_applicable`
+are distinct; missing evidence is not normalized to any of them. The sole
+layout registry declares these new node kinds as future source footprints for
+application manifest, auth, integration, and workflow-manifest families.
+Renderers, assignment/output contracts, AG2 execution, publication,
+capability advertisement, and the production `AppBuildPlan` path remain
+unchanged until later Slice 5D gates.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,
@@ -1072,6 +1100,7 @@ journey capability.
 | **3E. Fresh-main graph-v2 projection evolution** — after the independently reviewed Slice 3 change lands, evolve its offline adapters to emit typed payload documents and graph-v2 refs | No authority change; current stage outputs and `AppBuildPlan` remain comparison inputs | Every prior typed gap is either represented by a strict payload variant or remains an explicit blocking gap; graph/payload closure and re-extraction equivalence across the corpus | Do not branch from the unmerged Slice 3 PR. Rollback: delete the graph-v2 adapter evolution. No live models or ADR 0006 interaction. |
 | **4B. Aggregate CompilationPlan derivation** — derive one aggregate plan containing non-authoritative artifact-family-instance subplans; project assignments and task-batch inputs from it | No production authority change: agent-produced `AppBuildPlan` remains current and the aggregate plan is offline-only | Complete family dispositions; derived-vs-produced plan equivalence; global DAG and path ownership; stable aggregate and family digests; partial regeneration/reuse closure; proof that family plans cannot resolve or execute independently and binding cannot widen graph semantics | Begin identifying plan mirrors and dead converter normalizers for cutover, but delete no active authority. Rollback: delete the candidate plan path. No live models, capability advertisement, or ADR 0006 dependency. |
 | **4C. Offline deterministic renderer equivalence** — bind graph-v2 payloads and aggregate-plan family instances to registry renderers; AgentGenerator regains a renderer layer | No production authority change; candidate renderers run only against offline corpus fixtures and never beside a live build | Stable renderer order; byte-identical child contracts; loader/validator and route/component/action closure; AppGenerator and AgentGenerator equivalence; changed semantic closure changes only affected families | Retain current generation and promotion. Rollback: delete candidate renderers and comparison flag. No live models, capability advertisement, or ADR 0006 dependency. |
+| **5D-0A. Typed application/workflow semantic input closure** — add closed application, provider-neutral auth, application-integration, workflow-topology, and optional-family-selection payload facts; declare their future source footprints in the sole layout registry | No production authority change: `AppBuildPlan` remains operational authority and the new inputs are offline-only | Real Genesis corpus projects the five input categories without missing/ambiguous facts; recursive structural closure; contradiction, runtime-state smuggling, explicit-absence, topology-reference, digest-mutation, and shuffled-input proofs | No renderer, assignment, AG2, publication, or capability work. Remaining executable-output and renderer gaps stay explicit for 5D-0B. Rollback: remove the new offline payload variants/projection and registry input declarations. No live models. |
 | **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph + immutable artifact revision become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; `ApplicationPublication` CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/publication persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
 | **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected publication; rollback rehearsal through `ApplicationPublication` CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent graph/revision closure. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
 | **7. Retirement** — remove obsolete schemas, glob taxonomies, aliases, converter paths, transitional adapters, comparison fixtures, and development flags | One semantic authority; one registry per concern | Repository hygiene guard extended to ban retired names (pattern: `scripts/production_readiness_gate.py`); full suite; generated-app acceptance | Deletions complete. Rollback: deployment rollback before deletion only; no dual-read shim reintroduced. No live-model change. ADR 0006 slice interleaving agreed before this point. |

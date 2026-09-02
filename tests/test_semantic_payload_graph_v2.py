@@ -37,6 +37,9 @@ from mozaiksai.core.semantics.graph import (
 from mozaiksai.core.semantics.payloads import (
     PAYLOAD_MODEL_BY_KIND,
     ActionPayload,
+    ApplicationPayload,
+    AuthPayload,
+    AuthStrategyKind,
     BillingPeriod,
     CapabilityPayload,
     DataAliasPayload,
@@ -46,11 +49,19 @@ from mozaiksai.core.semantics.payloads import (
     EventPayload,
     FieldType,
     IndexSpec,
+    IntegrationConfigRequirement,
+    IntegrationConfigValueKind,
+    IntegrationKind,
+    IntegrationPayload,
+    IntegrationRequirementPhase,
     LimitPayload,
     MeterPayload,
     ModulePayload,
     NotificationChannel,
     NotificationPayload,
+    OptionalFamilyKind,
+    OptionalFamilySelection,
+    OptionalFamilySelectionStatus,
     PagePayload,
     PageSectionEntry,
     PermissionPayload,
@@ -224,14 +235,61 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden Merkle-root vector: pinned digests for the full-corpus v2 graph and
 # its archived fixture.  Independent of host, process, and input order.
-_GOLDEN_GRAPH_DIGEST = "adb01417eac21a97cd3061ed5a9216a6d6501447699c228e4e85bfe83bdf602f"
-_GOLDEN_ARCHIVE_DIGEST = "sha256:8e95d5bcce6b61528a46a1f09a18ab6766ffbfaa58905461c626fd6de31018ea"
+_GOLDEN_GRAPH_DIGEST = "1550d094a0b19f51f0ce75932b9cbccb494a3e3b044abb1249f6a4c3d1e3dd89"
+_GOLDEN_ARCHIVE_DIGEST = "sha256:759ec88e6b4e9a0ee603e682b0f5e66375f6ae9fb3d3bc51e5eb851d779109d2"
 
 
 def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str = "Home"):
     """One payload of every kind, so kind closure is exercised end to end."""
     field = TypedFieldSpec(name="name", field_type=FieldType.STRING, required=True)
     return {
+        SemanticNodeKind.APPLICATION: build_semantic_payload(
+            ApplicationPayload,
+            node_id="mozaiks.application.corpus",
+            payload_version=1,
+            scope=scope,
+            application_id="corpus-app",
+            display_name="Corpus App",
+            description="A closed application payload",
+            tagline=None,
+            value_proposition=None,
+            version="1.0.0",
+            default_route="/home",
+            optional_families=tuple(
+                OptionalFamilySelection(
+                    family=family,
+                    status=OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION,
+                )
+                for family in OptionalFamilyKind
+            ),
+        ),
+        SemanticNodeKind.AUTH: build_semantic_payload(
+            AuthPayload,
+            node_id="mozaiks.auth.corpus",
+            payload_version=1,
+            scope=scope,
+            auth_required=True,
+            strategy=AuthStrategyKind.ROLE_BASED,
+            roles=("admin",),
+        ),
+        SemanticNodeKind.INTEGRATION: build_semantic_payload(
+            IntegrationPayload,
+            node_id="mozaiks.integration.email",
+            payload_version=1,
+            scope=scope,
+            integration_id="email",
+            integration_kind=IntegrationKind.API_KEY,
+            purpose="Send notifications",
+            required_at=IntegrationRequirementPhase.RUNTIME,
+            optional=False,
+            config_requirements=(
+                IntegrationConfigRequirement(
+                    name="EMAIL_API_KEY",
+                    value_kind=IntegrationConfigValueKind.SECRET,
+                    required=True,
+                ),
+            ),
+        ),
         SemanticNodeKind.SURFACE: build_semantic_payload(
             SurfacePayload,
             node_id="mozaiks.surface.web",
@@ -372,6 +430,7 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             workflow_id="digest",
             description="Weekly digest workflow",
             startup_mode=WorkflowStartupMode.EVENT_DRIVEN,
+            topology=None,
         ),
         SemanticNodeKind.TRIGGER: build_semantic_payload(
             TriggerPayload,
@@ -541,7 +600,7 @@ def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
         NotificationPayload: ("template_text", "channel"),
         DataCollectionPayload: ("description", "fields"),
         DataAliasPayload: ("alias", "collection", "owner_node_id"),
-        WorkflowPayload: ("description", "startup_mode"),
+        WorkflowPayload: ("description", "startup_mode", "topology"),
         TriggerPayload: ("description", "trigger_kind"),
         PlanPayload: ("title", "prices"),
         ProductPayload: ("title", "description", "prices"),

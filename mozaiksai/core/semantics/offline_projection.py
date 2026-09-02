@@ -34,11 +34,25 @@ from mozaiksai.core.semantics.graph import (
 )
 from mozaiksai.core.semantics.payloads import (
     PAYLOAD_MODEL_BY_KIND,
+    AuthStrategyKind,
     BillingPeriod,
+    IntegrationConfigRequirement,
+    IntegrationConfigValueKind,
+    IntegrationKind,
+    IntegrationRequirementPhase,
+    OptionalFamilyKind,
+    OptionalFamilySelection,
+    OptionalFamilySelectionStatus,
     PageSectionEntry,
     PriceSpec,
     SemanticPayloadBase,
     TriggerKind,
+    WorkflowParticipant,
+    WorkflowStartupMode,
+    WorkflowTopology,
+    WorkflowTransition,
+    WorkflowTransitionKind,
+    WorkflowTransitionTargetKind,
     build_semantic_payload,
     semantic_payload_ref,
     validate_semantic_graph_v2_payload_closure,
@@ -166,6 +180,11 @@ _SOURCE_AUTHORITIES: dict[str, tuple[str, str, str]] = {
         "factory_app/workflows/AgentGenerator/structured_outputs.yaml",
         "WorkflowBundleBuilderOutput",
         "AgentGenerator bundle output",
+    ),
+    "integrations": (
+        "factory_app/app/modules/workspace_integrations/backend/schemas.py",
+        "AppIntegrationDeclarations",
+        "persisted application integration declarations",
     ),
     "app_context": (
         "mozaiksai/core/app_context/models.py",
@@ -362,6 +381,104 @@ _SURFACE_KINDS = frozenset(
         "ui_only",
     }
 )
+_APP_MANIFEST_FIELDS = frozenset(
+    {
+        "app_name",
+        "description",
+        "tagline",
+        "value_proposition",
+        "version",
+        "auth_strategy",
+        "roles",
+        "default_route",
+        "pages",
+        "custom_routes",
+    }
+)
+_APP_SCHEMA_FIELDS = frozenset(
+    {
+        "agent_message",
+        "manifest",
+        "pages",
+        "custom_route_bundle",
+        "theme_config_patch",
+        "shell_config",
+        "asset_manifest",
+        "data_contract",
+    }
+)
+_AUTH_STRATEGIES = {
+    "public": AuthStrategyKind.PUBLIC,
+    "basic-login": AuthStrategyKind.BASIC_LOGIN,
+    "role-based": AuthStrategyKind.ROLE_BASED,
+    "third-party": AuthStrategyKind.FEDERATED,
+}
+_WORKFLOW_STARTUP_MODES = {
+    "AgentDriven": WorkflowStartupMode.AGENT_DRIVEN,
+    "UserDriven": WorkflowStartupMode.USER_DRIVEN,
+    "BackendOnly": WorkflowStartupMode.BACKEND_ONLY,
+}
+_ORCHESTRATOR_FIELDS = frozenset(
+    {
+        "workflow_name",
+        "description",
+        "max_turns",
+        "human_in_the_loop",
+        "workflow_startup_mode",
+        "orchestration_pattern",
+        "initial_message",
+        "initial_agent",
+        "triggers",
+    }
+)
+_TRANSITION_FIELDS = frozenset(
+    {
+        "source_agent",
+        "target_agent",
+        "transition_type",
+        "condition_type",
+        "condition_key",
+        "condition_value",
+        "context_expression",
+        "tool_name",
+        "transition_target",
+    }
+)
+_INTEGRATION_DECLARATION_FIELDS = frozenset(
+    {
+        "app_id",
+        "service",
+        "catalog_id",
+        "display_name",
+        "kind",
+        "purpose",
+        "required_at",
+        "optional",
+        "workspace_status",
+        "connector_status",
+        "defaulted",
+        "removable",
+        "source",
+        "required_fields",
+        "preferred_setup_lane",
+        "allowed_setup_lanes",
+        "managed_default",
+        "declared_at",
+        "updated_at",
+        "removed",
+        "removed_at",
+        "removed_by",
+    }
+)
+_INTEGRATION_RUNTIME_FIELDS = _INTEGRATION_DECLARATION_FIELDS - {
+    "app_id",
+    "service",
+    "kind",
+    "purpose",
+    "required_at",
+    "optional",
+    "required_fields",
+}
 _GRAPH_V1_SURFACE_KINDS = frozenset({"module", "workflow"})
 _SLUG = re.compile(r"[^a-z0-9_]+")
 _MODULE_ENDPOINT = re.compile(r"^/api/modules/([^/]+)/([^/]+)$")
@@ -443,6 +560,9 @@ def _canonicalize_unordered(source: dict[str, Any]) -> None:
         surfaces = _mapping(value.get("surface_map")).get("surfaces")
         if isinstance(surfaces, list):
             surfaces.sort(key=lambda item: str(_mapping(item).get("surface_id") or ""))
+    integrations = source.get("integrations")
+    if isinstance(integrations, list):
+        integrations.sort(key=lambda item: str(_mapping(item).get("service") or ""))
     modules = source.get("modules")
     if not isinstance(modules, list):
         return
@@ -1530,6 +1650,378 @@ class _Builder:
                             product, "prices", (spec,), f"{root}.{field}[{i}].price"
                         )
 
+    def project_application(self, schema: dict[str, Any], root: str, graph_id: str) -> None:
+        manifest = _mapping(schema.get("manifest"))
+        if not manifest:
+            return
+        unknown_schema = sorted(set(schema) - _APP_SCHEMA_FIELDS)
+        unknown_manifest = sorted(set(manifest) - _APP_MANIFEST_FIELDS)
+        if unknown_schema or unknown_manifest:
+            paths = [f"{root}.{name}" for name in unknown_schema]
+            paths.extend(f"{root}.manifest.{name}" for name in unknown_manifest)
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.UNSUPPORTED,
+                        source_path=path,
+                        reason="unknown application field cannot enter semantic authority",
+                    )
+                    for path in paths
+                ]
+            )
+        required_manifest = {
+            "app_name",
+            "description",
+            "tagline",
+            "value_proposition",
+            "version",
+            "auth_strategy",
+            "roles",
+            "default_route",
+            "pages",
+            "custom_routes",
+        }
+        missing = sorted(required_manifest - set(manifest))
+        selection_fields = {
+            OptionalFamilyKind.CUSTOM_ROUTES: "custom_route_bundle",
+            OptionalFamilyKind.THEME: "theme_config_patch",
+            OptionalFamilyKind.SHELL: "shell_config",
+            OptionalFamilyKind.ASSETS: "asset_manifest",
+            OptionalFamilyKind.DATA: "data_contract",
+        }
+        missing.extend(sorted(set(selection_fields.values()) - set(schema)))
+        if "integrations" not in self.source:
+            missing.append("integrations")
+        if "agent_workflows" not in self.source:
+            missing.append("agent_workflows")
+        if missing:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.MISSING,
+                        source_path=f"{root}.{name}",
+                        reason="explicit application selection evidence is required",
+                    )
+                    for name in sorted(set(missing))
+                ]
+            )
+
+        application = self.node(
+            SemanticNodeKind.APPLICATION,
+            graph_id,
+            path=f"{root}.manifest.app_name",
+            group=f"{root}.manifest",
+        )
+        self.content_field(application, "application_id", graph_id, f"{root}.manifest.app_name")
+        for field, source_field in (
+            ("display_name", "app_name"),
+            ("description", "description"),
+            ("tagline", "tagline"),
+            ("value_proposition", "value_proposition"),
+            ("version", "version"),
+            ("default_route", "default_route"),
+        ):
+            self.content_field(
+                application,
+                field,
+                manifest.get(source_field),
+                f"{root}.manifest.{source_field}",
+            )
+
+        raw_strategy = manifest.get("auth_strategy")
+        if raw_strategy is None:
+            if _as_list(manifest.get("roles")):
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.CONTRADICTORY,
+                            source_path=f"{root}.manifest.roles",
+                            reason="logical roles require an explicit non-public auth strategy",
+                        )
+                    ]
+                )
+            auth_status = OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
+            auth_strategy = None
+        else:
+            auth_strategy = _AUTH_STRATEGIES.get(str(raw_strategy).strip())
+            if auth_strategy is None:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.UNSUPPORTED,
+                            source_path=f"{root}.manifest.auth_strategy",
+                            reason="auth_strategy must use the closed provider-neutral vocabulary",
+                        )
+                    ]
+                )
+            auth_status = (
+                OptionalFamilySelectionStatus.NOT_APPLICABLE
+                if auth_strategy is AuthStrategyKind.PUBLIC
+                else OptionalFamilySelectionStatus.SELECTED
+            )
+        selections = [OptionalFamilySelection(family=OptionalFamilyKind.AUTH, status=auth_status)]
+        for family, field in selection_fields.items():
+            selections.append(
+                OptionalFamilySelection(
+                    family=family,
+                    status=(
+                        OptionalFamilySelectionStatus.SELECTED
+                        if schema.get(field) is not None
+                        else OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
+                    ),
+                )
+            )
+            self.mark(f"{root}.{field}", identity="closed optional-family selection evidence")
+        integrations = _as_list(self.source.get("integrations"))
+        selections.append(
+            OptionalFamilySelection(
+                family=OptionalFamilyKind.INTEGRATIONS,
+                status=(
+                    OptionalFamilySelectionStatus.SELECTED
+                    if integrations
+                    else OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
+                ),
+            )
+        )
+        workflows = self.source.get("agent_workflows")
+        workflow_items = (
+            [value for key, value in _mapping(workflows).items() if key != "_meta"]
+            if isinstance(workflows, Mapping)
+            else _as_list(workflows)
+        )
+        selections.append(
+            OptionalFamilySelection(
+                family=OptionalFamilyKind.WORKFLOWS,
+                status=(
+                    OptionalFamilySelectionStatus.SELECTED
+                    if workflow_items
+                    else OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
+                ),
+            )
+        )
+        self.content_field(
+            application,
+            "optional_families",
+            tuple(selections),
+            f"{root}.manifest",
+        )
+
+        declared_pages = tuple(str(item) for item in _as_list(manifest.get("pages")))
+        actual_pages = tuple(str(_mapping(item).get("name")) for item in _as_list(schema.get("pages")))
+        if declared_pages != actual_pages:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.CONTRADICTORY,
+                        source_path=f"{root}.manifest.pages",
+                        reason="manifest page index must equal AppSchemaOutput.pages order",
+                    )
+                ]
+            )
+        for index, name in enumerate(declared_pages):
+            self.edge(
+                SemanticEdgeKind.DECLARES,
+                application,
+                _node_id(SemanticNodeKind.PAGE, name),
+                path=f"{root}.manifest.pages[{index}]",
+                group=f"{root}.manifest.pages",
+            )
+        declared_custom_routes = tuple(
+            str(item) for item in _as_list(manifest.get("custom_routes"))
+        )
+        actual_custom_routes = tuple(
+            str(_mapping(item).get("id"))
+            for item in _as_list(
+                _mapping(schema.get("custom_route_bundle")).get("route_manifest")
+            )
+        )
+        if declared_custom_routes != actual_custom_routes:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.CONTRADICTORY,
+                        source_path=f"{root}.manifest.custom_routes",
+                        reason="manifest custom-route index must equal custom_route_bundle",
+                    )
+                ]
+            )
+        for index, route_id in enumerate(declared_custom_routes):
+            self.edge(
+                SemanticEdgeKind.DECLARES,
+                application,
+                _node_id(SemanticNodeKind.PAGE, route_id),
+                path=f"{root}.manifest.custom_routes[{index}]",
+                group=f"{root}.manifest.custom_routes",
+            )
+        declared_routes = {
+            str(_mapping(item).get("route")) for item in _as_list(schema.get("pages"))
+        } | {
+            str(_mapping(item).get("path"))
+            for item in _as_list(
+                _mapping(schema.get("custom_route_bundle")).get("route_manifest")
+            )
+        }
+        if str(manifest.get("default_route")) not in declared_routes:
+            raise ProjectionError(
+                [
+                    ProjectionGap(
+                        kind=ProjectionGapKind.CONTRADICTORY,
+                        source_path=f"{root}.manifest.default_route",
+                        reason="default_route must resolve to a declared application route",
+                    )
+                ]
+            )
+
+        if auth_strategy is not None:
+            roles = tuple(_slug(item) for item in _as_list(manifest.get("roles")))
+            auth = self.node(
+                SemanticNodeKind.AUTH,
+                graph_id,
+                path=f"{root}.manifest.auth_strategy",
+                group=f"{root}.manifest.auth",
+            )
+            self.content_field(
+                auth,
+                "auth_required",
+                auth_strategy is not AuthStrategyKind.PUBLIC,
+                f"{root}.manifest.auth_strategy",
+            )
+            self.content_field(auth, "strategy", auth_strategy, f"{root}.manifest.auth_strategy")
+            self.content_field(auth, "roles", roles, f"{root}.manifest.roles")
+            for index, _role in enumerate(_as_list(manifest.get("roles"))):
+                self.mark(
+                    f"{root}.manifest.roles[{index}]",
+                    node=SemanticNodeKind.AUTH,
+                    identity="closed logical auth role",
+                )
+            self.edge(
+                SemanticEdgeKind.DECLARES,
+                application,
+                auth,
+                path=f"{root}.manifest.auth_strategy",
+                group=f"{root}.manifest.auth",
+            )
+
+    def project_integrations(self, declarations: Any, root: str, graph_id: str) -> None:
+        application = _node_id(SemanticNodeKind.APPLICATION, graph_id)
+        for index, raw in enumerate(_as_list(declarations)):
+            item = _mapping(raw)
+            base = f"{root}[{index}]"
+            unknown = sorted(set(item) - _INTEGRATION_DECLARATION_FIELDS)
+            if unknown:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.UNSUPPORTED,
+                            source_path=f"{base}.{name}",
+                            reason="unknown integration declaration field cannot enter semantic authority",
+                        )
+                        for name in unknown
+                    ]
+                )
+            if item.get("removed") is True:
+                for path, _ in _iter_leaves(item, base):
+                    self.mark(path, identity="removed declaration is explicit non-selection evidence")
+                continue
+            if item.get("app_id") not in (None, graph_id):
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.CONTRADICTORY,
+                            source_path=f"{base}.app_id",
+                            reason="integration declaration app_id disagrees with graph application identity",
+                        )
+                    ]
+                )
+            if item.get("app_id") is not None:
+                self.mark(
+                    f"{base}.app_id",
+                    node=SemanticNodeKind.APPLICATION,
+                    identity="exact application identity equality",
+                )
+            service = str(item.get("service") or "").strip()
+            raw_kind = str(item.get("kind") or "").strip()
+            raw_phase = str(item.get("required_at") or "").strip()
+            try:
+                integration_kind = IntegrationKind(raw_kind)
+                phase = IntegrationRequirementPhase(raw_phase)
+            except ValueError as exc:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.UNSUPPORTED,
+                            source_path=base,
+                            reason="integration kind/required_at must use the closed semantic vocabulary",
+                        )
+                    ]
+                ) from exc
+            requirements: list[IntegrationConfigRequirement] = []
+            for field_index, raw_field in enumerate(_as_list(item.get("required_fields"))):
+                config_field = _mapping(raw_field)
+                field_path = f"{base}.required_fields[{field_index}]"
+                allowed = {"name", "label", "type", "required", "frontend_safe", "options"}
+                if set(config_field) - allowed:
+                    raise ProjectionError(
+                        [
+                            ProjectionGap(
+                                kind=ProjectionGapKind.UNSUPPORTED,
+                                source_path=field_path,
+                                reason="integration configuration requirement is not structurally closed",
+                            )
+                        ]
+                    )
+                value_type = str(config_field.get("type") or "text").strip().lower()
+                if value_type in {"secret", "password", "api_key", "token"}:
+                    semantic_type = IntegrationConfigValueKind.SECRET
+                elif value_type == "url":
+                    semantic_type = IntegrationConfigValueKind.URL
+                elif value_type in {"text", "string"}:
+                    semantic_type = IntegrationConfigValueKind.TEXT
+                else:
+                    raise ProjectionError(
+                        [
+                            ProjectionGap(
+                                kind=ProjectionGapKind.UNSUPPORTED,
+                                source_path=f"{field_path}.type",
+                                reason="integration config type is outside the closed semantic vocabulary",
+                            )
+                        ]
+                    )
+                requirements.append(
+                    IntegrationConfigRequirement(
+                        name=str(config_field.get("name") or ""),
+                        value_kind=semantic_type,
+                        required=bool(config_field.get("required", True)),
+                    )
+                )
+                for path, _ in _iter_leaves(config_field, field_path):
+                    self.mark(path, identity="closed integration configuration requirement")
+            integration = self.node(
+                SemanticNodeKind.INTEGRATION,
+                service,
+                path=f"{base}.service",
+                group=root,
+            )
+            for payload_field, value, path in (
+                ("integration_id", service, f"{base}.service"),
+                ("integration_kind", integration_kind, f"{base}.kind"),
+                ("purpose", item.get("purpose"), f"{base}.purpose"),
+                ("required_at", phase, f"{base}.required_at"),
+                ("optional", bool(item.get("optional", False)), f"{base}.optional"),
+                ("config_requirements", tuple(requirements), f"{base}.required_fields"),
+            ):
+                self.content_field(integration, payload_field, value, path)
+            for runtime_field in _INTEGRATION_RUNTIME_FIELDS & set(item):
+                for path, _ in _iter_leaves(item[runtime_field], f"{base}.{runtime_field}"):
+                    self.mark(path, identity="excluded connector/provider runtime state")
+            self.edge(
+                SemanticEdgeKind.DECLARES,
+                application,
+                integration,
+                path=f"{base}.service",
+                group=root,
+            )
+
     def project_workflows(self, workflows: Any, root: str) -> None:
         items = (
             [(f"{root}.{key}", value) for key, value in sorted(workflows.items()) if key != "_meta"]
@@ -1553,13 +2045,6 @@ class _Builder:
                 SemanticNodeKind.WORKFLOW, name, path=f"{base}.workflow_name", group=root
             )
             files = _as_list(item.get("files"))
-            if len(files) > 1:
-                self.gap(
-                    ProjectionGapKind.UNSUPPORTED,
-                    f"{base}.files",
-                    "ordered renderer file list is a Slice 4 execution concern",
-                    adr_slice=4,
-                )
             orchestrators = [
                 (j, _mapping(raw_file))
                 for j, raw_file in enumerate(files)
@@ -1602,18 +2087,218 @@ class _Builder:
             self.mark(
                 path,
                 node=SemanticNodeKind.WORKFLOW,
-                identity="parsed current orchestrator.yaml identity and triggers",
+                identity="parsed current orchestrator.yaml identity, topology, and triggers",
             )
-            self.gap(
-                ProjectionGapKind.UNSUPPORTED,
-                path,
-                "orchestrator.yaml contains workflow behavior beyond graph identity, "
-                "trigger relationships, and typed workflow payload content",
-                adr_slice=5,
-            )
+            if orchestration.get("initial_message") is not None or orchestration.get(
+                "orchestration_pattern"
+            ) is not None:
+                self.gap(
+                    ProjectionGapKind.UNSUPPORTED,
+                    path,
+                    "workflow prompt/pattern implementation remains an explicit downstream output concern",
+                    adr_slice=5,
+                )
             description = orchestration.get("description")
             if isinstance(description, str):
                 self.content_field(workflow, "description", description, path)
+            raw_startup_mode = orchestration.get("workflow_startup_mode")
+            startup_mode = _WORKFLOW_STARTUP_MODES.get(str(raw_startup_mode or ""))
+            if startup_mode is None:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.UNSUPPORTED,
+                            source_path=path,
+                            reason="workflow_startup_mode is outside the closed semantic vocabulary",
+                        )
+                    ]
+                )
+            unknown_orchestrator = sorted(set(orchestration) - _ORCHESTRATOR_FIELDS)
+            if unknown_orchestrator:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.UNSUPPORTED,
+                            source_path=path,
+                            reason="runtime-only field cannot enter workflow semantic topology",
+                        )
+                        for _field in unknown_orchestrator
+                    ]
+                )
+            self.content_field(workflow, "startup_mode", startup_mode, path)
+
+            agents_files = [
+                _mapping(raw_file)
+                for raw_file in files
+                if _mapping(raw_file).get("filename") == "agents.yaml"
+            ]
+            transition_files = [
+                _mapping(raw_file)
+                for raw_file in files
+                if _mapping(raw_file).get("filename") == "transition_graph.yaml"
+            ]
+            if len(agents_files) > 1 or len(transition_files) > 1:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=ProjectionGapKind.CONTRADICTORY,
+                            source_path=f"{base}.files",
+                            reason="workflow bundle contains duplicate topology files",
+                        )
+                    ]
+                )
+            if not agents_files:
+                self.gap(
+                    ProjectionGapKind.MISSING,
+                    f"{base}.files",
+                    "workflow topology requires agents.yaml participant declarations",
+                    adr_slice=5,
+                )
+            else:
+                try:
+                    agents_doc = _mapping(
+                        yaml.safe_load(str(agents_files[0].get("content") or ""))
+                    )
+                    transitions_doc = (
+                        _mapping(yaml.safe_load(str(transition_files[0].get("content") or "")))
+                        if transition_files
+                        else {"transition_rules": []}
+                    )
+                except yaml.YAMLError as exc:
+                    raise ProjectionError(
+                        [
+                            ProjectionGap(
+                                kind=ProjectionGapKind.AMBIGUOUS,
+                                source_path=f"{base}.files",
+                                reason=f"workflow topology YAML is invalid: {exc}",
+                            )
+                        ]
+                    ) from exc
+                participants = tuple(
+                    WorkflowParticipant(participant_id=_slug(_mapping(raw_agent).get("name")))
+                    for raw_agent in _as_list(agents_doc.get("agents"))
+                )
+                if any(
+                    set(_mapping(raw_agent)) - {"name"}
+                    for raw_agent in _as_list(agents_doc.get("agents"))
+                ):
+                    agents_position = files.index(agents_files[0])
+                    self.gap(
+                        ProjectionGapKind.UNSUPPORTED,
+                        f"{base}.files[{agents_position}].content",
+                        "agent prompt/tool/model implementation remains an explicit downstream output concern",
+                        adr_slice=5,
+                    )
+                transitions: list[WorkflowTransition] = []
+                for raw_transition in _as_list(transitions_doc.get("transition_rules")):
+                    transition = _mapping(raw_transition)
+                    if set(transition) - _TRANSITION_FIELDS:
+                        raise ProjectionError(
+                            [
+                                ProjectionGap(
+                                    kind=ProjectionGapKind.UNSUPPORTED,
+                                    source_path=f"{base}.files",
+                                    reason="unknown transition field cannot enter workflow topology",
+                                )
+                            ]
+                        )
+                    transition_type = str(transition.get("transition_type") or "")
+                    condition_type = transition.get("condition_type")
+                    if transition_type == "after_turn":
+                        kind = WorkflowTransitionKind.AFTER_TURN
+                    elif transition_type == "condition" and condition_type == "context_equals":
+                        kind = WorkflowTransitionKind.CONTEXT_EQUALS
+                    elif transition_type == "condition" and condition_type == "tool_called":
+                        kind = WorkflowTransitionKind.TOOL_CALLED
+                    else:
+                        raise ProjectionError(
+                            [
+                                ProjectionGap(
+                                    kind=ProjectionGapKind.UNSUPPORTED,
+                                    source_path=f"{base}.files",
+                                    reason=(
+                                        "workflow transition condition is not in the closed "
+                                        "5D-0A topology vocabulary"
+                                    ),
+                                    adr_slice=5,
+                                )
+                            ]
+                        )
+                    raw_target = str(transition.get("target_agent") or "").strip()
+                    if raw_target == "terminate":
+                        target_kind = WorkflowTransitionTargetKind.TERMINATE
+                        target = None
+                    elif raw_target == "user":
+                        target_kind = WorkflowTransitionTargetKind.HUMAN
+                        target = None
+                    else:
+                        target_kind = WorkflowTransitionTargetKind.PARTICIPANT
+                        target = _slug(raw_target)
+                    transitions.append(
+                        WorkflowTransition(
+                            source_participant_id=_slug(transition.get("source_agent")),
+                            target_kind=target_kind,
+                            target_participant_id=target,
+                            transition_kind=kind,
+                            condition_key=(
+                                _slug(transition.get("condition_key"))
+                                if transition.get("condition_key") is not None
+                                else None
+                            ),
+                            condition_value=transition.get("condition_value"),
+                            tool_name=(
+                                _slug(transition.get("tool_name"))
+                                if transition.get("tool_name") is not None
+                                else None
+                            ),
+                        )
+                    )
+                try:
+                    max_turns = orchestration.get("max_turns")
+                    if not isinstance(max_turns, int) or isinstance(max_turns, bool):
+                        raise ValueError("max_turns must be an integer")
+                    topology = WorkflowTopology(
+                        max_turns=max_turns,
+                        human_input_required=bool(orchestration.get("human_in_the_loop")),
+                        initial_participant_id=(
+                            _slug(orchestration.get("initial_agent"))
+                            if orchestration.get("initial_agent") is not None
+                            else None
+                        ),
+                        participants=participants,
+                        transitions=tuple(transitions),
+                    )
+                except ValueError as exc:
+                    raise ProjectionError(
+                        [
+                            ProjectionGap(
+                                kind=ProjectionGapKind.CONTRADICTORY,
+                                source_path=f"{base}.files",
+                                reason=f"workflow topology is not referentially closed: {exc}",
+                            )
+                        ]
+                    ) from exc
+                self.content_field(workflow, "topology", topology, f"{base}.files")
+                for topology_file in [agents_files[0], *transition_files]:
+                    file_position = files.index(topology_file)
+                    topology_path = f"{base}.files[{file_position}].content"
+                    self.mark(topology_path, identity="closed logical workflow topology")
+            application = next(
+                (
+                    node_id
+                    for node_id, node in self.nodes.items()
+                    if node.kind is SemanticNodeKind.APPLICATION
+                ),
+                None,
+            )
+            if application is not None:
+                self.edge(
+                    SemanticEdgeKind.DECLARES,
+                    application,
+                    workflow,
+                    path=f"{base}.workflow_name",
+                    group=f"{root}.application_workflows",
+                )
             for raw_trigger in _as_list(orchestration.get("triggers")):
                 trigger_item = _mapping(raw_trigger)
                 identity = (
@@ -1971,6 +2656,7 @@ def project_semantic_graph(
             builder.project_route_manifest(
                 _mapping(schema["custom_route_bundle"]), f"{root}.custom_route_bundle"
             )
+        builder.project_application(schema, root, graph_id)
     design = _mapping(plain.get("design_docs") or plain.get("DesignDocsBundle"))
     if design:
         root = "design_docs" if "design_docs" in plain else "DesignDocsBundle"
@@ -2000,6 +2686,8 @@ def project_semantic_graph(
     if _mapping(plain.get("route_manifest")):
         builder.project_route_manifest(_mapping(plain["route_manifest"]), "route_manifest")
     builder.project_subscriptions(_mapping(plain.get("subscriptions")), "subscriptions")
+    if any(node.kind is SemanticNodeKind.APPLICATION for node in builder.nodes.values()):
+        builder.project_integrations(plain.get("integrations", []), "integrations", graph_id)
     builder.project_workflows(plain.get("agent_workflows", []), "agent_workflows")
     if _mapping(plain.get("app_context")):
         builder.project_ownership(_mapping(plain["app_context"]), "app_context")

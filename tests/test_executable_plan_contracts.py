@@ -256,6 +256,7 @@ def test_incomplete_source_footprint_is_typed_gap() -> None:
     plan = _derive_with_override(
         path_template="app/app.json",
         assignment_kinds=(AssignmentKind.SUBSCRIPTION_CONFIG,),
+        semantic_input_kinds=(),
     )
     assert any(
         gap.code is PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE

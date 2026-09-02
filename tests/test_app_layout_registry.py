@@ -75,6 +75,32 @@ class TestRegistryContract:
         assert ArtifactKind.MODULE_MANIFEST in kinds
         assert ArtifactKind.WORKFLOW_MANIFEST in kinds
 
+    def test_application_input_kinds_are_declared_on_the_existing_registry(self) -> None:
+        rows = _registry().families
+        by_kind = {
+            kind: [family for family in rows if family.kind is kind]
+            for kind in (
+                ArtifactKind.APP_MANIFEST,
+                ArtifactKind.APP_AUTH_CONFIG,
+                ArtifactKind.APP_INTEGRATIONS_CONFIG,
+                ArtifactKind.WORKFLOW_MANIFEST,
+            )
+        }
+        assert {row.semantic_input_kinds for row in by_kind[ArtifactKind.APP_MANIFEST]} == {
+            ("application",)
+        }
+        assert {row.semantic_input_kinds for row in by_kind[ArtifactKind.APP_AUTH_CONFIG]} == {
+            ("auth",)
+        }
+        assert {
+            row.semantic_input_kinds
+            for row in by_kind[ArtifactKind.APP_INTEGRATIONS_CONFIG]
+        } == {("integration",)}
+        assert all(
+            "workflow" in row.semantic_input_kinds
+            for row in by_kind[ArtifactKind.WORKFLOW_MANIFEST]
+        )
+
     def test_serialization_round_trip_revalidates_digest(self) -> None:
         registry = _registry()
 

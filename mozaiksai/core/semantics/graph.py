@@ -58,6 +58,9 @@ class SemanticGraphError(ValueError):
 class SemanticNodeKind(StrEnum):
     """Closed, versioned node-kind set for ``mozaiks.semantic_graph.v1``."""
 
+    APPLICATION = "application"
+    AUTH = "auth"
+    INTEGRATION = "integration"
     SURFACE = "surface"
     PAGE = "page"
     SECTION = "section"
