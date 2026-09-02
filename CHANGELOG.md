@@ -22,8 +22,13 @@ This project follows a practical pre-1.0 changelog format:
   whose documents carry a driver-generated `ObjectId` `_id` — previously
   produced a bare HTTP 500 at serialization on every read path (module
   routes, profile panels/tabs, page hydration). Datetimes and other
-  JSON-encodable values are untouched, unknown types are never coerced
-  through a repr, and input documents are not mutated.
+  JSON-encodable values keep their existing wire semantics through explicit
+  closed conversions, unknown types and non-string mapping keys fail closed
+  with a typed `MODULE_RESULT_NOT_JSON_SAFE` outcome (no silent key
+  collisions, no repr leaks), cyclic or absurdly nested results are rejected
+  instead of exhausting the stack, and the response-size gate now measures
+  the exact strictly-encoded UTF-8 bytes (no `default=str` masking). Input
+  documents are not mutated.
 
 
 ### Changed

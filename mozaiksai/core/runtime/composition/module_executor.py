@@ -39,7 +39,10 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
 from mozaiksai.core.runtime.app.module_loader import SettingDef
-from mozaiksai.core.runtime.composition.bson_safe import json_safe_bson
+from mozaiksai.core.runtime.composition.bson_safe import (
+    ModuleResultNormalizationError,
+    json_safe_bson,
+)
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAudit,
@@ -575,12 +578,33 @@ class ModuleExecutor:
                 error_code="EXECUTION_ERROR",
             )
 
-        # Module results routinely carry raw Mongo documents; normalize BSON
-        # identifier types here — the one choke point every action result
-        # crosses — so ObjectId/Decimal128 never reach a JSON serializer.
-        result = json_safe_bson(result)
+        # Module results routinely carry raw Mongo documents; normalize into
+        # the closed JSON transport contract here — the one choke point every
+        # action result crosses — so nothing a serializer cannot encode ever
+        # leaves the executor as a success. The action itself completed; an
+        # invalid transport result is its own typed outcome, not an
+        # execution failure.
+        try:
+            result = json_safe_bson(result)
+        except ModuleResultNormalizationError as exc:
+            logger.error(
+                "MODULE_RESULT_NOT_JSON_SAFE: module=%s action=%s error=%s",
+                request.module, request.action, exc,
+            )
+            asyncio.create_task(
+                self._emit_dispatch_audit(
+                    replace(dispatch_audit, outcome="failed", reason="MODULE_RESULT_NOT_JSON_SAFE"),
+                    error="MODULE_RESULT_NOT_JSON_SAFE",
+                )
+            )
+            return ModuleResult(
+                success=False,
+                error=f"Action {request.action!r} returned a result that is not JSON-safe",
+                error_code="MODULE_RESULT_NOT_JSON_SAFE",
+            )
 
-        # Output schema validation — warn only; don't fail the caller on a module contract bug.
+        # Output schema validation — warn only; don't fail the caller on a
+        # module contract bug. Validates the exact transport shape.
         if output_schema and result is not None:
             out_error = _validate_schema(result, output_schema)
             if out_error:
@@ -588,13 +612,24 @@ class ModuleExecutor:
                     "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
                     request.module, request.action, out_error)
 
-        # Response size gate — prevent unbounded responses from being buffered
-        # in platform routes or sent over WebSocket payloads.
+        # Response size gate — strict encoding of the exact transport shape;
+        # the byte length is measured on the encoded UTF-8 bytes. A strict
+        # serialization failure here means the normalizer contract was
+        # violated and is the same typed outcome.
         if result is not None:
             try:
-                result_size = len(json.dumps(result, default=str))
-            except Exception:
-                result_size = 0
+                encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                logger.error(
+                    "MODULE_RESULT_NOT_JSON_SAFE: module=%s action=%s strict serialization failed: %s",
+                    request.module, request.action, exc,
+                )
+                return ModuleResult(
+                    success=False,
+                    error=f"Action {request.action!r} returned a result that is not JSON-safe",
+                    error_code="MODULE_RESULT_NOT_JSON_SAFE",
+                )
+            result_size = len(encoded.encode("utf-8"))
             max_response = _response_max_bytes()
             if result_size > max_response:
                 logger.error(
