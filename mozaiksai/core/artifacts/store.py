@@ -55,54 +55,99 @@ class BuildRecordStore:
             self.client = get_mongo_client()
             await self._ensure_indexes()
 
+    # Retired unique indexes keyed on fields BuildRecord documents never carry
+    # (every record produced null tuples, so distinct build families collided
+    # with E11000). Dropped by exact name before canonical materialization.
+    _RETIRED_INDEXES: dict[str, tuple[str, ...]] = {
+        "ArtifactVersions": ("av_app_kind_key_version",),
+        "ArtifactVersionCounters": ("avc_app_kind_key",),
+    }
+
+    # BuildRecord identity is (app_id, build_family, build_key, version_number);
+    # the model carries app scope as app_id only (build_app_scope_filter).
+    _INDEX_CONTRACT: dict[str, list[dict[str, Any]]] = {
+        "ArtifactVersions": [
+            {
+                "name": "av_app_family_key_version",
+                "keys": [
+                    ("app_id", 1),
+                    ("build_family", 1),
+                    ("build_key", 1),
+                    ("version_number", -1),
+                ],
+                "unique": True,
+            },
+            {
+                "name": "av_app_lineage_created",
+                "keys": [("app_id", 1), ("lineage_root_id", 1), ("created_at", -1)],
+            },
+            {
+                "name": "av_app_status_updated",
+                "keys": [("app_id", 1), ("lifecycle_status", 1), ("updated_at", -1)],
+            },
+        ],
+        "ArtifactVersionCounters": [
+            {
+                "name": "avc_app_family_key",
+                "keys": [("app_id", 1), ("build_family", 1), ("build_key", 1)],
+                "unique": True,
+            },
+        ],
+        "ChangeRequests": [
+            {
+                "name": "cr_app_record_created",
+                "keys": [("app_id", 1), ("build_record_id", 1), ("created_at", -1)],
+            },
+            {
+                "name": "cr_app_class_created",
+                "keys": [("app_id", 1), ("classification", 1), ("created_at", -1)],
+            },
+        ],
+        "RefinementSessions": [
+            {
+                "name": "rs_app_record_started",
+                "keys": [("app_id", 1), ("build_record_id", 1), ("started_at", -1)],
+            },
+            {
+                "name": "rs_app_result_record_started",
+                "keys": [("app_id", 1), ("result_build_record_id", 1), ("started_at", -1)],
+                "sparse": True,
+            },
+            {
+                "name": "rs_app_sandbox",
+                "keys": [("app_id", 1), ("sandbox_id", 1)],
+                "sparse": True,
+            },
+        ],
+    }
+
     async def _ensure_indexes(self) -> None:
-        versions = await self._coll("ArtifactVersions")
-        await versions.create_index(
-            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1), ("version_number", -1)],
-            name="av_app_kind_key_version",
-            unique=True,
-        )
-        await versions.create_index(
-            [("app_id", 1), ("lineage_root_id", 1), ("created_at", -1)],
-            name="av_app_lineage_created",
-        )
-        await versions.create_index(
-            [("app_id", 1), ("lifecycle_status", 1), ("updated_at", -1)],
-            name="av_app_status_updated",
+        """Materialize the store's index contract through the canonical verifier.
+
+        Any pre-existing index whose definition conflicts with the declared
+        contract fails the store closed rather than being accepted by name.
+        """
+        from mozaiksai.core.runtime.persistence.indexes import (
+            _ensure_raw_collection_indexes,
         )
 
-        counters = await self._coll("ArtifactVersionCounters")
-        await counters.create_index(
-            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1)],
-            name="avc_app_kind_key",
-            unique=True,
-        )
+        for collection_name, retired_names in self._RETIRED_INDEXES.items():
+            collection = await self._coll(collection_name)
+            existing = {
+                str(row.get("name") or "")
+                for row in await collection.list_indexes().to_list(length=None)
+            }
+            for retired in retired_names:
+                if retired in existing:
+                    await collection.drop_index(retired)
 
-        change_requests = await self._coll("ChangeRequests")
-        await change_requests.create_index(
-            [("app_id", 1), ("build_record_id", 1), ("created_at", -1)],
-            name="cr_app_record_created",
-        )
-        await change_requests.create_index(
-            [("app_id", 1), ("classification", 1), ("created_at", -1)],
-            name="cr_app_class_created",
-        )
-
-        refinement_sessions = await self._coll("RefinementSessions")
-        await refinement_sessions.create_index(
-            [("app_id", 1), ("build_record_id", 1), ("started_at", -1)],
-            name="rs_app_record_started",
-        )
-        await refinement_sessions.create_index(
-            [("app_id", 1), ("result_build_record_id", 1), ("started_at", -1)],
-            name="rs_app_result_record_started",
-            sparse=True,
-        )
-        await refinement_sessions.create_index(
-            [("app_id", 1), ("sandbox_id", 1)],
-            name="rs_app_sandbox",
-            sparse=True,
-        )
+        for collection_name, specs in self._INDEX_CONTRACT.items():
+            collection = await self._coll(collection_name)
+            await _ensure_raw_collection_indexes(
+                collection,
+                specs,
+                collection_label=collection_name,
+            )
 
     async def _coll(self, name: str):
         await self._ensure_client()
@@ -165,8 +210,8 @@ class BuildRecordStore:
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str,
+        build_family: str,
+        build_key: str | None = None,
         reason: str,
         invalidated_by_version_id: str | None = None,
         exclude_version_id: str | None = None,
@@ -176,10 +221,11 @@ class BuildRecordStore:
             raise ValueError("app_id is required")
         query: dict[str, Any] = {
             "app_id": resolved_app_id,
-            "artifact_kind": artifact_kind,
-            "artifact_key": artifact_key,
+            "build_family": build_family,
             "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value, ArtifactLifecycleStatus.STALE.value]},
         }
+        if build_key is not None:
+            query["build_key"] = build_key
         if exclude_version_id:
             query["_id"] = {"$ne": exclude_version_id}
         versions = await self._coll("ArtifactVersions")
@@ -203,7 +249,7 @@ class BuildRecordStore:
         *,
         app_id: str,
         artifact_version_refs: dict[str, str],
-        affected_artifact_kinds: Iterable[str] | None = None,
+        affected_build_families: Iterable[str] | None = None,
         reason: str,
         invalidated_by_version_id: str | None = None,
     ) -> list[str]:
@@ -212,23 +258,23 @@ class BuildRecordStore:
             raise ValueError("app_id is required")
 
         normalized_refs: dict[str, str] = {}
-        for raw_kind, raw_version_id in dict(artifact_version_refs or {}).items():
-            artifact_kind = str(raw_kind or "").strip()
+        for raw_family, raw_version_id in dict(artifact_version_refs or {}).items():
+            build_family = str(raw_family or "").strip()
             artifact_version_id = str(raw_version_id or "").strip()
-            if artifact_kind and artifact_version_id:
-                normalized_refs[artifact_kind] = artifact_version_id
+            if build_family and artifact_version_id:
+                normalized_refs[build_family] = artifact_version_id
 
-        target_kinds: list[str] = []
-        raw_target_kinds = list(affected_artifact_kinds or normalized_refs.keys())
-        for raw_kind in raw_target_kinds:
-            artifact_kind = str(raw_kind or "").strip()
-            if artifact_kind and artifact_kind not in target_kinds:
-                target_kinds.append(artifact_kind)
+        target_families: list[str] = []
+        raw_target_families = list(affected_build_families or normalized_refs.keys())
+        for raw_family in raw_target_families:
+            build_family = str(raw_family or "").strip()
+            if build_family and build_family not in target_families:
+                target_families.append(build_family)
 
         invalidated_ids: list[str] = []
         seen_version_ids: set[str] = set()
-        for artifact_kind in target_kinds:
-            artifact_version_id = normalized_refs.get(artifact_kind)  # type: ignore[assignment]
+        for build_family in target_families:
+            artifact_version_id = normalized_refs.get(build_family)  # type: ignore[assignment]
             if not artifact_version_id or artifact_version_id in seen_version_ids:
                 continue
             seen_version_ids.add(artifact_version_id)
@@ -519,31 +565,6 @@ class BuildRecordStore:
         rows = await cursor.to_list(length=max(1, int(limit)))
         return [RefinementSessionDoc.model_validate(row) for row in rows]
 
-    async def get_current_artifact_version_refs(self, *, app_id: str) -> dict[str, str]:
-        """Return a mapping of artifact_kind → artifact_version_id for all CURRENT versions."""
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            return {}
-        await self._ensure_client()
-        versions = await self._coll("ArtifactVersions")
-        try:
-            scope = build_app_scope_filter(resolved_app_id)
-            cursor = versions.find(
-                {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                projection={"artifact_kind": 1, "build_family": 1, "_id": 1, "version_number": 1},
-            ).sort("version_number", -1)
-            rows = await cursor.to_list(length=200)
-            refs: dict[str, str] = {}
-            for row in rows:
-                kind = str(row.get("artifact_kind") or row.get("build_family") or "").strip()
-                version_id = str(row.get("_id") or "").strip()
-                if kind and version_id and kind not in refs:
-                    refs[kind] = version_id
-            return refs
-        except Exception as exc:
-            logger.warning("get_current_artifact_version_refs failed for app %s: %s", resolved_app_id, exc)
-            return {}
-
     async def get_current_build_record_refs(self, *, app_id: str) -> dict[str, str]:
         """Return a mapping of build_family → build_record_id for all CURRENT build records."""
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
@@ -555,12 +576,12 @@ class BuildRecordStore:
             scope = build_app_scope_filter(resolved_app_id)
             cursor = versions.find(
                 {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                projection={"build_family": 1, "artifact_kind": 1, "_id": 1, "version_number": 1},
+                projection={"build_family": 1, "_id": 1, "version_number": 1},
             ).sort("version_number", -1)
             rows = await cursor.to_list(length=200)
             refs: dict[str, str] = {}
             for row in rows:
-                family = str(row.get("build_family") or row.get("artifact_kind") or "").strip()
+                family = str(row.get("build_family") or "").strip()
                 record_id = str(row.get("_id") or "").strip()
                 if family and record_id and family not in refs:
                     refs[family] = record_id
@@ -568,34 +589,6 @@ class BuildRecordStore:
         except Exception as exc:
             logger.warning("get_current_build_record_refs failed for app %s: %s", resolved_app_id, exc)
             return {}
-
-    async def get_stale_artifact_families(self, *, app_id: str) -> list[str]:
-        """Return artifact family names that are genuinely stale (STALE but no CURRENT)."""
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            return []
-        await self._ensure_client()
-        versions = await self._coll("ArtifactVersions")
-        try:
-            scope = build_app_scope_filter(resolved_app_id)
-            stale_kinds: set[str] = set(
-                await versions.distinct(
-                    "artifact_kind",
-                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.STALE.value},
-                )
-            )
-            if not stale_kinds:
-                return []
-            current_kinds: set[str] = set(
-                await versions.distinct(
-                    "artifact_kind",
-                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                )
-            )
-            return sorted(str(k) for k in (stale_kinds - current_kinds) if k)
-        except Exception as exc:
-            logger.warning("get_stale_artifact_families failed for app %s: %s", resolved_app_id, exc)
-            return []
 
     async def get_stale_build_families(self, *, app_id: str) -> list[str]:
         """Return build family names that are genuinely stale (STALE but no CURRENT)."""

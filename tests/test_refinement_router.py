@@ -1408,7 +1408,7 @@ def _patch_artifact_store(monkeypatch: pytest.MonkeyPatch, stale_families: list)
     import importlib
     store_mod = importlib.import_module("mozaiksai.core.artifacts.store")
     monkeypatch.setattr(store_mod.ArtifactStore, "__init__", lambda self: None)
-    monkeypatch.setattr(store_mod.ArtifactStore, "get_stale_artifact_families", AsyncMock(return_value=stale_families))
+    monkeypatch.setattr(store_mod.ArtifactStore, "get_stale_build_families", AsyncMock(return_value=stale_families))
 
 
 @pytest.mark.asyncio

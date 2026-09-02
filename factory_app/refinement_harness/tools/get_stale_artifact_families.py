@@ -33,7 +33,7 @@ async def get_stale_artifact_families(
         return {"stale_families": [], "all_current": True}
 
     store = artifact_store or get_artifact_store()
-    stale = await store.get_stale_artifact_families(app_id=app_id)
+    stale = await store.get_stale_build_families(app_id=app_id)
     return {
         "stale_families": stale,
         "all_current": len(stale) == 0,

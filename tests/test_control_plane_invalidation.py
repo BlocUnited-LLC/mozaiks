@@ -115,7 +115,7 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
                 "workflow_bundle": "av_workflow_1",
                 "app_bundle": "av_app_1",
             },
-            "affected_artifact_kinds": ["design_docs", "app_bundle"],
+            "affected_build_families": ["design_docs", "app_bundle"],
             "reason": "change_request:cr_123",
         }
     ]
@@ -123,14 +123,12 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
     assert artifact_store.family_calls == [
         {
             "app_id": "app_1",
-            "artifact_kind": "subscription_contract",
-            "artifact_key": "subscription_contract",
+            "build_family": "subscription_contract",
             "reason": "change_request:cr_123",
         },
         {
             "app_id": "app_1",
-            "artifact_kind": "workflow_bundle",
-            "artifact_key": "workflow_bundle",
+            "build_family": "workflow_bundle",
             "reason": "change_request:cr_123",
         }
     ]

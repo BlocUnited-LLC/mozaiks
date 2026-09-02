@@ -381,7 +381,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         {
             "app_id": captured_prepare["app_id"],
             "artifact_version_refs": {"app_bundle": "av_123"},
-            "affected_artifact_kinds": ["app_bundle"],
+            "affected_build_families": ["app_bundle"],
             "reason": "change_request:cr_123",
         }
     ]

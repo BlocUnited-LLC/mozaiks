@@ -84,8 +84,8 @@ async def test_invalidate_artifact_family_marks_versions_stale() -> None:
 
     modified = await store.invalidate_artifact_family(
         app_id="app-1",
-        artifact_kind="app_bundle",
-        artifact_key="primary",
+        build_family="app_bundle",
+        build_key="primary",
         reason="design changed upstream",
         invalidated_by_version_id="av_new",
         exclude_version_id="av_keep",
@@ -94,8 +94,8 @@ async def test_invalidate_artifact_family_marks_versions_stale() -> None:
     assert modified == 2
     query, update = versions_coll.update_many.await_args.args
     assert query["app_id"] == "app-1"
-    assert query["artifact_kind"] == "app_bundle"
-    assert query["artifact_key"] == "primary"
+    assert query["build_family"] == "app_bundle"
+    assert query["build_key"] == "primary"
     assert query["_id"] == {"$ne": "av_keep"}
     assert update["$set"]["lifecycle_status"] == ArtifactLifecycleStatus.STALE.value
     assert update["$set"]["invalidated_by_version_id"] == "av_new"
@@ -115,7 +115,7 @@ async def test_invalidate_artifact_version_refs_marks_only_targeted_known_versio
             "app_bundle": "av_bundle_1",
             "workflow_bundle": "av_workflow_1",
         },
-        affected_artifact_kinds=["concept", "missing", "app_bundle", "workflow_bundle"],
+        affected_build_families=["concept", "missing", "app_bundle", "workflow_bundle"],
         reason="change_request:cr_123",
     )
 
@@ -352,7 +352,7 @@ async def test_list_refinement_sessions_filters_by_result_build_record_id() -> N
 
 
 @pytest.mark.asyncio
-async def test_get_stale_artifact_families_returns_stale_without_current() -> None:
+async def test_get_stale_build_families_returns_stale_without_current() -> None:
     """Families with a STALE version but no CURRENT version are returned."""
     store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
@@ -365,17 +365,19 @@ async def test_get_stale_artifact_families_returns_stale_without_current() -> No
     store._coll = AsyncMock(return_value=versions_coll)
     store._ensure_client = AsyncMock()
 
-    result = await store.get_stale_artifact_families(app_id="app-1")
+    result = await store.get_stale_build_families(app_id="app-1")
 
     # workflow_bundle has a CURRENT version, so it is not stale
     # design_docs has no CURRENT version, so it remains stale
     assert result == ["design_docs"]
     assert versions_coll.distinct.await_count == 2
+    for call in versions_coll.distinct.await_args_list:
+        assert call.args[0] == "build_family"
 
 
 @pytest.mark.asyncio
-async def test_get_current_artifact_version_refs_returns_highest_current_per_kind() -> None:
-    """Returns the highest-versioned CURRENT artifact_version_id for each kind."""
+async def test_get_current_build_record_refs_returns_highest_current_per_family() -> None:
+    """Returns the highest-versioned CURRENT build_record_id for each build family."""
     store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     cursor = MagicMock()
@@ -383,16 +385,16 @@ async def test_get_current_artifact_version_refs_returns_highest_current_per_kin
     cursor.sort.return_value = cursor
     cursor.to_list = AsyncMock(
         return_value=[
-            {"_id": "av_concept_2", "artifact_kind": "concept", "version_number": 2},
-            {"_id": "av_concept_1", "artifact_kind": "concept", "version_number": 1},
-            {"_id": "av_design_1", "artifact_kind": "design_docs", "version_number": 1},
+            {"_id": "av_concept_2", "build_family": "concept", "version_number": 2},
+            {"_id": "av_concept_1", "build_family": "concept", "version_number": 1},
+            {"_id": "av_design_1", "build_family": "design_docs", "version_number": 1},
         ]
     )
     versions_coll.find.return_value = cursor
     store._coll = AsyncMock(return_value=versions_coll)
     store._ensure_client = AsyncMock()
 
-    refs = await store.get_current_artifact_version_refs(app_id="app-1")
+    refs = await store.get_current_build_record_refs(app_id="app-1")
 
     # concept -> highest version (av_concept_2); design_docs -> only version
     assert refs == {"concept": "av_concept_2", "design_docs": "av_design_1"}
@@ -403,8 +405,8 @@ async def test_get_current_artifact_version_refs_returns_highest_current_per_kin
 
 
 @pytest.mark.asyncio
-async def test_get_current_artifact_version_refs_returns_empty_when_no_current() -> None:
-    """Returns empty dict when no CURRENT artifact versions exist."""
+async def test_get_current_build_record_refs_returns_empty_when_no_current() -> None:
+    """Returns empty dict when no CURRENT build records exist."""
     store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
     cursor = MagicMock()
@@ -414,13 +416,13 @@ async def test_get_current_artifact_version_refs_returns_empty_when_no_current()
     store._coll = AsyncMock(return_value=versions_coll)
     store._ensure_client = AsyncMock()
 
-    refs = await store.get_current_artifact_version_refs(app_id="app-1")
+    refs = await store.get_current_build_record_refs(app_id="app-1")
 
     assert refs == {}
 
 
 @pytest.mark.asyncio
-async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
+async def test_get_stale_build_families_clears_when_all_rebuilt() -> None:
     """If every stale family has a CURRENT version, the list is empty."""
     store = BuildRecordStore.__new__(BuildRecordStore)
     versions_coll = MagicMock()
@@ -433,6 +435,6 @@ async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
     store._coll = AsyncMock(return_value=versions_coll)
     store._ensure_client = AsyncMock()
 
-    result = await store.get_stale_artifact_families(app_id="app-1")
+    result = await store.get_stale_build_families(app_id="app-1")
 
     assert result == []
