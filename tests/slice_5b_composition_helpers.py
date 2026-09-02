@@ -214,6 +214,7 @@ def composition_fixture() -> dict[str, object]:
         external=[],
         inapplicable=[],
         unsupplied=[],
+        input_only=[],
         deferred=[],
     )
     preserved_output = _output(preserved, b"agents: []\n", origin="preserved")
@@ -223,6 +224,7 @@ def composition_fixture() -> dict[str, object]:
         external_handoff_units=(handoff.unit_id,),
         inapplicable_units=(inapplicable.unit_id,),
         unsupplied_preserved_units=(),
+        input_only_units=(),
         instance_scope_deferred_units=(preserved.unit_id,),
         gap_count=0,
         closure=closure,

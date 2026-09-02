@@ -172,6 +172,7 @@ class MaterializerIdentifier(StrEnum):
     MODULE_CONTRACT_EXECUTOR = "module_contract_executor"
     MODULE_BACKEND_EXECUTOR = "module_backend_executor"
     PAGE_SCHEMA_EXECUTOR = "page_schema_executor"
+    APP_CONFIG_EXECUTOR = "app_config_executor"
     WORKFLOW_GENERATOR = "workflow_generator"
     CAPABILITY_PACK_MATERIALIZER = "capability_pack_materializer"
     DOWNLOAD_DEPLOYMENT_RENDERER = "download_deployment_renderer"
@@ -644,9 +645,9 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         "event",
         "capability",
     )
-    application_inputs = ("application",)
+    application_inputs = ("application", "auth")
     auth_inputs = ("auth",)
-    integration_inputs = ("integration",)
+    integration_inputs = ("application", "integration")
     return (
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, app, "app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER, inputs=application_inputs),
         _family(ArtifactKind.APP_CONFIG, LayoutOwner.PLATFORM, Requirement.OPTIONAL, app, "config/ai.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.PLATFORM_HOST),
@@ -1021,6 +1022,16 @@ def _materializer_for_family(
     if kind is ArtifactKind.APP_UI_PAGE_SCHEMA:
         return MaterializerIdentifier.PAGE_SCHEMA_EXECUTOR
     if kind in {
+        ArtifactKind.APP_MANIFEST,
+        ArtifactKind.APP_CONFIG,
+        ArtifactKind.APP_INTEGRATIONS_CONFIG,
+        ArtifactKind.APP_SECRET_REFERENCES,
+        ArtifactKind.APP_SUBSCRIPTION_CONFIG,
+        ArtifactKind.APP_DATA_CONTRACT,
+        ArtifactKind.APP_UI_ROUTE_MANIFEST,
+    }:
+        return MaterializerIdentifier.APP_CONFIG_EXECUTOR
+    if kind in {
         ArtifactKind.MODULE_MANIFEST,
         ArtifactKind.MODULE_CONTRACT,
         ArtifactKind.MODULE_RUNTIME_EXTENSIONS,
@@ -1121,6 +1132,19 @@ def _semantic_inputs_for_family(kind: ArtifactKind) -> tuple[str, ...]:
         ),
         ArtifactKind.APP_DEPLOYMENT_ARTIFACT: (
             "deployment_target",
+        ),
+        ArtifactKind.APP_UI_ROUTE_MANIFEST: (
+            "application",
+            "page",
+        ),
+        ArtifactKind.APP_CONFIG: (
+            "application",
+            "workflow",
+        ),
+        ArtifactKind.APP_SECRET_REFERENCES: (
+            "application",
+            "auth",
+            "integration",
         ),
     }.get(kind, ())
 

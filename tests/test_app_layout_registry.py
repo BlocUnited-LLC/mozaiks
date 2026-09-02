@@ -89,7 +89,7 @@ class TestRegistryContract:
             )
         }
         assert {row.semantic_input_kinds for row in by_kind[ArtifactKind.APP_MANIFEST]} == {
-            ("application",)
+            ("application", "auth")
         }
         assert {row.semantic_input_kinds for row in by_kind[ArtifactKind.APP_AUTH_CONFIG]} == {
             ("auth",)
@@ -97,7 +97,7 @@ class TestRegistryContract:
         assert {
             row.semantic_input_kinds
             for row in by_kind[ArtifactKind.APP_INTEGRATIONS_CONFIG]
-        } == {("integration",)}
+        } == {("application", "integration")}
         assert all(
             "workflow" in row.semantic_input_kinds
             for row in by_kind[ArtifactKind.WORKFLOW_MANIFEST]

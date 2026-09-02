@@ -60,6 +60,11 @@ from mozaiksai.core.runtime.app.page_schema import (
     AppPageSchema,
     AppPageSection,
 )
+from mozaiksai.core.semantics.app_config_materialization import (
+    APP_CONFIG_FAMILIES,
+    render_app_config_unit,
+    resolve_app_config_renderer_selection,
+)
 from mozaiksai.core.semantics.binding import (
     ImplementationBinding,
     RendererSelection,
@@ -412,6 +417,7 @@ class MaterializedBundle:
     external_handoff_units: tuple[str, ...]
     inapplicable_units: tuple[str, ...]
     unsupplied_preserved_units: tuple[str, ...]
+    input_only_units: tuple[str, ...]
     instance_scope_deferred_units: tuple[str, ...]
     gap_count: int
     closure: RegenerationClosure | None = field(default=None)
@@ -495,6 +501,7 @@ def _materialize_unit(
     external: list[str],
     inapplicable: list[str],
     unsupplied: list[str],
+    input_only: list[str],
     deferred: list[str],
 ) -> None:
     composable = [o for o in unit.outputs if o.path_scope in _COMPOSABLE_PATH_SCOPES]
@@ -508,7 +515,10 @@ def _materialize_unit(
             raise MaterializationError(
                 f"render unit {unit.unit_id!r} must own exactly one composable output"
             )
-        content = render_app_ui_page_schema_unit(unit=unit, payload_by_node=payload_by_node)
+        if unit.family_kind in APP_CONFIG_FAMILIES:
+            content = render_app_config_unit(unit=unit, payload_by_node=payload_by_node)
+        else:
+            content = render_app_ui_page_schema_unit(unit=unit, payload_by_node=payload_by_node)
         target = composable[0]
         bundle_outputs.append(
             MaterializedOutput(
@@ -545,6 +555,10 @@ def _materialize_unit(
         external.append(unit.unit_id)
     elif unit.disposition is PlanDisposition.INAPPLICABLE:
         inapplicable.append(unit.unit_id)
+    elif unit.disposition is PlanDisposition.INPUT_ONLY:
+        # Input-only families feed later derivations; they never produce
+        # bundle bytes and are reported explicitly, never silently skipped.
+        input_only.append(unit.unit_id)
     else:
         raise MaterializationError(
             f"unit {unit.unit_id!r} disposition {unit.disposition.value!r} has no "
@@ -574,12 +588,21 @@ def materialize_plan(
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
+    if any(
+        unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind in APP_CONFIG_FAMILIES
+        for unit in verified_plan.units
+    ):
+        resolve_app_config_renderer_selection(
+            binding, graph=verified_graph, layout_registry=layout_registry
+        )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
 
     outputs: list[MaterializedOutput] = []
     external: list[str] = []
     inapplicable: list[str] = []
     unsupplied: list[str] = []
+    input_only: list[str] = []
     deferred: list[str] = []
     for unit in verified_plan.units:
         _materialize_unit(
@@ -590,6 +613,7 @@ def materialize_plan(
             external=external,
             inapplicable=inapplicable,
             unsupplied=unsupplied,
+            input_only=input_only,
             deferred=deferred,
         )
     _assert_output_ownership(verified_plan, outputs)
@@ -599,6 +623,7 @@ def materialize_plan(
         external_handoff_units=tuple(sorted(external)),
         inapplicable_units=tuple(sorted(inapplicable)),
         unsupplied_preserved_units=tuple(sorted(unsupplied)),
+        input_only_units=tuple(sorted(input_only)),
         instance_scope_deferred_units=tuple(sorted(set(deferred))),
         gap_count=len(verified_plan.gaps),
     )
@@ -654,6 +679,14 @@ def rematerialize_plan(
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
+    if any(
+        unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind in APP_CONFIG_FAMILIES
+        for unit in verified_plan.units
+    ):
+        resolve_app_config_renderer_selection(
+            binding, graph=verified_graph, layout_registry=layout_registry
+        )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
     base_by_unit: dict[str, list[MaterializedOutput]] = {}
     for output in base_bundle.outputs:
@@ -663,6 +696,7 @@ def rematerialize_plan(
     external: list[str] = []
     inapplicable: list[str] = []
     unsupplied: list[str] = []
+    input_only: list[str] = []
     deferred: list[str] = []
     for unit in verified_plan.units:
         if unit.unit_id in reusable_ids:
@@ -701,6 +735,8 @@ def rematerialize_plan(
                 external.append(unit.unit_id)
             elif unit.disposition is PlanDisposition.INAPPLICABLE:
                 inapplicable.append(unit.unit_id)
+            elif unit.disposition is PlanDisposition.INPUT_ONLY:
+                input_only.append(unit.unit_id)
             if any(o.path_scope not in _COMPOSABLE_PATH_SCOPES for o in unit.outputs):
                 deferred.append(unit.unit_id)
             continue
@@ -712,6 +748,7 @@ def rematerialize_plan(
             external=external,
             inapplicable=inapplicable,
             unsupplied=unsupplied,
+            input_only=input_only,
             deferred=deferred,
         )
     _assert_output_ownership(verified_plan, outputs)
@@ -721,6 +758,7 @@ def rematerialize_plan(
         external_handoff_units=tuple(sorted(external)),
         inapplicable_units=tuple(sorted(inapplicable)),
         unsupplied_preserved_units=tuple(sorted(unsupplied)),
+        input_only_units=tuple(sorted(input_only)),
         instance_scope_deferred_units=tuple(sorted(set(deferred))),
         gap_count=len(verified_plan.gaps),
         closure=closure,

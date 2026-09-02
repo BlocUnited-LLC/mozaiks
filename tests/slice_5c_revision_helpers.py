@@ -86,6 +86,7 @@ def revision_fixture() -> dict[str, object]:
         external_handoff_units=(),
         inapplicable_units=(),
         unsupplied_preserved_units=(),
+        input_only_units=(),
         instance_scope_deferred_units=(),
         gap_count=0,
     )
@@ -282,6 +283,7 @@ def executable_revision_fixture() -> dict[str, object]:
         external_handoff_units=materialized_source.external_handoff_units,
         inapplicable_units=materialized_source.inapplicable_units,
         unsupplied_preserved_units=(),
+        input_only_units=(),
         instance_scope_deferred_units=materialized_source.instance_scope_deferred_units,
         gap_count=0,
     )

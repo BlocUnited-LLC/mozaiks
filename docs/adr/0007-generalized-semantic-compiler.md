@@ -319,6 +319,29 @@ no renderer, invokes no AG2 primitive, and is not imported by production
 AppGenerator, task execution, assembly, persistence, publication, Studio, or
 refinement paths. Those gates remain for 5D-0B2, 5D-0B3, and the atomic cutover.
 
+Slice 5D-0B2A makes the application-configuration subset of those `render`
+families deterministic. One renderer authority,
+`deterministic_app_config_renderer@1`, is resolved only through an
+`ImplementationBinding` renderer selection bound to the
+`app_config_executor` materializer, and renders exactly five families —
+`app_manifest` (`app.json`), `app_ui_route_manifest`
+(`ui/route_manifest.json`), `app_config` (`config/ai.json`),
+`app_integrations_config` (`config/integrations.yaml`), and
+`app_secret_references` (`security/secrets.yaml`, secret names only) — from
+accepted semantic payloads alone. Two named byte contracts,
+`mozaiks.json_decl_bytes.v1` and `mozaiks.yaml_decl_bytes.v1`, fix
+serialization (UTF-8, LF, trailing newline, declaration-order preservation,
+round-trip equality) so identical facts always produce identical bytes; the
+renderer reads no clock, environment, filesystem, `AppBuildPlan`, or Git
+state. Families whose required facts still lack a typed semantic home —
+`app_subscription_config` (default plan and assignment-store wiring),
+`app_data_contract` (collection-to-module ownership edges), and asset
+manifests (no typed asset facts) — remain typed gaps with recorded
+prerequisites for 5D-0B2B. Production AppGenerator writers remain the
+authoritative emitters of these paths until the atomic 5D cutover; hygiene
+guards prove they do not call the B2A renderer and that no production module
+imports it.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,

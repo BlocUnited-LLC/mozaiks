@@ -77,6 +77,7 @@ def test_missing_extra_duplicate_and_stale_inputs_fail_closed() -> None:
         external_handoff_units=(),
         inapplicable_units=(),
         unsupplied_preserved_units=(),
+        input_only_units=(),
         instance_scope_deferred_units=(),
         gap_count=0,
     )

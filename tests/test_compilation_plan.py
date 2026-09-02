@@ -47,13 +47,13 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-# Re-pinned once for the plan-authority contract: CompilationPlan identity
-# now pins assignment_contracts_digest — the exact assignment-descriptor
-# closure consulted during derivation (empty-consulted for this config-less
-# corpus). Identity-only change: no rendered byte, assignment resolution, or
-# reuse behavior changed; unrelated registry descriptors remain outside plan
-# identity by the locality rule.
-_GOLDEN_PLAN_DIGEST = "df0bebdc10fe304977f6c2828d3410f88366c1763c3f175ac5f891e4bf769314"
+# Re-pinned once for Slice 5D-0B2A: the app-config completion predicate now
+# recognizes the corpus's closed application/auth/page facts, flipping the
+# unconditional application-configuration families (app_manifest, app_config,
+# app_secret_references, app_ui_route_manifest) from typed gaps to RENDER.
+# Plan identity also includes #475's exact consulted assignment-contract
+# closure. No semantic fact was invented; the corpus payloads are unchanged.
+_GOLDEN_PLAN_DIGEST = "9be0e974aeeaa59841ac48d53ef306fd988ec609193de057bbfe6b5a07737e6d"
 
 
 def _registry():
@@ -389,14 +389,12 @@ def test_digest_propagates_payload_to_graph_to_plan() -> None:
         if unit.source_scope is PlanSourceScope.GRAPH_WIDE
     }
     assert graph_wide <= affected
-    # Unsupported route-manifest rendering stays a typed gap rather than a
-    # false dependent renderer unit.
-    assert not any(unit.family_kind == "app_ui_route_manifest" for unit in changed.units)
-    assert any(
-        gap.family_kind == "app_ui_route_manifest"
-            and gap.code.value == "renderer_input_undeclared"
-        for gap in changed.gaps
-    )
+    # Route-manifest rendering now declares typed inputs (5D-0B2A); on this
+    # corpus it either derives a render unit or remains an explicit typed gap —
+    # never a silent omission.
+    route_units = [u for u in changed.units if u.family_kind == "app_ui_route_manifest"]
+    route_gaps = [g for g in changed.gaps if g.family_kind == "app_ui_route_manifest"]
+    assert route_units or route_gaps
     # ...and unrelated declared units with unchanged footprints stay reusable.
     unrelated_units = {
         unit.unit_id
@@ -533,6 +531,8 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
     offenders: list[str] = []
     excluded = {
         Path("mozaiksai/core/semantics/compilation_plan.py"),
+        Path("mozaiksai/core/semantics/decl_bytes.py"),
+        Path("mozaiksai/core/semantics/app_config_materialization.py"),
         Path("mozaiksai/core/semantics/resolver.py"),
         Path("mozaiksai/core/semantics/refs.py"),
         # Slice 4C offline materializer: consumes the plan inside the

@@ -434,6 +434,7 @@ def test_agent_author_has_no_slice_4c_materialization_path() -> None:
             external=[],
             inapplicable=[],
             unsupplied=[],
+            input_only=[],
             deferred=[],
         )
 

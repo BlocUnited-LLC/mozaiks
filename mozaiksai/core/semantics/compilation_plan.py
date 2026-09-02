@@ -66,6 +66,7 @@ from mozaiksai.core.semantics.payloads import (
     ApplicationPayload,
     ArtifactDeclarationPayload,
     ArtifactDeclarationRole,
+    AuthPayload,
     IntegrationImplementationKind,
     IntegrationPayload,
     LockfileKind,
@@ -94,6 +95,16 @@ from mozaiksai.core.workflow.assignment_kinds import (
 from mozaiksai.core.workflow.structured_output_contracts import (
     StructuredOutputContractRef,
     build_structured_output_contract_ref,
+)
+
+_APP_CONFIG_RENDER_KINDS = frozenset(
+    {
+        "app_manifest",
+        "app_config",
+        "app_integrations_config",
+        "app_secret_references",
+        "app_ui_route_manifest",
+    }
 )
 
 COMPILATION_PLAN_SCHEMA_VERSION: Literal["mozaiks.compilation_plan.v1"] = (
@@ -1311,6 +1322,56 @@ def derive_compilation_plan(
             )
         return value
 
+    def _app_config_inputs_complete(row: RegistryFamilyRow) -> bool:
+        """Slice 5D-0B2A: application-config families with closed inputs.
+
+        Complete only when the accepted authorities can supply every rendered
+        fact for the row's exact output contract; everything else stays a
+        typed gap. ``config/asset_manifest.json`` shares the ``app_config``
+        family but has no typed asset facts yet, so it remains gapped.
+        """
+        applications = [
+            payload
+            for payload in payload_by_node.values()
+            if isinstance(payload, ApplicationPayload)
+        ]
+        if len(applications) != 1:
+            return False
+        application = applications[0]
+        auth_payloads = [
+            payload
+            for payload in payload_by_node.values()
+            if isinstance(payload, AuthPayload)
+        ]
+        auth_selected = any(
+            selection.family is OptionalFamilyKind.AUTH
+            and selection.status is OptionalFamilySelectionStatus.SELECTED
+            for selection in application.optional_families
+        )
+        if auth_selected and len(auth_payloads) != 1:
+            return False
+        if row.kind == "app_manifest":
+            return True
+        if row.kind == "app_config":
+            return row.path_template == "config/ai.json"
+        if row.kind == "app_secret_references":
+            return True
+        if row.kind == "app_integrations_config":
+            return any(
+                isinstance(payload, IntegrationPayload)
+                for payload in payload_by_node.values()
+            )
+        if row.kind == "app_ui_route_manifest":
+            pages = [
+                payload
+                for payload in payload_by_node.values()
+                if isinstance(payload, PagePayload)
+            ]
+            if not pages or any(not page.route or not page.title for page in pages):
+                return False
+            return application.default_route in {page.route for page in pages}
+        return False
+
     def _renderer_inputs_complete(
         row: RegistryFamilyRow, *, root_node_id: str | None
     ) -> bool:
@@ -1321,6 +1382,8 @@ def derive_compilation_plan(
         gaps until a later prerequisite explicitly closes their normative
         source models.
         """
+        if row.kind in _APP_CONFIG_RENDER_KINDS and root_node_id is None:
+            return _app_config_inputs_complete(row)
         if row.kind != "app_ui_page_schema" or root_node_id is None:
             return False
         page = payload_by_node[root_node_id]
