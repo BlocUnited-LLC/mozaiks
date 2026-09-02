@@ -23,6 +23,7 @@ from mozaiksai.core.semantics.archive import (
     build_deterministic_archive,
 )
 from mozaiksai.core.semantics.binding import ImplementationBinding
+from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.capabilities import advertised_semantic_compiler_capabilities
 from mozaiksai.core.semantics.graph import (
     SEMANTIC_GRAPH_V2_SCHEMA_VERSION,
@@ -79,8 +80,13 @@ from mozaiksai.core.semantics.payloads import (
     TriggerKind,
     TriggerPayload,
     TypedFieldSpec,
+    WorkflowParticipant,
     WorkflowPayload,
     WorkflowStartupMode,
+    WorkflowTopology,
+    WorkflowTransition,
+    WorkflowTransitionKind,
+    WorkflowTransitionTargetKind,
     build_semantic_payload,
     parse_semantic_payload,
     semantic_payload_ref,
@@ -553,9 +559,359 @@ def _corpus_graph(
     return graph, payloads
 
 
+def _workflow_transition(
+    *,
+    target_kind: WorkflowTransitionTargetKind,
+    target_participant_id: str | None = None,
+    transition_kind: WorkflowTransitionKind = WorkflowTransitionKind.AFTER_TURN,
+    condition_key: str | None = None,
+    condition_value: str | int | bool | None = None,
+    tool_name: str | None = None,
+) -> WorkflowTransition:
+    return WorkflowTransition(
+        source_participant_id="source",
+        target_kind=target_kind,
+        target_participant_id=target_participant_id,
+        transition_kind=transition_kind,
+        condition_key=condition_key,
+        condition_value=condition_value,
+        tool_name=tool_name,
+    )
+
+
+def _workflow_topology(
+    transitions: tuple[WorkflowTransition, ...],
+) -> WorkflowTopology:
+    return WorkflowTopology(
+        max_turns=10,
+        human_input_required=False,
+        initial_participant_id="source",
+        participants=tuple(
+            WorkflowParticipant(participant_id=participant_id)
+            for participant_id in ("source", "left", "right")
+        ),
+        transitions=transitions,
+    )
+
+
+def _node_for_payload(payload: SemanticPayloadBase) -> SemanticNodeV2:
+    return SemanticNodeV2(
+        node_id=payload.node_id,
+        kind=payload.payload_kind,
+        payload_ref=semantic_payload_ref(payload),
+    )
+
+
+def _application_payload(
+    *, node_id: str, application_id: str, default_route: str = "/"
+) -> ApplicationPayload:
+    return build_semantic_payload(
+        ApplicationPayload,
+        node_id=node_id,
+        payload_version=1,
+        scope=_SCOPE,
+        application_id=application_id,
+        display_name=f"{application_id} application",
+        description=None,
+        tagline=None,
+        value_proposition=None,
+        version="1.0.0",
+        default_route=default_route,
+        optional_families=tuple(
+            OptionalFamilySelection(
+                family=family,
+                status=OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION,
+            )
+            for family in OptionalFamilyKind
+        ),
+    )
+
+
+def _graph_document(nodes: tuple[SemanticNodeV2, ...]) -> dict[str, object]:
+    ordered_nodes = tuple(sorted(nodes, key=lambda item: item.node_id))
+    document: dict[str, object] = {
+        "schema_version": SEMANTIC_GRAPH_V2_SCHEMA_VERSION,
+        "graph_id": "hostile-graph",
+        "version": 1,
+        "scope": _SCOPE.model_dump(mode="json"),
+        "namespace_grants": [],
+        "nodes": [node.model_dump(mode="json") for node in ordered_nodes],
+        "edges": [],
+    }
+    digest_payload = {
+        **document,
+        "nodes": [node.identity_payload for node in ordered_nodes],
+    }
+    document["graph_digest"] = canonical_digest(digest_payload)
+    return document
+
+
 # ---------------------------------------------------------------------------
 # Kind closure
 # ---------------------------------------------------------------------------
+
+
+def test_workflow_topology_rejects_exact_duplicate_transitions() -> None:
+    transition = _workflow_transition(
+        target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+        target_participant_id="left",
+    )
+    with pytest.raises(ValidationError, match="duplicate workflow transitions"):
+        _workflow_topology((transition, transition))
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="left",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="right",
+            ),
+        ),
+        (
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="left",
+                transition_kind=WorkflowTransitionKind.CONTEXT_EQUALS,
+                condition_key="route",
+                condition_value="approved",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="right",
+                transition_kind=WorkflowTransitionKind.CONTEXT_EQUALS,
+                condition_key="route",
+                condition_value="approved",
+            ),
+        ),
+        (
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="left",
+                transition_kind=WorkflowTransitionKind.CONTEXT_EQUALS,
+                condition_key="route",
+                condition_value="approved",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.HUMAN,
+                transition_kind=WorkflowTransitionKind.CONTEXT_EQUALS,
+                condition_key="route",
+                condition_value="approved",
+            ),
+        ),
+        (
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="left",
+                transition_kind=WorkflowTransitionKind.TOOL_CALLED,
+                tool_name="approve",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.TERMINATE,
+                transition_kind=WorkflowTransitionKind.TOOL_CALLED,
+                tool_name="approve",
+            ),
+        ),
+    ],
+)
+def test_workflow_topology_rejects_conflicting_routing_outcomes(
+    first: WorkflowTransition,
+    second: WorkflowTransition,
+) -> None:
+    with pytest.raises(ValidationError, match="conflicting workflow transitions"):
+        _workflow_topology((first, second))
+
+
+def test_workflow_topology_allows_distinct_context_values_and_tool_names() -> None:
+    topology = _workflow_topology(
+        (
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="left",
+                transition_kind=WorkflowTransitionKind.CONTEXT_EQUALS,
+                condition_key="route",
+                condition_value="approved",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="right",
+                transition_kind=WorkflowTransitionKind.CONTEXT_EQUALS,
+                condition_key="route",
+                condition_value="rejected",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="left",
+                transition_kind=WorkflowTransitionKind.TOOL_CALLED,
+                tool_name="approve",
+            ),
+            _workflow_transition(
+                target_kind=WorkflowTransitionTargetKind.PARTICIPANT,
+                target_participant_id="right",
+                transition_kind=WorkflowTransitionKind.TOOL_CALLED,
+                tool_name="reject",
+            ),
+        )
+    )
+    assert len(topology.transitions) == 4
+
+
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        tuple(
+            _node_for_payload(payload)
+            for payload in (
+                _application_payload(
+                    node_id="mozaiks.application.one", application_id="one"
+                ),
+                _application_payload(
+                    node_id="mozaiks.application.two", application_id="two"
+                ),
+            )
+        ),
+        tuple(
+            _node_for_payload(payload)
+            for payload in (
+                _application_payload(
+                    node_id="mozaiks.application.primary",
+                    application_id="shared-app",
+                ),
+                _application_payload(
+                    node_id="mozaiks.application.alternate",
+                    application_id="shared-app",
+                    default_route="/alternate",
+                ),
+            )
+        ),
+    ],
+)
+def test_semantic_graph_v2_rejects_multiple_application_authorities(
+    nodes: tuple[SemanticNodeV2, ...],
+) -> None:
+    with pytest.raises(ValidationError, match="at most one application node"):
+        build_semantic_graph_v2(
+            graph_id="conflicting-applications",
+            version=1,
+            scope=_SCOPE,
+            nodes=nodes,
+        )
+
+
+def test_semantic_graph_v2_rejects_multiple_auth_authorities() -> None:
+    auth_payloads = (
+        build_semantic_payload(
+            AuthPayload,
+            node_id="mozaiks.auth.roles",
+            payload_version=1,
+            scope=_SCOPE,
+            auth_required=True,
+            strategy=AuthStrategyKind.ROLE_BASED,
+            roles=("admin",),
+        ),
+        build_semantic_payload(
+            AuthPayload,
+            node_id="mozaiks.auth.federated",
+            payload_version=1,
+            scope=_SCOPE,
+            auth_required=True,
+            strategy=AuthStrategyKind.FEDERATED,
+            roles=(),
+        ),
+    )
+    auth_nodes = tuple(_node_for_payload(payload) for payload in auth_payloads)
+    with pytest.raises(ValidationError, match="at most one auth node"):
+        build_semantic_graph_v2(
+            graph_id="conflicting-auth",
+            version=1,
+            scope=_SCOPE,
+            nodes=auth_nodes,
+        )
+    with pytest.raises(ValidationError, match="at most one auth node"):
+        SemanticGraphV2.model_validate(_graph_document(auth_nodes))
+
+    hostile_document = _graph_document(auth_nodes)
+    hostile_graph = SemanticGraphV2.model_construct(
+        schema_version=SEMANTIC_GRAPH_V2_SCHEMA_VERSION,
+        graph_id=hostile_document["graph_id"],
+        version=hostile_document["version"],
+        scope=_SCOPE,
+        namespace_grants=(),
+        nodes=auth_nodes,
+        edges=(),
+        graph_digest=hostile_document["graph_digest"],
+    )
+    resolver = SemanticReferenceResolver()
+    for payload in auth_payloads:
+        resolver.register_semantic_payload(payload)
+    with pytest.raises(ReferenceResolutionError, match="cold validation"):
+        resolver.register_semantic_graph_v2(hostile_graph)
+
+
+def test_semantic_graph_v2_allows_partial_singletons_and_multiple_integrations() -> None:
+    application = _application_payload(
+        node_id="mozaiks.application.partial", application_id="partial-app"
+    )
+    auth = build_semantic_payload(
+        AuthPayload,
+        node_id="mozaiks.auth.partial",
+        payload_version=1,
+        scope=_SCOPE,
+        auth_required=False,
+        strategy=AuthStrategyKind.PUBLIC,
+        roles=(),
+    )
+    integrations = tuple(
+        build_semantic_payload(
+            IntegrationPayload,
+            node_id=f"mozaiks.integration.{integration_id}",
+            payload_version=1,
+            scope=_SCOPE,
+            integration_id=integration_id,
+            integration_kind=IntegrationKind.API_KEY,
+            purpose=None,
+            required_at=IntegrationRequirementPhase.RUNTIME,
+            optional=True,
+            config_requirements=(),
+        )
+        for integration_id in ("email", "search")
+    )
+
+    application_only = build_semantic_graph_v2(
+        graph_id="application-only",
+        version=1,
+        scope=_SCOPE,
+        nodes=(_node_for_payload(application),),
+    )
+    application_and_auth = build_semantic_graph_v2(
+        graph_id="application-and-auth",
+        version=1,
+        scope=_SCOPE,
+        nodes=(_node_for_payload(application), _node_for_payload(auth)),
+    )
+    integration_graph = build_semantic_graph_v2(
+        graph_id="multiple-integrations",
+        version=1,
+        scope=_SCOPE,
+        nodes=tuple(_node_for_payload(payload) for payload in integrations),
+    )
+
+    assert [node.kind for node in application_only.nodes] == [
+        SemanticNodeKind.APPLICATION
+    ]
+    assert {node.kind for node in application_and_auth.nodes} == {
+        SemanticNodeKind.APPLICATION,
+        SemanticNodeKind.AUTH,
+    }
+    assert [node.kind for node in integration_graph.nodes] == [
+        SemanticNodeKind.INTEGRATION,
+        SemanticNodeKind.INTEGRATION,
+    ]
 
 
 def test_every_node_kind_has_exactly_one_payload_variant() -> None:

@@ -469,6 +469,14 @@ class SemanticGraphV2(SemanticsModel):
     @model_validator(mode="after")
     def _validate_graph(self) -> SemanticGraphV2:
         _validate_graph_structure(self)
+        for singleton_kind in (SemanticNodeKind.APPLICATION, SemanticNodeKind.AUTH):
+            matching_nodes = [
+                node.node_id for node in self.nodes if node.kind is singleton_kind
+            ]
+            if len(matching_nodes) > 1:
+                raise ValueError(
+                    f"semantic graph v2 permits at most one {singleton_kind.value} node"
+                )
         for node in self.nodes:
             if node.payload_ref.scope != self.scope:
                 raise ValueError(

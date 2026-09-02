@@ -321,6 +321,28 @@ class WorkflowTransition(SemanticsModel):
                 raise ValueError("tool_called requires tool_name only")
         return self
 
+    @property
+    def routing_decision_identity(self) -> tuple[object, ...]:
+        """Canonical authored decision key, excluding its target outcome."""
+        identity: tuple[object, ...] = (
+            self.source_participant_id,
+            self.transition_kind.value,
+        )
+        if self.transition_kind is WorkflowTransitionKind.CONTEXT_EQUALS:
+            condition_value = self.condition_value
+            identity += (
+                self.condition_key,
+                type(condition_value).__name__,
+                condition_value,
+            )
+        elif self.transition_kind is WorkflowTransitionKind.TOOL_CALLED:
+            identity += (self.tool_name,)
+        return identity
+
+    @property
+    def target_outcome(self) -> tuple[str, str | None]:
+        return self.target_kind.value, self.target_participant_id
+
 
 class WorkflowTopology(SemanticsModel):
     max_turns: int = Field(ge=1, le=500, strict=True)
@@ -367,6 +389,16 @@ class WorkflowTopology(SemanticsModel):
         )
         if len(ordered) != len(set(ordered)):
             raise ValueError("duplicate workflow transitions")
+        outcomes_by_decision: dict[tuple[object, ...], tuple[str, str | None]] = {}
+        for transition in ordered:
+            decision = transition.routing_decision_identity
+            outcome = transition.target_outcome
+            existing = outcomes_by_decision.get(decision)
+            if existing is not None and existing != outcome:
+                raise ValueError(
+                    "conflicting workflow transitions for one routing decision"
+                )
+            outcomes_by_decision[decision] = outcome
         return ordered
 
     @model_validator(mode="after")
