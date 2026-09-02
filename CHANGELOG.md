@@ -12,6 +12,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Generated Mongo documents no longer break HTTP responses**: module action
+  results are normalized at the ModuleExecutor boundary so BSON `ObjectId`
+  values (including `_id`, nested documents, list items, and mapping keys)
+  become their stable hex strings and `Decimal128` becomes its lossless
+  decimal string. Generated apps that list or read Mongo-backed records —
+  whose documents carry a driver-generated `ObjectId` `_id` — previously
+  produced a bare HTTP 500 at serialization on every read path (module
+  routes, profile panels/tabs, page hydration). Datetimes and other
+  JSON-encodable values are untouched, unknown types are never coerced
+  through a repr, and input documents are not mutated.
+
+
 ### Changed
 
 - Upgraded the AG2 runtime to 1.0.3, including ACP 0.12.1 compatibility and corrected usage-event accounting coverage.

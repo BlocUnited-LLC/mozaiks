@@ -39,6 +39,7 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
 from mozaiksai.core.runtime.app.module_loader import SettingDef
+from mozaiksai.core.runtime.composition.bson_safe import json_safe_bson
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAudit,
@@ -573,6 +574,11 @@ class ModuleExecutor:
                 error=f"Action {request.action!r} failed",
                 error_code="EXECUTION_ERROR",
             )
+
+        # Module results routinely carry raw Mongo documents; normalize BSON
+        # identifier types here — the one choke point every action result
+        # crosses — so ObjectId/Decimal128 never reach a JSON serializer.
+        result = json_safe_bson(result)
 
         # Output schema validation — warn only; don't fail the caller on a module contract bug.
         if output_schema and result is not None:
