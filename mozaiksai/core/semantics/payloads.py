@@ -36,7 +36,11 @@ from mozaiksai.core.runtime.app.page_schema import (
     AppPageSection,
 )
 from mozaiksai.core.semantics.canonical import canonical_digest
-from mozaiksai.core.semantics.graph import SemanticGraphV2, SemanticNodeKind
+from mozaiksai.core.semantics.graph import (
+    SemanticEdgeKind,
+    SemanticGraphV2,
+    SemanticNodeKind,
+)
 from mozaiksai.core.semantics.portable_path import validate_portable_path
 from mozaiksai.core.semantics.refs import (
     ExecutionAccessScopeRef,
@@ -45,7 +49,6 @@ from mozaiksai.core.semantics.refs import (
     _validate_digest,
     validate_node_id_grammar,
 )
-from mozaiksai.core.stub_kinds import StubKind
 from mozaiksai.core.taxonomy import SemanticCategory, validate_identifier_grammar
 
 SEMANTIC_PAYLOAD_SCHEMA_VERSION: Literal["mozaiks.semantic_payload.v1"] = (
@@ -55,7 +58,6 @@ SEMANTIC_PAYLOAD_SCHEMA_VERSION: Literal["mozaiks.semantic_payload.v1"] = (
 _MAX_TEXT_CHARS = 4000
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 _PAGE_ROUTE = re.compile(r"^/[A-Za-z0-9_./:{}?-]*$")
-_ENTRYPOINT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CANONICAL_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _ENV_HANDLE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _SEMVER = re.compile(
@@ -224,6 +226,50 @@ class IntegrationConfigValueKind(StrEnum):
     SECRET = "secret"
 
 
+class IntegrationImplementationKind(StrEnum):
+    CONFIG_ONLY = "config_only"
+    APP_OWNED_ADAPTER = "app_owned_adapter"
+    MANAGED_CAPABILITY = "managed_capability"
+
+
+class AdapterAreaKind(StrEnum):
+    AUTH = "auth"
+    SOURCE_CONTROL = "source_control"
+    DEPLOYMENT = "deployment"
+    DNS = "dns"
+    REGISTRAR = "registrar"
+    CLOUD = "cloud"
+    STORAGE = "storage"
+    SEARCH = "search"
+    EMAIL = "email"
+    DATABASE = "database"
+    SECRETS = "secrets"
+    PAYMENTS = "payments"
+
+
+class PackageManagerKind(StrEnum):
+    NPM = "npm"
+    PNPM = "pnpm"
+    YARN = "yarn"
+
+
+class LockfileKind(StrEnum):
+    PACKAGE_LOCK = "package_lock"
+    PNPM_LOCK = "pnpm_lock"
+    YARN_LOCK = "yarn_lock"
+
+
+class ArtifactDeclarationRole(StrEnum):
+    DATA_MIGRATION = "data_migration"
+    APP_ROUTE_EXTENSION = "app_route_extension"
+    CUSTOM_PAGE = "custom_page"
+    MODULE_HELPER = "module_helper"
+    WORKFLOW_TOOL = "workflow_tool"
+    WORKFLOW_COMPONENT = "workflow_component"
+    MODULE_ADMIN_PAGE = "module_admin_page"
+    REFINEMENT_PROMPT_PACK = "refinement_prompt_pack"
+
+
 class WorkflowTransitionKind(StrEnum):
     AFTER_TURN = "after_turn"
     CONTEXT_EQUALS = "context_equals"
@@ -258,6 +304,90 @@ class IntegrationConfigRequirement(SemanticsModel):
         if _FIELD_NAME.fullmatch(text) is None and _ENV_HANDLE.fullmatch(text) is None:
             raise ValueError("integration configuration names must be snake_case or ENV_STYLE")
         return text
+
+
+class IntegrationImplementationBinding(SemanticsModel):
+    implementation_kind: IntegrationImplementationKind
+    adapter_area: AdapterAreaKind | None = None
+
+    @model_validator(mode="after")
+    def _coherence(self) -> IntegrationImplementationBinding:
+        owns_adapter = (
+            self.implementation_kind is IntegrationImplementationKind.APP_OWNED_ADAPTER
+        )
+        if owns_adapter != (self.adapter_area is not None):
+            raise ValueError("only app_owned_adapter integrations declare adapter_area")
+        return self
+
+
+class RuntimeSupportSelection(SemanticsModel):
+    python_runtime: bool
+    requirements: bool
+    pyproject: bool
+    node_frontend: bool
+    package_manager: PackageManagerKind | None
+    lockfile: LockfileKind | None
+    typescript: bool
+    vite: bool
+
+    @model_validator(mode="after")
+    def _coherence(self) -> RuntimeSupportSelection:
+        if not self.python_runtime and (self.requirements or self.pyproject):
+            raise ValueError("Python support files require python_runtime")
+        node_fields = (
+            self.package_manager is not None,
+            self.lockfile is not None,
+            self.typescript,
+            self.vite,
+        )
+        if not self.node_frontend and any(node_fields):
+            raise ValueError("Node support files require node_frontend")
+        if self.node_frontend and self.package_manager is None:
+            raise ValueError("node_frontend requires one package_manager")
+        expected_lock = (
+            {
+                PackageManagerKind.NPM: LockfileKind.PACKAGE_LOCK,
+                PackageManagerKind.PNPM: LockfileKind.PNPM_LOCK,
+                PackageManagerKind.YARN: LockfileKind.YARN_LOCK,
+            }[self.package_manager]
+            if self.package_manager is not None
+            else None
+        )
+        if self.lockfile is not None and self.lockfile is not expected_lock:
+            raise ValueError("lockfile must match the selected package_manager")
+        return self
+
+
+class RefinementHarnessSelection(SemanticsModel):
+    status: OptionalFamilySelectionStatus
+    harness_id: str | None = None
+    prompt_pack_ids: tuple[str, ...] = Field(default_factory=tuple)
+
+    @field_validator("harness_id")
+    @classmethod
+    def _harness_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _canonical_id(value, field_name="harness_id")
+
+    @field_validator("prompt_pack_ids")
+    @classmethod
+    def _prompt_pack_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        ordered = tuple(
+            sorted(_canonical_id(item, field_name="prompt_pack_id") for item in value)
+        )
+        if len(ordered) != len(set(ordered)):
+            raise ValueError("duplicate refinement prompt-pack identities")
+        return ordered
+
+    @model_validator(mode="after")
+    def _coherence(self) -> RefinementHarnessSelection:
+        selected = self.status is OptionalFamilySelectionStatus.SELECTED
+        if selected != (self.harness_id is not None):
+            raise ValueError("selected refinement harness requires one harness_id")
+        if not selected and self.prompt_pack_ids:
+            raise ValueError("an unselected refinement harness cannot declare prompt packs")
+        return self
 
 
 class WorkflowParticipant(SemanticsModel):
@@ -609,6 +739,11 @@ class ApplicationPayload(SemanticPayloadBase):
     version: str
     default_route: str
     optional_families: tuple[OptionalFamilySelection, ...]
+    runtime_support: RuntimeSupportSelection | None = None
+    refinement_harness: RefinementHarnessSelection | None = None
+    closed_artifact_roles: tuple[ArtifactDeclarationRole, ...] = Field(
+        default_factory=tuple
+    )
 
     @field_validator("application_id")
     @classmethod
@@ -656,6 +791,23 @@ class ApplicationPayload(SemanticPayloadBase):
             raise ValueError("optional_families must state every closed optional family")
         return ordered
 
+    @field_validator("closed_artifact_roles")
+    @classmethod
+    def _closed_artifact_roles(
+        cls, value: tuple[ArtifactDeclarationRole, ...]
+    ) -> tuple[ArtifactDeclarationRole, ...]:
+        allowed = {
+            ArtifactDeclarationRole.DATA_MIGRATION,
+            ArtifactDeclarationRole.APP_ROUTE_EXTENSION,
+            ArtifactDeclarationRole.CUSTOM_PAGE,
+            ArtifactDeclarationRole.REFINEMENT_PROMPT_PACK,
+        }
+        if not set(value) <= allowed:
+            raise ValueError("application carries only application-owned artifact roles")
+        if len(value) != len(set(value)):
+            raise ValueError("duplicate closed application artifact roles")
+        return tuple(sorted(value, key=lambda item: item.value))
+
 
 class AuthPayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.AUTH] = SemanticNodeKind.AUTH
@@ -691,6 +843,7 @@ class IntegrationPayload(SemanticPayloadBase):
     required_at: IntegrationRequirementPhase
     optional: bool
     config_requirements: tuple[IntegrationConfigRequirement, ...]
+    implementation: IntegrationImplementationBinding | None = None
 
     @field_validator("integration_id")
     @classmethod
@@ -844,6 +997,9 @@ class ModulePayload(SemanticPayloadBase):
     payload_kind: Literal[SemanticNodeKind.MODULE] = SemanticNodeKind.MODULE
     module_id: str
     description: str | None
+    closed_artifact_roles: tuple[ArtifactDeclarationRole, ...] = Field(
+        default_factory=tuple
+    )
 
     @field_validator("module_id")
     @classmethod
@@ -856,6 +1012,21 @@ class ModulePayload(SemanticPayloadBase):
         if value is None:
             return None
         return _text(value, field_name="description")
+
+    @field_validator("closed_artifact_roles")
+    @classmethod
+    def _closed_artifact_roles(
+        cls, value: tuple[ArtifactDeclarationRole, ...]
+    ) -> tuple[ArtifactDeclarationRole, ...]:
+        allowed = {
+            ArtifactDeclarationRole.MODULE_HELPER,
+            ArtifactDeclarationRole.MODULE_ADMIN_PAGE,
+        }
+        if not set(value) <= allowed:
+            raise ValueError("module carries only module-owned artifact roles")
+        if len(value) != len(set(value)):
+            raise ValueError("duplicate closed module artifact roles")
+        return tuple(sorted(value, key=lambda item: item.value))
 
 
 class ActionPayload(SemanticPayloadBase):
@@ -1048,6 +1219,9 @@ class WorkflowPayload(SemanticPayloadBase):
     description: str | None
     startup_mode: WorkflowStartupMode | None
     topology: WorkflowTopology | None
+    closed_artifact_roles: tuple[ArtifactDeclarationRole, ...] = Field(
+        default_factory=tuple
+    )
 
     @field_validator("workflow_id")
     @classmethod
@@ -1060,6 +1234,21 @@ class WorkflowPayload(SemanticPayloadBase):
         if value is None:
             return None
         return _text(value, field_name="description")
+
+    @field_validator("closed_artifact_roles")
+    @classmethod
+    def _closed_artifact_roles(
+        cls, value: tuple[ArtifactDeclarationRole, ...]
+    ) -> tuple[ArtifactDeclarationRole, ...]:
+        allowed = {
+            ArtifactDeclarationRole.WORKFLOW_TOOL,
+            ArtifactDeclarationRole.WORKFLOW_COMPONENT,
+        }
+        if not set(value) <= allowed:
+            raise ValueError("workflow carries only workflow-owned artifact roles")
+        if len(value) != len(set(value)):
+            raise ValueError("duplicate closed workflow artifact roles")
+        return tuple(sorted(value, key=lambda item: item.value))
 
 
 class TriggerPayload(SemanticPayloadBase):
@@ -1241,28 +1430,42 @@ class DeploymentTargetPayload(SemanticPayloadBase):
         return normalized
 
 
-class StubDeclarationPayload(SemanticPayloadBase):
-    payload_kind: Literal[SemanticNodeKind.STUB_DECLARATION] = SemanticNodeKind.STUB_DECLARATION
-    stub_kind: StubKind
-    path: str
-    entrypoint: str
+class ArtifactDeclarationPayload(SemanticPayloadBase):
+    payload_kind: Literal[SemanticNodeKind.ARTIFACT_DECLARATION] = (
+        SemanticNodeKind.ARTIFACT_DECLARATION
+    )
+    declaration_id: str
+    artifact_role: ArtifactDeclarationRole
+    owner_node_id: str
+    related_node_id: str | None = None
 
-    @field_validator("path")
+    @field_validator("declaration_id")
     @classmethod
-    def _path(cls, value: str) -> str:
-        return validate_portable_path(value).text
+    def _declaration_id(cls, value: str) -> str:
+        return _canonical_id(value, field_name="declaration_id")
 
-    @field_validator("entrypoint")
+    @field_validator("owner_node_id", "related_node_id")
     @classmethod
-    def _entrypoint(cls, value: str) -> str:
-        text = str(value or "").strip()
-        if _ENTRYPOINT.fullmatch(text) is None:
-            raise ValueError(f"entrypoint must be a bare symbol name, got {value!r}")
-        return text
+    def _node_refs(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_node_id_grammar(value)
+
+    @model_validator(mode="after")
+    def _relationship_shape(self) -> ArtifactDeclarationPayload:
+        requires_related = self.artifact_role in {
+            ArtifactDeclarationRole.CUSTOM_PAGE,
+            ArtifactDeclarationRole.MODULE_ADMIN_PAGE,
+        }
+        if requires_related != (self.related_node_id is not None):
+            raise ValueError(
+                "custom-page and module-admin declarations require one related page node"
+            )
+        return self
 
 
 SemanticPayload = Annotated[
-    ApplicationPayload | AuthPayload | IntegrationPayload | SurfacePayload | PagePayload | SectionPayload | ModulePayload | ActionPayload | CapabilityPayload | PermissionPayload | EventPayload | ReactionPayload | NotificationPayload | DataCollectionPayload | DataAliasPayload | WorkflowPayload | TriggerPayload | PlanPayload | ProductPayload | MeterPayload | LimitPayload | DeploymentTargetPayload | StubDeclarationPayload,
+    ApplicationPayload | AuthPayload | IntegrationPayload | SurfacePayload | PagePayload | SectionPayload | ModulePayload | ActionPayload | CapabilityPayload | PermissionPayload | EventPayload | ReactionPayload | NotificationPayload | DataCollectionPayload | DataAliasPayload | WorkflowPayload | TriggerPayload | PlanPayload | ProductPayload | MeterPayload | LimitPayload | DeploymentTargetPayload | ArtifactDeclarationPayload,
     Field(discriminator="payload_kind"),
 ]
 
@@ -1290,7 +1493,7 @@ PAYLOAD_MODEL_BY_KIND: dict[SemanticNodeKind, type[SemanticPayloadBase]] = {
     SemanticNodeKind.METER: MeterPayload,
     SemanticNodeKind.LIMIT: LimitPayload,
     SemanticNodeKind.DEPLOYMENT_TARGET: DeploymentTargetPayload,
-    SemanticNodeKind.STUB_DECLARATION: StubDeclarationPayload,
+    SemanticNodeKind.ARTIFACT_DECLARATION: ArtifactDeclarationPayload,
 }
 
 _PAYLOAD_ADAPTER: TypeAdapter[SemanticPayloadBase] = TypeAdapter(SemanticPayload)
@@ -1394,12 +1597,115 @@ def validate_semantic_graph_v2_payload_closure(
             f"supplied payloads are not pinned by the graph: {extras}"
         )
 
+    payload_by_node = {payload.node_id: payload for payload in supplied.values()}
+    edge_keys = {
+        (edge.kind, edge.source_node_id, edge.target_node_id)
+        for edge in verified_graph.edges
+    }
+    owner_kind_by_role = {
+        ArtifactDeclarationRole.DATA_MIGRATION: SemanticNodeKind.APPLICATION,
+        ArtifactDeclarationRole.APP_ROUTE_EXTENSION: SemanticNodeKind.APPLICATION,
+        ArtifactDeclarationRole.CUSTOM_PAGE: SemanticNodeKind.APPLICATION,
+        ArtifactDeclarationRole.MODULE_HELPER: SemanticNodeKind.MODULE,
+        ArtifactDeclarationRole.WORKFLOW_TOOL: SemanticNodeKind.WORKFLOW,
+        ArtifactDeclarationRole.WORKFLOW_COMPONENT: SemanticNodeKind.WORKFLOW,
+        ArtifactDeclarationRole.MODULE_ADMIN_PAGE: SemanticNodeKind.MODULE,
+        ArtifactDeclarationRole.REFINEMENT_PROMPT_PACK: SemanticNodeKind.APPLICATION,
+    }
+    seen_declarations: set[tuple[ArtifactDeclarationRole, str, str]] = set()
+    for payload in payload_by_node.values():
+        if not isinstance(payload, ArtifactDeclarationPayload):
+            continue
+        owner = payload_by_node.get(payload.owner_node_id)
+        expected_owner_kind = owner_kind_by_role[payload.artifact_role]
+        if owner is None or getattr(owner, "payload_kind", None) is not expected_owner_kind:
+            raise SemanticPayloadError(
+                f"artifact declaration {payload.node_id!r} has a foreign or missing owner"
+            )
+        if payload.artifact_role not in getattr(owner, "closed_artifact_roles", ()):
+            raise SemanticPayloadError(
+                f"artifact declaration {payload.node_id!r} uses an owner-unclosed role"
+            )
+        identity = (
+            payload.artifact_role,
+            payload.owner_node_id,
+            payload.declaration_id,
+        )
+        if identity in seen_declarations:
+            raise SemanticPayloadError(f"duplicate artifact declaration identity {identity!r}")
+        seen_declarations.add(identity)
+        if (
+            SemanticEdgeKind.OWNS,
+            payload.owner_node_id,
+            payload.node_id,
+        ) not in edge_keys:
+            raise SemanticPayloadError(
+                f"artifact declaration {payload.node_id!r} lacks its typed owner edge"
+            )
+        if payload.related_node_id is not None:
+            related = payload_by_node.get(payload.related_node_id)
+            if related is None or getattr(related, "payload_kind", None) is not SemanticNodeKind.PAGE:
+                raise SemanticPayloadError(
+                    f"artifact declaration {payload.node_id!r} has a foreign related page"
+                )
+            if (
+                SemanticEdgeKind.BINDS,
+                payload.node_id,
+                payload.related_node_id,
+            ) not in edge_keys:
+                raise SemanticPayloadError(
+                    f"artifact declaration {payload.node_id!r} lacks its typed page edge"
+                )
+
+    applications = [
+        payload
+        for payload in payload_by_node.values()
+        if isinstance(payload, ApplicationPayload)
+    ]
+    integrations = [
+        payload
+        for payload in payload_by_node.values()
+        if isinstance(payload, IntegrationPayload)
+    ]
+    if integrations:
+        application = applications[0] if applications else None
+        for integration in integrations:
+            if integration.implementation is None:
+                continue
+            if application is None or (
+                SemanticEdgeKind.DECLARES,
+                application.node_id,
+                integration.node_id,
+            ) not in edge_keys:
+                raise SemanticPayloadError(
+                    f"integration {integration.node_id!r} lacks application ownership"
+                )
+
+    for application in applications:
+        selection = application.refinement_harness
+        if selection is None:
+            continue
+        declared_packs = {
+            payload.declaration_id
+            for payload in payload_by_node.values()
+            if isinstance(payload, ArtifactDeclarationPayload)
+            and payload.artifact_role is ArtifactDeclarationRole.REFINEMENT_PROMPT_PACK
+            and payload.owner_node_id == application.node_id
+        }
+        if declared_packs != set(selection.prompt_pack_ids):
+            raise SemanticPayloadError(
+                "refinement prompt-pack declarations do not match application selection"
+            )
+
 
 __all__ = [
     "PAYLOAD_MODEL_BY_KIND",
     "SEMANTIC_PAYLOAD_SCHEMA_VERSION",
+    "AdapterAreaKind",
     "ActionPayload",
     "ApplicationPayload",
+    "ArtifactDeclarationPayload",
+    "ArtifactDeclarationRole",
     "AuthPayload",
     "AuthStrategyKind",
     "BillingPeriod",
@@ -1414,10 +1720,13 @@ __all__ = [
     "IndexSpec",
     "IntegrationConfigRequirement",
     "IntegrationConfigValueKind",
+    "IntegrationImplementationBinding",
+    "IntegrationImplementationKind",
     "IntegrationKind",
     "IntegrationPayload",
     "IntegrationRequirementPhase",
     "LimitPayload",
+    "LockfileKind",
     "MeterPayload",
     "ModulePayload",
     "NotificationChannel",
@@ -1425,6 +1734,7 @@ __all__ = [
     "OptionalFamilyKind",
     "OptionalFamilySelection",
     "OptionalFamilySelectionStatus",
+    "PackageManagerKind",
     "PagePayload",
     "PageSectionEntry",
     "PermissionPayload",
@@ -1432,13 +1742,14 @@ __all__ = [
     "PriceSpec",
     "ProductPayload",
     "ReactionPayload",
+    "RefinementHarnessSelection",
+    "RuntimeSupportSelection",
     "SectionContentEntry",
     "SectionEntryKind",
     "SectionPayload",
     "SemanticPayload",
     "SemanticPayloadBase",
     "SemanticPayloadError",
-    "StubDeclarationPayload",
     "SurfacePayload",
     "TriggerKind",
     "TriggerPayload",

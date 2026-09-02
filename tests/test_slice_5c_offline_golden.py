@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from mozaiksai.core.artifacts.content_store import LocalArtifactContentStore
 from mozaiksai.core.artifacts.revision_store import ArtifactRevisionStore
 from mozaiksai.core.runtime.app.page_schema import load_app_page_schemas
-from mozaiksai.core.runtime.persistence.app_data import load_app_data_contract
 from mozaiksai.core.semantics.artifact_revision import PublicationOutcome
 from tests.slice_5c_revision_helpers import executable_revision_fixture
 from tests.test_artifact_revision_store import _MemoryClient
@@ -50,6 +48,8 @@ async def test_offline_revision_publication_restore_and_loader_golden(
         destination = app_root / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
-    assert load_app_data_contract(app_root)["app_id"] == "slice-5c-golden"
     assert set(load_app_page_schemas(app_root)) == {"home"}
-    assert json.loads(restored.files()["data/contract.json"])["version"] == "1"
+    assert (
+        restored.files()["modules/reports/backend/report_hook.py"]
+        == b"def report_hook():\n    return None\n"
+    )

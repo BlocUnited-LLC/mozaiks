@@ -283,6 +283,42 @@ Renderers, assignment/output contracts, AG2 execution, publication,
 capability advertisement, and the production `AppBuildPlan` path remain
 unchanged until later Slice 5D gates.
 
+Slice 5D-0B1 closes the executable-family contract surface without making it
+operational. Every layout-registry row now declares one compiler disposition:
+`render`, `agent_author`, `preserve_unowned`, `external_handoff`, `input_only`,
+or `inapplicable`. Greenfield derivation never selects `preserve_unowned`;
+that disposition is valid only when a later brownfield input contract supplies
+pre-existing digest-bound bytes. Renderer callables and rendered bytes remain
+outside this slice.
+
+The compiler selects mutually exclusive application-manifest, module, and
+workflow-manifest path scopes through `CompilationScopeSelection`. The
+canonical integration declaration is `config/integrations.yaml`; unreleased
+JSON and `.yml` aliases are not compiler artifacts. Typed artifact declarations
+close migration, route-extension, custom-page, module-helper, workflow-tool,
+workflow-component, module-admin-page, and refinement prompt-pack identity over
+explicit owner/relationship edges. Integration implementation and adapter-area,
+root runtime/toolchain, and refinement-harness selections are likewise closed
+semantic facts. Missing facts emit prerequisite gaps; they are never inferred
+from files or normalized to false.
+
+Reasoning-heavy authorship uses finite family-specific assignment kinds and
+content-pinned structured-output schemas. Each compiler assignment resolves to
+one workflow/model locator, a closed artifact-family/path contract, semantic
+identity bindings, and one Mozaiks-owned validator. The broad production
+`AppBuildPlan` assignment vocabulary remains only as transitional path ownership
+metadata until the atomic 5D cutover; it is excluded from compiler descriptor
+resolution. In particular, validation is a deterministic gate and generic
+`integration`/`validation` authoring kinds do not exist.
+
+`CompilationPlan.gaps` is exactly the literal emitted first-blocker set.
+`CompilationGapReport.emitted_gaps` repeats that set, while hypothetical
+blockers may appear only in the separate `latent_gaps` field; the composite
+diagnostic view never changes the canonical plan gap count. 5D-0B1 registers
+no renderer, invokes no AG2 primitive, and is not imported by production
+AppGenerator, task execution, assembly, persistence, publication, Studio, or
+refinement paths. Those gates remain for 5D-0B2, 5D-0B3, and the atomic cutover.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,
@@ -1101,6 +1137,7 @@ journey capability.
 | **4B. Aggregate CompilationPlan derivation** — derive one aggregate plan containing non-authoritative artifact-family-instance subplans; project assignments and task-batch inputs from it | No production authority change: agent-produced `AppBuildPlan` remains current and the aggregate plan is offline-only | Complete family dispositions; derived-vs-produced plan equivalence; global DAG and path ownership; stable aggregate and family digests; partial regeneration/reuse closure; proof that family plans cannot resolve or execute independently and binding cannot widen graph semantics | Begin identifying plan mirrors and dead converter normalizers for cutover, but delete no active authority. Rollback: delete the candidate plan path. No live models, capability advertisement, or ADR 0006 dependency. |
 | **4C. Offline deterministic renderer equivalence** — bind graph-v2 payloads and aggregate-plan family instances to registry renderers; AgentGenerator regains a renderer layer | No production authority change; candidate renderers run only against offline corpus fixtures and never beside a live build | Stable renderer order; byte-identical child contracts; loader/validator and route/component/action closure; AppGenerator and AgentGenerator equivalence; changed semantic closure changes only affected families | Retain current generation and promotion. Rollback: delete candidate renderers and comparison flag. No live models, capability advertisement, or ADR 0006 dependency. |
 | **5D-0A. Typed application/workflow semantic input closure** — add closed application, provider-neutral auth, application-integration, workflow-topology, and optional-family-selection payload facts; declare their future source footprints in the sole layout registry | No production authority change: `AppBuildPlan` remains operational authority and the new inputs are offline-only | Real Genesis corpus projects the five input categories without missing/ambiguous facts; recursive structural closure; contradiction, runtime-state smuggling, explicit-absence, topology-reference, digest-mutation, and shuffled-input proofs | No renderer, assignment, AG2, publication, or capability work. Remaining executable-output and renderer gaps stay explicit for 5D-0B. Rollback: remove the new offline payload variants/projection and registry input declarations. No live models. |
+| **5D-0B1. Executable family and assignment contracts** — declare per-family dispositions, typed scope/selection/placeholder relations, narrow compiler assignment kinds, exact content-pinned output models, validator bindings, and literal emitted-versus-latent gap reporting | No production authority change: broad `AppBuildPlan` kinds remain production-only metadata and compiler contracts remain offline | Disposition/alias/scope exhaustiveness; typed relation ownership and missing-edge rejection; exact-model unknown-field/path rejection; schema-digest and semantic-identity binding; no selected greenfield preservation; production-unwired hygiene | No renderer callable, runnable bundle, AG2 adapter, evaluation/hosted field, or cutover. 5D-0B2 may enter only by binding deterministic renderers to these declared `render` families. Rollback removes B1 fields/models and retains 5D-0A inputs. No live models. |
 | **5. Authority cutover, strict outputs, persistence unification** — compiled models `extra="forbid"` by default; agents emit graph-node payloads validated against runtime models; graph + immutable artifact revision become the persistence spine; `BuilderArtifactStore` becomes a projection or typed view; `ApplicationPublication` CAS becomes publication authority | Agent-produced plan and four representations → one authored graph, derived binding/plan, rendered views, and one published graph/revision pair in a single cutover | Offline corpus regeneration equivalence; strictness report published **before** the flip; route/component/action closure; data-reference consumer tests through a test/development-only comparison window; fault injection at every graph/revision/publication persistence boundary proves publish-all-or-neither and idempotent retry | Retire generator YAML mirrors, `AppBuildPlan`, and `save_app_schema` parallel validators on proof. Truthfully advertise `semantic_taxonomy_v1` and `semantic_reference_contracts_v1` together only after the cutover proof. Rollback blocks bounded starts; the per-workflow test/development flag exists only until cutover completes, then is removed. No production dual-read/dual-authority mode. Live-model builds only after offline proof and only under ADR 0006 bounded journeys. |
 | **6. Refinement on the graph** — typed, content-identified `RefinementPatch`; checkpoint output schemas re-typed; affected set = graph query; recompile → validate → CAS-promote | Whole-file patching + glob safety → typed patches + registry regions | Patch property tests (apply+recompile == direct compile); duplicate retry/idempotency and patch-id/content-conflict tests; two-writer stale-base race matrix; promotion parity; failure-injected publication; rollback rehearsal through `ApplicationPublication` CAS | Retire the four glob taxonomies and `_stale_route` staleness substitution after parity proof. Rollback selects a prior consistent graph/revision closure. No live models beyond slice 5 policy. Uses ADR 0006 counters for repair/refinement starts when bounded. |
 | **7. Retirement** — remove obsolete schemas, glob taxonomies, aliases, converter paths, transitional adapters, comparison fixtures, and development flags | One semantic authority; one registry per concern | Repository hygiene guard extended to ban retired names (pattern: `scripts/production_readiness_gate.py`); full suite; generated-app acceptance | Deletions complete. Rollback: deployment rollback before deletion only; no dual-read shim reintroduced. No live-model change. ADR 0006 slice interleaving agreed before this point. |

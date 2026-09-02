@@ -6335,6 +6335,116 @@ models:
         - 'null'
         description: Optional summary message.
 
+  ModuleBackendImplementationOutput:
+    type: model
+    description: >
+      Exact reasoning-heavy backend implementation for one compiler-selected
+      module backend role. Paths are compiler-owned and cannot be added,
+      renamed, or deleted by this model.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - module_backend_implementation
+      module_id:
+        type: str
+        description: Canonical module identity supplied by the assignment.
+      backend_role:
+        type: literal
+        values:
+        - service
+        - repo
+        - policy
+        - schemas
+        description: Fixed backend role supplied by the registry family.
+      source:
+        type: str
+        description: UTF-8 source for the one compiler-owned backend path.
+
+  IntegrationAdapterImplementationOutput:
+    type: model
+    description: Exact source for one declared app-owned integration adapter.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - integration_adapter_implementation
+      integration_id:
+        type: str
+        description: Canonical integration identity supplied by the assignment.
+      adapter_area:
+        type: str
+        description: Closed adapter-area identity supplied by the semantic binding.
+      adapter_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned adapter path.
+
+  AppRouteExtensionImplementationOutput:
+    type: model
+    description: Exact source for one predeclared app route extension.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - app_route_extension_implementation
+      route_id:
+        type: str
+        description: Canonical route-extension identity supplied by the assignment.
+      route_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned route path.
+
+  CustomPageImplementationOutput:
+    type: model
+    description: Exact JSX source for one predeclared custom page.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - custom_page_implementation
+      page_id:
+        type: str
+        description: Canonical page identity supplied by the assignment.
+      component_source:
+        type: str
+        description: UTF-8 JSX source for the compiler-owned custom page path.
+
+  ModuleHelperImplementationOutput:
+    type: model
+    description: Exact source for one predeclared module-local helper.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - module_helper_implementation
+      module_id:
+        type: str
+        description: Canonical owning module identity supplied by the assignment.
+      helper_id:
+        type: str
+        description: Canonical helper identity supplied by the declaration.
+      helper_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned helper path.
+
+  ModuleAdminPageImplementationOutput:
+    type: model
+    description: Exact JSX source for one predeclared module admin page.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - module_admin_page_implementation
+      module_id:
+        type: str
+        description: Canonical owning module identity supplied by the assignment.
+      page_id:
+        type: str
+        description: Canonical related page identity supplied by the declaration.
+      component_source:
+        type: str
+        description: UTF-8 JSX source for the compiler-owned module admin path.
+
   IntegrationReadinessSummary:
     type: model
     fields:

@@ -544,11 +544,7 @@ def _load_integration_requirements(
     errors: list[str] = []
     for path in (
         "config/integrations.yaml",
-        "config/integrations.yml",
-        "config/integrations.json",
         "app/config/integrations.yaml",
-        "app/config/integrations.yml",
-        "app/config/integrations.json",
     ):
         raw = normalized_files.get(path)
         if raw is None:
@@ -556,7 +552,7 @@ def _load_integration_requirements(
         try:
             parsed = yaml.safe_load(raw) or {}
         except Exception as exc:
-            errors.append(f"{path}: integration contract must be valid YAML/JSON: {exc}")
+            errors.append(f"{path}: integration contract must be valid YAML: {exc}")
             continue
         if not isinstance(parsed, dict):
             errors.append(f"{path}: integration contract must be an object.")

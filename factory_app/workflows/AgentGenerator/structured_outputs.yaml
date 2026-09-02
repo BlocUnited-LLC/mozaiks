@@ -2202,6 +2202,72 @@ models:
         type: str
         description: Concise quality-gate message before review_workflow_ui_quality runs.
 
+  WorkflowParticipantImplementationOutput:
+    type: model
+    description: Exact agents.yaml implementation for one declared workflow.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_participant_implementation
+      workflow_id:
+        type: str
+        description: Canonical workflow identity supplied by the assignment.
+      agents_yaml:
+        type: str
+        description: UTF-8 agents.yaml content; topology remains compiler-owned.
+
+  WorkflowStructuredModelsOutput:
+    type: model
+    description: Exact structured_outputs.yaml implementation for one workflow.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_structured_models_implementation
+      workflow_id:
+        type: str
+        description: Canonical workflow identity supplied by the assignment.
+      structured_outputs_yaml:
+        type: str
+        description: UTF-8 structured_outputs.yaml content.
+
+  WorkflowToolImplementationOutput:
+    type: model
+    description: Exact Python source for one predeclared workflow tool.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_tool_implementation
+      workflow_id:
+        type: str
+        description: Canonical owning workflow identity supplied by the assignment.
+      tool_id:
+        type: str
+        description: Canonical tool identity supplied by the declaration.
+      tool_source:
+        type: str
+        description: UTF-8 source for the single compiler-owned tool path.
+
+  WorkflowUiImplementationOutput:
+    type: model
+    description: Exact JSX source for one predeclared workflow UI component.
+    fields:
+      assignment_kind:
+        type: literal
+        values:
+        - workflow_ui_implementation
+      workflow_id:
+        type: str
+        description: Canonical owning workflow identity supplied by the assignment.
+      component_id:
+        type: str
+        description: Canonical component identity supplied by the declaration.
+      component_source:
+        type: str
+        description: UTF-8 JSX source for the single compiler-owned UI path.
+
   WorkflowBundleBuilderOutput:
     type: model
     description: >

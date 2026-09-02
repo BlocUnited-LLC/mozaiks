@@ -93,6 +93,8 @@ def test_stale_schema_and_runtime_identity_injection_fail() -> None:
         for key, value in forged_document.items()
         if key not in {"assignment_id", "assignment_digest"}
     }
+    if not assignment.semantic_identity_bindings:
+        payload.pop("semantic_identity_bindings")
     forged_digest = stable_digest(payload)
     forged_document["assignment_digest"] = forged_digest
     forged_document["assignment_id"] = f"wa_{forged_digest[:24]}"

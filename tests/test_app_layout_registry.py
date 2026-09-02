@@ -12,6 +12,7 @@ from mozaiksai.core.runtime.app import paths as app_paths
 from mozaiksai.core.runtime.app.layout_registry import (
     SCHEMA_VERSION,
     AppLayoutRegistry,
+    ArtifactDisposition,
     ArtifactFamily,
     ArtifactKind,
     ConditionIdentifier,
@@ -50,6 +51,7 @@ def _minimal_family(template: str) -> ArtifactFamily:
         path_scope=PathScope.APP_BUNDLE_ROOT,
         path_template=template,
         materializer=MaterializerIdentifier.APP_GENERATOR,
+        disposition=ArtifactDisposition.RENDER,
         validator=ValidatorIdentifier.APP_PATHS,
         runtime_consumer=RuntimeConsumerIdentifier.PLATFORM_HOST,
         security_class=SecurityClass.INTERNAL_CONTRACT,
@@ -325,7 +327,10 @@ class TestControlPlaneAndManagedCapabilityBoundaries:
         # capabilities; only the generated client is capability-conditioned.
         assert integrations.family.requirement is Requirement.CONDITIONAL
         assert client.family.requirement is Requirement.CONDITIONAL
-        assert integrations.family.condition is ConditionIdentifier.WHEN_APP_DECLARED
+        assert (
+            integrations.family.condition
+            is ConditionIdentifier.WHEN_INTEGRATIONS_SELECTED
+        )
         assert client.family.condition is ConditionIdentifier.WHEN_MANAGED_CAPABILITY_SELECTED
 
     def test_unselected_managed_capabilities_do_not_become_required_core(self) -> None:

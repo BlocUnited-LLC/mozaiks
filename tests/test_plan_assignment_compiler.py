@@ -36,7 +36,7 @@ def _fixture():
     unit = next(
         item
         for item in plan.units
-        if item.disposition is PlanDisposition.AGENT_AUTHOR and not item.depends_on_units
+        if item.disposition is PlanDisposition.AGENT_AUTHOR
     )
     resolver = SemanticReferenceResolver()
     for payload in payloads:
@@ -65,10 +65,18 @@ def _fixture():
         )
         for source in unit.sources
     )
+    dependency_refs = tuple(
+        PlanUnitRef(
+            compilation_plan_ref=plan_ref,
+            unit_id=dependency_id,
+            unit_digest=plan.unit(dependency_id).unit_digest,
+        )
+        for dependency_id in unit.depends_on_units
+    )
     spec = ApprovedAssignmentSpec(
         plan_unit_ref=unit_ref,
         assignment_kind=unit.assignment_kind,
-        dependency_context_refs=source_refs,
+        dependency_context_refs=(*source_refs, *dependency_refs),
         required_structured_output_ref=unit.required_structured_output_ref,
         required_validators=(unit.validator,),
         assignment_retry_limit=0,

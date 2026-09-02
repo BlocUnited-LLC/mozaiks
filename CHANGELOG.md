@@ -38,6 +38,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Executable application-family contracts (ADR 0007 Slice 5D-0B1)**:
+  the offline compiler now declares truthful per-family dispositions,
+  mutually exclusive application/module/workflow path scopes, typed artifact
+  and integration implementation relations, narrow family-specific assignment
+  kinds, schema-pinned closed outputs, semantic identity bindings, and exact
+  validator ownership. `CompilationPlan.gaps` remains the literal emitted gap
+  set; latent diagnostics are separate. The canonical integration path is now
+  `config/integrations.yaml`. No renderer, runnable bundle, AG2 execution,
+  production cutover, evaluation, or hosted-product authority was added;
+  `AppBuildPlan` remains the live planning authority.
+
 - **Typed application and workflow semantic input closure (ADR 0007 Slice
   5D-0A)**: graph-v2 now has closed application, provider-neutral auth,
   application-integration, and logical workflow-topology payloads plus finite

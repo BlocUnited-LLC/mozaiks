@@ -50,6 +50,11 @@ APP_GENERATOR_CONFIG = yaml.safe_load(
         encoding="utf-8"
     )
 )
+AGENT_GENERATOR_CONFIG = yaml.safe_load(
+    (ROOT / "factory_app/workflows/AgentGenerator/structured_outputs.yaml").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 class _RegistryOverride:
@@ -170,7 +175,7 @@ def test_structured_output_schema_identity_invalidates_agent_author_reuse() -> N
             if unit.disposition is PlanDisposition.AGENT_AUTHOR
             and unit.required_structured_output_ref is not None
             and unit.required_structured_output_ref.model_id
-            == "ConfigMiddlewareOutput"
+            == "ModuleHelperImplementationOutput"
         )
 
     base = _derive(APP_GENERATOR_CONFIG)
@@ -202,7 +207,7 @@ def test_structured_output_schema_identity_invalidates_agent_author_reuse() -> N
     ).reusable
 
     changed = copy.deepcopy(APP_GENERATOR_CONFIG)
-    changed["models"]["ConfigMiddlewareOutput"]["fields"]["agent_message"][
+    changed["models"]["ModuleHelperImplementationOutput"]["fields"]["helper_source"][
         "description"
     ] += " Authoritative schema mutation."
     changed_plan = _derive(changed)
@@ -221,15 +226,15 @@ def test_structured_output_schema_identity_invalidates_agent_author_reuse() -> N
         (
             {
                 "assignment_kinds": (
-                    AssignmentKind.MODULE_CONTRACT,
-                    AssignmentKind.PAGE_BUNDLE,
+                    AssignmentKind.MODULE_HELPER_IMPLEMENTATION,
+                    AssignmentKind.CUSTOM_PAGE_IMPLEMENTATION,
                 )
             },
             PlanGapCode.ASSIGNMENT_AMBIGUOUS,
         ),
         ({"validator": ValidatorIdentifier.NONE}, PlanGapCode.VALIDATOR_UNDECLARED),
         (
-            {"assignment_kinds": (AssignmentKind.AGENT_BACKEND_INTEGRATION,)},
+            {"assignment_kinds": (AssignmentKind.CUSTOM_PAGE_IMPLEMENTATION,)},
             PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED,
         ),
     ],
@@ -238,29 +243,31 @@ def test_agent_author_metadata_failures_are_typed_gaps(
     updates: dict[str, object], expected: PlanGapCode
 ) -> None:
     plan = _derive_with_override(
-        path_template="modules/{module_id}/module.yaml", **updates
+        path_template="modules/{module_id}/backend/{helper_id}.py", **updates
     )
     assert any(
-        gap.code is expected and gap.path_template == "modules/{module_id}/module.yaml"
+        gap.code is expected
+        and gap.path_template == "modules/{module_id}/backend/{helper_id}.py"
         for gap in plan.gaps
     )
     assert not any(
         unit.disposition is PlanDisposition.AGENT_AUTHOR
         and unit.outputs
-        and unit.outputs[0].path.endswith("/module.yaml")
+        and unit.outputs[0].path.endswith("/report_hook.py")
         for unit in plan.units
     )
 
 
-def test_incomplete_source_footprint_is_typed_gap() -> None:
-    plan = _derive_with_override(
-        path_template="app/app.json",
-        assignment_kinds=(AssignmentKind.SUBSCRIPTION_CONFIG,),
-        semantic_input_kinds=(),
+def test_missing_output_contract_config_is_typed_gap() -> None:
+    graph, payloads = _corpus_graph()
+    plan = derive_compilation_plan(
+        graph=graph,
+        payloads=payloads,
+        registry=_registry(),
     )
     assert any(
-        gap.code is PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE
-        and gap.path_template == "app/app.json"
+        gap.code is PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED
+        and gap.path_template == "modules/{module_id}/backend/{helper_id}.py"
         for gap in plan.gaps
     )
 
@@ -279,10 +286,8 @@ def test_disposition_precedence_never_promotes_other_authorities() -> None:
         for unit in plan.units
         if unit.family_kind == ArtifactKind.APP_UI_PAGE_SCHEMA.value
     )
-    assert all(
-        unit.disposition is PlanDisposition.PRESERVE_UNOWNED
-        for unit in plan.units
-        if unit.materializer in {"human_authored", "preserved_opaque"}
+    assert not any(
+        unit.disposition is PlanDisposition.PRESERVE_UNOWNED for unit in plan.units
     )
     assert all(
         unit.disposition is PlanDisposition.EXTERNAL_HANDOFF
@@ -347,7 +352,7 @@ def test_plan_unit_ref_rejects_wrong_unit_and_runtime_shaped_identity() -> None:
 def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
     ref = build_structured_output_contract_ref(
         workflow_name="AppGenerator",
-        model_id="ConfigMiddlewareOutput",
+        model_id="ModuleHelperImplementationOutput",
         configs={"AppGenerator": APP_GENERATOR_CONFIG},
     )
     assert resolve_structured_output_contract_ref(
@@ -355,14 +360,14 @@ def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
     )
 
     changed = copy.deepcopy(APP_GENERATOR_CONFIG)
-    changed["models"]["ConfigMiddlewareOutput"]["fields"]["mode"]["description"] += (
+    changed["models"]["ModuleHelperImplementationOutput"]["fields"]["helper_source"]["description"] += (
         " Canonical mutation."
     )
     with pytest.raises(ValueError, match="schema digest mismatch"):
         resolve_structured_output_contract_ref(ref, configs={"AppGenerator": changed})
     changed_ref = build_structured_output_contract_ref(
         workflow_name="AppGenerator",
-        model_id="ConfigMiddlewareOutput",
+        model_id="ModuleHelperImplementationOutput",
         configs={"AppGenerator": changed},
     )
     assert changed_ref.schema_digest != ref.schema_digest
@@ -376,7 +381,7 @@ def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
     with pytest.raises(ValueError, match="unknown structured-output workflow"):
         build_structured_output_contract_ref(
             workflow_name="UnknownWorkflow",
-            model_id="ConfigMiddlewareOutput",
+            model_id="ModuleHelperImplementationOutput",
             configs={"AppGenerator": APP_GENERATOR_CONFIG},
         )
     with pytest.raises(ValidationError, match="canonical workflow/model identifier"):
@@ -389,20 +394,24 @@ def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
 
 def test_locator_contains_only_proven_contracts() -> None:
     assert set(ASSIGNMENT_CONTRACT_DESCRIPTORS) == {
-        AssignmentKind.SUBSCRIPTION_CONFIG,
-        AssignmentKind.SERVICE_FOUNDATION,
-        AssignmentKind.MODULE_CONTRACT,
-        AssignmentKind.PERSISTENCE_CONTRACT,
-        AssignmentKind.DATA_MIGRATIONS,
-        AssignmentKind.DATA_MODELS,
-        AssignmentKind.BUSINESS_SERVICES,
-        AssignmentKind.REFINEMENT_HARNESS,
-        AssignmentKind.API_SURFACE,
-        AssignmentKind.PAGE_BUNDLE,
+        AssignmentKind.MODULE_BACKEND_IMPLEMENTATION,
+        AssignmentKind.INTEGRATION_ADAPTER_IMPLEMENTATION,
+        AssignmentKind.APP_ROUTE_EXTENSION_IMPLEMENTATION,
+        AssignmentKind.CUSTOM_PAGE_IMPLEMENTATION,
+        AssignmentKind.WORKFLOW_PARTICIPANT_IMPLEMENTATION,
+        AssignmentKind.WORKFLOW_STRUCTURED_MODELS_IMPLEMENTATION,
+        AssignmentKind.WORKFLOW_TOOL_IMPLEMENTATION,
+        AssignmentKind.WORKFLOW_UI_IMPLEMENTATION,
+        AssignmentKind.MODULE_HELPER_IMPLEMENTATION,
+        AssignmentKind.MODULE_ADMIN_PAGE_IMPLEMENTATION,
     }
     assert all(
-        descriptor.workflow_name == "AppGenerator"
-        and descriptor.structured_output_model_id in APP_GENERATOR_CONFIG["models"]
+        descriptor.structured_output_model_id
+        in (
+            APP_GENERATOR_CONFIG["models"]
+            if descriptor.workflow_name == "AppGenerator"
+            else AGENT_GENERATOR_CONFIG["models"]
+        )
         for descriptor in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()
     )
 
@@ -439,7 +448,8 @@ def test_slice_5a_substrate_is_production_unwired() -> None:
         "mozaiksai/core/semantics/resolver.py",
         "mozaiksai/core/semantics/refs.py",
         "mozaiksai/core/workflow/plan_assignment_compiler.py",
-        "mozaiksai/core/workflow/assignment_artifacts.py",
+            "mozaiksai/core/workflow/assignment_artifacts.py",
+            "mozaiksai/core/runtime/app/layout_registry.py",
     }
     tokens = ("AGENT_AUTHOR", "PlanUnitRef", "ApprovedAssignmentSpec", "compile_approved_plan")
     offenders: list[str] = []

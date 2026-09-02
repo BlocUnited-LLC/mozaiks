@@ -17,7 +17,7 @@ from mozaiksai.core.semantics.compilation_plan import CompilationPlan, PlanDispo
 from mozaiksai.core.semantics.refs import PlanUnitRef, SemanticPayloadRef
 from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
 
-from .assignment_kinds import AssignmentKind
+from .assignment_kinds import AssignmentKind, assignment_contract_descriptor
 from .structured_output_contracts import (
     StructuredOutputContractRef,
     resolve_structured_output_contract_ref,
@@ -100,6 +100,7 @@ class CompiledAssignment(_FrozenModel):
     dependency_context_refs: tuple[DependencyContextRef, ...]
     required_structured_output_ref: StructuredOutputContractRef
     required_validators: tuple[ValidatorIdentifier, ...]
+    semantic_identity_bindings: tuple[tuple[str, str], ...] = ()
     assignment_retry_limit: int
     base_revision_digest: str | None
     assignment_digest: str
@@ -109,6 +110,8 @@ class CompiledAssignment(_FrozenModel):
         payload = self.model_dump(
             mode="json", exclude={"assignment_id", "assignment_digest"}
         )
+        if not self.semantic_identity_bindings:
+            payload.pop("semantic_identity_bindings")
         expected = stable_digest(payload)
         if self.assignment_digest != expected:
             raise ValueError("assignment_digest does not match assignment content")
@@ -183,6 +186,19 @@ def compile_approved_plan(
         resolve_structured_output_contract_ref(
             spec.required_structured_output_ref, configs=structured_output_configs
         )
+        descriptor = assignment_contract_descriptor(spec.assignment_kind)
+        if descriptor is None:
+            raise ValueError("assignment kind has no executable output contract")
+        unit_bindings = dict(unit.placeholder_values)
+        try:
+            semantic_identity_bindings = tuple(
+                (model_field, unit_bindings[binding_name])
+                for model_field, binding_name in descriptor.identity_bindings
+            )
+        except KeyError as exc:
+            raise ValueError(
+                f"plan unit lacks required semantic identity binding {exc.args[0]!r}"
+            ) from exc
 
         depends_on_refs = tuple(sorted(unit_refs, key=lambda ref: ref.unit_id))
         payload: dict[str, Any] = {
@@ -197,6 +213,7 @@ def compile_approved_plan(
                 mode="json"
             ),
             "required_validators": [item.value for item in spec.required_validators],
+            "semantic_identity_bindings": [list(item) for item in semantic_identity_bindings],
             "assignment_retry_limit": spec.assignment_retry_limit,
             "base_revision_digest": spec.base_revision_digest,
         }

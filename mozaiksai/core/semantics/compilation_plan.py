@@ -50,7 +50,12 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from mozaiksai.core.runtime.app.layout_registry import ValidatorIdentifier
+from mozaiksai.core.runtime.app.layout_registry import (
+    ArtifactDisposition,
+    ConditionIdentifier,
+    PathScope,
+    ValidatorIdentifier,
+)
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.graph import (
     SemanticEdgeKind,
@@ -58,8 +63,18 @@ from mozaiksai.core.semantics.graph import (
     SemanticNodeKind,
 )
 from mozaiksai.core.semantics.payloads import (
+    ApplicationPayload,
+    ArtifactDeclarationPayload,
+    ArtifactDeclarationRole,
+    IntegrationImplementationKind,
+    IntegrationPayload,
+    LockfileKind,
+    ModulePayload,
+    OptionalFamilyKind,
+    OptionalFamilySelectionStatus,
     PagePayload,
     SemanticPayloadBase,
+    WorkflowPayload,
     parse_semantic_payload,
     validate_semantic_graph_v2_payload_closure,
 )
@@ -71,6 +86,7 @@ from mozaiksai.core.semantics.refs import (
     validate_node_id_grammar,
 )
 from mozaiksai.core.workflow.assignment_kinds import (
+    COMPILER_ASSIGNMENT_KINDS,
     AssignmentKind,
     assignment_contract_descriptor,
 )
@@ -85,7 +101,7 @@ COMPILATION_PLAN_SCHEMA_VERSION: Literal["mozaiks.compilation_plan.v1"] = (
 
 _PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
+_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _UNIT_SEGMENT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _SCHEMA_VERSION_RE = re.compile(r"^[a-z][a-z0-9_.]*$")
 
@@ -146,6 +162,7 @@ class RegistryFamilyRow(SemanticsModel):
     path_scope: str
     path_template: str
     materializer: str
+    disposition: ArtifactDisposition
     assignment_kinds: tuple[AssignmentKind, ...]
     validator: ValidatorIdentifier
     dependency_families: tuple[str, ...] = Field(default_factory=tuple)
@@ -197,6 +214,7 @@ class RegistryFamilyRow(SemanticsModel):
             "path_scope": self.path_scope,
             "path_template": self.path_template,
             "materializer": self.materializer,
+            "disposition": self.disposition.value,
             "assignment_kinds": [kind.value for kind in self.assignment_kinds],
             "validator": self.validator.value,
             "dependency_families": list(self.dependency_families),
@@ -295,6 +313,7 @@ def snapshot_layout_registry(registry: Any) -> LayoutRegistrySnapshot:
                 path_scope=getattr(family.path_scope, "value", family.path_scope),
                 path_template=family.path_template,
                 materializer=getattr(family.materializer, "value", family.materializer),
+                disposition=getattr(family.disposition, "value", family.disposition),
                 assignment_kinds=tuple(
                     getattr(item, "value", item) for item in family.assignment_kinds
                 ),
@@ -344,6 +363,35 @@ class PlanDisposition(StrEnum):
     INPUT_ONLY = "input_only"
     EXTERNAL_HANDOFF = "external_handoff"
     INAPPLICABLE = "inapplicable"
+
+
+class CompilationScopeSelection(SemanticsModel):
+    """Typed physical-scope choice for mutually exclusive registry variants."""
+
+    app_manifest_scope: PathScope = PathScope.APP_BUNDLE_ROOT
+    module_scope: PathScope = PathScope.APP_BUNDLE_ROOT
+    workflow_manifest_scope: PathScope = PathScope.WORKFLOW_RELATIVE
+
+    @model_validator(mode="after")
+    def _closed_scopes(self) -> CompilationScopeSelection:
+        if self.app_manifest_scope not in {
+            PathScope.APP_BUNDLE_ROOT,
+            PathScope.WORKSPACE_ROOT,
+        }:
+            raise ValueError("app_manifest_scope must select app or workspace root")
+        if self.module_scope not in {
+            PathScope.APP_BUNDLE_ROOT,
+            PathScope.MODULE_RELATIVE,
+        }:
+            raise ValueError("module_scope must select app or module-relative root")
+        if self.workflow_manifest_scope not in {
+            PathScope.WORKSPACE_ROOT,
+            PathScope.WORKFLOW_RELATIVE,
+        }:
+            raise ValueError(
+                "workflow_manifest_scope must select workspace or workflow-relative root"
+            )
+        return self
 
 
 class PlanSourceScope(StrEnum):
@@ -406,6 +454,17 @@ class PlanGap(SemanticsModel):
         if value is None:
             return None
         return _identifier(value, field_name="subject")
+
+
+class CompilationGapReport(SemanticsModel):
+    """Truthful diagnostic partition; ``plan.gaps`` are emitted blockers only."""
+
+    emitted_gaps: tuple[PlanGap, ...]
+    latent_gaps: tuple[PlanGap, ...] = Field(default_factory=tuple)
+
+    @property
+    def composite_diagnostics(self) -> tuple[PlanGap, ...]:
+        return self.emitted_gaps + self.latent_gaps
 
 
 class PlanSource(SemanticsModel):
@@ -669,6 +728,7 @@ class CompilationPlan(SemanticsModel):
     graph_version: int = Field(ge=1, strict=True)
     scope: ExecutionAccessScopeRef
     graph_digest: str
+    scope_selection: CompilationScopeSelection
     registry_schema_version: str
     registry_digest: str
     units: tuple[FamilyInstancePlan, ...]
@@ -795,6 +855,7 @@ class CompilationPlan(SemanticsModel):
             "graph_version": self.graph_version,
             "scope": self.scope.model_dump(mode="json"),
             "graph_digest": self.graph_digest,
+            "scope_selection": self.scope_selection.model_dump(mode="json"),
             "registry_schema_version": self.registry_schema_version,
             "registry_digest": self.registry_digest,
             "units": [unit.identity_payload for unit in self.units],
@@ -809,6 +870,10 @@ class CompilationPlan(SemanticsModel):
             if candidate.unit_id == unit_id:
                 return candidate
         raise CompilationPlanError(f"unknown plan unit {unit_id!r}")
+
+    def gap_report(self) -> CompilationGapReport:
+        """Return literal emitted blockers; no hypothetical blocker is counted."""
+        return CompilationGapReport(emitted_gaps=self.gaps)
 
 
 # ---------------------------------------------------------------------------
@@ -825,17 +890,6 @@ _DERIVABLE_CONDITIONS: dict[str, tuple[SemanticNodeKind, ...]] = {
     "when_subscriptions_required": (SemanticNodeKind.PLAN,),
     "when_deployment_export_requested": (SemanticNodeKind.DEPLOYMENT_TARGET,),
 }
-
-_BINDING_CONDITIONS: frozenset[str] = frozenset(
-    {
-        "when_auth_enabled",
-        "when_custom_route_declared",
-        "when_refinement_harness_required",
-        "when_managed_capability_selected",
-        "when_generated_staging_selected",
-        "when_extension_selected",
-    }
-)
 
 _INSTANCE_PLACEHOLDERS: dict[str, SemanticNodeKind] = {
     "module_id": SemanticNodeKind.MODULE,
@@ -867,11 +921,6 @@ _FAMILY_SOURCE_KINDS: dict[str, tuple[SemanticNodeKind, ...]] = {
     "when_module_declared": (SemanticNodeKind.MODULE,),
 }
 
-_AGENT_AUTHORED_MATERIALIZERS = frozenset(
-    {"app_generator", "module_contract_executor", "workflow_generator"}
-)
-
-
 def _cold_validate_inputs(
     graph: SemanticGraphV2, payloads: Iterable[SemanticPayloadBase]
 ) -> tuple[SemanticGraphV2, dict[str, SemanticPayloadBase]]:
@@ -897,6 +946,7 @@ def derive_compilation_plan(
     graph: SemanticGraphV2,
     payloads: Iterable[SemanticPayloadBase],
     registry: Any,
+    scope_selection: CompilationScopeSelection = CompilationScopeSelection(),
     structured_output_configs: Mapping[str, Any] | None = None,
 ) -> CompilationPlan:
     """Derive the single aggregate plan for one immutable graph identity.
@@ -908,6 +958,9 @@ def derive_compilation_plan(
     """
     verified_graph, payload_by_node = _cold_validate_inputs(graph, payloads)
     output_configs = dict(structured_output_configs or {})
+    verified_scope_selection = CompilationScopeSelection.model_validate(
+        scope_selection.model_dump(mode="json")
+    )
     snapshot = (
         registry
         if isinstance(registry, LayoutRegistrySnapshot)
@@ -931,6 +984,225 @@ def derive_compilation_plan(
         return tuple(collected)
 
     node_by_id = {node.node_id: node for node in verified_graph.nodes}
+    application_payload = next(
+        (
+            payload
+            for payload in payload_by_node.values()
+            if isinstance(payload, ApplicationPayload)
+        ),
+        None,
+    )
+    declaration_payloads = tuple(
+        payload
+        for payload in payload_by_node.values()
+        if isinstance(payload, ArtifactDeclarationPayload)
+    )
+
+    def _optional_family_status(
+        family: OptionalFamilyKind,
+    ) -> OptionalFamilySelectionStatus | None:
+        if application_payload is None:
+            return None
+        return next(
+            item.status
+            for item in application_payload.optional_families
+            if item.family is family
+        )
+
+    condition_role = {
+        "when_migration_declared": ArtifactDeclarationRole.DATA_MIGRATION,
+        "when_app_route_extension_declared": ArtifactDeclarationRole.APP_ROUTE_EXTENSION,
+        "when_custom_route_declared": ArtifactDeclarationRole.CUSTOM_PAGE,
+        "when_module_helper_declared": ArtifactDeclarationRole.MODULE_HELPER,
+        "when_workflow_tool_declared": ArtifactDeclarationRole.WORKFLOW_TOOL,
+        "when_workflow_component_declared": ArtifactDeclarationRole.WORKFLOW_COMPONENT,
+        "when_module_admin_page_declared": ArtifactDeclarationRole.MODULE_ADMIN_PAGE,
+    }
+
+    def _role_evidence(role: ArtifactDeclarationRole) -> bool | None:
+        owners = {
+            payload.owner_node_id
+            for payload in declaration_payloads
+            if payload.artifact_role is role
+        }
+        eligible = tuple(
+            payload
+            for payload in payload_by_node.values()
+            if role in getattr(payload, "closed_artifact_roles", ())
+        )
+        if not eligible:
+            return None
+        return bool(owners)
+
+    def _condition_state(row: RegistryFamilyRow) -> bool | None:
+        condition = row.condition
+        if condition == "always":
+            return True
+        if condition == "when_app_declared":
+            return application_payload is not None
+        if condition == "when_module_declared":
+            return bool(nodes_by_kind.get(SemanticNodeKind.MODULE))
+        if condition == "when_page_declared":
+            return bool(nodes_by_kind.get(SemanticNodeKind.PAGE))
+        if condition == "when_workflow_declared":
+            return bool(nodes_by_kind.get(SemanticNodeKind.WORKFLOW))
+        if condition == "when_data_contract_required":
+            status = _optional_family_status(OptionalFamilyKind.DATA)
+            return None if status is None else status is OptionalFamilySelectionStatus.SELECTED
+        if condition == "when_subscriptions_required":
+            return bool(nodes_by_kind.get(SemanticNodeKind.PLAN))
+        if condition == "when_deployment_export_requested":
+            return bool(nodes_by_kind.get(SemanticNodeKind.DEPLOYMENT_TARGET))
+        optional_conditions = {
+            "when_auth_enabled": OptionalFamilyKind.AUTH,
+            "when_integrations_selected": OptionalFamilyKind.INTEGRATIONS,
+            "when_theme_selected": OptionalFamilyKind.THEME,
+            "when_shell_selected": OptionalFamilyKind.SHELL,
+            "when_assets_selected": OptionalFamilyKind.ASSETS,
+        }
+        if condition in optional_conditions:
+            status = _optional_family_status(optional_conditions[condition])
+            return None if status is None else status is OptionalFamilySelectionStatus.SELECTED
+        if condition == "when_runtime_support_selected":
+            if application_payload is None or application_payload.runtime_support is None:
+                return None
+            return True
+        if condition == "when_refinement_harness_required":
+            if application_payload is None or application_payload.refinement_harness is None:
+                return None
+            return (
+                application_payload.refinement_harness.status
+                is OptionalFamilySelectionStatus.SELECTED
+            )
+        if condition in condition_role:
+            role = condition_role[condition]
+            if role is ArtifactDeclarationRole.CUSTOM_PAGE:
+                status = _optional_family_status(OptionalFamilyKind.CUSTOM_ROUTES)
+                if status is not OptionalFamilySelectionStatus.SELECTED:
+                    return None if status is None else False
+            return _role_evidence(role)
+        if condition in {
+            "when_managed_capability_selected",
+            "when_app_owned_integration_selected",
+        }:
+            status = _optional_family_status(OptionalFamilyKind.INTEGRATIONS)
+            if status is not OptionalFamilySelectionStatus.SELECTED:
+                return None if status is None else False
+            integrations = tuple(
+                payload
+                for payload in payload_by_node.values()
+                if isinstance(payload, IntegrationPayload)
+            )
+            if any(payload.implementation is None for payload in integrations):
+                return None
+            expected = (
+                IntegrationImplementationKind.MANAGED_CAPABILITY
+                if condition == "when_managed_capability_selected"
+                else IntegrationImplementationKind.APP_OWNED_ADAPTER
+            )
+            return any(
+                payload.implementation is not None
+                and payload.implementation.implementation_kind is expected
+                for payload in integrations
+            )
+        if condition == "when_extension_selected":
+            return True
+        if condition == "when_generated_staging_selected":
+            return True
+        return None
+
+    def _root_support_selected(path: str) -> bool:
+        assert application_payload is not None
+        selection = application_payload.runtime_support
+        assert selection is not None
+        selected = {
+            "__init__.py": selection.python_runtime,
+            "requirements.txt": selection.requirements,
+            "pyproject.toml": selection.pyproject,
+            "index.html": selection.node_frontend,
+            "package.json": selection.node_frontend,
+            "package-lock.json": selection.lockfile is LockfileKind.PACKAGE_LOCK,
+            "pnpm-lock.yaml": selection.lockfile is LockfileKind.PNPM_LOCK,
+            "yarn.lock": selection.lockfile is LockfileKind.YARN_LOCK,
+            "tsconfig.json": selection.typescript,
+            "vite.config.js": selection.vite and not selection.typescript,
+            "vite.config.ts": selection.vite and selection.typescript,
+        }
+        return selected[path]
+
+    def _special_instances(
+        row: RegistryFamilyRow,
+    ) -> tuple[tuple[tuple[tuple[str, str], ...], str], ...] | None:
+        role = condition_role.get(row.condition)
+        if row.kind == "app_refinement_harness" and "{pack_id}" in row.path_template:
+            role = ArtifactDeclarationRole.REFINEMENT_PROMPT_PACK
+        if role is not None:
+            instances: list[tuple[tuple[tuple[str, str], ...], str]] = []
+            for declaration in declaration_payloads:
+                if declaration.artifact_role is not role:
+                    continue
+                owner = payload_by_node[declaration.owner_node_id]
+                values: dict[str, str] = {}
+                if role is ArtifactDeclarationRole.DATA_MIGRATION:
+                    values["migration_id"] = declaration.declaration_id
+                elif role is ArtifactDeclarationRole.APP_ROUTE_EXTENSION:
+                    values["pack_id"] = declaration.declaration_id
+                elif role is ArtifactDeclarationRole.CUSTOM_PAGE:
+                    assert declaration.related_node_id is not None
+                    page = payload_by_node[declaration.related_node_id]
+                    assert isinstance(page, PagePayload)
+                    values["page_id"] = page.page_id
+                elif role is ArtifactDeclarationRole.MODULE_HELPER:
+                    assert isinstance(owner, ModulePayload)
+                    values.update(
+                        module_id=owner.module_id,
+                        helper_id=declaration.declaration_id,
+                    )
+                elif role is ArtifactDeclarationRole.WORKFLOW_TOOL:
+                    assert isinstance(owner, WorkflowPayload)
+                    values.update(
+                        workflow_id=owner.workflow_id,
+                        tool_id=declaration.declaration_id,
+                    )
+                elif role is ArtifactDeclarationRole.WORKFLOW_COMPONENT:
+                    assert isinstance(owner, WorkflowPayload)
+                    values.update(
+                        workflow_id=owner.workflow_id,
+                        component_id=declaration.declaration_id,
+                    )
+                elif role is ArtifactDeclarationRole.MODULE_ADMIN_PAGE:
+                    assert isinstance(owner, ModulePayload)
+                    assert declaration.related_node_id is not None
+                    page = payload_by_node[declaration.related_node_id]
+                    assert isinstance(page, PagePayload)
+                    values.update(module_id=owner.module_id, page_id=page.page_id)
+                elif role is ArtifactDeclarationRole.REFINEMENT_PROMPT_PACK:
+                    values["pack_id"] = declaration.declaration_id
+                instances.append((tuple(sorted(values.items())), declaration.node_id))
+            return tuple(sorted(instances))
+
+        if row.condition in {
+            "when_app_owned_integration_selected",
+            "when_managed_capability_selected",
+        }:
+            expected = (
+                IntegrationImplementationKind.APP_OWNED_ADAPTER
+                if row.condition == "when_app_owned_integration_selected"
+                else IntegrationImplementationKind.MANAGED_CAPABILITY
+            )
+            instances = []
+            for integration in payload_by_node.values():
+                if not isinstance(integration, IntegrationPayload):
+                    continue
+                binding = integration.implementation
+                if binding is None or binding.implementation_kind is not expected:
+                    continue
+                values = {"pack_id": integration.integration_id}
+                if binding.adapter_area is not None:
+                    values["adapter_area"] = binding.adapter_area.value
+                instances.append((tuple(sorted(values.items())), integration.node_id))
+            return tuple(sorted(instances))
+        return None
 
     def _renderer_footprint(
         row: RegistryFamilyRow, *, root_node_id: str | None = None
@@ -1078,6 +1350,30 @@ def derive_compilation_plan(
         row_digest = row.row_digest
         placeholders = tuple(_PLACEHOLDER_RE.findall(row.path_template))
 
+        selected_scope: PathScope | None = None
+        if row.kind == "app_manifest":
+            selected_scope = verified_scope_selection.app_manifest_scope
+        elif row.owner == "module" and row.path_scope in {
+            PathScope.APP_BUNDLE_ROOT.value,
+            PathScope.MODULE_RELATIVE.value,
+        }:
+            selected_scope = verified_scope_selection.module_scope
+        elif row.kind == "workflow_manifest":
+            selected_scope = verified_scope_selection.workflow_manifest_scope
+        if selected_scope is not None and row.path_scope != selected_scope.value:
+            _add_unit(
+                FamilyInstancePlan(
+                    unit_id=f"{row.kind}/scope_inactive/{row_digest[:12]}",
+                    family_kind=row.kind,
+                    family_identity_digest=row_digest,
+                    disposition=PlanDisposition.INAPPLICABLE,
+                    source_scope=PlanSourceScope.DECLARED,
+                    materializer=row.materializer,
+                    validator=row.validator,
+                )
+            )
+            continue
+
         if row.requirement == "prohibited":
             _add_unit(
                 FamilyInstancePlan(
@@ -1092,50 +1388,22 @@ def derive_compilation_plan(
             )
             continue
 
-        if row.condition in _BINDING_CONDITIONS:
-            _gap(row, PlanGapCode.BINDING_CONDITION_DEFERRED, subject=row.condition)
-            continue
-
-        if row.path_scope == "generated_staging":
-            _gap(row, PlanGapCode.STAGING_TRANSPORT_EXCLUDED)
-            continue
-
-        trigger_kinds = _DERIVABLE_CONDITIONS.get(row.condition)
-        if trigger_kinds is None:
-            _gap(row, PlanGapCode.CONDITION_UNDERIVABLE, subject=row.condition)
-            continue
-
-        bindable = {name for name in placeholders if name in _INSTANCE_PLACEHOLDERS}
-        unbindable = [name for name in placeholders if name not in _INSTANCE_PLACEHOLDERS]
-        scope_implied = _SCOPE_IMPLIED_PLACEHOLDER.get(row.path_scope)
-        if scope_implied is not None:
-            # The scope root is itself an instance: the implied placeholder
-            # joins the binding set even when the template does not spell it.
-            bindable.add(scope_implied)
-        if unbindable:
-            _gap(
-                row,
-                PlanGapCode.PLACEHOLDER_UNDERIVABLE,
-                subject="__".join(sorted(set(unbindable))),
+        condition_state = _condition_state(row)
+        if condition_state is None:
+            known_conditions = {condition.value for condition in ConditionIdentifier}
+            code = (
+                PlanGapCode.BINDING_CONDITION_DEFERRED
+                if row.condition in known_conditions
+                else PlanGapCode.CONDITION_UNDERIVABLE
             )
+            _gap(row, code, subject=row.condition)
             continue
-        if len(bindable) > 1:
-            # Joint instantiation across two node kinds requires a typed graph
-            # relationship this slice cannot prove; never invent one.
-            _gap(
-                row,
-                PlanGapCode.PLACEHOLDER_RELATIONSHIP_UNPROVABLE,
-                subject="__".join(sorted(bindable)),
-            )
-            continue
-
-        condition_met = not trigger_kinds or any(
-            nodes_by_kind.get(kind) for kind in trigger_kinds
-        )
-        if not condition_met:
+        if row.kind == "app_root_support" and condition_state:
+            condition_state = _root_support_selected(row.path_template)
+        if not condition_state:
             _add_unit(
                 FamilyInstancePlan(
-                    unit_id=f"{row.kind}/{row_digest[:12]}",
+                    unit_id=f"{row.kind}/inactive/{row_digest[:12]}",
                     family_kind=row.kind,
                     family_identity_digest=row_digest,
                     disposition=PlanDisposition.INAPPLICABLE,
@@ -1146,27 +1414,58 @@ def derive_compilation_plan(
             )
             continue
 
+        trigger_kinds = _DERIVABLE_CONDITIONS.get(row.condition, ())
+
+        special_instances = _special_instances(row)
+        bindable = {name for name in placeholders if name in _INSTANCE_PLACEHOLDERS}
+        unbindable = [name for name in placeholders if name not in _INSTANCE_PLACEHOLDERS]
+        scope_implied = _SCOPE_IMPLIED_PLACEHOLDER.get(row.path_scope)
+        if scope_implied is not None:
+            # The scope root is itself an instance: the implied placeholder
+            # joins the binding set even when the template does not spell it.
+            bindable.add(scope_implied)
+        if special_instances is None and unbindable:
+            _gap(
+                row,
+                PlanGapCode.PLACEHOLDER_UNDERIVABLE,
+                subject="__".join(sorted(set(unbindable))),
+            )
+            continue
+        if special_instances is None and len(bindable) > 1:
+            # Joint instantiation across two node kinds requires a typed graph
+            # relationship this slice cannot prove; never invent one.
+            _gap(
+                row,
+                PlanGapCode.PLACEHOLDER_RELATIONSHIP_UNPROVABLE,
+                subject="__".join(sorted(bindable)),
+            )
+            continue
+
         assignment_kind: AssignmentKind | None = None
         output_ref: StructuredOutputContractRef | None = None
-        if row.materializer in {"human_authored", "preserved_opaque"}:
-            disposition = PlanDisposition.PRESERVE_UNOWNED
-        elif row.path_scope == "deployment_derived" or row.owner == "download_renderer":
-            disposition = PlanDisposition.EXTERNAL_HANDOFF
-        elif row.materializer == "page_schema_executor":
-            disposition = PlanDisposition.RENDER
-        elif row.materializer in _AGENT_AUTHORED_MATERIALIZERS:
-            if not row.assignment_kinds:
+        disposition = PlanDisposition(row.disposition.value)
+        if disposition is PlanDisposition.AGENT_AUTHOR:
+            compiler_assignment_kinds = tuple(
+                kind for kind in row.assignment_kinds if kind in COMPILER_ASSIGNMENT_KINDS
+            )
+            if not compiler_assignment_kinds:
                 _gap(row, PlanGapCode.ASSIGNMENT_UNDECLARED, adr_slice=5)
                 continue
-            if len(row.assignment_kinds) != 1:
+            if len(compiler_assignment_kinds) != 1:
                 _gap(row, PlanGapCode.ASSIGNMENT_AMBIGUOUS, adr_slice=5)
                 continue
             if row.validator is ValidatorIdentifier.NONE:
                 _gap(row, PlanGapCode.VALIDATOR_UNDECLARED, adr_slice=5)
                 continue
-            assignment_kind = row.assignment_kinds[0]
+            assignment_kind = compiler_assignment_kinds[0]
             descriptor = assignment_contract_descriptor(assignment_kind)
             if descriptor is None:
+                _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
+                continue
+            if (
+                row.kind not in descriptor.owned_artifact_families
+                or row.validator.value not in descriptor.validator_ids
+            ):
                 _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
                 continue
             try:
@@ -1178,15 +1477,61 @@ def derive_compilation_plan(
             except (TypeError, ValueError):
                 _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
                 continue
-            disposition = PlanDisposition.AGENT_AUTHOR
-        else:
-            disposition = PlanDisposition.RENDER
 
         if disposition is PlanDisposition.RENDER and not row.semantic_input_kinds:
             _gap(row, PlanGapCode.RENDERER_INPUT_UNDECLARED, adr_slice=4)
             continue
 
-        if bindable:
+        if special_instances is not None:
+            for values, root_node_id in special_instances:
+                path = row.path_template
+                for placeholder, local in values:
+                    path = path.replace("{" + placeholder + "}", local)
+                if "{" in path or "}" in path:
+                    _gap(
+                        row,
+                        PlanGapCode.PLACEHOLDER_RELATIONSHIP_UNPROVABLE,
+                        subject="__".join(sorted(placeholders)),
+                    )
+                    continue
+                if disposition is PlanDisposition.RENDER and not _renderer_inputs_complete(
+                    row, root_node_id=root_node_id
+                ):
+                    _gap(
+                        row,
+                        PlanGapCode.RENDERER_INPUT_INCOMPLETE,
+                        subject=next(iter(values))[1],
+                        adr_slice=4,
+                    )
+                    continue
+                unit_sources, unit_edge_sources = _renderer_footprint(
+                    row, root_node_id=root_node_id
+                )
+                resolved_sources = unit_sources or (
+                    PlanSource(
+                        node_id=root_node_id,
+                        payload_digest=payload_by_node[root_node_id].payload_digest,
+                    ),
+                )
+                identity = "-".join(value for _name, value in values)
+                unit = FamilyInstancePlan(
+                    unit_id=f"{row.kind}/{identity}/{row_digest[:12]}",
+                    family_kind=row.kind,
+                    family_identity_digest=row_digest,
+                    disposition=disposition,
+                    source_scope=PlanSourceScope.DECLARED,
+                    placeholder_values=values,
+                    outputs=(PlanOutput(path_scope=row.path_scope, path=path),),
+                    sources=resolved_sources,
+                    edge_sources=unit_edge_sources,
+                    materializer=row.materializer,
+                    validator=row.validator,
+                    assignment_kind=assignment_kind,
+                    required_structured_output_ref=output_ref,
+                )
+                _add_unit(unit)
+                unit_instance_index[(row.kind, values)] = unit.unit_id
+        elif bindable:
             placeholder = next(iter(bindable))
             node_kind = _INSTANCE_PLACEHOLDERS[placeholder]
             for node in nodes_by_kind.get(node_kind, ()):
@@ -1202,6 +1547,14 @@ def derive_compilation_plan(
                     )
                     continue
                 values = ((placeholder, local),)
+                backend_roles = {
+                    "module_backend_service": "service",
+                    "module_backend_repo": "repo",
+                    "module_backend_policy": "policy",
+                    "module_backend_schemas": "schemas",
+                }
+                if row.kind in backend_roles:
+                    values = tuple(sorted((*values, ("backend_role", backend_roles[row.kind]))))
                 path = row.path_template.replace("{" + placeholder + "}", local)
                 # Scope-implied instances keep the template text unchanged;
                 # their instance identity lives in placeholder_values and the
@@ -1293,6 +1646,15 @@ def derive_compilation_plan(
         row = row_by_digest[unit.family_identity_digest]
         for dependency_kind in row.dependency_families:
             same_instance = unit_instance_index.get((dependency_kind, unit.placeholder_values))
+            if same_instance is None and unit.placeholder_values:
+                unit_values = set(unit.placeholder_values)
+                candidates = sorted(
+                    unit_id
+                    for (kind, values), unit_id in unit_instance_index.items()
+                    if kind == dependency_kind and set(values).issubset(unit_values)
+                )
+                if len(candidates) == 1:
+                    same_instance = candidates[0]
             if same_instance is not None:
                 dep_ids.add(same_instance)
             else:
@@ -1328,6 +1690,7 @@ def derive_compilation_plan(
         "graph_version": verified_graph.version,
         "scope": verified_graph.scope.model_dump(mode="json"),
         "graph_digest": verified_graph.graph_digest,
+        "scope_selection": verified_scope_selection.model_dump(mode="json"),
         "registry_schema_version": snapshot.registry_schema_version,
         "registry_digest": snapshot.snapshot_digest,
         "units": [unit.identity_payload for unit in sorted_units],
@@ -1338,6 +1701,7 @@ def derive_compilation_plan(
         graph_version=verified_graph.version,
         scope=verified_graph.scope,
         graph_digest=verified_graph.graph_digest,
+        scope_selection=verified_scope_selection,
         registry_schema_version=snapshot.registry_schema_version,
         registry_digest=snapshot.snapshot_digest,
         units=sorted_units,
@@ -1489,6 +1853,8 @@ __all__ = [
     "COMPILATION_PLAN_SCHEMA_VERSION",
     "CompilationPlan",
     "CompilationPlanError",
+    "CompilationGapReport",
+    "CompilationScopeSelection",
     "FamilyInstancePlan",
     "LayoutRegistrySnapshot",
     "PlanDisposition",

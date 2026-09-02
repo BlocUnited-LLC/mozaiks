@@ -483,7 +483,7 @@ def test_graph_v2_renderer_binding_pins_family_implementation_and_version() -> N
         validate_implementation_binding_against_graph(v1_binding, v1)
 
 
-def test_opaque_artifact_preserves_exact_bytes_and_matches_plan_ownership() -> None:
+def test_opaque_artifact_bytes_are_exact_but_greenfield_plan_does_not_claim_them() -> None:
     content = b"def handle(ctx):\n    return {'ok': True}\n"
     digest = hashlib.sha256(content).hexdigest()
     graph, _payloads = _corpus_graph()
@@ -498,13 +498,9 @@ def test_opaque_artifact_preserves_exact_bytes_and_matches_plan_ownership() -> N
     )
     artifact = PreservedOpaqueArtifact(contract_ref=ref, content=content)
     assert artifact.content == content
-    unit = next(
-        unit
-        for unit in _plan().units
-        if unit.family_kind == ref.artifact_family
-        and any(output.path == ref.canonical_relative_path for output in unit.outputs)
+    assert not any(
+        unit.disposition is PlanDisposition.PRESERVE_UNOWNED for unit in _plan().units
     )
-    assert unit.disposition is PlanDisposition.PRESERVE_UNOWNED
     with pytest.raises(ValidationError, match="do not match"):
         PreservedOpaqueArtifact(contract_ref=ref, content=content + b"# changed\n")
 
@@ -519,32 +515,28 @@ def test_opaque_artifact_preserves_exact_bytes_and_matches_plan_ownership() -> N
 
 def test_unsupported_renderer_families_remain_explicit_typed_gaps() -> None:
     plan = _plan()
-    non_executable = {
+    renderer_blocked = {
         gap.family_kind
         for gap in plan.gaps
         if gap.code
         in {
-            PlanGapCode.ASSIGNMENT_UNDECLARED,
-            PlanGapCode.ASSIGNMENT_AMBIGUOUS,
-            PlanGapCode.VALIDATOR_UNDECLARED,
-            PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED,
-            PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE,
+            PlanGapCode.RENDERER_INPUT_UNDECLARED,
+            PlanGapCode.RENDERER_INPUT_INCOMPLETE,
         }
     }
     assert {
         "module_manifest",
-        "app_data_contract",
         "app_subscription_config",
         "workflow_manifest",
-    } <= non_executable
+    } <= renderer_blocked
     assert any(
         gap.family_kind == "app_manifest"
-        and gap.code is PlanGapCode.ASSIGNMENT_UNDECLARED
+        and gap.code is PlanGapCode.RENDERER_INPUT_INCOMPLETE
         for gap in plan.gaps
     )
     assert not any(
         unit.disposition is PlanDisposition.AGENT_AUTHOR
-        and unit.family_kind in non_executable | {"app_manifest"}
+        and unit.family_kind in renderer_blocked | {"app_manifest"}
         for unit in plan.units
     )
 

@@ -220,10 +220,7 @@ def _opaque(family: str, path: str, content: bytes) -> PreservedOpaqueArtifact:
 
 
 def _preserved_artifacts() -> tuple[PreservedOpaqueArtifact, ...]:
-    return (
-        _opaque("module_backend_handler", "modules/orders/backend/handler.py", _HANDLER_BYTES),
-        _opaque("module_backend_service", "modules/orders/backend/service.py", _SERVICE_BYTES),
-    )
+    return ()
 
 
 def _materialize(source: dict):
@@ -303,6 +300,8 @@ def _authored_skeleton() -> dict[str, str]:
             "    output_schema: {type: object}\n"
         ),
         "modules/orders/backend/__init__.py": "",
+        "modules/orders/backend/handler.py": _HANDLER_BYTES.decode("utf-8"),
+        "modules/orders/backend/service.py": _SERVICE_BYTES.decode("utf-8"),
     }
 
 
@@ -450,12 +449,14 @@ def test_wrong_materializer_and_wrong_family_are_rejected() -> None:
         resolve_page_schema_renderer_selection(
             mismatched, graph=result.graph, layout_registry=_registry()
         )
-    preserved_unit = next(
-        u for u in plan.units if u.disposition is PlanDisposition.PRESERVE_UNOWNED
+    non_renderer_unit = next(
+        u for u in plan.units if u.disposition is not PlanDisposition.RENDER
     )
     payload_by_node = {p.node_id: p for p in result.payloads}
     with pytest.raises(MaterializationError, match="not renderer-ready"):
-        render_app_ui_page_schema_unit(unit=preserved_unit, payload_by_node=payload_by_node)
+        render_app_ui_page_schema_unit(
+            unit=non_renderer_unit, payload_by_node=payload_by_node
+        )
 
 
 def test_binding_pinned_to_a_different_graph_is_rejected() -> None:
@@ -537,13 +538,10 @@ def test_outputs_are_exactly_the_plan_assigned_paths() -> None:
     page_unit = _page_unit(plan)
     assert bundle.files().keys() == {
         "ui/pages/orders.yaml",
-        "modules/orders/backend/handler.py",
-        "modules/orders/backend/service.py",
     }
     assert page_unit.outputs[0].path == "ui/pages/orders.yaml"
     origins = {o.path: o.origin for o in bundle.outputs}
     assert origins["ui/pages/orders.yaml"] == "rendered"
-    assert origins["modules/orders/backend/handler.py"] == "preserved"
 
 
 def test_compose_rejects_overlap_and_collisions() -> None:
@@ -575,26 +573,20 @@ def test_unmatched_preserved_artifact_is_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_preserved_bytes_are_exact_including_empty() -> None:
+def test_greenfield_plan_rejects_unowned_preserved_bytes() -> None:
     result, plan = _build(_source())
-    empty = _opaque("module_backend_policy", "modules/orders/backend/policy.py", b"")
-    bundle = materialize_plan(
-        plan=plan,
-        graph=result.graph,
-        payloads=result.payloads,
-        binding=_binding(result.graph),
-        layout_registry=_registry(),
-        preserved_artifacts=(*_preserved_artifacts(), empty),
+    unowned = _opaque(
+        "module_backend_policy", "modules/orders/backend/policy.py", b""
     )
-    files = bundle.files()
-    assert files["modules/orders/backend/handler.py"] == _HANDLER_BYTES
-    assert files["modules/orders/backend/policy.py"] == b""
-    # Explicit report: preserved units without supplied bytes are named.
-    assert bundle.unsupplied_preserved_units
-    assert all(
-        unit_id not in bundle.unsupplied_preserved_units
-        for unit_id in (o.unit_id for o in bundle.outputs)
-    )
+    with pytest.raises(MaterializationError, match="matches 0 plan units"):
+        materialize_plan(
+            plan=plan,
+            graph=result.graph,
+            payloads=result.payloads,
+            binding=_binding(result.graph),
+            layout_registry=_registry(),
+            preserved_artifacts=(unowned,),
+        )
 
 
 def test_mutated_opaque_digest_is_rejected() -> None:
@@ -813,18 +805,9 @@ async def test_semantic_page_change_selectively_rematerializes_and_boots(
     # ...only the affected renderer-ready unit was rerendered...
     origins = {o.path: o.origin for o in successor_bundle.outputs}
     assert origins["ui/pages/orders.yaml"] == "rendered"
-    assert origins["modules/orders/backend/handler.py"] == "reused"
-    assert origins["modules/orders/backend/service.py"] == "reused"
-    # ...unrelated outputs and preserved digests are byte-identical...
+    # ...unrelated authored skeleton bytes remain byte-identical...
     assert successor_files["modules/orders/backend/handler.py"] == _HANDLER_BYTES
     assert successor_files["modules/orders/backend/service.py"] == _SERVICE_BYTES
-    base_digests = {o.path: o.content_digest for o in base_bundle.outputs}
-    successor_digests = {o.path: o.content_digest for o in successor_bundle.outputs}
-    for path in (
-        "modules/orders/backend/handler.py",
-        "modules/orders/backend/service.py",
-    ):
-        assert successor_digests[path] == base_digests[path]
     # ...gapped families did not magically materialize...
     assert successor_bundle.files().keys() == base_bundle.files().keys()
     # ...and the successor bundle validates, loads, and boots.

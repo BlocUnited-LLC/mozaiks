@@ -161,7 +161,7 @@ def neutral_manifest() -> list[dict[str, Any]]:
         {"path": "config/shell.json"},
         {"path": "data/contract.json"},
         {"path": "data/migrations/001_initial.json"},
-        {"path": "config/integrations.json"},
+        {"path": "config/integrations.yaml"},
         {"path": "docs/integrations.md"},
         {"path": "services/integrations/analytics_provider_client.py"},
         {"path": "services/integrations/managed_analytics_client.py"},

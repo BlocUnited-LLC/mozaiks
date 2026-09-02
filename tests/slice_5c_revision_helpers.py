@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -177,6 +176,7 @@ def executable_revision_fixture() -> dict[str, object]:
         graph_version=graph.version,
         scope=graph.scope,
         graph_digest=graph.graph_digest,
+        scope_selection=source_plan.scope_selection,
         registry_schema_version=source_plan.registry_schema_version,
         registry_digest=source_plan.registry_digest,
         units=source_plan.units,
@@ -263,22 +263,16 @@ def executable_revision_fixture() -> dict[str, object]:
     result = build_assignment_artifact_result(
         assignment=assignments.ordered_assignments[0],
         structured_output={
-            "database_files": [],
-            "code_files": [],
-            "pending_schema_migration": None,
-            "agent_message": "immutable revision fixture",
+            "assignment_kind": "module_helper_implementation",
+            "module_id": "reports",
+            "helper_id": "report_hook",
+            "helper_source": "def report_hook():\n    return None\n",
         },
         artifacts={
-            "data/contract.json": json.dumps(
-                {"version": "1", "app_id": "slice-5c-golden", "surfaces": []},
-                sort_keys=True,
-            )
-            + "\n"
+            "modules/reports/backend/report_hook.py": "def report_hook():\n    return None\n"
         },
         structured_output_configs={"AppGenerator": structured},
-        validator_runner=lambda _validator, files: (
-            json.loads(files["data/contract.json"])["app_id"] == "slice-5c-golden"
-        ),
+        validator_runner=lambda _validator, files: bool(files),
     )
     materialized_source = source["materialized"]
     materialized = MaterializedBundle(
