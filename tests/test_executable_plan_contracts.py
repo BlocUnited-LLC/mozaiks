@@ -432,6 +432,7 @@ def test_slice_5a_substrate_is_production_unwired() -> None:
     allowed = {
         "mozaiksai/core/semantics/compilation_plan.py",
         "mozaiksai/core/semantics/composition_ledger.py",
+        "mozaiksai/core/semantics/artifact_revision.py",
         "mozaiksai/core/semantics/__init__.py",
         "mozaiksai/core/semantics/materialization.py",
         "mozaiksai/core/semantics/resolver.py",

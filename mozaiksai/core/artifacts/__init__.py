@@ -1,6 +1,7 @@
 from .content_store import (
     ArtifactContentStore,
     BundleContentStore,
+    ContentIntegrityError,
     ContentNotFoundError,
     GridFSArtifactContentStore,
     GridFSBundleContentStore,
@@ -47,6 +48,7 @@ __all__ = [
     "get_bundle_content_store",
     # Content store — prior-api names
     "ArtifactContentStore",
+    "ContentIntegrityError",
     "ContentNotFoundError",
     "GridFSArtifactContentStore",
     "LocalArtifactContentStore",

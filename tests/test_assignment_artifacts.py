@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 
 import pytest
@@ -150,9 +151,7 @@ def test_missing_duplicate_failed_and_forged_receipts_fail() -> None:
         "subject_digest": receipt.subject_digest,
         "passed": False,
     }
-    failed = ValidatorReceipt(
-        **failed_payload, evidence_digest=stable_digest(failed_payload)
-    )
+    failed = ValidatorReceipt(**failed_payload, evidence_digest=stable_digest(failed_payload))
     document = result.model_dump(mode="json")
     document["validation_receipts"] = [failed.model_dump(mode="json")]
     with pytest.raises(ValidationError, match="passing validators"):
@@ -169,4 +168,19 @@ def test_duplicate_artifact_entries_fail_even_with_valid_individual_digests() ->
     document = result.model_dump(mode="json")
     document["artifacts"] *= 2
     with pytest.raises(ValidationError, match="unique"):
+        AssignmentArtifactResult.model_validate(document)
+
+
+def test_validator_receipt_cannot_be_transplanted_to_different_exact_result() -> None:
+    _assignment, _config, result = _build()
+    document = result.model_dump(mode="json")
+    document["artifacts"][0]["content"] += "\n# changed after validation\n"
+    document["artifacts"][0]["content_digest"] = hashlib.sha256(
+        document["artifacts"][0]["content"].encode("utf-8")
+    ).hexdigest()
+    document["result_digest"] = stable_digest(
+        {key: value for key, value in document.items() if key != "result_digest"}
+    )
+
+    with pytest.raises(ValidationError, match="receipt subject_digest"):
         AssignmentArtifactResult.model_validate(document)

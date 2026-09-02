@@ -38,6 +38,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Offline immutable artifact revisions (ADR 0007 Slice 5C)**: added a closed,
+  content-addressed `ArtifactRevision` contract binding graph, implementation
+  binding, CompilationPlan, CompositionLedger, validation evidence, exact
+  bytes, and parent lineage. An isolated `ApplicationPublication` store uses a
+  generation-guarded Mongo compare-and-swap so concurrent Genesis or sibling
+  candidates cannot both become CURRENT. Cold restore verifies every blob and
+  canonical digest; validator receipts now bind to the exact assignment result
+  they validated. The substrate remains deliberately production-unwired:
+  AppBuildPlan and BuildRecord still own live planning/publication until Slice
+  5D, and no AG2 behavior changes.
+
 - **Offline assignment artifact composition (ADR 0007 Slice 5B)**: added a
   pure Factory-participant admission resolver, closed structured-output and
   validator-backed `AssignmentArtifactResult`, and a content-free canonical

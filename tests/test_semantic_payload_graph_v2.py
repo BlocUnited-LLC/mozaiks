@@ -111,6 +111,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # Slice 5A: the replacement assignment compiler is an explicitly
         # offline substrate consumer of pinned payload and plan-unit refs.
         Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
+        # Slice 5C: the immutable revision store cold-validates the complete
+        # graph/plan closure before accepting or restoring application state.
+        # Its production non-importability is proven by the Slice 5C guard.
+        Path("mozaiksai/core/artifacts/revision_store.py"),
     }
 )
 _FORBIDDEN_PRODUCTION_MODULES = frozenset({"mozaiksai.core.semantics.payloads"})

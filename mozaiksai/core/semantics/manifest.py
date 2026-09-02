@@ -94,6 +94,13 @@ class ApplicationManifest(SemanticsModel):
                     f"{name} scope does not match the manifest ExecutionAccessScopeRef; "
                     "cross-scope references fail closed"
                 )
+        if self.artifact_revision_ref is not None and (
+            self.app_id is None or self.artifact_revision_ref.app_id != self.app_id
+        ):
+            raise ValueError(
+                "artifact_revision_ref must belong to the manifest application; "
+                "pre-app or foreign-app revision references fail closed"
+            )
         expected = canonical_digest(self.canonical_payload(include_digest=False))
         if self.manifest_digest != expected:
             raise ValueError("manifest_digest does not match manifest content")

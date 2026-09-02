@@ -50,9 +50,7 @@ def _assert_path_set_closed(paths: Sequence[str]) -> None:
     for index, parent in enumerate(ordered):
         for child in ordered[index + 1 :]:
             if child.startswith(f"{parent}/"):
-                raise ValueError(
-                    f"parent/child artifact collision: {parent!r} and {child!r}"
-                )
+                raise ValueError(f"parent/child artifact collision: {parent!r} and {child!r}")
 
 
 class AssignmentArtifact(_FrozenModel):
@@ -121,9 +119,7 @@ class AssignmentArtifactResult(_FrozenModel):
     validation_receipts: tuple[ValidatorReceipt, ...] = Field(min_length=1)
     result_digest: str
 
-    @field_validator(
-        "assignment_digest", "structured_output_digest", "result_digest"
-    )
+    @field_validator("assignment_digest", "structured_output_digest", "result_digest")
     @classmethod
     def _digests(cls, value: str, info: Any) -> str:
         return _sha256(value, field_name=str(info.field_name))
@@ -137,18 +133,14 @@ class AssignmentArtifactResult(_FrozenModel):
 
     @field_validator("artifacts")
     @classmethod
-    def _artifacts(
-        cls, value: tuple[AssignmentArtifact, ...]
-    ) -> tuple[AssignmentArtifact, ...]:
+    def _artifacts(cls, value: tuple[AssignmentArtifact, ...]) -> tuple[AssignmentArtifact, ...]:
         ordered = tuple(sorted(value, key=lambda item: item.path))
         _assert_path_set_closed([item.path for item in ordered])
         return ordered
 
     @field_validator("validation_receipts")
     @classmethod
-    def _receipts(
-        cls, value: tuple[ValidatorReceipt, ...]
-    ) -> tuple[ValidatorReceipt, ...]:
+    def _receipts(cls, value: tuple[ValidatorReceipt, ...]) -> tuple[ValidatorReceipt, ...]:
         ordered = tuple(sorted(value, key=lambda item: item.validator.value))
         validators = [item.validator for item in ordered]
         if ValidatorIdentifier.NONE in validators:
@@ -161,6 +153,14 @@ class AssignmentArtifactResult(_FrozenModel):
 
     @model_validator(mode="after")
     def _result_identity(self) -> AssignmentArtifactResult:
+        subject_digest = _result_subject_digest(
+            structured_output_digest=self.structured_output_digest,
+            artifacts=self.artifacts,
+        )
+        if any(receipt.subject_digest != subject_digest for receipt in self.validation_receipts):
+            raise ValueError(
+                "validator receipt subject_digest does not match the exact artifact result"
+            )
         payload = self.model_dump(mode="json", exclude={"result_digest"})
         if self.result_digest != stable_digest(payload):
             raise ValueError("result_digest does not match artifact result")
@@ -170,14 +170,16 @@ class AssignmentArtifactResult(_FrozenModel):
 def _result_subject_digest(
     *, structured_output_digest: str, artifacts: Sequence[AssignmentArtifact]
 ) -> str:
-    return stable_digest(
-        {
-            "structured_output_digest": structured_output_digest,
-            "artifacts": [
-                {"path": item.path, "content_digest": item.content_digest}
-                for item in artifacts
-            ],
-        }
+    return cast(
+        str,
+        stable_digest(
+            {
+                "structured_output_digest": structured_output_digest,
+                "artifacts": [
+                    {"path": item.path, "content_digest": item.content_digest} for item in artifacts
+                ],
+            },
+        ),
     )
 
 
@@ -191,9 +193,7 @@ def build_assignment_artifact_result(
 ) -> AssignmentArtifactResult:
     """Validate untrusted output and generate Mozaiks-owned validation receipts."""
 
-    verified_assignment = CompiledAssignment.model_validate(
-        assignment.model_dump(mode="json")
-    )
+    verified_assignment = CompiledAssignment.model_validate(assignment.model_dump(mode="json"))
     model = resolve_structured_output_contract_ref(
         verified_assignment.required_structured_output_ref,
         configs=structured_output_configs,
@@ -261,9 +261,7 @@ def build_assignment_artifact_result(
         "artifacts": entries,
         "validation_receipts": tuple(receipts),
     }
-    return AssignmentArtifactResult(
-        **payload, result_digest=stable_digest(payload)
-    )
+    return AssignmentArtifactResult(**payload, result_digest=stable_digest(payload))
 
 
 def validate_assignment_artifact_result(
@@ -271,12 +269,8 @@ def validate_assignment_artifact_result(
 ) -> AssignmentArtifactResult:
     """Cold-bind an artifact result back to its canonical assignment."""
 
-    verified_assignment = CompiledAssignment.model_validate(
-        assignment.model_dump(mode="json")
-    )
-    verified_result = AssignmentArtifactResult.model_validate(
-        result.model_dump(mode="json")
-    )
+    verified_assignment = CompiledAssignment.model_validate(assignment.model_dump(mode="json"))
+    verified_result = AssignmentArtifactResult.model_validate(result.model_dump(mode="json"))
     if verified_result.assignment_id != verified_assignment.assignment_id:
         raise ValueError("artifact result references another assignment id")
     if verified_result.assignment_digest != verified_assignment.assignment_digest:
