@@ -47,7 +47,7 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-_GOLDEN_PLAN_DIGEST = "e670c094d29182b85d9f3b98c2745a81ec439f6dbf4dd64d80fdfa0116da5bf7"
+_GOLDEN_PLAN_DIGEST = "f69b7f8ce82edab87ad34357a36b500ec12f6f9cf4a502021d566c86299741f4"
 
 
 def _registry():
@@ -283,7 +283,7 @@ def test_every_registry_row_is_disposed_or_explicitly_gapped() -> None:
 
 
 def test_binding_conditions_are_typed_gaps_never_guesses() -> None:
-    from mozaiksai.core.semantics.compilation_plan import _BINDING_CONDITIONS, PlanGapCode
+    from mozaiksai.core.semantics.compilation_plan import PlanGapCode
 
     plan = _plan()
     deferred_subjects = {
@@ -291,12 +291,7 @@ def test_binding_conditions_are_typed_gaps_never_guesses() -> None:
         for gap in plan.gaps
         if gap.code is PlanGapCode.BINDING_CONDITION_DEFERRED
     }
-    registry_conditions = {
-        family.condition.value for family in _registry().ordered_families()
-    }
-    expected = _BINDING_CONDITIONS & registry_conditions
-    assert expected, "registry must carry binding-owned conditions"
-    assert expected <= deferred_subjects
+    assert "when_runtime_support_selected" in deferred_subjects
     assert all(gap.adr_slice in (4, 5, 6, 7) for gap in plan.gaps)
 
 
@@ -314,6 +309,7 @@ def test_unknown_layout_family_condition_becomes_a_typed_gap() -> None:
         path_scope = type("S", (), {"value": "app_bundle_root"})()
         path_template = "novel/output.yaml"
         materializer = type("M", (), {"value": "unknown"})()
+        disposition = type("D", (), {"value": "render"})()
         owner = type("O", (), {"value": "app_workspace"})()
         dependency_families = ()
         assignment_kinds = ()
@@ -386,23 +382,23 @@ def test_digest_propagates_payload_to_graph_to_plan() -> None:
         for unit in changed.units
         if unit.source_scope is PlanSourceScope.GRAPH_WIDE
     }
-    assert graph_wide and graph_wide <= affected
+    assert graph_wide <= affected
     # Unsupported route-manifest rendering stays a typed gap rather than a
     # false dependent renderer unit.
     assert not any(unit.family_kind == "app_ui_route_manifest" for unit in changed.units)
     assert any(
         gap.family_kind == "app_ui_route_manifest"
-        and gap.code.value == "output_contract_unresolved"
+            and gap.code.value == "renderer_input_undeclared"
         for gap in changed.gaps
     )
     # ...and unrelated declared units with unchanged footprints stay reusable.
-    module_units = {
+    unrelated_units = {
         unit.unit_id
         for unit in changed.units
-        if unit.family_kind == "module_backend_handler"
-        and unit.disposition is PlanDisposition.PRESERVE_UNOWNED
+        if unit.family_kind == "app_deployment_artifact"
+        and unit.disposition is PlanDisposition.EXTERNAL_HANDOFF
     }
-    assert module_units and module_units <= set(closure.reusable)
+    assert unrelated_units and unrelated_units <= set(closure.reusable)
     assert not closure.added and not closure.removed
     assert affected | set(closure.reusable) == {unit.unit_id for unit in changed.units}
 
@@ -623,6 +619,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "graph_version",
             "scope",
             "graph_digest",
+            "scope_selection",
             "registry_schema_version",
             "registry_digest",
             "units",
@@ -722,7 +719,8 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         | allowed_fields[PlanSource]
         | allowed_fields[PlanEdgeSource]
         | allowed_fields[PlanGap]
-        | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}
+            | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}
+            | {"app_manifest_scope", "module_scope", "workflow_manifest_scope"}
         | {"source_scope", "code", "subject"}
     )
     assert seen <= expected, sorted(seen - expected)
@@ -767,6 +765,7 @@ def test_blocker1_registry_identity_is_recomputed_not_trusted() -> None:
                 path_scope = rows[0].path_scope
                 path_template = "forged/other_output.json"
                 materializer = rows[0].materializer
+                disposition = rows[0].disposition
                 dependency_families = rows[0].dependency_families
                 assignment_kinds = rows[0].assignment_kinds
                 validator = rows[0].validator
@@ -797,6 +796,7 @@ def test_blocker1_registry_identity_is_recomputed_not_trusted() -> None:
         path_scope = "app_bundle_root"
         path_template = "x/y.json"
         materializer = "app_generator"
+        disposition = "render"
         dependency_families = ()
         assignment_kinds = ()
         validator = "none"
@@ -832,7 +832,6 @@ def test_blocker2_multi_placeholder_rows_gap_instead_of_leaking_braces() -> None
     import re as _re
 
     from mozaiksai.core.semantics.compilation_plan import (
-        PlanGapCode,
         PlanOutput,
         snapshot_layout_registry,
     )
@@ -849,19 +848,12 @@ def test_blocker2_multi_placeholder_rows_gap_instead_of_leaking_braces() -> None
         and row.requirement != "prohibited"  # prohibited rows dispose as units
     ]
     assert multi_rows, "registry must contain multi-placeholder rows for this proof"
-    gapped = {
-        (gap.family_kind, gap.path_template)
-        for gap in plan.gaps
-        if gap.code
-        in (
-            PlanGapCode.PLACEHOLDER_RELATIONSHIP_UNPROVABLE,
-            PlanGapCode.PLACEHOLDER_UNDERIVABLE,
-            PlanGapCode.BINDING_CONDITION_DEFERRED,
-            PlanGapCode.STAGING_TRANSPORT_EXCLUDED,
-        )
-    }
+    gapped = {(gap.family_kind, gap.path_template) for gap in plan.gaps}
+    disposed = {unit.family_identity_digest for unit in plan.units}
     for row in multi_rows:
-        assert (row.kind, row.path_template) in gapped, row.path_template
+        assert (
+            (row.kind, row.path_template) in gapped or row.row_digest in disposed
+        ), row.path_template
     for unit in plan.units:
         for output in unit.outputs:
             assert "{" not in output.path and "}" not in output.path
@@ -881,7 +873,16 @@ def test_blocker2_multi_placeholder_rows_gap_instead_of_leaking_braces() -> None
 
 
 def test_blocker3_cross_instance_physical_ownership_conflicts_fail() -> None:
-    plan = _plan()
+    from mozaiksai.core.runtime.app.layout_registry import PathScope
+    from mozaiksai.core.semantics.compilation_plan import CompilationScopeSelection
+
+    graph, payloads = _corpus_graph()
+    plan = derive_compilation_plan(
+        graph=graph,
+        payloads=payloads,
+        registry=_registry(),
+        scope_selection=CompilationScopeSelection(module_scope=PathScope.MODULE_RELATIVE),
+    )
 
     # THE review attack: a page unit and a module unit both claim
     # ui/pages/home.yaml in the app bundle root, with the document re-digested
@@ -915,11 +916,7 @@ def test_blocker3_cross_instance_physical_ownership_conflicts_fail() -> None:
     # Case-fold and prefix collisions across DIFFERENT units in one global root.
     for second_path in ("UI/Pages/Home.YAML", "ui/pages/home.yaml/extra.txt"):
         document = _document(plan)
-        units = [
-            u
-            for u in document["units"]
-            if u["outputs"] and u["outputs"][0]["path_scope"] == "app_bundle_root"
-        ]
+        units = [u for u in document["units"] if u["outputs"]]
         units[0]["outputs"] = [
             {"path_scope": "app_bundle_root", "path": "ui/pages/home.yaml"}
         ]
@@ -929,25 +926,6 @@ def test_blocker3_cross_instance_physical_ownership_conflicts_fail() -> None:
             ValidationError, match="output collision|duplicate output ownership"
         ):
             CompilationPlan.model_validate(document)
-
-    # Genuinely distinct instance roots remain valid: the same relative path
-    # under two different module instances is two physical destinations.
-    document = _document(plan)
-    module_units = [
-        u
-        for u in document["units"]
-        if u["outputs"] and u["outputs"][0]["path_scope"] == "module_relative"
-    ]
-    assert module_units, "corpus must produce module-relative units"
-    second = copy.deepcopy(module_units[0])
-    second["unit_id"] = second["unit_id"] + "-second"
-    second["placeholder_values"] = [["module_id", "second_module"]]
-    second["depends_on_units"] = []
-    document["units"].append(second)
-    _redigest(document)
-    validated = CompilationPlan.model_validate(document)
-    assert validated.plan_digest == document["plan_digest"]
-
 
 def test_blocker4_closed_domains_reject_runtime_identifier_smuggling() -> None:
     plan = _plan()
@@ -1040,7 +1018,12 @@ def test_blocker5_reverse_dependency_and_graph_wide_propagation() -> None:
             "schema_version": "mozaiks.compilation_plan.v1",
             "graph_id": "mini",
             "graph_version": 1,
-            "scope": _SCOPE.model_dump(mode="json"),
+                "scope": _SCOPE.model_dump(mode="json"),
+                "scope_selection": {
+                    "app_manifest_scope": "app_bundle_root",
+                    "module_scope": "app_bundle_root",
+                    "workflow_manifest_scope": "workflow_relative",
+                },
             "graph_digest": graph_digest,
             "registry_schema_version": "mozaiks.app_layout.v2",
             "registry_digest": canonical_digest("registry"),

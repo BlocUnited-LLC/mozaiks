@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from mozaiksai.core.runtime.app.layout_registry import (
     AppLayoutRegistry,
+    ArtifactDisposition,
     ArtifactFamily,
     ArtifactKind,
     ConditionIdentifier,
@@ -56,6 +57,7 @@ def _family(template: str, *, kind: ArtifactKind = ArtifactKind.APP_CONFIG) -> A
         path_scope=PathScope.APP_BUNDLE_ROOT,
         path_template=template,
         materializer=MaterializerIdentifier.APP_GENERATOR,
+        disposition=ArtifactDisposition.RENDER,
         validator=ValidatorIdentifier.APP_PATHS,
         runtime_consumer=RuntimeConsumerIdentifier.PLATFORM_HOST,
         security_class=SecurityClass.INTERNAL_CONTRACT,

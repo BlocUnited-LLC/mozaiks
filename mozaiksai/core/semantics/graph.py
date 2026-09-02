@@ -80,7 +80,7 @@ class SemanticNodeKind(StrEnum):
     METER = "meter"
     LIMIT = "limit"
     DEPLOYMENT_TARGET = "deployment_target"
-    STUB_DECLARATION = "stub_declaration"
+    ARTIFACT_DECLARATION = "artifact_declaration"
 
 
 class SemanticEdgeKind(StrEnum):

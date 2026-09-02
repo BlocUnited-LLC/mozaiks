@@ -39,6 +39,8 @@ from mozaiksai.core.semantics.payloads import (
     PAYLOAD_MODEL_BY_KIND,
     ActionPayload,
     ApplicationPayload,
+    ArtifactDeclarationPayload,
+    ArtifactDeclarationRole,
     AuthPayload,
     AuthStrategyKind,
     BillingPeriod,
@@ -75,7 +77,6 @@ from mozaiksai.core.semantics.payloads import (
     SectionPayload,
     SemanticPayloadBase,
     SemanticPayloadError,
-    StubDeclarationPayload,
     SurfacePayload,
     TriggerKind,
     TriggerPayload,
@@ -241,8 +242,8 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden Merkle-root vector: pinned digests for the full-corpus v2 graph and
 # its archived fixture.  Independent of host, process, and input order.
-_GOLDEN_GRAPH_DIGEST = "1550d094a0b19f51f0ce75932b9cbccb494a3e3b044abb1249f6a4c3d1e3dd89"
-_GOLDEN_ARCHIVE_DIGEST = "sha256:759ec88e6b4e9a0ee603e682b0f5e66375f6ae9fb3d3bc51e5eb851d779109d2"
+_GOLDEN_GRAPH_DIGEST = "19d4fa7f8db76e05a3710b58f5909ddb807ccb7ce37facb51e8278de2a19f86b"
+_GOLDEN_ARCHIVE_DIGEST = "sha256:785d575f4e4ab73d16b2e28d54896ede3ea2e0d40a7013e05f2bf361fd6fc2f7"
 
 
 def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str = "Home"):
@@ -355,6 +356,7 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             scope=scope,
             module_id="reports",
             description="Reporting module",
+            closed_artifact_roles=(ArtifactDeclarationRole.MODULE_HELPER,),
         ),
         SemanticNodeKind.ACTION: build_semantic_payload(
             ActionPayload,
@@ -495,14 +497,14 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             profile_id="generic_container",
             output_hints=("Dockerfile", "docker-compose.yml"),
         ),
-        SemanticNodeKind.STUB_DECLARATION: build_semantic_payload(
-            StubDeclarationPayload,
-            node_id="mozaiks.stub.report_hook",
+        SemanticNodeKind.ARTIFACT_DECLARATION: build_semantic_payload(
+            ArtifactDeclarationPayload,
+            node_id="mozaiks.artifact.report_hook",
             payload_version=1,
             scope=scope,
-            stub_kind="python_backend",
-            path="modules/reports/backend/hooks.py",
-            entrypoint="on_report_created",
+            declaration_id="report_hook",
+            artifact_role=ArtifactDeclarationRole.MODULE_HELPER,
+            owner_node_id="mozaiks.module.reports",
         ),
     }
 
@@ -547,6 +549,11 @@ def _corpus_graph(
             kind=SemanticEdgeKind.EMITS,
             source_node_id="mozaiks.action.create_report",
             target_node_id="mozaiks.event.report_created",
+        ),
+        SemanticEdge(
+            kind=SemanticEdgeKind.OWNS,
+            source_node_id="mozaiks.module.reports",
+            target_node_id="mozaiks.artifact.report_hook",
         ),
     ]
     graph = build_semantic_graph_v2(
@@ -1495,13 +1502,13 @@ def test_unknown_fields_and_untyped_shapes_are_rejected() -> None:
             "undeclared field",
         ),
         (
-            StubDeclarationPayload,
+            ArtifactDeclarationPayload,
             {
-                "stub_kind": "python_backend",
-                "path": "modules\\reports\\hook.py",
-                "entrypoint": "run",
+                "declaration_id": "Bad ID",
+                "artifact_role": ArtifactDeclarationRole.MODULE_HELPER,
+                "owner_node_id": "mozaiks.module.reports",
             },
-            "backslash",
+            "canonical",
         ),
     ],
 )

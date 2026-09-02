@@ -80,12 +80,23 @@ def _compiled_models(config: Any) -> dict[str, type[BaseModel]]:
     from mozaiksai.core.workflow.declarative.contracts import StructuredOutputsConfig
     from mozaiksai.core.workflow.outputs.structured import build_models_from_config
 
+    from .assignment_kinds import ASSIGNMENT_CONTRACT_DESCRIPTORS
+
     verified = StructuredOutputsConfig.model_validate(config)
     dumped = verified.model_dump(by_alias=True, exclude_unset=True)
-    return cast(
+    models = cast(
         dict[str, type[BaseModel]],
         build_models_from_config(dumped.get("models", {})),
     )
+    exact_model_ids = {
+        descriptor.structured_output_model_id
+        for descriptor in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()
+    }
+    for model_id in exact_model_ids & models.keys():
+        model = models[model_id]
+        model.model_config = ConfigDict(**model.model_config, extra="forbid")
+        model.model_rebuild(force=True)
+    return models
 
 
 def build_structured_output_contract_ref(

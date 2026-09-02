@@ -404,6 +404,8 @@ def _family(
     template: str,
     deps: tuple[ArtifactKind, ...] = (),
 ) -> ArtifactFamily:
+    from mozaiksai.core.runtime.app.layout_registry import ArtifactDisposition
+
     return ArtifactFamily(
         kind=kind,
         owner=LayoutOwner.APP_WORKSPACE,
@@ -413,6 +415,7 @@ def _family(
         path_scope=PathScope.APP_BUNDLE_ROOT,
         path_template=template,
         materializer=MaterializerIdentifier.APP_GENERATOR,
+        disposition=ArtifactDisposition.RENDER,
         validator=ValidatorIdentifier.NONE,
         runtime_consumer=RuntimeConsumerIdentifier.NONE,
         security_class=SecurityClass.INTERNAL_CONTRACT,

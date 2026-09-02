@@ -204,7 +204,18 @@ def build_assignment_artifact_result(
         else structured_output
     )
     validated_output = model.model_validate(raw_output)
-    structured_digest = stable_digest(validated_output.model_dump(mode="json"))
+    output_values = validated_output.model_dump(mode="json")
+    if verified_assignment.semantic_identity_bindings:
+        if output_values.get("assignment_kind") != verified_assignment.assignment_kind.value:
+            raise ValueError(
+                "structured output assignment_kind does not match assignment authority"
+            )
+        for field_name, expected_value in verified_assignment.semantic_identity_bindings:
+            if output_values.get(field_name) != expected_value:
+                raise ValueError(
+                    f"structured output {field_name!r} does not match semantic assignment identity"
+                )
+    structured_digest = stable_digest(output_values)
 
     entries = tuple(
         AssignmentArtifact(
