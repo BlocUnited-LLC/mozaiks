@@ -57,7 +57,24 @@ class OrdersBaseHandler:
     async def archive_order(self, ctx, **params):
         deleted = await self._collection(ctx).delete_one({"order_id": params.get("order_id", "")})
         return {"archived": bool(deleted)}
+
+    async def corrupt_order(self, ctx, **params):
+        return {"handle": {"a", "b"}}
 '''
+
+_PROFILE_YAML = """
+schema_version: mozaiks.profile.v1
+panels:
+  - id: orders_panel
+    title: Orders
+    kind: list
+    action: list_orders
+    fields:
+      - id: order_id
+        label: Order
+      - id: customer_name
+        label: Customer
+"""
 
 _MODULE_YAML = """
 schema_version: mozaiks.module.v1
@@ -92,6 +109,11 @@ actions:
     handler_method: archive_order
     input_schema: {type: object, properties: {order_id: {type: string}}}
     output_schema: {type: object}
+  - id: corrupt_order
+    description: Return a value outside the JSON transport contract.
+    handler_method: corrupt_order
+    input_schema: {type: object, properties: {}}
+    output_schema: {type: object}
 """
 
 
@@ -103,6 +125,7 @@ def _persistence_bundle() -> dict[str, str]:
         if not path.startswith("modules/orders/")
     }
     files["modules/orders/module.yaml"] = _MODULE_YAML
+    files["modules/orders/contracts/profile.yaml"] = _PROFILE_YAML
     files["modules/orders/backend/__init__.py"] = ""
     files["modules/orders/backend/base_handler.py"] = _PERSISTENCE_HANDLER
     files["modules/orders/backend/handler.py"] = (
@@ -140,7 +163,7 @@ def test_persistence_backed_crud_over_http_is_json_safe(tmp_path, monkeypatch) -
         with TestClient(platform.app, raise_server_exceptions=False) as client:
             created = _assert_json_200(
                 client.post(
-                    "/api/modules/orders/create_order",
+                    "/api/modules/orders/create_order?app_id=support-operations",
                     json={"params": {"customer_name": "Ada"}},
                 ),
                 "create_order",
@@ -149,7 +172,7 @@ def test_persistence_backed_crud_over_http_is_json_safe(tmp_path, monkeypatch) -
             assert order_id
 
             listed = _assert_json_200(
-                client.post("/api/modules/orders/list_orders", json={}),
+                client.post("/api/modules/orders/list_orders?app_id=support-operations", json={}),
                 "list_orders",
             )
             assert listed["count"] >= 1
@@ -159,7 +182,7 @@ def test_persistence_backed_crud_over_http_is_json_safe(tmp_path, monkeypatch) -
 
             read = _assert_json_200(
                 client.post(
-                    "/api/modules/orders/read_order",
+                    "/api/modules/orders/read_order?app_id=support-operations",
                     json={"params": {"order_id": order_id}},
                 ),
                 "read_order",
@@ -169,7 +192,7 @@ def test_persistence_backed_crud_over_http_is_json_safe(tmp_path, monkeypatch) -
 
             updated = _assert_json_200(
                 client.post(
-                    "/api/modules/orders/update_order",
+                    "/api/modules/orders/update_order?app_id=support-operations",
                     json={"params": {"order_id": order_id, "customer_name": "Grace"}},
                 ),
                 "update_order",
@@ -179,14 +202,51 @@ def test_persistence_backed_crud_over_http_is_json_safe(tmp_path, monkeypatch) -
 
             # GET module dispatch surface as an additional embedding path.
             listed_get = _assert_json_200(
-                client.get("/api/modules/orders/list_orders"),
+                client.get("/api/modules/orders/list_orders?app_id=support-operations"),
                 "list_orders (GET)",
             )
             assert any(isinstance(o.get("_id"), str) for o in listed_get["orders"])
 
+            # Profile-panel embedding surface: the platform hydrates the
+            # module action into the panel payload; the Mongo documents must
+            # arrive as valid JSON with string identifiers, no crash.
+            panels = _assert_json_200(
+                client.get("/api/me/profile-panels"),
+                "profile-panels",
+            )
+            orders_panel = next(
+                p for p in panels["panels"] if p["id"] == "orders_panel"
+            )
+            assert orders_panel["error"] is None, orders_panel
+            hydrated_orders = orders_panel["data"]["orders"]
+            assert any(
+                o["order_id"] == order_id and isinstance(o["_id"], str)
+                for o in hydrated_orders
+            ), f"order {order_id} missing from panel data: {hydrated_orders!r}"
+
+            # A result outside the transport contract fails typed at the
+            # executor and reaches the wire as the platform's controlled
+            # JSON error envelope (the host masks 500 details by policy).
+            # An unhandled FastAPI serialization crash would instead produce
+            # Starlette's plain-text "Internal Server Error" body — so a
+            # parseable JSON envelope here proves the typed path handled it.
+            corrupt_response = client.post(
+                "/api/modules/orders/corrupt_order?app_id=support-operations", json={}
+            )
+            assert corrupt_response.status_code == 500
+            corrupt_payload = json.loads(corrupt_response.text)
+            assert corrupt_payload == {"detail": "Internal server error"}
+
+            # The server survives the invalid result: the next request works.
+            still_alive = _assert_json_200(
+                client.get("/api/modules/orders/list_orders?app_id=support-operations"),
+                "list_orders (after corrupt)",
+            )
+            assert still_alive["count"] >= 1
+
             archived = _assert_json_200(
                 client.post(
-                    "/api/modules/orders/archive_order",
+                    "/api/modules/orders/archive_order?app_id=support-operations",
                     json={"params": {"order_id": order_id}},
                 ),
                 "archive_order",

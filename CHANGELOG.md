@@ -28,7 +28,18 @@ This project follows a practical pre-1.0 changelog format:
   collisions, no repr leaks), cyclic or absurdly nested results are rejected
   instead of exhausting the stack, and the response-size gate now measures
   the exact strictly-encoded UTF-8 bytes (no `default=str` masking). Input
-  documents are not mutated.
+  documents are not mutated. The container domain is closed to exact
+  `dict`/`list`/`tuple`: sets and frozensets (no deterministic JSON form),
+  container subclasses, custom Mappings, and generators are rejected before
+  any iteration can run hostile code, and BSON `Int64` converts to the exact
+  builtin int. Non-finite `Decimal` values (NaN/Infinity), failing pydantic
+  serializers, malformed UTF-8 bytes, and unexpected conversion failures all
+  surface as the same typed error — never a raw exception — with hostile
+  payload contents kept out of error messages. The size gate's encoding is
+  byte-for-byte identical to what Starlette's `JSONResponse` emits (compact
+  separators, `ensure_ascii=False`, UTF-8), verified against real
+  `TestClient` response bodies, so a result at the limit passes and one byte
+  over fails.
 
 
 ### Changed

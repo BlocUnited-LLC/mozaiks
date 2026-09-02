@@ -612,13 +612,21 @@ class ModuleExecutor:
                     "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
                     request.module, request.action, out_error)
 
-        # Response size gate — strict encoding of the exact transport shape;
-        # the byte length is measured on the encoded UTF-8 bytes. A strict
-        # serialization failure here means the normalizer contract was
-        # violated and is the same typed outcome.
+        # Response size gate — the exact wire render. These dump options are
+        # byte-for-byte what starlette.responses.JSONResponse.render() emits
+        # (ensure_ascii=False, allow_nan=False, no indent, compact
+        # separators, UTF-8), verified by test against a real TestClient
+        # body. A strict serialization failure here means the normalizer
+        # contract was violated and is the same typed outcome.
         if result is not None:
             try:
-                encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
+                encoded = json.dumps(
+                    result,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    indent=None,
+                    separators=(",", ":"),
+                )
             except (TypeError, ValueError) as exc:
                 logger.error(
                     "MODULE_RESULT_NOT_JSON_SAFE: module=%s action=%s strict serialization failed: %s",

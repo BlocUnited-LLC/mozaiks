@@ -83,7 +83,6 @@ def test_fastapi_equivalent_wire_semantics_preserved() -> None:
             "kind": _Kind.ACTIVE,
             "model": _Doc(name="a", when=stamp),
             "blob": b"text-bytes",
-            "tags": {"a"},
         }
     )
     assert normalized["when"] == stamp.isoformat()
@@ -94,7 +93,6 @@ def test_fastapi_equivalent_wire_semantics_preserved() -> None:
     assert normalized["kind"] == "active"
     assert normalized["model"]["name"] == "a"
     assert normalized["blob"] == "text-bytes"
-    assert normalized["tags"] == ["a"]
     json.dumps(normalized, allow_nan=False)
 
 
@@ -198,6 +196,273 @@ def test_shared_noncyclic_child_is_encoded_twice_deterministically() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Closed container domain — exact dict/list/tuple only, decided before any
+# iteration or .items() call can execute hostile code
+# ---------------------------------------------------------------------------
+
+
+def test_ordinary_set_and_frozenset_are_rejected() -> None:
+    with pytest.raises(ModuleResultNormalizationError, match="no deterministic JSON form"):
+        json_safe_bson({"tags": {"a", "b"}})
+    with pytest.raises(ModuleResultNormalizationError, match="no deterministic JSON form"):
+        json_safe_bson({"tags": frozenset({"a", "b"})})
+
+
+def test_container_subclasses_are_rejected_without_iteration() -> None:
+    executed: list[str] = []
+
+    class _HostileDict(dict):
+        def items(self):
+            executed.append("dict.items")
+            return super().items()
+
+    class _HostileList(list):
+        def __iter__(self):
+            executed.append("list.iter")
+            return super().__iter__()
+
+    class _HostileTuple(tuple):
+        def __iter__(self):
+            executed.append("tuple.iter")
+            return super().__iter__()
+
+    class _HostileSet(set):
+        def __iter__(self):
+            executed.append("set.iter")
+            raise RuntimeError("hostile iteration payload")
+
+    for hostile in (
+        _HostileDict({"k": "v"}),
+        _HostileList(["v"]),
+        _HostileTuple(("v",)),
+        _HostileSet({"v"}),
+    ):
+        with pytest.raises(ModuleResultNormalizationError):
+            json_safe_bson({"payload": hostile})
+    assert executed == []
+
+
+def test_custom_mapping_is_rejected_without_items_call() -> None:
+    from collections.abc import Iterator, Mapping
+
+    executed: list[str] = []
+
+    class _HostileMapping(Mapping):
+        def __getitem__(self, key):  # pragma: no cover - must never run
+            executed.append("getitem")
+            return "x"
+
+        def __iter__(self) -> Iterator[str]:  # pragma: no cover - must never run
+            executed.append("iter")
+            raise RuntimeError("hostile mapping payload")
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(ModuleResultNormalizationError, match="exact"):
+        json_safe_bson({"payload": _HostileMapping()})
+    assert executed == []
+
+
+def test_generators_and_arbitrary_iterables_are_rejected() -> None:
+    def _gen():  # pragma: no cover - must never be iterated
+        yield "leak"
+
+    with pytest.raises(ModuleResultNormalizationError, match="unsupported value type"):
+        json_safe_bson({"stream": _gen()})
+
+    class _Iterable:
+        def __iter__(self):  # pragma: no cover - must never run
+            raise RuntimeError("hostile")
+
+    with pytest.raises(ModuleResultNormalizationError, match="unsupported value type"):
+        json_safe_bson({"stream": _Iterable()})
+
+
+def test_scalar_subclasses_are_outside_the_exact_domain() -> None:
+    class _EvilInt(int):
+        pass
+
+    class _EvilStr(str):
+        pass
+
+    class _EvilFloat(float):
+        pass
+
+    for scalar in (_EvilInt(1), _EvilStr("s"), _EvilFloat(1.5)):
+        with pytest.raises(ModuleResultNormalizationError):
+            json_safe_bson({"v": scalar})
+
+
+def test_no_set_serialization_path_across_hash_seeds() -> None:
+    """Sets fail identically under different PYTHONHASHSEED values.
+
+    If any code path serialized a set, its ordering would vary with the hash
+    seed; the contract removes the path entirely, so every seed produces the
+    same typed rejection and the seed can never influence wire bytes.
+    """
+    import subprocess
+    import sys
+
+    snippet = (
+        "from mozaiksai.core.runtime.composition.bson_safe import "
+        "json_safe_bson, ModuleResultNormalizationError\n"
+        "try:\n"
+        "    json_safe_bson({'tags': {'a', 'b', 'c', 'd', 'e'}})\n"
+        "except ModuleResultNormalizationError as exc:\n"
+        "    print('REJECTED:' + str(exc))\n"
+        "else:\n"
+        "    print('ACCEPTED')\n"
+    )
+    outputs = set()
+    for seed in ("0", "1", "424242"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        proc = subprocess.run(
+            [sys.executable, "-c", snippet],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        outputs.add(proc.stdout.strip())
+    assert len(outputs) == 1
+    assert next(iter(outputs)).startswith("REJECTED:")
+
+
+# ---------------------------------------------------------------------------
+# Conversion failures are typed, never raw
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity", "sNaN"])
+def test_nonfinite_decimals_fail_closed(bad: str) -> None:
+    with pytest.raises(ModuleResultNormalizationError, match="non-finite Decimal"):
+        json_safe_bson({"amount": Decimal(bad)})
+
+
+def test_pydantic_model_with_unserializable_field_fails_typed() -> None:
+    from typing import Any as _Any
+
+    from pydantic import ConfigDict
+
+    class _Holder(BaseModel):
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+        payload: _Any
+
+    with pytest.raises(ModuleResultNormalizationError, match="could not be serialized"):
+        json_safe_bson({"doc": _Holder(payload=object())})
+
+
+def test_pydantic_model_with_throwing_serializer_fails_typed() -> None:
+    from pydantic import field_serializer
+
+    class _Throwing(BaseModel):
+        name: str
+
+        @field_serializer("name")
+        def _boom(self, value: str) -> str:
+            raise RuntimeError("serializer exploded with SECRET-DETAILS")
+
+    with pytest.raises(ModuleResultNormalizationError) as excinfo:
+        json_safe_bson({"doc": _Throwing(name="x")})
+    assert "SECRET-DETAILS" not in str(excinfo.value)
+
+
+def test_malformed_utf8_bytes_fail_typed() -> None:
+    with pytest.raises(ModuleResultNormalizationError, match="not valid UTF-8"):
+        json_safe_bson({"blob": b"\xff\xfe\xfa"})
+
+
+def test_enum_with_unsupported_value_fails_typed() -> None:
+    class _Weird(Enum):
+        MEMBER = object()
+
+    with pytest.raises(ModuleResultNormalizationError, match="unsupported value type"):
+        json_safe_bson({"kind": _Weird.MEMBER})
+
+
+def test_enum_with_set_value_fails_typed() -> None:
+    class _SetValued(Enum):
+        MEMBER = frozenset({"a"})
+
+    with pytest.raises(ModuleResultNormalizationError):
+        json_safe_bson({"kind": _SetValued.MEMBER})
+
+
+def test_unexpected_conversion_exception_is_wrapped_without_contents() -> None:
+    class _HostileDatetime(datetime):
+        def isoformat(self, *args, **kwargs):  # pragma: no cover - bypassed
+            raise RuntimeError("SECRET-CONTENT")
+
+    # Unbound datetime.isoformat is used, so the override never runs and the
+    # value converts through the base implementation.
+    normalized = json_safe_bson(
+        {"when": _HostileDatetime(2026, 9, 2, tzinfo=UTC)}
+    )
+    assert normalized["when"].startswith("2026-09-02")
+
+
+def test_top_level_wrapper_never_leaks_and_only_raises_typed_error() -> None:
+    class _RaisingEnum(Enum):
+        MEMBER = "ok"
+
+        @property
+        def value(self):  # noqa: PLR0206 - deliberate hostile property
+            raise RuntimeError("SECRET-ENUM-CONTENT")
+
+    with pytest.raises(ModuleResultNormalizationError) as excinfo:
+        json_safe_bson({"kind": _RaisingEnum.MEMBER})
+    message = str(excinfo.value)
+    assert "SECRET-ENUM-CONTENT" not in message
+    assert "RuntimeError" in message
+
+
+# ---------------------------------------------------------------------------
+# Exact FastAPI wire-byte parity
+# ---------------------------------------------------------------------------
+
+
+def _wire_bytes(value) -> bytes:
+    """The executor's exact wire render (must match JSONResponse.render)."""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        indent=None,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"text": "é"},
+        {"emoji": "🚀", "mixed": ["é", {"k": "ü"}], "n": 3, "f": 1.5, "none": None},
+        {"nested": {"a": [1, 2, 3], "b": "plain ascii"}},
+        [],
+        {},
+        ["é", "combining é"],
+    ],
+    ids=["latin-accent", "emoji-mixed", "nested", "empty-list", "empty-dict", "unicode-list"],
+)
+def test_measured_bytes_equal_actual_starlette_response_bytes(payload) -> None:
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+
+    @app.get("/echo")
+    def _echo():
+        return JSONResponse(content=payload)
+
+    with TestClient(app) as client:
+        body = client.get("/echo").content
+    assert _wire_bytes(payload) == body
+    assert len(_wire_bytes(payload)) == len(body)
+
+
+# ---------------------------------------------------------------------------
 # Executor boundary behavior
 # ---------------------------------------------------------------------------
 
@@ -263,6 +528,63 @@ async def test_oversized_normalized_response_is_rejected_by_exact_bytes() -> Non
     result = await ex.execute(_request("records", "huge"))
     assert result.success is False
     assert result.error_code == "RESPONSE_TOO_LARGE"
+
+
+class _SizedHandler:
+    """Returns a payload whose exact wire bytes are controllable."""
+
+    def __init__(self, payload) -> None:
+        self._payload = payload
+
+    def sized(self, ctx, **params):
+        return self._payload
+
+
+def _exact_wire_size(value) -> int:
+    return len(
+        json.dumps(
+            value, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+        ).encode("utf-8")
+    )
+
+
+@pytest.mark.asyncio
+async def test_result_at_exact_limit_passes_and_one_byte_over_fails(monkeypatch) -> None:
+    # Multi-byte characters make encoded-string length diverge from byte
+    # length; the gate must measure the actual UTF-8 wire bytes.
+    payload = {"text": "é" * 10}
+    limit = _exact_wire_size(payload)
+
+    monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", str(limit))
+    ex = ModuleExecutor()
+    ex.register("sized", _SizedHandler(payload))
+    at_limit = await ex.execute(_request("sized", "sized"))
+    assert at_limit.success is True
+
+    monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", str(limit - 1))
+    ex2 = ModuleExecutor()
+    ex2.register("sized", _SizedHandler(payload))
+    over = await ex2.execute(_request("sized", "sized"))
+    assert over.success is False
+    assert over.error_code == "RESPONSE_TOO_LARGE"
+
+
+@pytest.mark.asyncio
+async def test_unsupported_result_is_not_json_safe_never_a_size_outcome(monkeypatch) -> None:
+    monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", "1")
+    ex = ModuleExecutor()
+    ex.register("sized", _SizedHandler({"handle": object()}))
+    result = await ex.execute(_request("sized", "sized"))
+    assert result.success is False
+    assert result.error_code == "MODULE_RESULT_NOT_JSON_SAFE"
+
+
+def test_bson_int64_converts_to_exact_int() -> None:
+    from bson.int64 import Int64
+
+    normalized = json_safe_bson({"count": Int64(9_007_199_254_740_993)})
+    assert normalized["count"] == 9_007_199_254_740_993
+    assert type(normalized["count"]) is int
 
 
 # ---------------------------------------------------------------------------
