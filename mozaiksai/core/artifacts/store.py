@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
@@ -39,6 +40,28 @@ _DATABASE_NAME = "mozaiksai"
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class BuildRecordCurrentConflictError(RuntimeError):
+    """A concurrent writer published a different CURRENT record for the same target.
+
+    Raised when the storage-level uniqueness guard (partial unique index on
+    CURRENT records per app_id/build_family/build_key) rejects a publication
+    because another record became CURRENT between the supersede step and the
+    publish step. The caller's record was NOT published; the concurrent
+    winner's CURRENT record stands.
+    """
+
+    def __init__(self, *, app_id: str, build_family: str, build_key: str, build_record_id: str) -> None:
+        self.app_id = app_id
+        self.build_family = build_family
+        self.build_key = build_key
+        self.build_record_id = build_record_id
+        super().__init__(
+            f"Concurrent CURRENT publication conflict for app_id={app_id!r} "
+            f"build_family={build_family!r} build_key={build_key!r}: "
+            f"record {build_record_id!r} was not published"
+        )
 
 
 class BuildRecordStore:
@@ -110,6 +133,17 @@ class BuildRecordStore:
             {
                 "name": "av_app_status_updated",
                 "keys": [("app_id", 1), ("lifecycle_status", 1), ("updated_at", -1)],
+            },
+            {
+                # Storage-level invariant: at most one CURRENT record per
+                # (app_id, build_family, build_key). Concurrent independent
+                # clients racing supersede-then-publish cannot both land
+                # CURRENT — the second publish fails with DuplicateKeyError,
+                # which the store translates into a typed conflict.
+                "name": "av_unique_current",
+                "keys": [("app_id", 1), ("build_family", 1), ("build_key", 1)],
+                "unique": True,
+                "partialFilterExpression": {"lifecycle_status": "current"},
             },
         ],
         "ArtifactVersionCounters": [
@@ -764,7 +798,20 @@ class BuildRecordStore:
                 },
             )
 
-        await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+        try:
+            await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+        except DuplicateKeyError as exc:
+            if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
+                # A concurrent writer made another record CURRENT between this
+                # call's supersede step and its insert; the partial unique
+                # index keeps the invariant and this record was not created.
+                raise BuildRecordCurrentConflictError(
+                    app_id=resolved_app_id,
+                    build_family=build_family,
+                    build_key=build_key,
+                    build_record_id=build_record_id,
+                ) from exc
+            raise
         return record
 
     async def get_build_record(
@@ -968,10 +1015,23 @@ class BuildRecordStore:
                 }
             },
         )
-        await versions.update_one(
-            {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
-            {"$set": updates},
-        )
+        try:
+            await versions.update_one(
+                {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
+                {"$set": updates},
+            )
+        except DuplicateKeyError as exc:
+            # The av_unique_current partial unique index rejected the publish:
+            # a concurrent independent client made a different record CURRENT
+            # after this accept's supersede step ran. Re-accepting the record
+            # that already IS current never conflicts (same document), so a
+            # duplicate here always means a different-target winner.
+            raise BuildRecordCurrentConflictError(
+                app_id=resolved_app_id,
+                build_family=target.build_family,
+                build_key=target.build_key,
+                build_record_id=target.id,
+            ) from exc
         refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
         return BuildRecord.model_validate(refreshed) if isinstance(refreshed, dict) else target
 

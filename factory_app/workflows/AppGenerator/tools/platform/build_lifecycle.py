@@ -117,23 +117,28 @@ async def emit_build_completed(
 ) -> str | None:
     """Emit build.completed only for runs that produced their terminal outputs.
 
-    generate_and_download sets ``download_status="ready"`` as the canonical
-    terminal success marker. When the workflow run ends without it — the
-    terminal tool failed (including failures the auto-tool handler converted
-    into an error tool result), was cancelled, or never produced a bundle —
-    the completion hook must not claim build.completed/review; it records the
-    existing typed failed lifecycle outcome instead.
+    generate_and_download owns the ``download_status`` marker lifecycle:
+    ``ready`` is the canonical terminal success state, ``failed`` records a
+    terminal-tool failure (including required-lineage persistence failures the
+    auto-tool handler converted into an error tool result). Every completed
+    workflow turn invokes this hook, so a run whose marker is neither state —
+    an intermediate conversational turn, a cancelled download, or a blocked
+    export — must claim nothing: completion is prevented without fabricating
+    a failure.
     """
-    if _context_value(context_variables, "download_status") != "ready":
+    marker = _context_value(context_variables, "download_status")
+    if marker == "failed":
         return await emit_build_failed(
             app_id=app_id,
             execution_id=execution_id,
             chat_id=chat_id,
             user_id=user_id,
             workflow_name=workflow_name,
-            error="required build outputs missing: generate_and_download did not reach its terminal success state",
+            error="required build outputs missing: generate_and_download failed before its terminal success state",
             **kwargs,
         )
+    if marker != "ready":
+        return None
 
     outbox_event_id = await _shared_emit_build_completed(
         app_id=app_id,

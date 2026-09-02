@@ -77,6 +77,26 @@ This project follows a practical pre-1.0 changelog format:
   and the AppGenerator completion hook emits the typed build-failed outcome
   instead of build.completed/review when the terminal download tool did not
   reach its success state.
+- **Workflow completion claims now traverse the production bridge
+  truthfully**: run-level lifecycle hook resolution kept only the
+  last-declared `lifecycle_tools` entry per trigger, so AppGenerator's four
+  `on_complete` tools collapsed to one telemetry recorder and no production
+  run ever emitted `build.completed`; hooks for the same trigger now compose
+  in declaration order with per-hook fault isolation. The bridge threads the
+  canonical persisted session context snapshot into completion hooks, and the
+  AppGenerator completion gate is tri-state on the terminal
+  `download_status` marker owned by `generate_and_download`: `ready` claims
+  build.completed, `failed` (recorded by the registration boundary before a
+  failure reaches the auto-tool handler) claims the typed build.failed, and
+  every other state — intermediate conversational turns, cancelled
+  downloads, absent context — claims nothing.
+- **At most one CURRENT BuildRecord per (app_id, build_family, build_key) is
+  now storage-enforced**: a partial unique index on CURRENT records
+  (verified through the canonical index contract, mismatches fail closed)
+  rejects interleaved supersede/publish races between independent clients;
+  the losing publish surfaces as a typed
+  `BuildRecordCurrentConflictError`, same-target retries stay idempotent,
+  and unrelated build families are unaffected.
 
 
 ### Changed

@@ -363,7 +363,7 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
     if not isinstance(lifecycle_tools, list):
         return empty_hooks
 
-    result = dict(empty_hooks)
+    loaded: dict[str, list[Any]] = {trigger: [] for trigger in empty_hooks}
 
     for entry in lifecycle_tools:
         if not isinstance(entry, dict):
@@ -388,7 +388,7 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
                 file_path=wf_file,
                 function=function,
             )
-            result[trigger] = callable_fn
+            loaded[trigger].append(callable_fn)
             logger.info(
                 "LIFECYCLE_HOOKS_LOADED: %s:%s trigger=%s (workflow=%s)",
                 wf_file,
@@ -405,7 +405,45 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
                 exc,
             )
 
+    result = dict(empty_hooks)
+    for trigger, hooks in loaded.items():
+        if len(hooks) == 1:
+            result[trigger] = hooks[0]
+        elif hooks:
+            result[trigger] = _compose_lifecycle_hooks(hooks, trigger, workflow_name)
+
     return result
+
+
+def _compose_lifecycle_hooks(hooks: list[Any], trigger: str, workflow_name: str) -> Any:
+    """Invoke every declared hook for a trigger in declaration order.
+
+    A workflow may declare several lifecycle_tools for the same run-level
+    trigger; each must run. One hook's failure is isolated so it cannot
+    suppress the others (a telemetry recorder must not block a build
+    lifecycle claim). Returns the first non-None hook result.
+    """
+
+    async def _composed(*args: Any, **kwargs: Any) -> Any:
+        first_result: Any = None
+        for hook in hooks:
+            try:
+                hook_result = hook(*args, **kwargs)
+                if inspect.isawaitable(hook_result):
+                    hook_result = await hook_result
+                if first_result is None:
+                    first_result = hook_result
+            except Exception as exc:
+                logger.warning(
+                    "LIFECYCLE_HOOK_ERROR: trigger=%s workflow=%s hook=%s error=%s",
+                    trigger,
+                    workflow_name,
+                    getattr(hook, "__name__", repr(hook)),
+                    exc,
+                )
+        return first_result
+
+    return _composed
 
 
 def _load_workflow_local_entrypoint(

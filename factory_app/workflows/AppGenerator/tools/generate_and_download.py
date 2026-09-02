@@ -614,6 +614,43 @@ async def _register_app_bundle_artifact_version(
     written_paths: list[str] | None = None,
     context_variables: Any | None,
 ):
+    """Register the bundle's BuildRecord and required lineage.
+
+    Owns the terminal failure marker: any registration failure records
+    ``download_status="failed"`` before re-raising so the completion hook
+    reads it from the persisted session context and emits the typed
+    build-failed outcome instead of claiming completion.
+    """
+    try:
+        return await _register_app_bundle_artifact_version_steps(
+            app_id=app_id,
+            user_id=user_id,
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            bundle_name=bundle_name,
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=context_variables,
+        )
+    except Exception:
+        _context_set(context_variables, "download_status", "failed")
+        _context_set(context_variables, "app_download_ready", False)
+        raise
+
+
+async def _register_app_bundle_artifact_version_steps(
+    *,
+    app_id: str,
+    user_id: str | None,
+    workflow_name: str,
+    chat_id: str | None,
+    bundle_name: str,
+    zip_path: Path,
+    app_dir: Path | None = None,
+    written_paths: list[str] | None = None,
+    context_variables: Any | None,
+):
     try:
         import hashlib
 

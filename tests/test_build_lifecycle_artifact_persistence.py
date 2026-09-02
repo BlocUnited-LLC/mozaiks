@@ -255,10 +255,15 @@ class TestAgentGeneratorEmitBuildCompleted:
 
 
 class TestAppGeneratorCompletionGate:
-    """build.completed may be claimed only after terminal tool success."""
+    """build.completed only after terminal success; build.failed only on the failed marker.
+
+    The completion hook fires on every completed workflow turn, so states
+    other than the two terminal markers (intermediate turns, cancelled
+    downloads, absent context) must claim nothing at all.
+    """
 
     @pytest.mark.asyncio
-    async def test_missing_terminal_marker_emits_failed_not_completed(self) -> None:
+    async def test_failed_marker_emits_failed_not_completed(self) -> None:
         from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
 
         shared_emit = _make_shared_emit("outbox_should_not_happen")
@@ -275,7 +280,7 @@ class TestAppGeneratorCompletionGate:
                 chat_id="chat-1",
                 user_id="user-1",
                 workflow_name="AppGenerator",
-                context_variables={},
+                context_variables={"download_status": "failed", "app_download_ready": False},
             )
 
         assert result == "outbox_failed_1"
@@ -285,40 +290,34 @@ class TestAppGeneratorCompletionGate:
         assert "terminal success" in failed.await_args.kwargs["error"]
 
     @pytest.mark.asyncio
-    async def test_cancelled_download_emits_failed_not_completed(self) -> None:
+    @pytest.mark.parametrize(
+        "context_variables",
+        [
+            {},
+            {"download_status": "cancelled", "app_download_ready": False},
+            None,
+        ],
+        ids=["intermediate-turn", "cancelled-download", "no-context"],
+    )
+    async def test_nonterminal_states_claim_nothing(self, context_variables) -> None:
         from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
 
         shared_emit = _make_shared_emit()
-        failed = AsyncMock(return_value="outbox_failed_2")
+        persist = _make_persist()
+        failed = AsyncMock()
 
         with (
             patch.object(mod, "_shared_emit_build_completed", shared_emit),
+            patch.object(mod, "_persist_app_bundle_artifact", persist),
             patch.object(mod, "emit_build_failed", failed),
         ):
-            await mod.emit_build_completed(
+            result = await mod.emit_build_completed(
                 app_id="app-1",
                 workflow_name="AppGenerator",
-                context_variables={"download_status": "cancelled", "app_download_ready": False},
+                context_variables=context_variables,
             )
 
+        assert result is None
         shared_emit.assert_not_awaited()
-        failed.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_none_context_emits_failed_not_completed(self) -> None:
-        from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
-
-        shared_emit = _make_shared_emit()
-        failed = AsyncMock(return_value="outbox_failed_3")
-
-        with (
-            patch.object(mod, "_shared_emit_build_completed", shared_emit),
-            patch.object(mod, "emit_build_failed", failed),
-        ):
-            await mod.emit_build_completed(
-                app_id="app-1",
-                workflow_name="AppGenerator",
-            )
-
-        shared_emit.assert_not_awaited()
-        failed.assert_awaited_once()
+        persist.assert_not_awaited()
+        failed.assert_not_awaited()

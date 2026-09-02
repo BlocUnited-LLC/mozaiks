@@ -422,9 +422,10 @@ async def test_auto_tool_failure_traversal_never_claims_completion(
     assert status == "error"
     assert result == {"status": "error", "message": "tool_execution_failed"}
 
-    # No success/download/ready claim exists anywhere in workflow state.
-    assert context.data.get("download_status") != "ready"
-    assert context.data.get("app_download_ready") is not True
+    # The registration boundary recorded the terminal failure marker, and no
+    # success/download/ready claim exists anywhere in workflow state.
+    assert context.data.get("download_status") == "failed"
+    assert context.data.get("app_download_ready") is False
     assert context.data.get("greenfield_app_context_registered") is not True
 
     # Completion hook: typed failed outcome, never build.completed/review.

@@ -605,6 +605,23 @@ class WorkflowBridgeMixin:
         run_status_value = str(getattr(run_status, "value", run_status or "completed"))
 
         if emit_execution_completed is not None and run_status_value == "completed":
+            # Thread the canonical persisted final context snapshot through the
+            # existing lifecycle call so completion hooks can see terminal tool
+            # state. This is the same session-context authority runs are seeded
+            # from; hooks that don't accept context ignore the extra kwarg.
+            final_context: dict[str, Any] | None = None
+            try:
+                pm = self._get_or_create_persistence_manager()
+                final_context = await pm.fetch_chat_session_extra_context(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    workflow_name=workflow_name,
+                )
+            except Exception as _ctx_exc:
+                logger.warning(
+                    "EXECUTION_COMPLETED_CONTEXT_FETCH_FAILED chat=%s: %s", chat_id, _ctx_exc
+                )
+                final_context = None
             try:
                 _t = asyncio.create_task(
                     emit_execution_completed(
@@ -613,6 +630,7 @@ class WorkflowBridgeMixin:
                         chat_id=chat_id,
                         user_id=user_id,
                         workflow_name=workflow_name,
+                        context_variables=final_context,
                     )
                 )
                 _t.add_done_callback(
