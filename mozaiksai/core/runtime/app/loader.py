@@ -153,16 +153,23 @@ class AppLoader:
         except AppProvenanceLoadError as exc:
             raise AppLoadError(f"Invalid provenance.yaml: {exc}") from exc
 
+        # Fail closed: an app that DECLARES a subscription contract must load
+        # it or not load at all. Downgrading an invalid present config to
+        # subscriptions_config=None would wire NoOpEntitlementAdapter and
+        # silently grant every entitlement gate. Only an absent file means a
+        # valid non-SaaS app. load_subscriptions_config remains the sole
+        # schema authority (v1 and v2 both accepted, unchanged).
         subscriptions_config: SubscriptionsConfig | None = None
         try:
             subscriptions_config = load_subscriptions_config(base_path)
-            if subscriptions_config is not None:
-                logger.info(
-                    "SUBSCRIPTIONS_LOADED: %s plans (%s)",
-                    len(subscriptions_config.plans), [p.plan_id for p in subscriptions_config.plans])
         except SubscriptionsLoadError as exc:
-            logger.warning(
-                "SUBSCRIPTIONS_CONFIG_INVALID: %s — entitlement enforcement disabled", exc)
+            raise AppLoadError(f"Invalid config/subscriptions.yaml: {exc}") from exc
+        if subscriptions_config is not None:
+            logger.info(
+                "SUBSCRIPTIONS_LOADED: schema=%s root_plans=%s products=%s",
+                subscriptions_config.schema_version,
+                [p.plan_id for p in subscriptions_config.plans],
+                [p.product_id for p in subscriptions_config.products])
 
         logger.info(
             "APP_LOADED: name=%s version=%s mode=%s workflows=%s modules=%s",

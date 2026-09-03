@@ -54,8 +54,10 @@ grants. When the app also declares `assignment_store`, the platform loads it at
 startup and wires the OSS `ConfiguredEntitlementAdapter` into
 `ModuleExecutor`; the adapter reads the configured app data alias for active
 subscription assignment state. Non-SaaS apps omit this file; all entitlement
-gates pass unconditionally via `NoOpEntitlementAdapter`. Schema:
-`mozaiks.subscriptions.v1`.
+gates pass unconditionally via `NoOpEntitlementAdapter`. A file that is
+present but invalid fails application loading — it is never downgraded to
+disabled enforcement, so a malformed contract can never silently grant gated
+actions. Schema: `mozaiks.subscriptions.v1`.
 Assignment stores may declare `tenant_id_field`, `workspace_id_field`, and
 `user_id_field`; the configured adapter checks exact scoped assignments before
 falling back to broader tenant, workspace, user, or app-level records.
