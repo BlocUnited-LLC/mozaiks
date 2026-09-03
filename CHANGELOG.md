@@ -108,6 +108,22 @@ This project follows a practical pre-1.0 changelog format:
   runs in one chat stay distinct. The receipt references the temporary
   pre-5D BuildRecord publication authority, which ADR 0007 Slice 5D will
   later replace.
+- **Terminal receipts bind to the exact persisted closure, and receipt
+  integrity is never authorization**: BuildRecords now persist their
+  immutable run/build binding at creation, and cold verification requires
+  the receipt's BuildRecord and AppContextVersion references to be the exact
+  records created for that run and build — canonical family/key vocabulary,
+  CURRENT (or draft-with-parent for the distinct revision-candidate receipt
+  variant), matching run/build binding on both records, the
+  AppContextVersion's logical version identity and its cross-reference back
+  to the receipt's BuildRecord, and a required lowercase SHA-256 bundle
+  digest that must agree with the persisted manifest. A correctly
+  re-digested receipt referencing real but unrelated CURRENT records now
+  claims nothing. The receipt and run-identity session fields are
+  server-owned: generic context persistence rejects writes to them with
+  detection, and only a privileged runtime setter (used by the bridge's
+  identity mint and the terminal write point after full persistence closure)
+  can install them.
 - **At most one CURRENT BuildRecord per (app_id, build_family, build_key) is
   now storage-enforced**: a partial unique index on CURRENT records
   (verified through the canonical index contract, mismatches fail closed)

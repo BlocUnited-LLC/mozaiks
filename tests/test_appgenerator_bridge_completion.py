@@ -56,7 +56,19 @@ class _FakePersistenceManager:
         self, *, chat_id: str, app_id: str | None = None,
         variables: dict[str, Any] | None = None, workflow_name: str | None = None,
     ) -> None:
-        self.store.update(variables or {})
+        # Mirrors production: server-owned fields are rejected here.
+        for key, value in (variables or {}).items():
+            if key in {"build_terminal_receipt", "workflow_run_id"}:
+                continue
+            self.store[key] = value
+
+    async def persist_server_owned_session_fields(
+        self, *, chat_id: str, app_id: str | None = None,
+        workflow_name: str | None = None, fields: dict[str, Any] | None = None,
+    ) -> None:
+        for key, value in (fields or {}).items():
+            assert key in {"build_terminal_receipt", "workflow_run_id"}, key
+            self.store[key] = value
 
 
 class _Bridge(WorkflowBridgeMixin):
@@ -102,13 +114,21 @@ class _FakeArtifactStore:
     def add_record(
         self, *, record_id: str, build_family: str, lifecycle: str,
         parent: str | None = None, digests: tuple[str, ...] = (),
+        workflow_run_id: str | None = None, build_id: str | None = None,
+        build_key: str | None = None, summary_payload: dict[str, Any] | None = None,
     ) -> None:
         self.records[record_id] = SimpleNamespace(
             id=record_id,
             build_family=build_family,
+            build_key=build_key if build_key is not None else build_family,
             lifecycle_status=lifecycle,
             parent_build_record_id=parent,
+            workflow_run_id=workflow_run_id,
+            build_id=build_id,
             files_manifest=[SimpleNamespace(sha256=d) for d in digests],
+            commit_metadata=SimpleNamespace(
+                metadata={"summary_payload": summary_payload} if summary_payload else {}
+            ),
         )
 
     async def get_build_record(self, *, app_id: str, build_record_id: str) -> Any:
@@ -118,20 +138,46 @@ class _FakeArtifactStore:
 def _register_success_lineage(
     store: _FakeArtifactStore,
     *,
+    run_id: str,
+    app_id: str = _APP_ID,
+    build_id: str | None = None,
     record_id: str = "av_run",
     context_record_id: str = "acv_run",
+    context_version_id: str = "ctx_run",
     lifecycle: str = "current",
     context_lifecycle: str = "current",
     parent: str | None = None,
     digest: str = _BUNDLE_DIGEST,
+    context_run_id: str | None = None,
+    context_build_id: str | None = None,
+    cross_ref_record_id: str | None = None,
+    payload_app_id: str | None = None,
 ) -> None:
+    """Persist the exact closure a legitimate run produces (or an attacked
+    variant thereof)."""
+    bound_build = build_id or f"build_{run_id}"
     store.add_record(
-        record_id=record_id, build_family="app_bundle", lifecycle=lifecycle,
-        parent=parent, digests=(digest,),
+        record_id=record_id, build_family="app_bundle", build_key="app_bundle",
+        lifecycle=lifecycle, parent=parent, digests=(digest,),
+        workflow_run_id=run_id, build_id=bound_build,
     )
     store.add_record(
         record_id=context_record_id, build_family="app_context_version",
-        lifecycle=context_lifecycle,
+        build_key="app_context_version", lifecycle=context_lifecycle,
+        workflow_run_id=context_run_id if context_run_id is not None else run_id,
+        build_id=context_build_id if context_build_id is not None else bound_build,
+        summary_payload={
+            "context_version_id": context_version_id,
+            "app_id": payload_app_id if payload_app_id is not None else app_id,
+            "artifact_refs": [
+                {
+                    "artifact_kind": "app_bundle",
+                    "artifact_version_id": (
+                        cross_ref_record_id if cross_ref_record_id is not None else record_id
+                    ),
+                }
+            ],
+        },
     )
 
 
@@ -142,9 +188,9 @@ def _success_receipt_dict(
     workflow_name: str = _WORKFLOW,
     build_id: str | None = None,
     record_id: str = "av_run",
+    context_version_id: str = "ctx_run",
     context_record_id: str = "acv_run",
-    lifecycle: str = "current",
-    digest: str | None = _BUNDLE_DIGEST,
+    digest: str = _BUNDLE_DIGEST,
 ) -> dict[str, Any]:
     receipt = issue_success_receipt(
         app_id=app_id,
@@ -152,8 +198,7 @@ def _success_receipt_dict(
         workflow_run_id=run_id,
         build_id=build_id or f"build_{run_id}",
         build_record_id=record_id,
-        build_record_lifecycle=lifecycle,  # type: ignore[arg-type]
-        app_context_version_id="acv_logical",
+        app_context_version_id=context_version_id,
         app_context_record_id=context_record_id,
         bundle_digest=digest,
     )
@@ -165,9 +210,14 @@ def _terminal_tool_success(store: _FakeArtifactStore):
 
     async def _on_run(pm: _FakePersistenceManager) -> None:
         run_id = pm.store["workflow_run_id"]
-        _register_success_lineage(store, record_id=f"av_{run_id}", context_record_id=f"acv_{run_id}")
+        _register_success_lineage(
+            store, run_id=run_id,
+            record_id=f"av_{run_id}", context_record_id=f"acv_{run_id}",
+            context_version_id=f"ctx_{run_id}",
+        )
         pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _success_receipt_dict(
-            run_id, record_id=f"av_{run_id}", context_record_id=f"acv_{run_id}"
+            run_id, record_id=f"av_{run_id}", context_record_id=f"acv_{run_id}",
+            context_version_id=f"ctx_{run_id}",
         )
         pm.store["download_status"] = "ready"
         pm.store["app_download_ready"] = True
@@ -491,15 +541,23 @@ async def _launch_with_seeded_receipt(
 
 @pytest.mark.asyncio
 async def test_tampered_receipt_field_fails_digest_and_claims_nothing(monkeypatch) -> None:
+    """Attack 16 precursor: altering a field without re-signing fails the
+    body digest before any lineage resolution."""
     store = _FakeArtifactStore()
-    _register_success_lineage(store)
-    pm_probe = _FakePersistenceManager()
-    # Build a receipt for an arbitrary run then alter a field without re-signing.
-    receipt = _success_receipt_dict("wfrun_victim")
-    receipt["build_id"] = "attacker-substituted-build"
-    events = await _launch_with_seeded_receipt(monkeypatch, receipt, store)
+
+    async def _seed(pm: _FakePersistenceManager) -> None:
+        rid = pm.store["workflow_run_id"]
+        _register_success_lineage(store, run_id=rid)
+        receipt = _success_receipt_dict(rid)
+        receipt["build_id"] = "attacker-substituted-build"  # not re-signed
+        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = receipt
+
+    events = _intercept_lifecycle(monkeypatch)
+    _patch_store(monkeypatch, store)
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, _seed)
+    await _launch(_Bridge(pm), _hooks())
     assert events == [], events
-    del pm_probe
 
 
 @pytest.mark.asyncio
@@ -513,17 +571,19 @@ async def test_validly_signed_receipt_with_wrong_identity_claims_nothing(
     """A digest-valid receipt whose identity does not match the completing
     run/app/workflow can never authorize a claim."""
     store = _FakeArtifactStore()
-    _register_success_lineage(store)
-    kwargs: dict[str, Any] = {}
-    if mutation == "wrong_app":
-        kwargs["app_id"] = "some-other-app"
-    if mutation == "wrong_workflow":
-        kwargs["workflow_name"] = "AgentGenerator"
-    run_id = "wfrun_other_run" if mutation == "wrong_run" else None
 
     async def _seed_current_run(pm: _FakePersistenceManager) -> None:
-        rid = run_id or pm.store["workflow_run_id"]
-        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _success_receipt_dict(rid, **kwargs)
+        current_rid = pm.store["workflow_run_id"]
+        receipt_rid = "wfrun_other_run" if mutation == "wrong_run" else current_rid
+        kwargs: dict[str, Any] = {}
+        if mutation == "wrong_app":
+            kwargs["app_id"] = "some-other-app"
+        if mutation == "wrong_workflow":
+            kwargs["workflow_name"] = "AgentGenerator"
+        # Give the forger a perfect persisted closure for the receipt's own
+        # identity so rejection comes from the identity binding alone.
+        _register_success_lineage(store, run_id=receipt_rid)
+        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _success_receipt_dict(receipt_rid, **kwargs)
 
     events = _intercept_lifecycle(monkeypatch)
     _patch_store(monkeypatch, store)
@@ -533,44 +593,156 @@ async def test_validly_signed_receipt_with_wrong_identity_claims_nothing(
     assert events == [], events
 
 
+def _closure_attack_missing_build_record(store, rid):
+    _register_success_lineage(store, run_id=rid)
+    return _success_receipt_dict(rid, record_id="av_nonexistent")
+
+
+def _closure_attack_wrong_family(store, rid):
+    _register_success_lineage(store, run_id=rid)
+    store.records["av_run"].build_family = "workflow_bundle"
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_wrong_key(store, rid):
+    _register_success_lineage(store, run_id=rid)
+    store.records["av_run"].build_key = "secondary"
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_fake_build_id_real_record(store, rid):
+    # Attack 4: real bound CURRENT record; receipt re-signed with a build_id
+    # that has no corresponding persisted build.
+    _register_success_lineage(store, run_id=rid)
+    return _success_receipt_dict(rid, build_id="build_with_no_persisted_build")
+
+
+def _closure_attack_record_bound_to_other_run(store, rid):
+    # Attack 5: the referenced records were created for another run.
+    _register_success_lineage(store, run_id="wfrun_other")
+    return _success_receipt_dict(
+        rid, build_id="build_wfrun_other",
+        context_version_id="ctx_run",
+    )
+
+
+def _closure_attack_unbound_record(store, rid):
+    # Attack 8 shape: an older record with no persisted run binding can never
+    # satisfy a lineage receipt — no fallback.
+    _register_success_lineage(store, run_id=rid)
+    store.records["av_run"].workflow_run_id = None
+    store.records["av_run"].build_id = None
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_missing_context_record(store, rid):
+    _register_success_lineage(store, run_id=rid)
+    del store.records["acv_run"]
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_nonexistent_logical_version(store, rid):
+    # Attack 9: unrelated current context record + nonexistent logical id.
+    _register_success_lineage(store, run_id=rid)
+    return _success_receipt_dict(rid, context_version_id="ctx_nonexistent")
+
+
+def _closure_attack_logical_record_mismatch(store, rid):
+    # Attack 11: correct record ID plus a substituted (real) logical version.
+    _register_success_lineage(store, run_id=rid)
+    _register_success_lineage(
+        store, run_id=rid, record_id="av_other", context_record_id="acv_other",
+        context_version_id="ctx_other",
+    )
+    return _success_receipt_dict(rid, context_version_id="ctx_other")
+
+
+def _closure_attack_unrelated_context_record(store, rid):
+    # Attack 10: an unrelated CURRENT context record from another run.
+    _register_success_lineage(store, run_id=rid)
+    _register_success_lineage(
+        store, run_id="wfrun_other", record_id="av_other",
+        context_record_id="acv_other", context_version_id="ctx_other",
+    )
+    return _success_receipt_dict(rid, context_record_id="acv_other")
+
+
+def _closure_attack_stale_context_record(store, rid):
+    _register_success_lineage(store, run_id=rid, context_lifecycle="superseded")
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_context_from_other_app(store, rid):
+    # Attack 13: context record persisted for a different app scope.
+    _register_success_lineage(store, run_id=rid, payload_app_id="another-app")
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_context_from_other_build(store, rid):
+    # Attack 14: BuildRecord and AppContextVersion from different builds.
+    _register_success_lineage(store, run_id=rid, context_build_id="build_other")
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_context_cross_ref_mismatch(store, rid):
+    _register_success_lineage(store, run_id=rid, cross_ref_record_id="av_someone_else")
+    return _success_receipt_dict(rid)
+
+
+def _closure_attack_wrong_bundle_digest(store, rid):
+    # Attack 15: complete correct closure, wrong digest in the receipt.
+    _register_success_lineage(store, run_id=rid)
+    return _success_receipt_dict(rid, digest="a" * 64)
+
+
+def _closure_attack_digest_from_other_record(store, rid):
+    _register_success_lineage(store, run_id=rid)
+    _register_success_lineage(
+        store, run_id=rid, record_id="av_other", context_record_id="acv_other",
+        context_version_id="ctx_other", digest="b" * 64,
+    )
+    return _success_receipt_dict(rid, digest="b" * 64)
+
+
+def _closure_attack_success_before_current(store, rid):
+    # Attack 15/pre-lineage: greenfield record still DRAFT — a success receipt
+    # can never claim it regardless of digest correctness.
+    _register_success_lineage(store, run_id=rid, lifecycle="draft")
+    return _success_receipt_dict(rid)
+
+
+_CLOSURE_ATTACKS = {
+    "missing_build_record": _closure_attack_missing_build_record,
+    "wrong_family": _closure_attack_wrong_family,
+    "wrong_key": _closure_attack_wrong_key,
+    "fake_build_id_real_record": _closure_attack_fake_build_id_real_record,
+    "record_bound_to_other_run": _closure_attack_record_bound_to_other_run,
+    "unbound_record": _closure_attack_unbound_record,
+    "missing_context_record": _closure_attack_missing_context_record,
+    "nonexistent_logical_version": _closure_attack_nonexistent_logical_version,
+    "logical_record_mismatch": _closure_attack_logical_record_mismatch,
+    "unrelated_context_record": _closure_attack_unrelated_context_record,
+    "stale_context_record": _closure_attack_stale_context_record,
+    "context_from_other_app": _closure_attack_context_from_other_app,
+    "context_from_other_build": _closure_attack_context_from_other_build,
+    "context_cross_ref_mismatch": _closure_attack_context_cross_ref_mismatch,
+    "wrong_bundle_digest": _closure_attack_wrong_bundle_digest,
+    "digest_from_other_record": _closure_attack_digest_from_other_record,
+    "success_before_current_lineage": _closure_attack_success_before_current,
+}
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "lineage_case",
-    [
-        "missing_build_record",
-        "wrong_family",
-        "missing_context_record",
-        "context_not_current",
-        "digest_mismatch",
-        "success_before_current_lineage",
-    ],
-)
-async def test_success_receipt_failing_cold_verification_claims_nothing(
-    monkeypatch, lineage_case: str
-) -> None:
+@pytest.mark.parametrize("attack", sorted(_CLOSURE_ATTACKS))
+async def test_lineage_closure_attacks_claim_nothing(monkeypatch, attack: str) -> None:
+    """Every substituted or incomplete closure fails cold verification: a
+    real CURRENT record is never sufficient unless it is the exact record for
+    the receipt's run and build."""
     store = _FakeArtifactStore()
-    receipt_kwargs: dict[str, Any] = {}
-    if lineage_case == "missing_build_record":
-        store.add_record(record_id="acv_run", build_family="app_context_version", lifecycle="current")
-    elif lineage_case == "wrong_family":
-        store.add_record(record_id="av_run", build_family="workflow_bundle", lifecycle="current", digests=(_BUNDLE_DIGEST,))
-        store.add_record(record_id="acv_run", build_family="app_context_version", lifecycle="current")
-    elif lineage_case == "missing_context_record":
-        store.add_record(record_id="av_run", build_family="app_bundle", lifecycle="current", digests=(_BUNDLE_DIGEST,))
-    elif lineage_case == "context_not_current":
-        _register_success_lineage(store, context_lifecycle="superseded")
-    elif lineage_case == "digest_mismatch":
-        _register_success_lineage(store, digest="e" * 64)
-    elif lineage_case == "success_before_current_lineage":
-        # Greenfield record still DRAFT with no parent: receipt claiming
-        # CURRENT fails the lifecycle match; receipt claiming DRAFT fails the
-        # unaccepted-greenfield rule. Attack both shapes.
-        _register_success_lineage(store, lifecycle="draft")
-        receipt_kwargs["lifecycle"] = "draft"
 
     async def _seed(pm: _FakePersistenceManager) -> None:
         rid = pm.store["workflow_run_id"]
-        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _success_receipt_dict(rid, **receipt_kwargs)
+        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _CLOSURE_ATTACKS[attack](store, rid)
 
     events = _intercept_lifecycle(monkeypatch)
     _patch_store(monkeypatch, store)
@@ -578,6 +750,186 @@ async def test_success_receipt_failing_cold_verification_claims_nothing(
     _patch_adapter(monkeypatch, pm, _seed)
     await _launch(_Bridge(pm), _hooks())
     assert events == [], events
+
+
+@pytest.mark.asyncio
+async def test_revision_candidate_receipt_completes_and_cannot_claim_current(monkeypatch) -> None:
+    """Genesis/refinement separation: a refinement run's candidate receipt
+    (draft record with parent lineage) claims completion through its own
+    closed variant; the same records can never satisfy a Genesis success
+    receipt, and a candidate receipt can never claim a CURRENT record."""
+    from mozaiksai.core.artifacts.build_receipt import issue_revision_candidate_receipt
+
+    events = _intercept_lifecycle(monkeypatch)
+    store = _FakeArtifactStore()
+    _patch_store(monkeypatch, store)
+    pm = _FakePersistenceManager()
+
+    async def _revision_terminal(inner_pm: _FakePersistenceManager) -> None:
+        rid = inner_pm.store["workflow_run_id"]
+        _register_success_lineage(
+            store, run_id=rid, lifecycle="draft", parent="av_parent",
+            record_id=f"av_{rid}", context_record_id=f"acv_{rid}",
+            context_version_id=f"ctx_{rid}",
+        )
+        receipt = issue_revision_candidate_receipt(
+            app_id=_APP_ID,
+            workflow_name=_WORKFLOW,
+            workflow_run_id=rid,
+            build_id=f"build_{rid}",
+            build_record_id=f"av_{rid}",
+            app_context_version_id=f"ctx_{rid}",
+            app_context_record_id=f"acv_{rid}",
+            bundle_digest=_BUNDLE_DIGEST,
+        )
+        inner_pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = receipt.model_dump(mode="json")
+
+    _patch_adapter(monkeypatch, pm, _revision_terminal)
+    await _launch(_Bridge(pm), _hooks())
+    assert len(_events_of(events, "build.completed")) == 1
+    assert _events_of(events, "build.failed") == []
+
+    # A candidate receipt referencing a CURRENT record must fail closed.
+    events_before = len(events)
+
+    async def _candidate_claiming_current(inner_pm: _FakePersistenceManager) -> None:
+        rid = inner_pm.store["workflow_run_id"]
+        _register_success_lineage(
+            store, run_id=rid, record_id=f"av_{rid}", context_record_id=f"acv_{rid}",
+            context_version_id=f"ctx_{rid}",
+        )
+        receipt = issue_revision_candidate_receipt(
+            app_id=_APP_ID,
+            workflow_name=_WORKFLOW,
+            workflow_run_id=rid,
+            build_id=f"build_{rid}",
+            build_record_id=f"av_{rid}",
+            app_context_version_id=f"ctx_{rid}",
+            app_context_record_id=f"acv_{rid}",
+            bundle_digest=_BUNDLE_DIGEST,
+        )
+        inner_pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = receipt.model_dump(mode="json")
+
+    _patch_adapter(monkeypatch, pm, _candidate_claiming_current)
+    await _launch(_Bridge(pm), _hooks())
+    assert events[events_before:] == [], events[events_before:]
+
+
+# ---------------------------------------------------------------------------
+# Forged-closure substitution attacks (Codex 1)
+# ---------------------------------------------------------------------------
+
+
+def _forged_success_receipt_dict(
+    run_id: str,
+    *,
+    build_id: str,
+    record_id: str,
+    context_version_id: str,
+    context_record_id: str,
+    bundle_digest: str | None,
+) -> dict[str, Any]:
+    """Forge a success receipt the way an attacker with context access would:
+    fill the current schema's fields with substituted references and recompute
+    the content digest. The digest is a content hash, not a server signature —
+    re-digesting must never be sufficient."""
+    from mozaiksai.core.artifacts.build_receipt import BuildSuccessReceipt, _digest_payload
+
+    forged: dict[str, Any] = {
+        "schema_version": "mozaiks.build_receipt.v1",
+        "kind": "success",
+        "scope": "server",
+        "status": "succeeded",
+        "app_id": _APP_ID,
+        "workflow_name": _WORKFLOW,
+        "workflow_run_id": run_id,
+        "build_id": build_id,
+        "build_record_id": record_id,
+        "app_context_version_id": context_version_id,
+        "app_context_record_id": context_record_id,
+        "bundle_digest": bundle_digest,
+        "receipt_digest": "",
+    }
+    if "build_record_lifecycle" in BuildSuccessReceipt.model_fields:
+        forged["build_record_lifecycle"] = "current"
+    forged["receipt_digest"] = _digest_payload(forged)
+    return forged
+
+
+@pytest.mark.asyncio
+async def test_codex1_forged_closure_substitution_attack(monkeypatch) -> None:
+    """Codex 1's exact attack: a correctly re-digested success receipt with a
+    matching app/workflow/run, a build_id with no corresponding persisted
+    build, a real but UNRELATED CURRENT app-bundle BuildRecord, a nonexistent
+    app_context_version_id, an unrelated CURRENT app_context_record_id, and
+    bundle_digest=None must claim nothing: receipt-body integrity is not
+    server authority — the referenced closure is false."""
+    store = _FakeArtifactStore()
+    # Real but unrelated persisted lineage from some other build.
+    store.add_record(
+        record_id="av_unrelated", build_family="app_bundle", lifecycle="current",
+        digests=("f" * 64,),
+    )
+    store.add_record(
+        record_id="acv_unrelated", build_family="app_context_version", lifecycle="current",
+    )
+
+    async def _seed_forged(pm: _FakePersistenceManager) -> None:
+        rid = pm.store["workflow_run_id"]
+        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _forged_success_receipt_dict(
+            rid,
+            build_id="build_with_no_persisted_build",
+            record_id="av_unrelated",
+            context_version_id="ctx_nonexistent",
+            context_record_id="acv_unrelated",
+            bundle_digest=None,
+        )
+
+    events = _intercept_lifecycle(monkeypatch)
+    _patch_store(monkeypatch, store)
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, _seed_forged)
+    await _launch(_Bridge(pm), _hooks())
+    assert events == [], (
+        f"forged closure substitution was accepted: {events}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_forged_closure_with_stolen_valid_digest_still_fails(monkeypatch) -> None:
+    """Strengthened variant: the forger also steals the unrelated record's
+    REAL digest so the receipt is structurally perfect. Rejection must come
+    from the false closure (run/build binding, AppContextVersion identity),
+    not from early shape checks."""
+    stolen_digest = "e" * 64
+    store = _FakeArtifactStore()
+    store.add_record(
+        record_id="av_unrelated", build_family="app_bundle", lifecycle="current",
+        digests=(stolen_digest,),
+    )
+    store.add_record(
+        record_id="acv_unrelated", build_family="app_context_version", lifecycle="current",
+    )
+
+    async def _seed_forged(pm: _FakePersistenceManager) -> None:
+        rid = pm.store["workflow_run_id"]
+        pm.store[TERMINAL_RECEIPT_CONTEXT_KEY] = _forged_success_receipt_dict(
+            rid,
+            build_id="build_with_no_persisted_build",
+            record_id="av_unrelated",
+            context_version_id="ctx_nonexistent",
+            context_record_id="acv_unrelated",
+            bundle_digest=stolen_digest,
+        )
+
+    events = _intercept_lifecycle(monkeypatch)
+    _patch_store(monkeypatch, store)
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, _seed_forged)
+    await _launch(_Bridge(pm), _hooks())
+    assert events == [], (
+        f"forged closure with stolen digest was accepted: {events}"
+    )
 
 
 # ---------------------------------------------------------------------------

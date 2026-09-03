@@ -38,17 +38,16 @@ def _success_context() -> dict:
         workflow_run_id=_RUN_ID,
         build_id=f"build_{_RUN_ID}",
         build_record_id="av_1",
-        build_record_lifecycle="current",
         app_context_version_id="acv_logical",
         app_context_record_id="acv_1",
-        bundle_digest=None,
+        bundle_digest="d" * 64,
     )
     return {TERMINAL_RECEIPT_CONTEXT_KEY: receipt.model_dump(mode="json")}
 
 
 def _patch_lineage_ok(mod):
     return patch.object(
-        mod, "_verify_success_receipt_lineage", AsyncMock(return_value=True)
+        mod, "_verify_terminal_receipt_closure", AsyncMock(return_value=True)
     )
 
 

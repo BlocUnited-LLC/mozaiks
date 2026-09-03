@@ -285,6 +285,8 @@ async def register_greenfield_app_context_version(
     files_manifest: list[dict[str, Any]] | None = None,
     source_workflow: str | None = None,
     source_chat_id: str | None = None,
+    workflow_run_id: str | None = None,
+    build_id: str | None = None,
     make_current: bool = True,
 ) -> RegisteredAppContextVersion:
     """Persist greenfield app-context artifacts and register a current AppContextVersion."""
@@ -385,6 +387,8 @@ async def register_greenfield_app_context_version(
         artifact_store=store,
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
+        workflow_run_id=workflow_run_id,
+        build_id=build_id,
         make_current=make_current,
     )
 
@@ -468,6 +472,8 @@ async def register_app_context_version(
     artifact_store: BuildRecordStore | None = None,
     source_workflow: str | None = None,
     source_chat_id: str | None = None,
+    workflow_run_id: str | None = None,
+    build_id: str | None = None,
     make_current: bool = False,
 ) -> RegisteredAppContextVersion:
     """Persist an AppContextVersion as an ArtifactVersion."""
@@ -489,6 +495,8 @@ async def register_app_context_version(
         ],
         source_workflow=source_workflow,
         source_chat_id=source_chat_id,
+        workflow_run_id=workflow_run_id,
+        build_id=build_id,
         lifecycle_status=BuildRecordStatus.DRAFT,
         validation_status=BuildRecordValidationStatus.PENDING,
         commit_metadata={

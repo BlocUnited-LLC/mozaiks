@@ -152,9 +152,26 @@ class _MemoryArtifactStore:
                 doc.lifecycle_status = ArtifactLifecycleStatus.SUPERSEDED
 
 
+class _FakeSessionPM:
+    """Server-owned session-field sink for terminal receipt persistence."""
+
+    def __init__(self) -> None:
+        self.server_owned: dict[str, Any] = {}
+
+    async def persist_server_owned_session_fields(
+        self, *, chat_id: str, app_id: str | None = None,
+        workflow_name: str | None = None, fields: dict[str, Any] | None = None,
+    ) -> None:
+        self.server_owned.update(fields or {})
+
+
 def _patch_artifact_store(monkeypatch, store: _MemoryArtifactStore) -> None:
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: store)
+    session_pm = _FakeSessionPM()
+    monkeypatch.setattr(
+        generate_and_download_module, "_ag2_persistence_manager", lambda: session_pm
+    )
     monkeypatch.setattr(
         artifacts_mod,
         "resolve_latest_artifact_version_refs",

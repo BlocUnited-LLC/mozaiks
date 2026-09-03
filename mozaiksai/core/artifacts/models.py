@@ -128,6 +128,12 @@ class BuildRecord(BaseModel):
     lineage_root_id: str
     source_workflow: str | None = None
     source_chat_id: str | None = None
+    # Immutable run binding: the server-minted workflow run and build this
+    # record was created for. Written once at creation; terminal receipts are
+    # verified against these exact values (no fallback for unbound records —
+    # a record without a binding can never satisfy a success receipt).
+    workflow_run_id: str | None = None
+    build_id: str | None = None
     canonical_inputs_version: dict[str, str] = Field(default_factory=dict)
     lifecycle_status: BuildRecordStatus = BuildRecordStatus.DRAFT
     validation_status: BuildRecordValidationStatus = BuildRecordValidationStatus.PENDING

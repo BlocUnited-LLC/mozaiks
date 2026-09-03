@@ -67,6 +67,9 @@ class _FakePersistenceManager:
     async def persist_context_variables(self, **kwargs):  # noqa: ANN003
         self.persisted_context.append(kwargs)
 
+    async def persist_server_owned_session_fields(self, **kwargs):  # noqa: ANN003
+        return None
+
     async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
         self.completed.append({"chat_id": chat_id, "app_id": app_id})
         return True

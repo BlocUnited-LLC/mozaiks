@@ -350,6 +350,9 @@ class _FakePersistenceManager:
     async def persist_context_variables(self, **kwargs):  # noqa: ANN003
         return None
 
+    async def persist_server_owned_session_fields(self, **kwargs):  # noqa: ANN003
+        return None
+
     async def fetch_chat_session_extra_context(self, **kwargs):  # noqa: ANN003
         return {}
 

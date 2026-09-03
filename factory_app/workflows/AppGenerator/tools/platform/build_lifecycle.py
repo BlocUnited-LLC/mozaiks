@@ -105,80 +105,148 @@ def _context_value(context_variables: Any, key: str) -> Any:
     return None
 
 
-async def _verify_success_receipt_lineage(receipt: Any, *, app_id: str) -> bool:
-    """Cold-verify a success receipt against the persisted build lineage.
+async def _verify_terminal_receipt_closure(receipt: Any, *, app_id: str) -> bool:
+    """Cold-verify a lineage receipt against the exact persisted closure.
 
-    The receipt's references must resolve in the artifact store with the
-    identities and lifecycle the receipt claims: the app-bundle BuildRecord
-    (CURRENT for greenfield promotion, DRAFT only for revision records that
-    carry parent lineage), the CURRENT AppContextVersion record, and the
-    bundle digest when the record carries one. Any mismatch fails closed.
+    Receipt-body integrity (the self-digest) is never authorization. The
+    referenced records must be the exact records persisted for this run and
+    build, on every canonical dimension: server-owned app scope, family/key
+    vocabulary, run/build binding, lifecycle state, logical AppContextVersion
+    identity, the AppContextVersion-to-BuildRecord cross-reference, and the
+    required bundle digest. Any missing or disagreeing value fails closed --
+    a real but unrelated CURRENT record is never sufficient.
     """
     from logs.logging_config import get_core_logger
     from mozaiksai.core.artifacts import get_artifact_store
+    from mozaiksai.core.artifacts.build_receipt import BuildRevisionCandidateReceipt
 
     log = get_core_logger("appgenerator_build_lifecycle")
     store = get_artifact_store()
+
+    def _refuse(reason: str, *args: Any) -> bool:
+        log.error("BUILD_RECEIPT_VERIFICATION_FAILED: " + reason, *args)
+        return False
 
     record = await store.get_build_record(
         app_id=app_id, build_record_id=receipt.build_record_id
     )
     if record is None:
-        log.error(
-            "BUILD_RECEIPT_VERIFICATION_FAILED: build record %s not found for app %s",
-            receipt.build_record_id, app_id,
+        return _refuse("build record %s not found for app %s", receipt.build_record_id, app_id)
+    if record.build_family != "app_bundle" or record.build_key != "app_bundle":
+        return _refuse(
+            "record %s family/key %s/%s is not the canonical app_bundle vocabulary",
+            record.id, record.build_family, record.build_key,
         )
-        return False
-    if record.build_family != "app_bundle":
-        log.error(
-            "BUILD_RECEIPT_VERIFICATION_FAILED: record %s family=%s is not app_bundle",
-            record.id, record.build_family,
+
+    # Exact run/build binding: the record must have been created FOR this
+    # run and build. Records without a persisted binding can never satisfy a
+    # lineage receipt -- there is no fallback for unbound records.
+    record_run_id = str(getattr(record, "workflow_run_id", "") or "").strip()
+    record_build_id = str(getattr(record, "build_id", "") or "").strip()
+    if not record_run_id or record_run_id != receipt.workflow_run_id:
+        return _refuse(
+            "record %s run binding %r does not match receipt run %r",
+            record.id, record_run_id or "<unbound>", receipt.workflow_run_id,
         )
-        return False
+    if not record_build_id or record_build_id != receipt.build_id:
+        return _refuse(
+            "record %s build binding %r does not match receipt build %r",
+            record.id, record_build_id or "<unbound>", receipt.build_id,
+        )
+
     lifecycle = str(getattr(record.lifecycle_status, "value", record.lifecycle_status))
-    if lifecycle != receipt.build_record_lifecycle:
-        log.error(
-            "BUILD_RECEIPT_VERIFICATION_FAILED: record %s lifecycle=%s receipt claims %s",
-            record.id, lifecycle, receipt.build_record_lifecycle,
-        )
-        return False
-    if lifecycle == "draft" and not record.parent_build_record_id:
-        # A draft without parent lineage is an unaccepted greenfield record:
-        # success requires CURRENT acceptance under the temporary authority.
-        log.error(
-            "BUILD_RECEIPT_VERIFICATION_FAILED: record %s is an unaccepted greenfield draft",
-            record.id,
-        )
-        return False
-    if receipt.bundle_digest:
-        manifest_digests = {
-            str(getattr(entry, "sha256", "") or "") for entry in record.files_manifest
-        }
-        if receipt.bundle_digest not in manifest_digests:
-            log.error(
-                "BUILD_RECEIPT_VERIFICATION_FAILED: bundle digest %s absent from record %s manifest",
-                receipt.bundle_digest, record.id,
+    if isinstance(receipt, BuildRevisionCandidateReceipt):
+        if lifecycle != "draft" or not record.parent_build_record_id:
+            return _refuse(
+                "revision candidate record %s must be a draft with parent lineage (lifecycle=%s)",
+                record.id, lifecycle,
             )
-            return False
+    else:
+        if lifecycle != "current":
+            return _refuse(
+                "success record %s lifecycle=%s is not CURRENT", record.id, lifecycle
+            )
+
+    # Required bundle digest agreement with the persisted manifest authority.
+    manifest_digests = {
+        str(getattr(entry, "sha256", "") or "") for entry in record.files_manifest
+    }
+    manifest_digests.discard("")
+    if receipt.bundle_digest not in manifest_digests:
+        return _refuse(
+            "bundle digest %s absent from record %s manifest", receipt.bundle_digest, record.id
+        )
 
     context_record = await store.get_build_record(
         app_id=app_id, build_record_id=receipt.app_context_record_id
     )
     if context_record is None:
-        log.error(
-            "BUILD_RECEIPT_VERIFICATION_FAILED: AppContextVersion record %s not found",
-            receipt.app_context_record_id,
+        return _refuse(
+            "AppContextVersion record %s not found", receipt.app_context_record_id
         )
-        return False
+    if (
+        context_record.build_family != "app_context_version"
+        or context_record.build_key != "app_context_version"
+    ):
+        return _refuse(
+            "record %s family/key %s/%s is not the canonical app_context_version vocabulary",
+            context_record.id, context_record.build_family, context_record.build_key,
+        )
     context_lifecycle = str(
         getattr(context_record.lifecycle_status, "value", context_record.lifecycle_status)
     )
     if context_lifecycle != "current":
-        log.error(
-            "BUILD_RECEIPT_VERIFICATION_FAILED: AppContextVersion record %s lifecycle=%s is not current",
+        return _refuse(
+            "AppContextVersion record %s lifecycle=%s is not current",
             context_record.id, context_lifecycle,
         )
-        return False
+    context_run_id = str(getattr(context_record, "workflow_run_id", "") or "").strip()
+    context_build_id = str(getattr(context_record, "build_id", "") or "").strip()
+    if not context_run_id or context_run_id != receipt.workflow_run_id:
+        return _refuse(
+            "AppContextVersion record %s run binding %r does not match receipt run %r",
+            context_record.id, context_run_id or "<unbound>", receipt.workflow_run_id,
+        )
+    if not context_build_id or context_build_id != receipt.build_id:
+        return _refuse(
+            "AppContextVersion record %s build binding %r does not match receipt build %r",
+            context_record.id, context_build_id or "<unbound>", receipt.build_id,
+        )
+
+    # Logical AppContextVersion identity and the exact cross-reference back to
+    # the receipt's BuildRecord, read from the persisted summary payload.
+    summary = getattr(getattr(context_record, "commit_metadata", None), "metadata", None)
+    payload = summary.get("summary_payload") if isinstance(summary, dict) else None
+    if not isinstance(payload, dict):
+        return _refuse(
+            "AppContextVersion record %s carries no persisted summary payload",
+            context_record.id,
+        )
+    logical_id = str(payload.get("context_version_id") or "").strip()
+    if not logical_id or logical_id != receipt.app_context_version_id:
+        return _refuse(
+            "AppContextVersion record %s logical id %r does not match receipt %r",
+            context_record.id, logical_id or "<missing>", receipt.app_context_version_id,
+        )
+    payload_app_id = str(payload.get("app_id") or "").strip()
+    if payload_app_id != str(app_id):
+        return _refuse(
+            "AppContextVersion record %s app scope %r does not match %r",
+            context_record.id, payload_app_id, app_id,
+        )
+    bundle_refs = [
+        ref
+        for ref in (payload.get("artifact_refs") or [])
+        if isinstance(ref, dict) and ref.get("artifact_kind") == "app_bundle"
+    ]
+    if not any(
+        str(ref.get("artifact_version_id") or "").strip() == receipt.build_record_id
+        for ref in bundle_refs
+    ):
+        return _refuse(
+            "AppContextVersion record %s does not cross-reference BuildRecord %s",
+            context_record.id, receipt.build_record_id,
+        )
     return True
 
 
@@ -257,7 +325,7 @@ async def emit_build_completed(
             **kwargs,
         )
 
-    if not await _verify_success_receipt_lineage(receipt, app_id=str(app_id)):
+    if not await _verify_terminal_receipt_closure(receipt, app_id=str(app_id)):
         return None
 
     outbox_event_id = await _shared_emit_build_completed(

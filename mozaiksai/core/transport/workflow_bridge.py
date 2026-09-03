@@ -529,11 +529,14 @@ class WorkflowBridgeMixin:
             if existing:
                 return existing
         workflow_run_id = f"wfrun_{uuid4().hex}"
-        await pm.persist_context_variables(
+        # Server-owned write path: generic context persistence rejects the
+        # run-identity key, so a model/tool-authored context update can never
+        # install or replace it.
+        await pm.persist_server_owned_session_fields(
             chat_id=chat_id,
             app_id=app_id,
             workflow_name=workflow_name,
-            variables={"workflow_run_id": workflow_run_id},
+            fields={"workflow_run_id": workflow_run_id},
         )
         return workflow_run_id
 
