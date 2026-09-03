@@ -209,6 +209,7 @@ def composition_fixture() -> dict[str, object]:
     _materialize_unit(
         rendered,
         payload_by_node=payload_by_id,
+        app_config_render_input=None,
         preserved_by_unit={},
         bundle_outputs=rendered_outputs,
         external=[],

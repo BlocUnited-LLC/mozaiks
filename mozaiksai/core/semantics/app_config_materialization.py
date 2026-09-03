@@ -10,13 +10,14 @@ whose complete input authority exists on accepted semantic payloads:
 - ``app_integrations_config`` -> ``config/integrations.yaml``
 - ``app_secret_references``   -> ``security/secrets.yaml``
 
-Every fact rendered here derives from footprint-pinned payloads
-(ApplicationPayload, AuthPayload, IntegrationPayload, PagePayload,
-WorkflowPayload) or from a deterministic runtime default the normative
-loader already defines (``version`` when unauthored is not one of them —
-version is authored intent; ``chat_startup_mode`` falls back to the
-platform's own ``"ask"`` default only when no agent-driven workflow is
-selected, mirroring ``mozaiksai.hosts.platform``).
+Dependency direction is one-way: the central offline materialization owner
+(``mozaiksai.core.semantics.materialization``) resolves semantic refs,
+validates the graph/plan/binding relationship, and projects the accepted
+payload facts into one closed, immutable :class:`ApplicationFamilyRenderInput`
+snapshot. This module consumes only that snapshot. It imports no semantic
+payload classes, no graph model, and no binding machinery — the snapshot is
+derived data pinned to exact source payload digests, never a second authored
+semantic model.
 
 The renderer is offline substrate: no filesystem, no clocks, no environment,
 no AG2, no AppBuildPlan, no production callers. Families whose facts lack a
@@ -28,33 +29,19 @@ recorded in the slice tests.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import Literal
 
-from mozaiksai.core.runtime.app.layout_registry import MaterializerIdentifier
-from mozaiksai.core.semantics.binding import (
-    ImplementationBinding,
-    RendererSelection,
-    validate_implementation_binding_against_graph,
-)
+from pydantic import BaseModel, ConfigDict, model_validator
+
 from mozaiksai.core.semantics.compilation_plan import FamilyInstancePlan, PlanDisposition
 from mozaiksai.core.semantics.decl_bytes import json_decl_bytes, yaml_decl_bytes
-from mozaiksai.core.semantics.graph import SemanticGraphV2
-from mozaiksai.core.semantics.payloads import (
-    ApplicationPayload,
-    AuthPayload,
-    IntegrationConfigValueKind,
-    IntegrationPayload,
-    OptionalFamilyKind,
-    OptionalFamilySelectionStatus,
-    PagePayload,
-    SemanticPayloadBase,
-    WorkflowPayload,
-    WorkflowStartupMode,
-)
 
 APP_CONFIG_RENDERER_IMPLEMENTATION_ID = "deterministic_app_config_renderer"
 APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION = "1"
+
+APP_FAMILY_RENDER_INPUT_VERSION: Literal["mozaiks.app_family_render_input.v1"] = (
+    "mozaiks.app_family_render_input.v1"
+)
 
 #: The closed family set this renderer implementation may produce.
 APP_CONFIG_FAMILIES: frozenset[str] = frozenset(
@@ -88,160 +75,141 @@ class AppConfigMaterializationError(ValueError):
     """The inputs violate the Slice 5D-0B2A application-family contract."""
 
 
-def resolve_app_config_renderer_selection(
-    binding: ImplementationBinding,
-    *,
-    graph: SemanticGraphV2,
-    layout_registry: Any,
-) -> RendererSelection:
-    """Resolve the accepted app-config renderer through the binding.
+class _ClosedRenderInputModel(BaseModel):
+    """Frozen, unknown-field-rejecting base for every snapshot component."""
 
-    Fails closed when the binding carries no selection covering the
-    application-configuration families, claims a different materializer, or
-    pins any implementation identity/version other than the single accepted
-    deterministic implementation of this slice. There is no fallback to any
-    historical generator path.
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class RenderInputSource(_ClosedRenderInputModel):
+    """One pinned semantic source: exact node identity and payload digest."""
+
+    node_id: str
+    payload_digest: str
+
+
+class RenderInputPage(_ClosedRenderInputModel):
+    """The route-manifest facts of one declared page."""
+
+    page_id: str
+    route: str
+    title: str
+
+
+class RenderInputConfigRequirement(_ClosedRenderInputModel):
+    """One integration configuration requirement, names only — never values."""
+
+    name: str
+    value_type: Literal["text", "url", "secret"]
+    required: bool
+
+
+class RenderInputIntegration(_ClosedRenderInputModel):
+    """The declaration facts of one selected integration."""
+
+    integration_id: str
+    kind: str
+    purpose: str | None
+    required_at: str
+    optional: bool
+    config_requirements: tuple[RenderInputConfigRequirement, ...]
+
+
+class ApplicationFamilyRenderInput(_ClosedRenderInputModel):
+    """Closed immutable render input for the application-configuration families.
+
+    Derived data only: the offline materialization owner projects accepted,
+    footprint-pinned payload facts into this snapshot and ties it to the exact
+    source payload digests in ``sources``. Equivalent facts supplied in any
+    order normalize to one canonical snapshot, so identical semantics always
+    produce identical bytes. The model is recursively frozen and rejects every
+    undeclared field — it cannot carry arbitrary metadata, provider state,
+    clocks, or environment.
     """
-    try:
-        validate_implementation_binding_against_graph(
-            binding, graph, layout_registry=layout_registry
+
+    render_input_schema_version: Literal["mozaiks.app_family_render_input.v1"]
+    application_id: str
+    display_name: str
+    version: str
+    description: str | None
+    default_route: str
+    auth_required: bool
+    pages: tuple[RenderInputPage, ...]
+    has_agent_driven_workflow: bool
+    integrations: tuple[RenderInputIntegration, ...]
+    sources: tuple[RenderInputSource, ...]
+
+    @model_validator(mode="after")
+    def _canonical_order(self) -> ApplicationFamilyRenderInput:
+        pages = tuple(sorted(self.pages, key=lambda p: p.route))
+        routes = [p.route for p in pages]
+        if len(set(routes)) != len(routes):
+            raise ValueError("render input declares duplicate page routes")
+        integrations = tuple(
+            sorted(self.integrations, key=lambda i: i.integration_id)
         )
-    except ValueError as exc:
-        raise AppConfigMaterializationError(
-            f"implementation binding rejected: {exc}"
-        ) from exc
-    matches = [
-        selection
-        for selection in binding.renderer_selections
-        if APP_CONFIG_FAMILIES & set(selection.artifact_families)
-    ]
-    if not matches:
-        raise AppConfigMaterializationError(
-            "binding carries no renderer selection for the application-config families"
-        )
-    selection = matches[0]
-    if selection.materializer_id is not MaterializerIdentifier.APP_CONFIG_EXECUTOR:
-        raise AppConfigMaterializationError(
-            "renderer selection for application-config families pins materializer "
-            f"{selection.materializer_id.value!r}, not the app config executor"
-        )
-    if (
-        selection.implementation_id != APP_CONFIG_RENDERER_IMPLEMENTATION_ID
-        or selection.implementation_version != APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION
-    ):
-        raise AppConfigMaterializationError(
-            "binding pins unaccepted app-config renderer implementation "
-            f"{selection.implementation_id!r}@{selection.implementation_version!r}"
-        )
-    return selection
+        integration_ids = [i.integration_id for i in integrations]
+        if len(set(integration_ids)) != len(integration_ids):
+            raise ValueError("render input declares duplicate integration ids")
+        sources = tuple(sorted(self.sources, key=lambda s: s.node_id))
+        source_ids = [s.node_id for s in sources]
+        if len(set(source_ids)) != len(source_ids):
+            raise ValueError("render input declares duplicate source node ids")
+        if not sources:
+            raise ValueError("render input pins no semantic sources")
+        object.__setattr__(self, "pages", pages)
+        object.__setattr__(self, "integrations", integrations)
+        object.__setattr__(self, "sources", sources)
+        return self
+
+    def source_digest(self, node_id: str) -> str | None:
+        for source in self.sources:
+            if source.node_id == node_id:
+                return source.payload_digest
+        return None
 
 
-def _footprint_payloads(
-    unit: FamilyInstancePlan, payload_by_node: Mapping[str, SemanticPayloadBase]
-) -> dict[str, SemanticPayloadBase]:
-    """Return exactly the payloads pinned by the unit's source footprint."""
-    resolved: dict[str, SemanticPayloadBase] = {}
+def _verify_unit_sources(
+    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+) -> None:
+    """Every unit-pinned source must match the snapshot's exact digest."""
     for source in unit.sources:
-        pinned = payload_by_node.get(source.node_id)
-        if pinned is None or pinned.payload_digest != source.payload_digest:
+        pinned = render_input.source_digest(source.node_id)
+        if pinned is None or pinned != source.payload_digest:
             raise AppConfigMaterializationError(
                 f"unit {unit.unit_id!r} source {source.node_id!r} is missing or does "
                 "not match its pinned payload digest"
             )
-        resolved[source.node_id] = pinned
-    return resolved
-
-
-def _one_of(
-    payloads: Mapping[str, SemanticPayloadBase],
-    payload_type: type,
-    *,
-    unit: FamilyInstancePlan,
-    required: bool,
-) -> Any:
-    matches = [p for p in payloads.values() if isinstance(p, payload_type)]
-    if len(matches) > 1:
-        raise AppConfigMaterializationError(
-            f"unit {unit.unit_id!r} footprint pins more than one "
-            f"{payload_type.__name__}"
-        )
-    if not matches:
-        if required:
-            raise AppConfigMaterializationError(
-                f"unit {unit.unit_id!r} footprint pins no {payload_type.__name__}"
-            )
-        return None
-    return matches[0]
-
-
-def _local_id(node_id: str) -> str:
-    return node_id.rsplit(".", 1)[-1]
-
-
-def _auth_required(
-    application: ApplicationPayload, auth: AuthPayload | None
-) -> bool:
-    if auth is not None:
-        return bool(auth.auth_required)
-    for selection in application.optional_families:
-        if selection.family is OptionalFamilyKind.AUTH:
-            if selection.status is OptionalFamilySelectionStatus.SELECTED:
-                raise AppConfigMaterializationError(
-                    "auth is selected but no AuthPayload is pinned in the footprint"
-                )
-            return False
-    raise AppConfigMaterializationError(
-        "application selection evidence does not state the auth family"
-    )
 
 
 def _app_manifest_document(
-    unit: FamilyInstancePlan, payloads: Mapping[str, SemanticPayloadBase]
-) -> dict[str, Any]:
-    application: ApplicationPayload = _one_of(
-        payloads, ApplicationPayload, unit=unit, required=True
-    )
-    auth: AuthPayload | None = _one_of(payloads, AuthPayload, unit=unit, required=False)
-    document: dict[str, Any] = {
-        "appId": application.application_id,
-        "appName": application.display_name,
-        "version": application.version,
+    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+) -> dict[str, object]:
+    document: dict[str, object] = {
+        "appId": render_input.application_id,
+        "appName": render_input.display_name,
+        "version": render_input.version,
     }
-    if application.description is not None:
-        document["description"] = application.description
-    document["authRequired"] = _auth_required(application, auth)
-    document["startup"] = {"landing_spot": application.default_route}
+    if render_input.description is not None:
+        document["description"] = render_input.description
+    document["authRequired"] = render_input.auth_required
+    document["startup"] = {"landing_spot": render_input.default_route}
     return document
 
 
 def _route_manifest_document(
-    unit: FamilyInstancePlan, payloads: Mapping[str, SemanticPayloadBase]
-) -> dict[str, Any]:
-    application: ApplicationPayload = _one_of(
-        payloads, ApplicationPayload, unit=unit, required=True
-    )
-    pages = sorted(
-        (p for p in payloads.values() if isinstance(p, PagePayload)),
-        key=lambda p: str(p.route or ""),
-    )
-    entries: list[dict[str, Any]] = []
-    declared_routes: set[str] = set()
-    for page in pages:
-        if not page.route or not page.title:
-            raise AppConfigMaterializationError(
-                f"page {page.node_id!r} lacks the route/title facts the route "
-                "manifest requires"
-            )
-        declared_routes.add(page.route)
-        entries.append(
-            {
-                "path": page.route,
-                "component": "SchemaPage",
-                "label": page.title,
-                "schema": page.page_id,
-            }
-        )
-    if application.default_route not in declared_routes:
+    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+) -> dict[str, object]:
+    entries = [
+        {
+            "path": page.route,
+            "component": "SchemaPage",
+            "label": page.title,
+            "schema": page.page_id,
+        }
+        for page in render_input.pages
+    ]
+    if render_input.default_route not in {page.route for page in render_input.pages}:
         raise AppConfigMaterializationError(
             "application default_route does not resolve to a declared page route"
         )
@@ -249,62 +217,33 @@ def _route_manifest_document(
 
 
 def _ai_config_document(
-    unit: FamilyInstancePlan, payloads: Mapping[str, SemanticPayloadBase]
-) -> dict[str, Any]:
-    _one_of(payloads, ApplicationPayload, unit=unit, required=True)
-    workflows = [p for p in payloads.values() if isinstance(p, WorkflowPayload)]
-    mode = _CHAT_STARTUP_DEFAULT
-    if any(w.startup_mode is WorkflowStartupMode.AGENT_DRIVEN for w in workflows):
-        mode = "workflow"
+    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+) -> dict[str, object]:
+    mode = (
+        "workflow"
+        if render_input.has_agent_driven_workflow
+        else _CHAT_STARTUP_DEFAULT
+    )
     return {"chat": {"chat_startup_mode": mode}}
 
 
-def _integration_entries(
-    payloads: Mapping[str, SemanticPayloadBase],
-) -> list[IntegrationPayload]:
-    return sorted(
-        (p for p in payloads.values() if isinstance(p, IntegrationPayload)),
-        key=lambda p: p.integration_id,
-    )
-
-
-_CONFIG_VALUE_TYPES = {
-    IntegrationConfigValueKind.TEXT: "text",
-    IntegrationConfigValueKind.URL: "url",
-    IntegrationConfigValueKind.SECRET: "secret",
-}
-
-
 def _integrations_document(
-    unit: FamilyInstancePlan, payloads: Mapping[str, SemanticPayloadBase]
-) -> dict[str, Any]:
-    application: ApplicationPayload = _one_of(
-        payloads, ApplicationPayload, unit=unit, required=True
-    )
-    integrations = _integration_entries(payloads)
-    selected = any(
-        s.family is OptionalFamilyKind.INTEGRATIONS
-        and s.status is OptionalFamilySelectionStatus.SELECTED
-        for s in application.optional_families
-    )
-    if selected and not integrations:
-        raise AppConfigMaterializationError(
-            "integrations are selected but no IntegrationPayload is pinned"
-        )
-    entries: list[dict[str, Any]] = []
-    for integration in integrations:
-        entry: dict[str, Any] = {
+    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    for integration in render_input.integrations:
+        entry: dict[str, object] = {
             "service": integration.integration_id,
-            "kind": integration.integration_kind.value,
+            "kind": integration.kind,
         }
         if integration.purpose is not None:
             entry["purpose"] = integration.purpose
-        entry["required_at"] = integration.required_at.value
+        entry["required_at"] = integration.required_at
         entry["optional"] = integration.optional
         entry["required_fields"] = [
             {
                 "name": requirement.name,
-                "type": _CONFIG_VALUE_TYPES[requirement.value_kind],
+                "type": requirement.value_type,
                 "required": requirement.required,
             }
             for requirement in integration.config_requirements
@@ -314,14 +253,14 @@ def _integrations_document(
 
 
 def _secret_references_document(
-    unit: FamilyInstancePlan, payloads: Mapping[str, SemanticPayloadBase]
-) -> dict[str, Any]:
-    _one_of(payloads, ApplicationPayload, unit=unit, required=True)
-    names: set[str] = set()
-    for integration in _integration_entries(payloads):
-        for requirement in integration.config_requirements:
-            if requirement.value_kind is IntegrationConfigValueKind.SECRET:
-                names.add(requirement.name)
+    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+) -> dict[str, object]:
+    names = {
+        requirement.name
+        for integration in render_input.integrations
+        for requirement in integration.config_requirements
+        if requirement.value_type == "secret"
+    }
     return {"version": 1, "secrets": sorted(names)}
 
 
@@ -338,13 +277,13 @@ _DOCUMENT_BUILDERS = {
 def render_app_config_unit(
     *,
     unit: FamilyInstancePlan,
-    payload_by_node: Mapping[str, SemanticPayloadBase],
+    render_input: ApplicationFamilyRenderInput,
 ) -> bytes:
     """Render one application-configuration unit's canonical bytes.
 
     The unit's plan-owned output path selects the artifact contract; the
-    renderer never chooses paths and never reads state outside the unit's
-    pinned source footprint.
+    renderer never chooses paths and never reads state outside the closed
+    render-input snapshot whose sources cover the unit's pinned footprint.
     """
     if unit.family_kind not in APP_CONFIG_FAMILIES:
         raise AppConfigMaterializationError(
@@ -366,16 +305,21 @@ def render_app_config_unit(
             f"unit {unit.unit_id!r} output {path!r} has no deterministic "
             "application-config contract in this slice"
         )
+    _verify_unit_sources(unit, render_input)
     build_document, serialize = builder
-    payloads = _footprint_payloads(unit, payload_by_node)
-    return serialize(build_document(unit, payloads))
+    return serialize(build_document(unit, render_input))
 
 
 __all__ = [
     "APP_CONFIG_FAMILIES",
     "APP_CONFIG_RENDERER_IMPLEMENTATION_ID",
     "APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION",
+    "APP_FAMILY_RENDER_INPUT_VERSION",
     "AppConfigMaterializationError",
+    "ApplicationFamilyRenderInput",
+    "RenderInputConfigRequirement",
+    "RenderInputIntegration",
+    "RenderInputPage",
+    "RenderInputSource",
     "render_app_config_unit",
-    "resolve_app_config_renderer_selection",
 ]

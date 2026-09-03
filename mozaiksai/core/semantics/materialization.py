@@ -62,8 +62,16 @@ from mozaiksai.core.runtime.app.page_schema import (
 )
 from mozaiksai.core.semantics.app_config_materialization import (
     APP_CONFIG_FAMILIES,
+    APP_CONFIG_RENDERER_IMPLEMENTATION_ID,
+    APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION,
+    APP_FAMILY_RENDER_INPUT_VERSION,
+    AppConfigMaterializationError,
+    ApplicationFamilyRenderInput,
+    RenderInputConfigRequirement,
+    RenderInputIntegration,
+    RenderInputPage,
+    RenderInputSource,
     render_app_config_unit,
-    resolve_app_config_renderer_selection,
 )
 from mozaiksai.core.semantics.binding import (
     ImplementationBinding,
@@ -82,9 +90,17 @@ from mozaiksai.core.semantics.compilation_plan import (
 from mozaiksai.core.semantics.graph import SemanticGraphV2
 from mozaiksai.core.semantics.opaque_artifact import PreservedOpaqueArtifact
 from mozaiksai.core.semantics.payloads import (
+    ApplicationPayload,
+    AuthPayload,
+    IntegrationConfigValueKind,
+    IntegrationPayload,
+    OptionalFamilyKind,
+    OptionalFamilySelectionStatus,
     PagePayload,
     SectionPayload,
     SemanticPayloadBase,
+    WorkflowPayload,
+    WorkflowStartupMode,
     parse_semantic_payload,
 )
 from mozaiksai.core.semantics.portable_path import detect_collisions
@@ -265,6 +281,203 @@ def resolve_page_schema_renderer_selection(
             f"@{PAGE_SCHEMA_RENDERER_IMPLEMENTATION_VERSION!r}"
         )
     return selection
+
+
+def resolve_app_config_renderer_selection(
+    binding: ImplementationBinding,
+    *,
+    graph: SemanticGraphV2,
+    layout_registry: Any,
+) -> RendererSelection:
+    """Resolve the accepted app-config renderer through the binding.
+
+    Fails closed when the binding carries no selection covering the
+    application-configuration families, claims a different materializer, or
+    pins any implementation identity/version other than the single accepted
+    deterministic implementation of this slice. There is no fallback to any
+    historical generator path.
+    """
+    try:
+        validate_implementation_binding_against_graph(
+            binding, graph, layout_registry=layout_registry
+        )
+    except ValueError as exc:
+        raise AppConfigMaterializationError(
+            f"implementation binding rejected: {exc}"
+        ) from exc
+    matches = [
+        selection
+        for selection in binding.renderer_selections
+        if APP_CONFIG_FAMILIES & set(selection.artifact_families)
+    ]
+    if not matches:
+        raise AppConfigMaterializationError(
+            "binding carries no renderer selection for the application-config families"
+        )
+    selection = matches[0]
+    if selection.materializer_id is not MaterializerIdentifier.APP_CONFIG_EXECUTOR:
+        raise AppConfigMaterializationError(
+            "renderer selection for application-config families pins materializer "
+            f"{selection.materializer_id.value!r}, not the app config executor"
+        )
+    if (
+        selection.implementation_id != APP_CONFIG_RENDERER_IMPLEMENTATION_ID
+        or selection.implementation_version != APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION
+    ):
+        raise AppConfigMaterializationError(
+            "binding pins unaccepted app-config renderer implementation "
+            f"{selection.implementation_id!r}@{selection.implementation_version!r}"
+        )
+    return selection
+
+
+# ---------------------------------------------------------------------------
+# Application-family render input (the one payload->renderer boundary)
+# ---------------------------------------------------------------------------
+
+
+_CONFIG_VALUE_TYPES: dict[IntegrationConfigValueKind, Literal["text", "url", "secret"]] = {
+    IntegrationConfigValueKind.TEXT: "text",
+    IntegrationConfigValueKind.URL: "url",
+    IntegrationConfigValueKind.SECRET: "secret",
+}
+
+
+def build_app_family_render_input(
+    *,
+    units: Iterable[FamilyInstancePlan],
+    payload_by_node: Mapping[str, SemanticPayloadBase],
+) -> ApplicationFamilyRenderInput:
+    """Project footprint-pinned payload facts into the closed render input.
+
+    This is the single boundary where semantic payload classes feed the
+    application-family renderer. It resolves exactly the payloads pinned by
+    the app-config units' source footprints, validates their closure, and
+    normalizes the already-authoritative facts into the frozen
+    :class:`ApplicationFamilyRenderInput` snapshot. The renderer never sees a
+    payload object.
+    """
+    app_units = [
+        unit
+        for unit in units
+        if unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind in APP_CONFIG_FAMILIES
+    ]
+    if not app_units:
+        raise AppConfigMaterializationError(
+            "no application-configuration render units to project"
+        )
+    resolved: dict[str, SemanticPayloadBase] = {}
+    for unit in app_units:
+        for source in unit.sources:
+            pinned = payload_by_node.get(source.node_id)
+            if pinned is None or pinned.payload_digest != source.payload_digest:
+                raise AppConfigMaterializationError(
+                    f"unit {unit.unit_id!r} source {source.node_id!r} is missing "
+                    "or does not match its pinned payload digest"
+                )
+            resolved[source.node_id] = pinned
+
+    applications = [
+        payload
+        for payload in resolved.values()
+        if isinstance(payload, ApplicationPayload)
+    ]
+    if len(applications) != 1:
+        raise AppConfigMaterializationError(
+            "application-config projection requires exactly one ApplicationPayload"
+        )
+    application = applications[0]
+
+    auths = [payload for payload in resolved.values() if isinstance(payload, AuthPayload)]
+    if len(auths) > 1:
+        raise AppConfigMaterializationError(
+            "application-config projection pins more than one AuthPayload"
+        )
+    auth = auths[0] if auths else None
+    if auth is not None:
+        auth_required = bool(auth.auth_required)
+    else:
+        for selection in application.optional_families:
+            if selection.family is OptionalFamilyKind.AUTH:
+                if selection.status is OptionalFamilySelectionStatus.SELECTED:
+                    raise AppConfigMaterializationError(
+                        "auth is selected but no AuthPayload is pinned in the footprint"
+                    )
+                auth_required = False
+                break
+        else:
+            raise AppConfigMaterializationError(
+                "application selection evidence does not state the auth family"
+            )
+
+    pages: list[RenderInputPage] = []
+    for payload in resolved.values():
+        if isinstance(payload, PagePayload):
+            if not payload.route or not payload.title:
+                raise AppConfigMaterializationError(
+                    f"page {payload.node_id!r} lacks the route/title facts the route "
+                    "manifest requires"
+                )
+            pages.append(
+                RenderInputPage(
+                    page_id=payload.page_id, route=payload.route, title=payload.title
+                )
+            )
+
+    integrations_selected = any(
+        selection.family is OptionalFamilyKind.INTEGRATIONS
+        and selection.status is OptionalFamilySelectionStatus.SELECTED
+        for selection in application.optional_families
+    )
+    integration_payloads = [
+        payload for payload in resolved.values() if isinstance(payload, IntegrationPayload)
+    ]
+    if integrations_selected and not integration_payloads:
+        raise AppConfigMaterializationError(
+            "integrations are selected but no IntegrationPayload is pinned"
+        )
+    integrations = tuple(
+        RenderInputIntegration(
+            integration_id=payload.integration_id,
+            kind=payload.integration_kind.value,
+            purpose=payload.purpose,
+            required_at=payload.required_at.value,
+            optional=payload.optional,
+            config_requirements=tuple(
+                RenderInputConfigRequirement(
+                    name=requirement.name,
+                    value_type=_CONFIG_VALUE_TYPES[requirement.value_kind],
+                    required=requirement.required,
+                )
+                for requirement in payload.config_requirements
+            ),
+        )
+        for payload in integration_payloads
+    )
+
+    has_agent_driven_workflow = any(
+        isinstance(payload, WorkflowPayload)
+        and payload.startup_mode is WorkflowStartupMode.AGENT_DRIVEN
+        for payload in resolved.values()
+    )
+
+    return ApplicationFamilyRenderInput(
+        render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
+        application_id=application.application_id,
+        display_name=application.display_name,
+        version=application.version,
+        description=application.description,
+        default_route=application.default_route,
+        auth_required=auth_required,
+        pages=tuple(pages),
+        has_agent_driven_workflow=has_agent_driven_workflow,
+        integrations=integrations,
+        sources=tuple(
+            RenderInputSource(node_id=node_id, payload_digest=payload.payload_digest)
+            for node_id, payload in resolved.items()
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +709,7 @@ def _materialize_unit(
     unit: FamilyInstancePlan,
     *,
     payload_by_node: Mapping[str, SemanticPayloadBase],
+    app_config_render_input: ApplicationFamilyRenderInput | None,
     preserved_by_unit: Mapping[str, PreservedOpaqueArtifact],
     bundle_outputs: list[MaterializedOutput],
     external: list[str],
@@ -516,7 +730,14 @@ def _materialize_unit(
                 f"render unit {unit.unit_id!r} must own exactly one composable output"
             )
         if unit.family_kind in APP_CONFIG_FAMILIES:
-            content = render_app_config_unit(unit=unit, payload_by_node=payload_by_node)
+            if app_config_render_input is None:
+                raise MaterializationError(
+                    f"render unit {unit.unit_id!r} requires the application-family "
+                    "render input, which was not constructed"
+                )
+            content = render_app_config_unit(
+                unit=unit, render_input=app_config_render_input
+            )
         else:
             content = render_app_ui_page_schema_unit(unit=unit, payload_by_node=payload_by_node)
         target = composable[0]
@@ -588,6 +809,7 @@ def materialize_plan(
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
+    app_config_render_input: ApplicationFamilyRenderInput | None = None
     if any(
         unit.disposition is PlanDisposition.RENDER
         and unit.family_kind in APP_CONFIG_FAMILIES
@@ -595,6 +817,9 @@ def materialize_plan(
     ):
         resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
+        )
+        app_config_render_input = build_app_family_render_input(
+            units=verified_plan.units, payload_by_node=payload_by_node
         )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
 
@@ -608,6 +833,7 @@ def materialize_plan(
         _materialize_unit(
             unit,
             payload_by_node=payload_by_node,
+            app_config_render_input=app_config_render_input,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
             external=external,
@@ -679,6 +905,7 @@ def rematerialize_plan(
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
+    app_config_render_input: ApplicationFamilyRenderInput | None = None
     if any(
         unit.disposition is PlanDisposition.RENDER
         and unit.family_kind in APP_CONFIG_FAMILIES
@@ -686,6 +913,9 @@ def rematerialize_plan(
     ):
         resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
+        )
+        app_config_render_input = build_app_family_render_input(
+            units=verified_plan.units, payload_by_node=payload_by_node
         )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
     base_by_unit: dict[str, list[MaterializedOutput]] = {}
@@ -743,6 +973,7 @@ def rematerialize_plan(
         _materialize_unit(
             unit,
             payload_by_node=payload_by_node,
+            app_config_render_input=app_config_render_input,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
             external=external,

@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.layout_registry import (
     MaterializerIdentifier,
@@ -50,7 +51,10 @@ from mozaiksai.core.semantics.graph import (
     SemanticNodeV2,
     build_semantic_graph_v2,
 )
-from mozaiksai.core.semantics.materialization import materialize_plan
+from mozaiksai.core.semantics.materialization import (
+    build_app_family_render_input,
+    materialize_plan,
+)
 from mozaiksai.core.semantics.payloads import (
     ApplicationPayload,
     AuthPayload,
@@ -566,11 +570,14 @@ def test_renderer_rejects_wrong_family_wrong_binding_and_unknown_template() -> N
     graph, payloads = _extended_fixture()
     plan = _plan(graph, payloads, with_configs=False)
     payload_by_node = {p.node_id: p for p in payloads}
+    render_input = build_app_family_render_input(
+        units=plan.units, payload_by_node=payload_by_node
+    )
     page_unit = next(
         u for u in plan.units if u.family_kind == "app_ui_page_schema"
     )
     with pytest.raises(AppConfigMaterializationError, match="not an"):
-        render_app_config_unit(unit=page_unit, payload_by_node=payload_by_node)
+        render_app_config_unit(unit=page_unit, render_input=render_input)
 
     from mozaiksai.core.semantics.materialization import MaterializationError
 
@@ -732,3 +739,157 @@ def test_b2a_renderer_is_unwired_from_production_code() -> None:
             if any(marker in source for marker in _B2A_MODULE_MARKERS):
                 offenders.append(str(rel))
     assert offenders == [], offenders
+
+
+def test_renderer_module_imports_no_payload_or_graph_symbols() -> None:
+    """The renderer consumes only the closed snapshot — never the semantic
+    authoring model. This is the exact dependency direction the architecture
+    scan in test_semantic_payload_graph_v2 enforces repo-wide; asserting it
+    here keeps the boundary explicit at the renderer itself."""
+    for module_name in ("app_config_materialization", "decl_bytes"):
+        source = (
+            ROOT / "mozaiksai" / "core" / "semantics" / f"{module_name}.py"
+        ).read_text(encoding="utf-8")
+        assert "mozaiksai.core.semantics.payloads" not in source, module_name
+        assert "SemanticGraphV2" not in source, module_name
+        assert "semantics.binding" not in source, module_name
+
+
+def test_semantics_package_import_does_not_load_the_renderer() -> None:
+    """Importing the semantics package (the convenience-export surface) must
+    not transitively load the renderer or the offline materializer, so no
+    production module can reach them through the package __init__."""
+    probe = (
+        "import sys\n"
+        "import mozaiksai.core.semantics  # noqa: F401\n"
+        "loaded = [m for m in sys.modules if 'app_config_materialization' in m\n"
+        "          or m.endswith('semantics.materialization')\n"
+        "          or m.endswith('semantics.decl_bytes')]\n"
+        "print(loaded)\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "[]"
+
+
+# ---------------------------------------------------------------------------
+# Render-input snapshot attacks: invalid input fails closed; equivalent
+# reordered facts produce identical bytes.
+# ---------------------------------------------------------------------------
+
+
+def _valid_render_input():
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {p.node_id: p for p in payloads}
+    return plan, payload_by_node, build_app_family_render_input(
+        units=plan.units, payload_by_node=payload_by_node
+    )
+
+
+def test_render_input_is_frozen_and_rejects_undeclared_fields() -> None:
+    _plan_obj, _payloads, render_input = _valid_render_input()
+    with pytest.raises(ValidationError):
+        render_input.default_route = "/elsewhere"  # type: ignore[misc]
+    document = render_input.model_dump()
+    document["arbitrary_metadata"] = {"campaign": "x"}
+    with pytest.raises(ValidationError):
+        type(render_input).model_validate(document)
+    entry = render_input.integrations[0].model_dump()
+    entry["provider_account"] = "acct_123"
+    with pytest.raises(ValidationError):
+        type(render_input.integrations[0]).model_validate(entry)
+
+
+def test_render_input_normalizes_reordered_equivalent_facts() -> None:
+    plan, payload_by_node, render_input = _valid_render_input()
+    document = render_input.model_dump()
+    document["pages"] = list(reversed(document["pages"]))
+    document["integrations"] = list(reversed(document["integrations"]))
+    document["sources"] = list(reversed(document["sources"]))
+    reordered = type(render_input).model_validate(document)
+    assert reordered == render_input
+    unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER
+        and u.family_kind in APP_CONFIG_FAMILIES
+    )
+    assert render_app_config_unit(
+        unit=unit, render_input=reordered
+    ) == render_app_config_unit(unit=unit, render_input=render_input)
+
+
+def test_render_input_rejects_duplicates_and_empty_sources() -> None:
+    _plan_obj, _payloads, render_input = _valid_render_input()
+    document = render_input.model_dump()
+    document["pages"] = document["pages"] + document["pages"][:1]
+    with pytest.raises(ValidationError, match="duplicate page routes"):
+        type(render_input).model_validate(document)
+    document = render_input.model_dump()
+    document["sources"] = []
+    with pytest.raises(ValidationError, match="pins no semantic sources"):
+        type(render_input).model_validate(document)
+
+
+def test_stale_or_missing_source_digest_fails_closed() -> None:
+    plan, payload_by_node, render_input = _valid_render_input()
+    unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER
+        and u.family_kind in APP_CONFIG_FAMILIES
+    )
+    document = render_input.model_dump()
+    for source in document["sources"]:
+        source["payload_digest"] = "f" * 64
+    stale = type(render_input).model_validate(document)
+    with pytest.raises(AppConfigMaterializationError, match="pinned payload digest"):
+        render_app_config_unit(unit=unit, render_input=stale)
+    document = render_input.model_dump()
+    document["sources"] = [
+        s for s in document["sources"] if s["node_id"] not in {
+            src.node_id for src in unit.sources
+        }
+    ]
+    if document["sources"]:
+        missing = type(render_input).model_validate(document)
+        with pytest.raises(AppConfigMaterializationError, match="missing"):
+            render_app_config_unit(unit=unit, render_input=missing)
+
+
+def test_render_input_from_a_different_application_fails_closed() -> None:
+    plan, _payloads, _render_input = _valid_render_input()
+    other_graph, other_payloads = _extended_fixture(default_route="/reports")
+    other_plan = _plan(other_graph, other_payloads, with_configs=False)
+    other_input = build_app_family_render_input(
+        units=other_plan.units,
+        payload_by_node={p.node_id: p for p in other_payloads},
+    )
+    unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER
+        and u.family_kind == "app_manifest"
+    )
+    with pytest.raises(AppConfigMaterializationError, match="pinned payload digest"):
+        render_app_config_unit(unit=unit, render_input=other_input)
+
+
+def test_payload_mutation_after_snapshot_creation_cannot_change_bytes() -> None:
+    plan, payload_by_node, render_input = _valid_render_input()
+    unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER
+        and u.family_kind in APP_CONFIG_FAMILIES
+    )
+    before = render_app_config_unit(unit=unit, render_input=render_input)
+    payload_by_node.clear()
+    assert render_app_config_unit(unit=unit, render_input=render_input) == before
