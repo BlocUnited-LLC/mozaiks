@@ -129,6 +129,11 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # Slice 5A: the replacement assignment compiler is an explicitly
         # offline substrate consumer of pinned payload and plan-unit refs.
         Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
+        # Canonical plan-authority verifier: consumes the graph authority as
+        # an input type and re-derives plans through the one canonical
+        # derivation function. Offline-only; its production non-importability
+        # is proven by the hygiene scan in tests/test_compilation_plan.py.
+        Path("mozaiksai/core/semantics/plan_authority.py"),
         # Slice 5C: the immutable revision store cold-validates the complete
         # graph/plan closure before accepting or restoring application state.
         # Its production non-importability is proven by the Slice 5C guard.
