@@ -564,3 +564,97 @@ async def test_handle_user_input_from_api_surfaces_token_denial_with_structured_
     assert err["extra_data"].get("recovery_action") == "top_up_tokens"
     assert err["extra_data"].get("billing_route") == "/billing"
 
+
+@pytest.mark.asyncio
+async def test_required_on_fail_hook_failure_keeps_original_failure(monkeypatch, caplog) -> None:
+    """A required on_fail persistence hook raising must not change the
+    outcome: the original workflow failure remains the reported failure, the
+    lifecycle persistence failure is surfaced loudly with the original
+    failure class as diagnostic context, and no recursive on_fail occurs."""
+    persistence_manager = _FakePersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+
+    class _ExplodingAdapter:
+        async def run(self, request):  # noqa: ANN001
+            raise RuntimeError("workflow blew up")
+
+        async def resume(self, request):  # noqa: ANN001
+            raise RuntimeError("workflow blew up")
+
+    on_fail_calls: list[dict] = []
+
+    async def _required_on_fail(**kwargs):  # noqa: ANN003
+        on_fail_calls.append(kwargs)
+        raise RuntimeError("required lifecycle persistence unavailable")
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(
+        _bridge_mod,
+        "get_workflow_lifecycle_hooks",
+        lambda _workflow_name: {"on_fail": _required_on_fail},
+    )
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _ExplodingAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1",
+        user_id="user-1",
+        workflow_name="TestFlow",
+        message="hello",
+        app_id="app-1",
+    )
+
+    # Original failure remains the failure; on_fail dispatch was awaited
+    # exactly once (no recursion, no detached task).
+    assert result["status"] == "error"
+    assert len(on_fail_calls) == 1
+    assert any(
+        "LIFECYCLE_FAILURE_PERSISTENCE_FAILED" in record.message
+        and "RuntimeError" in record.getMessage()
+        for record in caplog.records
+    )
+    assert any(e.get("error_code") == "WORKFLOW_EXECUTION_FAILED" for e in transport.errors)
+
+
+@pytest.mark.asyncio
+async def test_on_fail_hook_success_still_reports_original_failure(monkeypatch) -> None:
+    """Ordinary workflow failure with a healthy awaited on_fail dispatch:
+    the hook runs to completion before the error result returns."""
+    persistence_manager = _FakePersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+
+    class _ExplodingAdapter:
+        async def run(self, request):  # noqa: ANN001
+            raise RuntimeError("workflow blew up")
+
+        async def resume(self, request):  # noqa: ANN001
+            raise RuntimeError("workflow blew up")
+
+    on_fail_calls: list[dict] = []
+
+    async def _on_fail(**kwargs):  # noqa: ANN003
+        on_fail_calls.append(kwargs)
+        return "outbox_failed"
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(
+        _bridge_mod,
+        "get_workflow_lifecycle_hooks",
+        lambda _workflow_name: {"on_fail": _on_fail},
+    )
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _ExplodingAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1",
+        user_id="user-1",
+        workflow_name="TestFlow",
+        message="hello",
+        app_id="app-1",
+    )
+    assert result["status"] == "error"
+    assert len(on_fail_calls) == 1

@@ -394,25 +394,30 @@ class WorkflowBridgeMixin:
 
             logger.error("User input handling failed for chat %s: %s", chat_id, e, exc_info=True)
             if starting_new_workflow and _emit_execution_failed is not None:
+                # Awaited on_fail lifecycle dispatch. The original workflow
+                # failure remains the reported failure either way; if the
+                # required failure-persistence hook itself fails, surface it
+                # loudly with the original failure class as diagnostic
+                # context (never raw contents) and continue to the existing
+                # typed error return — no recursive on_fail dispatch.
                 try:
-                    _t = asyncio.create_task(
-                        _emit_execution_failed(
-                            app_id=app_id,
-                            execution_id=chat_id,
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            workflow_name=workflow_name,
-                            message="workflow_execution_failed",
-                            details=None,
-                        )
+                    await _emit_execution_failed(
+                        app_id=app_id,
+                        execution_id=chat_id,
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        workflow_name=workflow_name,
+                        message="workflow_execution_failed",
+                        details=None,
                     )
-                    _t.add_done_callback(
-                        lambda t: logger.debug("EXECUTION_FAILED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
-                        if not t.cancelled() and t.exception() is not None
-                        else None
-                    )
+                except asyncio.CancelledError:
+                    raise
                 except Exception as _ev_exc:
-                    logger.debug("EXECUTION_FAILED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+                    logger.error(
+                        "LIFECYCLE_FAILURE_PERSISTENCE_FAILED chat=%s workflow=%s: %s "
+                        "(original failure: %s)",
+                        chat_id, workflow_name, _ev_exc, e.__class__.__name__,
+                    )
             # Clear stuck REVISING state so the next refinement request can route correctly.
             if app_id and user_id:
                 try:
@@ -485,23 +490,6 @@ class WorkflowBridgeMixin:
             "message": "Chat execution lease lost.",
             "route": "chat_lock_lost",
         }
-
-    def _track_lifecycle_task(self, task: asyncio.Task, *, label: str, chat_id: str) -> None:
-        """Hold a strong reference to a lifecycle task until it finishes.
-
-        asyncio keeps only weak references to tasks; without tracking, a
-        fire-and-forget lifecycle emission can be garbage-collected mid-flight
-        and cancellation can leave a dangling background task.
-        """
-        pending: set[asyncio.Task] = self.__dict__.setdefault("_lifecycle_tasks", set())
-        pending.add(task)
-
-        def _done(t: asyncio.Task) -> None:
-            pending.discard(t)
-            if not t.cancelled() and t.exception() is not None:
-                logger.error("%s chat=%s: %s", label, chat_id, t.exception())
-
-        task.add_done_callback(_done)
 
     async def _ensure_workflow_run_identity(
         self,
@@ -625,23 +613,39 @@ class WorkflowBridgeMixin:
             except Exception as persist_err:
                 logger.debug("Early persistence of user message failed (non-fatal): %s", persist_err)
 
-        # Build lifecycle reporting (non-blocking; required-hook failures are
-        # surfaced through the tracked task's done callback).
+        # Required on_start lifecycle dispatch is a gate: it must complete
+        # before any agent/workflow execution starts. The composed dispatcher
+        # already isolates best_effort hooks; an escaping exception is a
+        # required lifecycle obligation failing, so orchestration never
+        # begins and the caller receives a typed error, not success.
         if emit_execution_started is not None:
             try:
-                _t = asyncio.create_task(
-                    emit_execution_started(
-                        app_id=app_id,
-                        execution_id=chat_id,
-                        chat_id=chat_id,
-                        user_id=user_id,
-                        workflow_name=workflow_name,
-                        workflow_run_id=workflow_run_id,
-                    )
+                await emit_execution_started(
+                    app_id=app_id,
+                    execution_id=chat_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    workflow_name=workflow_name,
+                    workflow_run_id=workflow_run_id,
                 )
-                self._track_lifecycle_task(_t, label="EXECUTION_STARTED_EMIT_FAILED", chat_id=chat_id)
-            except Exception as _ev_exc:
-                logger.debug("EXECUTION_STARTED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as _start_exc:
+                logger.error(
+                    "LIFECYCLE_START_PERSISTENCE_FAILED chat=%s workflow=%s: %s",
+                    chat_id, workflow_name, _start_exc,
+                )
+                await self.send_error(
+                    error_message="Required start lifecycle persistence failed.",
+                    error_code="LIFECYCLE_PERSISTENCE_FAILED",
+                    chat_id=chat_id,
+                )
+                return {
+                    "status": "error",
+                    "chat_id": chat_id,
+                    "message": "Required start lifecycle persistence failed.",
+                    "route": "lifecycle_start_failed",
+                }
 
         # Launch orchestration via OrchestrationPort (engine-agnostic).
         # A missing message plus an explicit initial-agent override means the
@@ -690,21 +694,39 @@ class WorkflowBridgeMixin:
                     "EXECUTION_COMPLETED_CONTEXT_FETCH_FAILED chat=%s: %s", chat_id, _ctx_exc
                 )
                 final_context = None
+            # Required on_complete lifecycle dispatch is a gate: the bridge
+            # may not return a successful completed result until it finishes.
+            # The AG2 run reaching its internal terminal state does not permit
+            # claiming the application lifecycle completed when required
+            # publication/lifecycle persistence failed.
             try:
-                _t = asyncio.create_task(
-                    emit_execution_completed(
-                        app_id=app_id,
-                        execution_id=chat_id,
-                        chat_id=chat_id,
-                        user_id=user_id,
-                        workflow_name=workflow_name,
-                        workflow_run_id=workflow_run_id,
-                        context_variables=final_context,
-                    )
+                await emit_execution_completed(
+                    app_id=app_id,
+                    execution_id=chat_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    workflow_name=workflow_name,
+                    workflow_run_id=workflow_run_id,
+                    context_variables=final_context,
                 )
-                self._track_lifecycle_task(_t, label="EXECUTION_COMPLETED_EMIT_FAILED", chat_id=chat_id)
-            except Exception as _ev_exc:
-                logger.debug("EXECUTION_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as _complete_exc:
+                logger.error(
+                    "LIFECYCLE_COMPLETION_PERSISTENCE_FAILED chat=%s workflow=%s: %s",
+                    chat_id, workflow_name, _complete_exc,
+                )
+                await self.send_error(
+                    error_message="Run finished but required lifecycle persistence failed.",
+                    error_code="LIFECYCLE_PERSISTENCE_FAILED",
+                    chat_id=chat_id,
+                )
+                return {
+                    "status": "error",
+                    "chat_id": chat_id,
+                    "message": "Required completion lifecycle persistence failed.",
+                    "route": "lifecycle_completion_failed",
+                }
 
         await self._emit_synthetic_run_complete_if_needed(
             chat_id=chat_id,

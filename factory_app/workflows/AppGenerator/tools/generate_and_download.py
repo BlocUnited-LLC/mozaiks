@@ -972,6 +972,8 @@ async def _register_app_bundle_artifact_version_steps(
         )
 
     from mozaiksai.core.artifacts.build_receipt import (
+        BuildRevisionCandidateReceipt,
+        BuildSuccessReceipt,
         issue_revision_candidate_receipt,
         issue_success_receipt,
     )
@@ -989,6 +991,7 @@ async def _register_app_bundle_artifact_version_steps(
         "app_context_record_id": str(context_record.id),
         "bundle_digest": sha,
     }
+    receipt: BuildSuccessReceipt | BuildRevisionCandidateReceipt
     if promote_after_lineage:
         if record_lifecycle != "current":
             raise RuntimeError(

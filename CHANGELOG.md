@@ -124,6 +124,21 @@ This project follows a practical pre-1.0 changelog format:
   detection, and only a privileged runtime setter (used by the bridge's
   identity mint and the terminal write point after full persistence closure)
   can install them.
+- **Required lifecycle dispatch is an awaited gate, not a logged
+  background task**: the bridge previously launched composed lifecycle
+  dispatchers with fire-and-forget tasks whose failures were only logged,
+  so a required lifecycle persistence failure still returned
+  `status=success` / `run_status=completed`. The bridge now awaits the
+  composed dispatcher at every lifecycle boundary: a required `on_start`
+  failure prevents orchestration from starting and returns a typed
+  `LIFECYCLE_PERSISTENCE_FAILED` error; a required `on_complete` failure
+  means the bridge never returns a successful completed result (the AG2
+  run reaching its internal terminal state does not permit claiming the
+  application lifecycle completed); a required `on_fail` failure is
+  surfaced loudly while the original workflow failure remains the reported
+  failure. Best-effort hook failures remain isolated by the declarative
+  policy and never independently change outcomes. The superseded
+  fire-and-forget lifecycle task tracker was deleted.
 - **At most one CURRENT BuildRecord per (app_id, build_family, build_key) is
   now storage-enforced**: a partial unique index on CURRENT records
   (verified through the canonical index contract, mismatches fail closed)

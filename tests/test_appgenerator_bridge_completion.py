@@ -74,12 +74,17 @@ class _FakePersistenceManager:
 class _Bridge(WorkflowBridgeMixin):
     def __init__(self, pm: _FakePersistenceManager) -> None:
         self._pm = pm
+        self.sent_errors: list[dict[str, Any]] = []
+        self.synthetic_completes = 0
 
     def _get_or_create_persistence_manager(self) -> _FakePersistenceManager:
         return self._pm
 
     async def _emit_synthetic_run_complete_if_needed(self, **_kwargs: Any) -> None:
-        return None
+        self.synthetic_completes += 1
+
+    async def send_error(self, **kwargs: Any) -> None:
+        self.sent_errors.append(kwargs)
 
 
 class _FakeAdapter:
@@ -90,6 +95,7 @@ class _FakeAdapter:
         self._on_run = on_run
 
     async def _result(self, request: Any) -> RunResult:
+        self.invocations = getattr(self, "invocations", 0) + 1
         if self._on_run is not None:
             await self._on_run(self._pm)
         return RunResult(
@@ -296,25 +302,38 @@ async def _launch(
     hooks: dict[str, Any],
     *,
     is_resume_request: bool = False,
-) -> None:
+    emit_started: Any = None,
+    expect_status: str = "success",
+    workflow_name: str = _WORKFLOW,
+) -> dict[str, Any]:
+    before_tasks = set(asyncio.all_tasks())
     result = await bridge._launch_workflow_run_locked(
         chat_id=_CHAT_ID,
         user_id="user-1",
-        workflow_name=_WORKFLOW,
+        workflow_name=workflow_name,
         message=None,
         app_id=_APP_ID,
         initial_agent_name_override="resume-agent" if is_resume_request else None,
         is_resume_request=is_resume_request,
-        emit_execution_started=None,
-        emit_execution_completed=hooks["on_complete"],
+        emit_execution_started=emit_started,
+        emit_execution_completed=hooks.get("on_complete"),
     )
-    assert result["run_status"] == "completed"
-    pending = set(bridge.__dict__.get("_lifecycle_tasks", set()))
-    if pending:
-        await asyncio.wait(pending, timeout=10)
+    assert result["status"] == expect_status, result
+    if expect_status == "success":
+        assert result["run_status"] == "completed"
+    else:
+        assert result.get("run_status") != "completed"
     await asyncio.sleep(0)
-    # Attack 20: completion leaves no dangling lifecycle background task.
-    assert not bridge.__dict__.get("_lifecycle_tasks", set())
+    # Attack 17: lifecycle dispatch is awaited — no pending lifecycle task or
+    # unretrieved exception survives the call, and the superseded tracker is
+    # gone entirely.
+    assert "_lifecycle_tasks" not in bridge.__dict__
+    leaked = {
+        t for t in asyncio.all_tasks() - before_tasks
+        if t is not asyncio.current_task() and not t.done()
+    }
+    assert not leaked, f"leaked pending tasks: {leaked}"
+    return result
 
 
 def _hooks() -> dict[str, Any]:
@@ -1046,15 +1065,25 @@ class TestLifecycleHookPolicy:
 
 
 @pytest.mark.asyncio
-async def test_required_emit_failure_prevents_success_claim_through_bridge(monkeypatch) -> None:
-    """Attack 16 through the real bridge: the canonical outbox write fails —
-    no completed event is recorded and the required failure is surfaced."""
+async def test_codex1_required_hook_failure_is_not_success(monkeypatch) -> None:
+    """Codex 1's exact reproduction, corrected contract.
+
+    A composed on_complete dispatch whose required hook raises
+    RuntimeError("required lifecycle persistence unavailable") previously
+    logged the failure through a detached task callback while the bridge
+    still returned status=success / run_status=completed. The awaited
+    lifecycle gate now returns the typed error: a required lifecycle
+    persistence failure is never a successful completed result.
+    """
     events = _intercept_lifecycle(monkeypatch)
     store = _FakeArtifactStore()
     _patch_store(monkeypatch, store)
 
+    hooks_seen: list[str] = []
+
     async def _upsert_boom(**_kwargs: Any) -> str:
-        raise RuntimeError("outbox unavailable")
+        hooks_seen.append("required")
+        raise RuntimeError("required lifecycle persistence unavailable")
 
     monkeypatch.setattr(_shared_lifecycle, "upsert_outbox_event", _upsert_boom)
 
@@ -1062,22 +1091,227 @@ async def test_required_emit_failure_prevents_success_claim_through_bridge(monke
     _patch_adapter(monkeypatch, pm, _terminal_tool_success(store))
     bridge = _Bridge(pm)
 
-    result = await bridge._launch_workflow_run_locked(
-        chat_id=_CHAT_ID,
-        user_id="user-1",
-        workflow_name=_WORKFLOW,
-        message=None,
-        app_id=_APP_ID,
-        initial_agent_name_override=None,
-        is_resume_request=False,
-        emit_execution_started=None,
-        emit_execution_completed=_hooks()["on_complete"],
+    result = await _launch(bridge, _hooks(), expect_status="error")
+    assert result["route"] == "lifecycle_completion_failed"
+    assert hooks_seen == ["required"]
+    assert events == [], events
+    # The typed error surfaced through the existing transport error channel
+    # and no synthetic completed signal was presented to the caller.
+    assert any(
+        e.get("error_code") == "LIFECYCLE_PERSISTENCE_FAILED" for e in bridge.sent_errors
+    )
+    assert bridge.synthetic_completes == 0
+
+
+@pytest.mark.asyncio
+async def test_required_on_start_failure_blocks_orchestration(monkeypatch) -> None:
+    """Attack 1: required on_start raises — the orchestration adapter is
+    never invoked, no model/tool work begins, and the bridge returns the
+    typed error, not completed."""
+    _intercept_lifecycle(monkeypatch)
+    _patch_store(monkeypatch, _FakeArtifactStore())
+
+    async def _upsert_boom(**_kwargs: Any) -> str:
+        raise RuntimeError("required lifecycle persistence unavailable")
+
+    monkeypatch.setattr(_shared_lifecycle, "upsert_outbox_event", _upsert_boom)
+
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, None)
+    import mozaiksai.core.adapters.ag2_orchestration as orchestration
+
+    adapter = orchestration.get_ag2_adapter()
+    bridge = _Bridge(pm)
+
+    hooks = get_workflow_lifecycle_hooks(_WORKFLOW)
+    result = await _launch(
+        bridge, hooks, emit_started=hooks["on_start"], expect_status="error"
+    )
+    assert result["route"] == "lifecycle_start_failed"
+    assert getattr(adapter, "invocations", 0) == 0, "orchestration must not start"
+    assert any(
+        e.get("error_code") == "LIFECYCLE_PERSISTENCE_FAILED" for e in bridge.sent_errors
+    )
+    assert bridge.synthetic_completes == 0
+
+
+@pytest.mark.asyncio
+async def test_best_effort_on_start_failure_lets_run_proceed(monkeypatch) -> None:
+    """Attack 2: a best_effort on_start hook raising is isolated by the
+    composed dispatcher; the run proceeds and completes normally."""
+    from mozaiksai.core.runtime.composition.extensions import _compose_lifecycle_hooks
+
+    events = _intercept_lifecycle(monkeypatch)
+    store = _FakeArtifactStore()
+    _patch_store(monkeypatch, store)
+
+    async def _telemetry_boom(**_kw: Any) -> None:
+        raise RuntimeError("recorder backend unavailable")
+
+    started: list[str] = []
+
+    async def _required_ok(**_kw: Any) -> str:
+        started.append("required")
+        return "outbox_started"
+
+    composed_start = _compose_lifecycle_hooks(
+        [(_telemetry_boom, "best_effort"), (_required_ok, "required")],
+        "on_start", _WORKFLOW,
+    )
+
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, _terminal_tool_success(store))
+    await _launch(_Bridge(pm), _hooks(), emit_started=composed_start)
+    assert started == ["required"]
+    assert len(_events_of(events, "build.completed")) == 1
+
+
+@pytest.mark.asyncio
+async def test_best_effort_on_complete_failure_keeps_success(monkeypatch) -> None:
+    """Attack 4: a best_effort on_complete recorder raising after the
+    canonical required completion does not undo completion or the bridge's
+    success result."""
+    from mozaiksai.core.runtime.composition.extensions import _compose_lifecycle_hooks
+
+    events = _intercept_lifecycle(monkeypatch)
+    store = _FakeArtifactStore()
+    _patch_store(monkeypatch, store)
+    pm = _FakePersistenceManager()
+
+    real_hooks = _hooks()
+
+    async def _recorder_boom(**_kw: Any) -> None:
+        raise RuntimeError("recorder backend unavailable")
+
+    composed = _compose_lifecycle_hooks(
+        [(real_hooks["on_complete"], "required"), (_recorder_boom, "best_effort")],
+        "on_complete", _WORKFLOW,
+    )
+    _patch_adapter(monkeypatch, pm, _terminal_tool_success(store))
+    result = await _launch(_Bridge(pm), {"on_complete": composed})
+    assert result["run_status"] == "completed"
+    assert len(_events_of(events, "build.completed")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["on_start", "on_complete"])
+async def test_cancellation_during_lifecycle_dispatch_propagates(monkeypatch, phase: str) -> None:
+    """Attacks 11/12: cancellation during an awaited lifecycle dispatch
+    propagates CancelledError, starts no agent run afterwards (on_start),
+    and leaves no orphan lifecycle task."""
+    _intercept_lifecycle(monkeypatch)
+    store = _FakeArtifactStore()
+    _patch_store(monkeypatch, store)
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, _terminal_tool_success(store))
+    import mozaiksai.core.adapters.ag2_orchestration as orchestration
+
+    adapter = orchestration.get_ag2_adapter()
+
+    blocked = asyncio.Event()
+
+    async def _hanging_hook(**_kw: Any) -> None:
+        blocked.set()
+        await asyncio.sleep(3600)
+
+    bridge = _Bridge(pm)
+    kwargs: dict[str, Any] = {
+        "chat_id": _CHAT_ID, "user_id": "user-1", "workflow_name": _WORKFLOW,
+        "message": None, "app_id": _APP_ID, "initial_agent_name_override": None,
+        "is_resume_request": False,
+        "emit_execution_started": _hanging_hook if phase == "on_start" else None,
+        "emit_execution_completed": _hanging_hook if phase == "on_complete" else None,
+    }
+    task = asyncio.create_task(bridge._launch_workflow_run_locked(**kwargs))
+    await asyncio.wait_for(blocked.wait(), timeout=10)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    if phase == "on_start":
+        assert getattr(adapter, "invocations", 0) == 0
+    assert "_lifecycle_tasks" not in bridge.__dict__
+
+
+@pytest.mark.asyncio
+async def test_no_lifecycle_hooks_completes_normally(monkeypatch) -> None:
+    """Attack 15: workflows without lifecycle hooks are unaffected."""
+    events = _intercept_lifecycle(monkeypatch)
+    _patch_store(monkeypatch, _FakeArtifactStore())
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, None)
+    bridge = _Bridge(pm)
+    result = await _launch(bridge, {"on_complete": None})
+    assert result["run_status"] == "completed"
+    assert events == []
+    assert bridge.synthetic_completes == 1
+
+
+@pytest.mark.asyncio
+async def test_non_appgenerator_workflow_completion_unchanged(monkeypatch) -> None:
+    """Attack 16: a non-AppGenerator build workflow's real required
+    on_complete hook still emits through the awaited gate."""
+    events = _intercept_lifecycle(monkeypatch)
+    _patch_store(monkeypatch, _FakeArtifactStore())
+    pm = _FakePersistenceManager()
+    _patch_adapter(monkeypatch, pm, None)
+
+    hooks = get_workflow_lifecycle_hooks("ValueEngine")
+    assert hooks["on_complete"] is not None
+    result = await _launch(
+        _Bridge(pm), hooks, workflow_name="ValueEngine"
     )
     assert result["run_status"] == "completed"
-    pending = set(bridge.__dict__.get("_lifecycle_tasks", set()))
-    done, _ = await asyncio.wait(pending, timeout=10)
-    # The required-hook failure is retrieved (no dangling task, no unretrieved
-    # exception warning) and no success claim was recorded.
-    assert all(t.done() for t in done)
-    assert events == [], events
-    assert not bridge.__dict__.get("_lifecycle_tasks", set())
+    # ValueEngine's shared emitter claims completion only at its journey
+    # position (is_build_workflow gate); outside a journey it claims nothing
+    # and the awaited gate still returns success — behavior unchanged.
+    assert events == []
+
+
+class TestMultipleRequiredHooks:
+    """Attacks 8/9: multiple required hooks propagate the first failure in
+    deterministic declaration order."""
+
+    @pytest.mark.asyncio
+    async def test_first_required_raises_stops_chain(self) -> None:
+        from mozaiksai.core.runtime.composition.extensions import _compose_lifecycle_hooks
+
+        calls: list[str] = []
+
+        async def _first(**_kw: Any) -> None:
+            calls.append("first")
+            raise RuntimeError("required lifecycle persistence unavailable")
+
+        async def _second(**_kw: Any) -> None:
+            calls.append("second")
+
+        composed = _compose_lifecycle_hooks(
+            [(_first, "required"), (_second, "required")], "on_complete", _WORKFLOW
+        )
+        with pytest.raises(RuntimeError):
+            await composed(app_id=_APP_ID)
+        assert calls == ["first"]
+
+    @pytest.mark.asyncio
+    async def test_middle_required_raises_stops_chain(self) -> None:
+        from mozaiksai.core.runtime.composition.extensions import _compose_lifecycle_hooks
+
+        calls: list[str] = []
+
+        async def _ok(**_kw: Any) -> str:
+            calls.append("ok")
+            return "outbox_1"
+
+        async def _boom(**_kw: Any) -> None:
+            calls.append("boom")
+            raise RuntimeError("required lifecycle persistence unavailable")
+
+        async def _after(**_kw: Any) -> None:
+            calls.append("after")
+
+        composed = _compose_lifecycle_hooks(
+            [(_ok, "required"), (_boom, "required"), (_after, "required")],
+            "on_complete", _WORKFLOW,
+        )
+        with pytest.raises(RuntimeError):
+            await composed(app_id=_APP_ID)
+        assert calls == ["ok", "boom"]
