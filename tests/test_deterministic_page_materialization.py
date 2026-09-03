@@ -518,7 +518,9 @@ def test_registry_identity_mismatch_is_rejected() -> None:
 
     snapshot = snapshot_layout_registry(extended)
     forged = snapshot.model_copy(update={"snapshot_digest": "a" * 64})
-    with pytest.raises(MaterializationError):
+    from mozaiksai.core.semantics.plan_authority import PlanAuthorityError
+
+    with pytest.raises((MaterializationError, PlanAuthorityError)):
         materialize_plan(
             plan=plan,
             graph=result.graph,

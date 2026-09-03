@@ -536,6 +536,10 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         # Slice 5B offline composition consumes the aggregate plan only
         # after assignment/materialization output has been validated.
             Path("mozaiksai/core/semantics/composition_ledger.py"),
+            # Canonical-authority verifier: re-derives candidate plans through
+            # the one derivation function; offline-only, and this same scan
+            # proves no production module imports it.
+            Path("mozaiksai/core/semantics/plan_authority.py"),
             # Slice 5C offline immutable revision closure and persistence owner.
             Path("mozaiksai/core/semantics/artifact_revision.py"),
             Path("mozaiksai/core/artifacts/revision_store.py"),

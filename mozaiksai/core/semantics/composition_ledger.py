@@ -19,6 +19,11 @@ from mozaiksai.core.semantics.compilation_plan import (
     RegenerationClosure,
 )
 from mozaiksai.core.semantics.materialization import MaterializedBundle, MaterializedOutput
+from mozaiksai.core.semantics.plan_authority import (
+    PlanAuthorityError,
+    PlanAuthorityMismatch,
+    PlanAuthorityProof,
+)
 from mozaiksai.core.semantics.portable_path import validate_portable_path
 from mozaiksai.core.semantics.refs import CompilationPlanRef, PlanUnitRef, SemanticsModel
 from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
@@ -420,10 +425,34 @@ def compose_plan_artifacts(
     base_plan: CompilationPlan | None = None,
     base_outputs: Iterable[MaterializedOutput] = (),
     regeneration_closure: RegenerationClosure | None = None,
+    plan_authority_proof: PlanAuthorityProof | None = None,
 ) -> CanonicalComposedBundle:
-    """Compose all plan units without execution, persistence, or publication."""
+    """Compose all plan units without execution, persistence, or publication.
+
+    Composition consumes a ``MaterializedBundle`` whose plan digest is bound
+    to the plan; that bundle's canonical upstream gate
+    (``materialize_plan``/``rematerialize_plan``) verifies the plan against
+    its immutable authorities before any byte exists. This boundary cannot
+    re-derive the plan itself: composed plans legitimately carry
+    ``preserve_unowned`` units that greenfield derivation never selects, and
+    the brownfield base-input contract that would make them derivable is a
+    later, explicitly-identified authority. Callers that hold the plan's
+    authorities may pass the :class:`PlanAuthorityProof` produced by
+    ``validate_compilation_plan_against_authority``; when supplied it must
+    cover exactly this plan or composition fails closed.
+    """
 
     verified_plan = CompilationPlan.model_validate(plan.model_dump(mode="json"))
+    if plan_authority_proof is not None and not plan_authority_proof.covers(
+        verified_plan
+    ):
+        raise PlanAuthorityError(
+            PlanAuthorityMismatch.CANONICAL_DERIVATION_MISMATCH,
+            "supplied plan-authority proof does not cover the composed plan "
+            f"(proof {plan_authority_proof.plan_digest[:12]}, "
+            f"plan {verified_plan.plan_digest[:12]})",
+            plan_digest=verified_plan.plan_digest,
+        )
     if verified_plan.gaps:
         raise ValueError("blocking CompilationPlan gaps prevent canonical composition")
     if materialized_bundle.plan_digest != verified_plan.plan_digest:

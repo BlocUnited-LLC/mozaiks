@@ -13,6 +13,24 @@ This project follows a practical pre-1.0 changelog format:
 ## Unreleased
 
 ### Fixed
+
+- **CompilationPlans are now cold-verified against canonical authority before
+  they can authorize byte production or historical reuse**: a plan
+  self-digest proves body integrity, not truthful derivation — a caller
+  could mutate any derived plan fact (a unit's source footprint, disposition,
+  output path, validator, an emitted gap), recompute the digests, and pass a
+  structurally cold-valid forgery into `materialize_plan` or
+  `rematerialize_plan`. Both boundaries now re-derive the candidate from its
+  exact immutable authorities (graph, payload closure, layout registry, and
+  the same optional derivation inputs) through the single canonical
+  derivation function and require exact canonical equality, failing closed
+  with a finite typed `PlanAuthorityError` (`plan_body_invalid`,
+  `canonical_derivation_mismatch`, `required_authority_missing`).
+  Rematerialization additionally pins base-plan lineage (scope and graph
+  identity) and recomputes reuse classification itself; 5B composition can
+  accept the resulting `PlanAuthorityProof` and rejects one that does not
+  cover its plan.
+
 - **A present but invalid `config/subscriptions.yaml` now fails application
   loading instead of silently disabling entitlement enforcement**: AppLoader
   previously caught the subscription contract's load error, logged a warning,

@@ -67,6 +67,7 @@ from mozaiksai.core.semantics.binding import (
 )
 from mozaiksai.core.semantics.compilation_plan import (
     CompilationPlan,
+    CompilationScopeSelection,
     FamilyInstancePlan,
     LayoutRegistrySnapshot,
     PlanDisposition,
@@ -81,6 +82,9 @@ from mozaiksai.core.semantics.payloads import (
     SectionPayload,
     SemanticPayloadBase,
     parse_semantic_payload,
+)
+from mozaiksai.core.semantics.plan_authority import (
+    validate_compilation_plan_against_authority,
 )
 from mozaiksai.core.semantics.portable_path import detect_collisions
 
@@ -560,6 +564,8 @@ def materialize_plan(
     binding: ImplementationBinding,
     layout_registry: Any,
     preserved_artifacts: Iterable[PreservedOpaqueArtifact] = (),
+    scope_selection: CompilationScopeSelection | None = None,
+    structured_output_configs: Any = None,
 ) -> MaterializedBundle:
     """Materialize every plan-authorized output for one CompilationPlan.
 
@@ -569,6 +575,17 @@ def materialize_plan(
     explicitly. The registry snapshot identity must match the plan's pinned
     registry digest — a plan derived from a different registry fails closed.
     """
+    # A self-digest proves body integrity, not truthful derivation: the plan
+    # must equal its canonical rederivation from the supplied authorities
+    # before it may authorize any byte production.
+    validate_compilation_plan_against_authority(
+        plan,
+        graph=graph,
+        payloads=payloads,
+        registry=layout_registry,
+        scope_selection=scope_selection,
+        structured_output_configs=structured_output_configs,
+    )
     verified_plan, verified_graph, payload_by_node = _cold_validate(plan, graph, payloads)
     _assert_registry_identity(verified_plan, layout_registry)
     resolve_page_schema_renderer_selection(
@@ -634,6 +651,8 @@ def rematerialize_plan(
     binding: ImplementationBinding,
     layout_registry: Any,
     preserved_artifacts: Iterable[PreservedOpaqueArtifact] = (),
+    scope_selection: CompilationScopeSelection | None = None,
+    structured_output_configs: Any = None,
 ) -> MaterializedBundle:
     """Selectively rematerialize a successor plan against a base bundle.
 
@@ -644,6 +663,26 @@ def rematerialize_plan(
     """
     if base_bundle.plan_digest != base_plan.plan_digest:
         raise MaterializationError("base bundle does not correspond to the base plan")
+    # The successor plan authorizes every fresh byte and every reuse
+    # decision: verify it against canonical derivation before any
+    # historical output is consulted. The base plan authorities are not
+    # present at this boundary; the base is anchored by cold body
+    # validation, the exact digest tie to the base bundle, and
+    # same-scope/same-graph lineage, and the reuse classification is
+    # recomputed here from both plans, never taken from the caller.
+    validate_compilation_plan_against_authority(
+        successor_plan,
+        graph=graph,
+        payloads=payloads,
+        registry=layout_registry,
+        scope_selection=scope_selection,
+        structured_output_configs=structured_output_configs,
+    )
+    verified_base = CompilationPlan.model_validate(base_plan.model_dump(mode="json"))
+    if verified_base.scope != successor_plan.scope:
+        raise MaterializationError("base plan belongs to another execution scope")
+    if verified_base.graph_id != successor_plan.graph_id:
+        raise MaterializationError("base plan belongs to another application graph")
     closure = plan_regeneration_closure(base_plan, successor_plan)
     reusable_ids = set(closure.reusable)
 
