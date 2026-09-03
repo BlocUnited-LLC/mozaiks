@@ -314,7 +314,21 @@ def resolve_app_config_renderer_selection(
         raise AppConfigMaterializationError(
             "binding carries no renderer selection for the application-config families"
         )
+    if len(matches) != 1:
+        raise AppConfigMaterializationError(
+            "application-config families are split across multiple renderer "
+            "selections; deterministic_app_config_renderer@1 requires one "
+            "selection declaring its exact family set"
+        )
     selection = matches[0]
+    declared = set(selection.artifact_families)
+    if declared != APP_CONFIG_FAMILIES:
+        raise AppConfigMaterializationError(
+            "renderer selection is the authorization boundary for "
+            "deterministic_app_config_renderer@1 and must declare exactly its "
+            f"supported family set {sorted(APP_CONFIG_FAMILIES)}; "
+            f"got {sorted(declared)}"
+        )
     if selection.materializer_id is not MaterializerIdentifier.APP_CONFIG_EXECUTOR:
         raise AppConfigMaterializationError(
             "renderer selection for application-config families pins materializer "
@@ -705,11 +719,66 @@ def _match_preserved(
     return by_unit
 
 
+def _assert_app_config_output_closure(
+    plan: CompilationPlan,
+    outputs: Iterable[MaterializedOutput],
+    selection: RendererSelection | None,
+) -> None:
+    """Bijection gate for the application-configuration output set.
+
+    Every emitted app-config output must come from an active, authorized
+    RENDER unit of the validated plan at that unit's plan-owned path; every
+    active authorized unit must have produced exactly one output; and no
+    output may exist for an inactive or unauthorized family. Inactive
+    conditional units are simply absent — never an error, never bytes.
+    """
+    unit_by_id = {unit.unit_id: unit for unit in plan.units}
+    active_expected = {
+        unit.unit_id: unit
+        for unit in plan.units
+        if unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind in APP_CONFIG_FAMILIES
+        and any(o.path_scope in _COMPOSABLE_PATH_SCOPES for o in unit.outputs)
+    }
+    emitted_counts: dict[str, int] = {}
+    for output in outputs:
+        unit = unit_by_id.get(output.unit_id)
+        if unit is None or unit.family_kind not in APP_CONFIG_FAMILIES:
+            continue
+        if selection is None or unit.family_kind not in selection.artifact_families:
+            raise AppConfigMaterializationError(
+                f"output {output.path!r} was emitted for unauthorized "
+                f"application-config family {unit.family_kind!r}"
+            )
+        if unit.unit_id not in active_expected:
+            raise AppConfigMaterializationError(
+                f"output {output.path!r} was emitted for inactive "
+                f"application-config unit {output.unit_id!r}"
+            )
+        owned_paths = {
+            o.path for o in unit.outputs if o.path_scope in _COMPOSABLE_PATH_SCOPES
+        }
+        if output.path not in owned_paths:
+            raise AppConfigMaterializationError(
+                f"output {output.path!r} does not equal the plan-owned path of "
+                f"unit {output.unit_id!r}"
+            )
+        emitted_counts[output.unit_id] = emitted_counts.get(output.unit_id, 0) + 1
+    for unit_id, unit in active_expected.items():
+        if emitted_counts.get(unit_id, 0) != 1:
+            raise AppConfigMaterializationError(
+                f"active application-config unit {unit_id!r} "
+                f"({unit.family_kind!r}) must produce exactly one output; "
+                f"produced {emitted_counts.get(unit_id, 0)}"
+            )
+
+
 def _materialize_unit(
     unit: FamilyInstancePlan,
     *,
     payload_by_node: Mapping[str, SemanticPayloadBase],
     app_config_render_input: ApplicationFamilyRenderInput | None,
+    app_config_selection: RendererSelection | None,
     preserved_by_unit: Mapping[str, PreservedOpaqueArtifact],
     bundle_outputs: list[MaterializedOutput],
     external: list[str],
@@ -730,10 +799,19 @@ def _materialize_unit(
                 f"render unit {unit.unit_id!r} must own exactly one composable output"
             )
         if unit.family_kind in APP_CONFIG_FAMILIES:
-            if app_config_render_input is None:
+            if app_config_render_input is None or app_config_selection is None:
                 raise MaterializationError(
                     f"render unit {unit.unit_id!r} requires the application-family "
-                    "render input, which was not constructed"
+                    "render input and resolved renderer selection, which were "
+                    "not constructed"
+                )
+            # A renderer selection cannot authorize a family by implication:
+            # the unit's family must be explicitly named by the resolved
+            # selection even though resolution already pinned the exact set.
+            if unit.family_kind not in app_config_selection.artifact_families:
+                raise AppConfigMaterializationError(
+                    f"unit {unit.unit_id!r} family {unit.family_kind!r} is not "
+                    "authorized by the resolved app-config renderer selection"
                 )
             content = render_app_config_unit(
                 unit=unit, render_input=app_config_render_input
@@ -810,12 +888,13 @@ def materialize_plan(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
     app_config_render_input: ApplicationFamilyRenderInput | None = None
+    app_config_selection: RendererSelection | None = None
     if any(
         unit.disposition is PlanDisposition.RENDER
         and unit.family_kind in APP_CONFIG_FAMILIES
         for unit in verified_plan.units
     ):
-        resolve_app_config_renderer_selection(
+        app_config_selection = resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
         )
         app_config_render_input = build_app_family_render_input(
@@ -834,6 +913,7 @@ def materialize_plan(
             unit,
             payload_by_node=payload_by_node,
             app_config_render_input=app_config_render_input,
+            app_config_selection=app_config_selection,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
             external=external,
@@ -843,6 +923,7 @@ def materialize_plan(
             deferred=deferred,
         )
     _assert_output_ownership(verified_plan, outputs)
+    _assert_app_config_output_closure(verified_plan, outputs, app_config_selection)
     return MaterializedBundle(
         plan_digest=verified_plan.plan_digest,
         outputs=tuple(sorted(outputs, key=lambda o: o.path)),
@@ -906,12 +987,13 @@ def rematerialize_plan(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
     app_config_render_input: ApplicationFamilyRenderInput | None = None
+    app_config_selection: RendererSelection | None = None
     if any(
         unit.disposition is PlanDisposition.RENDER
         and unit.family_kind in APP_CONFIG_FAMILIES
         for unit in verified_plan.units
     ):
-        resolve_app_config_renderer_selection(
+        app_config_selection = resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
         )
         app_config_render_input = build_app_family_render_input(
@@ -974,6 +1056,7 @@ def rematerialize_plan(
             unit,
             payload_by_node=payload_by_node,
             app_config_render_input=app_config_render_input,
+            app_config_selection=app_config_selection,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
             external=external,
@@ -983,6 +1066,7 @@ def rematerialize_plan(
             deferred=deferred,
         )
     _assert_output_ownership(verified_plan, outputs)
+    _assert_app_config_output_closure(verified_plan, outputs, app_config_selection)
     return MaterializedBundle(
         plan_digest=verified_plan.plan_digest,
         outputs=tuple(sorted(outputs, key=lambda o: o.path)),

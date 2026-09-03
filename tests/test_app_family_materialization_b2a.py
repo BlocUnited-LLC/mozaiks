@@ -107,10 +107,20 @@ def _extended_fixture(
     home_title: str = "Home",
     default_route: str = "/home",
     auth_selected: bool = True,
+    integrations_selected: bool = True,
     integration_secret_name: str = "EMAIL_API_KEY",
 ):
     """Corpus with explicit product-meaningful optional-family selections."""
     payloads = dict(_corpus_payloads(scope=_SCOPE, home_title=home_title))
+
+    def _family_selected(family: OptionalFamilyKind) -> bool:
+        if family not in _SELECTED:
+            return False
+        if family is OptionalFamilyKind.AUTH:
+            return auth_selected
+        if family is OptionalFamilyKind.INTEGRATIONS:
+            return integrations_selected
+        return True
 
     application = payloads["application"]
     selections = tuple(
@@ -118,7 +128,7 @@ def _extended_fixture(
             family=family,
             status=(
                 OptionalFamilySelectionStatus.SELECTED
-                if family in _SELECTED and (family is not OptionalFamilyKind.AUTH or auth_selected)
+                if _family_selected(family)
                 else OptionalFamilySelectionStatus.ABSENT_BY_DECLARATION
             ),
         )
@@ -138,6 +148,8 @@ def _extended_fixture(
         default_route=default_route,
         optional_families=selections,
     )
+    if not integrations_selected:
+        payloads.pop("integration", None)
     if not auth_selected:
         payloads.pop("auth", None)
     else:
@@ -880,6 +892,320 @@ def test_render_input_from_a_different_application_fails_closed() -> None:
     )
     with pytest.raises(AppConfigMaterializationError, match="pinned payload digest"):
         render_app_config_unit(unit=unit, render_input=other_input)
+
+
+# ---------------------------------------------------------------------------
+# Renderer-selection authorization matrix: the ImplementationBinding selection
+# is an authorization/capability boundary, not descriptive metadata. Version 1
+# of deterministic_app_config_renderer supports exactly the five-family set;
+# anything else fails closed at resolution, per-unit dispatch, or output
+# closure.
+# ---------------------------------------------------------------------------
+
+
+def _binding_with_families(
+    graph,
+    families,
+    *,
+    implementation_version: str = APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION,
+    materializer_id: MaterializerIdentifier = MaterializerIdentifier.APP_CONFIG_EXECUTOR,
+):
+    return build_implementation_binding(
+        binding_id="b2a_matrix",
+        version=1,
+        scope=_SCOPE,
+        semantic_graph_ref=SemanticGraphRef(
+            subject_id=graph.graph_id,
+            subject_version=graph.version,
+            content_digest=graph.graph_digest,
+            scope=graph.scope,
+        ),
+        renderer_selections=(
+            RendererSelection(
+                materializer_id=MaterializerIdentifier.PAGE_SCHEMA_EXECUTOR,
+                implementation_id="deterministic_page_schema_renderer",
+                implementation_version="1",
+                artifact_families=("app_ui_page_schema",),
+            ),
+            RendererSelection(
+                materializer_id=materializer_id,
+                implementation_id=APP_CONFIG_RENDERER_IMPLEMENTATION_ID,
+                implementation_version=implementation_version,
+                artifact_families=tuple(families),
+            ),
+        ),
+    )
+
+
+def _materialize_with(binding, *, graph, payloads, plan):
+    from mozaiksai.core.semantics.materialization import MaterializationError
+
+    return materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=binding,
+        layout_registry=build_app_layout_registry(()),
+    ), MaterializationError
+
+
+@pytest.mark.parametrize(
+    "families",
+    [
+        pytest.param(("app_manifest",), id="only-app-manifest"),
+        pytest.param(("app_config",), id="only-app-config"),
+        pytest.param(
+            tuple(sorted(APP_CONFIG_FAMILIES - {"app_secret_references"})),
+            id="four-of-five",
+        ),
+        pytest.param(
+            tuple(sorted(APP_CONFIG_FAMILIES | {"app_subscription_config"})),
+            id="five-plus-subscription",
+        ),
+        pytest.param(
+            tuple(sorted(APP_CONFIG_FAMILIES | {"totally_unknown_family"})),
+            id="five-plus-forged",
+        ),
+    ],
+)
+def test_non_exact_family_sets_fail_closed_and_emit_nothing(families) -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    binding = _binding_with_families(graph, families)
+    from mozaiksai.core.semantics.materialization import MaterializationError
+
+    with pytest.raises((AppConfigMaterializationError, MaterializationError)):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=binding,
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_subset_binding_attack_is_rejected_verbatim() -> None:
+    """Codex 2's exact attack, preserved unchanged: an otherwise valid binding
+    whose app-config selection authorizes only app_manifest must fail closed
+    instead of emitting all five application families."""
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    binding = _binding_with_families(graph, ("app_manifest",))
+    with pytest.raises(
+        AppConfigMaterializationError, match="must declare exactly its"
+    ):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=binding,
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_empty_and_duplicate_family_sets_fail_at_the_model() -> None:
+    with pytest.raises(ValidationError):
+        RendererSelection(
+            materializer_id=MaterializerIdentifier.APP_CONFIG_EXECUTOR,
+            implementation_id=APP_CONFIG_RENDERER_IMPLEMENTATION_ID,
+            implementation_version=APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION,
+            artifact_families=(),
+        )
+    with pytest.raises(ValidationError, match="unique"):
+        RendererSelection(
+            materializer_id=MaterializerIdentifier.APP_CONFIG_EXECUTOR,
+            implementation_id=APP_CONFIG_RENDERER_IMPLEMENTATION_ID,
+            implementation_version=APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION,
+            artifact_families=("app_manifest", "app_manifest"),
+        )
+
+
+def test_exact_set_succeeds_in_canonical_and_shuffled_order() -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    canonical = _binding_with_families(graph, tuple(sorted(APP_CONFIG_FAMILIES)))
+    shuffled = _binding_with_families(
+        graph, tuple(reversed(sorted(APP_CONFIG_FAMILIES)))
+    )
+    assert canonical.binding_digest == shuffled.binding_digest
+    registry = build_app_layout_registry(())
+    a = materialize_plan(
+        plan=plan, graph=graph, payloads=payloads, binding=canonical,
+        layout_registry=registry,
+    ).files()
+    b = materialize_plan(
+        plan=plan, graph=graph, payloads=payloads, binding=shuffled,
+        layout_registry=registry,
+    ).files()
+    assert a == b
+    assert _RENDERED_PATHS <= set(a)
+
+
+def test_wrong_version_and_wrong_materializer_fail_closed() -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    registry = build_app_layout_registry(())
+    from mozaiksai.core.semantics.materialization import MaterializationError
+
+    wrong_version = _binding_with_families(
+        graph, tuple(sorted(APP_CONFIG_FAMILIES)), implementation_version="2"
+    )
+    with pytest.raises((AppConfigMaterializationError, MaterializationError)):
+        materialize_plan(
+            plan=plan, graph=graph, payloads=payloads, binding=wrong_version,
+            layout_registry=registry,
+        )
+    wrong_materializer = _binding_with_families(
+        graph,
+        tuple(sorted(APP_CONFIG_FAMILIES)),
+        materializer_id=MaterializerIdentifier.PAGE_SCHEMA_EXECUTOR,
+    )
+    with pytest.raises((AppConfigMaterializationError, MaterializationError)):
+        materialize_plan(
+            plan=plan, graph=graph, payloads=payloads, binding=wrong_materializer,
+            layout_registry=registry,
+        )
+
+
+def test_forged_rebuilt_binding_with_recomputed_digest_still_fails() -> None:
+    """Serializing a valid binding, shrinking its family set, and rebuilding a
+    structurally valid document with a freshly computed digest must not
+    restore authorization: the family-set semantics are validated, not the
+    claimed digest."""
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    valid = _binding(graph)
+    document = valid.model_dump(mode="json")
+    forged_families = ("app_manifest",)
+    forged = _binding_with_families(graph, forged_families)
+    assert forged.binding_digest != valid.binding_digest
+    assert document["renderer_selections"][1]["artifact_families"] != list(
+        forged_families
+    )
+    with pytest.raises(AppConfigMaterializationError):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=forged,
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_plan_from_another_application_fails_before_authorization() -> None:
+    graph, payloads = _extended_fixture()
+    other_graph, other_payloads = _extended_fixture(default_route="/reports")
+    other_plan = _plan(other_graph, other_payloads, with_configs=False)
+    from mozaiksai.core.semantics.materialization import MaterializationError
+
+    with pytest.raises(MaterializationError):
+        materialize_plan(
+            plan=other_plan,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_registry_from_another_snapshot_fails_before_authorization() -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+
+    class _MutatedRegistry:
+        """Same schema version, one mutated row -> different snapshot digest."""
+
+        def __init__(self) -> None:
+            source = build_app_layout_registry(())
+            self.schema_version = source.schema_version
+            families = []
+            for family in source.ordered_families():
+                if family.path_template == "app.json":
+                    family = family.model_copy(
+                        update={"path_template": "app_renamed.json"}
+                    )
+                families.append(family)
+            self._families = tuple(families)
+
+        def ordered_families(self):
+            return self._families
+
+    from mozaiksai.core.semantics.materialization import MaterializationError
+
+    with pytest.raises(MaterializationError):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=_MutatedRegistry(),
+        )
+
+
+def test_inactive_conditional_family_is_absent_without_error() -> None:
+    """The binding pins the renderer's exact five-family capability; the plan
+    decides which of those families are active. An integrations-absent app
+    still binds all five, renders no integrations bytes, and raises no
+    missing-output error."""
+    graph, payloads = _extended_fixture(integrations_selected=False)
+    plan = _plan(graph, payloads, with_configs=False)
+    bundle = materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=build_app_layout_registry(()),
+    )
+    files = bundle.files()
+    assert "config/integrations.yaml" not in files
+    for expected in ("app.json", "config/ai.json", "ui/route_manifest.json",
+                     "security/secrets.yaml"):
+        assert expected in files, expected
+    assert yaml.safe_load(files["security/secrets.yaml"]) == {
+        "version": 1,
+        "secrets": [],
+    }
+
+
+def test_output_closure_rejects_extra_and_missing_outputs() -> None:
+    from mozaiksai.core.semantics.materialization import (
+        _assert_app_config_output_closure,
+    )
+
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    binding = _binding(graph)
+    selection = next(
+        s
+        for s in binding.renderer_selections
+        if s.materializer_id is MaterializerIdentifier.APP_CONFIG_EXECUTOR
+    )
+    bundle = materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=binding,
+        layout_registry=build_app_layout_registry(()),
+    )
+    app_outputs = [
+        o
+        for o in bundle.outputs
+        if o.path in _RENDERED_PATHS
+    ]
+    # The real bundle passes the closure.
+    _assert_app_config_output_closure(plan, bundle.outputs, selection)
+    # An extra unauthorized duplicate output fails.
+    with pytest.raises(AppConfigMaterializationError, match="exactly one output"):
+        _assert_app_config_output_closure(
+            plan, tuple(bundle.outputs) + (app_outputs[0],), selection
+        )
+    # Omitting one active authorized output fails.
+    dropped = tuple(o for o in bundle.outputs if o is not app_outputs[0])
+    with pytest.raises(AppConfigMaterializationError, match="exactly one output"):
+        _assert_app_config_output_closure(plan, dropped, selection)
+    # No selection at all cannot authorize emitted app-config outputs.
+    with pytest.raises(AppConfigMaterializationError, match="unauthorized"):
+        _assert_app_config_output_closure(plan, bundle.outputs, None)
 
 
 def test_payload_mutation_after_snapshot_creation_cannot_change_bytes() -> None:
