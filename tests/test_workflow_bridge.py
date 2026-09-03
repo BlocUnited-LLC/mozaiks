@@ -856,18 +856,18 @@ async def test_failure_before_any_build_emits_no_build_failed(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_failure_after_build_exists_binds_run_and_build(monkeypatch) -> None:
-    """Attacks 7/17: when the session genuinely carries a canonical build
-    identity, build.failed binds to run + build and the idempotency key
-    includes both."""
+async def test_failure_after_current_run_built_binds_run_and_build(monkeypatch) -> None:
+    """Attacks 2/7/17: the current run established a build (its run-bound,
+    digest-verified terminal receipt exists), then the run fails. The
+    build.failed event binds the exact run and the exact build that THIS
+    run established, and the idempotency key includes both."""
     import importlib
+
+    from mozaiksai.core.artifacts.build_receipt import issue_failure_receipt
 
     shared = importlib.import_module("factory_app.workflows._shared.platform.build_lifecycle")
 
     events: list[dict] = []
-
-    async def _session_ctx(**_kw):  # noqa: ANN003
-        return {"build_registry_id": "br-777", "journey_instance_id": "build-777"}
 
     async def _upsert(**kwargs):  # noqa: ANN003
         events.append(dict(kwargs))
@@ -876,16 +876,46 @@ async def test_failure_after_build_exists_binds_run_and_build(monkeypatch) -> No
     async def _noop(**_kw):  # noqa: ANN003
         return None
 
+    persistence_manager = _StoringPersistenceManager()
+
+    async def _session_ctx(**_kw):  # noqa: ANN003
+        return dict(persistence_manager.session)
+
     monkeypatch.setattr(shared, "_get_chat_session_context", _session_ctx)
     monkeypatch.setattr(shared, "upsert_outbox_event", _upsert)
     monkeypatch.setattr(shared, "_materialize_local_app_registry_event", _noop)
     monkeypatch.setattr(shared, "_spawn_delivery", lambda **_kw: None)
 
-    persistence_manager = _StoringPersistenceManager()
+    class _BuildThenFailAdapter:
+        """The run's terminal tool persists its run-bound receipt (the
+        server-owned run-to-build binding), then the run fails."""
+
+        async def run(self, request):  # noqa: ANN001
+            run_id = persistence_manager.session["workflow_run_id"]
+            receipt = issue_failure_receipt(
+                app_id="app-1",
+                workflow_name="AppGenerator",
+                workflow_run_id=run_id,
+                build_id="build-run-B",
+                error_code="lineage_registration_failed",
+            )
+            persistence_manager.session["build_terminal_receipt"] = receipt.model_dump(mode="json")
+            raise RuntimeError("workflow blew up after build work")
+
+        async def resume(self, request):  # noqa: ANN001
+            return await self.run(request)
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
     transport = _DummyTransport(persistence_manager)
-    _failing_env(
-        monkeypatch, transport, [], hooks={"on_fail": shared.emit_build_failed}
+    monkeypatch.setattr(
+        _bridge_mod,
+        "get_workflow_lifecycle_hooks",
+        lambda _w: {"on_fail": shared.emit_build_failed},
     )
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _BuildThenFailAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
 
     result = await transport.handle_user_input_from_api(
         chat_id="same-chat", user_id="user-1", workflow_name="AppGenerator",
@@ -896,10 +926,65 @@ async def test_failure_after_build_exists_binds_run_and_build(monkeypatch) -> No
     assert result["status"] == "error"
     assert len(events) == 1
     assert events[0]["event_type"] == "build.failed"
-    assert events[0]["build_id"] == "build-777"
+    assert events[0]["build_id"] == "build-run-B"
     assert run_id and run_id in events[0]["idempotency_key"]
-    assert "build-777" in events[0]["idempotency_key"]
+    assert "build-run-B" in events[0]["idempotency_key"]
     assert events[0]["payload"]["workflowRunId"] == run_id
+
+
+@pytest.mark.asyncio
+async def test_receipt_from_another_run_never_populates_build_binding(monkeypatch) -> None:
+    """Attacks 8/9: a terminal receipt persisted by ANOTHER run (or any
+    session build identity from another run) never populates the failing
+    run's build binding — no build.failed against the other run's build."""
+    import importlib
+
+    from mozaiksai.core.artifacts.build_receipt import issue_failure_receipt
+
+    shared = importlib.import_module("factory_app.workflows._shared.platform.build_lifecycle")
+
+    events: list[dict] = []
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        events.append(dict(kwargs))
+        return "outbox_1"
+
+    async def _noop(**_kw):  # noqa: ANN003
+        return None
+
+    persistence_manager = _StoringPersistenceManager()
+    stale = issue_failure_receipt(
+        app_id="app-1",
+        workflow_name="AppGenerator",
+        workflow_run_id="wfrun_previous_run",
+        build_id="build-run-A",
+        error_code="lineage_registration_failed",
+    )
+    persistence_manager.session["build_terminal_receipt"] = stale.model_dump(mode="json")
+    persistence_manager.session["build_registry_id"] = "br-run-A"
+
+    async def _session_ctx(**_kw):  # noqa: ANN003
+        return dict(persistence_manager.session)
+
+    monkeypatch.setattr(shared, "_get_chat_session_context", _session_ctx)
+    monkeypatch.setattr(shared, "upsert_outbox_event", _upsert)
+    monkeypatch.setattr(shared, "_materialize_local_app_registry_event", _noop)
+    monkeypatch.setattr(shared, "_spawn_delivery", lambda **_kw: None)
+
+    transport = _DummyTransport(persistence_manager)
+    _failing_env(
+        monkeypatch, transport, [], hooks={"on_fail": shared.emit_build_failed}
+    )
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="AppGenerator",
+        message="x", app_id="app-1",
+    )
+    assert result["status"] == "error"
+    assert events == [], (
+        "another run's receipt/build must never receive this run's failure: "
+        + repr(events)
+    )
 
 
 @pytest.mark.asyncio
@@ -943,3 +1028,83 @@ async def test_cancellation_is_not_wrapped_into_run_failure(monkeypatch) -> None
     with pytest.raises(_asyncio.CancelledError):
         await task
     assert on_fail_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_b_prebuild_failure_never_claims_run_a_build(monkeypatch) -> None:
+    """Codex 1's stale-build substitution, driven through the real outer
+    failure path.
+
+    Run A completed a build and left historical session fields
+    (build_registry_id=br-run-A, journey_instance_id=build-run-A). Run B —
+    same app/chat/workflow, a distinct immutable workflow_run_id — fails
+    BEFORE creating any build. Chat/session "latest build" fields are
+    presentation context, not run-to-build authority: Run B must remain a
+    truthful run-level failure with NO build.failed event, and Run A's
+    build state must remain untouched. Previously the shared emitter read
+    Run A's build identity from the latest session context and emitted
+    build.failed with build_id=build-run-A paired with Run B's
+    workflow_run_id.
+    """
+    import importlib
+
+    shared = importlib.import_module("factory_app.workflows._shared.platform.build_lifecycle")
+
+    events: list[dict] = []
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        events.append(dict(kwargs))
+        return "outbox_1"
+
+    async def _noop(**_kw):  # noqa: ANN003
+        return None
+
+    persistence_manager = _StoringPersistenceManager()
+    # Run A's historical session/build state — deliberately NOT deleted:
+    # history stays for UI/reconnect/audit; the correction is authority
+    # qualification, not destructive clearing.
+    persistence_manager.session.update(
+        {
+            "build_registry_id": "br-run-A",
+            "journey_instance_id": "build-run-A",
+            "build_id": "build-run-A",
+        }
+    )
+
+    async def _session_ctx(**_kw):  # noqa: ANN003
+        return dict(persistence_manager.session)
+
+    monkeypatch.setattr(shared, "_get_chat_session_context", _session_ctx)
+    monkeypatch.setattr(shared, "upsert_outbox_event", _upsert)
+    monkeypatch.setattr(shared, "_materialize_local_app_registry_event", _noop)
+    monkeypatch.setattr(shared, "_spawn_delivery", lambda **_kw: None)
+
+    transport = _DummyTransport(persistence_manager)
+    _failing_env(
+        monkeypatch, transport, [], hooks={"on_fail": shared.emit_build_failed}
+    )
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="AppGenerator",
+        message="run B", app_id="app-1",
+    )
+    run_b_id = persistence_manager.session.get("workflow_run_id")
+
+    assert result["status"] == "error"
+    assert run_b_id
+    stale_claims = [
+        e for e in events
+        if e.get("build_id") == "build-run-A"
+        or "build-run-A" in str(e.get("idempotency_key", ""))
+        or "br-run-A" in str(e.get("idempotency_key", ""))
+    ]
+    assert stale_claims == [], (
+        "Run B paired with Run A's build: " + repr(stale_claims)
+    )
+    assert events == [], (
+        "Run B never established a build; no build.failed may be emitted: "
+        + repr(events)
+    )
+    # Run A's historical state remains unchanged (attack 20).
+    assert persistence_manager.session["build_registry_id"] == "br-run-A"
+    assert persistence_manager.session["journey_instance_id"] == "build-run-A"

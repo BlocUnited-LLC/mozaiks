@@ -636,7 +636,59 @@ class WorkflowBridgeMixin:
                 workflow_name=workflow_name,
                 chat_id=chat_id,
                 workflow_run_id=workflow_run_id,
+                build_id=await self._current_run_build_binding(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    workflow_name=workflow_name,
+                    workflow_run_id=workflow_run_id,
+                ),
             ) from exc
+
+    async def _current_run_build_binding(
+        self,
+        *,
+        chat_id: str,
+        app_id: str,
+        workflow_name: str,
+        workflow_run_id: str,
+    ) -> str | None:
+        """Resolve the exact build established by THIS run, or None.
+
+        The only accepted authority is the server-owned, digest-verified
+        terminal receipt whose ``workflow_run_id`` equals the current run —
+        the run-to-build binding written by the terminal build tool after
+        the persistence closure. Unqualified "latest" session build fields
+        (build_registry_id / journey_instance_id / build_id) are
+        presentation context from possibly-earlier runs and are never used.
+        Reconnect/retry reuses the persisted binding automatically; any
+        parse failure, missing receipt, or receipt from another run yields
+        None — a truthful run-level failure with no build claim.
+        """
+        try:
+            from mozaiksai.core.artifacts.build_receipt import (
+                TERMINAL_RECEIPT_CONTEXT_KEY,
+                parse_terminal_receipt,
+            )
+
+            pm = self._get_or_create_persistence_manager()
+            session_context = await pm.fetch_chat_session_extra_context(
+                chat_id=chat_id,
+                app_id=app_id,
+                workflow_name=workflow_name,
+            )
+            raw_receipt = (session_context or {}).get(TERMINAL_RECEIPT_CONTEXT_KEY)
+            if raw_receipt is None:
+                return None
+            receipt = parse_terminal_receipt(raw_receipt)
+            if (
+                receipt.workflow_run_id != workflow_run_id
+                or receipt.app_id != str(app_id)
+                or receipt.workflow_name != str(workflow_name)
+            ):
+                return None
+            return receipt.build_id
+        except Exception:
+            return None
 
     async def _execute_identified_run(
         self,

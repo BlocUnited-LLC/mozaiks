@@ -868,31 +868,56 @@ async def emit_build_failed(
     ):
         return None
 
-    # build.failed is a build-specific terminal claim: it requires a
-    # canonical build identity — an explicit build_id from the caller
-    # (terminal receipts, journeys) or one the session genuinely carries.
-    # A run that failed before any build existed must not fabricate a
-    # build identity from the chat; the typed workflow failure and the
-    # run-identified on_fail dispatch remain the truthful record.
-    session_ctx = context.get("session_context") or {}
-    has_canonical_build = (
-        bool(_normalize_text(build_id))
-        or context.get("build_registry_id_source") in ("explicit", "session")
-        or bool(_normalize_text(context.get("journey_key")))
-        or any(
-            _normalize_text(session_ctx.get(key))
-            for key in ("build_registry_id", "journey_instance_id", "build_id")
-        )
-    )
-    if not has_canonical_build:
+    # build.failed is a build-specific terminal claim requiring the exact
+    # server-owned relation workflow_run_id -> build_id, established by the
+    # SAME run. Chat/session "latest build" fields (build_registry_id,
+    # journey_instance_id, build_id) are presentation/workflow context, not
+    # run-to-build authority: the latest session values may belong to a
+    # previous run in the same chat.
+    #
+    # Identified dispatch (caller supplied workflow_run_id): a build-specific
+    # event requires an explicitly supplied current-run build reference —
+    # the callers that pass one derive it from the run's own verified state
+    # (the digest-verified run-bound terminal receipt, or a journey/build
+    # tool acting for this run). Unqualified session fields are never
+    # searched. Without an explicit reference the run remains a truthful
+    # run-level failure: on_fail still ran, but no build.failed is emitted
+    # and no earlier build is touched.
+    #
+    # Unidentified dispatch (no workflow_run_id supplied — direct callers):
+    # a canonical build identity must still exist (explicit reference or a
+    # resolved journey identity); a bare chat fallback never fabricates one.
+    explicit_build = _normalize_text(build_id)
+    run_scope = _normalize_text(workflow_run_id)
+    if run_scope and not explicit_build:
         logger.info(
-            "BUILD_FAILED_SKIPPED_NO_BUILD: workflow=%s run=%s — terminal "
-            "failure preceded any canonical build identity; no build.failed "
-            "event fabricated",
+            "BUILD_FAILED_SKIPPED_UNBOUND_RUN: workflow=%s run=%s — no "
+            "current-run build reference supplied; latest session build "
+            "identity is not run-to-build authority, so no build.failed "
+            "event is emitted for this run",
             workflow_name,
-            _normalize_text(workflow_run_id) or "<unidentified>",
+            run_scope,
         )
         return None
+    if not run_scope:
+        session_ctx = context.get("session_context") or {}
+        has_canonical_build = (
+            bool(explicit_build)
+            or context.get("build_registry_id_source") in ("explicit", "session")
+            or bool(_normalize_text(context.get("journey_key")))
+            or any(
+                _normalize_text(session_ctx.get(key))
+                for key in ("build_registry_id", "journey_instance_id", "build_id")
+            )
+        )
+        if not has_canonical_build:
+            logger.info(
+                "BUILD_FAILED_SKIPPED_NO_BUILD: workflow=%s — terminal "
+                "failure preceded any canonical build identity; no "
+                "build.failed event fabricated",
+                workflow_name,
+            )
+            return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
     if workflow_run_id:

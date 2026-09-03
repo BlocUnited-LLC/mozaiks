@@ -146,12 +146,17 @@ This project follows a practical pre-1.0 changelog format:
   identity through the failure event payload and idempotency key — two
   distinct failed runs in one chat can no longer share `build.failed` event
   or idempotency authority, while a retry of the same run reuses the
-  persisted identity and stays one effective event. `build.failed` is now
-  emitted only when a canonical build identity genuinely exists (explicit
-  build id or one the session carries); a run failing before any build
-  existed no longer fabricates a build-specific failure from chat identity —
-  the typed workflow failure and the run-identified on_fail dispatch remain
-  the truthful record.
+  persisted identity and stays one effective event. A build-specific
+  `build.failed` claim now requires the exact server-owned relation
+  workflow_run_id -> build_id established by the same run: the failing
+  run's build binding comes only from its own digest-verified terminal
+  receipt, and the shared emitter never searches unqualified "latest"
+  session build fields for an identified dispatch — a run failing before
+  it established any build (including in a chat whose session still
+  carries a previous run's build identity) emits no build.failed and
+  touches no earlier build; the typed workflow failure and the
+  run-identified on_fail dispatch remain the truthful record. Historical
+  session build state is preserved for UI/reconnect/audit.
 - **At most one CURRENT BuildRecord per (app_id, build_family, build_key) is
   now storage-enforced**: a partial unique index on CURRENT records
   (verified through the canonical index contract, mismatches fail closed)
