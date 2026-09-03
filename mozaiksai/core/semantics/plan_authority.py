@@ -36,7 +36,7 @@ base-input contract exists) may accept it in place of re-deriving.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -78,24 +78,97 @@ class PlanAuthorityError(ValueError):
         self.unit_id = unit_id
 
 
+class _IssuanceToken:
+    """Module-private issuance capability binding one exact plan digest.
+
+    TRUST MODEL — explicit and bounded: this is an in-process fail-closed API
+    contract, not cryptography. A ``PlanAuthorityProof`` is meaningful only
+    when its token was created by :func:`validate_compilation_plan_against_authority`
+    at issuance time for the exact digests the proof names. Ordinary callers
+    cannot obtain a token through any public path: proofs are not
+    serializable documents, ``dataclasses.replace`` keeps the original token
+    (whose bound digest then mismatches), and constructing ``_IssuanceToken``
+    requires reaching into this module's private namespace — which no
+    production module does (guard-tested). Test fixtures that must compose
+    not-yet-derivable brownfield plans may simulate the future base-input
+    authority through this private seam, and only there.
+    """
+
+    __slots__ = ("_plan_digest",)
+
+    def __init__(self, plan_digest: str) -> None:
+        self._plan_digest = plan_digest
+
+
 @dataclass(frozen=True)
 class PlanAuthorityProof:
     """Attestation that one exact plan was verified against exact authorities.
 
-    Produced only by :func:`validate_compilation_plan_against_authority`.
-    Immutable, scope-free of payload content, and valid only for the exact
-    plan digest it names — there is no ambient trusted-plan set and no TTL.
+    Issued only by :func:`validate_compilation_plan_against_authority` (or a
+    test fixture explicitly simulating a future authority through the private
+    issuance seam). Immutable, free of payload content, non-serializable, and
+    valid only for the exact plan/graph/registry/scope identity it names —
+    there is no ambient trusted-plan set and no TTL.
     """
 
     plan_digest: str
     graph_digest: str
     registry_digest: str
+    scope_key: str
+    issued_token: _IssuanceToken = field(repr=False, compare=False)
 
     def covers(self, plan: CompilationPlan) -> bool:
         return (
-            self.plan_digest == plan.plan_digest
+            isinstance(self.issued_token, _IssuanceToken)
+            and self.issued_token._plan_digest == self.plan_digest
+            and self.plan_digest == plan.plan_digest
             and self.graph_digest == plan.graph_digest
             and self.registry_digest == plan.registry_digest
+            and self.scope_key == _scope_key(plan)
+        )
+
+
+def _scope_key(plan: CompilationPlan) -> str:
+    scope = plan.scope
+    return "|".join(
+        str(getattr(scope, name, "") or "")
+        for name in ("tenant_id", "workspace_id", "pre_app_scope_id")
+    )
+
+
+def require_plan_authority_proof(
+    proof: PlanAuthorityProof | None, plan: CompilationPlan
+) -> None:
+    """Fail closed unless ``proof`` is a validator-issued proof for ``plan``.
+
+    ``None``, a foreign object, a proof whose token was not bound to its own
+    plan digest at issuance, or a proof for another plan/graph/registry/scope
+    all reject with the finite typed :class:`PlanAuthorityError` before any
+    downstream authority is exercised.
+    """
+    if proof is None or not isinstance(proof, PlanAuthorityProof):
+        raise PlanAuthorityError(
+            PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING,
+            "a validator-issued PlanAuthorityProof is required; None or a "
+            "foreign object cannot authorize plan consumption",
+            plan_digest=getattr(plan, "plan_digest", None),
+        )
+    if (
+        not isinstance(proof.issued_token, _IssuanceToken)
+        or proof.issued_token._plan_digest != proof.plan_digest
+    ):
+        raise PlanAuthorityError(
+            PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING,
+            "the supplied proof was not issued by the canonical validator "
+            "for the digests it names",
+            plan_digest=plan.plan_digest,
+        )
+    if not proof.covers(plan):
+        raise PlanAuthorityError(
+            PlanAuthorityMismatch.CANONICAL_DERIVATION_MISMATCH,
+            "the supplied proof does not cover this exact plan "
+            f"(proof {proof.plan_digest[:12]}, plan {plan.plan_digest[:12]})",
+            plan_digest=plan.plan_digest,
         )
 
 
@@ -201,6 +274,8 @@ def validate_compilation_plan_against_authority(
         plan_digest=canonical.plan_digest,
         graph_digest=canonical.graph_digest,
         registry_digest=canonical.registry_digest,
+        scope_key=_scope_key(canonical),
+        issued_token=_IssuanceToken(canonical.plan_digest),
     )
 
 
@@ -208,5 +283,6 @@ __all__ = [
     "PlanAuthorityError",
     "PlanAuthorityMismatch",
     "PlanAuthorityProof",
+    "require_plan_authority_proof",
     "validate_compilation_plan_against_authority",
 ]

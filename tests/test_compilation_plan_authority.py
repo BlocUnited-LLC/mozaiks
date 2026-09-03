@@ -431,25 +431,274 @@ def test_missing_authorities_fail_typed() -> None:
     assert excinfo.value.category is PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING
 
 
-def test_composition_rejects_a_non_covering_proof() -> None:
+# ---------------------------------------------------------------------------
+# Public composition boundary: plan authority is mandatory. Codex 3's exact
+# reproduction is preserved — an internally consistent forged plan (rejected
+# by the canonical validator) with the entire supporting chain publicly
+# recomputed (closure, resolver, assignments, result, bundle) must not be
+# composable, and no None/omitted/forged-proof path may exist.
+# ---------------------------------------------------------------------------
+
+
+def _forged_composition_scenario():
+    import dataclasses
+    from pathlib import Path as _Path
+
+    import yaml as _yaml
+
+    from mozaiksai.core.semantics.compilation_plan import (
+        plan_regeneration_closure,
+    )
+    from mozaiksai.core.semantics.refs import (
+        CompilationPlanRef,
+        PlanUnitRef,
+        SemanticPayloadRef,
+    )
+    from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
+    from mozaiksai.core.workflow.assignment_artifacts import (
+        build_assignment_artifact_result,
+    )
+    from mozaiksai.core.workflow.plan_assignment_compiler import (
+        ApprovedAssignmentSpec,
+        ApprovedPlan,
+        compile_approved_plan,
+    )
+    from tests.slice_5b_composition_helpers import composition_fixture
+
+    root = _Path(__file__).resolve().parents[1]
+    structured = _yaml.safe_load(
+        (
+            root / "factory_app/workflows/AppGenerator/structured_outputs.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    fixture = composition_fixture()
+    successor = fixture["successor"]
+    base = fixture["base"]
+    base_ids = {u.unit_id for u in base.units}
+    unit = next(
+        u for u in successor.units if u.sources and u.unit_id not in base_ids
+    )
+    present = {s.node_id for s in unit.sources}
+    extra = next(p for p in fixture["payloads"] if p.node_id not in present)
+    document = successor.model_dump(mode="json")
+    payload = successor.canonical_payload(include_digest=False)
+    for doc in (document, payload):
+        for u in doc["units"]:
+            if u["unit_id"] == unit.unit_id:
+                u["sources"] = sorted(
+                    list(u["sources"])
+                    + [
+                        {
+                            "node_id": extra.node_id,
+                            "payload_digest": extra.payload_digest,
+                        }
+                    ],
+                    key=lambda s: s["node_id"],
+                )
+    document["plan_digest"] = canonical_digest(payload)
+    forged = CompilationPlan.model_validate(document)
+
+    resolver = SemanticReferenceResolver()
+    for item in fixture["payloads"]:
+        resolver.register_semantic_payload(item)
+    resolver.register_semantic_graph_v2(fixture["graph"])
+    resolver.register_compilation_plan(base)
+    resolver.register_compilation_plan(forged)
+
+    agent = next(
+        u for u in forged.units if u.disposition.value == "agent_author"
+    )
+    plan_ref = CompilationPlanRef(
+        subject_id=forged.graph_id,
+        subject_version=forged.graph_version,
+        content_digest=forged.plan_digest,
+        scope=forged.scope,
+    )
+    unit_ref = PlanUnitRef(
+        compilation_plan_ref=plan_ref,
+        unit_id=agent.unit_id,
+        unit_digest=agent.unit_digest,
+    )
+    payload_by_id = {p.node_id: p for p in fixture["payloads"]}
+    source_refs = tuple(
+        SemanticPayloadRef(
+            node_id=s.node_id,
+            payload_kind=payload_by_id[s.node_id].payload_kind.value,
+            payload_version=payload_by_id[s.node_id].payload_version,
+            content_digest=s.payload_digest,
+            scope=forged.scope,
+        )
+        for s in agent.sources
+    )
+    assignments = compile_approved_plan(
+        ApprovedPlan(
+            assignments=(
+                ApprovedAssignmentSpec(
+                    plan_unit_ref=unit_ref,
+                    assignment_kind=agent.assignment_kind,
+                    dependency_context_refs=source_refs,
+                    required_structured_output_ref=(
+                        agent.required_structured_output_ref
+                    ),
+                    required_validators=(agent.validator,),
+                    assignment_retry_limit=2,
+                    base_revision_digest=fixture["base_revision_digest"],
+                ),
+            )
+        ),
+        resolver=resolver,
+        structured_output_configs={"AppGenerator": structured},
+    )
+    helper_source = "def report_hook():\n    return None\n"
+    result = build_assignment_artifact_result(
+        assignment=assignments.ordered_assignments[0],
+        structured_output={
+            "assignment_kind": "module_helper_implementation",
+            "module_id": "reports",
+            "helper_id": "report_hook",
+            "helper_source": helper_source,
+        },
+        artifacts={"modules/reports/backend/report_hook.py": helper_source},
+        structured_output_configs={"AppGenerator": structured},
+        validator_runner=lambda _validator, files: bool(files),
+    )
+    bundle = dataclasses.replace(
+        fixture["materialized"], plan_digest=forged.plan_digest
+    )
+    return {
+        "fixture": fixture,
+        "forged": forged,
+        "resolver": resolver,
+        "assignments": assignments,
+        "result": result,
+        "bundle": bundle,
+        "closure": plan_regeneration_closure(base, forged),
+    }
+
+
+def _compose_forged(scenario, proof):
     from mozaiksai.core.semantics.composition_ledger import compose_plan_artifacts
 
-    graph, payloads, plan = _authority()
-    wrong = PlanAuthorityProof(
-        plan_digest="a" * 64,
-        graph_digest=plan.graph_digest,
-        registry_digest=plan.registry_digest,
+    return compose_plan_artifacts(
+        plan=scenario["forged"],
+        resolver=scenario["resolver"],
+        assignments=scenario["assignments"],
+        assignment_results=(scenario["result"],),
+        materialized_bundle=scenario["bundle"],
+        plan_authority_proof=proof,
+        base_revision_digest=scenario["fixture"]["base_revision_digest"],
+        base_plan=scenario["fixture"]["base"],
+        base_outputs=scenario["fixture"]["base_outputs"],
+        regeneration_closure=scenario["closure"],
+    )
+
+
+def test_codex3_public_composition_forgery_is_rejected() -> None:
+    """Preserved reproduction: the internally consistent forged plan whose
+    supporting chain was fully recomputed through public APIs cannot compose —
+    proof=None fails typed, and no validator will issue a covering proof."""
+    scenario = _forged_composition_scenario()
+    with pytest.raises(PlanAuthorityError) as excinfo:
+        _compose_forged(scenario, None)
+    assert (
+        excinfo.value.category
+        is PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING
+    )
+
+
+def test_composition_requires_the_proof_argument_entirely() -> None:
+    from mozaiksai.core.semantics.composition_ledger import compose_plan_artifacts
+
+    scenario = _forged_composition_scenario()
+    with pytest.raises(TypeError):
+        compose_plan_artifacts(
+            plan=scenario["forged"],
+            resolver=scenario["resolver"],
+            assignments=scenario["assignments"],
+            assignment_results=(scenario["result"],),
+            materialized_bundle=scenario["bundle"],
+            base_revision_digest=scenario["fixture"]["base_revision_digest"],
+            base_plan=scenario["fixture"]["base"],
+            base_outputs=scenario["fixture"]["base_outputs"],
+            regeneration_closure=scenario["closure"],
+        )
+
+
+def test_forged_or_foreign_proofs_cannot_authorize_composition() -> None:
+    import dataclasses
+
+
+    scenario = _forged_composition_scenario()
+    forged = scenario["forged"]
+    honest = scenario["fixture"]["plan_authority_proof"]
+    # proof for another plan (the honest successor) does not cover the forgery
+    with pytest.raises(PlanAuthorityError):
+        _compose_forged(scenario, honest)
+    # dataclasses.replace with substituted digests keeps the original token,
+    # whose issuance-bound digest then mismatches — rejected as non-issued
+    replaced = dataclasses.replace(
+        honest,
+        plan_digest=forged.plan_digest,
+        graph_digest=forged.graph_digest,
+        registry_digest=forged.registry_digest,
+    )
+    with pytest.raises(PlanAuthorityError) as excinfo:
+        _compose_forged(scenario, replaced)
+    assert (
+        excinfo.value.category
+        is PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING
+    )
+    # direct public construction cannot mint a token
+    with pytest.raises(TypeError):
+        PlanAuthorityProof(
+            plan_digest=forged.plan_digest,
+            graph_digest=forged.graph_digest,
+            registry_digest=forged.registry_digest,
+            scope_key="tenant1|ws1|",
+        )
+    # a caller-created token-shaped object is a foreign object
+    class _FakeToken:
+        _plan_digest = forged.plan_digest
+
+    fake = PlanAuthorityProof(
+        plan_digest=forged.plan_digest,
+        graph_digest=forged.graph_digest,
+        registry_digest=forged.registry_digest,
+        scope_key="tenant1|ws1|",
+        issued_token=_FakeToken(),
     )
     with pytest.raises(PlanAuthorityError):
-        compose_plan_artifacts(
-            plan=plan,
-            resolver=None,  # rejected before any resolver use
-            assignments=None,
-            assignment_results=(),
-            materialized_bundle=None,
-            base_revision_digest=None,
-            plan_authority_proof=wrong,
-        )
+        _compose_forged(scenario, fake)
+    # proofs are not serializable documents: no pydantic surface exists
+    assert not hasattr(PlanAuthorityProof, "model_validate")
+    # a wrong-scope proof for an identical body does not cover the plan
+    graph, payloads, plan = _authority()
+    issued = validate_compilation_plan_against_authority(
+        plan, graph=graph, payloads=payloads, registry=_registry()
+    )
+    wrong_scope = dataclasses.replace(issued, scope_key="other|scope|")
+    from mozaiksai.core.semantics.plan_authority import (
+        require_plan_authority_proof,
+    )
+
+    with pytest.raises(PlanAuthorityError):
+        require_plan_authority_proof(wrong_scope, plan)
+    # the untouched validator-issued proof covers its exact plan
+    require_plan_authority_proof(issued, plan)
+
+
+def test_no_production_module_reaches_the_private_issuance_seam() -> None:
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[1]
+    offenders = []
+    for base_dir in ("mozaiksai", "factory_app"):
+        for path in (root / base_dir).rglob("*.py"):
+            if path.name == "plan_authority.py":
+                continue
+            if "_IssuanceToken" in path.read_text(encoding="utf-8"):
+                offenders.append(str(path.relative_to(root)))
+    assert offenders == []
 
 
 def test_base_plan_foreign_scope_and_graph_are_rejected() -> None:

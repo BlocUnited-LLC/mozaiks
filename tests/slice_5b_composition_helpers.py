@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from mozaiksai.core.semantics import plan_authority as _plan_authority
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.compilation_plan import (
     CompilationPlan,
@@ -20,6 +21,7 @@ from mozaiksai.core.semantics.materialization import (
     MaterializedOutput,
     _materialize_unit,
 )
+from mozaiksai.core.semantics.plan_authority import PlanAuthorityProof
 from mozaiksai.core.semantics.refs import (
     CompilationPlanRef,
     PlanUnitRef,
@@ -75,6 +77,25 @@ def _output(unit: FamilyInstancePlan, content: bytes, *, origin: str) -> Materia
 
 
 @lru_cache(maxsize=1)
+def issue_test_authority_proof(plan) -> PlanAuthorityProof:
+    """Issue a proof for a synthetic test plan through the PRIVATE seam.
+
+    These fixtures deliberately compose plans (preserve_unowned, fabricated
+    refinement units) that greenfield derivation cannot produce yet — the
+    brownfield base-input contract is the identified future authority. Until
+    it exists, tests simulate that authority by reaching into the
+    plan_authority module's private issuance token. No production module
+    references this seam (guard-tested in test_compilation_plan_authority).
+    """
+    return PlanAuthorityProof(
+        plan_digest=plan.plan_digest,
+        graph_digest=plan.graph_digest,
+        registry_digest=plan.registry_digest,
+        scope_key=_plan_authority._scope_key(plan),
+        issued_token=_plan_authority._IssuanceToken(plan.plan_digest),
+    )
+
+
 def composition_fixture() -> dict[str, object]:
     structured = yaml.safe_load(
         (ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(
@@ -235,6 +256,7 @@ def composition_fixture() -> dict[str, object]:
         "payloads": payloads,
         "base": base,
         "successor": successor,
+        "plan_authority_proof": issue_test_authority_proof(successor),
         "closure": closure,
         "resolver": resolver,
         "assignments": assignments,

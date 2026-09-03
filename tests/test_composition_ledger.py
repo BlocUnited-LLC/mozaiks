@@ -23,6 +23,7 @@ def _compose(**updates):
         "assignments": fixture["assignments"],
         "assignment_results": (fixture["result"],),
         "materialized_bundle": fixture["materialized"],
+        "plan_authority_proof": fixture["plan_authority_proof"],
         "base_revision_digest": fixture["base_revision_digest"],
         "base_plan": fixture["base"],
         "base_outputs": fixture["base_outputs"],

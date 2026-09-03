@@ -36,6 +36,7 @@ from mozaiksai.core.workflow.structured_output_contracts import stable_digest
 from tests.slice_5b_composition_helpers import (
     composition_fixture,
     empty_assignment_set,
+    issue_test_authority_proof,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +96,7 @@ def revision_fixture() -> dict[str, object]:
         assignments=empty_assignment_set(),
         assignment_results=(),
         materialized_bundle=materialized,
+        plan_authority_proof=issue_test_authority_proof(plan),
         base_revision_digest=None,
     )
     validators = tuple(
@@ -290,6 +292,7 @@ def executable_revision_fixture() -> dict[str, object]:
         assignments=assignments,
         assignment_results=(result,),
         materialized_bundle=materialized,
+        plan_authority_proof=issue_test_authority_proof(plan),
         base_revision_digest=None,
     )
     validators = tuple(
