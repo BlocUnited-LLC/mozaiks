@@ -409,21 +409,29 @@ def build_app_family_render_input(
             "application-config projection pins more than one AuthPayload"
         )
     auth = auths[0] if auths else None
+
+    def _family_selected(family: OptionalFamilyKind) -> bool:
+        for selection in application.optional_families:
+            if selection.family is family:
+                return selection.status is OptionalFamilySelectionStatus.SELECTED
+        raise AppConfigMaterializationError(
+            f"application selection evidence does not state the {family.value} family"
+        )
+
+    auth_selected = _family_selected(OptionalFamilyKind.AUTH)
     if auth is not None:
+        if not auth_selected:
+            raise AppConfigMaterializationError(
+                "an AuthPayload is pinned while the application declares the "
+                "auth family absent; contradictory evidence cannot render"
+            )
         auth_required = bool(auth.auth_required)
     else:
-        for selection in application.optional_families:
-            if selection.family is OptionalFamilyKind.AUTH:
-                if selection.status is OptionalFamilySelectionStatus.SELECTED:
-                    raise AppConfigMaterializationError(
-                        "auth is selected but no AuthPayload is pinned in the footprint"
-                    )
-                auth_required = False
-                break
-        else:
+        if auth_selected:
             raise AppConfigMaterializationError(
-                "application selection evidence does not state the auth family"
+                "auth is selected but no AuthPayload is pinned in the footprint"
             )
+        auth_required = False
 
     pages: list[RenderInputPage] = []
     for payload in resolved.values():
@@ -470,11 +478,51 @@ def build_app_family_render_input(
         for payload in integration_payloads
     )
 
-    has_agent_driven_workflow = any(
-        isinstance(payload, WorkflowPayload)
-        and payload.startup_mode is WorkflowStartupMode.AGENT_DRIVEN
-        for payload in resolved.values()
-    )
+    # Selection honesty is an application-level fact: evaluate it over the
+    # complete cold-validated payload closure, not only the payloads pinned by
+    # currently-active unit footprints — a gapped config/ai.json unit must not
+    # hide missing, ambiguous, or contradictory workflow evidence.
+    workflow_payloads = [
+        payload
+        for payload in payload_by_node.values()
+        if isinstance(payload, WorkflowPayload)
+    ]
+    if _family_selected(OptionalFamilyKind.WORKFLOWS):
+        if not workflow_payloads:
+            raise AppConfigMaterializationError(
+                "workflows are selected but no WorkflowPayload is pinned in "
+                "the footprint; missing selected evidence cannot render"
+            )
+        if any(payload.startup_mode is None for payload in workflow_payloads):
+            raise AppConfigMaterializationError(
+                "a selected workflow does not state its startup mode; the "
+                "chat startup derivation is ambiguous"
+            )
+        agent_driven = [
+            payload
+            for payload in workflow_payloads
+            if payload.startup_mode is WorkflowStartupMode.AGENT_DRIVEN
+        ]
+        if len(agent_driven) > 1:
+            raise AppConfigMaterializationError(
+                "multiple selected workflows claim agent-driven startup; the "
+                "chat startup derivation is ambiguous"
+            )
+        chat_startup_mode: Literal["ask", "workflow"] = (
+            "workflow" if agent_driven else "ask"
+        )
+    else:
+        if workflow_payloads:
+            raise AppConfigMaterializationError(
+                "WorkflowPayloads are pinned while the application declares "
+                "the workflows family absent; contradictory evidence cannot "
+                "render"
+            )
+        # Proven absence: the platform host itself defaults the chat startup
+        # mode to "ask" when config/ai.json declares none
+        # (mozaiksai.hosts.platform.build_shell_config), so this literal is
+        # the runtime own provider-neutral default, not an invented fact.
+        chat_startup_mode = "ask"
 
     return ApplicationFamilyRenderInput(
         render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
@@ -485,7 +533,7 @@ def build_app_family_render_input(
         default_route=application.default_route,
         auth_required=auth_required,
         pages=tuple(pages),
-        has_agent_driven_workflow=has_agent_driven_workflow,
+        chat_startup_mode=chat_startup_mode,
         integrations=integrations,
         sources=tuple(
             RenderInputSource(node_id=node_id, payload_digest=payload.payload_digest)

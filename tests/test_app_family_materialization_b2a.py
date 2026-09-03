@@ -65,6 +65,9 @@ from mozaiksai.core.semantics.payloads import (
     SectionContentEntry,
     SectionEntryKind,
     SectionPayload,
+    SemanticNodeKind,
+    WorkflowPayload,
+    WorkflowStartupMode,
     build_semantic_payload,
     semantic_payload_ref,
 )
@@ -108,18 +111,27 @@ def _extended_fixture(
     default_route: str = "/home",
     auth_selected: bool = True,
     integrations_selected: bool = True,
+    workflows_selected: bool = True,
+    drop_workflow_payload: bool = False,
+    workflow_startup_mode: WorkflowStartupMode | None = WorkflowStartupMode.EVENT_DRIVEN,
+    extra_workflow_startup_mode: WorkflowStartupMode | None = None,
+    custom_routes_selected: bool = False,
     integration_secret_name: str = "EMAIL_API_KEY",
 ):
     """Corpus with explicit product-meaningful optional-family selections."""
     payloads = dict(_corpus_payloads(scope=_SCOPE, home_title=home_title))
 
     def _family_selected(family: OptionalFamilyKind) -> bool:
+        if family is OptionalFamilyKind.CUSTOM_ROUTES:
+            return custom_routes_selected
         if family not in _SELECTED:
             return False
         if family is OptionalFamilyKind.AUTH:
             return auth_selected
         if family is OptionalFamilyKind.INTEGRATIONS:
             return integrations_selected
+        if family is OptionalFamilyKind.WORKFLOWS:
+            return workflows_selected
         return True
 
     application = payloads["application"]
@@ -152,6 +164,31 @@ def _extended_fixture(
         payloads.pop("integration", None)
     if not auth_selected:
         payloads.pop("auth", None)
+    if drop_workflow_payload:
+        payloads.pop(SemanticNodeKind.WORKFLOW, None)
+    elif workflow_startup_mode is not WorkflowStartupMode.EVENT_DRIVEN:
+        workflow = payloads[SemanticNodeKind.WORKFLOW]
+        payloads[SemanticNodeKind.WORKFLOW] = build_semantic_payload(
+            WorkflowPayload,
+            node_id=workflow.node_id,
+            payload_version=workflow.payload_version,
+            scope=_SCOPE,
+            workflow_id=workflow.workflow_id,
+            description=workflow.description,
+            startup_mode=workflow_startup_mode,
+            topology=workflow.topology,
+        )
+    if extra_workflow_startup_mode is not None:
+        payloads["workflow_extra"] = build_semantic_payload(
+            WorkflowPayload,
+            node_id="mozaiks.workflow.assistant",
+            payload_version=1,
+            scope=_SCOPE,
+            workflow_id="assistant",
+            description="Interactive assistant workflow",
+            startup_mode=extra_workflow_startup_mode,
+            topology=None,
+        )
     else:
         auth = payloads["auth"]
         payloads["auth"] = build_semantic_payload(
@@ -1206,6 +1243,347 @@ def test_output_closure_rejects_extra_and_missing_outputs() -> None:
     # No selection at all cannot authorize emitted app-config outputs.
     with pytest.raises(AppConfigMaterializationError, match="unauthorized"):
         _assert_app_config_output_closure(plan, bundle.outputs, None)
+
+
+# ---------------------------------------------------------------------------
+# Selection honesty: a family whose selection says SELECTED must have its
+# typed facts; missing selected evidence stays a typed gap and contradictory
+# evidence never renders. Codex 2's exact attack is preserved first.
+# ---------------------------------------------------------------------------
+
+
+def _gap_paths(plan, family_kind):
+    return {
+        gap.path_template for gap in plan.gaps if gap.family_kind == family_kind
+    }
+
+
+def test_workflows_selected_with_zero_payloads_stays_a_typed_gap() -> None:
+    """Codex 2's exact attack, preserved: WORKFLOWS selected, zero
+    WorkflowPayloads. app_config must not be classified complete from an
+    application-only footprint, and config/ai.json must not be emitted with a
+    normalized chat_startup_mode."""
+    graph, payloads = _extended_fixture(drop_workflow_payload=True)
+    plan = _plan(graph, payloads, with_configs=False)
+    render_units = [
+        u
+        for u in plan.units
+        if u.family_kind == "app_config" and u.disposition is PlanDisposition.RENDER
+    ]
+    assert render_units == []
+    assert "config/ai.json" in _gap_paths(plan, "app_config")
+    with pytest.raises(
+        AppConfigMaterializationError, match="workflows are selected but no"
+    ):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_one_complete_workflow_renders_exact_startup_mode() -> None:
+    ask = _bundle_files()
+    assert json.loads(ask["config/ai.json"]) == {
+        "chat": {"chat_startup_mode": "ask"}
+    }
+    graph, payloads = _extended_fixture(
+        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN
+    )
+    plan = _plan(graph, payloads, with_configs=False)
+    files = materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    assert json.loads(files["config/ai.json"]) == {
+        "chat": {"chat_startup_mode": "workflow"}
+    }
+
+
+def test_two_compatible_workflows_render_deterministically() -> None:
+    graph, payloads = _extended_fixture(
+        extra_workflow_startup_mode=WorkflowStartupMode.ON_DEMAND
+    )
+    plan = _plan(graph, payloads, with_configs=False)
+    files = materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    assert json.loads(files["config/ai.json"]) == {
+        "chat": {"chat_startup_mode": "ask"}
+    }
+    # One agent-driven among on-demand peers is likewise unambiguous.
+    graph2, payloads2 = _extended_fixture(
+        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN,
+        extra_workflow_startup_mode=WorkflowStartupMode.ON_DEMAND,
+    )
+    plan2 = _plan(graph2, payloads2, with_configs=False)
+    files2 = materialize_plan(
+        plan=plan2,
+        graph=graph2,
+        payloads=payloads2,
+        binding=_binding(graph2),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    assert json.loads(files2["config/ai.json"]) == {
+        "chat": {"chat_startup_mode": "workflow"}
+    }
+
+
+def test_conflicting_agent_driven_workflows_stay_a_typed_gap() -> None:
+    graph, payloads = _extended_fixture(
+        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN,
+        extra_workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN,
+    )
+    plan = _plan(graph, payloads, with_configs=False)
+    assert "config/ai.json" in _gap_paths(plan, "app_config")
+    with pytest.raises(AppConfigMaterializationError, match="ambiguous"):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_workflow_without_startup_mode_stays_a_typed_gap() -> None:
+    graph, payloads = _extended_fixture(workflow_startup_mode=None)
+    plan = _plan(graph, payloads, with_configs=False)
+    assert "config/ai.json" in _gap_paths(plan, "app_config")
+
+
+def test_workflow_node_with_missing_payload_fails_derivation_closed() -> None:
+    from mozaiksai.core.semantics.compilation_plan import CompilationPlanError
+
+    graph, payloads = _extended_fixture()
+    without = [
+        p for p in payloads if p.payload_kind is not SemanticNodeKind.WORKFLOW
+    ]
+    with pytest.raises(CompilationPlanError, match="payload closure failed"):
+        derive_compilation_plan(
+            graph=graph,
+            payloads=without,
+            registry=build_app_layout_registry(()),
+        )
+
+
+def test_workflows_absent_with_payload_present_is_a_contradiction() -> None:
+    graph, payloads = _extended_fixture(workflows_selected=False)
+    plan = _plan(graph, payloads, with_configs=False)
+    assert "config/ai.json" in _gap_paths(plan, "app_config")
+    with pytest.raises(AppConfigMaterializationError, match="declares"):
+        materialize_plan(
+            plan=plan,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=build_app_layout_registry(()),
+        )
+
+
+def test_workflows_absent_with_zero_payloads_renders_runtime_default() -> None:
+    """Semantically proven absence renders the platform host's own default
+    (mozaiksai.hosts.platform.build_shell_config falls back to "ask" when
+    config/ai.json declares no chat startup mode)."""
+    graph, payloads = _extended_fixture(
+        workflows_selected=False, drop_workflow_payload=True
+    )
+    plan = _plan(graph, payloads, with_configs=False)
+    files = materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    assert json.loads(files["config/ai.json"]) == {
+        "chat": {"chat_startup_mode": "ask"}
+    }
+
+
+def test_workflow_description_mutation_does_not_change_ai_config_bytes() -> None:
+    base = _bundle_files()
+    graph, payloads = _extended_fixture()
+    workflow = next(
+        p for p in payloads if p.payload_kind is SemanticNodeKind.WORKFLOW
+    )
+    mutated = [
+        build_semantic_payload(
+            WorkflowPayload,
+            node_id=p.node_id,
+            payload_version=p.payload_version,
+            scope=_SCOPE,
+            workflow_id=p.workflow_id,
+            description="A different description entirely",
+            startup_mode=p.startup_mode,
+            topology=p.topology,
+        )
+        if p is workflow
+        else p
+        for p in payloads
+    ]
+    nodes = [
+        SemanticNodeV2(
+            node_id=p.node_id, kind=p.payload_kind, payload_ref=semantic_payload_ref(p)
+        )
+        for p in mutated
+    ]
+    edges = list(graph.edges)
+    mutated_graph = build_semantic_graph_v2(
+        graph_id=graph.graph_id,
+        version=graph.version,
+        scope=_SCOPE,
+        nodes=nodes,
+        edges=edges,
+    )
+    plan = _plan(mutated_graph, mutated, with_configs=False)
+    files = materialize_plan(
+        plan=plan,
+        graph=mutated_graph,
+        payloads=mutated,
+        binding=_binding(mutated_graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    # The description is not consumed by config/ai.json: bytes are unchanged
+    # even though the workflow payload digest (and source footprint) changed.
+    assert files["config/ai.json"] == base["config/ai.json"]
+    assert files["app.json"] == base["app.json"]
+
+
+def test_workflow_startup_mode_mutation_changes_only_ai_config() -> None:
+    base = _bundle_files()
+    graph, payloads = _extended_fixture(
+        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN
+    )
+    plan = _plan(graph, payloads, with_configs=False)
+    files = materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    assert files["config/ai.json"] != base["config/ai.json"]
+    for unchanged in (
+        "app.json",
+        "ui/route_manifest.json",
+        "config/integrations.yaml",
+        "security/secrets.yaml",
+    ):
+        assert files[unchanged] == base[unchanged], unchanged
+
+
+def test_forged_render_input_claiming_no_workflow_fails_source_pinning() -> None:
+    plan, payload_by_node, render_input = _valid_render_input()
+    workflow_node_ids = {
+        node_id
+        for node_id, payload in payload_by_node.items()
+        if payload.payload_kind is SemanticNodeKind.WORKFLOW
+    }
+    document = render_input.model_dump()
+    document["chat_startup_mode"] = "ask"
+    document["sources"] = [
+        s for s in document["sources"] if s["node_id"] not in workflow_node_ids
+    ]
+    forged = type(render_input).model_validate(document)
+    ai_unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER and u.family_kind == "app_config"
+    )
+    with pytest.raises(AppConfigMaterializationError, match="missing"):
+        render_app_config_unit(unit=ai_unit, render_input=forged)
+
+
+def test_selected_auth_without_payload_stays_a_typed_gap() -> None:
+    graph, payloads = _extended_fixture(auth_selected=True)
+    without_auth = [
+        p for p in payloads if p.payload_kind is not SemanticNodeKind.AUTH
+    ]
+    nodes = [
+        SemanticNodeV2(
+            node_id=p.node_id, kind=p.payload_kind, payload_ref=semantic_payload_ref(p)
+        )
+        for p in without_auth
+    ]
+    kept_ids = {n.node_id for n in nodes}
+    edges = [
+        e
+        for e in graph.edges
+        if e.source_node_id in kept_ids and e.target_node_id in kept_ids
+    ]
+    stripped_graph = build_semantic_graph_v2(
+        graph_id=graph.graph_id,
+        version=graph.version,
+        scope=_SCOPE,
+        nodes=nodes,
+        edges=edges,
+    )
+    plan = _plan(stripped_graph, without_auth, with_configs=False)
+    for family in (
+        "app_manifest",
+        "app_config",
+        "app_secret_references",
+        "app_ui_route_manifest",
+    ):
+        assert not any(
+            u.family_kind == family and u.disposition is PlanDisposition.RENDER
+            for u in plan.units
+        ), family
+
+
+def test_selected_integrations_without_payload_gap_secret_references() -> None:
+    graph, payloads = _extended_fixture()
+    without = [
+        p for p in payloads if p.payload_kind is not SemanticNodeKind.INTEGRATION
+    ]
+    nodes = [
+        SemanticNodeV2(
+            node_id=p.node_id, kind=p.payload_kind, payload_ref=semantic_payload_ref(p)
+        )
+        for p in without
+    ]
+    kept_ids = {n.node_id for n in nodes}
+    edges = [
+        e
+        for e in graph.edges
+        if e.source_node_id in kept_ids and e.target_node_id in kept_ids
+    ]
+    stripped_graph = build_semantic_graph_v2(
+        graph_id=graph.graph_id,
+        version=graph.version,
+        scope=_SCOPE,
+        nodes=nodes,
+        edges=edges,
+    )
+    plan = _plan(stripped_graph, without, with_configs=False)
+    # Selected integrations with zero payloads: neither the integrations
+    # config nor the names-only secret surface may render empty output.
+    for family in ("app_integrations_config", "app_secret_references"):
+        assert not any(
+            u.family_kind == family and u.disposition is PlanDisposition.RENDER
+            for u in plan.units
+        ), family
+
+
+def test_selected_custom_routes_without_declaration_gap_route_manifest() -> None:
+    graph, payloads = _extended_fixture(custom_routes_selected=True)
+    plan = _plan(graph, payloads, with_configs=False)
+    assert not any(
+        u.family_kind == "app_ui_route_manifest"
+        and u.disposition is PlanDisposition.RENDER
+        for u in plan.units
+    )
+    assert "ui/route_manifest.json" in _gap_paths(plan, "app_ui_route_manifest")
 
 
 def test_payload_mutation_after_snapshot_creation_cannot_change_bytes() -> None:

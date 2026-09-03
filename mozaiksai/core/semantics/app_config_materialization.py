@@ -135,7 +135,11 @@ class ApplicationFamilyRenderInput(_ClosedRenderInputModel):
     default_route: str
     auth_required: bool
     pages: tuple[RenderInputPage, ...]
-    has_agent_driven_workflow: bool
+    #: Application chat startup behavior, resolved by the materialization
+    #: owner only after workflow-selection completeness is proven. A missing
+    #: or contradictory workflow fact never reaches this field: the owner
+    #: fails closed instead of normalizing absence to a mode.
+    chat_startup_mode: Literal["ask", "workflow"]
     integrations: tuple[RenderInputIntegration, ...]
     sources: tuple[RenderInputSource, ...]
 
@@ -219,12 +223,7 @@ def _route_manifest_document(
 def _ai_config_document(
     unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
 ) -> dict[str, object]:
-    mode = (
-        "workflow"
-        if render_input.has_agent_driven_workflow
-        else _CHAT_STARTUP_DEFAULT
-    )
-    return {"chat": {"chat_startup_mode": mode}}
+    return {"chat": {"chat_startup_mode": render_input.chat_startup_mode}}
 
 
 def _integrations_document(

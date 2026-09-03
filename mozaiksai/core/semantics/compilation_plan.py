@@ -76,6 +76,7 @@ from mozaiksai.core.semantics.payloads import (
     PagePayload,
     SemanticPayloadBase,
     WorkflowPayload,
+    WorkflowStartupMode,
     parse_semantic_payload,
     validate_semantic_graph_v2_payload_closure,
 )
@@ -1327,8 +1328,13 @@ def derive_compilation_plan(
 
         Complete only when the accepted authorities can supply every rendered
         fact for the row's exact output contract; everything else stays a
-        typed gap. ``config/asset_manifest.json`` shares the ``app_config``
-        family but has no typed asset facts yet, so it remains gapped.
+        typed gap. Selection honesty is enforced per consuming family: a
+        family whose optional-family selection says SELECTED must have its
+        typed facts present, and a family declared absent must have none —
+        missing selected evidence is never normalized to an empty rendering,
+        and contradictory evidence never renders. ``config/asset_manifest.json``
+        shares the ``app_config`` family but has no typed asset facts yet, so
+        it remains gapped.
         """
         applications = [
             payload
@@ -1338,30 +1344,71 @@ def derive_compilation_plan(
         if len(applications) != 1:
             return False
         application = applications[0]
-        auth_payloads = [
-            payload
-            for payload in payload_by_node.values()
-            if isinstance(payload, AuthPayload)
-        ]
-        auth_selected = any(
-            selection.family is OptionalFamilyKind.AUTH
-            and selection.status is OptionalFamilySelectionStatus.SELECTED
-            for selection in application.optional_families
-        )
-        if auth_selected and len(auth_payloads) != 1:
+
+        def _selected(family: OptionalFamilyKind) -> bool:
+            return any(
+                selection.family is family
+                and selection.status is OptionalFamilySelectionStatus.SELECTED
+                for selection in application.optional_families
+            )
+
+        def _facts_honest(
+            family: OptionalFamilyKind,
+            payload_type: type,
+            *,
+            exactly_one: bool = False,
+        ) -> bool:
+            present = [
+                payload
+                for payload in payload_by_node.values()
+                if isinstance(payload, payload_type)
+            ]
+            if _selected(family):
+                return len(present) == 1 if exactly_one else len(present) >= 1
+            # Declared absent or not applicable: any present fact is
+            # contradictory evidence, which stays a typed gap.
+            return not present
+
+        # Auth facts feed app.json's authRequired and the secret-reference
+        # surface; every application-config family shares this gate.
+        if not _facts_honest(OptionalFamilyKind.AUTH, AuthPayload, exactly_one=True):
             return False
         if row.kind == "app_manifest":
             return True
         if row.kind == "app_config":
-            return row.path_template == "config/ai.json"
-        if row.kind == "app_secret_references":
+            if row.path_template != "config/ai.json":
+                return False
+            if not _facts_honest(OptionalFamilyKind.WORKFLOWS, WorkflowPayload):
+                return False
+            if _selected(OptionalFamilyKind.WORKFLOWS):
+                workflows = [
+                    payload
+                    for payload in payload_by_node.values()
+                    if isinstance(payload, WorkflowPayload)
+                ]
+                # Startup derivation must be unambiguous: every selected
+                # workflow states its startup mode, and at most one workflow
+                # may claim application startup (agent_driven).
+                if any(workflow.startup_mode is None for workflow in workflows):
+                    return False
+                agent_driven = [
+                    workflow
+                    for workflow in workflows
+                    if workflow.startup_mode is WorkflowStartupMode.AGENT_DRIVEN
+                ]
+                if len(agent_driven) > 1:
+                    return False
             return True
+        if row.kind == "app_secret_references":
+            return _facts_honest(OptionalFamilyKind.INTEGRATIONS, IntegrationPayload)
         if row.kind == "app_integrations_config":
-            return any(
-                isinstance(payload, IntegrationPayload)
-                for payload in payload_by_node.values()
-            )
+            return _facts_honest(OptionalFamilyKind.INTEGRATIONS, IntegrationPayload)
         if row.kind == "app_ui_route_manifest":
+            # Selected custom routes are route-manifest inputs this slice
+            # cannot render; the family stays a typed gap rather than
+            # emitting a manifest that silently omits them.
+            if _selected(OptionalFamilyKind.CUSTOM_ROUTES):
+                return False
             pages = [
                 payload
                 for payload in payload_by_node.values()

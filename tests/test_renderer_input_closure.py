@@ -529,13 +529,15 @@ def test_unsupported_renderer_families_remain_explicit_typed_gaps() -> None:
         "app_subscription_config",
         "workflow_manifest",
     } <= renderer_blocked
-    # Slice 5D-0B2A closed app_manifest: the corpus's application/auth facts
-    # are byte-complete, so it renders deterministically instead of gapping.
-    assert "app_manifest" not in renderer_blocked
+    # This corpus declares every optional family absent while pinning auth,
+    # integration, and workflow payloads — contradictory selection evidence.
+    # Slice 5D-0B2A selection honesty therefore keeps app_manifest a typed
+    # incomplete gap here; the honest closure renders only on the
+    # selection-consistent B2A fixture.
     assert any(
-        unit.family_kind == "app_manifest"
-        and unit.disposition is PlanDisposition.RENDER
-        for unit in plan.units
+        gap.family_kind == "app_manifest"
+        and gap.code is PlanGapCode.RENDERER_INPUT_INCOMPLETE
+        for gap in plan.gaps
     )
     assert not any(
         unit.disposition is PlanDisposition.AGENT_AUTHOR

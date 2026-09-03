@@ -47,13 +47,15 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-# Re-pinned once for Slice 5D-0B2A: the app-config completion predicate now
-# recognizes the corpus's closed application/auth/page facts, flipping the
-# unconditional application-configuration families (app_manifest, app_config,
-# app_secret_references, app_ui_route_manifest) from typed gaps to RENDER.
-# Plan identity also includes #475's exact consulted assignment-contract
-# closure. No semantic fact was invented; the corpus payloads are unchanged.
-_GOLDEN_PLAN_DIGEST = "9be0e974aeeaa59841ac48d53ef306fd988ec609193de057bbfe6b5a07737e6d"
+# This corpus declares every optional family ABSENT_BY_DECLARATION while
+# carrying auth/integration/workflow payloads — contradictory selection
+# evidence. Slice 5D-0B2A's selection-honesty completion therefore keeps the
+# application-configuration families as typed gaps here (only the page family
+# renders). Plan identity also includes #475's consulted assignment-contract
+# closure. The honest
+# five-family closure is proven on the selection-consistent fixture in
+# tests/test_app_family_materialization_b2a.py instead.
+_GOLDEN_PLAN_DIGEST = "c95aad3fef6ef3f66c29b1ca5dbd4b38156cb2fbc4afbc89195a4c7d4413e501"
 
 
 def _registry():
