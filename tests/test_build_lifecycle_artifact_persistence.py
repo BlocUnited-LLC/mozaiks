@@ -22,6 +22,36 @@ def _make_persist():
     return AsyncMock(return_value=None)
 
 
+_RUN_ID = "wfrun_persistence_test"
+
+
+def _success_context() -> dict:
+    """Run context carrying a valid receipt bound to _RUN_ID."""
+    from mozaiksai.core.artifacts.build_receipt import (
+        TERMINAL_RECEIPT_CONTEXT_KEY,
+        issue_success_receipt,
+    )
+
+    receipt = issue_success_receipt(
+        app_id="app-1",
+        workflow_name="AppGenerator",
+        workflow_run_id=_RUN_ID,
+        build_id=f"build_{_RUN_ID}",
+        build_record_id="av_1",
+        build_record_lifecycle="current",
+        app_context_version_id="acv_logical",
+        app_context_record_id="acv_1",
+        bundle_digest=None,
+    )
+    return {TERMINAL_RECEIPT_CONTEXT_KEY: receipt.model_dump(mode="json")}
+
+
+def _patch_lineage_ok(mod):
+    return patch.object(
+        mod, "_verify_success_receipt_lineage", AsyncMock(return_value=True)
+    )
+
+
 # ── AppGenerator ───────────────────────────────────────────────────────────────
 
 class TestAppGeneratorEmitBuildCompleted:
@@ -36,13 +66,15 @@ class TestAppGeneratorEmitBuildCompleted:
             patch.object(mod, "_shared_emit_build_completed", shared_emit),
             patch.object(mod, "_read_build_mode", AsyncMock(return_value=None)),
             patch.object(mod, "_persist_app_bundle_artifact", persist),
+            _patch_lineage_ok(mod),
         ):
             result = await mod.emit_build_completed(
                 app_id="app-1",
                 chat_id="chat-1",
                 user_id="user-1",
                 workflow_name="AppGenerator",
-                context_variables={"download_status": "ready"},
+                workflow_run_id=_RUN_ID,
+                context_variables=_success_context(),
             )
 
         assert result == "outbox_app_1"
@@ -65,13 +97,15 @@ class TestAppGeneratorEmitBuildCompleted:
             patch.object(mod, "_shared_emit_build_completed", _make_shared_emit()),
             patch.object(mod, "_read_build_mode", AsyncMock(return_value="revision")),
             patch.object(mod, "_persist_app_bundle_artifact", persist),
+            _patch_lineage_ok(mod),
         ):
             await mod.emit_build_completed(
                 app_id="app-1",
                 chat_id="chat-1",
                 user_id="user-1",
                 workflow_name="AppGenerator",
-                context_variables={"download_status": "ready"},
+                workflow_run_id=_RUN_ID,
+                context_variables=_success_context(),
             )
 
         persist.assert_awaited_once_with(
@@ -90,13 +124,15 @@ class TestAppGeneratorEmitBuildCompleted:
             patch.object(mod, "_shared_emit_build_completed", _make_shared_emit("outbox_2")),
             patch.object(mod, "_read_build_mode", AsyncMock(return_value=None)),
             patch.object(mod, "_persist_app_bundle_artifact", AsyncMock(side_effect=RuntimeError("db down"))),
+            _patch_lineage_ok(mod),
         ):
             result = await mod.emit_build_completed(
                 app_id="app-1",
                 chat_id="chat-1",
                 user_id="user-1",
                 workflow_name="AppGenerator",
-                context_variables={"download_status": "ready"},
+                workflow_run_id=_RUN_ID,
+                context_variables=_success_context(),
             )
 
         # outbox_event_id still returned — persistence failure is best-effort
@@ -255,20 +291,32 @@ class TestAgentGeneratorEmitBuildCompleted:
 
 
 class TestAppGeneratorCompletionGate:
-    """build.completed only after terminal success; build.failed only on the failed marker.
+    """Lifecycle claims come only from this run's terminal receipt.
 
-    The completion hook fires on every completed workflow turn, so states
-    other than the two terminal markers (intermediate turns, cancelled
-    downloads, absent context) must claim nothing at all.
+    The completion hook fires on every completed workflow turn: no receipt,
+    a receipt bound to a different run, or bare chat-scoped markers (which
+    remain UI projections) must claim nothing at all.
     """
 
     @pytest.mark.asyncio
-    async def test_failed_marker_emits_failed_not_completed(self) -> None:
+    async def test_run_bound_failure_receipt_emits_failed_not_completed(self) -> None:
         from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
+        from mozaiksai.core.artifacts.build_receipt import (
+            TERMINAL_RECEIPT_CONTEXT_KEY,
+            issue_failure_receipt,
+        )
 
         shared_emit = _make_shared_emit("outbox_should_not_happen")
         persist = _make_persist()
         failed = AsyncMock(return_value="outbox_failed_1")
+
+        receipt = issue_failure_receipt(
+            app_id="app-1",
+            workflow_name="AppGenerator",
+            workflow_run_id=_RUN_ID,
+            build_id=f"build_{_RUN_ID}",
+            error_code="lineage_registration_failed",
+        )
 
         with (
             patch.object(mod, "_shared_emit_build_completed", shared_emit),
@@ -280,26 +328,40 @@ class TestAppGeneratorCompletionGate:
                 chat_id="chat-1",
                 user_id="user-1",
                 workflow_name="AppGenerator",
-                context_variables={"download_status": "failed", "app_download_ready": False},
+                workflow_run_id=_RUN_ID,
+                context_variables={
+                    TERMINAL_RECEIPT_CONTEXT_KEY: receipt.model_dump(mode="json"),
+                    "download_status": "failed",
+                },
             )
 
         assert result == "outbox_failed_1"
         shared_emit.assert_not_awaited()
         persist.assert_not_awaited()
         failed.assert_awaited_once()
-        assert "terminal success" in failed.await_args.kwargs["error"]
+        assert failed.await_args.kwargs["build_id"] == f"build_{_RUN_ID}"
+        assert failed.await_args.kwargs["workflow_run_id"] == _RUN_ID
+        assert "lineage_registration_failed" in failed.await_args.kwargs["error"]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "context_variables",
         [
             {},
+            {"download_status": "ready", "app_download_ready": True},
+            {"download_status": "failed", "app_download_ready": False},
             {"download_status": "cancelled", "app_download_ready": False},
             None,
         ],
-        ids=["intermediate-turn", "cancelled-download", "no-context"],
+        ids=[
+            "intermediate-turn",
+            "bare-ready-marker",
+            "bare-failed-marker",
+            "cancelled-download",
+            "no-context",
+        ],
     )
-    async def test_nonterminal_states_claim_nothing(self, context_variables) -> None:
+    async def test_states_without_run_receipt_claim_nothing(self, context_variables) -> None:
         from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
 
         shared_emit = _make_shared_emit()
@@ -314,10 +376,46 @@ class TestAppGeneratorCompletionGate:
             result = await mod.emit_build_completed(
                 app_id="app-1",
                 workflow_name="AppGenerator",
+                workflow_run_id=_RUN_ID,
                 context_variables=context_variables,
             )
 
         assert result is None
         shared_emit.assert_not_awaited()
         persist.assert_not_awaited()
+        failed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_receipt_from_other_run_claims_nothing(self) -> None:
+        from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
+        from mozaiksai.core.artifacts.build_receipt import (
+            TERMINAL_RECEIPT_CONTEXT_KEY,
+            issue_failure_receipt,
+        )
+
+        shared_emit = _make_shared_emit()
+        failed = AsyncMock()
+        stale = issue_failure_receipt(
+            app_id="app-1",
+            workflow_name="AppGenerator",
+            workflow_run_id="wfrun_previous_run",
+            build_id="build_wfrun_previous_run",
+            error_code="lineage_registration_failed",
+        )
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", shared_emit),
+            patch.object(mod, "emit_build_failed", failed),
+        ):
+            result = await mod.emit_build_completed(
+                app_id="app-1",
+                workflow_name="AppGenerator",
+                workflow_run_id=_RUN_ID,
+                context_variables={
+                    TERMINAL_RECEIPT_CONTEXT_KEY: stale.model_dump(mode="json")
+                },
+            )
+
+        assert result is None
+        shared_emit.assert_not_awaited()
         failed.assert_not_awaited()

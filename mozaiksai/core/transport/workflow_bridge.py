@@ -21,6 +21,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
 from mozaiksai.core.runtime.persistence.distributed_lock import (
@@ -485,6 +486,57 @@ class WorkflowBridgeMixin:
             "route": "chat_lock_lost",
         }
 
+    def _track_lifecycle_task(self, task: asyncio.Task, *, label: str, chat_id: str) -> None:
+        """Hold a strong reference to a lifecycle task until it finishes.
+
+        asyncio keeps only weak references to tasks; without tracking, a
+        fire-and-forget lifecycle emission can be garbage-collected mid-flight
+        and cancellation can leave a dangling background task.
+        """
+        pending: set[asyncio.Task] = self.__dict__.setdefault("_lifecycle_tasks", set())
+        pending.add(task)
+
+        def _done(t: asyncio.Task) -> None:
+            pending.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error("%s chat=%s: %s", label, chat_id, t.exception())
+
+        task.add_done_callback(_done)
+
+    async def _ensure_workflow_run_identity(
+        self,
+        *,
+        chat_id: str,
+        app_id: str,
+        workflow_name: str,
+        is_resume_request: bool,
+    ) -> str:
+        """Establish the immutable workflow-run identity for this launch.
+
+        A fresh run mints a new identity exactly once and persists it before
+        orchestration starts, opening a new run-scoped lifecycle namespace: a
+        new run never inherits the previous run's terminal receipt. A resume
+        reconnects to the persisted identity and never regenerates it. The
+        identity is server-owned and random — never wall-clock derived, never
+        caller-substitutable.
+        """
+        pm = self._get_or_create_persistence_manager()
+        if is_resume_request:
+            existing_context = await pm.fetch_chat_session_extra_context(
+                chat_id=chat_id, app_id=app_id, workflow_name=workflow_name,
+            )
+            existing = str((existing_context or {}).get("workflow_run_id") or "").strip()
+            if existing:
+                return existing
+        workflow_run_id = f"wfrun_{uuid4().hex}"
+        await pm.persist_context_variables(
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            variables={"workflow_run_id": workflow_run_id},
+        )
+        return workflow_run_id
+
     async def _launch_workflow_run_locked(
         self,
         *,
@@ -506,6 +558,17 @@ class WorkflowBridgeMixin:
         """
         from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
         from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
+
+        # Immutable run identity — minted once per fresh run, reconnected on
+        # resume. Terminal receipts and lifecycle claims bind to it; failing
+        # to establish it fails the launch closed rather than running a build
+        # whose completion could never be verified.
+        workflow_run_id = await self._ensure_workflow_run_identity(
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            is_resume_request=is_resume_request,
+        )
 
         if message or is_resume_request:
             try:
@@ -559,7 +622,8 @@ class WorkflowBridgeMixin:
             except Exception as persist_err:
                 logger.debug("Early persistence of user message failed (non-fatal): %s", persist_err)
 
-        # Build lifecycle reporting (best-effort; non-blocking).
+        # Build lifecycle reporting (non-blocking; required-hook failures are
+        # surfaced through the tracked task's done callback).
         if emit_execution_started is not None:
             try:
                 _t = asyncio.create_task(
@@ -569,13 +633,10 @@ class WorkflowBridgeMixin:
                         chat_id=chat_id,
                         user_id=user_id,
                         workflow_name=workflow_name,
+                        workflow_run_id=workflow_run_id,
                     )
                 )
-                _t.add_done_callback(
-                    lambda t: logger.debug("EXECUTION_STARTED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
-                    if not t.cancelled() and t.exception() is not None
-                    else None
-                )
+                self._track_lifecycle_task(_t, label="EXECUTION_STARTED_EMIT_FAILED", chat_id=chat_id)
             except Exception as _ev_exc:
                 logger.debug("EXECUTION_STARTED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
 
@@ -606,9 +667,13 @@ class WorkflowBridgeMixin:
 
         if emit_execution_completed is not None and run_status_value == "completed":
             # Thread the canonical persisted final context snapshot through the
-            # existing lifecycle call so completion hooks can see terminal tool
-            # state. This is the same session-context authority runs are seeded
-            # from; hooks that don't accept context ignore the extra kwarg.
+            # existing lifecycle call so completion hooks can read the terminal
+            # run receipt. This is the same session-context authority runs are
+            # seeded from; hooks that don't accept context ignore the extra
+            # kwarg. The immutable workflow_run_id binds the claim: a receipt
+            # persisted by a different run can never complete this one, even
+            # in the same chat. A fetch failure yields no context — the
+            # completion gate then claims nothing (fail closed).
             final_context: dict[str, Any] | None = None
             try:
                 pm = self._get_or_create_persistence_manager()
@@ -630,14 +695,11 @@ class WorkflowBridgeMixin:
                         chat_id=chat_id,
                         user_id=user_id,
                         workflow_name=workflow_name,
+                        workflow_run_id=workflow_run_id,
                         context_variables=final_context,
                     )
                 )
-                _t.add_done_callback(
-                    lambda t: logger.debug("EXECUTION_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
-                    if not t.cancelled() and t.exception() is not None
-                    else None
-                )
+                self._track_lifecycle_task(_t, label="EXECUTION_COMPLETED_EMIT_FAILED", chat_id=chat_id)
             except Exception as _ev_exc:
                 logger.debug("EXECUTION_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
 

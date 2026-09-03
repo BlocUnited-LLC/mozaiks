@@ -274,7 +274,19 @@ async def get_build_artifacts(
     return {"previewUrl": preview_url, "exportDownloadUrl": export_url}
 
 
-def _idempotency_key(*, app_id: str, build_id: str, event_type: str) -> str:
+def _idempotency_key(
+    *, app_id: str, build_id: str, event_type: str, workflow_run_id: str | None = None
+) -> str:
+    """Outbox idempotency identity for one lifecycle event.
+
+    When the immutable workflow-run identity is available it is part of the
+    key: retrying the same run's completion stays one effective event while
+    two distinct runs in the same chat/build scope remain distinct events.
+    Chat identity is never the key.
+    """
+    run_segment = str(workflow_run_id or "").strip()
+    if run_segment:
+        return f"build:{app_id}:{build_id}:{run_segment}:{event_type}"
     return f"build:{app_id}:{build_id}:{event_type}"
 
 
@@ -694,6 +706,7 @@ async def emit_build_started(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    workflow_run_id: str | None = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -715,6 +728,8 @@ async def emit_build_started(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    if workflow_run_id:
+        payload["workflowRunId"] = str(workflow_run_id)
     outbox_event_id = await upsert_outbox_event(
         app_id=context["app_id"],
         build_id=context["build_id"],
@@ -726,6 +741,7 @@ async def emit_build_started(
             app_id=context["app_id"],
             build_id=context["build_id"],
             event_type="build.started",
+            workflow_run_id=workflow_run_id,
         ),
         payload=payload,
     )
@@ -751,6 +767,7 @@ async def emit_build_completed(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    workflow_run_id: str | None = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -772,6 +789,8 @@ async def emit_build_completed(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    if workflow_run_id:
+        payload["workflowRunId"] = str(workflow_run_id)
     payload["artifacts"] = await get_build_artifacts(
         app_id=context["app_id"],
         build_id=context["build_id"],
@@ -789,6 +808,7 @@ async def emit_build_completed(
             app_id=context["app_id"],
             build_id=context["build_id"],
             event_type="build.completed",
+            workflow_run_id=workflow_run_id,
         ),
         payload=payload,
     )
@@ -828,6 +848,7 @@ async def emit_build_failed(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    workflow_run_id: str | None = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -848,6 +869,8 @@ async def emit_build_failed(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    if workflow_run_id:
+        payload["workflowRunId"] = str(workflow_run_id)
     payload["error"] = _normalize_text(error)
     outbox_event_id = await upsert_outbox_event(
         app_id=context["app_id"],
@@ -860,6 +883,7 @@ async def emit_build_failed(
             app_id=context["app_id"],
             build_id=context["build_id"],
             event_type="build.failed",
+            workflow_run_id=workflow_run_id,
         ),
         payload=payload,
     )

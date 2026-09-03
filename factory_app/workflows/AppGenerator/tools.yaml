@@ -291,18 +291,21 @@ lifecycle_tools:
     agent: null
     file: tools/platform/build_lifecycle.py
     function: emit_build_started
+    policy: required
     description: Notify platform build tracking when workflow run starts.
     tool_type: Agent_Tool
   - trigger: on_complete
     agent: null
     file: tools/platform/build_lifecycle.py
     function: emit_build_completed
+    policy: required
     description: Notify platform build tracking when workflow run completes.
     tool_type: Agent_Tool
   - trigger: on_complete
     agent: null
     file: tools/platform/module_pattern_recorder.py
     function: record_module_patterns
+    policy: best_effort
     description: >
       Extract generated module IDs from the assembled bundle and POST them to the
       hosted build_intelligence module so pairwise cooccurrence patterns are scored.
@@ -312,6 +315,7 @@ lifecycle_tools:
     agent: null
     file: tools/platform/domain_tags_recorder.py
     function: record_domain_tags
+    policy: best_effort
     description: >
       Derive domain tags from selected capability_packs and POST them to
       build_intelligence so gate_failure and refinement_hotspot patterns are
@@ -322,6 +326,7 @@ lifecycle_tools:
     agent: null
     file: tools/platform/gate_corrections_recorder.py
     function: record_gate_corrections
+    policy: best_effort
     description: >
       Post quality gate correction records to build_intelligence for any gate
       that ended in "blocked" status. Increments quality_gate_blocks on the build
@@ -332,12 +337,14 @@ lifecycle_tools:
     agent: null
     file: tools/platform/build_lifecycle.py
     function: emit_build_failed
+    policy: required
     description: Notify platform build tracking when workflow run fails.
     tool_type: Agent_Tool
   - trigger: on_fail
     agent: null
     file: tools/platform/gate_corrections_recorder.py
     function: record_gate_corrections
+    policy: best_effort
     description: >
       Post quality gate correction records to build_intelligence even when the
       workflow fails. Ensures corrections are captured for failed builds where

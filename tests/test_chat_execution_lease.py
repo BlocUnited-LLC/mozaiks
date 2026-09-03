@@ -347,6 +347,12 @@ class _FakePersistenceManager:
     async def append_run_user_message(self, **kwargs):  # noqa: ANN003
         self.run_user_messages.append(kwargs)
 
+    async def persist_context_variables(self, **kwargs):  # noqa: ANN003
+        return None
+
+    async def fetch_chat_session_extra_context(self, **kwargs):  # noqa: ANN003
+        return {}
+
 
 class _FakeAdapter:
     def __init__(self, delay: float = 0.0) -> None:

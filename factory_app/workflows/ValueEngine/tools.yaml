@@ -44,17 +44,20 @@ lifecycle_tools:
     agent: null
     file: ../_shared/platform/build_lifecycle.py
     function: emit_build_started
+    policy: required
     description: Notify platform build tracking when workflow run starts.
     tool_type: Agent_Tool
   - trigger: on_complete
     agent: null
     file: ../_shared/platform/build_lifecycle.py
     function: emit_build_completed
+    policy: required
     description: Notify platform build tracking when workflow run completes.
     tool_type: Agent_Tool
   - trigger: on_fail
     agent: null
     file: ../_shared/platform/build_lifecycle.py
     function: emit_build_failed
+    policy: required
     description: Notify platform build tracking when workflow run fails.
     tool_type: Agent_Tool

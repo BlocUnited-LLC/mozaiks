@@ -396,7 +396,10 @@ async def test_auto_tool_failure_traversal_never_claims_completion(
     written_paths = _write_generated_app(app_dir)
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
-    context = _Context({"app_bundle_acceptance_status": "passed"})
+    run_id = "wfrun_greenfield_traversal"
+    context = _Context(
+        {"app_bundle_acceptance_status": "passed", "workflow_run_id": run_id}
+    )
 
     async def _terminal_tool(**kwargs: Any) -> dict[str, Any]:
         await generate_and_download_module._register_app_bundle_artifact_version(
@@ -422,13 +425,23 @@ async def test_auto_tool_failure_traversal_never_claims_completion(
     assert status == "error"
     assert result == {"status": "error", "message": "tool_execution_failed"}
 
-    # The registration boundary recorded the terminal failure marker, and no
-    # success/download/ready claim exists anywhere in workflow state.
+    # The registration boundary issued the run-bound failure receipt; markers
+    # remain UI projections and no success/ready claim exists anywhere.
+    from mozaiksai.core.artifacts.build_receipt import (
+        TERMINAL_RECEIPT_CONTEXT_KEY,
+        parse_terminal_receipt,
+    )
+
+    receipt = parse_terminal_receipt(context.data.get(TERMINAL_RECEIPT_CONTEXT_KEY))
+    assert receipt.kind == "failure"
+    assert receipt.workflow_run_id == run_id
+    assert receipt.error_code == "lineage_registration_failed"
     assert context.data.get("download_status") == "failed"
     assert context.data.get("app_download_ready") is False
     assert context.data.get("greenfield_app_context_registered") is not True
 
-    # Completion hook: typed failed outcome, never build.completed/review.
+    # Completion hook: typed failed outcome bound to this run, never
+    # build.completed/review.
     shared_completed = AsyncMock()
     failed = AsyncMock(return_value="outbox_failed")
     with (
@@ -440,11 +453,14 @@ async def test_auto_tool_failure_traversal_never_claims_completion(
             chat_id="chat_greenfield",
             user_id="user_123",
             workflow_name="AppGenerator",
+            workflow_run_id=run_id,
             context_variables=context,
         )
     assert outcome == "outbox_failed"
     shared_completed.assert_not_awaited()
     failed.assert_awaited_once()
+    assert failed.await_args.kwargs["workflow_run_id"] == run_id
+    assert failed.await_args.kwargs["build_id"] == f"build_{run_id}"
 
     # Partial state: the bundle record exists only as a non-current draft and
     # no CURRENT AppContextVersion lineage was created.

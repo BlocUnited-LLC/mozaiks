@@ -363,7 +363,8 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
     if not isinstance(lifecycle_tools, list):
         return empty_hooks
 
-    loaded: dict[str, list[Any]] = {trigger: [] for trigger in empty_hooks}
+    loaded: dict[str, list[tuple[Any, str]]] = {trigger: [] for trigger in empty_hooks}
+    seen_declarations: set[tuple[str, str, str]] = set()
 
     for entry in lifecycle_tools:
         if not isinstance(entry, dict):
@@ -382,18 +383,43 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
                 trigger, workflow_name)
             continue
 
+        # Duplicate declarations are deduplicated explicitly, never run twice.
+        declaration_key = (trigger, wf_file, function)
+        if declaration_key in seen_declarations:
+            logger.warning(
+                "LIFECYCLE_HOOKS_DUPLICATE: %s:%s trigger=%s (workflow=%s) — "
+                "duplicate declaration ignored",
+                wf_file, function, trigger, workflow_name,
+            )
+            continue
+        seen_declarations.add(declaration_key)
+
+        # Closed declarative failure policy. `required` hook failures
+        # propagate and prevent lifecycle claims; `best_effort` failures are
+        # recorded without suppressing canonical state. The default is
+        # `required` so no hook silently becomes optional.
+        policy = str(entry.get("policy") or "required").strip().lower()
+        if policy not in _LIFECYCLE_HOOK_POLICIES:
+            logger.warning(
+                "LIFECYCLE_HOOKS_INVALID_POLICY: %s:%s trigger=%s policy=%r "
+                "(workflow=%s) — entry skipped",
+                wf_file, function, trigger, policy, workflow_name,
+            )
+            continue
+
         try:
             callable_fn = _load_workflow_local_entrypoint(
                 workflow_name=workflow_name,
                 file_path=wf_file,
                 function=function,
             )
-            loaded[trigger].append(callable_fn)
+            loaded[trigger].append((callable_fn, policy))
             logger.info(
-                "LIFECYCLE_HOOKS_LOADED: %s:%s trigger=%s (workflow=%s)",
+                "LIFECYCLE_HOOKS_LOADED: %s:%s trigger=%s policy=%s (workflow=%s)",
                 wf_file,
                 function,
                 trigger,
+                policy,
                 workflow_name,
             )
         except Exception as exc:
@@ -407,39 +433,57 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
 
     result = dict(empty_hooks)
     for trigger, hooks in loaded.items():
-        if len(hooks) == 1:
-            result[trigger] = hooks[0]
-        elif hooks:
+        if hooks:
             result[trigger] = _compose_lifecycle_hooks(hooks, trigger, workflow_name)
 
     return result
 
 
-def _compose_lifecycle_hooks(hooks: list[Any], trigger: str, workflow_name: str) -> Any:
+_LIFECYCLE_HOOK_POLICIES = frozenset({"required", "best_effort"})
+
+
+def _isolated_hook_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Shallow-copy hook kwargs so sibling hooks cannot mutate each other's input."""
+    isolated = dict(kwargs)
+    context = isolated.get("context_variables")
+    if isinstance(context, dict):
+        isolated["context_variables"] = dict(context)
+    return isolated
+
+
+def _compose_lifecycle_hooks(
+    hooks: list[tuple[Any, str]], trigger: str, workflow_name: str
+) -> Any:
     """Invoke every declared hook for a trigger in declaration order.
 
     A workflow may declare several lifecycle_tools for the same run-level
-    trigger; each must run. One hook's failure is isolated so it cannot
-    suppress the others (a telemetry recorder must not block a build
-    lifecycle claim). Returns the first non-None hook result.
+    trigger; each runs in declaration order with isolated kwargs. A
+    ``required`` hook failure propagates immediately — remaining hooks do not
+    run and no downstream state may treat the trigger as satisfied. A
+    ``best_effort`` hook failure is logged and never suppresses canonical
+    state. Returns the first non-None hook result.
     """
 
     async def _composed(*args: Any, **kwargs: Any) -> Any:
         first_result: Any = None
-        for hook in hooks:
+        for hook, policy in hooks:
+            hook_name = getattr(hook, "__name__", repr(hook))
             try:
-                hook_result = hook(*args, **kwargs)
+                hook_result = hook(*args, **_isolated_hook_kwargs(kwargs))
                 if inspect.isawaitable(hook_result):
                     hook_result = await hook_result
                 if first_result is None:
                     first_result = hook_result
             except Exception as exc:
+                if policy == "required":
+                    logger.error(
+                        "LIFECYCLE_HOOK_REQUIRED_FAILED: trigger=%s workflow=%s hook=%s error=%s",
+                        trigger, workflow_name, hook_name, exc,
+                    )
+                    raise
                 logger.warning(
-                    "LIFECYCLE_HOOK_ERROR: trigger=%s workflow=%s hook=%s error=%s",
-                    trigger,
-                    workflow_name,
-                    getattr(hook, "__name__", repr(hook)),
-                    exc,
+                    "LIFECYCLE_HOOK_BEST_EFFORT_FAILED: trigger=%s workflow=%s hook=%s error=%s",
+                    trigger, workflow_name, hook_name, exc,
                 )
         return first_result
 

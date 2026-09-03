@@ -82,14 +82,32 @@ This project follows a practical pre-1.0 changelog format:
   last-declared `lifecycle_tools` entry per trigger, so AppGenerator's four
   `on_complete` tools collapsed to one telemetry recorder and no production
   run ever emitted `build.completed`; hooks for the same trigger now compose
-  in declaration order with per-hook fault isolation. The bridge threads the
-  canonical persisted session context snapshot into completion hooks, and the
-  AppGenerator completion gate is tri-state on the terminal
-  `download_status` marker owned by `generate_and_download`: `ready` claims
-  build.completed, `failed` (recorded by the registration boundary before a
-  failure reaches the auto-tool handler) claims the typed build.failed, and
-  every other state — intermediate conversational turns, cancelled
-  downloads, absent context — claims nothing.
+  in declaration order. Each `lifecycle_tools` entry declares a closed
+  failure policy (`policy: required | best_effort`, default `required`): a
+  required hook failure propagates and prevents the lifecycle claim, a
+  best-effort telemetry hook failure is recorded without suppressing
+  canonical state, duplicate declarations deduplicate explicitly, and hook
+  kwargs are isolated between siblings.
+- **Build lifecycle success is bound to an immutable run identity, not
+  chat-scoped markers**: the bridge mints a `workflow_run_id` exactly once
+  per workflow run (reconnect/resume reuses the persisted identity, never
+  regenerates it) and threads it through run context, lifecycle hooks, and
+  outbox idempotency. `generate_and_download` issues one immutable,
+  digest-signed terminal receipt per run — a success receipt only after the
+  complete persistence closure (bundle acceptance, BuildRecord, required
+  AppContextVersion lineage, CURRENT promotion), or a failure receipt with a
+  finite error code on terminal build failure. The completion bridge acts
+  only on a receipt bound to the exact completing run/app/workflow and
+  cold-verifies the success lineage (BuildRecord identity/status,
+  AppContextVersion currency, bundle digest) before emitting
+  `build.completed`; any mismatch fails closed. A previous run's persisted
+  `download_status="ready"` in the same chat can no longer complete a later
+  run that produced nothing — `download_status` remains a UI progress
+  projection only. Outbox idempotency keys now include the run identity, so
+  retried completions of one run stay one effective event while distinct
+  runs in one chat stay distinct. The receipt references the temporary
+  pre-5D BuildRecord publication authority, which ADR 0007 Slice 5D will
+  later replace.
 - **At most one CURRENT BuildRecord per (app_id, build_family, build_key) is
   now storage-enforced**: a partial unique index on CURRENT records
   (verified through the canonical index contract, mismatches fail closed)

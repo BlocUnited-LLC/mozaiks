@@ -623,6 +623,11 @@ class LifecycleToolSpec(DeclarativeModel):
     function: str
     description: str | None = None
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"] = "Agent_Tool"
+    # Closed failure policy for run-level lifecycle hooks: a `required` hook's
+    # failure propagates and prevents lifecycle claims; a `best_effort` hook's
+    # failure is recorded without suppressing canonical state. The default is
+    # required so no hook silently becomes optional.
+    policy: Literal["required", "best_effort"] = "required"
     ui: ToolUIConfig | None = None
     ui_contract: UIToolContractSpec | None = None
 

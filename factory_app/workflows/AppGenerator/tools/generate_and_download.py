@@ -602,6 +602,51 @@ async def _register_greenfield_app_context_for_bundle(
     return registered
 
 
+def _terminal_run_identity(context_variables: Any | None) -> tuple[str, str]:
+    """Resolve the immutable (workflow_run_id, build_id) pair for receipts.
+
+    The workflow_run_id is minted by the bridge at run launch and threaded
+    through the persisted run context. The build identity is the journey's
+    build_id when one exists, otherwise it is derived from the run identity —
+    never from the chat, so two runs in one chat always carry distinct
+    terminal identities.
+    """
+    workflow_run_id = str(_context_get(context_variables, "workflow_run_id") or "").strip()
+    build_id = str(_context_get(context_variables, "build_id") or "").strip()
+    if not build_id and workflow_run_id:
+        build_id = f"build_{workflow_run_id}"
+    return workflow_run_id, build_id
+
+
+def _write_failure_receipt(
+    *,
+    context_variables: Any | None,
+    app_id: str,
+    workflow_name: str,
+    error_code: str,
+) -> None:
+    from mozaiksai.core.artifacts.build_receipt import (
+        TERMINAL_RECEIPT_CONTEXT_KEY,
+        issue_failure_receipt,
+    )
+
+    workflow_run_id, build_id = _terminal_run_identity(context_variables)
+    if not workflow_run_id or not build_id:
+        # Without an immutable run identity no receipt can bind the failure;
+        # the completion hook then claims nothing for this run (fail closed).
+        return
+    receipt = issue_failure_receipt(
+        app_id=str(app_id),
+        workflow_name=str(workflow_name),
+        workflow_run_id=workflow_run_id,
+        build_id=build_id,
+        error_code=error_code,  # type: ignore[arg-type]
+    )
+    _context_set(
+        context_variables, TERMINAL_RECEIPT_CONTEXT_KEY, receipt.model_dump(mode="json")
+    )
+
+
 async def _register_app_bundle_artifact_version(
     *,
     app_id: str,
@@ -616,10 +661,12 @@ async def _register_app_bundle_artifact_version(
 ):
     """Register the bundle's BuildRecord and required lineage.
 
-    Owns the terminal failure marker: any registration failure records
-    ``download_status="failed"`` before re-raising so the completion hook
-    reads it from the persisted session context and emits the typed
-    build-failed outcome instead of claiming completion.
+    Owns the terminal receipt boundary: success writes the run-bound success
+    receipt only after the complete persistence closure inside the steps
+    function; any registration failure writes the run-bound failure receipt
+    before re-raising, so the completion hook emits the typed build-failed
+    outcome for exactly this run instead of claiming completion. The
+    ``download_status`` markers remain UI projections only.
     """
     try:
         return await _register_app_bundle_artifact_version_steps(
@@ -634,6 +681,12 @@ async def _register_app_bundle_artifact_version(
             context_variables=context_variables,
         )
     except Exception:
+        _write_failure_receipt(
+            context_variables=context_variables,
+            app_id=str(app_id),
+            workflow_name=str(workflow_name),
+            error_code="lineage_registration_failed",
+        )
         _context_set(context_variables, "download_status", "failed")
         _context_set(context_variables, "app_download_ready", False)
         raise
@@ -816,7 +869,6 @@ async def _register_app_bundle_artifact_version_steps(
         chat_id=chat_id,
         context_variables=context_variables,
     )
-    del registered_context
     if promote_after_lineage:
         accepted = await artifact_store.accept_build_record(
             app_id=str(app_id),
@@ -827,6 +879,43 @@ async def _register_app_bundle_artifact_version_steps(
                 "app_bundle promotion failed: record vanished before acceptance"
             )
         artifact_version = accepted
+
+    # The complete persistence closure succeeded: bundle accepted, BuildRecord
+    # persisted, required AppContextVersion lineage registered, greenfield
+    # record promoted to CURRENT. Issue the immutable run-bound success
+    # receipt — the only artifact the completion bridge may act on.
+    from mozaiksai.core.artifacts.build_receipt import (
+        TERMINAL_RECEIPT_CONTEXT_KEY,
+        issue_success_receipt,
+    )
+
+    workflow_run_id, terminal_build_id = _terminal_run_identity(context_variables)
+    if not workflow_run_id or not terminal_build_id:
+        # Launched outside the bridge (no minted run identity): the build
+        # artifacts persist normally, but no receipt is issued, so the bridge
+        # can never claim lifecycle completion for an unidentified run.
+        get_workflow_logger(workflow_name=workflow_name, app_id=str(app_id)).warning(
+            "No workflow_run_id in run context; terminal success receipt skipped — "
+            "bridge lifecycle completion will not claim this build"
+        )
+        return artifact_version
+    record_lifecycle = str(
+        getattr(artifact_version.lifecycle_status, "value", artifact_version.lifecycle_status)
+    )
+    receipt = issue_success_receipt(
+        app_id=str(app_id),
+        workflow_name=str(workflow_name),
+        workflow_run_id=workflow_run_id,
+        build_id=terminal_build_id,
+        build_record_id=str(artifact_version.id),
+        build_record_lifecycle=record_lifecycle,  # type: ignore[arg-type]
+        app_context_version_id=str(registered_context.context_version.context_version_id),
+        app_context_record_id=str(registered_context.artifact_version.id),
+        bundle_digest=sha,
+    )
+    _context_set(
+        context_variables, TERMINAL_RECEIPT_CONTEXT_KEY, receipt.model_dump(mode="json")
+    )
     return artifact_version
 
 
