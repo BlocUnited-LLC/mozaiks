@@ -39,6 +39,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger("simple_transport.workflow")
 
 
+class WorkflowRunFailure(Exception):
+    """Terminal ordinary failure of an identified workflow run.
+
+    Raised by the launch path after the immutable server-owned
+    ``workflow_run_id`` has been established, carrying the identities the
+    outer failure handler needs to dispatch the on_fail lifecycle exactly
+    once with the exact run identity — never with chat identity as a
+    substitute. ``build_id`` carries the canonical build identity only when
+    one is genuinely known in scope; it is never synthesized here.
+    """
+
+    def __init__(
+        self,
+        *,
+        original: BaseException,
+        app_id: str,
+        workflow_name: str,
+        chat_id: str,
+        workflow_run_id: str,
+        build_id: str | None = None,
+    ) -> None:
+        super().__init__(f"workflow run failed: {original.__class__.__name__}")
+        self.original = original
+        self.app_id = app_id
+        self.workflow_name = workflow_name
+        self.chat_id = chat_id
+        self.workflow_run_id = workflow_run_id
+        self.build_id = build_id
+
+
 def _persist_context_kwargs(
     *,
     chat_id: str,
@@ -392,14 +422,25 @@ class WorkflowBridgeMixin:
                 )
                 return {"status": "error", "chat_id": chat_id, "message": "Insufficient token balance"}
 
-            logger.error("User input handling failed for chat %s: %s", chat_id, e, exc_info=True)
+            # An identified run failure carries the immutable server-owned
+            # workflow_run_id (and canonical build_id when genuinely known);
+            # failures raised before run identity existed carry neither, and
+            # on_fail is then dispatched only with the identities genuinely
+            # known — never with chat identity substituted for run identity.
+            run_failure = e if isinstance(e, WorkflowRunFailure) else None
+            original_failure = run_failure.original if run_failure is not None else e
+            logger.error(
+                "User input handling failed for chat %s: %s",
+                chat_id, original_failure, exc_info=original_failure,
+            )
             if starting_new_workflow and _emit_execution_failed is not None:
-                # Awaited on_fail lifecycle dispatch. The original workflow
-                # failure remains the reported failure either way; if the
-                # required failure-persistence hook itself fails, surface it
-                # loudly with the original failure class as diagnostic
-                # context (never raw contents) and continue to the existing
-                # typed error return — no recursive on_fail dispatch.
+                # Awaited on_fail lifecycle dispatch — exactly once per
+                # terminal run failure. The original workflow failure remains
+                # the reported failure either way; if the required
+                # failure-persistence hook itself fails, surface it loudly
+                # with the original failure class as diagnostic context
+                # (never raw contents) and continue to the existing typed
+                # error return — no recursive on_fail dispatch.
                 try:
                     await _emit_execution_failed(
                         app_id=app_id,
@@ -407,6 +448,12 @@ class WorkflowBridgeMixin:
                         chat_id=chat_id,
                         user_id=user_id,
                         workflow_name=workflow_name,
+                        workflow_run_id=(
+                            run_failure.workflow_run_id if run_failure is not None else None
+                        ),
+                        build_id=(
+                            run_failure.build_id if run_failure is not None else None
+                        ),
                         message="workflow_execution_failed",
                         details=None,
                     )
@@ -414,9 +461,11 @@ class WorkflowBridgeMixin:
                     raise
                 except Exception as _ev_exc:
                     logger.error(
-                        "LIFECYCLE_FAILURE_PERSISTENCE_FAILED chat=%s workflow=%s: %s "
+                        "LIFECYCLE_FAILURE_PERSISTENCE_FAILED chat=%s workflow=%s run=%s: %s "
                         "(original failure: %s)",
-                        chat_id, workflow_name, _ev_exc, e.__class__.__name__,
+                        chat_id, workflow_name,
+                        run_failure.workflow_run_id if run_failure is not None else "<pre-identity>",
+                        _ev_exc, original_failure.__class__.__name__,
                     )
             # Clear stuck REVISING state so the next refinement request can route correctly.
             if app_id and user_id:
@@ -547,9 +596,6 @@ class WorkflowBridgeMixin:
         (app_id, chat_id); every durable session/WAL mutation of the
         start/resume path happens inside this method.
         """
-        from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
-        from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
-
         # Immutable run identity — minted once per fresh run, reconnected on
         # resume. Terminal receipts and lifecycle claims bind to it; failing
         # to establish it fails the launch closed rather than running a build
@@ -560,6 +606,55 @@ class WorkflowBridgeMixin:
             workflow_name=workflow_name,
             is_resume_request=is_resume_request,
         )
+
+        # From this point the run has its immutable identity: any ordinary
+        # terminal failure must carry it to the outer failure handler so
+        # on_fail is dispatched with the exact run identity, never with chat
+        # identity as a substitute. Cancellation, typed token denial, and
+        # already-typed run failures pass through unchanged.
+        try:
+            return await self._execute_identified_run(
+                chat_id=chat_id,
+                user_id=user_id,
+                workflow_name=workflow_name,
+                message=message,
+                app_id=app_id,
+                initial_agent_name_override=initial_agent_name_override,
+                is_resume_request=is_resume_request,
+                emit_execution_started=emit_execution_started,
+                emit_execution_completed=emit_execution_completed,
+                workflow_run_id=workflow_run_id,
+            )
+        except (asyncio.CancelledError, WorkflowRunFailure):
+            raise
+        except Exception as exc:
+            if exc.__class__.__name__ == "TokenUsageDenied":
+                raise
+            raise WorkflowRunFailure(
+                original=exc,
+                app_id=app_id,
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                workflow_run_id=workflow_run_id,
+            ) from exc
+
+    async def _execute_identified_run(
+        self,
+        *,
+        chat_id: str,
+        user_id: str | None,
+        workflow_name: str,
+        message: str | None,
+        app_id: str,
+        initial_agent_name_override: str | None,
+        is_resume_request: bool,
+        emit_execution_started: Any,
+        emit_execution_completed: Any,
+        workflow_run_id: str,
+    ) -> dict[str, Any]:
+        """Execute a workflow run whose immutable identity is established."""
+        from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
+        from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
 
         if message or is_resume_request:
             try:

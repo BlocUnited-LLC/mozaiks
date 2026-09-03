@@ -139,6 +139,19 @@ This project follows a practical pre-1.0 changelog format:
   failure. Best-effort hook failures remain isolated by the declarative
   policy and never independently change outcomes. The superseded
   fire-and-forget lifecycle task tracker was deleted.
+- **Terminal run failures carry the exact immutable run identity**: an
+  ordinary failure of an identified workflow run now propagates as a typed
+  `WorkflowRunFailure` carrying the server-owned `workflow_run_id`, and the
+  on_fail lifecycle dispatch (exactly once per terminal failure) passes that
+  identity through the failure event payload and idempotency key — two
+  distinct failed runs in one chat can no longer share `build.failed` event
+  or idempotency authority, while a retry of the same run reuses the
+  persisted identity and stays one effective event. `build.failed` is now
+  emitted only when a canonical build identity genuinely exists (explicit
+  build id or one the session carries); a run failing before any build
+  existed no longer fabricates a build-specific failure from chat identity —
+  the typed workflow failure and the run-identified on_fail dispatch remain
+  the truthful record.
 - **At most one CURRENT BuildRecord per (app_id, build_family, build_key) is
   now storage-enforced**: a partial unique index on CURRENT records
   (verified through the canonical index contract, mismatches fail closed)

@@ -658,3 +658,288 @@ async def test_on_fail_hook_success_still_reports_original_failure(monkeypatch) 
     )
     assert result["status"] == "error"
     assert len(on_fail_calls) == 1
+
+
+class _StoringPersistenceManager(_FakePersistenceManager):
+    """Fake PM that actually persists server-owned session fields."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.session: dict[str, object] = {}
+
+    async def persist_server_owned_session_fields(self, **kwargs):  # noqa: ANN003
+        self.session.update(kwargs.get("fields") or {})
+
+    async def fetch_chat_session_extra_context(self, **kwargs):  # noqa: ANN003
+        return dict(self.session)
+
+
+class _AlwaysFailingAdapter:
+    async def run(self, request):  # noqa: ANN001
+        raise RuntimeError("workflow blew up")
+
+    async def resume(self, request):  # noqa: ANN001
+        raise RuntimeError("workflow blew up")
+
+
+@pytest.mark.asyncio
+async def test_two_failed_runs_in_one_chat_have_distinct_failure_identity(monkeypatch) -> None:
+    """Codex 1's failure-identity attack, driven through the real production
+    outer error path.
+
+    Run A and Run B are distinct workflow runs in the same chat, each ending
+    in a terminal ordinary failure. The on_fail lifecycle dispatch must carry
+    each run's exact server-owned immutable workflow_run_id — previously both
+    dispatches received only execution_id=chat_id / chat_id with no
+    workflow_run_id, so two distinct failed runs shared build.failed event
+    and idempotency authority.
+    """
+    persistence_manager = _StoringPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+
+    on_fail_calls: list[dict] = []
+
+    async def _on_fail(**kwargs):  # noqa: ANN003
+        on_fail_calls.append(dict(kwargs))
+        return "outbox_failed"
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(
+        _bridge_mod,
+        "get_workflow_lifecycle_hooks",
+        lambda _workflow_name: {"on_fail": _on_fail},
+    )
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _AlwaysFailingAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+
+    # Run A: fresh run, terminal ordinary failure.
+    result_a = await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="TestFlow",
+        message="run A", app_id="app-1",
+    )
+    run_a_id = persistence_manager.session.get("workflow_run_id")
+
+    # Run B: fresh run, same chat/workflow, terminal ordinary failure.
+    result_b = await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="TestFlow",
+        message="run B", app_id="app-1",
+    )
+    run_b_id = persistence_manager.session.get("workflow_run_id")
+
+    assert result_a["status"] == "error"
+    assert result_b["status"] == "error"
+    assert len(on_fail_calls) == 2, "exactly one on_fail dispatch per terminal failure"
+    assert run_a_id and run_b_id and run_a_id != run_b_id
+
+    dispatched_run_ids = [call.get("workflow_run_id") for call in on_fail_calls]
+    assert dispatched_run_ids == [run_a_id, run_b_id], (
+        "on_fail must carry each run's exact immutable workflow_run_id; got "
+        f"{dispatched_run_ids} (chat_id={on_fail_calls[0].get('chat_id')!r}, "
+        f"execution_id={on_fail_calls[0].get('execution_id')!r})"
+    )
+    # The failure identity must never be substituted with chat identity.
+    for call in on_fail_calls:
+        assert call.get("workflow_run_id") != call.get("chat_id")
+
+
+def _failing_env(monkeypatch, transport, on_fail_calls, hooks=None):
+    async def _on_fail(**kwargs):  # noqa: ANN003
+        on_fail_calls.append(dict(kwargs))
+        return "outbox_failed"
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(
+        _bridge_mod,
+        "get_workflow_lifecycle_hooks",
+        lambda _workflow_name: hooks if hooks is not None else {"on_fail": _on_fail},
+    )
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _AlwaysFailingAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+    return _on_fail
+
+
+@pytest.mark.asyncio
+async def test_same_run_failure_retry_shares_one_failure_identity(monkeypatch) -> None:
+    """Attack 2/5: a resume/retry of the same failed run reuses the persisted
+    immutable run identity — the retried failure dispatch carries the SAME
+    workflow_run_id, so retries collapse to one effective failure authority
+    while distinct runs never do."""
+    persistence_manager = _StoringPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    on_fail_calls: list[dict] = []
+    _failing_env(monkeypatch, transport, on_fail_calls)
+
+    await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="TestFlow",
+        message="run A", app_id="app-1",
+    )
+    run_id = persistence_manager.session.get("workflow_run_id")
+
+    # Reconnect/resume retry of the same run (no new identity minted).
+    await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="TestFlow",
+        message=None, app_id="app-1", initial_agent_name_override="resume-agent",
+    )
+
+    assert persistence_manager.session.get("workflow_run_id") == run_id
+    assert [c.get("workflow_run_id") for c in on_fail_calls] == [run_id, run_id]
+
+
+@pytest.mark.asyncio
+async def test_distinct_workflows_and_apps_have_distinct_failure_identity(monkeypatch) -> None:
+    """Attacks 3/4: two workflows in one chat, and two apps reusing a
+    chat-like ID, each carry their own run identity and app scope."""
+    persistence_manager = _StoringPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    on_fail_calls: list[dict] = []
+    _failing_env(monkeypatch, transport, on_fail_calls)
+
+    await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="FlowOne",
+        message="x", app_id="app-1",
+    )
+    await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="FlowTwo",
+        message="x", app_id="app-1",
+    )
+    await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="FlowOne",
+        message="x", app_id="app-2",
+    )
+
+    run_ids = [c.get("workflow_run_id") for c in on_fail_calls]
+    assert len(run_ids) == 3 and len(set(run_ids)) == 3
+    assert [c.get("app_id") for c in on_fail_calls] == ["app-1", "app-1", "app-2"]
+    assert [c.get("workflow_name") for c in on_fail_calls] == ["FlowOne", "FlowTwo", "FlowOne"]
+
+
+@pytest.mark.asyncio
+async def test_failure_before_any_build_emits_no_build_failed(monkeypatch) -> None:
+    """Attacks 6/16: a run failing before any canonical build identity exists
+    must not fabricate a build.failed event — the real shared emitter skips
+    emission; the typed workflow failure and the run-identified on_fail
+    dispatch remain the truthful record."""
+    import importlib
+
+    shared = importlib.import_module("factory_app.workflows._shared.platform.build_lifecycle")
+
+    events: list[dict] = []
+
+    async def _session_ctx(**_kw):  # noqa: ANN003
+        return {}
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        events.append(dict(kwargs))
+        return "outbox_1"
+
+    monkeypatch.setattr(shared, "_get_chat_session_context", _session_ctx)
+    monkeypatch.setattr(shared, "upsert_outbox_event", _upsert)
+    monkeypatch.setattr(shared, "_materialize_local_app_registry_event", _upsert)
+    monkeypatch.setattr(shared, "_spawn_delivery", lambda **_kw: None)
+
+    persistence_manager = _StoringPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    _failing_env(
+        monkeypatch, transport, [], hooks={"on_fail": shared.emit_build_failed}
+    )
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="AppGenerator",
+        message="x", app_id="app-1",
+    )
+    assert result["status"] == "error"
+    assert events == [], "no build.failed may be fabricated for a build that never existed"
+
+
+@pytest.mark.asyncio
+async def test_failure_after_build_exists_binds_run_and_build(monkeypatch) -> None:
+    """Attacks 7/17: when the session genuinely carries a canonical build
+    identity, build.failed binds to run + build and the idempotency key
+    includes both."""
+    import importlib
+
+    shared = importlib.import_module("factory_app.workflows._shared.platform.build_lifecycle")
+
+    events: list[dict] = []
+
+    async def _session_ctx(**_kw):  # noqa: ANN003
+        return {"build_registry_id": "br-777", "journey_instance_id": "build-777"}
+
+    async def _upsert(**kwargs):  # noqa: ANN003
+        events.append(dict(kwargs))
+        return "outbox_1"
+
+    async def _noop(**_kw):  # noqa: ANN003
+        return None
+
+    monkeypatch.setattr(shared, "_get_chat_session_context", _session_ctx)
+    monkeypatch.setattr(shared, "upsert_outbox_event", _upsert)
+    monkeypatch.setattr(shared, "_materialize_local_app_registry_event", _noop)
+    monkeypatch.setattr(shared, "_spawn_delivery", lambda **_kw: None)
+
+    persistence_manager = _StoringPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    _failing_env(
+        monkeypatch, transport, [], hooks={"on_fail": shared.emit_build_failed}
+    )
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="same-chat", user_id="user-1", workflow_name="AppGenerator",
+        message="x", app_id="app-1",
+    )
+    run_id = persistence_manager.session.get("workflow_run_id")
+
+    assert result["status"] == "error"
+    assert len(events) == 1
+    assert events[0]["event_type"] == "build.failed"
+    assert events[0]["build_id"] == "build-777"
+    assert run_id and run_id in events[0]["idempotency_key"]
+    assert "build-777" in events[0]["idempotency_key"]
+    assert events[0]["payload"]["workflowRunId"] == run_id
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_not_wrapped_into_run_failure(monkeypatch) -> None:
+    """Attack 13: cancellation during the identified run propagates as
+    CancelledError — it is never converted into an ordinary run failure and
+    dispatches no on_fail."""
+    import asyncio as _asyncio
+
+    persistence_manager = _StoringPersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+    on_fail_calls: list[dict] = []
+
+    class _HangingAdapter:
+        async def run(self, request):  # noqa: ANN001
+            await _asyncio.sleep(3600)
+
+        async def resume(self, request):  # noqa: ANN001
+            await _asyncio.sleep(3600)
+
+    async def _on_fail(**kwargs):  # noqa: ANN003
+        on_fail_calls.append(kwargs)
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(
+        _bridge_mod, "get_workflow_lifecycle_hooks", lambda _w: {"on_fail": _on_fail}
+    )
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _HangingAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+
+    task = _asyncio.create_task(
+        transport.handle_user_input_from_api(
+            chat_id="same-chat", user_id="user-1", workflow_name="TestFlow",
+            message="x", app_id="app-1",
+        )
+    )
+    await _asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(_asyncio.CancelledError):
+        await task
+    assert on_fail_calls == []

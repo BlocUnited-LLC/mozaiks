@@ -868,6 +868,32 @@ async def emit_build_failed(
     ):
         return None
 
+    # build.failed is a build-specific terminal claim: it requires a
+    # canonical build identity — an explicit build_id from the caller
+    # (terminal receipts, journeys) or one the session genuinely carries.
+    # A run that failed before any build existed must not fabricate a
+    # build identity from the chat; the typed workflow failure and the
+    # run-identified on_fail dispatch remain the truthful record.
+    session_ctx = context.get("session_context") or {}
+    has_canonical_build = (
+        bool(_normalize_text(build_id))
+        or context.get("build_registry_id_source") in ("explicit", "session")
+        or bool(_normalize_text(context.get("journey_key")))
+        or any(
+            _normalize_text(session_ctx.get(key))
+            for key in ("build_registry_id", "journey_instance_id", "build_id")
+        )
+    )
+    if not has_canonical_build:
+        logger.info(
+            "BUILD_FAILED_SKIPPED_NO_BUILD: workflow=%s run=%s — terminal "
+            "failure preceded any canonical build identity; no build.failed "
+            "event fabricated",
+            workflow_name,
+            _normalize_text(workflow_run_id) or "<unidentified>",
+        )
+        return None
+
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
     if workflow_run_id:
         payload["workflowRunId"] = str(workflow_run_id)
