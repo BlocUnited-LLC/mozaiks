@@ -58,7 +58,15 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # page family. Plan identity also includes #475's consulted assignment-contract
 # closure. The honest four-family closure is proven on the
 # selection-consistent fixture in tests/test_app_family_materialization_b2a.py.
-_GOLDEN_PLAN_DIGEST = "db7ccc1f4d30a3d2621682afb54f8307830eb493beea1e8fb5ffaf2198d46a83"
+# Re-pinned once for the source-locality correction: app_secret_references no
+# longer declares auth as a semantic input (security/secrets.yaml consumes no
+# auth fact), which changes the registry row digest and therefore every plan
+# identity. Proven before re-pinning: the removed source was unconsumed
+# (roles-only auth mutation left secrets bytes identical), all four rendered
+# outputs are byte-identical, selective reuse improved (the secret unit now
+# survives auth mutations), and no required source was dropped (loader and
+# mutation suites green).
+_GOLDEN_PLAN_DIGEST = "c0ef25d66c43710c7a6a967fcfb4fecb8232231050d4e8eb0fda054381389a05"
 
 
 def _registry():

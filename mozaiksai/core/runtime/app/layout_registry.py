@@ -1141,9 +1141,14 @@ def _semantic_inputs_for_family(kind: ArtifactKind) -> tuple[str, ...]:
             "application",
             "workflow",
         ),
+        # security/secrets.yaml emits application integration-selection
+        # evidence plus integration configuration requirements whose value
+        # kind is secret. AuthPayload carries no typed secret/configuration
+        # requirement today, so auth is NOT a source of this family;
+        # provider-neutral auth secret declaration is a separate typed
+        # prerequisite.
         ArtifactKind.APP_SECRET_REFERENCES: (
             "application",
-            "auth",
             "integration",
         ),
     }.get(kind, ())

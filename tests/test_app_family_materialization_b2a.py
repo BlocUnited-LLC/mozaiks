@@ -114,6 +114,7 @@ def _extended_fixture(
     home_title: str = "Home",
     default_route: str = "/home",
     auth_selected: bool = True,
+    auth_roles: tuple[str, ...] | None = None,
     integrations_selected: bool = True,
     workflows_selected: bool = True,
     drop_workflow_payload: bool = False,
@@ -202,7 +203,7 @@ def _extended_fixture(
             scope=_SCOPE,
             auth_required=auth.auth_required,
             strategy=auth.strategy,
-            roles=auth.roles,
+            roles=auth.roles if auth_roles is None else auth_roles,
         )
     if integration_secret_name != "EMAIL_API_KEY":
         integration = payloads["integration"]
@@ -1541,3 +1542,267 @@ def test_payload_mutation_after_projection_cannot_change_bytes() -> None:
     before = render_app_config_unit(unit=unit, render_input=render_input)
     payload_by_node.clear()
     assert render_app_config_unit(unit=unit, render_input=render_input) == before
+
+
+# ---------------------------------------------------------------------------
+# Source locality: a family's PlanUnit footprint contains exactly the payload
+# kinds whose facts influence its existence, path, bytes, or validator
+# obligation, and the family render input must bind exactly that footprint —
+# not a subset, not a superset. (Codex 2 attacks preserved below.)
+# ---------------------------------------------------------------------------
+
+_EXPECTED_FAMILY_SOURCE_KINDS = {
+    "app_manifest": {"application", "auth"},
+    "app_ui_route_manifest": {"application", "page"},
+    "app_integrations_config": {"application", "integration"},
+    "app_secret_references": {"application", "integration"},
+}
+
+
+def _unit_for(plan, family):
+    return next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER and u.family_kind == family
+    )
+
+
+def test_auth_roles_mutation_leaves_secret_unit_and_bytes_unchanged() -> None:
+    """Codex 2 Attack A, preserved: security/secrets.yaml consumes no auth
+    fact, so AuthPayload is not a source of app_secret_references. A
+    roles-only auth mutation leaves the secret unit's identity, footprint,
+    reuse, and bytes unchanged."""
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    unit = _unit_for(plan, "app_secret_references")
+    assert {s.node_id.split(".")[1] for s in unit.sources} == {
+        "application",
+        "integration",
+    }
+    mutated_graph, mutated = _extended_fixture(
+        auth_roles=("admin", "viewer", "editor")
+    )
+    mutated_plan = _plan(mutated_graph, mutated, with_configs=False)
+    mutated_unit = _unit_for(mutated_plan, "app_secret_references")
+    assert mutated_unit.unit_digest == unit.unit_digest
+    assert mutated_unit.sources == unit.sources
+    from mozaiksai.core.semantics.compilation_plan import plan_regeneration_closure
+
+    closure = plan_regeneration_closure(plan, mutated_plan)
+    assert unit.unit_id in closure.reusable
+    # app.json DOES consume auth (authRequired): its unit is conservatively
+    # invalidated at payload-level granularity even though roles do not enter
+    # its bytes.
+    manifest_unit = _unit_for(plan, "app_manifest")
+    mutated_manifest = _unit_for(mutated_plan, "app_manifest")
+    assert mutated_manifest.unit_digest != manifest_unit.unit_digest
+    base = _bundle_files()
+    registry = build_app_layout_registry(())
+    changed = materialize_plan(
+        plan=mutated_plan,
+        graph=mutated_graph,
+        payloads=mutated,
+        binding=_binding(mutated_graph),
+        layout_registry=registry,
+    ).files()
+    for path in _RENDERED_PATHS:
+        assert changed[path] == base[path], path
+
+
+def test_extra_unrelated_source_in_valid_render_input_is_rejected() -> None:
+    """Codex 2 Attack B, preserved: a fully valid render input carrying every
+    expected source plus one unrelated valid payload source from the same
+    graph must be rejected — the source set is exact, never 'at least'."""
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {p.node_id: p for p in payloads}
+    unit = _unit_for(plan, "app_secret_references")
+    valid = project_app_family_render_input(
+        unit=unit, payload_by_node=payload_by_node
+    )
+    page = payload_by_node["mozaiks.page.home"]
+    document = valid.model_dump()
+    document["sources"] = list(document["sources"]) + [
+        {"node_id": page.node_id, "payload_digest": page.payload_digest}
+    ]
+    forged = type(valid).model_validate(document)
+    with pytest.raises(
+        AppConfigMaterializationError, match="does not bind exactly"
+    ):
+        render_app_config_unit(unit=unit, render_input=forged)
+
+
+@pytest.mark.parametrize(
+    ("family", "extra_node"),
+    [
+        pytest.param(
+            "app_secret_references", "mozaiks.auth.corpus", id="auth-into-secrets"
+        ),
+        pytest.param(
+            "app_manifest", "mozaiks.workflow.digest", id="workflow-into-manifest"
+        ),
+        pytest.param(
+            "app_ui_route_manifest",
+            "mozaiks.integration.email",
+            id="integration-into-routes",
+        ),
+        pytest.param(
+            "app_integrations_config",
+            "mozaiks.page.home",
+            id="page-into-integrations",
+        ),
+    ],
+)
+def test_every_family_rejects_an_unrelated_extra_source(family, extra_node) -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {p.node_id: p for p in payloads}
+    unit = _unit_for(plan, family)
+    valid = project_app_family_render_input(
+        unit=unit, payload_by_node=payload_by_node
+    )
+    extra = payload_by_node[extra_node]
+    document = valid.model_dump()
+    document["sources"] = list(document["sources"]) + [
+        {"node_id": extra.node_id, "payload_digest": extra.payload_digest}
+    ]
+    forged = type(valid).model_validate(document)
+    with pytest.raises(
+        AppConfigMaterializationError, match="does not bind exactly"
+    ):
+        render_app_config_unit(unit=unit, render_input=forged)
+
+
+def test_plan_source_added_to_a_family_is_rejected() -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {p.node_id: p for p in payloads}
+    plan_payload = next(
+        p for p in payloads if p.payload_kind is SemanticNodeKind.PLAN
+    )
+    unit = _unit_for(plan, "app_manifest")
+    valid = project_app_family_render_input(
+        unit=unit, payload_by_node=payload_by_node
+    )
+    document = valid.model_dump()
+    document["sources"] = list(document["sources"]) + [
+        {
+            "node_id": plan_payload.node_id,
+            "payload_digest": plan_payload.payload_digest,
+        }
+    ]
+    forged = type(valid).model_validate(document)
+    with pytest.raises(
+        AppConfigMaterializationError, match="does not bind exactly"
+    ):
+        render_app_config_unit(unit=unit, render_input=forged)
+
+
+def test_omitted_required_source_and_shuffled_exact_set() -> None:
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {p.node_id: p for p in payloads}
+    unit = _unit_for(plan, "app_integrations_config")
+    valid = project_app_family_render_input(
+        unit=unit, payload_by_node=payload_by_node
+    )
+    document = valid.model_dump()
+    document["sources"] = list(document["sources"])[:-1]
+    if document["sources"]:
+        trimmed = type(valid).model_validate(document)
+        with pytest.raises(
+            AppConfigMaterializationError, match="does not bind exactly"
+        ):
+            render_app_config_unit(unit=unit, render_input=trimmed)
+    # The exact expected set succeeds in canonical and shuffled input order.
+    document = valid.model_dump()
+    document["sources"] = list(reversed(document["sources"]))
+    shuffled = type(valid).model_validate(document)
+    assert render_app_config_unit(
+        unit=unit, render_input=shuffled
+    ) == render_app_config_unit(unit=unit, render_input=valid)
+
+
+def test_registry_plan_and_render_input_source_kinds_are_consistent() -> None:
+    """Permanent guard: for every renderer-ready family the registry
+    declaration, the derived PlanUnit footprint, and the projected render
+    input agree on exactly the same source kinds."""
+    registry = build_app_layout_registry(())
+    for family in registry.ordered_families():
+        expected = _EXPECTED_FAMILY_SOURCE_KINDS.get(family.kind.value)
+        if expected is None or family.path_template not in _RENDERED_PATHS:
+            continue
+        assert set(family.semantic_input_kinds) == expected, family.kind
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {p.node_id: p for p in payloads}
+    for family_kind, expected in _EXPECTED_FAMILY_SOURCE_KINDS.items():
+        unit = _unit_for(plan, family_kind)
+        derived_kinds = {
+            payload_by_node[s.node_id].payload_kind.value for s in unit.sources
+        }
+        assert derived_kinds <= expected, (family_kind, derived_kinds)
+        render_input = project_app_family_render_input(
+            unit=unit, payload_by_node=payload_by_node
+        )
+        input_kinds = {
+            payload_by_node[s.node_id].payload_kind.value
+            for s in render_input.sources
+        }
+        assert input_kinds == derived_kinds, family_kind
+
+
+def test_no_family_consumes_graph_edge_identities() -> None:
+    """Edge audit: none of the four family inputs consume edge facts. Adding
+    an unrelated edge changes graph identity but leaves every unit's
+    footprint, identity, and rendered bytes unchanged."""
+    base = _bundle_files()
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    extra_edge = SemanticEdge(
+        kind=SemanticEdgeKind.DEPENDS_ON,
+        source_node_id="mozaiks.module.reports",
+        target_node_id="mozaiks.page.home",
+    )
+    edged_graph = build_semantic_graph_v2(
+        graph_id=graph.graph_id,
+        version=graph.version,
+        scope=_SCOPE,
+        nodes=list(graph.nodes),
+        edges=[*graph.edges, extra_edge],
+    )
+    edged_plan = _plan(edged_graph, payloads, with_configs=False)
+    for family_kind in _EXPECTED_FAMILY_SOURCE_KINDS:
+        assert (
+            _unit_for(edged_plan, family_kind).unit_digest
+            == _unit_for(plan, family_kind).unit_digest
+        ), family_kind
+    files = materialize_plan(
+        plan=edged_plan,
+        graph=edged_graph,
+        payloads=payloads,
+        binding=_binding(edged_graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+    for path in _RENDERED_PATHS:
+        assert files[path] == base[path], path
+
+
+def test_unrelated_page_and_workflow_mutations_keep_secret_unit_reusable() -> None:
+    from mozaiksai.core.semantics.compilation_plan import plan_regeneration_closure
+
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    secret_unit = _unit_for(plan, "app_secret_references")
+    for kwargs in (
+        {"home_title": "Console"},
+        {"workflow_startup_mode": WorkflowStartupMode.AGENT_DRIVEN},
+    ):
+        m_graph, m_payloads = _extended_fixture(**kwargs)
+        m_plan = _plan(m_graph, m_payloads, with_configs=False)
+        assert (
+            _unit_for(m_plan, "app_secret_references").unit_digest
+            == secret_unit.unit_digest
+        ), kwargs
+        closure = plan_regeneration_closure(plan, m_plan)
+        assert secret_unit.unit_id in closure.reusable, kwargs

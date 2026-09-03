@@ -219,14 +219,31 @@ AppFamilyRenderInput = (
 def _verify_unit_sources(
     unit: FamilyInstancePlan, render_input: AppFamilyRenderInput
 ) -> None:
-    """Every unit-pinned source must match the render input's exact digest."""
-    for source in unit.sources:
-        pinned = render_input.source_digest(source.node_id)
-        if pinned is None or pinned != source.payload_digest:
-            raise AppConfigMaterializationError(
-                f"unit {unit.unit_id!r} source {source.node_id!r} is missing or does "
-                "not match its pinned payload digest"
-            )
+    """The render input must bind exactly the unit's pinned source set.
+
+    Not a subset, not a superset, not "at least the required sources": after
+    canonical normalization, the (node_id, payload_digest) identity tuples of
+    the render input must equal the PlanUnit's source footprint exactly. A
+    missing source, an additional source, a duplicate, a stale digest, or a
+    substituted identity all fail closed — no unrelated payload can become
+    hidden provenance of a family's bytes.
+    """
+    expected = tuple(
+        sorted((s.node_id, s.payload_digest) for s in unit.sources)
+    )
+    if len({node_id for node_id, _ in expected}) != len(expected):
+        raise AppConfigMaterializationError(
+            f"unit {unit.unit_id!r} pins duplicate source node ids"
+        )
+    actual = tuple((s.node_id, s.payload_digest) for s in render_input.sources)
+    if actual != expected:
+        raise AppConfigMaterializationError(
+            f"unit {unit.unit_id!r} render input does not bind exactly the "
+            "unit's pinned source set — a source is missing, extra, "
+            "substituted, or does not match its pinned payload digest: "
+            f"expected {[n for n, _ in expected]!r}, "
+            f"got {[n for n, _ in actual]!r}"
+        )
 
 
 def _app_manifest_document(
