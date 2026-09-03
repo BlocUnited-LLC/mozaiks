@@ -13,6 +13,18 @@ This project follows a practical pre-1.0 changelog format:
 ## Unreleased
 
 ### Fixed
+- **A present but invalid `config/subscriptions.yaml` now fails application
+  loading instead of silently disabling entitlement enforcement**: AppLoader
+  previously caught the subscription contract's load error, logged a warning,
+  and continued with no subscription config — which wired
+  `NoOpEntitlementAdapter` and granted every `entitlement_gate`
+  unconditionally. An invalid present contract (malformed YAML, unknown
+  fields, wrong schema version, broken plan/default/product/wallet
+  references) now raises `AppLoadError` and the platform host refuses to
+  start. An absent file is unchanged: a valid non-SaaS app with no
+  enforcement configured. Both `mozaiks.subscriptions.v1` and
+  `mozaiks.subscriptions.v2` remain accepted, unchanged —
+  `load_subscriptions_config` stays the sole schema authority.
 
 - **Generated Mongo documents no longer break HTTP responses**: module action
   results are normalized at the ModuleExecutor boundary so BSON `ObjectId`
