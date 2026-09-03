@@ -1385,7 +1385,7 @@ class RefinementTriggerRouteResolver:
                 ArtifactStore,  # local import avoids circular dep
             )
             store = ArtifactStore()
-            stale = await store.get_stale_artifact_families(app_id=request.app_id)
+            stale = await store.get_stale_build_families(app_id=request.app_id)
         except Exception as exc:
             _logger.debug("STALE_ARTIFACT_LOOKUP_FAILED app=%s: %s", request.app_id, exc)
             return None

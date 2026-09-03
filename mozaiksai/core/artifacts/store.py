@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
@@ -34,9 +35,33 @@ ArtifactValidationStatus = BuildRecordValidationStatus
 
 logger = get_workflow_logger("artifact_store")
 
+_DATABASE_NAME = "mozaiksai"
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class BuildRecordCurrentConflictError(RuntimeError):
+    """A concurrent writer published a different CURRENT record for the same target.
+
+    Raised when the storage-level uniqueness guard (partial unique index on
+    CURRENT records per app_id/build_family/build_key) rejects a publication
+    because another record became CURRENT between the supersede step and the
+    publish step. The caller's record was NOT published; the concurrent
+    winner's CURRENT record stands.
+    """
+
+    def __init__(self, *, app_id: str, build_family: str, build_key: str, build_record_id: str) -> None:
+        self.app_id = app_id
+        self.build_family = build_family
+        self.build_key = build_key
+        self.build_record_id = build_record_id
+        super().__init__(
+            f"Concurrent CURRENT publication conflict for app_id={app_id!r} "
+            f"build_family={build_family!r} build_key={build_key!r}: "
+            f"record {build_record_id!r} was not published"
+        )
 
 
 class BuildRecordStore:
@@ -52,61 +77,170 @@ class BuildRecordStore:
         async with self._init_lock:
             if self.client is not None:
                 return
-            self.client = get_mongo_client()
-            await self._ensure_indexes()
+            candidate = get_mongo_client()
+            # The store becomes available only after the complete index
+            # contract verifies; a failed migration must not leave a client
+            # behind that skips verification on the next call.
+            await self._ensure_indexes(client=candidate)
+            self.client = candidate
 
-    async def _ensure_indexes(self) -> None:
-        versions = await self._coll("ArtifactVersions")
-        await versions.create_index(
-            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1), ("version_number", -1)],
-            name="av_app_kind_key_version",
-            unique=True,
-        )
-        await versions.create_index(
-            [("app_id", 1), ("lineage_root_id", 1), ("created_at", -1)],
-            name="av_app_lineage_created",
-        )
-        await versions.create_index(
-            [("app_id", 1), ("lifecycle_status", 1), ("updated_at", -1)],
-            name="av_app_status_updated",
+    # Retired unique indexes keyed on fields BuildRecord documents never carry
+    # (every record produced null tuples, so distinct build families collided
+    # with E11000). Each retired index is identified by its COMPLETE historical
+    # definition, never by name alone: dropping is destructive DDL, and an
+    # unrelated operator index that merely reuses a retired name must fail the
+    # store closed instead of being deleted.
+    _RETIRED_INDEX_CONTRACT: dict[str, list[dict[str, Any]]] = {
+        "ArtifactVersions": [
+            {
+                "name": "av_app_kind_key_version",
+                "keys": [
+                    ("app_id", 1),
+                    ("artifact_kind", 1),
+                    ("artifact_key", 1),
+                    ("version_number", -1),
+                ],
+                "unique": True,
+            },
+        ],
+        "ArtifactVersionCounters": [
+            {
+                "name": "avc_app_kind_key",
+                "keys": [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1)],
+                "unique": True,
+            },
+        ],
+    }
+
+    # BuildRecord identity is (app_id, build_family, build_key, version_number);
+    # the model carries app scope as app_id only (build_app_scope_filter).
+    _INDEX_CONTRACT: dict[str, list[dict[str, Any]]] = {
+        "ArtifactVersions": [
+            {
+                "name": "av_app_family_key_version",
+                "keys": [
+                    ("app_id", 1),
+                    ("build_family", 1),
+                    ("build_key", 1),
+                    ("version_number", -1),
+                ],
+                "unique": True,
+            },
+            {
+                "name": "av_app_lineage_created",
+                "keys": [("app_id", 1), ("lineage_root_id", 1), ("created_at", -1)],
+            },
+            {
+                "name": "av_app_status_updated",
+                "keys": [("app_id", 1), ("lifecycle_status", 1), ("updated_at", -1)],
+            },
+            {
+                # Storage-level invariant: at most one CURRENT record per
+                # (app_id, build_family, build_key). Concurrent independent
+                # clients racing supersede-then-publish cannot both land
+                # CURRENT — the second publish fails with DuplicateKeyError,
+                # which the store translates into a typed conflict.
+                "name": "av_unique_current",
+                "keys": [("app_id", 1), ("build_family", 1), ("build_key", 1)],
+                "unique": True,
+                "partialFilterExpression": {"lifecycle_status": "current"},
+            },
+        ],
+        "ArtifactVersionCounters": [
+            {
+                "name": "avc_app_family_key",
+                "keys": [("app_id", 1), ("build_family", 1), ("build_key", 1)],
+                "unique": True,
+            },
+        ],
+        "ChangeRequests": [
+            {
+                "name": "cr_app_record_created",
+                "keys": [("app_id", 1), ("build_record_id", 1), ("created_at", -1)],
+            },
+            {
+                "name": "cr_app_class_created",
+                "keys": [("app_id", 1), ("classification", 1), ("created_at", -1)],
+            },
+        ],
+        "RefinementSessions": [
+            {
+                "name": "rs_app_record_started",
+                "keys": [("app_id", 1), ("build_record_id", 1), ("started_at", -1)],
+            },
+            {
+                "name": "rs_app_result_record_started",
+                "keys": [("app_id", 1), ("result_build_record_id", 1), ("started_at", -1)],
+                "sparse": True,
+            },
+            {
+                "name": "rs_app_sandbox",
+                "keys": [("app_id", 1), ("sandbox_id", 1)],
+                "sparse": True,
+            },
+        ],
+    }
+
+    async def _ensure_indexes(self, *, client: Any) -> None:
+        """Verify and materialize the store's complete index contract.
+
+        Runs as a full preflight before any destructive action: every present
+        retired-name candidate is compared against its exact historical
+        definition first. Only exact matches are dropped; a same-name index
+        with any other definition fails the store closed with a typed
+        index-contract error, and no unrelated index is ever deleted. The
+        canonical indexes are then installed/verified through the canonical
+        runtime index verifier; a same-name canonical index with a different
+        definition also fails closed.
+        """
+        from mozaiksai.core.runtime.persistence.indexes import (
+            DatabaseIndexApplyError,
+            _ensure_raw_collection_indexes,
+            _index_mismatches,
+            _normalize_index_spec,
         )
 
-        counters = await self._coll("ArtifactVersionCounters")
-        await counters.create_index(
-            [("app_id", 1), ("artifact_kind", 1), ("artifact_key", 1)],
-            name="avc_app_kind_key",
-            unique=True,
-        )
+        database = client[_DATABASE_NAME]
 
-        change_requests = await self._coll("ChangeRequests")
-        await change_requests.create_index(
-            [("app_id", 1), ("build_record_id", 1), ("created_at", -1)],
-            name="cr_app_record_created",
-        )
-        await change_requests.create_index(
-            [("app_id", 1), ("classification", 1), ("created_at", -1)],
-            name="cr_app_class_created",
-        )
+        # Preflight: verify every retired-name candidate everywhere before
+        # executing a single drop.
+        verified_drops: list[tuple[Any, str]] = []
+        for collection_name, retired_specs in self._RETIRED_INDEX_CONTRACT.items():
+            collection = database[collection_name]
+            existing_rows = {
+                str(row.get("name") or ""): dict(row)
+                for row in await collection.list_indexes().to_list(length=None)
+            }
+            for raw_spec in retired_specs:
+                spec = _normalize_index_spec(
+                    dict(raw_spec), f"{collection_name}.retired[{raw_spec['name']}]"
+                )
+                present = existing_rows.get(spec.name)
+                if present is None:
+                    continue
+                mismatch = "; ".join(_index_mismatches(present, spec))
+                if mismatch:
+                    raise DatabaseIndexApplyError(
+                        f"Refusing to drop index {spec.name!r} on "
+                        f"{collection_name!r}: existing definition does not "
+                        f"match the retired contract ({mismatch}). Resolve the "
+                        "conflicting index manually; the store fails closed."
+                    )
+                verified_drops.append((collection, spec.name))
 
-        refinement_sessions = await self._coll("RefinementSessions")
-        await refinement_sessions.create_index(
-            [("app_id", 1), ("build_record_id", 1), ("started_at", -1)],
-            name="rs_app_record_started",
-        )
-        await refinement_sessions.create_index(
-            [("app_id", 1), ("result_build_record_id", 1), ("started_at", -1)],
-            name="rs_app_result_record_started",
-            sparse=True,
-        )
-        await refinement_sessions.create_index(
-            [("app_id", 1), ("sandbox_id", 1)],
-            name="rs_app_sandbox",
-            sparse=True,
-        )
+        for collection, index_name in verified_drops:
+            await collection.drop_index(index_name)
+
+        for collection_name, specs in self._INDEX_CONTRACT.items():
+            await _ensure_raw_collection_indexes(
+                database[collection_name],
+                specs,
+                collection_label=collection_name,
+            )
 
     async def _coll(self, name: str):
         await self._ensure_client()
-        return self.client["mozaiksai"][name]  # type: ignore[index]
+        return self.client[_DATABASE_NAME][name]  # type: ignore[index]
 
     async def _next_build_record_version_number(self, *, app_id: str, build_family: str, build_key: str) -> int:
         counters = await self._coll("ArtifactVersionCounters")
@@ -165,8 +299,8 @@ class BuildRecordStore:
         self,
         *,
         app_id: str,
-        artifact_kind: str,
-        artifact_key: str,
+        build_family: str,
+        build_key: str | None = None,
         reason: str,
         invalidated_by_version_id: str | None = None,
         exclude_version_id: str | None = None,
@@ -176,10 +310,11 @@ class BuildRecordStore:
             raise ValueError("app_id is required")
         query: dict[str, Any] = {
             "app_id": resolved_app_id,
-            "artifact_kind": artifact_kind,
-            "artifact_key": artifact_key,
+            "build_family": build_family,
             "lifecycle_status": {"$nin": [ArtifactLifecycleStatus.ARCHIVED.value, ArtifactLifecycleStatus.DELETED.value, ArtifactLifecycleStatus.STALE.value]},
         }
+        if build_key is not None:
+            query["build_key"] = build_key
         if exclude_version_id:
             query["_id"] = {"$ne": exclude_version_id}
         versions = await self._coll("ArtifactVersions")
@@ -203,7 +338,7 @@ class BuildRecordStore:
         *,
         app_id: str,
         artifact_version_refs: dict[str, str],
-        affected_artifact_kinds: Iterable[str] | None = None,
+        affected_build_families: Iterable[str] | None = None,
         reason: str,
         invalidated_by_version_id: str | None = None,
     ) -> list[str]:
@@ -212,23 +347,23 @@ class BuildRecordStore:
             raise ValueError("app_id is required")
 
         normalized_refs: dict[str, str] = {}
-        for raw_kind, raw_version_id in dict(artifact_version_refs or {}).items():
-            artifact_kind = str(raw_kind or "").strip()
+        for raw_family, raw_version_id in dict(artifact_version_refs or {}).items():
+            build_family = str(raw_family or "").strip()
             artifact_version_id = str(raw_version_id or "").strip()
-            if artifact_kind and artifact_version_id:
-                normalized_refs[artifact_kind] = artifact_version_id
+            if build_family and artifact_version_id:
+                normalized_refs[build_family] = artifact_version_id
 
-        target_kinds: list[str] = []
-        raw_target_kinds = list(affected_artifact_kinds or normalized_refs.keys())
-        for raw_kind in raw_target_kinds:
-            artifact_kind = str(raw_kind or "").strip()
-            if artifact_kind and artifact_kind not in target_kinds:
-                target_kinds.append(artifact_kind)
+        target_families: list[str] = []
+        raw_target_families = list(affected_build_families or normalized_refs.keys())
+        for raw_family in raw_target_families:
+            build_family = str(raw_family or "").strip()
+            if build_family and build_family not in target_families:
+                target_families.append(build_family)
 
         invalidated_ids: list[str] = []
         seen_version_ids: set[str] = set()
-        for artifact_kind in target_kinds:
-            artifact_version_id = normalized_refs.get(artifact_kind)  # type: ignore[assignment]
+        for build_family in target_families:
+            artifact_version_id = normalized_refs.get(build_family)  # type: ignore[assignment]
             if not artifact_version_id or artifact_version_id in seen_version_ids:
                 continue
             seen_version_ids.add(artifact_version_id)
@@ -519,31 +654,6 @@ class BuildRecordStore:
         rows = await cursor.to_list(length=max(1, int(limit)))
         return [RefinementSessionDoc.model_validate(row) for row in rows]
 
-    async def get_current_artifact_version_refs(self, *, app_id: str) -> dict[str, str]:
-        """Return a mapping of artifact_kind → artifact_version_id for all CURRENT versions."""
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            return {}
-        await self._ensure_client()
-        versions = await self._coll("ArtifactVersions")
-        try:
-            scope = build_app_scope_filter(resolved_app_id)
-            cursor = versions.find(
-                {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                projection={"artifact_kind": 1, "build_family": 1, "_id": 1, "version_number": 1},
-            ).sort("version_number", -1)
-            rows = await cursor.to_list(length=200)
-            refs: dict[str, str] = {}
-            for row in rows:
-                kind = str(row.get("artifact_kind") or row.get("build_family") or "").strip()
-                version_id = str(row.get("_id") or "").strip()
-                if kind and version_id and kind not in refs:
-                    refs[kind] = version_id
-            return refs
-        except Exception as exc:
-            logger.warning("get_current_artifact_version_refs failed for app %s: %s", resolved_app_id, exc)
-            return {}
-
     async def get_current_build_record_refs(self, *, app_id: str) -> dict[str, str]:
         """Return a mapping of build_family → build_record_id for all CURRENT build records."""
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
@@ -555,12 +665,12 @@ class BuildRecordStore:
             scope = build_app_scope_filter(resolved_app_id)
             cursor = versions.find(
                 {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                projection={"build_family": 1, "artifact_kind": 1, "_id": 1, "version_number": 1},
+                projection={"build_family": 1, "_id": 1, "version_number": 1},
             ).sort("version_number", -1)
             rows = await cursor.to_list(length=200)
             refs: dict[str, str] = {}
             for row in rows:
-                family = str(row.get("build_family") or row.get("artifact_kind") or "").strip()
+                family = str(row.get("build_family") or "").strip()
                 record_id = str(row.get("_id") or "").strip()
                 if family and record_id and family not in refs:
                     refs[family] = record_id
@@ -568,34 +678,6 @@ class BuildRecordStore:
         except Exception as exc:
             logger.warning("get_current_build_record_refs failed for app %s: %s", resolved_app_id, exc)
             return {}
-
-    async def get_stale_artifact_families(self, *, app_id: str) -> list[str]:
-        """Return artifact family names that are genuinely stale (STALE but no CURRENT)."""
-        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
-        if not resolved_app_id:
-            return []
-        await self._ensure_client()
-        versions = await self._coll("ArtifactVersions")
-        try:
-            scope = build_app_scope_filter(resolved_app_id)
-            stale_kinds: set[str] = set(
-                await versions.distinct(
-                    "artifact_kind",
-                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.STALE.value},
-                )
-            )
-            if not stale_kinds:
-                return []
-            current_kinds: set[str] = set(
-                await versions.distinct(
-                    "artifact_kind",
-                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
-                )
-            )
-            return sorted(str(k) for k in (stale_kinds - current_kinds) if k)
-        except Exception as exc:
-            logger.warning("get_stale_artifact_families failed for app %s: %s", resolved_app_id, exc)
-            return []
 
     async def get_stale_build_families(self, *, app_id: str) -> list[str]:
         """Return build family names that are genuinely stale (STALE but no CURRENT)."""
@@ -636,6 +718,8 @@ class BuildRecordStore:
         files_manifest: Iterable[dict[str, Any] | ArtifactFileManifestEntry] | None = None,
         source_workflow: str | None = None,
         source_chat_id: str | None = None,
+        workflow_run_id: str | None = None,
+        build_id: str | None = None,
         parent_build_record_id: str | None = None,
         canonical_inputs_version: dict[str, str] | None = None,
         lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
@@ -687,6 +771,8 @@ class BuildRecordStore:
             lineage_root_id=lineage_root_id,
             source_workflow=source_workflow,
             source_chat_id=source_chat_id,
+            workflow_run_id=str(workflow_run_id).strip() or None if workflow_run_id else None,
+            build_id=str(build_id).strip() or None if build_id else None,
             canonical_inputs_version=dict(canonical_inputs_version or {}),
             lifecycle_status=lifecycle_status,
             validation_status=validation_status,
@@ -716,7 +802,20 @@ class BuildRecordStore:
                 },
             )
 
-        await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+        try:
+            await versions.insert_one(record.model_dump(by_alias=True, mode="python"))
+        except DuplicateKeyError as exc:
+            if lifecycle_status == ArtifactLifecycleStatus.CURRENT:
+                # A concurrent writer made another record CURRENT between this
+                # call's supersede step and its insert; the partial unique
+                # index keeps the invariant and this record was not created.
+                raise BuildRecordCurrentConflictError(
+                    app_id=resolved_app_id,
+                    build_family=build_family,
+                    build_key=build_key,
+                    build_record_id=build_record_id,
+                ) from exc
+            raise
         return record
 
     async def get_build_record(
@@ -920,10 +1019,23 @@ class BuildRecordStore:
                 }
             },
         )
-        await versions.update_one(
-            {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
-            {"$set": updates},
-        )
+        try:
+            await versions.update_one(
+                {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
+                {"$set": updates},
+            )
+        except DuplicateKeyError as exc:
+            # The av_unique_current partial unique index rejected the publish:
+            # a concurrent independent client made a different record CURRENT
+            # after this accept's supersede step ran. Re-accepting the record
+            # that already IS current never conflicts (same document), so a
+            # duplicate here always means a different-target winner.
+            raise BuildRecordCurrentConflictError(
+                app_id=resolved_app_id,
+                build_family=target.build_family,
+                build_key=target.build_key,
+                build_record_id=target.id,
+            ) from exc
         refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
         return BuildRecord.model_validate(refreshed) if isinstance(refreshed, dict) else target
 

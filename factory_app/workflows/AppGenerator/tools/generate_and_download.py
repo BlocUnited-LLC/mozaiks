@@ -579,46 +579,225 @@ async def _register_greenfield_app_context_for_bundle(
     files_manifest: list[dict[str, Any]],
     workflow_name: str,
     chat_id: str | None,
+    workflow_run_id: str | None = None,
+    build_id: str | None = None,
     context_variables: Any | None,
-    raise_on_contract_error: bool = False,
-) -> Any | None:
-    try:
-        registered = await register_greenfield_app_context_version(
-            app_bundle_artifact=app_bundle_artifact,
-            artifact_store=artifact_store,
-            files_manifest=files_manifest,
-            source_workflow=workflow_name,
-            source_chat_id=chat_id,
-            make_current=True,
-        )
-    except (TypeError, ValueError) as exc:
-        if raise_on_contract_error:
-            raise
-        wf_logger = get_workflow_logger(
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=getattr(app_bundle_artifact, "app_id", None),
-        )
-        wf_logger.warning("Greenfield app-context registration skipped: %s", exc)
-        _context_set(context_variables, "app_context_registration_warning", str(exc))
-        return None
-    except Exception as exc:
-        wf_logger = get_workflow_logger(
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=getattr(app_bundle_artifact, "app_id", None),
-        )
-        wf_logger.warning("Greenfield app-context registration failed: %s", exc)
-        _context_set(context_variables, "app_context_registration_warning", str(exc))
-        return None
+) -> Any:
+    """Register the CURRENT AppContextVersion lineage for a generated bundle.
 
+    This registration is required publication lineage: hosting and refinement
+    resolve the CURRENT AppContextVersion, so a failure here must fail the
+    build instead of returning a downloadable bundle whose lineage does not
+    exist.
+    """
+    registered = await register_greenfield_app_context_version(
+        app_bundle_artifact=app_bundle_artifact,
+        artifact_store=artifact_store,
+        files_manifest=files_manifest,
+        source_workflow=workflow_name,
+        source_chat_id=chat_id,
+        workflow_run_id=workflow_run_id,
+        build_id=build_id,
+        make_current=True,
+    )
     _context_set(context_variables, "app_context_version_id", registered.context_version.context_version_id)
     _context_set(context_variables, "app_context_artifact_version_id", registered.artifact_version.id)
     _context_set(context_variables, "greenfield_app_context_registered", True)
     return registered
 
 
+def _terminal_run_identity(context_variables: Any | None) -> tuple[str, str]:
+    """Resolve the immutable (workflow_run_id, build_id) pair for receipts.
+
+    The workflow_run_id is minted by the bridge at run launch and threaded
+    through the persisted run context. The build identity is the journey's
+    build_id when one exists, otherwise it is derived from the run identity —
+    never from the chat, so two runs in one chat always carry distinct
+    terminal identities.
+    """
+    workflow_run_id = str(_context_get(context_variables, "workflow_run_id") or "").strip()
+    build_id = str(_context_get(context_variables, "build_id") or "").strip()
+    if not build_id and workflow_run_id:
+        build_id = f"build_{workflow_run_id}"
+    return workflow_run_id, build_id
+
+
+async def _persist_terminal_receipt(
+    *,
+    receipt_payload: dict[str, Any],
+    app_id: str,
+    chat_id: str | None,
+    workflow_name: str,
+    context_variables: Any | None,
+    best_effort: bool = False,
+) -> None:
+    """Persist the terminal receipt through the server-owned session channel.
+
+    Generic context persistence strips the reserved receipt key, so the only
+    durable write path is this privileged call; the in-memory context copy is
+    kept for in-run visibility only.
+    """
+    _context_set(context_variables, "build_terminal_receipt", receipt_payload)
+    resolved_chat_id = str(chat_id or "").strip()
+    if not resolved_chat_id:
+        return
+    pm = _ag2_persistence_manager()
+    try:
+        await pm.persist_server_owned_session_fields(
+            chat_id=resolved_chat_id,
+            app_id=str(app_id),
+            workflow_name=str(workflow_name),
+            fields={"build_terminal_receipt": receipt_payload},
+        )
+    except Exception:
+        if not best_effort:
+            raise
+        # Failure receipts ride the original exception path: a durable-write
+        # problem must not mask the build failure being reported. The absent
+        # receipt then simply claims nothing (fail closed).
+        get_workflow_logger(workflow_name=str(workflow_name), app_id=str(app_id)).warning(
+            "Failure receipt durable write failed; completion will claim nothing for this run"
+        )
+
+
+async def _persist_run_build_binding(
+    *,
+    binding_payload: dict[str, Any],
+    app_id: str,
+    chat_id: str | None,
+    workflow_name: str,
+    context_variables: Any | None,
+) -> None:
+    """Persist the run-to-build binding through the server-owned session channel.
+
+    The binding is authority persistence, not telemetry: a durable-write
+    failure fails the build closed rather than leaving a build whose exact
+    run relation cannot be cold-resolved later. Headless runs (no chat
+    session) keep the in-memory copy only — there is no session document to
+    bind to and no bridge lifecycle that would consume it.
+    """
+    _context_set(context_variables, "run_build_binding", binding_payload)
+    resolved_chat_id = str(chat_id or "").strip()
+    if not resolved_chat_id:
+        return
+    pm = _ag2_persistence_manager()
+    await pm.persist_server_owned_session_fields(
+        chat_id=resolved_chat_id,
+        app_id=str(app_id),
+        workflow_name=str(workflow_name),
+        fields={"run_build_binding": binding_payload},
+    )
+
+
+async def _write_failure_receipt(
+    *,
+    context_variables: Any | None,
+    app_id: str,
+    chat_id: str | None,
+    workflow_name: str,
+    error_code: str,
+) -> None:
+    from mozaiksai.core.artifacts.build_receipt import (
+        BuildFailureReceipt,
+        WorkflowRunFailure,
+        issue_failure_receipt,
+        issue_run_failure,
+    )
+    from mozaiksai.core.artifacts.run_build_binding import (
+        BindingValidationError,
+        parse_run_build_binding,
+    )
+
+    workflow_run_id = str(_context_get(context_variables, "workflow_run_id") or "").strip()
+    if not workflow_run_id:
+        # Without an immutable run identity no receipt can bind the failure;
+        # the completion hook then claims nothing for this run (fail closed).
+        return
+
+    # A build-specific failure receipt requires the exact build this run
+    # established — the sealed run/build binding written at record creation.
+    # A run that failed before establishing any build gets the run-level
+    # WorkflowRunFailure instead: a failure receipt never fabricates a build.
+    binding = None
+    raw_binding = _context_get(context_variables, "run_build_binding")
+    if raw_binding is not None:
+        try:
+            binding = parse_run_build_binding(raw_binding)
+        except BindingValidationError:
+            binding = None
+    receipt: BuildFailureReceipt | WorkflowRunFailure
+    if binding is not None and binding.workflow_run_id == workflow_run_id:
+        receipt = issue_failure_receipt(
+            app_id=str(app_id),
+            workflow_name=str(workflow_name),
+            workflow_run_id=workflow_run_id,
+            build_id=binding.build_id,
+            error_code=error_code,  # type: ignore[arg-type]
+        )
+    else:
+        receipt = issue_run_failure(
+            app_id=str(app_id),
+            workflow_name=str(workflow_name),
+            workflow_run_id=workflow_run_id,
+            error_code="run_failed_before_build",
+        )
+    await _persist_terminal_receipt(
+        receipt_payload=receipt.model_dump(mode="json"),
+        app_id=str(app_id),
+        chat_id=chat_id,
+        workflow_name=str(workflow_name),
+        context_variables=context_variables,
+        best_effort=True,
+    )
+
+
 async def _register_app_bundle_artifact_version(
+    *,
+    app_id: str,
+    user_id: str | None,
+    workflow_name: str,
+    chat_id: str | None,
+    bundle_name: str,
+    zip_path: Path,
+    app_dir: Path | None = None,
+    written_paths: list[str] | None = None,
+    context_variables: Any | None,
+):
+    """Register the bundle's BuildRecord and required lineage.
+
+    Owns the terminal receipt boundary: success writes the run-bound success
+    receipt only after the complete persistence closure inside the steps
+    function; any registration failure writes the run-bound failure receipt
+    before re-raising, so the completion hook emits the typed build-failed
+    outcome for exactly this run instead of claiming completion. The
+    ``download_status`` markers remain UI projections only.
+    """
+    try:
+        return await _register_app_bundle_artifact_version_steps(
+            app_id=app_id,
+            user_id=user_id,
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            bundle_name=bundle_name,
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=context_variables,
+        )
+    except Exception:
+        await _write_failure_receipt(
+            context_variables=context_variables,
+            app_id=str(app_id),
+            chat_id=chat_id,
+            workflow_name=str(workflow_name),
+            error_code="lineage_registration_failed",
+        )
+        _context_set(context_variables, "download_status", "failed")
+        _context_set(context_variables, "app_download_ready", False)
+        raise
+
+
+async def _register_app_bundle_artifact_version_steps(
     *,
     app_id: str,
     user_id: str | None,
@@ -667,11 +846,11 @@ async def _register_app_bundle_artifact_version(
             parent_version_id = None
             validation_status_raw = None
 
-    lifecycle_status = (
-        ArtifactLifecycleStatus.DRAFT
-        if parent_version_id
-        else ArtifactLifecycleStatus.CURRENT
-    )
+    # Every bundle record starts as DRAFT: a greenfield record becomes CURRENT
+    # only after its required AppContextVersion lineage registered, so a
+    # failed registration can never leave a published-looking record behind.
+    lifecycle_status = ArtifactLifecycleStatus.DRAFT
+    promote_after_lineage = not parent_version_id
 
     normalized_status = str(validation_status_raw or "").strip().lower()
     validation_status = ArtifactValidationStatus.PENDING
@@ -753,6 +932,8 @@ async def _register_app_bundle_artifact_version(
             wf_logger = get_workflow_logger(workflow_name=workflow_name, app_id=app_id)
             wf_logger.warning("Content store put_bundle failed; falling back to local path: %s", cs_exc)
 
+    # The immutable run binding is stamped on every record in this closure.
+    run_binding_workflow_run_id, run_binding_build_id = _terminal_run_identity(context_variables)
     artifact_store = get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
@@ -768,6 +949,8 @@ async def _register_app_bundle_artifact_version(
         files_manifest=files_manifest,
         source_workflow=workflow_name,
         source_chat_id=chat_id,
+        workflow_run_id=run_binding_workflow_run_id or None,
+        build_id=run_binding_build_id or None,
         lifecycle_status=lifecycle_status,
         validation_status=validation_status,
         app_validation_status=str(app_validation_status) if app_validation_status else None,
@@ -787,12 +970,134 @@ async def _register_app_bundle_artifact_version(
             context_variables.set("artifact_version_id", artifact_version.id)
         except Exception:
             pass
-    await _register_greenfield_app_context_for_bundle(
+
+    # The run just established its build: issue and durably persist the sealed
+    # run-to-build binding through the server-owned session seam. This is the
+    # only creation point — the binding is never derived from chat identity or
+    # latest-session build fields, and a pre-build run never has one.
+    if run_binding_workflow_run_id and run_binding_build_id:
+        from mozaiksai.core.artifacts.run_build_binding import issue_run_build_binding
+
+        run_build_binding = issue_run_build_binding(
+            app_id=str(app_id),
+            workflow_name=str(workflow_name),
+            workflow_run_id=run_binding_workflow_run_id,
+            build_id=run_binding_build_id,
+            build_record_id=str(artifact_version.id),
+            build_family=str(artifact_version.build_family),
+            build_key=str(artifact_version.build_key),
+            version_number=int(artifact_version.version_number),
+            bundle_digest=sha,
+        )
+        await _persist_run_build_binding(
+            binding_payload=run_build_binding.model_dump(mode="json"),
+            app_id=str(app_id),
+            chat_id=chat_id,
+            workflow_name=str(workflow_name),
+            context_variables=context_variables,
+        )
+
+    registered_context = await _register_greenfield_app_context_for_bundle(
         app_bundle_artifact=artifact_version,
         artifact_store=artifact_store,
         files_manifest=files_manifest,
         workflow_name=workflow_name,
         chat_id=chat_id,
+        workflow_run_id=run_binding_workflow_run_id or None,
+        build_id=run_binding_build_id or None,
+        context_variables=context_variables,
+    )
+    if promote_after_lineage:
+        accepted = await artifact_store.accept_build_record(
+            app_id=str(app_id),
+            build_record_id=artifact_version.id,
+        )
+        if accepted is None:
+            raise RuntimeError(
+                "app_bundle promotion failed: record vanished before acceptance"
+            )
+        artifact_version = accepted
+
+    workflow_run_id, terminal_build_id = _terminal_run_identity(context_variables)
+    if not workflow_run_id or not terminal_build_id:
+        # Launched outside the bridge (no minted run identity): the build
+        # artifacts persist normally, but no receipt is issued, so the bridge
+        # can never claim lifecycle completion for an unidentified run.
+        get_workflow_logger(workflow_name=workflow_name, app_id=str(app_id)).warning(
+            "No workflow_run_id in run context; terminal receipt skipped — "
+            "bridge lifecycle completion will not claim this build"
+        )
+        return artifact_version
+
+    # Acceptance/receipt requires the exact persisted run binding: the receipt
+    # is constructed from the persisted verified records, and any disagreement
+    # between the persisted binding and this run fails the build closed.
+    persisted_run_id = str(getattr(artifact_version, "workflow_run_id", "") or "").strip()
+    persisted_build_id = str(getattr(artifact_version, "build_id", "") or "").strip()
+    if persisted_run_id != workflow_run_id or persisted_build_id != terminal_build_id:
+        raise RuntimeError(
+            "terminal receipt refused: persisted BuildRecord run binding "
+            f"({persisted_run_id!r}/{persisted_build_id!r}) does not match this run "
+            f"({workflow_run_id!r}/{terminal_build_id!r})"
+        )
+    context_record = registered_context.artifact_version
+    context_run_id = str(getattr(context_record, "workflow_run_id", "") or "").strip()
+    context_build_id = str(getattr(context_record, "build_id", "") or "").strip()
+    if context_run_id != workflow_run_id or context_build_id != terminal_build_id:
+        raise RuntimeError(
+            "terminal receipt refused: persisted AppContextVersion run binding "
+            "does not match this run"
+        )
+    persisted_digests = {
+        str(getattr(entry, "sha256", "") or "") for entry in artifact_version.files_manifest
+    }
+    if sha not in persisted_digests:
+        raise RuntimeError(
+            "terminal receipt refused: bundle digest is not present in the "
+            "persisted BuildRecord manifest"
+        )
+
+    from mozaiksai.core.artifacts.build_receipt import (
+        BuildRevisionCandidateReceipt,
+        BuildSuccessReceipt,
+        issue_revision_candidate_receipt,
+        issue_success_receipt,
+    )
+
+    record_lifecycle = str(
+        getattr(artifact_version.lifecycle_status, "value", artifact_version.lifecycle_status)
+    )
+    receipt_kwargs = {
+        "app_id": str(app_id),
+        "workflow_name": str(workflow_name),
+        "workflow_run_id": persisted_run_id,
+        "build_id": persisted_build_id,
+        "build_record_id": str(artifact_version.id),
+        "app_context_version_id": str(registered_context.context_version.context_version_id),
+        "app_context_record_id": str(context_record.id),
+        "bundle_digest": sha,
+    }
+    receipt: BuildSuccessReceipt | BuildRevisionCandidateReceipt
+    if promote_after_lineage:
+        if record_lifecycle != "current":
+            raise RuntimeError(
+                "terminal receipt refused: greenfield record is not CURRENT after acceptance"
+            )
+        receipt = issue_success_receipt(**receipt_kwargs)
+    else:
+        # Refinement produces a non-current candidate deliberately; it gets
+        # the distinct closed candidate variant, never an ambiguous success.
+        if record_lifecycle != "draft" or not artifact_version.parent_build_record_id:
+            raise RuntimeError(
+                "terminal receipt refused: revision candidate must be a draft with parent lineage"
+            )
+        receipt = issue_revision_candidate_receipt(**receipt_kwargs)
+
+    await _persist_terminal_receipt(
+        receipt_payload=receipt.model_dump(mode="json"),
+        app_id=str(app_id),
+        chat_id=chat_id,
+        workflow_name=str(workflow_name),
         context_variables=context_variables,
     )
     return artifact_version

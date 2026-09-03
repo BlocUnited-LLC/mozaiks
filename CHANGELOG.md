@@ -13,6 +13,30 @@ This project follows a practical pre-1.0 changelog format:
 ## Unreleased
 
 ### Fixed
+- **Build persistence now records the exact run-to-build relation**: the
+  BuildRecord store enforces its complete index contract before becoming
+  available — retired indexes are dropped only when their full historical
+  definition matches (a same-name index with any other definition fails the
+  store closed), and a partial unique index makes at-most-one CURRENT record
+  per app/family/key storage-enforced with a typed
+  `BuildRecordCurrentConflictError` on concurrent publishes. Every
+  BuildRecord persists the immutable `workflow_run_id`/`build_id` it was
+  created for; a new sealed `RunBuildBinding` (digest-signed, server-owned)
+  captures the exact relation the moment a run establishes its build, and
+  cold verification resolves the persisted records and requires agreement on
+  run, build, app, family/key, version, and bundle digest — chat/session
+  "latest build" fields are never run-to-build authority. Greenfield bundles
+  are created DRAFT and promoted to CURRENT only after the required
+  AppContextVersion lineage registers, and terminal outcomes are strict
+  closed variants: success, revision candidate, build failure with an exact
+  build, or a run-level `WorkflowRunFailure` for runs that failed before
+  establishing any build — no failure ever fabricates a build identity. The
+  run identity, binding, and terminal receipt are server-owned session
+  fields writable only through the privileged persistence seam; generic
+  workflow context updates that try to set them are rejected and logged.
+  Lifecycle event emission is unchanged in this release and cuts over to
+  this authority in a follow-up.
+
 - **A present but invalid `config/subscriptions.yaml` now fails application
   loading instead of silently disabling entitlement enforcement**: AppLoader
   previously caught the subscription contract's load error, logged a warning,

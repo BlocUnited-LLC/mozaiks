@@ -121,7 +121,7 @@ class ArtifactInvalidationService:
             invalidated_build_record_ids = await resolved_store.invalidate_artifact_version_refs(
                 app_id=app_id,
                 artifact_version_refs=artifact_version_refs,
-                affected_artifact_kinds=affected_build_families,
+                affected_build_families=affected_build_families,
                 reason=reason,
             )
 
@@ -142,8 +142,7 @@ class ArtifactInvalidationService:
                 for family in sorted(downstream):
                     count = await resolved_store.invalidate_artifact_family(
                         app_id=app_id,
-                        artifact_kind=family,
-                        artifact_key=family,
+                        build_family=family,
                         reason=reason,
                     )
                     if count:

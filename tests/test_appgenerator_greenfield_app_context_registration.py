@@ -81,6 +81,8 @@ class _MemoryArtifactStore:
             source_workflow=kwargs.get("source_workflow"),
             source_chat_id=kwargs.get("source_chat_id"),
             canonical_inputs_version=kwargs.get("canonical_inputs_version") or {},
+            workflow_run_id=kwargs.get("workflow_run_id"),
+            build_id=kwargs.get("build_id"),
             lifecycle_status=kwargs.get("lifecycle_status", ArtifactLifecycleStatus.DRAFT),
             validation_status=kwargs.get("validation_status", ArtifactValidationStatus.PENDING),
             files_manifest=kwargs.get("files_manifest") or [],
@@ -152,9 +154,26 @@ class _MemoryArtifactStore:
                 doc.lifecycle_status = ArtifactLifecycleStatus.SUPERSEDED
 
 
-def _patch_artifact_store(monkeypatch, store: _MemoryArtifactStore) -> None:
+class _FakeSessionPM:
+    """Server-owned session-field sink for terminal receipt persistence."""
+
+    def __init__(self) -> None:
+        self.server_owned: dict[str, Any] = {}
+
+    async def persist_server_owned_session_fields(
+        self, *, chat_id: str, app_id: str | None = None,
+        workflow_name: str | None = None, fields: dict[str, Any] | None = None,
+    ) -> None:
+        self.server_owned.update(fields or {})
+
+
+def _patch_artifact_store(monkeypatch, store: _MemoryArtifactStore) -> _FakeSessionPM:
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: store)
+    session_pm = _FakeSessionPM()
+    monkeypatch.setattr(
+        generate_and_download_module, "_ag2_persistence_manager", lambda: session_pm
+    )
     monkeypatch.setattr(
         artifacts_mod,
         "resolve_latest_artifact_version_refs",
@@ -168,6 +187,7 @@ def _patch_artifact_store(monkeypatch, store: _MemoryArtifactStore) -> None:
             },
         ),
     )
+    return session_pm
 
 
 def _write_generated_app(app_dir: Path) -> list[str]:
@@ -283,12 +303,17 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
         assert (app_dir / rel_path).read_text(encoding="utf-8") == content
 
 
-async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
+async def test_appgenerator_greenfield_context_registration_failure_fails_the_build(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    """Required CURRENT lineage persistence failure must fail bundle registration.
+
+    Hosting and refinement resolve the CURRENT AppContextVersion; the build
+    must not claim success while that lineage does not exist.
+    """
     store = _MemoryArtifactStore()
-    _patch_artifact_store(monkeypatch, store)
+    session_pm = _patch_artifact_store(monkeypatch, store)
 
     async def _fail_registration(**_kwargs: Any) -> None:
         raise RuntimeError("context store unavailable")
@@ -305,25 +330,28 @@ async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context({"app_bundle_acceptance_status": "passed"})
 
-    app_bundle = await generate_and_download_module._register_app_bundle_artifact_version(
-        app_id="field_service",
-        user_id="user_123",
-        workflow_name="AppGenerator",
-        chat_id="chat_greenfield",
-        bundle_name="GeneratedApp",
-        zip_path=zip_path,
-        app_dir=app_dir,
-        written_paths=written_paths,
-        context_variables=context,
-    )
+    with pytest.raises(RuntimeError, match="context store unavailable"):
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="field_service",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            chat_id="chat_greenfield",
+            bundle_name="GeneratedApp",
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=context,
+        )
 
-    assert app_bundle.id == "av_app_bundle_1"
-    assert context.data["artifact_version_id"] == "av_app_bundle_1"
-    assert "context store unavailable" in context.data["app_context_registration_warning"]
-    assert {call["build_family"] for call in store.create_calls} == {"app_bundle"}
+    assert context.data.get("greenfield_app_context_registered") is not True
+    assert context.data.get("download_status") != "ready"
+    assert context.data.get("app_download_ready") is not True
+    # An unidentified run (no minted workflow_run_id) never persists
+    # server-owned run/build authority.
+    assert session_pm.server_owned == {}
 
 
-async def test_appgenerator_greenfield_context_contract_errors_can_be_strict() -> None:
+async def test_appgenerator_greenfield_context_contract_errors_fail_closed() -> None:
     store = _MemoryArtifactStore()
 
     with pytest.raises(ValueError, match="app_id is required"):
@@ -334,7 +362,6 @@ async def test_appgenerator_greenfield_context_contract_errors_can_be_strict() -
             workflow_name="AppGenerator",
             chat_id="chat_greenfield",
             context_variables=_Context(),
-            raise_on_contract_error=True,
         )
 
 
@@ -356,3 +383,173 @@ def test_appgenerator_context_registration_has_no_graph_database_or_proprietary_
         for term in forbidden_terms:
             assert term.lower() not in text
 
+
+async def test_auto_tool_failure_traversal_never_claims_completion(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Full path: auto-tool catch -> error result -> run-bound failure receipt.
+
+    The auto-tool handler converts the raised required-lineage failure into an
+    error tool result; the registration boundary must persist the typed
+    run-bound failure receipt, and no partial state may look like a
+    successful CURRENT lineage.
+    """
+    from types import SimpleNamespace
+
+    from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
+
+    store = _MemoryArtifactStore()
+    session_pm = _patch_artifact_store(monkeypatch, store)
+
+    async def _fail_registration(**_kwargs: Any) -> None:
+        raise RuntimeError("context store unavailable")
+
+    monkeypatch.setattr(
+        generate_and_download_module,
+        "register_greenfield_app_context_version",
+        _fail_registration,
+    )
+
+    app_dir = tmp_path / "GeneratedApp"
+    written_paths = _write_generated_app(app_dir)
+    zip_path = tmp_path / "GeneratedApp.zip"
+    zip_path.write_bytes(b"fake bundle bytes")
+    run_id = "wfrun_greenfield_traversal"
+    context = _Context(
+        {"app_bundle_acceptance_status": "passed", "workflow_run_id": run_id}
+    )
+
+    async def _terminal_tool(**kwargs: Any) -> dict[str, Any]:
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="field_service",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            chat_id="chat_greenfield",
+            bundle_name="GeneratedApp",
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=kwargs["context_variables"],
+        )
+        return {"status": "success"}
+
+    handler = AutoToolEventHandler.__new__(AutoToolEventHandler)
+    binding = SimpleNamespace(
+        function=_terminal_tool, agent_name="DownloadAgent", tool_name="generate_and_download"
+    )
+    result, status = await handler._invoke_tool(binding, {"context_variables": context})
+
+    # The real shared catch converted the failure into an error tool result.
+    assert status == "error"
+    assert result == {"status": "error", "message": "tool_execution_failed"}
+
+    # The registration boundary issued the run-bound failure receipt; markers
+    # remain UI projections and no success/ready claim exists anywhere.
+    from mozaiksai.core.artifacts.build_receipt import (
+        TERMINAL_RECEIPT_CONTEXT_KEY,
+        parse_terminal_receipt,
+    )
+
+    receipt = parse_terminal_receipt(context.data.get(TERMINAL_RECEIPT_CONTEXT_KEY))
+    assert receipt.kind == "failure"
+    assert receipt.workflow_run_id == run_id
+    assert receipt.error_code == "lineage_registration_failed"
+    assert context.data.get("download_status") == "failed"
+    assert context.data.get("app_download_ready") is False
+    assert context.data.get("greenfield_app_context_registered") is not True
+
+    # The run established its build before the lineage failure, so the sealed
+    # run/build binding exists, the failure receipt carries exactly that
+    # build, and the binding cold-verifies against the persisted record.
+    from mozaiksai.core.artifacts.closure import verify_run_build_binding_closure
+    from mozaiksai.core.artifacts.run_build_binding import parse_run_build_binding
+
+    run_binding = parse_run_build_binding(context.data.get("run_build_binding"))
+    assert run_binding.workflow_run_id == run_id
+    assert run_binding.build_id == f"build_{run_id}"
+    assert receipt.build_id == run_binding.build_id
+    assert session_pm.server_owned.get("run_build_binding") == run_binding.model_dump(
+        mode="json"
+    )
+    assert await verify_run_build_binding_closure(
+        run_binding,
+        workflow_run_id=run_id,
+        app_id="field_service",
+        workflow_name="AppGenerator",
+        store=store,
+    )
+
+    # Lifecycle event consumption of this receipt is the run-bound lifecycle
+    # cutover (the follow-up PR); this contract PR proves the persisted
+    # authority is exact and truthful for that consumer.
+
+    # Partial state: the bundle record exists only as a non-current draft and
+    # no CURRENT AppContextVersion lineage was created.
+    bundle_calls = [c for c in store.create_calls if c["build_family"] == "app_bundle"]
+    assert bundle_calls and all(
+        str(getattr(c["lifecycle_status"], "value", c["lifecycle_status"])) == "draft"
+        for c in bundle_calls
+    )
+    assert not [c for c in store.create_calls if c["build_family"] == "app_context_version"]
+
+    # Retry is deterministic: it fails identically and cannot mint CURRENT state.
+    result2, status2 = await handler._invoke_tool(binding, {"context_variables": context})
+    assert status2 == "error" and result2["status"] == "error"
+    assert not [c for c in store.create_calls if c["build_family"] == "app_context_version"]
+
+
+async def test_pre_build_failure_issues_run_level_failure_not_build_receipt(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A run that fails before establishing any build gets WorkflowRunFailure.
+
+    No BuildRecord was created, so there is no run/build binding, no
+    build-specific failure receipt, and no fabricated build identity — the
+    persisted terminal outcome is the run-level failure only.
+    """
+    from mozaiksai.core.artifacts.build_receipt import (
+        TERMINAL_RECEIPT_CONTEXT_KEY,
+        parse_terminal_receipt,
+    )
+
+    store = _MemoryArtifactStore()
+    session_pm = _patch_artifact_store(monkeypatch, store)
+
+    app_dir = tmp_path / "GeneratedApp"
+    written_paths = _write_generated_app(app_dir)
+    missing_zip = tmp_path / "never_written.zip"
+    run_id = "wfrun_prebuild_failure"
+    context = _Context(
+        {"app_bundle_acceptance_status": "passed", "workflow_run_id": run_id}
+    )
+
+    with pytest.raises(FileNotFoundError):
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="field_service",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            chat_id="chat_greenfield",
+            bundle_name="GeneratedApp",
+            zip_path=missing_zip,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=context,
+        )
+
+    # No build was established: no record, no binding, anywhere.
+    assert store.create_calls == []
+    assert "run_build_binding" not in context.data
+    assert "run_build_binding" not in session_pm.server_owned
+
+    # The persisted terminal outcome is the run-level failure with the exact
+    # run identity and no build fields at all.
+    receipt = parse_terminal_receipt(context.data.get(TERMINAL_RECEIPT_CONTEXT_KEY))
+    assert receipt.kind == "run_failure"
+    assert receipt.workflow_run_id == run_id
+    assert receipt.error_code == "run_failed_before_build"
+    assert "build_id" not in type(receipt).model_fields
+    assert session_pm.server_owned.get("build_terminal_receipt") == receipt.model_dump(
+        mode="json"
+    )
