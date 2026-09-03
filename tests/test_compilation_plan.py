@@ -49,13 +49,16 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
 # This corpus declares every optional family ABSENT_BY_DECLARATION while
 # carrying auth/integration/workflow payloads — contradictory selection
-# evidence. Slice 5D-0B2A's selection-honesty completion therefore keeps the
-# application-configuration families as typed gaps here (only the page family
-# renders). Plan identity also includes #475's consulted assignment-contract
-# closure. The honest
-# five-family closure is proven on the selection-consistent fixture in
-# tests/test_app_family_materialization_b2a.py instead.
-_GOLDEN_PLAN_DIGEST = "c95aad3fef6ef3f66c29b1ca5dbd4b38156cb2fbc4afbc89195a4c7d4413e501"
+# evidence. Slice 5D-0B2A's family-local selection-honesty completion keeps
+# app_manifest, app_integrations_config, and app_secret_references as typed
+# gaps here (each consumes the contradicted facts) and defers app_config
+# outright (no application-level AI-launch authority exists). The route
+# manifest consumes none of the contradicted facts — pages and default_route
+# are complete and custom routes are unselected — so it renders alongside the
+# page family. Plan identity also includes #475's consulted assignment-contract
+# closure. The honest four-family closure is proven on the
+# selection-consistent fixture in tests/test_app_family_materialization_b2a.py.
+_GOLDEN_PLAN_DIGEST = "db7ccc1f4d30a3d2621682afb54f8307830eb493beea1e8fb5ffaf2198d46a83"
 
 
 def _registry():

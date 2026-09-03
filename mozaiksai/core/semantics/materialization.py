@@ -66,11 +66,15 @@ from mozaiksai.core.semantics.app_config_materialization import (
     APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION,
     APP_FAMILY_RENDER_INPUT_VERSION,
     AppConfigMaterializationError,
-    ApplicationFamilyRenderInput,
+    AppFamilyRenderInput,
+    AppManifestRenderInput,
+    IntegrationsConfigRenderInput,
     RenderInputConfigRequirement,
     RenderInputIntegration,
     RenderInputPage,
     RenderInputSource,
+    RouteManifestRenderInput,
+    SecretReferencesRenderInput,
     render_app_config_unit,
 )
 from mozaiksai.core.semantics.binding import (
@@ -99,8 +103,6 @@ from mozaiksai.core.semantics.payloads import (
     PagePayload,
     SectionPayload,
     SemanticPayloadBase,
-    WorkflowPayload,
-    WorkflowStartupMode,
     parse_semantic_payload,
 )
 from mozaiksai.core.semantics.portable_path import detect_collisions
@@ -357,60 +359,58 @@ _CONFIG_VALUE_TYPES: dict[IntegrationConfigValueKind, Literal["text", "url", "se
 }
 
 
-def build_app_family_render_input(
+def project_app_family_render_input(
     *,
-    units: Iterable[FamilyInstancePlan],
+    unit: FamilyInstancePlan,
     payload_by_node: Mapping[str, SemanticPayloadBase],
-) -> ApplicationFamilyRenderInput:
-    """Project footprint-pinned payload facts into the closed render input.
+) -> AppFamilyRenderInput:
+    """Project one unit's plan-pinned sources into its family-local input.
 
     This is the single boundary where semantic payload classes feed the
     application-family renderer. It resolves exactly the payloads pinned by
-    the app-config units' source footprints, validates their closure, and
-    normalizes the already-authoritative facts into the frozen
-    :class:`ApplicationFamilyRenderInput` snapshot. The renderer never sees a
-    payload object.
+    THIS unit's source footprint, validates that family's closure, and
+    normalizes the already-authoritative facts into the frozen family-local
+    render input. The renderer never sees a payload object, and missing facts
+    for one family never block another family whose own closure is complete.
     """
-    app_units = [
-        unit
-        for unit in units
-        if unit.disposition is PlanDisposition.RENDER
-        and unit.family_kind in APP_CONFIG_FAMILIES
-    ]
-    if not app_units:
+    if (
+        unit.disposition is not PlanDisposition.RENDER
+        or unit.family_kind not in APP_CONFIG_FAMILIES
+    ):
         raise AppConfigMaterializationError(
-            "no application-configuration render units to project"
+            f"unit {unit.unit_id!r} ({unit.family_kind!r}) is not an active "
+            "application-configuration render unit"
         )
     resolved: dict[str, SemanticPayloadBase] = {}
-    for unit in app_units:
-        for source in unit.sources:
-            pinned = payload_by_node.get(source.node_id)
-            if pinned is None or pinned.payload_digest != source.payload_digest:
-                raise AppConfigMaterializationError(
-                    f"unit {unit.unit_id!r} source {source.node_id!r} is missing "
-                    "or does not match its pinned payload digest"
-                )
-            resolved[source.node_id] = pinned
+    for source in unit.sources:
+        pinned = payload_by_node.get(source.node_id)
+        if pinned is None or pinned.payload_digest != source.payload_digest:
+            raise AppConfigMaterializationError(
+                f"unit {unit.unit_id!r} source {source.node_id!r} is missing "
+                "or does not match its pinned payload digest"
+            )
+        resolved[source.node_id] = pinned
+    sources = tuple(
+        RenderInputSource(node_id=node_id, payload_digest=payload.payload_digest)
+        for node_id, payload in resolved.items()
+    )
 
-    applications = [
-        payload
-        for payload in resolved.values()
-        if isinstance(payload, ApplicationPayload)
-    ]
-    if len(applications) != 1:
-        raise AppConfigMaterializationError(
-            "application-config projection requires exactly one ApplicationPayload"
-        )
-    application = applications[0]
+    def _one_application() -> ApplicationPayload:
+        applications = [
+            payload
+            for payload in resolved.values()
+            if isinstance(payload, ApplicationPayload)
+        ]
+        if len(applications) != 1:
+            raise AppConfigMaterializationError(
+                f"unit {unit.unit_id!r} footprint must pin exactly one "
+                "ApplicationPayload"
+            )
+        return applications[0]
 
-    auths = [payload for payload in resolved.values() if isinstance(payload, AuthPayload)]
-    if len(auths) > 1:
-        raise AppConfigMaterializationError(
-            "application-config projection pins more than one AuthPayload"
-        )
-    auth = auths[0] if auths else None
-
-    def _family_selected(family: OptionalFamilyKind) -> bool:
+    def _family_selected(
+        application: ApplicationPayload, family: OptionalFamilyKind
+    ) -> bool:
         for selection in application.optional_families:
             if selection.family is family:
                 return selection.status is OptionalFamilySelectionStatus.SELECTED
@@ -418,127 +418,136 @@ def build_app_family_render_input(
             f"application selection evidence does not state the {family.value} family"
         )
 
-    auth_selected = _family_selected(OptionalFamilyKind.AUTH)
-    if auth is not None:
-        if not auth_selected:
-            raise AppConfigMaterializationError(
-                "an AuthPayload is pinned while the application declares the "
-                "auth family absent; contradictory evidence cannot render"
-            )
-        auth_required = bool(auth.auth_required)
-    else:
-        if auth_selected:
-            raise AppConfigMaterializationError(
-                "auth is selected but no AuthPayload is pinned in the footprint"
-            )
-        auth_required = False
-
-    pages: list[RenderInputPage] = []
-    for payload in resolved.values():
-        if isinstance(payload, PagePayload):
-            if not payload.route or not payload.title:
-                raise AppConfigMaterializationError(
-                    f"page {payload.node_id!r} lacks the route/title facts the route "
-                    "manifest requires"
-                )
-            pages.append(
-                RenderInputPage(
-                    page_id=payload.page_id, route=payload.route, title=payload.title
-                )
-            )
-
-    integrations_selected = any(
-        selection.family is OptionalFamilyKind.INTEGRATIONS
-        and selection.status is OptionalFamilySelectionStatus.SELECTED
-        for selection in application.optional_families
-    )
-    integration_payloads = [
-        payload for payload in resolved.values() if isinstance(payload, IntegrationPayload)
-    ]
-    if integrations_selected and not integration_payloads:
-        raise AppConfigMaterializationError(
-            "integrations are selected but no IntegrationPayload is pinned"
-        )
-    integrations = tuple(
-        RenderInputIntegration(
-            integration_id=payload.integration_id,
-            kind=payload.integration_kind.value,
-            purpose=payload.purpose,
-            required_at=payload.required_at.value,
-            optional=payload.optional,
-            config_requirements=tuple(
-                RenderInputConfigRequirement(
-                    name=requirement.name,
-                    value_type=_CONFIG_VALUE_TYPES[requirement.value_kind],
-                    required=requirement.required,
-                )
-                for requirement in payload.config_requirements
-            ),
-        )
-        for payload in integration_payloads
-    )
-
-    # Selection honesty is an application-level fact: evaluate it over the
-    # complete cold-validated payload closure, not only the payloads pinned by
-    # currently-active unit footprints — a gapped config/ai.json unit must not
-    # hide missing, ambiguous, or contradictory workflow evidence.
-    workflow_payloads = [
-        payload
-        for payload in payload_by_node.values()
-        if isinstance(payload, WorkflowPayload)
-    ]
-    if _family_selected(OptionalFamilyKind.WORKFLOWS):
-        if not workflow_payloads:
-            raise AppConfigMaterializationError(
-                "workflows are selected but no WorkflowPayload is pinned in "
-                "the footprint; missing selected evidence cannot render"
-            )
-        if any(payload.startup_mode is None for payload in workflow_payloads):
-            raise AppConfigMaterializationError(
-                "a selected workflow does not state its startup mode; the "
-                "chat startup derivation is ambiguous"
-            )
-        agent_driven = [
-            payload
-            for payload in workflow_payloads
-            if payload.startup_mode is WorkflowStartupMode.AGENT_DRIVEN
+    if unit.family_kind == "app_manifest":
+        application = _one_application()
+        auths = [
+            payload for payload in resolved.values() if isinstance(payload, AuthPayload)
         ]
-        if len(agent_driven) > 1:
+        if len(auths) > 1:
             raise AppConfigMaterializationError(
-                "multiple selected workflows claim agent-driven startup; the "
-                "chat startup derivation is ambiguous"
+                "app-manifest projection pins more than one AuthPayload"
             )
-        chat_startup_mode: Literal["ask", "workflow"] = (
-            "workflow" if agent_driven else "ask"
+        auth = auths[0] if auths else None
+        auth_selected = _family_selected(application, OptionalFamilyKind.AUTH)
+        if auth is not None:
+            if not auth_selected:
+                raise AppConfigMaterializationError(
+                    "an AuthPayload is pinned while the application declares "
+                    "the auth family absent; contradictory evidence cannot render"
+                )
+            auth_required = bool(auth.auth_required)
+        else:
+            if auth_selected:
+                raise AppConfigMaterializationError(
+                    "auth is selected but no AuthPayload is pinned in the footprint"
+                )
+            auth_required = False
+        return AppManifestRenderInput(
+            render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
+            application_id=application.application_id,
+            display_name=application.display_name,
+            version=application.version,
+            description=application.description,
+            default_route=application.default_route,
+            auth_required=auth_required,
+            sources=sources,
         )
-    else:
-        if workflow_payloads:
+
+    if unit.family_kind == "app_ui_route_manifest":
+        application = _one_application()
+        pages: list[RenderInputPage] = []
+        for payload in resolved.values():
+            if isinstance(payload, PagePayload):
+                if not payload.route or not payload.title:
+                    raise AppConfigMaterializationError(
+                        f"page {payload.node_id!r} lacks the route/title facts "
+                        "the route manifest requires"
+                    )
+                pages.append(
+                    RenderInputPage(
+                        page_id=payload.page_id,
+                        route=payload.route,
+                        title=payload.title,
+                    )
+                )
+        return RouteManifestRenderInput(
+            render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
+            default_route=application.default_route,
+            pages=tuple(pages),
+            sources=sources,
+        )
+
+    if unit.family_kind == "app_integrations_config":
+        application = _one_application()
+        integration_payloads = [
+            payload
+            for payload in resolved.values()
+            if isinstance(payload, IntegrationPayload)
+        ]
+        if _family_selected(application, OptionalFamilyKind.INTEGRATIONS):
+            if not integration_payloads:
+                raise AppConfigMaterializationError(
+                    "integrations are selected but no IntegrationPayload is pinned"
+                )
+        elif integration_payloads:
             raise AppConfigMaterializationError(
-                "WorkflowPayloads are pinned while the application declares "
-                "the workflows family absent; contradictory evidence cannot "
+                "IntegrationPayloads are pinned while the application declares "
+                "the integrations family absent; contradictory evidence cannot "
                 "render"
             )
-        # Proven absence: the platform host itself defaults the chat startup
-        # mode to "ask" when config/ai.json declares none
-        # (mozaiksai.hosts.platform.build_shell_config), so this literal is
-        # the runtime own provider-neutral default, not an invented fact.
-        chat_startup_mode = "ask"
+        return IntegrationsConfigRenderInput(
+            render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
+            integrations=tuple(
+                RenderInputIntegration(
+                    integration_id=payload.integration_id,
+                    kind=payload.integration_kind.value,
+                    purpose=payload.purpose,
+                    required_at=payload.required_at.value,
+                    optional=payload.optional,
+                    config_requirements=tuple(
+                        RenderInputConfigRequirement(
+                            name=requirement.name,
+                            value_type=_CONFIG_VALUE_TYPES[requirement.value_kind],
+                            required=requirement.required,
+                        )
+                        for requirement in payload.config_requirements
+                    ),
+                )
+                for payload in integration_payloads
+            ),
+            sources=sources,
+        )
 
-    return ApplicationFamilyRenderInput(
-        render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
-        application_id=application.application_id,
-        display_name=application.display_name,
-        version=application.version,
-        description=application.description,
-        default_route=application.default_route,
-        auth_required=auth_required,
-        pages=tuple(pages),
-        chat_startup_mode=chat_startup_mode,
-        integrations=integrations,
-        sources=tuple(
-            RenderInputSource(node_id=node_id, payload_digest=payload.payload_digest)
-            for node_id, payload in resolved.items()
-        ),
+    if unit.family_kind == "app_secret_references":
+        application = _one_application()
+        integration_payloads = [
+            payload
+            for payload in resolved.values()
+            if isinstance(payload, IntegrationPayload)
+        ]
+        if (
+            _family_selected(application, OptionalFamilyKind.INTEGRATIONS)
+            and not integration_payloads
+        ):
+            raise AppConfigMaterializationError(
+                "integrations are selected but no IntegrationPayload is pinned; "
+                "the names-only secret surface cannot render empty output"
+            )
+        names = {
+            requirement.name
+            for payload in integration_payloads
+            for requirement in payload.config_requirements
+            if requirement.value_kind is IntegrationConfigValueKind.SECRET
+        }
+        return SecretReferencesRenderInput(
+            render_input_schema_version=APP_FAMILY_RENDER_INPUT_VERSION,
+            secret_names=tuple(sorted(names)),
+            sources=sources,
+        )
+
+    raise AppConfigMaterializationError(
+        f"unit {unit.unit_id!r} family {unit.family_kind!r} has no family-local "
+        "render-input projection in this slice"
     )
 
 
@@ -825,7 +834,6 @@ def _materialize_unit(
     unit: FamilyInstancePlan,
     *,
     payload_by_node: Mapping[str, SemanticPayloadBase],
-    app_config_render_input: ApplicationFamilyRenderInput | None,
     app_config_selection: RendererSelection | None,
     preserved_by_unit: Mapping[str, PreservedOpaqueArtifact],
     bundle_outputs: list[MaterializedOutput],
@@ -847,11 +855,10 @@ def _materialize_unit(
                 f"render unit {unit.unit_id!r} must own exactly one composable output"
             )
         if unit.family_kind in APP_CONFIG_FAMILIES:
-            if app_config_render_input is None or app_config_selection is None:
+            if app_config_selection is None:
                 raise MaterializationError(
-                    f"render unit {unit.unit_id!r} requires the application-family "
-                    "render input and resolved renderer selection, which were "
-                    "not constructed"
+                    f"render unit {unit.unit_id!r} requires the resolved "
+                    "app-config renderer selection, which was not constructed"
                 )
             # A renderer selection cannot authorize a family by implication:
             # the unit's family must be explicitly named by the resolved
@@ -861,8 +868,14 @@ def _materialize_unit(
                     f"unit {unit.unit_id!r} family {unit.family_kind!r} is not "
                     "authorized by the resolved app-config renderer selection"
                 )
+            # Lazy family-local projection: only this unit's plan-pinned
+            # sources feed its closed input, so a typed gap in one family
+            # (e.g. app_config) never blocks another family's rendering.
             content = render_app_config_unit(
-                unit=unit, render_input=app_config_render_input
+                unit=unit,
+                render_input=project_app_family_render_input(
+                    unit=unit, payload_by_node=payload_by_node
+                ),
             )
         else:
             content = render_app_ui_page_schema_unit(unit=unit, payload_by_node=payload_by_node)
@@ -935,7 +948,6 @@ def materialize_plan(
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
-    app_config_render_input: ApplicationFamilyRenderInput | None = None
     app_config_selection: RendererSelection | None = None
     if any(
         unit.disposition is PlanDisposition.RENDER
@@ -944,9 +956,6 @@ def materialize_plan(
     ):
         app_config_selection = resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
-        )
-        app_config_render_input = build_app_family_render_input(
-            units=verified_plan.units, payload_by_node=payload_by_node
         )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
 
@@ -960,7 +969,6 @@ def materialize_plan(
         _materialize_unit(
             unit,
             payload_by_node=payload_by_node,
-            app_config_render_input=app_config_render_input,
             app_config_selection=app_config_selection,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
@@ -1034,7 +1042,6 @@ def rematerialize_plan(
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
     )
-    app_config_render_input: ApplicationFamilyRenderInput | None = None
     app_config_selection: RendererSelection | None = None
     if any(
         unit.disposition is PlanDisposition.RENDER
@@ -1043,9 +1050,6 @@ def rematerialize_plan(
     ):
         app_config_selection = resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
-        )
-        app_config_render_input = build_app_family_render_input(
-            units=verified_plan.units, payload_by_node=payload_by_node
         )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
     base_by_unit: dict[str, list[MaterializedOutput]] = {}
@@ -1103,7 +1107,6 @@ def rematerialize_plan(
         _materialize_unit(
             unit,
             payload_by_node=payload_by_node,
-            app_config_render_input=app_config_render_input,
             app_config_selection=app_config_selection,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,

@@ -4,10 +4,15 @@ Extends the accepted representative corpus so the reporting-style application
 explicitly SELECTS auth, one integration, and its workflow, then proves the
 closed application-configuration family set renders canonical bytes:
 
-    app.json, ui/route_manifest.json, config/ai.json,
+    app.json, ui/route_manifest.json,
     config/integrations.yaml, security/secrets.yaml
 
 through the single accepted ``deterministic_app_config_renderer@1`` authority.
+``config/ai.json`` (``app_config``) is deliberately deferred: per-workflow
+``workflow_startup_mode`` is not application-level chat launch authority, and
+the semantic model has no application-level AI-launch facts yet; the family
+stays a typed gap
+(``test_app_config_stays_a_typed_gap_and_never_blocks_the_four_families``).
 
 Families whose facts still lack a typed semantic home remain typed gaps with
 their exact prerequisites recorded here (see
@@ -52,8 +57,8 @@ from mozaiksai.core.semantics.graph import (
     build_semantic_graph_v2,
 )
 from mozaiksai.core.semantics.materialization import (
-    build_app_family_render_input,
     materialize_plan,
+    project_app_family_render_input,
 )
 from mozaiksai.core.semantics.payloads import (
     ApplicationPayload,
@@ -85,7 +90,6 @@ _SELECTED = {
 _RENDERED_PATHS = {
     "app.json",
     "ui/route_manifest.json",
-    "config/ai.json",
     "config/integrations.yaml",
     "security/secrets.yaml",
 }
@@ -468,11 +472,9 @@ def test_route_manifest_bytes_reference_declared_pages_only() -> None:
         assert entry["label"] == pages[entry["path"]].title
 
 
-def test_ai_config_and_integration_and_secret_bytes() -> None:
+def test_integration_and_secret_bytes() -> None:
     files = _bundle_files()
-    ai_document = json.loads(files["config/ai.json"].decode("utf-8"))
-    assert set(ai_document) == {"chat"}
-    assert ai_document["chat"]["chat_startup_mode"] in {"ask", "workflow"}
+    assert "config/ai.json" not in files
 
     integrations = yaml.safe_load(files["config/integrations.yaml"].decode("utf-8"))
     assert list(integrations) == ["integrations"]
@@ -589,7 +591,7 @@ def test_default_route_mutation_affects_manifest_and_routes_only() -> None:
         layout_registry=build_app_layout_registry(()),
     ).files()
     assert changed["ui/route_manifest.json"] != base["ui/route_manifest.json"]
-    for unchanged in ("app.json", "config/ai.json", "config/integrations.yaml", "security/secrets.yaml"):
+    for unchanged in ("app.json", "config/integrations.yaml", "security/secrets.yaml"):
         assert changed[unchanged] == base[unchanged], unchanged
 
 
@@ -606,7 +608,7 @@ def test_integration_secret_mutation_affects_integrations_and_secrets_only() -> 
     ).files()
     assert changed["config/integrations.yaml"] != base["config/integrations.yaml"]
     assert changed["security/secrets.yaml"] != base["security/secrets.yaml"]
-    for unchanged in ("app.json", "config/ai.json", "ui/route_manifest.json"):
+    for unchanged in ("app.json", "ui/route_manifest.json"):
         assert changed[unchanged] == base[unchanged], unchanged
 
 
@@ -619,14 +621,30 @@ def test_renderer_rejects_wrong_family_wrong_binding_and_unknown_template() -> N
     graph, payloads = _extended_fixture()
     plan = _plan(graph, payloads, with_configs=False)
     payload_by_node = {p.node_id: p for p in payloads}
-    render_input = build_app_family_render_input(
-        units=plan.units, payload_by_node=payload_by_node
+    manifest_unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER
+        and u.family_kind == "app_manifest"
+    )
+    render_input = project_app_family_render_input(
+        unit=manifest_unit, payload_by_node=payload_by_node
     )
     page_unit = next(
         u for u in plan.units if u.family_kind == "app_ui_page_schema"
     )
     with pytest.raises(AppConfigMaterializationError, match="not an"):
         render_app_config_unit(unit=page_unit, render_input=render_input)
+    # A family-local input from ANOTHER family's unit is rejected even when
+    # both units are authorized application-configuration units.
+    route_unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER
+        and u.family_kind == "app_ui_route_manifest"
+    )
+    with pytest.raises(AppConfigMaterializationError, match="does not match"):
+        render_app_config_unit(unit=route_unit, render_input=render_input)
 
     from mozaiksai.core.semantics.materialization import MaterializationError
 
@@ -677,6 +695,10 @@ def test_blocked_families_remain_typed_with_exact_prerequisites() -> None:
       ``DataCollectionPayload``.
     - ``config/asset_manifest.json`` (``app_config`` row): assets have
       selection evidence but no typed asset facts.
+    - ``config/ai.json`` (``app_config``): per-workflow
+      ``workflow_startup_mode`` is not application-level chat launch
+      authority. Prerequisite: application-level AI-launch facts
+      (chat startup mode, workflow entry point) with typed semantic homes.
     """
     graph, payloads = _extended_fixture()
     plan = _plan(graph, payloads)
@@ -684,6 +706,8 @@ def test_blocked_families_remain_typed_with_exact_prerequisites() -> None:
     assert "config/subscriptions.yaml" not in rendered
     assert "data/contract.json" not in rendered
     assert "config/asset_manifest.json" not in rendered
+    assert "config/ai.json" not in rendered
+    assert "config/ai.json" in {g.path_template for g in plan.gaps}
     # and they are not silently absent: each is a unit or typed gap elsewhere.
     gap_paths = {g.path_template for g in plan.gaps}
     unit_families = {u.family_kind for u in plan.units}
@@ -833,68 +857,67 @@ def test_semantics_package_import_does_not_load_the_renderer() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _valid_render_input():
+def _valid_render_input(family: str = "app_manifest"):
     graph, payloads = _extended_fixture()
     plan = _plan(graph, payloads, with_configs=False)
     payload_by_node = {p.node_id: p for p in payloads}
-    return plan, payload_by_node, build_app_family_render_input(
-        units=plan.units, payload_by_node=payload_by_node
+    unit = next(
+        u
+        for u in plan.units
+        if u.disposition is PlanDisposition.RENDER and u.family_kind == family
+    )
+    return plan, payload_by_node, unit, project_app_family_render_input(
+        unit=unit, payload_by_node=payload_by_node
     )
 
 
 def test_render_input_is_frozen_and_rejects_undeclared_fields() -> None:
-    _plan_obj, _payloads, render_input = _valid_render_input()
+    _plan_obj, _payloads, _unit, render_input = _valid_render_input()
     with pytest.raises(ValidationError):
         render_input.default_route = "/elsewhere"  # type: ignore[misc]
     document = render_input.model_dump()
     document["arbitrary_metadata"] = {"campaign": "x"}
     with pytest.raises(ValidationError):
         type(render_input).model_validate(document)
-    entry = render_input.integrations[0].model_dump()
+    _p2, _pl2, _u2, integrations_input = _valid_render_input(
+        "app_integrations_config"
+    )
+    entry = integrations_input.integrations[0].model_dump()
     entry["provider_account"] = "acct_123"
     with pytest.raises(ValidationError):
-        type(render_input.integrations[0]).model_validate(entry)
+        type(integrations_input.integrations[0]).model_validate(entry)
 
 
 def test_render_input_normalizes_reordered_equivalent_facts() -> None:
-    plan, payload_by_node, render_input = _valid_render_input()
+    plan, payload_by_node, unit, render_input = _valid_render_input(
+        "app_ui_route_manifest"
+    )
     document = render_input.model_dump()
     document["pages"] = list(reversed(document["pages"]))
-    document["integrations"] = list(reversed(document["integrations"]))
     document["sources"] = list(reversed(document["sources"]))
     reordered = type(render_input).model_validate(document)
     assert reordered == render_input
-    unit = next(
-        u
-        for u in plan.units
-        if u.disposition is PlanDisposition.RENDER
-        and u.family_kind in APP_CONFIG_FAMILIES
-    )
     assert render_app_config_unit(
         unit=unit, render_input=reordered
     ) == render_app_config_unit(unit=unit, render_input=render_input)
 
 
 def test_render_input_rejects_duplicates_and_empty_sources() -> None:
-    _plan_obj, _payloads, render_input = _valid_render_input()
-    document = render_input.model_dump()
+    _plan_obj, _payloads, _unit, route_input = _valid_render_input(
+        "app_ui_route_manifest"
+    )
+    document = route_input.model_dump()
     document["pages"] = document["pages"] + document["pages"][:1]
     with pytest.raises(ValidationError, match="duplicate page routes"):
-        type(render_input).model_validate(document)
-    document = render_input.model_dump()
+        type(route_input).model_validate(document)
+    document = route_input.model_dump()
     document["sources"] = []
     with pytest.raises(ValidationError, match="pins no semantic sources"):
-        type(render_input).model_validate(document)
+        type(route_input).model_validate(document)
 
 
 def test_stale_or_missing_source_digest_fails_closed() -> None:
-    plan, payload_by_node, render_input = _valid_render_input()
-    unit = next(
-        u
-        for u in plan.units
-        if u.disposition is PlanDisposition.RENDER
-        and u.family_kind in APP_CONFIG_FAMILIES
-    )
+    plan, payload_by_node, unit, render_input = _valid_render_input()
     document = render_input.model_dump()
     for source in document["sources"]:
         source["payload_digest"] = "f" * 64
@@ -914,18 +937,18 @@ def test_stale_or_missing_source_digest_fails_closed() -> None:
 
 
 def test_render_input_from_a_different_application_fails_closed() -> None:
-    plan, _payloads, _render_input = _valid_render_input()
+    plan, _payloads, unit, _render_input = _valid_render_input()
     other_graph, other_payloads = _extended_fixture(default_route="/reports")
     other_plan = _plan(other_graph, other_payloads, with_configs=False)
-    other_input = build_app_family_render_input(
-        units=other_plan.units,
-        payload_by_node={p.node_id: p for p in other_payloads},
-    )
-    unit = next(
+    other_unit = next(
         u
-        for u in plan.units
+        for u in other_plan.units
         if u.disposition is PlanDisposition.RENDER
         and u.family_kind == "app_manifest"
+    )
+    other_input = project_app_family_render_input(
+        unit=other_unit,
+        payload_by_node={p.node_id: p for p in other_payloads},
     )
     with pytest.raises(AppConfigMaterializationError, match="pinned payload digest"):
         render_app_config_unit(unit=unit, render_input=other_input)
@@ -993,15 +1016,19 @@ def _materialize_with(binding, *, graph, payloads, plan):
         pytest.param(("app_config",), id="only-app-config"),
         pytest.param(
             tuple(sorted(APP_CONFIG_FAMILIES - {"app_secret_references"})),
-            id="four-of-five",
+            id="three-of-four",
+        ),
+        pytest.param(
+            tuple(sorted(APP_CONFIG_FAMILIES | {"app_config"})),
+            id="four-plus-app-config",
         ),
         pytest.param(
             tuple(sorted(APP_CONFIG_FAMILIES | {"app_subscription_config"})),
-            id="five-plus-subscription",
+            id="four-plus-subscription",
         ),
         pytest.param(
             tuple(sorted(APP_CONFIG_FAMILIES | {"totally_unknown_family"})),
-            id="five-plus-forged",
+            id="four-plus-forged",
         ),
     ],
 )
@@ -1195,7 +1222,8 @@ def test_inactive_conditional_family_is_absent_without_error() -> None:
     )
     files = bundle.files()
     assert "config/integrations.yaml" not in files
-    for expected in ("app.json", "config/ai.json", "ui/route_manifest.json",
+    assert "config/ai.json" not in files
+    for expected in ("app.json", "ui/route_manifest.json",
                      "security/secrets.yaml"):
         assert expected in files, expected
     assert yaml.safe_load(files["security/secrets.yaml"]) == {
@@ -1246,9 +1274,11 @@ def test_output_closure_rejects_extra_and_missing_outputs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Selection honesty: a family whose selection says SELECTED must have its
-# typed facts; missing selected evidence stays a typed gap and contradictory
-# evidence never renders. Codex 2's exact attack is preserved first.
+# Selection honesty and family-local independence. app_config (config/ai.json)
+# is a deferred prerequisite in EVERY workflow scenario: per-workflow
+# workflow_startup_mode is not application-level chat launch authority, and no
+# application-level AI-launch facts exist. Its typed gap must never block the
+# four renderable families, and no chat startup mode is ever inferred.
 # ---------------------------------------------------------------------------
 
 
@@ -1258,107 +1288,101 @@ def _gap_paths(plan, family_kind):
     }
 
 
+def _materialized_files(graph, payloads, plan):
+    return materialize_plan(
+        plan=plan,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=build_app_layout_registry(()),
+    ).files()
+
+
+def _assert_four_families_render_and_ai_json_absent(graph, payloads, plan):
+    assert "config/ai.json" in _gap_paths(plan, "app_config")
+    assert not any(
+        u.family_kind == "app_config" and u.disposition is PlanDisposition.RENDER
+        for u in plan.units
+    )
+    files = _materialized_files(graph, payloads, plan)
+    assert "config/ai.json" not in files
+    for expected in _RENDERED_PATHS:
+        assert expected in files, expected
+    return files
+
+
 def test_workflows_selected_with_zero_payloads_stays_a_typed_gap() -> None:
-    """Codex 2's exact attack, preserved: WORKFLOWS selected, zero
-    WorkflowPayloads. app_config must not be classified complete from an
-    application-only footprint, and config/ai.json must not be emitted with a
-    normalized chat_startup_mode."""
+    """Codex 2 Attack A, preserved: WORKFLOWS selected, zero WorkflowPayloads.
+
+    app_config stays a typed renderer_input_incomplete gap with no
+    config/ai.json unit or bytes — and the four complete application families
+    render anyway: a missing app_config input must not abort them through a
+    globally coupled snapshot."""
     graph, payloads = _extended_fixture(drop_workflow_payload=True)
     plan = _plan(graph, payloads, with_configs=False)
-    render_units = [
-        u
-        for u in plan.units
-        if u.family_kind == "app_config" and u.disposition is PlanDisposition.RENDER
-    ]
-    assert render_units == []
-    assert "config/ai.json" in _gap_paths(plan, "app_config")
-    with pytest.raises(
-        AppConfigMaterializationError, match="workflows are selected but no"
-    ):
-        materialize_plan(
-            plan=plan,
-            graph=graph,
-            payloads=payloads,
-            binding=_binding(graph),
-            layout_registry=build_app_layout_registry(()),
-        )
+    _assert_four_families_render_and_ai_json_absent(graph, payloads, plan)
 
 
-def test_one_complete_workflow_renders_exact_startup_mode() -> None:
-    ask = _bundle_files()
-    assert json.loads(ask["config/ai.json"]) == {
-        "chat": {"chat_startup_mode": "ask"}
-    }
+def test_two_workflows_without_entry_point_render_no_ai_config() -> None:
+    """Codex 2 Attack B, preserved: one agent_driven and one on_demand
+    workflow with no application-level workflow entry point. Previously
+    chat_startup_mode was inferred as "workflow" from per-workflow facts; now
+    nothing is inferred — app_config stays a typed gap, no config/ai.json and
+    no entry_point are emitted, and the four families render."""
     graph, payloads = _extended_fixture(
-        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN
-    )
-    plan = _plan(graph, payloads, with_configs=False)
-    files = materialize_plan(
-        plan=plan,
-        graph=graph,
-        payloads=payloads,
-        binding=_binding(graph),
-        layout_registry=build_app_layout_registry(()),
-    ).files()
-    assert json.loads(files["config/ai.json"]) == {
-        "chat": {"chat_startup_mode": "workflow"}
-    }
-
-
-def test_two_compatible_workflows_render_deterministically() -> None:
-    graph, payloads = _extended_fixture(
-        extra_workflow_startup_mode=WorkflowStartupMode.ON_DEMAND
-    )
-    plan = _plan(graph, payloads, with_configs=False)
-    files = materialize_plan(
-        plan=plan,
-        graph=graph,
-        payloads=payloads,
-        binding=_binding(graph),
-        layout_registry=build_app_layout_registry(()),
-    ).files()
-    assert json.loads(files["config/ai.json"]) == {
-        "chat": {"chat_startup_mode": "ask"}
-    }
-    # One agent-driven among on-demand peers is likewise unambiguous.
-    graph2, payloads2 = _extended_fixture(
         workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN,
         extra_workflow_startup_mode=WorkflowStartupMode.ON_DEMAND,
     )
-    plan2 = _plan(graph2, payloads2, with_configs=False)
-    files2 = materialize_plan(
-        plan=plan2,
-        graph=graph2,
-        payloads=payloads2,
-        binding=_binding(graph2),
-        layout_registry=build_app_layout_registry(()),
-    ).files()
-    assert json.loads(files2["config/ai.json"]) == {
-        "chat": {"chat_startup_mode": "workflow"}
-    }
-
-
-def test_conflicting_agent_driven_workflows_stay_a_typed_gap() -> None:
-    graph, payloads = _extended_fixture(
-        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN,
-        extra_workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN,
-    )
     plan = _plan(graph, payloads, with_configs=False)
-    assert "config/ai.json" in _gap_paths(plan, "app_config")
-    with pytest.raises(AppConfigMaterializationError, match="ambiguous"):
-        materialize_plan(
-            plan=plan,
-            graph=graph,
-            payloads=payloads,
-            binding=_binding(graph),
-            layout_registry=build_app_layout_registry(()),
-        )
+    files = _assert_four_families_render_and_ai_json_absent(graph, payloads, plan)
+    blob = b"".join(files.values())
+    assert b"entry_point" not in blob
+    assert b"chat_startup_mode" not in blob
 
 
-def test_workflow_without_startup_mode_stays_a_typed_gap() -> None:
-    graph, payloads = _extended_fixture(workflow_startup_mode=None)
+@pytest.mark.parametrize(
+    ("kwargs", "case"),
+    [
+        pytest.param({}, "one-complete-workflow", id="one-complete-workflow"),
+        pytest.param(
+            {"workflow_startup_mode": WorkflowStartupMode.AGENT_DRIVEN},
+            "agent-driven",
+            id="one-agent-driven",
+        ),
+        pytest.param(
+            {
+                "workflow_startup_mode": WorkflowStartupMode.AGENT_DRIVEN,
+                "extra_workflow_startup_mode": WorkflowStartupMode.AGENT_DRIVEN,
+            },
+            "two-agent-driven",
+            id="two-agent-driven",
+        ),
+        pytest.param(
+            {"workflow_startup_mode": None},
+            "startup-mode-missing",
+            id="startup-mode-missing",
+        ),
+        pytest.param(
+            {"workflows_selected": False, "drop_workflow_payload": True},
+            "absent-no-payloads",
+            id="absent-no-payloads",
+        ),
+        pytest.param(
+            {"workflows_selected": False},
+            "absent-with-payload",
+            id="absent-with-payload",
+        ),
+    ],
+)
+def test_app_config_stays_a_typed_gap_and_never_blocks_the_four_families(
+    kwargs, case
+) -> None:
+    """Every workflow scenario — complete, ambiguous, missing, absent, or
+    contradictory — leaves app_config a typed gap (no AI-launch authority
+    exists) while the four renderable families materialize independently."""
+    graph, payloads = _extended_fixture(**kwargs)
     plan = _plan(graph, payloads, with_configs=False)
-    assert "config/ai.json" in _gap_paths(plan, "app_config")
+    _assert_four_families_render_and_ai_json_absent(graph, payloads, plan)
 
 
 def test_workflow_node_with_missing_payload_fails_derivation_closed() -> None:
@@ -1376,132 +1400,32 @@ def test_workflow_node_with_missing_payload_fails_derivation_closed() -> None:
         )
 
 
-def test_workflows_absent_with_payload_present_is_a_contradiction() -> None:
-    graph, payloads = _extended_fixture(workflows_selected=False)
-    plan = _plan(graph, payloads, with_configs=False)
-    assert "config/ai.json" in _gap_paths(plan, "app_config")
-    with pytest.raises(AppConfigMaterializationError, match="declares"):
-        materialize_plan(
-            plan=plan,
-            graph=graph,
-            payloads=payloads,
-            binding=_binding(graph),
-            layout_registry=build_app_layout_registry(()),
-        )
-
-
-def test_workflows_absent_with_zero_payloads_renders_runtime_default() -> None:
-    """Semantically proven absence renders the platform host's own default
-    (mozaiksai.hosts.platform.build_shell_config falls back to "ask" when
-    config/ai.json declares no chat startup mode)."""
-    graph, payloads = _extended_fixture(
-        workflows_selected=False, drop_workflow_payload=True
-    )
-    plan = _plan(graph, payloads, with_configs=False)
-    files = materialize_plan(
-        plan=plan,
-        graph=graph,
-        payloads=payloads,
-        binding=_binding(graph),
-        layout_registry=build_app_layout_registry(()),
-    ).files()
-    assert json.loads(files["config/ai.json"]) == {
-        "chat": {"chat_startup_mode": "ask"}
-    }
-
-
-def test_workflow_description_mutation_does_not_change_ai_config_bytes() -> None:
+def test_workflow_mutations_change_none_of_the_four_outputs() -> None:
+    """No retained family consumes workflow facts: startup-mode and
+    description mutations leave all four outputs byte-identical."""
     base = _bundle_files()
-    graph, payloads = _extended_fixture()
-    workflow = next(
-        p for p in payloads if p.payload_kind is SemanticNodeKind.WORKFLOW
-    )
-    mutated = [
-        build_semantic_payload(
-            WorkflowPayload,
-            node_id=p.node_id,
-            payload_version=p.payload_version,
-            scope=_SCOPE,
-            workflow_id=p.workflow_id,
-            description="A different description entirely",
-            startup_mode=p.startup_mode,
-            topology=p.topology,
-        )
-        if p is workflow
-        else p
-        for p in payloads
-    ]
-    nodes = [
-        SemanticNodeV2(
-            node_id=p.node_id, kind=p.payload_kind, payload_ref=semantic_payload_ref(p)
-        )
-        for p in mutated
-    ]
-    edges = list(graph.edges)
-    mutated_graph = build_semantic_graph_v2(
-        graph_id=graph.graph_id,
-        version=graph.version,
-        scope=_SCOPE,
-        nodes=nodes,
-        edges=edges,
-    )
-    plan = _plan(mutated_graph, mutated, with_configs=False)
-    files = materialize_plan(
-        plan=plan,
-        graph=mutated_graph,
-        payloads=mutated,
-        binding=_binding(mutated_graph),
-        layout_registry=build_app_layout_registry(()),
-    ).files()
-    # The description is not consumed by config/ai.json: bytes are unchanged
-    # even though the workflow payload digest (and source footprint) changed.
-    assert files["config/ai.json"] == base["config/ai.json"]
-    assert files["app.json"] == base["app.json"]
-
-
-def test_workflow_startup_mode_mutation_changes_only_ai_config() -> None:
-    base = _bundle_files()
-    graph, payloads = _extended_fixture(
-        workflow_startup_mode=WorkflowStartupMode.AGENT_DRIVEN
-    )
-    plan = _plan(graph, payloads, with_configs=False)
-    files = materialize_plan(
-        plan=plan,
-        graph=graph,
-        payloads=payloads,
-        binding=_binding(graph),
-        layout_registry=build_app_layout_registry(()),
-    ).files()
-    assert files["config/ai.json"] != base["config/ai.json"]
-    for unchanged in (
-        "app.json",
-        "ui/route_manifest.json",
-        "config/integrations.yaml",
-        "security/secrets.yaml",
+    for kwargs in (
+        {"workflow_startup_mode": WorkflowStartupMode.AGENT_DRIVEN},
+        {"extra_workflow_startup_mode": WorkflowStartupMode.ON_DEMAND},
     ):
-        assert files[unchanged] == base[unchanged], unchanged
+        graph, payloads = _extended_fixture(**kwargs)
+        plan = _plan(graph, payloads, with_configs=False)
+        files = _materialized_files(graph, payloads, plan)
+        for path in _RENDERED_PATHS:
+            assert files[path] == base[path], (kwargs, path)
 
 
-def test_forged_render_input_claiming_no_workflow_fails_source_pinning() -> None:
-    plan, payload_by_node, render_input = _valid_render_input()
-    workflow_node_ids = {
-        node_id
-        for node_id, payload in payload_by_node.items()
-        if payload.payload_kind is SemanticNodeKind.WORKFLOW
-    }
-    document = render_input.model_dump()
-    document["chat_startup_mode"] = "ask"
-    document["sources"] = [
-        s for s in document["sources"] if s["node_id"] not in workflow_node_ids
-    ]
-    forged = type(render_input).model_validate(document)
-    ai_unit = next(
-        u
-        for u in plan.units
-        if u.disposition is PlanDisposition.RENDER and u.family_kind == "app_config"
-    )
-    with pytest.raises(AppConfigMaterializationError, match="missing"):
-        render_app_config_unit(unit=ai_unit, render_input=forged)
+def test_renderer_cannot_emit_ai_json_even_for_a_forged_unit() -> None:
+    """Attack: hand the renderer a unit whose plan-owned output claims
+    config/ai.json. No deterministic contract exists for that path in this
+    slice, so rendering fails closed instead of inventing AI-launch bytes."""
+    plan, payload_by_node, unit, render_input = _valid_render_input()
+    forged_output = unit.outputs[0].model_copy(update={"path": "config/ai.json"})
+    forged_unit = unit.model_copy(update={"outputs": (forged_output,)})
+    with pytest.raises(
+        AppConfigMaterializationError, match="no deterministic"
+    ):
+        render_app_config_unit(unit=forged_unit, render_input=render_input)
 
 
 def test_selected_auth_without_payload_stays_a_typed_gap() -> None:
@@ -1529,16 +1453,24 @@ def test_selected_auth_without_payload_stays_a_typed_gap() -> None:
         edges=edges,
     )
     plan = _plan(stripped_graph, without_auth, with_configs=False)
-    for family in (
-        "app_manifest",
-        "app_config",
-        "app_secret_references",
-        "app_ui_route_manifest",
-    ):
+    # app.json consumes authRequired: it gaps. app_config stays its deferred
+    # typed gap. The families that do not consume auth facts remain
+    # independently renderable — family-local completion, no shared gate.
+    for gapped in ("app_manifest", "app_config"):
         assert not any(
-            u.family_kind == family and u.disposition is PlanDisposition.RENDER
+            u.family_kind == gapped and u.disposition is PlanDisposition.RENDER
             for u in plan.units
-        ), family
+        ), gapped
+    for renderable in (
+        "app_ui_route_manifest",
+        "app_integrations_config",
+        "app_secret_references",
+    ):
+        assert any(
+            u.family_kind == renderable
+            and u.disposition is PlanDisposition.RENDER
+            for u in plan.units
+        ), renderable
 
 
 def test_selected_integrations_without_payload_gap_secret_references() -> None:
@@ -1573,6 +1505,13 @@ def test_selected_integrations_without_payload_gap_secret_references() -> None:
             u.family_kind == family and u.disposition is PlanDisposition.RENDER
             for u in plan.units
         ), family
+    # Unrelated families remain independently renderable.
+    for renderable in ("app_manifest", "app_ui_route_manifest"):
+        assert any(
+            u.family_kind == renderable
+            and u.disposition is PlanDisposition.RENDER
+            for u in plan.units
+        ), renderable
 
 
 def test_selected_custom_routes_without_declaration_gap_route_manifest() -> None:
@@ -1584,16 +1523,21 @@ def test_selected_custom_routes_without_declaration_gap_route_manifest() -> None
         for u in plan.units
     )
     assert "ui/route_manifest.json" in _gap_paths(plan, "app_ui_route_manifest")
+    # Integrations and the other families remain independently renderable.
+    for renderable in (
+        "app_manifest",
+        "app_integrations_config",
+        "app_secret_references",
+    ):
+        assert any(
+            u.family_kind == renderable
+            and u.disposition is PlanDisposition.RENDER
+            for u in plan.units
+        ), renderable
 
 
-def test_payload_mutation_after_snapshot_creation_cannot_change_bytes() -> None:
-    plan, payload_by_node, render_input = _valid_render_input()
-    unit = next(
-        u
-        for u in plan.units
-        if u.disposition is PlanDisposition.RENDER
-        and u.family_kind in APP_CONFIG_FAMILIES
-    )
+def test_payload_mutation_after_projection_cannot_change_bytes() -> None:
+    plan, payload_by_node, unit, render_input = _valid_render_input()
     before = render_app_config_unit(unit=unit, render_input=render_input)
     payload_by_node.clear()
     assert render_app_config_unit(unit=unit, render_input=render_input) == before

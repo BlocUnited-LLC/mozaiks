@@ -76,7 +76,6 @@ from mozaiksai.core.semantics.payloads import (
     PagePayload,
     SemanticPayloadBase,
     WorkflowPayload,
-    WorkflowStartupMode,
     parse_semantic_payload,
     validate_semantic_graph_v2_payload_closure,
 )
@@ -1369,36 +1368,22 @@ def derive_compilation_plan(
             # contradictory evidence, which stays a typed gap.
             return not present
 
-        # Auth facts feed app.json's authRequired and the secret-reference
-        # surface; every application-config family shares this gate.
-        if not _facts_honest(OptionalFamilyKind.AUTH, AuthPayload, exactly_one=True):
-            return False
+        # Completion is family-local: each family is gated only by the facts
+        # its own byte contract consumes, so a missing or contradictory input
+        # for one family never blocks another whose closure is complete.
         if row.kind == "app_manifest":
-            return True
+            # app.json consumes application identity/display facts and the
+            # authRequired flag; auth honesty gates only this family.
+            return _facts_honest(
+                OptionalFamilyKind.AUTH, AuthPayload, exactly_one=True
+            )
         if row.kind == "app_config":
-            if row.path_template != "config/ai.json":
-                return False
-            if not _facts_honest(OptionalFamilyKind.WORKFLOWS, WorkflowPayload):
-                return False
-            if _selected(OptionalFamilyKind.WORKFLOWS):
-                workflows = [
-                    payload
-                    for payload in payload_by_node.values()
-                    if isinstance(payload, WorkflowPayload)
-                ]
-                # Startup derivation must be unambiguous: every selected
-                # workflow states its startup mode, and at most one workflow
-                # may claim application startup (agent_driven).
-                if any(workflow.startup_mode is None for workflow in workflows):
-                    return False
-                agent_driven = [
-                    workflow
-                    for workflow in workflows
-                    if workflow.startup_mode is WorkflowStartupMode.AGENT_DRIVEN
-                ]
-                if len(agent_driven) > 1:
-                    return False
-            return True
+            # config/ai.json is deferred: per-workflow startup_mode is not
+            # application-level chat launch authority, and the semantic model
+            # has no application-level AI-launch facts (chat startup mode,
+            # workflow entry point). The family stays a typed gap until that
+            # prerequisite exists — never rendered from inference.
+            return False
         if row.kind == "app_secret_references":
             return _facts_honest(OptionalFamilyKind.INTEGRATIONS, IntegrationPayload)
         if row.kind == "app_integrations_config":

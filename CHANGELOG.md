@@ -16,14 +16,18 @@ This project follows a practical pre-1.0 changelog format:
 
 - **Deterministic application-family rendering (ADR 0007 Slice 5D-0B2A)**: the
   offline semantic compiler can now render canonical application-configuration
-  bytes — `app.json`, `ui/route_manifest.json`, `config/ai.json`,
-  `config/integrations.yaml`, and names-only `security/secrets.yaml` — from
-  accepted semantic facts through a single binding-resolved
-  `deterministic_app_config_renderer@1` authority, under two named byte
-  contracts (`mozaiks.json_decl_bytes.v1`, `mozaiks.yaml_decl_bytes.v1`).
-  Production generation is unchanged: AppGenerator writers remain the
-  authoritative emitters of these paths until the atomic 5D cutover, and
-  guards prove the new renderer is not wired into any production path.
+  bytes for four application-level families — `app.json`,
+  `ui/route_manifest.json`, `config/integrations.yaml`, and names-only
+  `security/secrets.yaml` — from accepted semantic facts through a single
+  binding-resolved `deterministic_app_config_renderer@1` authority with
+  family-local render inputs, under two named byte contracts
+  (`mozaiks.json_decl_bytes.v1`, `mozaiks.yaml_decl_bytes.v1`).
+  `config/ai.json` is explicitly deferred: application-level AI-launch
+  semantics (chat startup mode, workflow entry point) have no typed semantic
+  home yet and are never inferred from per-workflow facts. Production
+  generation is unchanged: AppGenerator writers remain the authoritative
+  emitters of these paths until the atomic 5D cutover, and guards prove the
+  new renderer is not wired into any production path.
 
 ### Fixed
 - **Server-owned session fields and the canonical bundle entry are closed

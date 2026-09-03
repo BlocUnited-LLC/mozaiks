@@ -429,8 +429,7 @@ def test_agent_author_has_no_slice_4c_materialization_path() -> None:
         _materialize_unit(
             unit,
             payload_by_node={},
-            app_config_render_input=None,
-            app_config_selection=None,
+                app_config_selection=None,
             preserved_by_unit={},
             bundle_outputs=[],
             external=[],

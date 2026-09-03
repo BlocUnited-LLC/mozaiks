@@ -6,29 +6,33 @@ whose complete input authority exists on accepted semantic payloads:
 
 - ``app_manifest``            -> ``app.json``
 - ``app_ui_route_manifest``   -> ``ui/route_manifest.json``
-- ``app_config``              -> ``config/ai.json``
 - ``app_integrations_config`` -> ``config/integrations.yaml``
 - ``app_secret_references``   -> ``security/secrets.yaml``
 
-Dependency direction is one-way: the central offline materialization owner
-(``mozaiksai.core.semantics.materialization``) resolves semantic refs,
-validates the graph/plan/binding relationship, and projects the accepted
-payload facts into one closed, immutable :class:`ApplicationFamilyRenderInput`
-snapshot. This module consumes only that snapshot. It imports no semantic
-payload classes, no graph model, and no binding machinery — the snapshot is
-derived data pinned to exact source payload digests, never a second authored
-semantic model.
+``app_config`` (``config/ai.json``) is deliberately NOT renderer-ready in this
+slice: per-workflow ``workflow_startup_mode`` is not application-level chat
+launch authority, and the semantic model has no application-level AI-launch
+facts (chat startup mode, workflow entry point). The family stays a typed
+plan gap until that prerequisite exists; nothing here infers a startup mode
+or entry point.
+
+Each family consumes its own closed, frozen, family-local render input —
+``AppManifestRenderInput``, ``RouteManifestRenderInput``,
+``IntegrationsConfigRenderInput``, ``SecretReferencesRenderInput`` — projected
+by the central offline materialization owner from exactly that unit's
+plan-pinned sources. Missing facts for one family never block another family
+whose own source closure is complete. Dependency direction stays one-way:
+this module imports no semantic payload classes, no graph model, and no
+binding machinery; the inputs are derived data pinned to exact source payload
+digests, never a second authored semantic model.
 
 The renderer is offline substrate: no filesystem, no clocks, no environment,
-no AG2, no AppBuildPlan, no production callers. Families whose facts lack a
-typed semantic home (subscriptions ``default_plan_id`` and assignment-store
-wiring; data-contract collection->module surface ownership) are NOT rendered
-here — they remain typed plan gaps for 5D-0B2B with their prerequisites
-recorded in the slice tests.
+no AG2, no AppBuildPlan, no production callers.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -44,31 +48,29 @@ APP_FAMILY_RENDER_INPUT_VERSION: Literal["mozaiks.app_family_render_input.v1"] =
 )
 
 #: The closed family set this renderer implementation may produce.
+#: ``app_config`` is intentionally excluded: application-level AI-launch
+#: authority does not exist in the semantic model yet.
 APP_CONFIG_FAMILIES: frozenset[str] = frozenset(
     {
         "app_manifest",
         "app_ui_route_manifest",
-        "app_config",
         "app_integrations_config",
         "app_secret_references",
     }
 )
 
-#: Output templates this implementation renders. ``config/asset_manifest.json``
-#: shares the ``app_config`` family kind but has no typed semantic source yet;
-#: rendering it fails closed as an explicit 0B2B boundary.
+#: Output templates this implementation renders. ``config/ai.json`` and
+#: ``config/asset_manifest.json`` are not in this set; rendering them fails
+#: closed as explicit deferred-prerequisite boundaries.
 _RENDERED_TEMPLATES: frozenset[str] = frozenset(
     {
         "app.json",
         "app/app.json",
         "ui/route_manifest.json",
-        "config/ai.json",
         "config/integrations.yaml",
         "security/secrets.yaml",
     }
 )
-
-_CHAT_STARTUP_DEFAULT = "ask"
 
 
 class AppConfigMaterializationError(ValueError):
@@ -76,7 +78,7 @@ class AppConfigMaterializationError(ValueError):
 
 
 class _ClosedRenderInputModel(BaseModel):
-    """Frozen, unknown-field-rejecting base for every snapshot component."""
+    """Frozen, unknown-field-rejecting base for every render-input component."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -115,54 +117,27 @@ class RenderInputIntegration(_ClosedRenderInputModel):
     config_requirements: tuple[RenderInputConfigRequirement, ...]
 
 
-class ApplicationFamilyRenderInput(_ClosedRenderInputModel):
-    """Closed immutable render input for the application-configuration families.
+class _FamilyRenderInputBase(_ClosedRenderInputModel):
+    """Shared identity of every family-local render input.
 
-    Derived data only: the offline materialization owner projects accepted,
-    footprint-pinned payload facts into this snapshot and ties it to the exact
-    source payload digests in ``sources``. Equivalent facts supplied in any
-    order normalize to one canonical snapshot, so identical semantics always
-    produce identical bytes. The model is recursively frozen and rejects every
-    undeclared field — it cannot carry arbitrary metadata, provider state,
-    clocks, or environment.
+    Each input carries only the facts its one family consumes plus the exact
+    source payload digests that produced them. Inputs are normalized to one
+    canonical order so equivalent facts supplied in any order render identical
+    bytes, and they are recursively frozen and closed — no arbitrary metadata,
+    provider state, clocks, or environment can enter.
     """
 
     render_input_schema_version: Literal["mozaiks.app_family_render_input.v1"]
-    application_id: str
-    display_name: str
-    version: str
-    description: str | None
-    default_route: str
-    auth_required: bool
-    pages: tuple[RenderInputPage, ...]
-    #: Application chat startup behavior, resolved by the materialization
-    #: owner only after workflow-selection completeness is proven. A missing
-    #: or contradictory workflow fact never reaches this field: the owner
-    #: fails closed instead of normalizing absence to a mode.
-    chat_startup_mode: Literal["ask", "workflow"]
-    integrations: tuple[RenderInputIntegration, ...]
     sources: tuple[RenderInputSource, ...]
 
     @model_validator(mode="after")
-    def _canonical_order(self) -> ApplicationFamilyRenderInput:
-        pages = tuple(sorted(self.pages, key=lambda p: p.route))
-        routes = [p.route for p in pages]
-        if len(set(routes)) != len(routes):
-            raise ValueError("render input declares duplicate page routes")
-        integrations = tuple(
-            sorted(self.integrations, key=lambda i: i.integration_id)
-        )
-        integration_ids = [i.integration_id for i in integrations]
-        if len(set(integration_ids)) != len(integration_ids):
-            raise ValueError("render input declares duplicate integration ids")
+    def _canonical_sources(self) -> _FamilyRenderInputBase:
         sources = tuple(sorted(self.sources, key=lambda s: s.node_id))
         source_ids = [s.node_id for s in sources]
         if len(set(source_ids)) != len(source_ids):
             raise ValueError("render input declares duplicate source node ids")
         if not sources:
             raise ValueError("render input pins no semantic sources")
-        object.__setattr__(self, "pages", pages)
-        object.__setattr__(self, "integrations", integrations)
         object.__setattr__(self, "sources", sources)
         return self
 
@@ -173,10 +148,78 @@ class ApplicationFamilyRenderInput(_ClosedRenderInputModel):
         return None
 
 
+class AppManifestRenderInput(_FamilyRenderInputBase):
+    """Facts consumed by ``app.json`` only."""
+
+    family: Literal["app_manifest"] = "app_manifest"
+    application_id: str
+    display_name: str
+    version: str
+    description: str | None
+    default_route: str
+    auth_required: bool
+
+
+class RouteManifestRenderInput(_FamilyRenderInputBase):
+    """Facts consumed by ``ui/route_manifest.json`` only."""
+
+    family: Literal["app_ui_route_manifest"] = "app_ui_route_manifest"
+    default_route: str
+    pages: tuple[RenderInputPage, ...]
+
+    @model_validator(mode="after")
+    def _canonical_pages(self) -> RouteManifestRenderInput:
+        pages = tuple(sorted(self.pages, key=lambda p: p.route))
+        routes = [p.route for p in pages]
+        if len(set(routes)) != len(routes):
+            raise ValueError("render input declares duplicate page routes")
+        object.__setattr__(self, "pages", pages)
+        return self
+
+
+class IntegrationsConfigRenderInput(_FamilyRenderInputBase):
+    """Facts consumed by ``config/integrations.yaml`` only."""
+
+    family: Literal["app_integrations_config"] = "app_integrations_config"
+    integrations: tuple[RenderInputIntegration, ...]
+
+    @model_validator(mode="after")
+    def _canonical_integrations(self) -> IntegrationsConfigRenderInput:
+        integrations = tuple(
+            sorted(self.integrations, key=lambda i: i.integration_id)
+        )
+        integration_ids = [i.integration_id for i in integrations]
+        if len(set(integration_ids)) != len(integration_ids):
+            raise ValueError("render input declares duplicate integration ids")
+        object.__setattr__(self, "integrations", integrations)
+        return self
+
+
+class SecretReferencesRenderInput(_FamilyRenderInputBase):
+    """Names-only secret handles consumed by ``security/secrets.yaml``."""
+
+    family: Literal["app_secret_references"] = "app_secret_references"
+    secret_names: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def _canonical_names(self) -> SecretReferencesRenderInput:
+        names = tuple(sorted(set(self.secret_names)))
+        object.__setattr__(self, "secret_names", names)
+        return self
+
+
+AppFamilyRenderInput = (
+    AppManifestRenderInput
+    | RouteManifestRenderInput
+    | IntegrationsConfigRenderInput
+    | SecretReferencesRenderInput
+)
+
+
 def _verify_unit_sources(
-    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+    unit: FamilyInstancePlan, render_input: AppFamilyRenderInput
 ) -> None:
-    """Every unit-pinned source must match the snapshot's exact digest."""
+    """Every unit-pinned source must match the render input's exact digest."""
     for source in unit.sources:
         pinned = render_input.source_digest(source.node_id)
         if pinned is None or pinned != source.payload_digest:
@@ -187,7 +230,7 @@ def _verify_unit_sources(
 
 
 def _app_manifest_document(
-    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+    unit: FamilyInstancePlan, render_input: AppManifestRenderInput
 ) -> dict[str, object]:
     document: dict[str, object] = {
         "appId": render_input.application_id,
@@ -202,7 +245,7 @@ def _app_manifest_document(
 
 
 def _route_manifest_document(
-    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+    unit: FamilyInstancePlan, render_input: RouteManifestRenderInput
 ) -> dict[str, object]:
     entries = [
         {
@@ -220,14 +263,8 @@ def _route_manifest_document(
     return {"pages": entries}
 
 
-def _ai_config_document(
-    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
-) -> dict[str, object]:
-    return {"chat": {"chat_startup_mode": render_input.chat_startup_mode}}
-
-
 def _integrations_document(
-    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+    unit: FamilyInstancePlan, render_input: IntegrationsConfigRenderInput
 ) -> dict[str, object]:
     entries: list[dict[str, object]] = []
     for integration in render_input.integrations:
@@ -252,37 +289,45 @@ def _integrations_document(
 
 
 def _secret_references_document(
-    unit: FamilyInstancePlan, render_input: ApplicationFamilyRenderInput
+    unit: FamilyInstancePlan, render_input: SecretReferencesRenderInput
 ) -> dict[str, object]:
-    names = {
-        requirement.name
-        for integration in render_input.integrations
-        for requirement in integration.config_requirements
-        if requirement.value_type == "secret"
-    }
-    return {"version": 1, "secrets": sorted(names)}
+    return {"version": 1, "secrets": list(render_input.secret_names)}
 
 
-_DOCUMENT_BUILDERS = {
-    "app.json": (_app_manifest_document, json_decl_bytes),
-    "app/app.json": (_app_manifest_document, json_decl_bytes),
-    "ui/route_manifest.json": (_route_manifest_document, json_decl_bytes),
-    "config/ai.json": (_ai_config_document, json_decl_bytes),
-    "config/integrations.yaml": (_integrations_document, yaml_decl_bytes),
-    "security/secrets.yaml": (_secret_references_document, yaml_decl_bytes),
+_DOCUMENT_BUILDERS: dict[
+    str, tuple[str, Callable[..., dict[str, object]], Callable[..., bytes]]
+] = {
+    "app.json": ("app_manifest", _app_manifest_document, json_decl_bytes),
+    "app/app.json": ("app_manifest", _app_manifest_document, json_decl_bytes),
+    "ui/route_manifest.json": (
+        "app_ui_route_manifest",
+        _route_manifest_document,
+        json_decl_bytes,
+    ),
+    "config/integrations.yaml": (
+        "app_integrations_config",
+        _integrations_document,
+        yaml_decl_bytes,
+    ),
+    "security/secrets.yaml": (
+        "app_secret_references",
+        _secret_references_document,
+        yaml_decl_bytes,
+    ),
 }
 
 
 def render_app_config_unit(
     *,
     unit: FamilyInstancePlan,
-    render_input: ApplicationFamilyRenderInput,
+    render_input: AppFamilyRenderInput,
 ) -> bytes:
     """Render one application-configuration unit's canonical bytes.
 
     The unit's plan-owned output path selects the artifact contract; the
-    renderer never chooses paths and never reads state outside the closed
-    render-input snapshot whose sources cover the unit's pinned footprint.
+    renderer never chooses paths, never reads state outside the family-local
+    render input covering the unit's pinned footprint, and rejects an input
+    variant that belongs to a different family.
     """
     if unit.family_kind not in APP_CONFIG_FAMILIES:
         raise AppConfigMaterializationError(
@@ -304,8 +349,13 @@ def render_app_config_unit(
             f"unit {unit.unit_id!r} output {path!r} has no deterministic "
             "application-config contract in this slice"
         )
+    family, build_document, serialize = builder
+    if unit.family_kind != family or render_input.family != family:
+        raise AppConfigMaterializationError(
+            f"unit {unit.unit_id!r} ({unit.family_kind!r}) does not match the "
+            f"{render_input.family!r} render input for output {path!r}"
+        )
     _verify_unit_sources(unit, render_input)
-    build_document, serialize = builder
     return serialize(build_document(unit, render_input))
 
 
@@ -315,10 +365,14 @@ __all__ = [
     "APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION",
     "APP_FAMILY_RENDER_INPUT_VERSION",
     "AppConfigMaterializationError",
-    "ApplicationFamilyRenderInput",
+    "AppFamilyRenderInput",
+    "AppManifestRenderInput",
+    "IntegrationsConfigRenderInput",
     "RenderInputConfigRequirement",
     "RenderInputIntegration",
     "RenderInputPage",
     "RenderInputSource",
+    "RouteManifestRenderInput",
+    "SecretReferencesRenderInput",
     "render_app_config_unit",
 ]
