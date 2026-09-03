@@ -12,6 +12,24 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **Canonical CompilationPlan authority contract (ADR 0007 lane)**: a plan
+  self-digest proves body integrity, not truthful derivation — a caller can
+  mutate any derived plan fact, recompute the digests, and obtain a
+  structurally cold-valid plan. `CompilationPlanAuthorityInputs` is the one
+  strict immutable authority-input document (semantic graph, complete payload
+  closure, canonical layout-registry snapshot, scope selection,
+  structured-output configuration documents), and
+  `validate_compilation_plan_against_authority` re-derives the candidate
+  through the single canonical `derive_compilation_plan` implementation,
+  requires exact execution-authorizing equality, and returns the canonical
+  rederived plan. No proof object, token, or bearer capability exists:
+  possession of nothing establishes validity, serialized authority inputs are
+  never trusted without full rederivation, and brownfield plans without a
+  base-input authority are rejected fail-closed. Consumer wiring is a
+  separate enforcement change.
+
 ### Fixed
 - **A present but invalid `config/subscriptions.yaml` now fails application
   loading instead of silently disabling entitlement enforcement**: AppLoader
