@@ -87,6 +87,7 @@ from mozaiksai.core.semantics.payloads import (
     WorkflowCapabilityPayload,
     WorkflowParticipant,
     WorkflowPayload,
+    WorkflowResultPayload,
     WorkflowStartupMode,
     WorkflowTopology,
     WorkflowTransition,
@@ -551,6 +552,15 @@ def _extended_kind_payloads(
             action_node_id="mozaiks.action.create_report",
         ),
     )
+    payloads[SemanticNodeKind.WORKFLOW_RESULT] = build_semantic_payload(
+        WorkflowResultPayload,
+        node_id="mozaiks.workflow_result.weekly_digest",
+        payload_version=1,
+        scope=scope,
+        result_id="weekly_digest",
+        description="The rendered weekly digest",
+        workflow_capability_node_id="mozaiks.workflow_capability.digest_reporting",
+    )
     return payloads
 
 
@@ -1010,6 +1020,7 @@ def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
         DataAliasPayload: ("alias", "collection", "owner_node_id"),
         WorkflowPayload: ("description", "startup_mode", "topology"),
         WorkflowCapabilityPayload: ("description",),
+        WorkflowResultPayload: ("description",),
         TriggerPayload: ("description", "trigger_kind"),
         PlanPayload: ("title", "prices"),
         ProductPayload: ("title", "description", "prices"),

@@ -16,26 +16,32 @@ This project follows a practical pre-1.0 changelog format:
 - **Typed module↔workflow capability semantics**: the semantic graph now
   models the relationship between deterministic application capabilities
   (modules, actions, events) and agentic capabilities (workflows) as
-  canonical typed identity instead of stringly convention. Two new node
+  canonical typed identity instead of stringly convention. Three new node
   kinds — `workflow_capability` (the application-semantic identity of one
   workflow capability: a stable `capability_id` owned by exactly one
-  workflow) and `workflow_capability_binding` (one directional, typed
-  relationship per node: `consumes_action`,
-  `commits_result_through_action` with a provider-neutral
-  `workflow_result_id`, or `triggered_by_event`) — plus `ModuleActionRef`,
+  workflow), `workflow_capability_binding` (one directional, typed
+  relationship per node: `consumes_action`, `commits_result_through_action`,
+  or `triggered_by_event`), and `workflow_result` (the typed,
+  capability-owned semantic identity of one workflow output — never a
+  provider schema, model class, or AG2 runtime id) — plus `ModuleActionRef`,
   the exact module/action node identity that carries no HTTP path, handler
-  path, or AG2 tool identity. Payload closure rejects references to
-  nonexistent modules/actions/workflows/capabilities/events, actions the
-  named module does not declare, events no module produces, duplicate
-  binding identities, ambiguous duplicate capability ownership, and
-  missing derived traversal edges; generic BINDS/CONSUMES/DECLARES edges
-  are derived from the typed payloads, never authored as free-standing
-  meaning. AG2 Agent/Task/Network identities stay out of the graph —
-  a Mozaiks workflow capability is application semantics; AG2 runtime
-  objects remain execution implementation details. The new semantics are
-  offline contracts: no module_interface.yaml rendering, no layout-registry
-  families, and no production AppGenerator/AgentGenerator wiring in this
-  change.
+  path, or AG2 tool identity. Typed payloads own application meaning; graph
+  edges are derived projections: every action used through `ModuleActionRef`
+  must have exactly one canonical module owner, event-production authority
+  comes from typed `ActionPayload.emits` joined to the EVENT node's canonical
+  taxonomy identity (a bare EMITS edge can never invent production), commit
+  bindings reference a declared `workflow_result` node owned by their own
+  capability (result fan-out is explicit: several commit bindings referencing
+  the same result node), and each capability/binding/result node must
+  participate in exactly its derived edge set — full edge identity,
+  discriminator included — so payload-unbacked edge mutations fail closed.
+  AG2 Agent/Task/Network identities stay out of the graph — a Mozaiks
+  workflow capability is application semantics; AG2 runtime objects remain
+  execution implementation details. The offline projection now records
+  module-manifest action `emits` into the typed `ActionPayload` it already
+  drew EMITS edges from. The new semantics are offline contracts: no
+  module_interface.yaml rendering, no layout-registry families, and no
+  production AppGenerator/AgentGenerator wiring in this change.
 
 
 ### Fixed

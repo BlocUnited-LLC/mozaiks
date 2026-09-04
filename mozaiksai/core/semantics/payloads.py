@@ -291,9 +291,9 @@ class WorkflowCapabilityBindingRole(StrEnum):
 
     - ``consumes_action``: the workflow capability reads/invokes a declared
       module action while reasoning.
-    - ``commits_result_through_action``: exactly one named workflow result is
-      intended to be committed through a declared module action.  The module
-      action remains the only thing that mutates durable state.
+    - ``commits_result_through_action``: exactly one declared WORKFLOW_RESULT
+      node is intended to be committed through a declared module action.  The
+      module action remains the only thing that mutates durable state.
     - ``triggered_by_event``: a module-produced domain event launches the
       workflow capability.
 
@@ -1413,6 +1413,50 @@ class WorkflowCapabilityPayload(SemanticPayloadBase):
         return validate_node_id_grammar(value)
 
 
+class WorkflowResultPayload(SemanticPayloadBase):
+    """The typed application-semantic identity of one workflow result.
+
+    A workflow result is a declared semantic output of exactly one workflow
+    capability — result identity stays local to the capability that produces
+    it, because one workflow may expose several capabilities with different
+    semantic outputs.  ``result_id`` is unique within the owning capability
+    only; two unrelated capabilities may both truthfully produce ``summary``.
+
+    Identity is the node plus capability ownership — never a provider id,
+    model id, Python class, Pydantic/structured-output implementation class,
+    prompt name, or AG2 runtime result id.  Schema compatibility between the
+    workflow output contract and a module action input contract is deferred;
+    this node establishes only what the result IS and who owns it.
+
+    Payload closure requires ``workflow_capability_node_id`` to resolve to a
+    WORKFLOW_CAPABILITY node that is the sole DECLARES owner of this node.
+    """
+
+    payload_kind: Literal[SemanticNodeKind.WORKFLOW_RESULT] = (
+        SemanticNodeKind.WORKFLOW_RESULT
+    )
+    result_id: str
+    description: str | None
+    workflow_capability_node_id: str
+
+    @field_validator("result_id")
+    @classmethod
+    def _result_id(cls, value: str) -> str:
+        return _field_name(value, field_name="result_id")
+
+    @field_validator("description")
+    @classmethod
+    def _description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _text(value, field_name="description")
+
+    @field_validator("workflow_capability_node_id")
+    @classmethod
+    def _capability_node(cls, value: str) -> str:
+        return validate_node_id_grammar(value)
+
+
 class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
     """One typed, directional relationship between a workflow capability and
     a deterministic module surface.
@@ -1427,12 +1471,19 @@ class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
 
     - ``consumes_action`` — requires ``module_action`` only.
     - ``commits_result_through_action`` — requires ``module_action`` and
-      ``workflow_result_id``: the named workflow result is intended for
-      exactly that module action.  ``workflow_result_id`` is a
-      provider-neutral semantic result identity (snake_case) — never a
-      provider schema or model-class name.
-    - ``triggered_by_event`` — requires ``event_node_id`` only; the event
-      must be a module-produced domain event (an EMITS edge into it).
+      ``workflow_result_node_id``: an exact reference to a declared
+      WORKFLOW_RESULT node owned by this binding's own capability.  A free
+      result string can never establish result identity, and a capability
+      can never commit another capability's result.
+    - ``triggered_by_event`` — requires ``event_node_id`` only; closure
+      requires a canonical module-owned action whose typed
+      ``ActionPayload.emits`` truthfully produces the event.
+
+    Result fan-out policy: intentional fan-out is expressed only through
+    multiple explicit ``commits_result_through_action`` binding nodes that
+    all reference the SAME WORKFLOW_RESULT node — one declared result
+    committed through more than one deterministic module action, never a
+    hidden coincidence through repeated strings.
 
     A workflow with no result write simply has no
     ``commits_result_through_action`` binding — truthful absence, no fake
@@ -1446,7 +1497,7 @@ class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
     workflow_capability_node_id: str
     module_action: ModuleActionRef | None = None
     event_node_id: str | None = None
-    workflow_result_id: str | None = None
+    workflow_result_node_id: str | None = None
 
     @field_validator("workflow_capability_node_id")
     @classmethod
@@ -1460,12 +1511,12 @@ class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
             return None
         return validate_node_id_grammar(value)
 
-    @field_validator("workflow_result_id")
+    @field_validator("workflow_result_node_id")
     @classmethod
-    def _result_id(cls, value: str | None) -> str | None:
+    def _result_node(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _field_name(value, field_name="workflow_result_id")
+        return validate_node_id_grammar(value)
 
     @model_validator(mode="after")
     def _role_shape(self) -> WorkflowCapabilityBindingPayload:
@@ -1473,17 +1524,17 @@ class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
             WorkflowCapabilityBindingRole.CONSUMES_ACTION: {
                 "module_action": True,
                 "event_node_id": False,
-                "workflow_result_id": False,
+                "workflow_result_node_id": False,
             },
             WorkflowCapabilityBindingRole.COMMITS_RESULT_THROUGH_ACTION: {
                 "module_action": True,
                 "event_node_id": False,
-                "workflow_result_id": True,
+                "workflow_result_node_id": True,
             },
             WorkflowCapabilityBindingRole.TRIGGERED_BY_EVENT: {
                 "module_action": False,
                 "event_node_id": True,
-                "workflow_result_id": False,
+                "workflow_result_node_id": False,
             },
         }
         for field_name, required in requirements[self.binding_role].items():
@@ -1502,9 +1553,11 @@ class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
     def binding_identity(self) -> tuple[str, ...]:
         """The duplicate-rejection identity: capability, role, and endpoints.
 
-        ``workflow_result_id`` is deliberately excluded — two bindings routing
-        different results into the same action are the same authorized
-        relationship claimed twice, not two relationships.
+        ``workflow_result_node_id`` is part of the identity: committing the
+        same declared result through the same action twice is one relationship
+        claimed twice (rejected), while committing a DIFFERENT declared result
+        through the same action, or the same result through a different action
+        (explicit fan-out), are distinct typed relationships.
         """
         return (
             self.workflow_capability_node_id,
@@ -1512,18 +1565,22 @@ class WorkflowCapabilityBindingPayload(SemanticPayloadBase):
             self.module_action.module_node_id if self.module_action else "",
             self.module_action.action_node_id if self.module_action else "",
             self.event_node_id or "",
+            self.workflow_result_node_id or "",
         )
 
 
 def derive_workflow_capability_binding_edges(
     binding: WorkflowCapabilityBindingPayload,
 ) -> tuple[SemanticEdge, ...]:
-    """The generic traversal edges one binding node derives (option A).
+    """The complete meaning-bearing graph projection of one binding node.
 
     The typed payload is the meaning authority; these generic edges exist for
     graph traversal only and are derived — never authored independently —
     so payload facts and graph edges cannot drift.  Payload closure requires
-    exactly these edges to be present for every binding node.
+    the actual edge set touching every binding node to equal this derived set
+    EXACTLY (full :class:`SemanticEdge` identity including ``discriminator``),
+    so a forged, extra, or discriminator-mutated generic edge can never alter
+    application meaning independently of the payload.
     """
     edges: list[SemanticEdge] = [
         SemanticEdge(
@@ -1553,16 +1610,43 @@ def derive_workflow_capability_binding_edges(
                 target_node_id=binding.module_action.action_node_id,
             )
         )
-    else:
-        edges.append(
-            SemanticEdge(
-                kind=SemanticEdgeKind.BINDS,
-                source_node_id=binding.node_id,
-                target_node_id=binding.module_action.action_node_id,
-                discriminator=binding.workflow_result_id,
-            )
+        return tuple(edges)
+    if binding.workflow_result_node_id is None:  # pragma: no cover - model-validated
+        raise SemanticPayloadError("commit binding lacks workflow_result_node_id")
+    edges.append(
+        SemanticEdge(
+            kind=SemanticEdgeKind.BINDS,
+            source_node_id=binding.node_id,
+            target_node_id=binding.module_action.action_node_id,
+            discriminator=binding.workflow_result_node_id,
         )
+    )
+    edges.append(
+        SemanticEdge(
+            kind=SemanticEdgeKind.CONSUMES,
+            source_node_id=binding.node_id,
+            target_node_id=binding.workflow_result_node_id,
+        )
+    )
     return tuple(edges)
+
+
+def derive_workflow_result_edges(
+    result: WorkflowResultPayload,
+) -> tuple[SemanticEdge, ...]:
+    """The ownership projection of one WORKFLOW_RESULT node.
+
+    The owning capability DECLARES its result; commit bindings referencing the
+    result contribute their own derived CONSUMES edges.  Together those form
+    the exact edge participation payload closure requires for result nodes.
+    """
+    return (
+        SemanticEdge(
+            kind=SemanticEdgeKind.DECLARES,
+            source_node_id=result.workflow_capability_node_id,
+            target_node_id=result.node_id,
+        ),
+    )
 
 
 class PlanPayload(SemanticPayloadBase):
@@ -1713,7 +1797,7 @@ class ArtifactDeclarationPayload(SemanticPayloadBase):
 
 
 SemanticPayload = Annotated[
-    ApplicationPayload | AuthPayload | IntegrationPayload | SurfacePayload | PagePayload | SectionPayload | ModulePayload | ActionPayload | CapabilityPayload | PermissionPayload | EventPayload | ReactionPayload | NotificationPayload | DataCollectionPayload | DataAliasPayload | WorkflowPayload | WorkflowCapabilityPayload | WorkflowCapabilityBindingPayload | TriggerPayload | PlanPayload | ProductPayload | MeterPayload | LimitPayload | DeploymentTargetPayload | ArtifactDeclarationPayload,
+    ApplicationPayload | AuthPayload | IntegrationPayload | SurfacePayload | PagePayload | SectionPayload | ModulePayload | ActionPayload | CapabilityPayload | PermissionPayload | EventPayload | ReactionPayload | NotificationPayload | DataCollectionPayload | DataAliasPayload | WorkflowPayload | WorkflowCapabilityPayload | WorkflowCapabilityBindingPayload | WorkflowResultPayload | TriggerPayload | PlanPayload | ProductPayload | MeterPayload | LimitPayload | DeploymentTargetPayload | ArtifactDeclarationPayload,
     Field(discriminator="payload_kind"),
 ]
 
@@ -1737,6 +1821,7 @@ PAYLOAD_MODEL_BY_KIND: dict[SemanticNodeKind, type[SemanticPayloadBase]] = {
     SemanticNodeKind.WORKFLOW: WorkflowPayload,
     SemanticNodeKind.WORKFLOW_CAPABILITY: WorkflowCapabilityPayload,
     SemanticNodeKind.WORKFLOW_CAPABILITY_BINDING: WorkflowCapabilityBindingPayload,
+    SemanticNodeKind.WORKFLOW_RESULT: WorkflowResultPayload,
     SemanticNodeKind.TRIGGER: TriggerPayload,
     SemanticNodeKind.PLAN: PlanPayload,
     SemanticNodeKind.PRODUCT: ProductPayload,
@@ -1935,6 +2020,82 @@ def validate_semantic_graph_v2_payload_closure(
             )
         return declarers[0]
 
+    def _module_declarers_of(action_node_id: str) -> list[str]:
+        return [
+            declarer
+            for declarer in declares_by_target.get(action_node_id, [])
+            if _kind_of(declarer) is SemanticNodeKind.MODULE
+        ]
+
+    # --- typed event-production authority -----------------------------------
+    # The canonical event identity is the EVENT node's single EVENT-category
+    # taxonomy reference; ``ActionPayload.emits`` entries join through that
+    # identity.  A generic EMITS edge is a projection of the typed relation,
+    # never its origin: an edge an action's typed emits does not back is a
+    # forgery, and a typed emit whose unique event node lacks the projection
+    # is an incomplete graph.
+    event_identities_by_node: dict[str, tuple[str, ...]] = {}
+    for graph_node in verified_graph.nodes:
+        if graph_node.kind is not SemanticNodeKind.EVENT:
+            continue
+        event_identities_by_node[graph_node.node_id] = tuple(
+            reference.identifier
+            for reference in graph_node.taxonomy_references
+            if reference.category is SemanticCategory.EVENT
+        )
+    action_emits_by_node = {
+        payload.node_id: payload.emits
+        for payload in payload_by_node.values()
+        if isinstance(payload, ActionPayload)
+    }
+    emits_edge_keys: set[tuple[str, str]] = set()
+    for graph_edge in verified_graph.edges:
+        if graph_edge.kind is not SemanticEdgeKind.EMITS:
+            continue
+        emits_edge_keys.add((graph_edge.source_node_id, graph_edge.target_node_id))
+        if _kind_of(graph_edge.source_node_id) is not SemanticNodeKind.ACTION:
+            continue
+        emitted_ids = action_emits_by_node.get(graph_edge.source_node_id, ())
+        if not emitted_ids:
+            raise SemanticPayloadError(
+                f"EMITS edge from action {graph_edge.source_node_id!r} is not "
+                f"backed by typed ActionPayload.emits — a generic edge cannot "
+                f"invent event production"
+            )
+        target_identities = event_identities_by_node.get(graph_edge.target_node_id, ())
+        if len(target_identities) > 1:
+            raise SemanticPayloadError(
+                f"event {graph_edge.target_node_id!r} carries multiple canonical "
+                f"event identities"
+            )
+        if len(target_identities) == 1 and target_identities[0] not in emitted_ids:
+            raise SemanticPayloadError(
+                f"EMITS edge from action {graph_edge.source_node_id!r} targets "
+                f"event {graph_edge.target_node_id!r} whose canonical identity "
+                f"{target_identities[0]!r} the action's typed emits does not declare"
+            )
+    event_nodes_by_identity: dict[str, list[str]] = {}
+    for event_node_id, event_identities in event_identities_by_node.items():
+        for event_identity in event_identities:
+            event_nodes_by_identity.setdefault(event_identity, []).append(event_node_id)
+    for action_node_id, emitted_ids in action_emits_by_node.items():
+        for emitted_id in emitted_ids:
+            matching_event_nodes = event_nodes_by_identity.get(emitted_id, [])
+            if len(matching_event_nodes) > 1:
+                raise SemanticPayloadError(
+                    f"canonical event identity {emitted_id!r} is carried by "
+                    f"multiple event nodes"
+                )
+            if (
+                len(matching_event_nodes) == 1
+                and (action_node_id, matching_event_nodes[0]) not in emits_edge_keys
+            ):
+                raise SemanticPayloadError(
+                    f"action {action_node_id!r} declares emitted event "
+                    f"{emitted_id!r} but lacks the required EMITS projection to "
+                    f"{matching_event_nodes[0]!r}"
+                )
+
     seen_capability_ids: dict[str, str] = {}
     for payload in payload_by_node.values():
         if not isinstance(payload, WorkflowCapabilityPayload):
@@ -1960,13 +2121,37 @@ def validate_semantic_graph_v2_payload_closure(
             )
         seen_capability_ids[payload.capability_id] = payload.node_id
 
-    emits_targets = {
-        edge.target_node_id
-        for edge in verified_graph.edges
-        if edge.kind is SemanticEdgeKind.EMITS
-        and _kind_of(edge.source_node_id)
-        in (SemanticNodeKind.MODULE, SemanticNodeKind.ACTION)
-    }
+    result_owner_by_node: dict[str, str] = {}
+    seen_result_ids: dict[tuple[str, str], str] = {}
+    for payload in payload_by_node.values():
+        if not isinstance(payload, WorkflowResultPayload):
+            continue
+        if (
+            _kind_of(payload.workflow_capability_node_id)
+            is not SemanticNodeKind.WORKFLOW_CAPABILITY
+        ):
+            raise SemanticPayloadError(
+                f"workflow result {payload.node_id!r} names a missing or "
+                f"non-capability owner {payload.workflow_capability_node_id!r}"
+            )
+        result_declarer = _require_sole_declarer(
+            payload.node_id, SemanticNodeKind.WORKFLOW_CAPABILITY, "workflow result"
+        )
+        if result_declarer != payload.workflow_capability_node_id:
+            raise SemanticPayloadError(
+                f"workflow result {payload.node_id!r} claims owner "
+                f"{payload.workflow_capability_node_id!r} but is declared by "
+                f"{result_declarer!r}"
+            )
+        result_scope_key = (payload.workflow_capability_node_id, payload.result_id)
+        if result_scope_key in seen_result_ids:
+            raise SemanticPayloadError(
+                f"result_id {payload.result_id!r} is declared twice by capability "
+                f"{payload.workflow_capability_node_id!r}"
+            )
+        seen_result_ids[result_scope_key] = payload.node_id
+        result_owner_by_node[payload.node_id] = payload.workflow_capability_node_id
+
     seen_bindings: set[tuple[str, ...]] = set()
     for payload in payload_by_node.values():
         if not isinstance(payload, WorkflowCapabilityBindingPayload):
@@ -1999,15 +2184,25 @@ def validate_semantic_graph_v2_payload_closure(
                     f"binding {payload.node_id!r} references a missing or "
                     f"non-action node {payload.module_action.action_node_id!r}"
                 )
-            if (
-                SemanticEdgeKind.DECLARES,
-                payload.module_action.module_node_id,
-                payload.module_action.action_node_id,
-            ) not in edge_keys:
+            module_declarers = _module_declarers_of(payload.module_action.action_node_id)
+            if not module_declarers:
                 raise SemanticPayloadError(
                     f"binding {payload.node_id!r} references action "
-                    f"{payload.module_action.action_node_id!r} that module "
-                    f"{payload.module_action.module_node_id!r} does not declare"
+                    f"{payload.module_action.action_node_id!r} that no module "
+                    f"declares"
+                )
+            if len(module_declarers) > 1:
+                raise SemanticPayloadError(
+                    f"binding {payload.node_id!r} references action "
+                    f"{payload.module_action.action_node_id!r} that is "
+                    f"ambiguously owned by multiple modules"
+                )
+            if module_declarers[0] != payload.module_action.module_node_id:
+                raise SemanticPayloadError(
+                    f"binding {payload.node_id!r} references action "
+                    f"{payload.module_action.action_node_id!r} through module "
+                    f"{payload.module_action.module_node_id!r} but its canonical "
+                    f"module owner is {module_declarers[0]!r}"
                 )
         if payload.event_node_id is not None:
             if _kind_of(payload.event_node_id) is not SemanticNodeKind.EVENT:
@@ -2015,10 +2210,51 @@ def validate_semantic_graph_v2_payload_closure(
                     f"binding {payload.node_id!r} references a missing or "
                     f"non-event node {payload.event_node_id!r}"
                 )
-            if payload.event_node_id not in emits_targets:
+            trigger_identities = event_identities_by_node.get(payload.event_node_id, ())
+            if len(trigger_identities) != 1:
                 raise SemanticPayloadError(
                     f"binding {payload.node_id!r} is triggered by event "
-                    f"{payload.event_node_id!r} that no module or action produces"
+                    f"{payload.event_node_id!r} which must carry exactly one "
+                    f"canonical event identity, found {len(trigger_identities)}"
+                )
+            trigger_event_id = trigger_identities[0]
+            canonical_producers: list[str] = []
+            for producer_node_id, emitted_ids in action_emits_by_node.items():
+                if trigger_event_id not in emitted_ids:
+                    continue
+                producer_owners = _module_declarers_of(producer_node_id)
+                if len(producer_owners) > 1:
+                    raise SemanticPayloadError(
+                        f"trigger event {payload.event_node_id!r} is produced by "
+                        f"action {producer_node_id!r} with ambiguous module "
+                        f"ownership"
+                    )
+                if len(producer_owners) == 1:
+                    canonical_producers.append(producer_node_id)
+            if not canonical_producers:
+                raise SemanticPayloadError(
+                    f"binding {payload.node_id!r} is triggered by event "
+                    f"{payload.event_node_id!r} that no canonical module-owned "
+                    f"action produces"
+                )
+        if payload.workflow_result_node_id is not None:
+            if (
+                _kind_of(payload.workflow_result_node_id)
+                is not SemanticNodeKind.WORKFLOW_RESULT
+            ):
+                raise SemanticPayloadError(
+                    f"binding {payload.node_id!r} references a missing or "
+                    f"non-workflow-result node {payload.workflow_result_node_id!r}"
+                )
+            committed_result_owner = result_owner_by_node.get(
+                payload.workflow_result_node_id
+            )
+            if committed_result_owner != payload.workflow_capability_node_id:
+                raise SemanticPayloadError(
+                    f"binding {payload.node_id!r} commits result "
+                    f"{payload.workflow_result_node_id!r} owned by capability "
+                    f"{committed_result_owner!r} — a capability cannot commit "
+                    f"another capability's result"
                 )
         binding_key = payload.binding_identity
         if binding_key in seen_bindings:
@@ -2026,16 +2262,69 @@ def validate_semantic_graph_v2_payload_closure(
                 f"duplicate workflow capability binding identity {binding_key!r}"
             )
         seen_bindings.add(binding_key)
-        for required_edge in derive_workflow_capability_binding_edges(payload):
-            if (
-                required_edge.kind,
-                required_edge.source_node_id,
-                required_edge.target_node_id,
-            ) not in edge_keys:
+
+    # --- exact derived projection ownership ---------------------------------
+    # Workflow-capability semantics nodes participate ONLY in the canonical
+    # derived edges their typed payloads define.  The actual edge set touching
+    # each such node must equal the derived set exactly — full SemanticEdge
+    # identity, discriminator included — so a payload-unbacked edge mutation
+    # can never add, remove, or reshape application meaning.
+    exact_projection_kinds = {
+        SemanticNodeKind.WORKFLOW_CAPABILITY,
+        SemanticNodeKind.WORKFLOW_CAPABILITY_BINDING,
+        SemanticNodeKind.WORKFLOW_RESULT,
+    }
+    expected_participation: dict[str, dict[str, SemanticEdge]] = {
+        node_id: {}
+        for node_id, payload in payload_by_node.items()
+        if getattr(payload, "payload_kind", None) in exact_projection_kinds
+    }
+
+    def _expect_participation(derived_edge: SemanticEdge) -> None:
+        for endpoint in (derived_edge.source_node_id, derived_edge.target_node_id):
+            expected_here = expected_participation.get(endpoint)
+            if expected_here is not None:
+                expected_here[derived_edge.edge_identity] = derived_edge
+
+    for payload in payload_by_node.values():
+        if isinstance(payload, WorkflowCapabilityBindingPayload):
+            for derived_edge in derive_workflow_capability_binding_edges(payload):
+                _expect_participation(derived_edge)
+        elif isinstance(payload, WorkflowResultPayload):
+            for derived_edge in derive_workflow_result_edges(payload):
+                _expect_participation(derived_edge)
+        elif isinstance(payload, WorkflowCapabilityPayload):
+            _expect_participation(
+                SemanticEdge(
+                    kind=SemanticEdgeKind.DECLARES,
+                    source_node_id=payload.workflow_node_id,
+                    target_node_id=payload.node_id,
+                )
+            )
+
+    for graph_edge in verified_graph.edges:
+        for endpoint in (graph_edge.source_node_id, graph_edge.target_node_id):
+            expected_here = expected_participation.get(endpoint)
+            if expected_here is None:
+                continue
+            if graph_edge.edge_identity not in expected_here:
                 raise SemanticPayloadError(
-                    f"binding {payload.node_id!r} lacks its derived "
-                    f"{required_edge.kind.value} edge to "
-                    f"{required_edge.target_node_id!r}"
+                    f"edge {graph_edge.kind.value} "
+                    f"{graph_edge.source_node_id!r} -> "
+                    f"{graph_edge.target_node_id!r} (discriminator "
+                    f"{graph_edge.discriminator!r}) is not part of the canonical "
+                    f"derived projection of {endpoint!r}"
+                )
+    actual_edge_identities = {edge.edge_identity for edge in verified_graph.edges}
+    for projection_node_id, expected_here in expected_participation.items():
+        for derived_edge in expected_here.values():
+            if derived_edge.edge_identity not in actual_edge_identities:
+                raise SemanticPayloadError(
+                    f"node {projection_node_id!r} lacks its derived "
+                    f"{derived_edge.kind.value} edge "
+                    f"{derived_edge.source_node_id!r} -> "
+                    f"{derived_edge.target_node_id!r} (discriminator "
+                    f"{derived_edge.discriminator!r})"
                 )
 
     applications = [
@@ -2141,6 +2430,7 @@ __all__ = [
     "WorkflowCapabilityPayload",
     "WorkflowPayload",
     "WorkflowParticipant",
+    "WorkflowResultPayload",
     "WorkflowStartupMode",
     "WorkflowTopology",
     "WorkflowTransition",
@@ -2148,6 +2438,7 @@ __all__ = [
     "WorkflowTransitionTargetKind",
     "build_semantic_payload",
     "derive_workflow_capability_binding_edges",
+    "derive_workflow_result_edges",
     "parse_semantic_payload",
     "semantic_payload_ref",
     "validate_semantic_graph_v2_payload_closure",

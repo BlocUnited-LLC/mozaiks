@@ -76,6 +76,7 @@ class SemanticNodeKind(StrEnum):
     WORKFLOW = "workflow"
     WORKFLOW_CAPABILITY = "workflow_capability"
     WORKFLOW_CAPABILITY_BINDING = "workflow_capability_binding"
+    WORKFLOW_RESULT = "workflow_result"
     TRIGGER = "trigger"
     PLAN = "plan"
     PRODUCT = "product"
