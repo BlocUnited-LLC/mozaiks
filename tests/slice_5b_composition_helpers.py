@@ -53,6 +53,7 @@ def _plan(
         scope_selection=source.scope_selection,
         registry_schema_version=source.registry_schema_version,
         registry_digest=source.registry_digest,
+        assignment_contracts_digest=source.assignment_contracts_digest,
         units=units,
         gaps=(),
         plan_digest="0" * 64,

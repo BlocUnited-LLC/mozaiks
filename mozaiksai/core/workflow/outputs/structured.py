@@ -41,7 +41,18 @@ TYPE_MAP = {
 
 
 def _build_literal_enum(name: str, values: list[Any]) -> type[Enum]:
-    enum_name = f"{name}Enum_{abs(hash(tuple(values))) % 10000}"
+    # The enum class name enters the compiled model's JSON schema and
+    # therefore canonical structured-output identity. Python hash() is
+    # process-salted, so the name must be content-derived: a bounded prefix
+    # of the sha256 over the exact ordered value content.
+    import hashlib as _hashlib
+    import json as _json
+
+    content = _json.dumps(
+        values, ensure_ascii=False, separators=(",", ":"), default=repr
+    )
+    digest_prefix = _hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    enum_name = f"{name}Enum_{digest_prefix}"
     enum_members = {f"VALUE_{i}": value for i, value in enumerate(values)}
     return Enum(enum_name, enum_members)  # type: ignore[return-value]
 
