@@ -59,6 +59,7 @@ from mozaiksai.core.semantics.payloads import (
     IntegrationRequirementPhase,
     LimitPayload,
     MeterPayload,
+    ModuleActionRef,
     ModulePayload,
     NotificationChannel,
     NotificationPayload,
@@ -81,6 +82,9 @@ from mozaiksai.core.semantics.payloads import (
     TriggerKind,
     TriggerPayload,
     TypedFieldSpec,
+    WorkflowCapabilityBindingPayload,
+    WorkflowCapabilityBindingRole,
+    WorkflowCapabilityPayload,
     WorkflowParticipant,
     WorkflowPayload,
     WorkflowStartupMode,
@@ -514,6 +518,42 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
     }
 
 
+def _extended_kind_payloads(
+    *, scope: ExecutionAccessScopeRef = _SCOPE
+) -> dict[SemanticNodeKind, SemanticPayloadBase]:
+    """Corpus plus the module-workflow binding kinds.
+
+    The shared corpus graph is a pinned golden consumed by the compilation
+    plan and materialization suites, so the binding kinds get full graph
+    closure coverage in tests/test_workflow_capability_semantics.py instead
+    of being appended there; this map keeps per-kind round-trip coverage
+    complete for the whole enum.
+    """
+    payloads = dict(_corpus_payloads(scope=scope))
+    payloads[SemanticNodeKind.WORKFLOW_CAPABILITY] = build_semantic_payload(
+        WorkflowCapabilityPayload,
+        node_id="mozaiks.workflow_capability.digest_reporting",
+        payload_version=1,
+        scope=scope,
+        capability_id="reports.generate_digest",
+        description="User-launchable weekly digest generation",
+        workflow_node_id="mozaiks.workflow.digest",
+    )
+    payloads[SemanticNodeKind.WORKFLOW_CAPABILITY_BINDING] = build_semantic_payload(
+        WorkflowCapabilityBindingPayload,
+        node_id="mozaiks.workflow_capability_binding.digest_reads_reports",
+        payload_version=1,
+        scope=scope,
+        binding_role=WorkflowCapabilityBindingRole.CONSUMES_ACTION,
+        workflow_capability_node_id="mozaiks.workflow_capability.digest_reporting",
+        module_action=ModuleActionRef(
+            module_node_id="mozaiks.module.reports",
+            action_node_id="mozaiks.action.create_report",
+        ),
+    )
+    return payloads
+
+
 def _pricing_section(scope: ExecutionAccessScopeRef = _SCOPE) -> SectionPayload:
     return build_semantic_payload(
         SectionPayload,
@@ -938,7 +978,7 @@ def test_every_node_kind_has_exactly_one_payload_variant() -> None:
 def test_each_kind_round_trips_through_the_discriminated_union(
     kind: SemanticNodeKind,
 ) -> None:
-    payload = _corpus_payloads()[kind]
+    payload = _extended_kind_payloads()[kind]
     parsed = parse_semantic_payload(json.loads(json.dumps(payload.model_dump(mode="json"))))
     assert type(parsed) is PAYLOAD_MODEL_BY_KIND[kind]
     assert parsed == payload
@@ -969,6 +1009,7 @@ def test_truthful_absence_is_explicit_and_distinct_from_empty() -> None:
         DataCollectionPayload: ("description", "fields"),
         DataAliasPayload: ("alias", "collection", "owner_node_id"),
         WorkflowPayload: ("description", "startup_mode", "topology"),
+        WorkflowCapabilityPayload: ("description",),
         TriggerPayload: ("description", "trigger_kind"),
         PlanPayload: ("title", "prices"),
         ProductPayload: ("title", "description", "prices"),

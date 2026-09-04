@@ -12,6 +12,32 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+- **Typed module↔workflow capability semantics**: the semantic graph now
+  models the relationship between deterministic application capabilities
+  (modules, actions, events) and agentic capabilities (workflows) as
+  canonical typed identity instead of stringly convention. Two new node
+  kinds — `workflow_capability` (the application-semantic identity of one
+  workflow capability: a stable `capability_id` owned by exactly one
+  workflow) and `workflow_capability_binding` (one directional, typed
+  relationship per node: `consumes_action`,
+  `commits_result_through_action` with a provider-neutral
+  `workflow_result_id`, or `triggered_by_event`) — plus `ModuleActionRef`,
+  the exact module/action node identity that carries no HTTP path, handler
+  path, or AG2 tool identity. Payload closure rejects references to
+  nonexistent modules/actions/workflows/capabilities/events, actions the
+  named module does not declare, events no module produces, duplicate
+  binding identities, ambiguous duplicate capability ownership, and
+  missing derived traversal edges; generic BINDS/CONSUMES/DECLARES edges
+  are derived from the typed payloads, never authored as free-standing
+  meaning. AG2 Agent/Task/Network identities stay out of the graph —
+  a Mozaiks workflow capability is application semantics; AG2 runtime
+  objects remain execution implementation details. The new semantics are
+  offline contracts: no module_interface.yaml rendering, no layout-registry
+  families, and no production AppGenerator/AgentGenerator wiring in this
+  change.
+
+
 ### Fixed
 
 - **Canonical plan authority is now enforced across execution and durable
