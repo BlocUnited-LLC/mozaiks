@@ -34,6 +34,7 @@ def test_revision_contract_is_closed_required_nullable_and_deterministic() -> No
         "semantic_graph_ref",
         "implementation_binding_ref",
         "compilation_plan_ref",
+        "compilation_plan_authority_ref",
         "composition_ledger_digest",
         "bundle_digest",
         "validation_evidence_digest",
@@ -101,8 +102,9 @@ def test_validation_evidence_cold_closure_and_tampering() -> None:
     evidence = validate_artifact_revision_validation_evidence(
         evidence=fixture["evidence"],
         plan=fixture["plan"],
+        authority_inputs=fixture["authority_inputs"],
         ledger=fixture["bundle"].ledger,
-        assignment_results=(),
+        assignment_results=fixture["assignment_results"],
     )
     assert evidence == fixture["evidence"]
 
@@ -130,8 +132,9 @@ def test_validation_evidence_cold_closure_and_tampering() -> None:
         validate_artifact_revision_validation_evidence(
             evidence=forged,
             plan=fixture["plan"],
+            authority_inputs=fixture["authority_inputs"],
             ledger=fixture["bundle"].ledger,
-            assignment_results=(),
+            assignment_results=fixture["assignment_results"],
         )
 
 
@@ -179,3 +182,19 @@ def test_artifact_revision_ref_resolves_content_not_opaque_placeholder() -> None
     )
     with pytest.raises(ReferenceResolutionError, match="exactly"):
         resolver.resolve_artifact_revision(forged, requesting_scope=revision.scope)
+
+
+def test_revision_model_scope_closure_includes_authority_ref() -> None:
+    """An independently re-digested revision carrying a foreign-scope
+    plan-authority ref must fail model validation directly, before any
+    builder or store is involved."""
+
+    revision = revision_fixture()["revision"]
+    foreign = ExecutionAccessScopeRef(tenant_id="foreign-tenant")
+    document = revision.model_dump(mode="json")
+    document["compilation_plan_authority_ref"]["scope"] = foreign.model_dump(mode="json")
+    document["revision_digest"] = canonical_digest(
+        {key: value for key, value in document.items() if key != "revision_digest"}
+    )
+    with pytest.raises(ValidationError, match="share its execution scope"):
+        ArtifactRevision.model_validate(document)

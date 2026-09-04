@@ -1,358 +1,143 @@
+"""Shared 5C revision fixtures built on canonically derived plans.
+
+Every revision here pins its exact plan-authority document
+(``compilation_plan_authority_ref``) and flows through the canonical
+validation chain: derived plan -> authority validation -> composition ->
+evidence -> revision -> persistence. No synthetic plans, no bearer trust.
+"""
+
 from __future__ import annotations
 
-from pathlib import Path
+import hashlib
 
-import yaml
-
-from mozaiksai.core.runtime.app.layout_registry import ValidatorIdentifier
 from mozaiksai.core.semantics.artifact_revision import (
+    ValidatorReceipt,
     build_artifact_revision,
     build_artifact_revision_validation_evidence,
 )
-from mozaiksai.core.semantics.binding import build_implementation_binding
-from mozaiksai.core.semantics.canonical import canonical_digest
-from mozaiksai.core.semantics.compilation_plan import CompilationPlan, PlanDisposition
 from mozaiksai.core.semantics.composition_ledger import compose_plan_artifacts
-from mozaiksai.core.semantics.graph import build_semantic_graph_v2
-from mozaiksai.core.semantics.materialization import MaterializedBundle
+from mozaiksai.core.semantics.plan_authority import (
+    compilation_plan_authority_ref,
+)
 from mozaiksai.core.semantics.refs import (
     CompilationPlanRef,
     ImplementationBindingRef,
-    PlanUnitRef,
     SemanticGraphRef,
-    SemanticPayloadRef,
 )
-from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
-from mozaiksai.core.workflow.assignment_artifacts import (
-    ValidatorReceipt,
-    build_assignment_artifact_result,
-)
-from mozaiksai.core.workflow.plan_assignment_compiler import (
-    ApprovedAssignmentSpec,
-    ApprovedPlan,
-    compile_approved_plan,
-)
-from mozaiksai.core.workflow.structured_output_contracts import stable_digest
 from tests.slice_5b_composition_helpers import (
+    _binding,
     composition_fixture,
-    empty_assignment_set,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 
+def _receipts(plan, ledger) -> tuple[ValidatorReceipt, ...]:
+    from mozaiksai.core.runtime.app.layout_registry import ValidatorIdentifier
+    from mozaiksai.core.workflow.structured_output_contracts import stable_digest
 
-def revision_fixture() -> dict[str, object]:
-    source = composition_fixture()
-    graph = source["graph"]
-    payloads = source["payloads"]
-    plan = source["base"]
-    resolver = SemanticReferenceResolver()
-    for payload in payloads:
-        resolver.register_semantic_payload(payload)
-    resolver.register_semantic_graph_v2(graph)
-    resolver.register_compilation_plan(plan)
-
-    graph_ref = SemanticGraphRef(
-        subject_id=graph.graph_id,
-        subject_version=graph.version,
-        content_digest=graph.graph_digest,
-        scope=graph.scope,
+    validators = sorted(
+        {
+            unit.validator
+            for unit in plan.units
+            if unit.validator is not ValidatorIdentifier.NONE
+        },
+        key=lambda item: item.value,
     )
-    binding = build_implementation_binding(
-        binding_id="slice-5c-binding",
-        version=1,
-        scope=graph.scope,
-        semantic_graph_ref=graph_ref,
-        capability_pack_selections=(),
-        renderer_selections=(),
-        deployment_profile_selections=(),
-    )
-    resolver.register_implementation_binding(binding)
-    binding_ref = ImplementationBindingRef(
-        subject_id=binding.binding_id,
-        subject_version=binding.version,
-        content_digest=binding.binding_digest,
-        scope=binding.scope,
-    )
-    plan_ref = CompilationPlanRef(
-        subject_id=plan.graph_id,
-        subject_version=plan.graph_version,
-        content_digest=plan.plan_digest,
-        scope=plan.scope,
-    )
-    materialized = MaterializedBundle(
-        plan_digest=plan.plan_digest,
-        outputs=source["base_outputs"],
-        external_handoff_units=(),
-        inapplicable_units=(),
-        unsupplied_preserved_units=(),
-        input_only_units=(),
-        instance_scope_deferred_units=(),
-        gap_count=0,
-    )
-    bundle = compose_plan_artifacts(
-        plan=plan,
-        resolver=resolver,
-        assignments=empty_assignment_set(),
-        assignment_results=(),
-        materialized_bundle=materialized,
-        base_revision_digest=None,
-    )
-    validators = tuple(
-        sorted(
-            {
-                unit.validator
-                for unit in plan.units
-                if unit.validator is not ValidatorIdentifier.NONE
-            },
-            key=lambda item: item.value,
-        )
-    )
-    receipts = tuple(
+    return tuple(
         ValidatorReceipt(
             validator=validator,
-            subject_digest=bundle.ledger.bundle_digest,
+            subject_digest=ledger.bundle_digest,
             passed=True,
             evidence_digest=stable_digest(
                 {
                     "validator": validator.value,
-                    "subject_digest": bundle.ledger.bundle_digest,
+                    "subject_digest": ledger.bundle_digest,
                     "passed": True,
                 }
             ),
         )
         for validator in validators
     )
-    app_id = "corpus-app"
-    evidence = build_artifact_revision_validation_evidence(
-        scope=graph.scope,
-        app_id=app_id,
+
+
+def revision_fixture() -> dict[str, object]:
+    """Canonical genesis revision closure over the derived successor plan."""
+    source = composition_fixture()
+    plan = source["successor"]
+    graph = source["graph"]
+    authority_inputs = source["authority_inputs"]
+    resolver = source["resolver"]
+
+    binding = _binding(graph)
+    resolver.register_implementation_binding(binding)
+
+    composed = compose_plan_artifacts(
         plan=plan,
-        ledger=bundle.ledger,
-        assignment_results=(),
-        bundle_validator_receipts=receipts,
+        authority_inputs=authority_inputs,
+        resolver=resolver,
+        assignments=source["assignments"],
+        assignment_results=(source["result"],),
+        materialized_bundle=source["materialized"],
+        base_revision_digest=None,
     )
+    ledger = composed.ledger
+
+    evidence = build_artifact_revision_validation_evidence(
+        scope=plan.scope,
+        app_id=plan.graph_id,
+        plan=plan,
+        authority_inputs=authority_inputs,
+        ledger=ledger,
+        assignment_results=(source["result"],),
+        bundle_validator_receipts=_receipts(plan, ledger),
+    )
+    authority_ref = compilation_plan_authority_ref(authority_inputs)
     revision = build_artifact_revision(
-        scope=graph.scope,
-        app_id=app_id,
+        scope=plan.scope,
+        app_id=plan.graph_id,
         parent_revision_ref=None,
-        semantic_graph_ref=graph_ref,
-        implementation_binding_ref=binding_ref,
-        compilation_plan_ref=plan_ref,
-        composition_ledger_digest=bundle.ledger.ledger_digest,
-        bundle_digest=bundle.ledger.bundle_digest,
+        semantic_graph_ref=SemanticGraphRef(
+            subject_id=graph.graph_id,
+            subject_version=graph.version,
+            content_digest=graph.graph_digest,
+            scope=graph.scope,
+        ),
+        implementation_binding_ref=ImplementationBindingRef(
+            subject_id=binding.binding_id,
+            subject_version=binding.version,
+            content_digest=binding.binding_digest,
+            scope=binding.scope,
+        ),
+        compilation_plan_ref=CompilationPlanRef(
+            subject_id=plan.graph_id,
+            subject_version=plan.graph_version,
+            content_digest=plan.plan_digest,
+            scope=plan.scope,
+        ),
+        compilation_plan_authority_ref=authority_ref,
+        composition_ledger_digest=ledger.ledger_digest,
+        bundle_digest=ledger.bundle_digest,
         validation_evidence_digest=evidence.evidence_digest,
     )
     return {
-        "app_id": app_id,
-        "graph": graph,
+        **source,
         "plan": plan,
         "binding": binding,
-        "resolver": resolver,
-        "bundle": bundle,
+        "bundle": composed,
+        "ledger": ledger,
         "evidence": evidence,
         "revision": revision,
-        "receipts": receipts,
+        "authority_ref": authority_ref,
+        "assignment_results": (source["result"],),
+        "app_id": plan.graph_id,
+        "receipts": _receipts(plan, ledger),
     }
 
 
 def executable_revision_fixture() -> dict[str, object]:
-    """Genesis closure retaining the accepted 5B agent + renderer loader proof."""
-
-    source = composition_fixture()
-    source_graph = source["graph"]
-    payloads = source["payloads"]
-    graph = build_semantic_graph_v2(
-        graph_id=source_graph.graph_id,
-        version=2,
-        scope=source_graph.scope,
-        nodes=source_graph.nodes,
-        edges=source_graph.edges,
-        namespace_grants=source_graph.namespace_grants,
-    )
-    source_plan = source["successor"]
-    candidate = CompilationPlan.model_construct(
-        schema_version=source_plan.schema_version,
-        graph_id=graph.graph_id,
-        graph_version=graph.version,
-        scope=graph.scope,
-        graph_digest=graph.graph_digest,
-        scope_selection=source_plan.scope_selection,
-        registry_schema_version=source_plan.registry_schema_version,
-        registry_digest=source_plan.registry_digest,
-        assignment_contracts_digest=source_plan.assignment_contracts_digest,
-        units=source_plan.units,
-        gaps=(),
-        plan_digest="0" * 64,
-    )
-    plan_payload = candidate.canonical_payload(include_digest=False)
-    plan_payload["plan_digest"] = canonical_digest(plan_payload)
-    plan = CompilationPlan.model_validate(plan_payload)
-
-    resolver = SemanticReferenceResolver()
-    for payload in payloads:
-        resolver.register_semantic_payload(payload)
-    resolver.register_semantic_graph_v2(graph)
-    resolver.register_compilation_plan(plan)
-    graph_ref = SemanticGraphRef(
-        subject_id=graph.graph_id,
-        subject_version=graph.version,
-        content_digest=graph.graph_digest,
-        scope=graph.scope,
-    )
-    binding = build_implementation_binding(
-        binding_id="slice-5c-executable-binding",
-        version=1,
-        scope=graph.scope,
-        semantic_graph_ref=graph_ref,
-        capability_pack_selections=(),
-        renderer_selections=(),
-        deployment_profile_selections=(),
-    )
-    resolver.register_implementation_binding(binding)
-    binding_ref = ImplementationBindingRef(
-        subject_id=binding.binding_id,
-        subject_version=binding.version,
-        content_digest=binding.binding_digest,
-        scope=binding.scope,
-    )
-    plan_ref = CompilationPlanRef(
-        subject_id=plan.graph_id,
-        subject_version=plan.graph_version,
-        content_digest=plan.plan_digest,
-        scope=plan.scope,
-    )
-
-    agent = next(unit for unit in plan.units if unit.disposition is PlanDisposition.AGENT_AUTHOR)
-    payload_by_id = {payload.node_id: payload for payload in payloads}
-    dependency_refs = tuple(
-        SemanticPayloadRef(
-            node_id=item.node_id,
-            payload_kind=payload_by_id[item.node_id].payload_kind.value,
-            payload_version=payload_by_id[item.node_id].payload_version,
-            content_digest=item.payload_digest,
-            scope=plan.scope,
-        )
-        for item in agent.sources
-    )
-    approved = ApprovedPlan(
-        assignments=(
-            ApprovedAssignmentSpec(
-                plan_unit_ref=PlanUnitRef(
-                    compilation_plan_ref=plan_ref,
-                    unit_id=agent.unit_id,
-                    unit_digest=agent.unit_digest,
-                ),
-                assignment_kind=agent.assignment_kind,
-                dependency_context_refs=dependency_refs,
-                required_structured_output_ref=agent.required_structured_output_ref,
-                required_validators=(agent.validator,),
-                assignment_retry_limit=2,
-                base_revision_digest=None,
-            ),
-        )
-    )
-    structured = yaml.safe_load(
-        (ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(
-            encoding="utf-8"
-        )
-    )
-    assignments = compile_approved_plan(
-        approved,
-        resolver=resolver,
-        structured_output_configs={"AppGenerator": structured},
-    )
-    result = build_assignment_artifact_result(
-        assignment=assignments.ordered_assignments[0],
-        structured_output={
-            "assignment_kind": "module_helper_implementation",
-            "module_id": "reports",
-            "helper_id": "report_hook",
-            "helper_source": "def report_hook():\n    return None\n",
-        },
-        artifacts={
-            "modules/reports/backend/report_hook.py": "def report_hook():\n    return None\n"
-        },
-        structured_output_configs={"AppGenerator": structured},
-        validator_runner=lambda _validator, files: bool(files),
-    )
-    materialized_source = source["materialized"]
-    materialized = MaterializedBundle(
-        plan_digest=plan.plan_digest,
-        outputs=(*materialized_source.outputs, source["base_outputs"][0]),
-        external_handoff_units=materialized_source.external_handoff_units,
-        inapplicable_units=materialized_source.inapplicable_units,
-        unsupplied_preserved_units=(),
-        input_only_units=(),
-        instance_scope_deferred_units=materialized_source.instance_scope_deferred_units,
-        gap_count=0,
-    )
-    bundle = compose_plan_artifacts(
-        plan=plan,
-        resolver=resolver,
-        assignments=assignments,
-        assignment_results=(result,),
-        materialized_bundle=materialized,
-        base_revision_digest=None,
-    )
-    validators = tuple(
-        sorted(
-            {
-                unit.validator
-                for unit in plan.units
-                if unit.validator is not ValidatorIdentifier.NONE
-            },
-            key=lambda item: item.value,
-        )
-    )
-    receipts = tuple(
-        ValidatorReceipt(
-            validator=validator,
-            subject_digest=bundle.ledger.bundle_digest,
-            passed=True,
-            evidence_digest=stable_digest(
-                {
-                    "validator": validator.value,
-                    "subject_digest": bundle.ledger.bundle_digest,
-                    "passed": True,
-                }
-            ),
-        )
-        for validator in validators
-    )
-    evidence = build_artifact_revision_validation_evidence(
-        scope=graph.scope,
-        app_id="slice-5c-golden",
-        plan=plan,
-        ledger=bundle.ledger,
-        assignment_results=(result,),
-        bundle_validator_receipts=receipts,
-    )
-    revision = build_artifact_revision(
-        scope=graph.scope,
-        app_id="slice-5c-golden",
-        parent_revision_ref=None,
-        semantic_graph_ref=graph_ref,
-        implementation_binding_ref=binding_ref,
-        compilation_plan_ref=plan_ref,
-        composition_ledger_digest=bundle.ledger.ledger_digest,
-        bundle_digest=bundle.ledger.bundle_digest,
-        validation_evidence_digest=evidence.evidence_digest,
-    )
-    return {
-        "app_id": "slice-5c-golden",
-        "graph": graph,
-        "payloads": payloads,
-        "plan": plan,
-        "binding": binding,
-        "resolver": resolver,
-        "assignments": assignments,
-        "assignment_results": (result,),
-        "bundle": bundle,
-        "evidence": evidence,
-        "revision": revision,
-        "receipts": receipts,
-    }
+    """Alias retained for suites exercising the agent-authored closure —
+    the canonical fixture already carries an executable assignment."""
+    return dict(revision_fixture())
 
 
-__all__ = ["executable_revision_fixture", "revision_fixture"]
+def content_digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()

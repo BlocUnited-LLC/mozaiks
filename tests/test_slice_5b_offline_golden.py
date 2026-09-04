@@ -11,14 +11,12 @@ def test_offline_executable_artifact_composition_golden(tmp_path: Path) -> None:
     fixture = composition_fixture()
     composed = compose_plan_artifacts(
         plan=fixture["successor"],
+        authority_inputs=fixture["authority_inputs"],
         resolver=fixture["resolver"],
         assignments=fixture["assignments"],
         assignment_results=(fixture["result"],),
         materialized_bundle=fixture["materialized"],
-        base_revision_digest=fixture["base_revision_digest"],
-        base_plan=fixture["base"],
-        base_outputs=fixture["base_outputs"],
-        regeneration_closure=fixture["closure"],
+        base_revision_digest=None,
     )
 
     app_files = composed.files()

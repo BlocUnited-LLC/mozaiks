@@ -29,6 +29,12 @@ from mozaiksai.core.semantics.composition_ledger import (
     CompositionLedger,
 )
 from mozaiksai.core.semantics.graph import SemanticGraph, SemanticGraphV2
+from mozaiksai.core.semantics.plan_authority import (
+    CompilationPlanAuthorityInputs,
+    PlanAuthorityError,
+    compilation_plan_authority_digest,
+    validate_compilation_plan_against_authority,
+)
 from mozaiksai.core.semantics.refs import (
     ArtifactRevisionRef,
     CompilationPlanRef,
@@ -46,6 +52,7 @@ _EVIDENCE = "ArtifactRevisionEvidenceV1"
 _ASSIGNMENT_RESULTS = "AssignmentArtifactResultsV1"
 _LEDGERS = "CompositionLedgersV1"
 _PUBLICATIONS = "ApplicationPublicationsV1"
+_PLAN_AUTHORITY_INPUTS = "CompilationPlanAuthorityInputsV1"
 
 
 def _address_key(item: AccountedArtifact) -> tuple[str, tuple[tuple[str, str], ...], str]:
@@ -159,6 +166,12 @@ class ArtifactRevisionStore:
                 unique=True,
             )
             await self._ensure_index(
+                database[_PLAN_AUTHORITY_INPUTS],
+                (("scope_key", 1), ("app_id", 1), ("authority_digest", 1)),
+                name="plan_authority_inputs_scope_app_digest",
+                unique=True,
+            )
+            await self._ensure_index(
                 database[_PUBLICATIONS],
                 (("scope_key", 1), ("app_id", 1)),
                 name="application_publication_scope_app",
@@ -196,15 +209,30 @@ class ArtifactRevisionStore:
         assignment_results: Sequence[AssignmentArtifactResult],
         evidence: ArtifactRevisionValidationEvidence,
         revision: ArtifactRevision,
+        authority_inputs: CompilationPlanAuthorityInputs,
     ) -> ArtifactRevisionRef:
-        """Persist exact bytes and immutable documents, then cold-verify the closure."""
+        """Persist exact bytes and immutable documents, then cold-verify the closure.
+
+        Canonical plan authority is validated before any blob, result,
+        ledger, evidence, or revision write: the revision's pinned authority
+        ref must match the supplied immutable authority document, and the
+        stored plan must equal its canonical rederivation from it. The
+        authority document itself is persisted content-addressed so every
+        fresh process can repeat the rederivation.
+        """
 
         verified_revision = ArtifactRevision.model_validate(revision.model_dump(mode="json"))
-        plan, ledger, verified_results = self._validate_candidate_closure(
+        verified_authority = self._verify_authority_binding(
+            verified_revision, authority_inputs
+        )
+        canonical_plan = self._rederive_canonical_plan(verified_revision, verified_authority)
+        ledger, verified_results = self._validate_candidate_closure(
             bundle=bundle,
             assignment_results=assignment_results,
             evidence=evidence,
             revision=verified_revision,
+            authority_inputs=verified_authority,
+            canonical_plan=canonical_plan,
         )
 
         for artifact in bundle.artifacts:
@@ -213,6 +241,15 @@ class ArtifactRevisionStore:
             )
 
         scope_key = _scope_key(verified_revision.scope)
+        await self._put_immutable(
+            collection_name=_PLAN_AUTHORITY_INPUTS,
+            scope=verified_revision.scope,
+            scope_key=scope_key,
+            app_id=verified_revision.app_id,
+            digest_field="authority_digest",
+            digest=verified_revision.compilation_plan_authority_ref.authority_digest,
+            document=verified_authority.model_dump(mode="json"),
+        )
         for result in verified_results:
             await self._put_immutable(
                 collection_name=_ASSIGNMENT_RESULTS,
@@ -250,7 +287,6 @@ class ArtifactRevisionStore:
             digest=verified_revision.revision_digest,
             document=verified_revision.model_dump(mode="json"),
         )
-        del plan
         await self.resolve_revision(verified_revision.ref, requesting_scope=verified_revision.scope)
         return cast(ArtifactRevisionRef, verified_revision.ref)
 
@@ -283,6 +319,59 @@ class ArtifactRevisionStore:
                     f"immutable {collection_name} identity resolved to different content"
                 ) from None
 
+    def _verify_authority_binding(
+        self,
+        revision: ArtifactRevision,
+        authority_inputs: CompilationPlanAuthorityInputs,
+    ) -> CompilationPlanAuthorityInputs:
+        """The revision's pinned authority ref must name this exact document."""
+        if authority_inputs is None:
+            raise RevisionIntegrityError(
+                "canonical plan authority inputs are required"
+            )
+        try:
+            verified = CompilationPlanAuthorityInputs.model_validate(
+                authority_inputs.model_dump(mode="json")
+            )
+        except (TypeError, ValueError) as exc:
+            raise RevisionIntegrityError(
+                f"authority inputs failed cold validation: {exc}"
+            ) from exc
+        digest = compilation_plan_authority_digest(verified)
+        pinned = revision.compilation_plan_authority_ref
+        if pinned.authority_digest != digest:
+            raise RevisionIntegrityError(
+                "revision pins a different plan-authority document"
+            )
+        if pinned.scope != revision.scope:
+            raise RevisionIntegrityError(
+                "plan-authority reference crosses execution scope"
+            )
+        return verified
+
+    def _rederive_canonical_plan(
+        self,
+        revision: ArtifactRevision,
+        authority_inputs: CompilationPlanAuthorityInputs,
+    ) -> CompilationPlan:
+        """Resolve the pinned plan and immediately repeat canonical rederivation.
+
+        This runs before any dependent closure document, assignment result,
+        parent revision, or content blob is read or interpreted: ledger and
+        evidence interpretation must never precede canonical plan authority.
+        """
+
+        plan = self._resolve_semantic_authority(revision)
+        if _plan_ref(plan) != revision.compilation_plan_ref:
+            raise RevisionIntegrityError("resolved CompilationPlan identity mismatch")
+        try:
+            return validate_compilation_plan_against_authority(plan, authority_inputs)
+        except PlanAuthorityError as exc:
+            raise RevisionIntegrityError(
+                f"stored CompilationPlan failed canonical authority "
+                f"rederivation ({exc.category.value}): {exc}"
+            ) from exc
+
     def _validate_candidate_closure(
         self,
         *,
@@ -290,8 +379,9 @@ class ArtifactRevisionStore:
         assignment_results: Sequence[AssignmentArtifactResult],
         evidence: ArtifactRevisionValidationEvidence,
         revision: ArtifactRevision,
+        authority_inputs: CompilationPlanAuthorityInputs,
+        canonical_plan: CompilationPlan,
     ) -> tuple[
-        CompilationPlan,
         CompositionLedger,
         tuple[AssignmentArtifactResult, ...],
     ]:
@@ -307,16 +397,14 @@ class ArtifactRevisionStore:
         if bundle.plan_digest != revision.compilation_plan_ref.content_digest:
             raise RevisionIntegrityError("canonical bundle belongs to another CompilationPlan")
 
-        plan = self._resolve_semantic_authority(revision)
-        if _plan_ref(plan) != revision.compilation_plan_ref:
-            raise RevisionIntegrityError("resolved CompilationPlan identity mismatch")
         verified_results = tuple(
             AssignmentArtifactResult.model_validate(item.model_dump(mode="json"))
             for item in assignment_results
         )
-        validate_artifact_revision_validation_evidence(
+        self._validate_evidence_closure(
             evidence=evidence,
-            plan=plan,
+            canonical_plan=canonical_plan,
+            authority_inputs=authority_inputs,
             ledger=ledger,
             assignment_results=verified_results,
         )
@@ -353,7 +441,36 @@ class ArtifactRevisionStore:
                     raise RevisionIntegrityError(
                         "canonical bundle bytes do not match ledger unit provenance"
                     )
-        return plan, ledger, verified_results
+        return ledger, verified_results
+
+    def _validate_evidence_closure(
+        self,
+        *,
+        evidence: ArtifactRevisionValidationEvidence,
+        canonical_plan: CompilationPlan,
+        authority_inputs: CompilationPlanAuthorityInputs,
+        ledger: CompositionLedger,
+        assignment_results: Sequence[AssignmentArtifactResult],
+    ) -> None:
+        """Evidence verification failures become the store's typed error family."""
+
+        try:
+            validate_artifact_revision_validation_evidence(
+                evidence=evidence,
+                plan=canonical_plan,
+                authority_inputs=authority_inputs,
+                ledger=ledger,
+                assignment_results=assignment_results,
+            )
+        except PlanAuthorityError as exc:
+            raise RevisionIntegrityError(
+                f"validation evidence failed canonical plan authority "
+                f"({exc.category.value}): {exc}"
+            ) from exc
+        except ValueError as exc:
+            raise RevisionIntegrityError(
+                f"validation evidence failed closure verification: {exc}"
+            ) from exc
 
     def _resolve_semantic_authority(self, revision: ArtifactRevision) -> CompilationPlan:
         try:
@@ -440,7 +557,29 @@ class ArtifactRevisionStore:
             ) from exc
         if revision.ref != verified_ref:
             raise RevisionIntegrityError("stored ArtifactRevision does not match its ref")
-        plan = self._resolve_semantic_authority(revision)
+        # Every fresh process repeats canonical rederivation: read the exact
+        # persisted authority document the revision pins, cold-validate it,
+        # and require its digest to match the pinned ref before any trust.
+        authority_document = await self._get_document(
+            collection_name=_PLAN_AUTHORITY_INPUTS,
+            scope=revision.scope,
+            app_id=revision.app_id,
+            digest_field="authority_digest",
+            digest=revision.compilation_plan_authority_ref.authority_digest,
+        )
+        try:
+            stored_authority = CompilationPlanAuthorityInputs.model_validate(
+                dict(authority_document)
+            )
+        except (TypeError, ValueError) as exc:
+            raise RevisionIntegrityError(
+                f"stored authority inputs failed cold validation: {exc}"
+            ) from exc
+        authority_inputs = self._verify_authority_binding(revision, stored_authority)
+        canonical_plan = self._rederive_canonical_plan(revision, authority_inputs)
+        # Canonical plan authority holds from here on. Only now may dependent
+        # closure documents (ledger, evidence, assignment results), the parent
+        # lineage, and content blobs be read or interpreted.
 
         ledger_document = await self._get_document(
             collection_name=_LEDGERS,
@@ -483,9 +622,10 @@ class ArtifactRevisionStore:
                 raise RevisionIntegrityError(
                     f"stored assignment result failed cold validation: {exc}"
                 ) from exc
-        validate_artifact_revision_validation_evidence(
+        self._validate_evidence_closure(
             evidence=evidence,
-            plan=plan,
+            canonical_plan=canonical_plan,
+            authority_inputs=authority_inputs,
             ledger=ledger,
             assignment_results=results,
         )
@@ -526,7 +666,7 @@ class ArtifactRevisionStore:
                 )
             )
         bundle = CanonicalComposedBundle(
-            plan_digest=plan.plan_digest,
+            plan_digest=canonical_plan.plan_digest,
             artifacts=tuple(artifacts),
             ledger=ledger,
         )
@@ -535,6 +675,8 @@ class ArtifactRevisionStore:
             assignment_results=results,
             evidence=evidence,
             revision=revision,
+            authority_inputs=authority_inputs,
+            canonical_plan=canonical_plan,
         )
         return revision, bundle
 

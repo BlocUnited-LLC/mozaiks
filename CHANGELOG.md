@@ -12,6 +12,43 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Canonical plan authority is now enforced across execution and durable
+  revision closure (ADR 0007 lane)**: assignment compilation
+  (`compile_approved_plan`), composition (`compose_plan_artifacts`, including
+  the base plan in refinement), revision persistence, cold
+  resolution/restoration, promotion, and CURRENT resolution all require the
+  exact immutable `CompilationPlanAuthorityInputs` and canonically rederive
+  the plan before any authority is exercised — self-digests, refs, and
+  ledger digest chains prove integrity and identity only, never truthful
+  derivation. `ArtifactRevision` now pins a content-addressed
+  `compilation_plan_authority_ref` as part of immutable revision identity,
+  and the authority document is persisted content-addressed
+  (`CompilationPlanAuthorityInputsV1`) so every fresh process repeats the
+  rederivation. Plans carrying brownfield content (`preserve_unowned` /
+  `reuse_from_base`) fail closed with the typed `base_authority_missing`
+  category until the immutable base-input authority contract exists; the
+  former synthetic 5B/5C fixtures that composed fabricated preserved bytes
+  are replaced by canonically derived fixtures. Plans also no longer emit
+  the former unconditional "registry" renderer-resolution pseudo-gap, which
+  made the composition zero-gap contract unsatisfiable by construction.
+  Canonical authority additionally governs every downstream dataflow: after
+  rederivation, all execution-authorizing plan-unit facts (dispositions,
+  kinds, owned paths, validators, structured-output refs, sources,
+  dependencies, identity bindings) come only from the canonical rederived
+  plan — never from a subsequent resolver lookup, so a hostile resolver can
+  no longer substitute unit content into compiled assignments or
+  composition. Validation-evidence construction and verification now also
+  require the canonical authority inputs (a re-digested plan whose
+  validators were rewritten can no longer produce or bless evidence, and
+  ledger unit entries must mirror the canonical units exactly), the
+  `ArtifactRevision` model itself scope-closes its plan-authority reference,
+  cold resolution validates authority before reading any dependent closure
+  document, parent revision, or content blob, and canonical-authority
+  failures crossing the revision-store boundary surface as its typed error
+  family.
+
 ### Added
 
 - **Deterministic application-family rendering (ADR 0007 Slice 5D-0B2A)**: the

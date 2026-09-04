@@ -7,7 +7,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from mozaiksai.core.runtime.app.layout_registry import ValidatorIdentifier
 from mozaiksai.core.semantics.compilation_plan import PlanDisposition, derive_compilation_plan
+from mozaiksai.core.semantics.plan_authority import (
+    build_compilation_plan_authority_inputs,
+)
 from mozaiksai.core.semantics.refs import CompilationPlanRef, PlanUnitRef, SemanticPayloadRef
 from mozaiksai.core.semantics.resolver import ReferenceResolutionError, SemanticReferenceResolver
 from mozaiksai.core.workflow.plan_assignment_compiler import (
@@ -17,6 +21,8 @@ from mozaiksai.core.workflow.plan_assignment_compiler import (
 )
 from mozaiksai.core.workflow.structured_output_contracts import StructuredOutputContractRef
 from tests.test_compilation_plan import _corpus_graph, _registry
+
+_AUTHORITY: dict = {}
 
 
 @lru_cache(maxsize=1)
@@ -28,6 +34,12 @@ def _fixture():
     )
     graph, payloads = _corpus_graph()
     plan = derive_compilation_plan(
+        graph=graph,
+        payloads=payloads,
+        registry=_registry(),
+        structured_output_configs={"AppGenerator": config},
+    )
+    _AUTHORITY["inputs"] = build_compilation_plan_authority_inputs(
         graph=graph,
         payloads=payloads,
         registry=_registry(),
@@ -90,6 +102,7 @@ def test_closed_spec_compiles_paths_and_identity_from_plan_unit() -> None:
     result = compile_approved_plan(
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
+        authority_inputs=_AUTHORITY["inputs"],
         structured_output_configs={"AppGenerator": config},
     )
     assignment = result.ordered_assignments[0]
@@ -138,6 +151,7 @@ def test_missing_or_extra_source_ref_fails_exact_closure() -> None:
         compile_approved_plan(
             ApprovedPlan(assignments=(missing,)),
             resolver=resolver,
+            authority_inputs=_AUTHORITY["inputs"],
             structured_output_configs={"AppGenerator": config},
         )
 
@@ -191,6 +205,7 @@ def test_source_and_unit_dependency_refs_are_exact_and_same_plan() -> None:
     compiled = compile_approved_plan(
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
+        authority_inputs=_AUTHORITY["inputs"],
         structured_output_configs={"AppGenerator": config},
     ).ordered_assignments[0]
     assert {ref.unit_id for ref in compiled.depends_on_unit_refs} == set(
@@ -204,6 +219,7 @@ def test_source_and_unit_dependency_refs_are_exact_and_same_plan() -> None:
         compile_approved_plan(
             ApprovedPlan(assignments=(missing,)),
             resolver=resolver,
+            authority_inputs=_AUTHORITY["inputs"],
             structured_output_configs={"AppGenerator": config},
         )
 
@@ -222,6 +238,7 @@ def test_source_and_unit_dependency_refs_are_exact_and_same_plan() -> None:
         compile_approved_plan(
             ApprovedPlan(assignments=(foreign,)),
             resolver=resolver,
+            authority_inputs=_AUTHORITY["inputs"],
             structured_output_configs={"AppGenerator": config},
         )
 
@@ -245,6 +262,7 @@ def test_extra_semantic_source_ref_fails_exact_closure() -> None:
         compile_approved_plan(
             ApprovedPlan(assignments=(extra,)),
             resolver=resolver,
+            authority_inputs=_AUTHORITY["inputs"],
             structured_output_configs={"AppGenerator": config},
         )
 
@@ -270,6 +288,7 @@ def test_stale_structured_output_schema_digest_fails() -> None:
         compile_approved_plan(
             ApprovedPlan(assignments=(tampered,)),
             resolver=resolver,
+            authority_inputs=_AUTHORITY["inputs"],
             structured_output_configs={"AppGenerator": config},
         )
 
@@ -289,3 +308,98 @@ def test_omitted_base_revision_digest_fails() -> None:
     document.pop("base_revision_digest")
     with pytest.raises(ValidationError, match="base_revision_digest"):
         ApprovedAssignmentSpec.model_validate(document)
+
+
+def _compile(config, resolver, spec):
+    return compile_approved_plan(
+        ApprovedPlan(assignments=(spec,)),
+        resolver=resolver,
+        authority_inputs=_AUTHORITY["inputs"],
+        structured_output_configs={"AppGenerator": config},
+    )
+
+
+def test_forged_approved_unit_digest_fails_against_canonical_plan() -> None:
+    config, _plan, _unit, resolver, spec = _fixture()
+    forged = spec.model_copy(
+        update={
+            "plan_unit_ref": spec.plan_unit_ref.model_copy(
+                update={"unit_digest": "0" * 64}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="canonical unit identity"):
+        _compile(config, resolver, forged)
+
+
+def test_hostile_plan_unit_resolution_is_never_execution_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After canonical rederivation every execution-authorizing unit fact
+    comes from the canonical plan itself; a hostile ``resolve_plan_unit`` is
+    never even reached."""
+
+    config, _plan, unit, resolver, spec = _fixture()
+    baseline = _compile(config, resolver, spec)
+    calls: list[str] = []
+
+    def hostile(ref, *, requesting_scope):
+        calls.append(ref.unit_id)
+        raise AssertionError("plan-unit resolution must not supply execution facts")
+
+    monkeypatch.setattr(resolver, "resolve_plan_unit", hostile)
+    compiled = _compile(config, resolver, spec)
+    assert calls == []
+    assert compiled == baseline
+    assignment = compiled.ordered_assignments[0]
+    assert assignment.owned_paths == tuple(output.path for output in unit.outputs)
+    assert assignment.required_validators == (unit.validator,)
+    assert assignment.assignment_kind is unit.assignment_kind
+    assert assignment.required_structured_output_ref == unit.required_structured_output_ref
+
+
+@pytest.mark.parametrize(
+    "substitution",
+    [
+        "owned_path",
+        "validator",
+        "assignment_kind",
+        "structured_output_ref",
+        "dependency",
+        "identity_binding",
+    ],
+)
+def test_hostile_unit_substitution_cannot_reach_assignment_facts(
+    monkeypatch: pytest.MonkeyPatch, substitution: str
+) -> None:
+    """A resolver returning a modified but plausible unit must not change one
+    emitted assignment fact: the canonical plan is the only unit authority."""
+
+    config, plan, unit, resolver, spec = _fixture()
+    baseline = _compile(config, resolver, spec)
+    mutations = {
+        "owned_path": {
+            "outputs": (
+                unit.outputs[0].model_copy(update={"path": "evil/injected.py"}),
+                *unit.outputs[1:],
+            )
+        },
+        "validator": {"validator": ValidatorIdentifier.NONE},
+        "assignment_kind": {"assignment_kind": None},
+        "structured_output_ref": {"required_structured_output_ref": None},
+        "dependency": {"depends_on_units": ()},
+        "identity_binding": {
+            "placeholder_values": tuple(
+                (name, f"evil-{value}") for name, value in unit.placeholder_values
+            )
+        },
+    }
+
+    def hostile(ref, *, requesting_scope):
+        honest = plan.unit(ref.unit_id)
+        if ref.unit_id == unit.unit_id:
+            return honest.model_copy(update=mutations[substitution])
+        return honest
+
+    monkeypatch.setattr(resolver, "resolve_plan_unit", hostile)
+    assert _compile(config, resolver, spec) == baseline

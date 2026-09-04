@@ -19,6 +19,12 @@ from mozaiksai.core.semantics.compilation_plan import (
     RegenerationClosure,
 )
 from mozaiksai.core.semantics.materialization import MaterializedBundle, MaterializedOutput
+from mozaiksai.core.semantics.plan_authority import (
+    CompilationPlanAuthorityInputs,
+    PlanAuthorityError,
+    PlanAuthorityMismatch,
+    validate_compilation_plan_against_authority,
+)
 from mozaiksai.core.semantics.portable_path import validate_portable_path
 from mozaiksai.core.semantics.refs import CompilationPlanRef, PlanUnitRef, SemanticsModel
 from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
@@ -412,18 +418,30 @@ def _index_results(
 def compose_plan_artifacts(
     *,
     plan: CompilationPlan,
+    authority_inputs: CompilationPlanAuthorityInputs,
     resolver: SemanticReferenceResolver,
     assignments: CompiledAssignmentSet,
     assignment_results: Iterable[AssignmentArtifactResult],
     materialized_bundle: MaterializedBundle,
     base_revision_digest: str | None,
     base_plan: CompilationPlan | None = None,
+    base_authority_inputs: CompilationPlanAuthorityInputs | None = None,
     base_outputs: Iterable[MaterializedOutput] = (),
     regeneration_closure: RegenerationClosure | None = None,
 ) -> CanonicalComposedBundle:
-    """Compose all plan units without execution, persistence, or publication."""
+    """Compose all plan units without execution, persistence, or publication.
 
-    verified_plan = CompilationPlan.model_validate(plan.model_dump(mode="json"))
+    Canonical plan authority is mandatory and validated FIRST — before any
+    assignment, assignment-result, materialized byte, base output, preserved
+    or reused byte, path accounting, or ledger creation is inspected. The
+    canonical rederived plan (never the caller object) is the plan
+    composition uses; the same rule applies to the base plan in refinement
+    composition through ``base_authority_inputs``.
+    """
+
+    verified_plan = validate_compilation_plan_against_authority(
+        plan, authority_inputs
+    )
     if verified_plan.gaps:
         raise ValueError("blocking CompilationPlan gaps prevent canonical composition")
     if materialized_bundle.plan_digest != verified_plan.plan_digest:
@@ -449,7 +467,16 @@ def compose_plan_artifacts(
     else:
         if base_plan is None or base_revision_digest is None:
             raise ValueError("refinement composition requires base plan and revision digest")
-        verified_base = CompilationPlan.model_validate(base_plan.model_dump(mode="json"))
+        if base_authority_inputs is None:
+            raise PlanAuthorityError(
+                PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING,
+                "refinement composition requires the base plan's canonical "
+                "authority inputs",
+                plan_digest=base_plan.plan_digest,
+            )
+        verified_base = validate_compilation_plan_against_authority(
+            base_plan, base_authority_inputs
+        )
         closure = RegenerationClosure.model_validate(
             regeneration_closure.model_dump(mode="json")
         )
@@ -531,11 +558,10 @@ def compose_plan_artifacts(
             result = result_by_unit.get(unit.unit_id)
             if assignment is None or result is None:
                 raise ValueError(f"agent-authored unit {unit.unit_id!r} lacks an artifact result")
-            if assignment.plan_unit_ref.compilation_plan_ref != plan_ref:
-                raise ValueError("compiled assignment belongs to another CompilationPlan")
-            resolver.resolve_plan_unit(
-                assignment.plan_unit_ref, requesting_scope=verified_plan.scope
-            )
+            if assignment.plan_unit_ref != unit_ref:
+                raise ValueError(
+                    "compiled assignment does not match the canonical plan-unit identity"
+                )
             verified_result = validate_assignment_artifact_result(
                 assignment=assignment, result=result
             )

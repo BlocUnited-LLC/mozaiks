@@ -50,6 +50,7 @@ from mozaiksai.core.workflow.structured_output_contracts import (
     resolve_structured_output_contract_ref,
 )
 from tests.test_compilation_plan import _corpus_graph
+from tests.test_plan_assignment_compiler import _AUTHORITY
 from tests.test_plan_assignment_compiler import _fixture as assignment_fixture
 from tests.test_semantic_payload_graph_v2 import _application_payload
 
@@ -168,6 +169,7 @@ def test_artifact_result_rejects_semantic_identity_substitution() -> None:
     assignment = compile_approved_plan(
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
+        authority_inputs=_AUTHORITY["inputs"],
         structured_output_configs={"AppGenerator": config},
     ).ordered_assignments[0]
     assert dict(assignment.semantic_identity_bindings) == {

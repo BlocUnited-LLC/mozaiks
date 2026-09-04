@@ -1771,14 +1771,13 @@ def derive_compilation_plan(
             _add_unit(unit)
             unit_instance_index[(row.kind, ())] = unit.unit_id
 
-    gaps.append(
-        PlanGap(
-            code=PlanGapCode.RENDERER_RESOLUTION_DEFERRED,
-            family_kind="registry",
-            path_template="registry",
-            adr_slice=4,
-        )
-    )
+    # Renderer resolution is no longer a plan-level deferral: the accepted
+    # ImplementationBinding is the sole implementation authority and is
+    # enforced at materialization (4C/5D-0B2A). The former unconditional
+    # "registry" pseudo-gap carried no per-plan information and made the
+    # composition zero-gap contract unsatisfiable by construction, so plans
+    # no longer emit it; RENDERER_RESOLUTION_DEFERRED remains reserved for
+    # genuine per-family resolution deferrals.
 
     row_by_digest: dict[str, RegistryFamilyRow] = {row.row_digest: row for row in snapshot.rows}
     dependency_map: dict[str, tuple[str, ...]] = {}
