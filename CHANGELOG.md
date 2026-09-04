@@ -12,29 +12,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-### Added
-
-- **Canonical CompilationPlan authority contract (ADR 0007 lane)**: a plan
-  self-digest proves body integrity, not truthful derivation — a caller can
-  mutate any derived plan fact, recompute the digests, and obtain a
-  structurally cold-valid plan. `CompilationPlanAuthorityInputs` is the one
-  strict immutable authority-input document (semantic graph, complete payload
-  closure, canonical layout-registry snapshot, scope selection,
-  structured-output configuration documents), and
-  `validate_compilation_plan_against_authority` re-derives the candidate
-  through the single canonical `derive_compilation_plan` implementation,
-  requires exact execution-authorizing equality, and returns the canonical
-  rederived plan. No proof object, token, or bearer capability exists:
-  possession of nothing establishes validity, serialized authority inputs are
-  never trusted without full rederivation, and brownfield plans without a
-  base-input authority are rejected fail-closed. CompilationPlan identity
-  now pins `assignment_contracts_digest` — the exact assignment-descriptor
-  closure consulted during derivation, so only descriptors that can affect a
-  plan affect its identity; structured-output enum names are content-derived
-  (sha256) instead of process-salted `hash()`, making config-bearing plan
-  digests deterministic across processes and PYTHONHASHSEED values; and the
-  canonical derivation path no longer reads ambient assignment-registry
-  state. Consumer wiring is a separate enforcement change.
+### Fixed
+- **Server-owned session fields and the canonical bundle entry are closed
+  boundaries**: the chat-session lifecycle authority fields
+  (`workflow_run_id`, `run_build_binding`, `build_terminal_receipt`) are now
+  writable only through a privileged, lease-fenced persistence API — generic
+  session creation with `extra_fields` rejects them deterministically before
+  the idempotent existing-session return (a prohibited request never
+  silently succeeds, whether the session exists or not), generic context
+  persistence drops them with a logged security diagnostic, and the replay
+  merge preserves them past workflow-declared context policy without ever
+  accepting generic writes. A worker that lost its chat execution lease to a
+  successor can no longer replace the successor's lifecycle authority. The
+  app-bundle manifest now has an exact canonical bundle-entry identity: the
+  record must be the canonical `app_bundle`/`app_bundle` BuildRecord, its
+  persisted bundle name must satisfy the closed shared name grammar (ASCII
+  letters/digits/hyphen/underscore), and the single `application/zip` entry
+  must sit at exactly `{bundle_name}/{bundle_name}.zip` — one shared formula
+  used by both the manifest writer and the resolver. A digest may never be
+  validated against "any manifest entry with this digest"; wrong-family
+  records, wrong archive basenames, dot-segment names, duplicate archives,
+  digest-less entries, and mislocated archives all fail the build closed at
+  registration.
 
 ### Fixed
 - **A present but invalid `config/subscriptions.yaml` now fails application

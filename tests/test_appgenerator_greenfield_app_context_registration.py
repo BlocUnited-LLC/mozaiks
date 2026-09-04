@@ -266,6 +266,19 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     }
     assert file_ownership == {OwnershipClass.GENERATED_OVERLAY.value}
 
+    # Writer/resolver equivalence: the record the real writer just persisted
+    # resolves through the canonical resolver, and the resolved entry sits at
+    # exactly the shared canonical archive path. If the writer ever changes
+    # archive naming without the resolver contract changing, this fails.
+    from mozaiksai.core.artifacts.models import (
+        canonical_bundle_archive_path,
+        resolve_canonical_bundle_entry,
+    )
+
+    canonical_entry = resolve_canonical_bundle_entry(store.versions["av_app_bundle_1"])
+    assert canonical_entry.path == canonical_bundle_archive_path("GeneratedApp")
+    assert canonical_entry.content_type == "application/zip"
+
     app_bundle_manifest_paths = {
         entry.path for entry in store.versions["av_app_bundle_1"].files_manifest
     }
@@ -356,3 +369,34 @@ def test_appgenerator_context_registration_has_no_graph_database_or_proprietary_
         for term in forbidden_terms:
             assert term.lower() not in text
 
+
+
+async def test_writer_rejects_archive_name_disagreeing_with_bundle_identity(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """The real writer fails closed when the on-disk archive name does not
+    match the canonical {bundle_name}.zip identity, instead of persisting a
+    manifest that could never resolve."""
+    store = _MemoryArtifactStore()
+    _patch_artifact_store(monkeypatch, store)
+
+    app_dir = tmp_path / "GeneratedApp"
+    written_paths = _write_generated_app(app_dir)
+    zip_path = tmp_path / "SomethingElse.zip"
+    zip_path.write_bytes(b"fake bundle bytes")
+    context = _Context({"app_bundle_acceptance_status": "passed"})
+
+    with pytest.raises(RuntimeError, match="canonical archive name"):
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="field_service",
+            user_id="user_123",
+            workflow_name="AppGenerator",
+            chat_id="chat_greenfield",
+            bundle_name="GeneratedApp",
+            zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
+            context_variables=context,
+        )
+    assert store.create_calls == []

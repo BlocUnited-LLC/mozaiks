@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -232,6 +233,137 @@ class RefinementSessionDoc(BaseModel):
     @property
     def result_artifact_version_id(self) -> str | None:
         return self.result_build_record_id
+
+
+# --------------------------------------------------------------------------
+# Canonical app-bundle manifest entry identity
+# --------------------------------------------------------------------------
+
+# The canonical bundle archive entry is identified by its closed writer
+# contract, never by digest equality: the app_bundle manifest writer stamps
+# exactly one entry with this content type (the generated-file mapper can
+# never produce it), at exactly the canonical archive path
+# "{bundle_name}/{bundle_name}.zip" with bundle_name persisted in
+# commit_metadata.metadata["bundle_name"].
+CANONICAL_BUNDLE_CONTENT_TYPE = "application/zip"
+
+CANONICAL_APP_BUNDLE_FAMILY = "app_bundle"
+CANONICAL_APP_BUNDLE_KEY = "app_bundle"
+
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# The closed bundle-name grammar shared by the writer (name derivation) and
+# the resolver (identity verification): ASCII letters, digits, hyphen,
+# underscore only. This structurally excludes path separators, dot segments,
+# traversal, absolute/drive-qualified paths, and control characters.
+_CANONICAL_BUNDLE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class CanonicalBundleEntryError(ValueError):
+    """The record does not identify exactly one canonical bundle entry.
+
+    Raised when the record is not the canonical app_bundle record, when its
+    persisted bundle name violates the closed grammar, and for zero
+    candidates, multiple candidates, a missing/malformed digest, or a path
+    that is not exactly the canonical archive path. Consumers treat this as
+    "no verifiable bundle" and fail closed — in particular, a digest may
+    never be validated against "any manifest entry with this digest": only
+    the uniquely identified canonical entry's digest is bundle authority.
+    """
+
+
+def validate_canonical_bundle_name(bundle_name: Any) -> str:
+    """Validate a bundle name against the closed shared grammar.
+
+    Returns the exact name, or raises :class:`CanonicalBundleEntryError`.
+    Never normalizes: an invalid name fails closed, it is not repaired.
+    """
+    name = str(bundle_name or "")
+    if not _CANONICAL_BUNDLE_NAME_RE.match(name):
+        raise CanonicalBundleEntryError(
+            f"bundle name {name!r} violates the canonical bundle-name grammar "
+            "(ASCII letters, digits, hyphen, underscore only)"
+        )
+    return name
+
+
+def canonical_bundle_archive_path(bundle_name: str) -> str:
+    """The one canonical archive path formula: ``{bundle_name}/{bundle_name}.zip``.
+
+    Both the manifest writer and the resolver derive the archive identity
+    from this helper, so writer and resolver cannot drift independently.
+    """
+    name = validate_canonical_bundle_name(bundle_name)
+    return f"{name}/{name}.zip"
+
+
+def resolve_canonical_bundle_entry(record: BuildRecord) -> BuildRecordFileEntry:
+    """Resolve the single canonical bundle archive entry of an app_bundle record.
+
+    Exact contract (closed writer identity — no heuristics, no basename
+    inference, no suffix search, no digest membership search, no first-ZIP
+    wins, no path normalization):
+
+    1. the record itself is the canonical application-bundle record:
+       ``build_family == build_key == "app_bundle"`` — another family/key is
+       never accepted merely because its manifest looks bundle-shaped;
+    2. the persisted ``commit_metadata.metadata["bundle_name"]`` exists and
+       satisfies the closed shared bundle-name grammar;
+    3. the manifest contains exactly one ``application/zip`` candidate;
+    4. that candidate's path equals exactly
+       ``{bundle_name}/{bundle_name}.zip``;
+    5. the candidate's ``sha256`` is a lowercase 64-hex digest.
+
+    Anything else raises :class:`CanonicalBundleEntryError` and can never
+    become bundle-digest authority.
+    """
+    if (
+        record.build_family != CANONICAL_APP_BUNDLE_FAMILY
+        or record.build_key != CANONICAL_APP_BUNDLE_KEY
+    ):
+        raise CanonicalBundleEntryError(
+            f"record {record.id!r} family/key "
+            f"{record.build_family!r}/{record.build_key!r} is not the "
+            "canonical app_bundle record"
+        )
+
+    bundle_name = str(record.commit_metadata.metadata.get("bundle_name") or "")
+    if not bundle_name.strip():
+        raise CanonicalBundleEntryError(
+            f"record {record.id!r} carries no persisted bundle_name identity"
+        )
+    expected_path = canonical_bundle_archive_path(bundle_name)
+
+    candidates = [
+        entry
+        for entry in record.files_manifest
+        if entry.content_type == CANONICAL_BUNDLE_CONTENT_TYPE
+    ]
+    if not candidates:
+        raise CanonicalBundleEntryError(
+            f"record {record.id!r} manifest has no canonical bundle entry "
+            f"(content_type={CANONICAL_BUNDLE_CONTENT_TYPE!r})"
+        )
+    if len(candidates) > 1:
+        raise CanonicalBundleEntryError(
+            f"record {record.id!r} manifest has {len(candidates)} canonical "
+            "bundle entries; exactly one is required"
+        )
+    entry = candidates[0]
+
+    if str(entry.path or "") != expected_path:
+        raise CanonicalBundleEntryError(
+            f"record {record.id!r} canonical bundle entry path {entry.path!r} "
+            f"is not the exact canonical archive path {expected_path!r}"
+        )
+
+    digest = str(entry.sha256 or "").strip()
+    if not _SHA256_HEX_RE.match(digest):
+        raise CanonicalBundleEntryError(
+            f"record {record.id!r} canonical bundle entry {entry.path!r} has "
+            "no valid lowercase sha256 digest"
+        )
+    return entry
 
 
 # Prior-api class aliases -- kept so callers that import the old names still work
