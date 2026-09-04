@@ -808,16 +808,25 @@ def test_deep_immutability_and_source_mutation_independence() -> None:
 
 
 def test_model_copy_cannot_smuggle_unchecked_open_values() -> None:
-    """model_copy bypasses validators, but the validator's own cold
-    re-validation of the authority document rejects anything that cannot
-    round-trip the closed contract."""
-    inputs, plan = _authority()
-    smuggled = inputs.model_copy(
-        update={"structured_output_configs": {"AppGenerator": object()}}
+    """Authority models refuse model_copy(update=...) outright: the unsafe
+    update path no longer exists, so no raw dict/list or non-JSON object can
+    ever masquerade as validated authority state — no
+    validation-only-later contract."""
+    inputs, _plan_obj = _authority()
+    with pytest.raises(TypeError, match="does not support model_copy"):
+        inputs.model_copy(
+            update={"structured_output_configs": {"AppGenerator": object()}}
+        )
+    from mozaiksai.core.semantics.plan_authority import CanonicalJsonObject
+
+    node = CanonicalJsonObject.from_python({"a": [1, 2]})
+    with pytest.raises(TypeError, match="does not support model_copy"):
+        node.model_copy(update={"entries": ({"key": "a", "value": None},)})
+    # plain no-update copies remain safe and equal
+    assert node.model_copy() == node
+    assert inputs.model_copy().model_dump(mode="json") == inputs.model_dump(
+        mode="json"
     )
-    with pytest.raises(PlanAuthorityError) as excinfo:
-        validate_compilation_plan_against_authority(plan, smuggled)
-    assert excinfo.value.category is PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING
 
 
 # ---------------------------------------------------------------------------
@@ -849,3 +858,268 @@ def test_every_derivation_input_is_represented_in_authority_inputs() -> None:
     fields = set(CompilationPlanAuthorityInputs.model_fields)
     for parameter, field in represented.items():
         assert field in fields, (parameter, field)
+
+
+# ---------------------------------------------------------------------------
+# Assignment-descriptor authority locality. The plan pins the digest of the
+# exact descriptor closure CONSULTED during derivation: used-descriptor
+# changes change/reject plan identity; unrelated registry entries never
+# enter it. No "snapshot changed but plan cannot tell" state exists.
+# ---------------------------------------------------------------------------
+
+
+def _config_authority():
+    import yaml as _yaml
+
+    configs = {
+        "AppGenerator": _yaml.safe_load(
+            (
+                ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml"
+            ).read_text(encoding="utf-8")
+        )
+    }
+    result, _ = _build(_source())
+    inputs = build_compilation_plan_authority_inputs(
+        graph=result.graph,
+        payloads=result.payloads,
+        registry=_registry(),
+        structured_output_configs=configs,
+    )
+    plan = derive_compilation_plan(
+        graph=result.graph,
+        payloads=result.payloads,
+        registry=_registry(),
+        structured_output_configs=configs,
+    )
+    return inputs, plan
+
+
+def _with_descriptors(inputs, mutate_rows):
+    from mozaiksai.core.workflow.assignment_kinds import (
+        AssignmentContractRegistrySnapshot,
+    )
+
+    rows = [row.model_dump(mode="json") for row in
+            inputs.assignment_contract_registry.descriptors]
+    mutate_rows(rows)
+    snapshot = AssignmentContractRegistrySnapshot.model_validate(
+        {"registry_schema_version": (
+            inputs.assignment_contract_registry.registry_schema_version
+        ), "descriptors": rows}
+    )
+    return CompilationPlanAuthorityInputs.model_validate(
+        {**inputs.model_dump(mode="json"),
+         "assignment_contract_registry": snapshot.model_dump(mode="json")}
+    )
+
+
+def _used_kinds(plan):
+    return {
+        u.assignment_kind
+        for u in plan.units
+        if u.disposition.value == "agent_author" and u.assignment_kind
+    }
+
+
+def test_used_descriptor_mutations_change_or_reject_plan_identity() -> None:
+    inputs, plan = _config_authority()
+    used = _used_kinds(plan)
+    assert used, "config-bearing corpus must consult descriptors"
+    target = sorted(used)[0]
+
+    def _mutate(field, value):
+        def mutate(rows):
+            for row in rows:
+                if row["assignment_kind"] == target:
+                    row[field] = value
+                    return
+        return mutate
+
+    cases = {
+        "changed-workflow": _mutate("workflow_name", "OtherWorkflow"),
+        "changed-model": _mutate(
+            "structured_output_model_id", "SomeOtherModel"
+        ),
+        "changed-owned-family": _mutate(
+            "owned_artifact_families", ["app_dashboard"]
+        ),
+        "changed-validator": _mutate("validator_ids", ["app_paths"]),
+        "changed-identity-binding": _mutate(
+            "identity_bindings", [["module_id", "page_id"]]
+        ),
+    }
+
+    def _removed(rows):
+        rows[:] = [r for r in rows if r["assignment_kind"] != target]
+
+    cases["removed-used-descriptor"] = _removed
+    for case, mutate in cases.items():
+        tampered = _with_descriptors(inputs, mutate)
+        with pytest.raises(PlanAuthorityError) as excinfo:
+            validate_compilation_plan_against_authority(plan, tampered)
+        assert (
+            excinfo.value.category
+            is not PlanAuthorityMismatch.PLAN_BODY_INVALID
+        ), case
+
+
+def test_duplicate_used_descriptor_rejects_at_the_snapshot() -> None:
+    from pydantic import ValidationError as _VE
+
+    inputs, plan = _config_authority()
+    target = sorted(_used_kinds(plan))[0]
+
+    def duplicate(rows):
+        clone = dict(next(r for r in rows if r["assignment_kind"] == target))
+        rows.append(clone)
+
+    with pytest.raises(_VE, match="duplicate"):
+        _with_descriptors(inputs, duplicate)
+
+
+def test_unused_descriptor_mutations_do_not_affect_plan_identity() -> None:
+    """Locality: registry entries outside this plan's consulted closure are
+    normalized out of authority identity — adding, removing, or changing an
+    unused descriptor leaves validation accepting the same canonical plan."""
+    inputs, plan = _config_authority()
+    used = _used_kinds(plan)
+    unused = next(
+        row.assignment_kind.value
+        for row in inputs.assignment_contract_registry.descriptors
+        if row.assignment_kind.value not in used
+    )
+
+    def remove_unused(rows):
+        rows[:] = [r for r in rows if r["assignment_kind"] != unused]
+
+    def change_unused(rows):
+        for row in rows:
+            if row["assignment_kind"] == unused:
+                row["workflow_name"] = "MutatedWorkflow"
+                return
+
+    def reorder(rows):
+        rows.reverse()
+
+    for case, mutate in {
+        "missing-unused": remove_unused,
+        "changed-unused": change_unused,
+        "reordered-equivalent": reorder,
+    }.items():
+        adjusted = _with_descriptors(inputs, mutate)
+        canonical = validate_compilation_plan_against_authority(plan, adjusted)
+        assert canonical.plan_digest == plan.plan_digest, case
+    assert plan.assignment_contracts_digest
+
+
+# ---------------------------------------------------------------------------
+# Ambient structured-output registry independence with config-bearing plans,
+# and cross-process determinism under adversarial PYTHONHASHSEED values with
+# an enum-bearing structured-output contract in play.
+# ---------------------------------------------------------------------------
+
+
+def test_ambient_registry_mutation_cannot_change_config_bearing_plans() -> None:
+    import mozaiksai.core.workflow.assignment_kinds as ak
+
+    inputs, plan = _config_authority()
+    document = json.dumps(
+        {"inputs": inputs.model_dump(mode="json"), "plan": plan.model_dump(mode="json")}
+    )
+    original = ak.ASSIGNMENT_CONTRACT_DESCRIPTORS
+    try:
+        ak.ASSIGNMENT_CONTRACT_DESCRIPTORS = type(original)({})
+        revived = CompilationPlanAuthorityInputs.model_validate(
+            json.loads(document)["inputs"]
+        )
+        canonical = validate_compilation_plan_against_authority(plan, revived)
+    finally:
+        ak.ASSIGNMENT_CONTRACT_DESCRIPTORS = original
+    assert canonical.plan_digest == plan.plan_digest
+
+
+def test_enum_names_are_content_derived_not_process_salted() -> None:
+    from mozaiksai.core.workflow.outputs.structured import _build_literal_enum
+
+    first = _build_literal_enum("Status", ["draft", "published"])
+    second = _build_literal_enum("Status", ["draft", "published"])
+    assert first.__name__ == second.__name__
+    assert first.__name__.startswith("StatusEnum_")
+    suffix = first.__name__.rsplit("_", 1)[1]
+    assert len(suffix) == 12 and int(suffix, 16) >= 0
+    different = _build_literal_enum("Status", ["published", "draft"])
+    assert different.__name__ != first.__name__  # order is content
+
+
+@pytest.mark.parametrize("hash_seed", ["1", "2", "12345"])
+def test_config_bearing_plan_digest_is_hashseed_independent(hash_seed) -> None:
+    """The complete fresh-process proof: the exact same serialized graph,
+    payloads, registry, assignment closure, structured-output configs (with
+    enum-bearing contracts), and candidate plan reproduce the identical
+    canonical digest under adversarial PYTHONHASHSEED values, with the
+    ambient assignment registry emptied."""
+    import os
+
+    inputs, plan = _config_authority()
+    assert any(
+        u.required_structured_output_ref is not None for u in plan.units
+    ), "corpus must exercise structured-output (enum-bearing) contracts"
+    probe = (
+        "import json, sys\n"
+        "import mozaiksai.core.workflow.assignment_kinds as ak\n"
+        "ak.ASSIGNMENT_CONTRACT_DESCRIPTORS = type(ak.ASSIGNMENT_CONTRACT_DESCRIPTORS)({})\n"
+        "from mozaiksai.core.semantics.compilation_plan import CompilationPlan\n"
+        "from mozaiksai.core.semantics.plan_authority import (\n"
+        "    CompilationPlanAuthorityInputs,\n"
+        "    validate_compilation_plan_against_authority,\n"
+        ")\n"
+        "payload = json.loads(sys.stdin.read())\n"
+        "inputs = CompilationPlanAuthorityInputs.model_validate(payload['inputs'])\n"
+        "plan = CompilationPlan.model_validate(payload['plan'])\n"
+        "print(validate_compilation_plan_against_authority(plan, inputs).plan_digest)\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONHASHSEED"] = hash_seed
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(ROOT),
+        input=json.dumps(
+            {
+                "inputs": inputs.model_dump(mode="json"),
+                "plan": plan.model_dump(mode="json"),
+            }
+        ),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == plan.plan_digest
+
+
+def test_canonical_json_construction_matrix_is_uniform() -> None:
+    """Every supported entry path yields the identical deeply immutable
+    canonical representation or rejects unsafe construction."""
+    from mozaiksai.core.semantics.plan_authority import CanonicalJsonObject
+
+    source = {"a": {"b": [1, 2.5, "x", None, True]}}
+    via_from_python = CanonicalJsonObject.from_python(source)
+    via_validate = CanonicalJsonObject.model_validate(
+        via_from_python.model_dump(mode="json")
+    )
+    via_json = CanonicalJsonObject.model_validate_json(
+        json.dumps(via_from_python.model_dump(mode="json"))
+    )
+    via_copy = via_from_python.model_copy()
+    assert via_from_python == via_validate == via_json == via_copy
+    with pytest.raises(TypeError, match="does not support model_copy"):
+        via_from_python.model_copy(update={"entries": ()})
+    for constructor in (
+        lambda: CanonicalJsonObject.model_validate(
+            {"entries": [{"key": "a", "value": float("nan")}]}
+        ),
+        lambda: CanonicalJsonObject.from_python({"a": float("inf")}),
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            constructor()

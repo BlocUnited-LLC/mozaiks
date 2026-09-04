@@ -47,7 +47,13 @@ _SCOPE = ExecutionAccessScopeRef(tenant_id="tenant1", workspace_id="ws1")
 _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden aggregate digest for the full 2E corpus over the built-in registry.
-_GOLDEN_PLAN_DIGEST = "f69b7f8ce82edab87ad34357a36b500ec12f6f9cf4a502021d566c86299741f4"
+# Re-pinned once for the plan-authority contract: CompilationPlan identity
+# now pins assignment_contracts_digest — the exact assignment-descriptor
+# closure consulted during derivation (empty-consulted for this config-less
+# corpus). Identity-only change: no rendered byte, assignment resolution, or
+# reuse behavior changed; unrelated registry descriptors remain outside plan
+# identity by the locality rule.
+_GOLDEN_PLAN_DIGEST = "df0bebdc10fe304977f6c2828d3410f88366c1763c3f175ac5f891e4bf769314"
 
 
 def _registry():
@@ -626,6 +632,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "scope_selection",
             "registry_schema_version",
             "registry_digest",
+            "assignment_contracts_digest",
             "units",
             "gaps",
             "plan_digest",
@@ -1031,6 +1038,7 @@ def test_blocker5_reverse_dependency_and_graph_wide_propagation() -> None:
             "graph_digest": graph_digest,
             "registry_schema_version": "mozaiks.app_layout.v2",
             "registry_digest": canonical_digest("registry"),
+            "assignment_contracts_digest": canonical_digest("no-assignments"),
             "units": units,
             "gaps": [],
         }

@@ -732,11 +732,16 @@ class CompilationPlan(SemanticsModel):
     scope_selection: CompilationScopeSelection
     registry_schema_version: str
     registry_digest: str
+    #: Digest of the exact assignment-descriptor closure consulted during
+    #: derivation (descriptor content, or explicit absence, per consulted
+    #: compiler assignment kind). Only descriptors that can affect this plan
+    #: affect this identity; unrelated registry entries never enter it.
+    assignment_contracts_digest: str
     units: tuple[FamilyInstancePlan, ...]
     gaps: tuple[PlanGap, ...] = Field(default_factory=tuple)
     plan_digest: str
 
-    @field_validator("graph_digest", "registry_digest")
+    @field_validator("graph_digest", "registry_digest", "assignment_contracts_digest")
     @classmethod
     def _digests(cls, value: str, info: Any) -> str:
         return _validate_digest(value, field_name=str(info.field_name))
@@ -859,6 +864,7 @@ class CompilationPlan(SemanticsModel):
             "scope_selection": self.scope_selection.model_dump(mode="json"),
             "registry_schema_version": self.registry_schema_version,
             "registry_digest": self.registry_digest,
+            "assignment_contracts_digest": self.assignment_contracts_digest,
             "units": [unit.identity_payload for unit in self.units],
             "gaps": [gap.model_dump(mode="json") for gap in self.gaps],
         }
@@ -968,6 +974,16 @@ def derive_compilation_plan(
         if assignment_descriptors is not None
         else ASSIGNMENT_CONTRACT_DESCRIPTORS
     )
+    descriptor_exact_model_ids = frozenset(
+        descriptor.structured_output_model_id
+        for descriptor in descriptor_authority.values()
+    )
+    # The assignment-descriptor authority closure actually consulted by THIS
+    # derivation. Only descriptors that can affect the plan enter its
+    # identity: a consultation records the descriptor content (or its
+    # explicit absence, which produced a gap), and the closure digest is
+    # pinned on the plan. Unrelated registry entries never enter identity.
+    consulted_assignment_contracts: dict[str, dict[str, Any] | None] = {}
     output_configs = dict(structured_output_configs or {})
     verified_scope_selection = CompilationScopeSelection.model_validate(
         scope_selection.model_dump(mode="json")
@@ -1470,6 +1486,24 @@ def derive_compilation_plan(
                 continue
             assignment_kind = compiler_assignment_kinds[0]
             descriptor = descriptor_authority.get(AssignmentKind(assignment_kind))
+            consulted_assignment_contracts[str(assignment_kind)] = (
+                None
+                if descriptor is None
+                else {
+                    "assignment_kind": descriptor.assignment_kind.value,
+                    "workflow_name": descriptor.workflow_name,
+                    "structured_output_model_id": (
+                        descriptor.structured_output_model_id
+                    ),
+                    "owned_artifact_families": list(
+                        descriptor.owned_artifact_families
+                    ),
+                    "validator_ids": list(descriptor.validator_ids),
+                    "identity_bindings": [
+                        list(binding) for binding in descriptor.identity_bindings
+                    ],
+                }
+            )
             if descriptor is None:
                 _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
                 continue
@@ -1484,6 +1518,7 @@ def derive_compilation_plan(
                     workflow_name=descriptor.workflow_name,
                     model_id=descriptor.structured_output_model_id,
                     configs=output_configs,
+                    exact_model_ids=descriptor_exact_model_ids,
                 )
             except (TypeError, ValueError):
                 _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
@@ -1695,6 +1730,17 @@ def derive_compilation_plan(
         )
     )
 
+    assignment_contracts_digest = canonical_digest(
+        {
+            "closure_schema_version": "mozaiks.assignment_contract_closure.v1",
+            "consulted": [
+                {"assignment_kind": kind, "descriptor": descriptor}
+                for kind, descriptor in sorted(
+                    consulted_assignment_contracts.items()
+                )
+            ],
+        }
+    )
     payload: dict[str, Any] = {
         "schema_version": COMPILATION_PLAN_SCHEMA_VERSION,
         "graph_id": verified_graph.graph_id,
@@ -1704,6 +1750,7 @@ def derive_compilation_plan(
         "scope_selection": verified_scope_selection.model_dump(mode="json"),
         "registry_schema_version": snapshot.registry_schema_version,
         "registry_digest": snapshot.snapshot_digest,
+        "assignment_contracts_digest": assignment_contracts_digest,
         "units": [unit.identity_payload for unit in sorted_units],
         "gaps": [gap.model_dump(mode="json") for gap in sorted_gaps],
     }
@@ -1715,6 +1762,7 @@ def derive_compilation_plan(
         scope_selection=verified_scope_selection,
         registry_schema_version=snapshot.registry_schema_version,
         registry_digest=snapshot.snapshot_digest,
+        assignment_contracts_digest=assignment_contracts_digest,
         units=sorted_units,
         gaps=sorted_gaps,
         plan_digest=canonical_digest(payload),

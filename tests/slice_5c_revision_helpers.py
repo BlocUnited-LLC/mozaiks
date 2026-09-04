@@ -179,6 +179,7 @@ def executable_revision_fixture() -> dict[str, object]:
         scope_selection=source_plan.scope_selection,
         registry_schema_version=source_plan.registry_schema_version,
         registry_digest=source_plan.registry_digest,
+        assignment_contracts_digest=source_plan.assignment_contracts_digest,
         units=source_plan.units,
         gaps=(),
         plan_digest="0" * 64,

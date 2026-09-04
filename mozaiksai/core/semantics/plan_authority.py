@@ -119,16 +119,47 @@ class PlanAuthorityError(ValueError):
         self.unit_id = unit_id
 
 
-class CanonicalJsonEntry(BaseModel):
-    """One key/value pair of a canonical JSON object."""
+class _AuthorityModel(BaseModel):
+    """Frozen base for authority documents: no unchecked update path exists.
+
+    ``model_copy(update=...)`` bypasses pydantic validation, which would let
+    a raw mutable or non-JSON value masquerade as validated authority state.
+    Authority models therefore refuse update-copies entirely — reconstruct
+    through ``model_validate`` instead. Plain no-update copies stay safe
+    because every field is itself frozen/immutable.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    def model_copy(self, *, update=None, deep: bool = False):
+        if update:
+            raise TypeError(
+                f"{type(self).__name__} does not support model_copy(update=...); "
+                "reconstruct through model_validate so authority content is "
+                "always validated"
+            )
+        return super().model_copy(deep=deep)
+
+
+def _reject_nonfinite(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("canonical JSON forbids NaN and infinite floats")
+    return value
+
+
+class CanonicalJsonEntry(_AuthorityModel):
+    """One key/value pair of a canonical JSON object."""
 
     key: StrictStr
     value: CanonicalJsonValue
 
+    @field_validator("value")
+    @classmethod
+    def _finite(cls, value: Any) -> Any:
+        return _reject_nonfinite(value)
 
-class CanonicalJsonObject(BaseModel):
+
+class CanonicalJsonObject(_AuthorityModel):
     """Recursively closed, immutable, deterministic JSON object.
 
     Entries carry unique string keys in their exact declaration order —
@@ -138,8 +169,6 @@ class CanonicalJsonObject(BaseModel):
     are drawn only from the closed JSON algebra: no mutable dict/list
     survives construction and no non-JSON value can enter.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     entries: tuple[CanonicalJsonEntry, ...] = ()
 
@@ -167,12 +196,17 @@ class CanonicalJsonObject(BaseModel):
         return {entry.key: _python_value(entry.value) for entry in self.entries}
 
 
-class CanonicalJsonArray(BaseModel):
+class CanonicalJsonArray(_AuthorityModel):
     """Recursively closed, immutable JSON array preserving element order."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
     items: tuple[CanonicalJsonValue, ...] = ()
+
+    @field_validator("items")
+    @classmethod
+    def _finite_items(cls, value: tuple[Any, ...]) -> tuple[Any, ...]:
+        for item in value:
+            _reject_nonfinite(item)
+        return value
 
 
 CanonicalJsonValue = (
@@ -218,7 +252,7 @@ def _python_value(value: Any) -> Any:
     return value
 
 
-class CompilationPlanAuthorityInputs(BaseModel):
+class CompilationPlanAuthorityInputs(_AuthorityModel):
     """The exact immutable inputs canonical plan derivation consumes.
 
     One instance carries everything :func:`derive_compilation_plan` needs to
@@ -233,8 +267,6 @@ class CompilationPlanAuthorityInputs(BaseModel):
     base/brownfield input field because canonical derivation consumes none —
     see the module docstring for that identified prerequisite.
     """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
     authority_schema_version: str = AUTHORITY_INPUTS_SCHEMA_VERSION
     graph: SemanticGraphV2

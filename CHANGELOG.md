@@ -27,8 +27,14 @@ This project follows a practical pre-1.0 changelog format:
   rederived plan. No proof object, token, or bearer capability exists:
   possession of nothing establishes validity, serialized authority inputs are
   never trusted without full rederivation, and brownfield plans without a
-  base-input authority are rejected fail-closed. Consumer wiring is a
-  separate enforcement change.
+  base-input authority are rejected fail-closed. CompilationPlan identity
+  now pins `assignment_contracts_digest` — the exact assignment-descriptor
+  closure consulted during derivation, so only descriptors that can affect a
+  plan affect its identity; structured-output enum names are content-derived
+  (sha256) instead of process-salted `hash()`, making config-bearing plan
+  digests deterministic across processes and PYTHONHASHSEED values; and the
+  canonical derivation path no longer reads ambient assignment-registry
+  state. Consumer wiring is a separate enforcement change.
 
 ### Fixed
 - **A present but invalid `config/subscriptions.yaml` now fails application
