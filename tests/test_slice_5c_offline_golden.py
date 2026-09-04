@@ -27,6 +27,7 @@ async def test_offline_revision_publication_restore_and_loader_golden(
         assignment_results=fixture["assignment_results"],
         evidence=fixture["evidence"],
         revision=fixture["revision"],
+        authority_inputs=fixture["authority_inputs"],
     )
     assert await store.resolve_revision(ref, requesting_scope=ref.scope) == fixture["revision"]
     restored = await store.restore_revision(ref, requesting_scope=ref.scope)

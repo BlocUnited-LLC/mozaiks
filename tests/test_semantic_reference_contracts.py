@@ -307,6 +307,8 @@ def test_resolver_has_no_bare_id_lookup_surface() -> None:
         "register_taxonomy_namespace",
         "register_opaque_subject",
         "resolve",
+        "register_compilation_plan_authority_inputs",
+        "resolve_compilation_plan_authority_inputs",
         "resolve_artifact_revision",
         "resolve_manifest_ref",
         "resolve_plan_unit",

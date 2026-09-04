@@ -95,6 +95,12 @@ class PlanAuthorityMismatch(StrEnum):
     PLAN_BODY_INVALID = "plan_body_invalid"
     CANONICAL_DERIVATION_MISMATCH = "canonical_derivation_mismatch"
     REQUIRED_AUTHORITY_MISSING = "required_authority_missing"
+    #: The candidate carries base/brownfield content (preserve_unowned or
+    #: reuse_from_base) that canonical derivation cannot reproduce because the
+    #: immutable base-input authority contract does not exist yet. Durable
+    #: composition, revision persistence, and promotion of such plans fail
+    #: closed with this category until that prerequisite is implemented.
+    BASE_AUTHORITY_MISSING = "base_authority_missing"
 
 
 class PlanAuthorityError(ValueError):
@@ -412,6 +418,21 @@ def validate_compilation_plan_against_authority(
             f"authority inputs failed cold validation: {exc}",
             plan_digest=verified.plan_digest,
         ) from exc
+    brownfield_units = [
+        unit.unit_id
+        for unit in verified.units
+        if unit.disposition.value in ("preserve_unowned", "reuse_from_base")
+    ]
+    if brownfield_units:
+        raise PlanAuthorityError(
+            PlanAuthorityMismatch.BASE_AUTHORITY_MISSING,
+            "candidate plan carries base/brownfield content that canonical "
+            "derivation cannot reproduce; the immutable base-input authority "
+            "contract is a separate identified prerequisite "
+            f"(first unit: {brownfield_units[0]!r})",
+            plan_digest=verified.plan_digest,
+            unit_id=brownfield_units[0],
+        )
     try:
         canonical = derive_compilation_plan(
             graph=verified_inputs.graph,
@@ -450,6 +471,34 @@ def validate_compilation_plan_against_authority(
     return canonical
 
 
+def compilation_plan_authority_digest(
+    authority_inputs: CompilationPlanAuthorityInputs,
+) -> str:
+    """Content digest of the exact serialized authority-inputs document."""
+    from mozaiksai.core.semantics.canonical import canonical_digest
+
+    verified = CompilationPlanAuthorityInputs.model_validate(
+        authority_inputs.model_dump(mode="json")
+    )
+    return canonical_digest(verified.model_dump(mode="json"))
+
+
+def compilation_plan_authority_ref(
+    authority_inputs: CompilationPlanAuthorityInputs,
+):
+    """Scope-bound content-addressed ref for one authority-inputs document.
+
+    Confers no trust by possession: consumers must resolve the document,
+    cold-validate it, and canonically rederive the plan.
+    """
+    from mozaiksai.core.semantics.refs import CompilationPlanAuthorityRef
+
+    return CompilationPlanAuthorityRef(
+        scope=authority_inputs.graph.scope,
+        authority_digest=compilation_plan_authority_digest(authority_inputs),
+    )
+
+
 __all__ = [
     "AUTHORITY_INPUTS_SCHEMA_VERSION",
     "CanonicalJsonArray",
@@ -459,5 +508,7 @@ __all__ = [
     "PlanAuthorityError",
     "PlanAuthorityMismatch",
     "build_compilation_plan_authority_inputs",
+    "compilation_plan_authority_digest",
+    "compilation_plan_authority_ref",
     "validate_compilation_plan_against_authority",
 ]

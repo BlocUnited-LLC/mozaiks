@@ -75,6 +75,7 @@ class RefDocumentType(StrEnum):
     BUILD_CONTEXT_BINDING = "build_context_binding"
     REFINEMENT_PATCH = "refinement_patch"
     ARTIFACT_REVISION = "artifact_revision"
+    COMPILATION_PLAN_AUTHORITY_INPUTS = "compilation_plan_authority_inputs"
     CHILD_CONTRACT = "child_contract"
     TAXONOMY_NAMESPACE = "taxonomy_namespace"
     SEMANTIC_PAYLOAD = "semantic_payload"
@@ -197,6 +198,33 @@ class RefinementPatchRef(_ScopedRef):
     ref_schema_version: Literal["mozaiks.refinement_patch_ref.v1"] = (
         "mozaiks.refinement_patch_ref.v1"
     )
+
+
+class CompilationPlanAuthorityRef(SemanticsModel):
+    """Content-addressed reference to one immutable authority-inputs document.
+
+    The referenced document is a serialized ``CompilationPlanAuthorityInputs``
+    — the complete immutable inputs canonical plan derivation consumes. The
+    ref is scope-bound and digest-exact; it confers no trust by possession:
+    every consumer must resolve the document, cold-validate it, and
+    canonically rederive the plan.
+    """
+
+    ref_schema_version: Literal["mozaiks.compilation_plan_authority_ref.v1"] = (
+        "mozaiks.compilation_plan_authority_ref.v1"
+    )
+    scope: ExecutionAccessScopeRef
+    authority_digest: str
+
+    @field_validator("authority_digest")
+    @classmethod
+    def _authority_digest(cls, value: str) -> str:
+        text = str(value or "").strip().lower()
+        if _HEX_DIGEST.fullmatch(text) is None:
+            raise ValueError(
+                "authority_digest must be a lowercase SHA-256 hex digest"
+            )
+        return text
 
 
 class ArtifactRevisionRef(SemanticsModel):
@@ -349,6 +377,7 @@ class TaxonomyNamespaceRef(SemanticsModel):
 __all__ = [
     "ApplicationManifestRef",
     "ArtifactRevisionRef",
+    "CompilationPlanAuthorityRef",
     "BuildContextBindingRef",
     "ChildContractRef",
     "CompilationPlanRef",

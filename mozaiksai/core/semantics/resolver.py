@@ -66,6 +66,7 @@ class SemanticReferenceResolver:
         self._artifact_revisions: dict[
             tuple[ExecutionAccessScopeRef, str, str], ArtifactRevision
         ] = {}
+        self._plan_authority_inputs: dict[tuple[str, str], Any] = {}
 
     def _register(self, subject: _Subject) -> None:
         key = (subject.kind, subject.subject_id, subject.version)
@@ -228,6 +229,73 @@ class SemanticReferenceResolver:
                 content=verified,
             )
         )
+
+    def register_compilation_plan_authority_inputs(self, authority_inputs) -> None:
+        """Register one immutable authority-inputs document, digest-keyed.
+
+        The document is cold-revalidated on registration and again on
+        resolution; registration never confers derivation trust — consumers
+        must canonically rederive the plan from the resolved document.
+        """
+        from mozaiksai.core.semantics.plan_authority import (
+            CompilationPlanAuthorityInputs,
+            compilation_plan_authority_digest,
+        )
+
+        try:
+            verified = CompilationPlanAuthorityInputs.model_validate(
+                authority_inputs.model_dump(mode="json")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ReferenceResolutionError(
+                f"authority inputs failed cold validation: {exc}"
+            ) from exc
+        digest = compilation_plan_authority_digest(verified)
+        key = (verified.graph.scope.model_dump_json(), digest)
+        existing = self._plan_authority_inputs.get(key)
+        if existing is not None:
+            if compilation_plan_authority_digest(existing) != digest:
+                raise ReferenceResolutionError(
+                    "authority-inputs registration is immutable"
+                )
+            return
+        self._plan_authority_inputs[key] = verified
+
+    def resolve_compilation_plan_authority_inputs(
+        self, ref, *, requesting_scope
+    ):
+        """Resolve one authority-inputs document by exact scope and digest."""
+        from mozaiksai.core.semantics.plan_authority import (
+            CompilationPlanAuthorityInputs,
+            compilation_plan_authority_digest,
+        )
+        from mozaiksai.core.semantics.refs import CompilationPlanAuthorityRef
+
+        verified_ref = CompilationPlanAuthorityRef.model_validate(
+            ref.model_dump(mode="json")
+        )
+        if requesting_scope != verified_ref.scope:
+            raise ReferenceResolutionError(
+                "authority-inputs resolution crosses execution scope"
+            )
+        key = (verified_ref.scope.model_dump_json(), verified_ref.authority_digest)
+        document = self._plan_authority_inputs.get(key)
+        if document is None:
+            raise ReferenceResolutionError(
+                "unknown compilation-plan authority inputs "
+                f"{verified_ref.authority_digest[:12]!r}"
+            )
+        revalidated = CompilationPlanAuthorityInputs.model_validate(
+            document.model_dump(mode="json")
+        )
+        if (
+            compilation_plan_authority_digest(revalidated)
+            != verified_ref.authority_digest
+        ):
+            raise ReferenceResolutionError(
+                "authority-inputs content digest mismatch"
+            )
+        return revalidated
 
     def register_artifact_revision(self, revision: ArtifactRevision) -> None:
         """Register one content-bearing revision by its full scoped digest identity."""

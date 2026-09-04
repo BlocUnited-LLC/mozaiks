@@ -134,9 +134,10 @@ def _store(tmp_path: Path, fixture: dict[str, object], client=None):
 async def _persist(store: ArtifactRevisionStore, fixture: dict[str, object]):
     return await store.persist_revision_closure(
         bundle=fixture["bundle"],
-        assignment_results=(),
+        assignment_results=fixture["assignment_results"],
         evidence=fixture["evidence"],
         revision=fixture["revision"],
+        authority_inputs=fixture["authority_inputs"],
     )
 
 
@@ -199,8 +200,9 @@ def _child_fixture(fixture: dict[str, object], parent_ref: ArtifactRevisionRef):
         scope=fixture["revision"].scope,
         app_id=fixture["app_id"],
         plan=fixture["plan"],
+        authority_inputs=fixture["authority_inputs"],
         ledger=ledger,
-        assignment_results=(),
+        assignment_results=fixture["assignment_results"],
         bundle_validator_receipts=fixture["receipts"],
     )
     revision = build_artifact_revision(
@@ -272,7 +274,7 @@ async def test_swapped_blob_locations_fail_exact_digest_verification(tmp_path: P
     fixture = revision_fixture()
     store = _store(tmp_path, fixture)
     ref = await _persist(store, fixture)
-    first, second = fixture["bundle"].artifacts
+    first, second = fixture["bundle"].artifacts[:2]
     first_path = tmp_path / "sha256" / first.content_digest[:2] / first.content_digest
     second_path = tmp_path / "sha256" / second.content_digest[:2] / second.content_digest
     first_bytes = first_path.read_bytes()
@@ -353,7 +355,7 @@ async def test_forged_compilation_plan_ref_fails_before_publication(tmp_path: Pa
     arguments["compilation_plan_ref"] = forged_plan
     fixture["revision"] = build_artifact_revision(**arguments)
     store = _store(tmp_path, fixture)
-    with pytest.raises(RevisionIntegrityError, match="CompilationPlan"):
+    with pytest.raises(RevisionIntegrityError, match="CompilationPlan|cold resolution"):
         await _persist(store, fixture)
     assert await store.get_publication(scope=revision.scope, app_id=revision.app_id) is None
 

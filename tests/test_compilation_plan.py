@@ -68,7 +68,12 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # mutation suites green). Re-pinned after rebasing onto #475 because the same
 # canonical plan now also pins its consulted assignment-contract closure;
 # rendered bytes and family activation are unchanged.
-_GOLDEN_PLAN_DIGEST = "b751584c87214bf980dd380f8368a459dca0c3569590fe74d8cb80b4f555f4a3"
+# Re-pinned once for the authority-enforcement PR: plans no longer emit the
+# former unconditional "registry" renderer-resolution pseudo-gap (renderer
+# resolution is ImplementationBinding authority enforced at materialization),
+# so the gap set shrinks by exactly that one structural entry. Identity-only:
+# no unit, byte, footprint, or assignment fact changed.
+_GOLDEN_PLAN_DIGEST = "4e3a809b0982e18fa24f85da753a1df9734ae38132199c0be5931263fbd202f2"
 
 
 def _registry():
@@ -356,11 +361,16 @@ def test_unknown_layout_family_condition_becomes_a_typed_gap() -> None:
     )
 
 
-def test_renderer_resolution_is_an_explicit_gap_and_units_cannot_claim_one() -> None:
+def test_renderer_resolution_is_binding_authority_not_a_plan_gap() -> None:
+    """Renderer resolution belongs to the ImplementationBinding and is
+    enforced at materialization; plans no longer carry the former
+    unconditional "registry" pseudo-gap (which made the composition
+    zero-gap contract unsatisfiable by construction), and plan units still
+    cannot claim a renderer identity themselves."""
     from mozaiksai.core.semantics.compilation_plan import PlanGapCode
 
     plan = _plan()
-    assert any(
+    assert not any(
         gap.code is PlanGapCode.RENDERER_RESOLUTION_DEFERRED for gap in plan.gaps
     )
     assert "renderer" not in FamilyInstancePlan.model_fields

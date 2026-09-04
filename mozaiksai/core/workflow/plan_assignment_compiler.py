@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mozaiksai.core.runtime.app.layout_registry import ValidatorIdentifier
 from mozaiksai.core.semantics.compilation_plan import CompilationPlan, PlanDisposition
+from mozaiksai.core.semantics.plan_authority import (
+    CompilationPlanAuthorityInputs,
+    validate_compilation_plan_against_authority,
+)
 from mozaiksai.core.semantics.refs import PlanUnitRef, SemanticPayloadRef
 from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
 
@@ -136,22 +140,44 @@ def compile_approved_plan(
     plan: ApprovedPlan,
     *,
     resolver: SemanticReferenceResolver,
+    authority_inputs: CompilationPlanAuthorityInputs,
     structured_output_configs: Mapping[str, Any],
 ) -> CompiledAssignmentSet:
-    """Cold-resolve and compile approved units without execution side effects."""
+    """Cold-resolve and compile approved units without execution side effects.
+
+    Ref resolution and self-digest validation prove identity and body
+    integrity only. Before any assignment contract becomes executable, the
+    resolved plan must equal its canonical rederivation from the supplied
+    immutable authority inputs. Every execution-authorizing unit fact —
+    disposition, kind, outputs, validators, structured-output ref, sources,
+    dependencies, identity bindings — is then read from the canonical
+    rederived plan itself; the resolver is never consulted for unit content
+    after canonical validation.
+    """
 
     compiled: list[CompiledAssignment] = []
     plan_ref = plan.assignments[0].plan_unit_ref.compilation_plan_ref
     scope = plan_ref.scope
-    canonical_plan = resolver.resolve(plan_ref, requesting_scope=scope)
-    if not isinstance(canonical_plan, CompilationPlan):
+    resolved_plan = resolver.resolve(plan_ref, requesting_scope=scope)
+    if not isinstance(resolved_plan, CompilationPlan):
         raise ValueError("compilation plan ref did not resolve to a canonical plan")
-    canonical_plan = CompilationPlan.model_validate(
-        canonical_plan.model_dump(mode="json")
+    canonical_plan = validate_compilation_plan_against_authority(
+        resolved_plan, authority_inputs
     )
+    if canonical_plan.plan_digest != plan_ref.content_digest:
+        raise ValueError(
+            "canonical rederived plan does not match the approved plan ref"
+        )
     plan_order = {unit.unit_id: index for index, unit in enumerate(canonical_plan.units)}
+    canonical_units = {unit.unit_id: unit for unit in canonical_plan.units}
     for spec in plan.assignments:
-        unit = resolver.resolve_plan_unit(spec.plan_unit_ref, requesting_scope=scope)
+        unit = canonical_units.get(spec.plan_unit_ref.unit_id)
+        if unit is None:
+            raise ValueError("approved plan-unit ref names no canonical plan unit")
+        if spec.plan_unit_ref.unit_digest != unit.unit_digest:
+            raise ValueError(
+                "approved plan-unit ref does not match the canonical unit identity"
+            )
         if unit.disposition is not PlanDisposition.AGENT_AUTHOR:
             raise ValueError("only agent_author plan units may become assignments")
         if spec.assignment_kind is not unit.assignment_kind:
@@ -181,7 +207,14 @@ def compile_approved_plan(
         for dependency_ref in unit_refs:
             if dependency_ref.compilation_plan_ref != plan_ref:
                 raise ValueError("dependency plan-unit ref belongs to a foreign plan")
-            resolver.resolve_plan_unit(dependency_ref, requesting_scope=scope)
+            dependency_unit = canonical_units.get(dependency_ref.unit_id)
+            if (
+                dependency_unit is None
+                or dependency_ref.unit_digest != dependency_unit.unit_digest
+            ):
+                raise ValueError(
+                    "dependency plan-unit ref does not match the canonical unit identity"
+                )
 
         resolve_structured_output_contract_ref(
             spec.required_structured_output_ref, configs=structured_output_configs
