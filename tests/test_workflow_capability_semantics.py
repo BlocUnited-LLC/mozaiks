@@ -278,14 +278,19 @@ def _build_graph(
     edges: list[SemanticEdge] | None = None,
     graph_id: str = "documents-analysis",
     event_identity: str | None = _EVENT_ID,
+    extra_event_identities: dict[str, str] | None = None,
 ) -> SemanticGraphV2:
+    identities: dict[str, str] = dict(extra_event_identities or {})
+    if event_identity is not None:
+        identities[_EVENT] = event_identity
     nodes = []
     for payload in payloads.values():
         taxonomy_references: tuple[TaxonomyReference, ...] = ()
-        if payload.node_id == _EVENT and event_identity is not None:
+        if payload.node_id in identities:
             taxonomy_references = (
                 TaxonomyReference(
-                    category=SemanticCategory.EVENT, identifier=event_identity
+                    category=SemanticCategory.EVENT,
+                    identifier=identities[payload.node_id],
                 ),
             )
         nodes.append(
@@ -571,7 +576,7 @@ def test_action_declared_by_two_modules_rejects() -> None:
             target_node_id=_ACTION_GET,
         )
     )
-    _expect_rejection(payloads, "ambiguously owned by multiple modules", edges=edges)
+    _expect_rejection(payloads, "contradictory\\s+declarer set", edges=edges)
 
 
 def test_action_with_no_module_declarer_rejects() -> None:
@@ -585,7 +590,70 @@ def test_action_with_no_module_declarer_rejects() -> None:
             and edge.target_node_id == _ACTION_GET
         )
     ]
-    _expect_rejection(payloads, "that no module\\s+declares", edges=edges)
+    _expect_rejection(payloads, "has no module declarer", edges=edges)
+
+
+def test_action_with_module_and_nonmodule_declarers_rejects() -> None:
+    """Codex reproduction: MODULE + WORKFLOW both declare one action.
+
+    The complete declarer set is validated — a contradictory non-module
+    DECLARES edge is never filtered away before ownership is claimed.  The
+    same closure covers the ModuleActionRef target (get_content) and the
+    event-producing action (create).
+    """
+    for contradicted_action in (_ACTION_GET, _ACTION_CREATE):
+        payloads = _fixture_payloads()
+        edges = _fixture_edges(payloads)
+        edges.append(
+            SemanticEdge(
+                kind=SemanticEdgeKind.DECLARES,
+                source_node_id=_WORKFLOW,
+                target_node_id=contradicted_action,
+            )
+        )
+        _expect_rejection(payloads, "contradictory\\s+declarer set", edges=edges)
+
+
+def test_action_with_only_a_nonmodule_declarer_rejects() -> None:
+    payloads = _fixture_payloads()
+    edges = [
+        SemanticEdge(
+            kind=SemanticEdgeKind.DECLARES,
+            source_node_id=_WORKFLOW,
+            target_node_id=_ACTION_GET,
+        )
+        if (
+            edge.kind is SemanticEdgeKind.DECLARES
+            and edge.source_node_id == _MODULE
+            and edge.target_node_id == _ACTION_GET
+        )
+        else edge
+        for edge in _fixture_edges(payloads)
+    ]
+    _expect_rejection(payloads, "sole declarer.*is not a module", edges=edges)
+
+
+def test_discriminated_module_declares_edge_rejects() -> None:
+    """A payload-unbacked discriminator on the ownership projection rejects."""
+    payloads = _fixture_payloads()
+    edges = [
+        SemanticEdge(
+            kind=SemanticEdgeKind.DECLARES,
+            source_node_id=_MODULE,
+            target_node_id=_ACTION_GET,
+            discriminator="uninvited",
+        )
+        if (
+            edge.kind is SemanticEdgeKind.DECLARES
+            and edge.source_node_id == _MODULE
+            and edge.target_node_id == _ACTION_GET
+        )
+        else edge
+        for edge in _fixture_edges(payloads)
+    ]
+    _expect_rejection(
+        payloads, "declaring edge\\s+carrying a discriminator", edges=edges
+    )
 
 
 def test_removed_action_rejects() -> None:
@@ -643,7 +711,165 @@ def test_typed_emits_without_projection_edge_rejects() -> None:
         for edge in _fixture_edges(payloads)
         if edge.kind is not SemanticEdgeKind.EMITS
     ]
-    _expect_rejection(payloads, "lacks the required EMITS projection", edges=edges)
+    _expect_rejection(payloads, "lacks its typed EMITS\\s+projection", edges=edges)
+
+
+def test_typed_emit_without_any_event_node_rejects_even_without_trigger() -> None:
+    """Codex reproduction TYPED_EMIT_MISSING_EVENT_NODE.
+
+    The typed emit is an application-semantic claim in its own right: it must
+    close even when no trigger binding (and no consumer at all) exists.
+    """
+    payloads = _fixture_payloads()
+    del payloads[_EVENT]
+    del payloads[_BINDING_TRIGGER]
+    edges = [
+        edge
+        for edge in _fixture_edges(payloads)
+        if _EVENT not in (edge.source_node_id, edge.target_node_id)
+        and _BINDING_TRIGGER not in (edge.source_node_id, edge.target_node_id)
+    ]
+    _expect_rejection(
+        payloads,
+        "no event node carries that\\s+canonical event identity",
+        edges=edges,
+    )
+
+
+def test_typed_emit_event_without_taxonomy_identity_rejects() -> None:
+    """Codex reproduction TYPED_EMIT_EVENT_WITHOUT_TAXONOMY.
+
+    An EVENT node with no canonical EVENT-category identity cannot satisfy a
+    typed emit — with or without any trigger binding downstream.
+    """
+    with_trigger = _fixture_payloads()
+    _expect_rejection(
+        with_trigger,
+        "no event node carries that\\s+canonical event identity",
+        event_identity=None,
+    )
+
+    without_trigger = _fixture_payloads()
+    del without_trigger[_BINDING_TRIGGER]
+    edges = [
+        edge
+        for edge in _fixture_edges(without_trigger)
+        if _BINDING_TRIGGER not in (edge.source_node_id, edge.target_node_id)
+    ]
+    _expect_rejection(
+        without_trigger,
+        "no event node carries that\\s+canonical event identity",
+        edges=edges,
+        event_identity=None,
+    )
+
+
+def test_two_event_nodes_with_same_canonical_identity_reject() -> None:
+    payloads = _fixture_payloads()
+    payloads["mozaiks.event.documents_created_alt"] = build_semantic_payload(
+        EventPayload,
+        node_id="mozaiks.event.documents_created_alt",
+        payload_version=1,
+        scope=_SCOPE,
+        description="A rival claim to the same event identity",
+    )
+    _expect_rejection(
+        payloads,
+        "carried\\s+by multiple event nodes",
+        extra_event_identities={"mozaiks.event.documents_created_alt": _EVENT_ID},
+    )
+
+
+def test_typed_event_without_any_trigger_still_validates() -> None:
+    """A complete typed emit closure needs no consumer to be truthful."""
+    payloads = _fixture_payloads()
+    del payloads[_BINDING_TRIGGER]
+    edges = [
+        edge
+        for edge in _fixture_edges(payloads)
+        if _BINDING_TRIGGER not in (edge.source_node_id, edge.target_node_id)
+    ]
+    graph = _build_graph(payloads, edges=edges)
+    validate_semantic_graph_v2_payload_closure(graph, list(payloads.values()))
+
+
+def test_emits_discriminator_mutations_reject() -> None:
+    """Codex reproductions EMITS_WRONG_EXTRA_DISCRIMINATOR and
+    EMITS_EXTRA_DISCRIMINATED_DUPLICATE: the ACTION EMITS projection is
+    compared with full SemanticEdge identity, discriminator included."""
+    payloads = _fixture_payloads()
+
+    # A discriminated ACTION EMITS edge rejects at the floor (no typed payload
+    # backs any such discriminator) and would fail exact projection beneath.
+    discriminator_rejections = (
+        "carries a\\s+discriminator no typed payload backs"
+        "|not part of the\\s+typed emits projection"
+    )
+
+    # The only projection carries a forged discriminator.
+    edges = [
+        SemanticEdge(
+            kind=SemanticEdgeKind.EMITS,
+            source_node_id=_ACTION_CREATE,
+            target_node_id=_EVENT,
+            discriminator="evil",
+        )
+        if edge.kind is SemanticEdgeKind.EMITS
+        else edge
+        for edge in _fixture_edges(payloads)
+    ]
+    _expect_rejection(payloads, discriminator_rejections, edges=edges)
+
+    # The exact projection exists, plus a discriminated duplicate.
+    edges = _fixture_edges(payloads)
+    edges.append(
+        SemanticEdge(
+            kind=SemanticEdgeKind.EMITS,
+            source_node_id=_ACTION_CREATE,
+            target_node_id=_EVENT,
+            discriminator="evil",
+        )
+    )
+    _expect_rejection(payloads, discriminator_rejections, edges=edges)
+
+
+def test_emits_projection_to_wrong_or_extra_event_rejects() -> None:
+    payloads = _fixture_payloads()
+    payloads["mozaiks.event.decoy"] = build_semantic_payload(
+        EventPayload,
+        node_id="mozaiks.event.decoy",
+        payload_version=1,
+        scope=_SCOPE,
+        description="An event the action never declared",
+    )
+
+    # The projection targets the wrong event node entirely.
+    edges = [
+        SemanticEdge(
+            kind=SemanticEdgeKind.EMITS,
+            source_node_id=_ACTION_CREATE,
+            target_node_id="mozaiks.event.decoy",
+        )
+        if edge.kind is SemanticEdgeKind.EMITS
+        else edge
+        for edge in _fixture_edges(payloads)
+    ]
+    _expect_rejection(
+        payloads, "not part of the\\s+typed emits projection", edges=edges
+    )
+
+    # The exact projection exists, plus an extra edge to another event.
+    edges = _fixture_edges(payloads)
+    edges.append(
+        SemanticEdge(
+            kind=SemanticEdgeKind.EMITS,
+            source_node_id=_ACTION_CREATE,
+            target_node_id="mozaiks.event.decoy",
+        )
+    )
+    _expect_rejection(
+        payloads, "not part of the\\s+typed emits projection", edges=edges
+    )
 
 
 def test_event_without_canonical_producer_rejects() -> None:
@@ -694,19 +920,31 @@ def test_event_producer_with_ambiguous_module_ownership_rejects() -> None:
             target_node_id=_ACTION_CREATE,
         )
     )
-    _expect_rejection(payloads, "ambiguous module\\s+ownership", edges=edges)
+    _expect_rejection(payloads, "contradictory\\s+declarer set", edges=edges)
 
 
-def test_trigger_event_without_canonical_identity_rejects() -> None:
+def test_trigger_to_orphan_identity_less_event_rejects() -> None:
+    """No typed emit claims the event and it carries no canonical identity —
+    the trigger-authority check still fails closed."""
     payloads = _fixture_payloads()
+    payloads[_ACTION_CREATE] = _rebuilt_action(payloads, _ACTION_CREATE, emits=())
+    edges = [
+        edge
+        for edge in _fixture_edges(payloads)
+        if edge.kind is not SemanticEdgeKind.EMITS
+    ]
     _expect_rejection(
-        payloads, "exactly one\\s+canonical event identity", event_identity=None
+        payloads,
+        "exactly one\\s+canonical event identity",
+        edges=edges,
+        event_identity=None,
     )
 
 
 def test_removed_event_rejects() -> None:
     payloads = _fixture_payloads()
     del payloads[_EVENT]
+    payloads[_ACTION_CREATE] = _rebuilt_action(payloads, _ACTION_CREATE, emits=())
     edges = [
         edge
         for edge in _fixture_edges(payloads)

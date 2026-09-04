@@ -1992,12 +1992,10 @@ def validate_semantic_graph_v2_payload_closure(
                     f"artifact declaration {payload.node_id!r} lacks its typed page edge"
                 )
 
-    declares_by_target: dict[str, list[str]] = {}
+    declares_by_target: dict[str, list[SemanticEdge]] = {}
     for edge in verified_graph.edges:
         if edge.kind is SemanticEdgeKind.DECLARES:
-            declares_by_target.setdefault(edge.target_node_id, []).append(
-                edge.source_node_id
-            )
+            declares_by_target.setdefault(edge.target_node_id, []).append(edge)
 
     def _kind_of(node_id: str) -> SemanticNodeKind | None:
         payload = payload_by_node.get(node_id)
@@ -2007,25 +2005,67 @@ def validate_semantic_graph_v2_payload_closure(
     def _require_sole_declarer(
         target_node_id: str, expected_kind: SemanticNodeKind, subject: str
     ) -> str:
-        declarers = declares_by_target.get(target_node_id, [])
-        if len(declarers) != 1:
+        declarer_edges = declares_by_target.get(target_node_id, [])
+        if len(declarer_edges) != 1:
             raise SemanticPayloadError(
                 f"{subject} {target_node_id!r} must be declared by exactly one "
-                f"{expected_kind.value} node, found {len(declarers)}"
+                f"{expected_kind.value} node, found {len(declarer_edges)}"
             )
-        if _kind_of(declarers[0]) is not expected_kind:
+        declarer_node_id = declarer_edges[0].source_node_id
+        if _kind_of(declarer_node_id) is not expected_kind:
             raise SemanticPayloadError(
                 f"{subject} {target_node_id!r} is declared by a non-"
-                f"{expected_kind.value} node {declarers[0]!r}"
+                f"{expected_kind.value} node {declarer_node_id!r}"
             )
-        return declarers[0]
+        return declarer_node_id
 
-    def _module_declarers_of(action_node_id: str) -> list[str]:
-        return [
-            declarer
-            for declarer in declares_by_target.get(action_node_id, [])
-            if _kind_of(declarer) is SemanticNodeKind.MODULE
-        ]
+    def _require_canonical_module_owned_action(
+        action_node_id: str,
+        *,
+        subject: str,
+        expected_module_node_id: str | None = None,
+    ) -> str:
+        """Total declarer closure for one action in the new authority family.
+
+        The COMPLETE declarer set is validated — contradictory non-module
+        declarers are never filtered away before ownership is claimed:
+        exactly one DECLARES edge may target the action, its source must be a
+        MODULE, its projection must carry no discriminator, and when a
+        specific module is expected it must be that module.
+        """
+        declarer_edges = declares_by_target.get(action_node_id, [])
+        if not declarer_edges:
+            raise SemanticPayloadError(
+                f"{subject} action {action_node_id!r} has no module declarer"
+            )
+        if len(declarer_edges) > 1:
+            raise SemanticPayloadError(
+                f"{subject} action {action_node_id!r} has a contradictory "
+                f"declarer set; canonical ownership requires exactly one module "
+                f"declarer, found "
+                f"{sorted(edge.source_node_id for edge in declarer_edges)!r}"
+            )
+        declarer_node_id = declarer_edges[0].source_node_id
+        if _kind_of(declarer_node_id) is not SemanticNodeKind.MODULE:
+            raise SemanticPayloadError(
+                f"{subject} action {action_node_id!r} has a sole declarer "
+                f"{declarer_node_id!r} that is not a module"
+            )
+        if declarer_edges[0].discriminator is not None:
+            raise SemanticPayloadError(
+                f"{subject} action {action_node_id!r} has a declaring edge "
+                f"carrying a discriminator no typed payload backs"
+            )
+        if (
+            expected_module_node_id is not None
+            and declarer_node_id != expected_module_node_id
+        ):
+            raise SemanticPayloadError(
+                f"{subject} action {action_node_id!r} is referenced through "
+                f"module {expected_module_node_id!r} but its canonical module "
+                f"owner is {declarer_node_id!r}"
+            )
+        return declarer_node_id
 
     # --- typed event-production authority -----------------------------------
     # The canonical event identity is the EVENT node's single EVENT-category
@@ -2049,12 +2089,21 @@ def validate_semantic_graph_v2_payload_closure(
         if isinstance(payload, ActionPayload)
     }
     emits_edge_keys: set[tuple[str, str]] = set()
+    emits_edges_by_action: dict[str, list[SemanticEdge]] = {}
     for graph_edge in verified_graph.edges:
         if graph_edge.kind is not SemanticEdgeKind.EMITS:
             continue
         emits_edge_keys.add((graph_edge.source_node_id, graph_edge.target_node_id))
         if _kind_of(graph_edge.source_node_id) is not SemanticNodeKind.ACTION:
             continue
+        emits_edges_by_action.setdefault(graph_edge.source_node_id, []).append(
+            graph_edge
+        )
+        if graph_edge.discriminator is not None:
+            raise SemanticPayloadError(
+                f"EMITS edge from action {graph_edge.source_node_id!r} carries a "
+                f"discriminator no typed payload backs"
+            )
         emitted_ids = action_emits_by_node.get(graph_edge.source_node_id, ())
         if not emitted_ids:
             raise SemanticPayloadError(
@@ -2078,6 +2127,76 @@ def validate_semantic_graph_v2_payload_closure(
     for event_node_id, event_identities in event_identities_by_node.items():
         for event_identity in event_identities:
             event_nodes_by_identity.setdefault(event_identity, []).append(event_node_id)
+
+    # --- the canonical module-ownership family ------------------------------
+    # Every ACTION that any node DECLARES enters the new authority family:
+    # its complete declarer set must close to exactly one module owner, every
+    # typed emits entry must resolve to exactly one EVENT node carrying
+    # exactly one canonical EVENT identity, and the ACTION-sourced EMITS edge
+    # set must equal the typed projection exactly (full SemanticEdge identity,
+    # discriminator included).  This closure holds independently of whether
+    # any workflow, reaction, or trigger consumes the event — a typed emit is
+    # an application-semantic claim in its own right.  Undeclared actions are
+    # historical graph content outside the family: their EMITS edges keep the
+    # floor rules above and confer no event-production authority.
+    module_owned_action_owners: dict[str, str] = {}
+    for family_action_id, family_emitted_ids in action_emits_by_node.items():
+        if not declares_by_target.get(family_action_id):
+            continue
+        module_owned_action_owners[family_action_id] = (
+            _require_canonical_module_owned_action(
+                family_action_id, subject="declared"
+            )
+        )
+        expected_emits_projection: dict[str, SemanticEdge] = {}
+        for family_emitted_id in family_emitted_ids:
+            family_event_nodes = event_nodes_by_identity.get(family_emitted_id, [])
+            if not family_event_nodes:
+                raise SemanticPayloadError(
+                    f"action {family_action_id!r} declares emitted event "
+                    f"{family_emitted_id!r} but no event node carries that "
+                    f"canonical event identity"
+                )
+            if len(family_event_nodes) > 1:
+                raise SemanticPayloadError(
+                    f"canonical event identity {family_emitted_id!r} is carried "
+                    f"by multiple event nodes"
+                )
+            family_event_node_id = family_event_nodes[0]
+            if len(event_identities_by_node.get(family_event_node_id, ())) != 1:
+                raise SemanticPayloadError(
+                    f"event {family_event_node_id!r} carries multiple canonical "
+                    f"event identities"
+                )
+            expected_emits_edge = SemanticEdge(
+                kind=SemanticEdgeKind.EMITS,
+                source_node_id=family_action_id,
+                target_node_id=family_event_node_id,
+            )
+            expected_emits_projection[expected_emits_edge.edge_identity] = (
+                expected_emits_edge
+            )
+        actual_emits_edges = emits_edges_by_action.get(family_action_id, [])
+        for actual_emits_edge in actual_emits_edges:
+            if actual_emits_edge.edge_identity not in expected_emits_projection:
+                raise SemanticPayloadError(
+                    f"EMITS edge {actual_emits_edge.source_node_id!r} -> "
+                    f"{actual_emits_edge.target_node_id!r} (discriminator "
+                    f"{actual_emits_edge.discriminator!r}) is not part of the "
+                    f"typed emits projection of module-owned action "
+                    f"{family_action_id!r}"
+                )
+        actual_emits_identities = {
+            actual_emits_edge.edge_identity
+            for actual_emits_edge in actual_emits_edges
+        }
+        for expected_emits_edge in expected_emits_projection.values():
+            if expected_emits_edge.edge_identity not in actual_emits_identities:
+                raise SemanticPayloadError(
+                    f"action {family_action_id!r} lacks its typed EMITS "
+                    f"projection to {expected_emits_edge.target_node_id!r}"
+                )
+
     for action_node_id, emitted_ids in action_emits_by_node.items():
         for emitted_id in emitted_ids:
             matching_event_nodes = event_nodes_by_identity.get(emitted_id, [])
@@ -2184,26 +2303,11 @@ def validate_semantic_graph_v2_payload_closure(
                     f"binding {payload.node_id!r} references a missing or "
                     f"non-action node {payload.module_action.action_node_id!r}"
                 )
-            module_declarers = _module_declarers_of(payload.module_action.action_node_id)
-            if not module_declarers:
-                raise SemanticPayloadError(
-                    f"binding {payload.node_id!r} references action "
-                    f"{payload.module_action.action_node_id!r} that no module "
-                    f"declares"
-                )
-            if len(module_declarers) > 1:
-                raise SemanticPayloadError(
-                    f"binding {payload.node_id!r} references action "
-                    f"{payload.module_action.action_node_id!r} that is "
-                    f"ambiguously owned by multiple modules"
-                )
-            if module_declarers[0] != payload.module_action.module_node_id:
-                raise SemanticPayloadError(
-                    f"binding {payload.node_id!r} references action "
-                    f"{payload.module_action.action_node_id!r} through module "
-                    f"{payload.module_action.module_node_id!r} but its canonical "
-                    f"module owner is {module_declarers[0]!r}"
-                )
+            _require_canonical_module_owned_action(
+                payload.module_action.action_node_id,
+                subject=f"binding {payload.node_id!r}:",
+                expected_module_node_id=payload.module_action.module_node_id,
+            )
         if payload.event_node_id is not None:
             if _kind_of(payload.event_node_id) is not SemanticNodeKind.EVENT:
                 raise SemanticPayloadError(
@@ -2218,19 +2322,12 @@ def validate_semantic_graph_v2_payload_closure(
                     f"canonical event identity, found {len(trigger_identities)}"
                 )
             trigger_event_id = trigger_identities[0]
-            canonical_producers: list[str] = []
-            for producer_node_id, emitted_ids in action_emits_by_node.items():
-                if trigger_event_id not in emitted_ids:
-                    continue
-                producer_owners = _module_declarers_of(producer_node_id)
-                if len(producer_owners) > 1:
-                    raise SemanticPayloadError(
-                        f"trigger event {payload.event_node_id!r} is produced by "
-                        f"action {producer_node_id!r} with ambiguous module "
-                        f"ownership"
-                    )
-                if len(producer_owners) == 1:
-                    canonical_producers.append(producer_node_id)
+            canonical_producers = [
+                producer_node_id
+                for producer_node_id, produced_ids in action_emits_by_node.items()
+                if trigger_event_id in produced_ids
+                and producer_node_id in module_owned_action_owners
+            ]
             if not canonical_producers:
                 raise SemanticPayloadError(
                     f"binding {payload.node_id!r} is triggered by event "

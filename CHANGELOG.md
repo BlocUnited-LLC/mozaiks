@@ -35,6 +35,12 @@ This project follows a practical pre-1.0 changelog format:
   the same result node), and each capability/binding/result node must
   participate in exactly its derived edge set — full edge identity,
   discriminator included — so payload-unbacked edge mutations fail closed.
+  Every module-declared action forms the canonical ownership family: its
+  complete declarer set must close to exactly one module (contradictory
+  non-module DECLARES edges are never filtered away), every typed emit must
+  resolve to exactly one EVENT node carrying exactly one canonical identity
+  — independent of whether any workflow or trigger consumes the event — and
+  its EMITS edge set must equal the typed projection exactly.
   AG2 Agent/Task/Network identities stay out of the graph — a Mozaiks
   workflow capability is application semantics; AG2 runtime objects remain
   execution implementation details. The offline projection now records
