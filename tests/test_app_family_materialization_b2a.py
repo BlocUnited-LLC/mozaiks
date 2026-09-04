@@ -46,7 +46,9 @@ from mozaiksai.core.semantics.binding import (
     RendererSelection,
     build_implementation_binding,
 )
+from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.compilation_plan import (
+    CompilationPlan,
     PlanDisposition,
     derive_compilation_plan,
 )
@@ -57,8 +59,14 @@ from mozaiksai.core.semantics.graph import (
     build_semantic_graph_v2,
 )
 from mozaiksai.core.semantics.materialization import (
-    materialize_plan,
+    MaterializationError,
     project_app_family_render_input,
+)
+from mozaiksai.core.semantics.materialization import (
+    materialize_plan as _materialize_plan,
+)
+from mozaiksai.core.semantics.materialization import (
+    rematerialize_plan as _rematerialize_plan,
 )
 from mozaiksai.core.semantics.payloads import (
     ApplicationPayload,
@@ -75,6 +83,9 @@ from mozaiksai.core.semantics.payloads import (
     WorkflowStartupMode,
     build_semantic_payload,
     semantic_payload_ref,
+)
+from mozaiksai.core.semantics.plan_authority import (
+    build_compilation_plan_authority_inputs,
 )
 from mozaiksai.core.semantics.refs import SemanticGraphRef
 from tests.test_semantic_payload_graph_v2 import _SCOPE, _corpus_payloads
@@ -312,6 +323,21 @@ def _plan(graph, payloads, *, with_configs: bool = True):
         registry=build_app_layout_registry(()),
         structured_output_configs=CONFIGS if with_configs else None,
     )
+
+
+def _authority_inputs(graph, payloads):
+    return build_compilation_plan_authority_inputs(
+        graph=graph,
+        payloads=payloads,
+        registry=build_app_layout_registry(()),
+    )
+
+
+def materialize_plan(**kwargs):
+    kwargs["authority_inputs"] = _authority_inputs(
+        kwargs["graph"], kwargs["payloads"]
+    )
+    return _materialize_plan(**kwargs)
 
 
 def _binding(graph):
@@ -1671,6 +1697,99 @@ def test_every_family_rejects_an_unrelated_extra_source(family, extra_node) -> N
         AppConfigMaterializationError, match="does not bind exactly"
     ):
         render_app_config_unit(unit=unit, render_input=forged)
+
+
+def _forge_plan_with_extra_source(plan, family, extra):
+    document = plan.model_dump(mode="json")
+    identity = plan.canonical_payload(include_digest=False)
+    index = next(
+        i
+        for i, unit in enumerate(plan.units)
+        if unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind == family
+    )
+    source = {"node_id": extra.node_id, "payload_digest": extra.payload_digest}
+    for target in (document, identity):
+        target["units"][index]["sources"] = sorted(
+            target["units"][index]["sources"] + [source],
+            key=lambda item: item["node_id"],
+        )
+    document["plan_digest"] = canonical_digest(identity)
+    return CompilationPlan.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("family", "extra_node"),
+    [
+        pytest.param(
+            "app_secret_references", "mozaiks.page.home", id="page-into-secrets"
+        ),
+        pytest.param(
+            "app_manifest", "mozaiks.workflow.digest", id="workflow-into-manifest"
+        ),
+        pytest.param(
+            "app_ui_route_manifest",
+            "mozaiks.integration.email",
+            id="integration-into-routes",
+        ),
+        pytest.param(
+            "app_integrations_config",
+            "mozaiks.page.home",
+            id="page-into-integrations",
+        ),
+    ],
+)
+def test_canonical_authority_rejects_forged_family_plan_before_render_or_reuse(
+    family, extra_node, monkeypatch
+) -> None:
+    """A re-digested plan cannot redefine any family's source footprint.
+
+    Canonical authority validation runs before fresh rendering and before
+    rematerialization can copy historical bytes.
+    """
+    graph, payloads = _extended_fixture()
+    plan = _plan(graph, payloads, with_configs=False)
+    payload_by_node = {payload.node_id: payload for payload in payloads}
+    forged = _forge_plan_with_extra_source(plan, family, payload_by_node[extra_node])
+    registry = build_app_layout_registry(())
+    authority_inputs = _authority_inputs(graph, payloads)
+    base_bundle = _materialize_plan(
+        plan=plan,
+        authority_inputs=authority_inputs,
+        graph=graph,
+        payloads=payloads,
+        binding=_binding(graph),
+        layout_registry=registry,
+    )
+
+    def _must_not_materialize(*args, **kwargs):
+        raise AssertionError("forged plan reached unit materialization")
+
+    monkeypatch.setattr(
+        "mozaiksai.core.semantics.materialization._materialize_unit",
+        _must_not_materialize,
+    )
+    with pytest.raises(MaterializationError, match="canonical authority"):
+        _materialize_plan(
+            plan=forged,
+            authority_inputs=authority_inputs,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=registry,
+        )
+    with pytest.raises(MaterializationError, match="canonical authority"):
+        _rematerialize_plan(
+            base_bundle=base_bundle,
+            base_plan=plan,
+            base_authority_inputs=authority_inputs,
+            successor_plan=forged,
+            successor_authority_inputs=authority_inputs,
+            graph=graph,
+            payloads=payloads,
+            binding=_binding(graph),
+            layout_registry=registry,
+        )
 
 
 def test_plan_source_added_to_a_family_is_rejected() -> None:

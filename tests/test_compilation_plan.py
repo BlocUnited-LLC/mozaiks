@@ -65,8 +65,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # (roles-only auth mutation left secrets bytes identical), all four rendered
 # outputs are byte-identical, selective reuse improved (the secret unit now
 # survives auth mutations), and no required source was dropped (loader and
-# mutation suites green).
-_GOLDEN_PLAN_DIGEST = "c0ef25d66c43710c7a6a967fcfb4fecb8232231050d4e8eb0fda054381389a05"
+# mutation suites green). Re-pinned after rebasing onto #475 because the same
+# canonical plan now also pins its consulted assignment-contract closure;
+# rendered bytes and family activation are unchanged.
+_GOLDEN_PLAN_DIGEST = "b751584c87214bf980dd380f8368a459dca0c3569590fe74d8cb80b4f555f4a3"
 
 
 def _registry():

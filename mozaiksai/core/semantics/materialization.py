@@ -105,6 +105,11 @@ from mozaiksai.core.semantics.payloads import (
     SemanticPayloadBase,
     parse_semantic_payload,
 )
+from mozaiksai.core.semantics.plan_authority import (
+    CompilationPlanAuthorityInputs,
+    PlanAuthorityError,
+    validate_compilation_plan_against_authority,
+)
 from mozaiksai.core.semantics.portable_path import detect_collisions
 
 PAGE_SCHEMA_FAMILY: Literal["app_ui_page_schema"] = "app_ui_page_schema"
@@ -929,6 +934,7 @@ def _materialize_unit(
 def materialize_plan(
     *,
     plan: CompilationPlan,
+    authority_inputs: CompilationPlanAuthorityInputs,
     graph: SemanticGraphV2,
     payloads: Iterable[SemanticPayloadBase],
     binding: ImplementationBinding,
@@ -940,10 +946,19 @@ def materialize_plan(
     Renders exactly the renderer-ready page units through the bound accepted
     implementation, places exact preserved bytes for supplied
     ``preserve_unowned`` units, and reports every other unit's disposition
-    explicitly. The registry snapshot identity must match the plan's pinned
-    registry digest — a plan derived from a different registry fails closed.
+    explicitly. Canonical authority inputs are required and the submitted plan
+    must equal the plan re-derived from them. The registry snapshot identity
+    must also match the plan's pinned registry digest.
     """
-    verified_plan, verified_graph, payload_by_node = _cold_validate(plan, graph, payloads)
+    try:
+        canonical_plan = validate_compilation_plan_against_authority(plan, authority_inputs)
+    except PlanAuthorityError as exc:
+        raise MaterializationError(
+            "compilation plan rejected by canonical authority validation"
+        ) from exc
+    verified_plan, verified_graph, payload_by_node = _cold_validate(
+        canonical_plan, graph, payloads
+    )
     _assert_registry_identity(verified_plan, layout_registry)
     resolve_page_schema_renderer_selection(
         binding, graph=verified_graph, layout_registry=layout_registry
@@ -1016,7 +1031,9 @@ def rematerialize_plan(
     *,
     base_bundle: MaterializedBundle,
     base_plan: CompilationPlan,
+    base_authority_inputs: CompilationPlanAuthorityInputs,
     successor_plan: CompilationPlan,
+    successor_authority_inputs: CompilationPlanAuthorityInputs,
     graph: SemanticGraphV2,
     payloads: Iterable[SemanticPayloadBase],
     binding: ImplementationBinding,
@@ -1029,14 +1046,27 @@ def rematerialize_plan(
     byte-for-byte from the base bundle (preserved reuse re-verifies the
     pinned content digest); removed units' outputs are absent. The closure is
     computed by the 4B authority and attached to the result for inspection.
+    Both plans must first equal the plans re-derived from their respective
+    canonical authority inputs, before any historical bytes can be reused.
     """
-    if base_bundle.plan_digest != base_plan.plan_digest:
+    try:
+        canonical_base_plan = validate_compilation_plan_against_authority(
+            base_plan, base_authority_inputs
+        )
+        canonical_successor_plan = validate_compilation_plan_against_authority(
+            successor_plan, successor_authority_inputs
+        )
+    except PlanAuthorityError as exc:
+        raise MaterializationError(
+            "compilation plan rejected by canonical authority validation"
+        ) from exc
+    if base_bundle.plan_digest != canonical_base_plan.plan_digest:
         raise MaterializationError("base bundle does not correspond to the base plan")
-    closure = plan_regeneration_closure(base_plan, successor_plan)
+    closure = plan_regeneration_closure(canonical_base_plan, canonical_successor_plan)
     reusable_ids = set(closure.reusable)
 
     verified_plan, verified_graph, payload_by_node = _cold_validate(
-        successor_plan, graph, payloads
+        canonical_successor_plan, graph, payloads
     )
     _assert_registry_identity(verified_plan, layout_registry)
     resolve_page_schema_renderer_selection(
