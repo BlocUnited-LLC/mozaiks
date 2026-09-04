@@ -86,9 +86,10 @@ from mozaiksai.core.semantics.refs import (
     validate_node_id_grammar,
 )
 from mozaiksai.core.workflow.assignment_kinds import (
+    ASSIGNMENT_CONTRACT_DESCRIPTORS,
     COMPILER_ASSIGNMENT_KINDS,
+    AssignmentContractDescriptor,
     AssignmentKind,
-    assignment_contract_descriptor,
 )
 from mozaiksai.core.workflow.structured_output_contracts import (
     StructuredOutputContractRef,
@@ -948,6 +949,8 @@ def derive_compilation_plan(
     registry: Any,
     scope_selection: CompilationScopeSelection = CompilationScopeSelection(),
     structured_output_configs: Mapping[str, Any] | None = None,
+    assignment_descriptors: Mapping[AssignmentKind, AssignmentContractDescriptor]
+    | None = None,
 ) -> CompilationPlan:
     """Derive the single aggregate plan for one immutable graph identity.
 
@@ -957,6 +960,14 @@ def derive_compilation_plan(
     input object is never read.
     """
     verified_graph, payload_by_node = _cold_validate_inputs(graph, payloads)
+    # The descriptor authority is an explicit derivation input; the canonical
+    # module registry is only the default, so validation can supply the exact
+    # snapshot a serialized authority document pinned.
+    descriptor_authority = (
+        assignment_descriptors
+        if assignment_descriptors is not None
+        else ASSIGNMENT_CONTRACT_DESCRIPTORS
+    )
     output_configs = dict(structured_output_configs or {})
     verified_scope_selection = CompilationScopeSelection.model_validate(
         scope_selection.model_dump(mode="json")
@@ -1458,7 +1469,7 @@ def derive_compilation_plan(
                 _gap(row, PlanGapCode.VALIDATOR_UNDECLARED, adr_slice=5)
                 continue
             assignment_kind = compiler_assignment_kinds[0]
-            descriptor = assignment_contract_descriptor(assignment_kind)
+            descriptor = descriptor_authority.get(AssignmentKind(assignment_kind))
             if descriptor is None:
                 _gap(row, PlanGapCode.OUTPUT_CONTRACT_UNRESOLVED, adr_slice=5)
                 continue

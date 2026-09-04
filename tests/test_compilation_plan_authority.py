@@ -471,6 +471,7 @@ def test_shuffled_raw_authority_inputs_derive_the_same_canonical_plan() -> None:
         registry_snapshot=inputs.registry_snapshot,
         scope_selection=inputs.scope_selection,
         structured_output_configs=inputs.structured_output_configs,
+        assignment_contract_registry=inputs.assignment_contract_registry,
     )
     canonical = validate_compilation_plan_against_authority(plan, shuffled)
     assert canonical.plan_digest == plan.plan_digest
@@ -583,6 +584,7 @@ def test_unreferenced_extra_payload_in_authority_inputs_fails_closed() -> None:
         registry_snapshot=inputs.registry_snapshot,
         scope_selection=inputs.scope_selection,
         structured_output_configs=inputs.structured_output_configs,
+        assignment_contract_registry=inputs.assignment_contract_registry,
     )
     with pytest.raises(PlanAuthorityError) as excinfo:
         validate_compilation_plan_against_authority(plan, padded)
@@ -623,3 +625,227 @@ def test_scope_selection_is_never_silently_reconstructed() -> None:
     )
     with pytest.raises(PlanAuthorityError):
         validate_compilation_plan_against_authority(plan, default_inputs)
+
+
+# ---------------------------------------------------------------------------
+# Same document / same result: no canonical planner input may remain ambient.
+# Codex 3's exact assignment-registry reproduction is preserved here.
+# ---------------------------------------------------------------------------
+
+
+def test_ambient_assignment_registry_mutation_cannot_change_validation() -> None:
+    """The same serialized authority document yields the same canonical
+    rederived plan even after ambient assignment-descriptor registry state
+    changes — derivation consumes the descriptors resolved from the exact
+    supplied snapshot, never module globals."""
+    import mozaiksai.core.workflow.assignment_kinds as ak
+
+    inputs, plan = _authority()
+    document = json.dumps(
+        {"inputs": inputs.model_dump(mode="json"), "plan": plan.model_dump(mode="json")}
+    )
+    revived = CompilationPlanAuthorityInputs.model_validate(
+        json.loads(document)["inputs"]
+    )
+    before = validate_compilation_plan_against_authority(plan, revived)
+
+    original = ak.ASSIGNMENT_CONTRACT_DESCRIPTORS
+    try:
+        # ambient mutation: rebind the module registry to an empty mapping
+        ak.ASSIGNMENT_CONTRACT_DESCRIPTORS = type(original)({})
+        revived_again = CompilationPlanAuthorityInputs.model_validate(
+            json.loads(document)["inputs"]
+        )
+        after = validate_compilation_plan_against_authority(plan, revived_again)
+    finally:
+        ak.ASSIGNMENT_CONTRACT_DESCRIPTORS = original
+    assert after.plan_digest == before.plan_digest == plan.plan_digest
+    assert after.canonical_payload() == before.canonical_payload()
+
+
+def test_authority_snapshot_pins_descriptor_content() -> None:
+    """A forged descriptor snapshot inside the authority document changes the
+    canonical derivation result — descriptor authority is document state, so
+    tampering yields a typed mismatch rather than silent divergence."""
+    import yaml as _yaml
+
+    configs = {
+        "AppGenerator": _yaml.safe_load(
+            (
+                ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml"
+            ).read_text(encoding="utf-8")
+        )
+    }
+    result, _ = _build(_source())
+    plan = derive_compilation_plan(
+        graph=result.graph,
+        payloads=result.payloads,
+        registry=_registry(),
+        structured_output_configs=configs,
+    )
+    inputs = build_compilation_plan_authority_inputs(
+        graph=result.graph,
+        payloads=result.payloads,
+        registry=_registry(),
+        structured_output_configs=configs,
+    )
+    assert (
+        validate_compilation_plan_against_authority(plan, inputs).plan_digest
+        == plan.plan_digest
+    )
+    document = inputs.model_dump(mode="json")
+    document["assignment_contract_registry"]["descriptors"] = []
+    tampered = CompilationPlanAuthorityInputs.model_validate(document)
+    with pytest.raises(PlanAuthorityError):
+        validate_compilation_plan_against_authority(plan, tampered)
+
+
+def test_fresh_process_ambient_registry_independence() -> None:
+    """A fresh interpreter validating the same serialized document reaches
+    the same canonical digest even with the ambient registry emptied first."""
+    inputs, plan = _authority()
+    probe = (
+        "import json, sys\n"
+        "import mozaiksai.core.workflow.assignment_kinds as ak\n"
+        "ak.ASSIGNMENT_CONTRACT_DESCRIPTORS = type(ak.ASSIGNMENT_CONTRACT_DESCRIPTORS)({})\n"
+        "from mozaiksai.core.semantics.compilation_plan import CompilationPlan\n"
+        "from mozaiksai.core.semantics.plan_authority import (\n"
+        "    CompilationPlanAuthorityInputs,\n"
+        "    validate_compilation_plan_against_authority,\n"
+        ")\n"
+        "payload = json.loads(sys.stdin.read())\n"
+        "inputs = CompilationPlanAuthorityInputs.model_validate(payload['inputs'])\n"
+        "plan = CompilationPlan.model_validate(payload['plan'])\n"
+        "print(validate_compilation_plan_against_authority(plan, inputs).plan_digest)\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(ROOT),
+        input=json.dumps(
+            {
+                "inputs": inputs.model_dump(mode="json"),
+                "plan": plan.model_dump(mode="json"),
+            }
+        ),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == plan.plan_digest
+
+
+# ---------------------------------------------------------------------------
+# Closed structured-output configuration: immediate JSON-safety rejection and
+# deep immutability. "Frozen model containing mutable dict" is not enough.
+# ---------------------------------------------------------------------------
+
+
+def test_non_json_values_reject_immediately_at_construction() -> None:
+    from mozaiksai.core.semantics.plan_authority import CanonicalJsonObject
+
+    class _Custom:
+        pass
+
+    def _fn():
+        return None
+
+    rejects = [
+        {"a": object()},
+        {"a": _Custom()},
+        {"a": _fn},
+        {"a": b"bytes"},
+        {"a": {1, 2}},
+        {"a": float("nan")},
+        {"a": float("inf")},
+        {1: "non-string-key"},
+        {"a": {"nested": object()}},
+        {"a": [1, [2, {"deep": set()}]]},
+    ]
+    for bad in rejects:
+        with pytest.raises((ValueError, TypeError)):
+            CanonicalJsonObject.from_python(bad)
+    good = CanonicalJsonObject.from_python(
+        {"s": "x", "i": 3, "f": 1.5, "b": True, "n": None, "arr": [1, "two", {"k": []}]}
+    )
+    assert good.to_python() == {
+        "s": "x",
+        "i": 3,
+        "f": 1.5,
+        "b": True,
+        "n": None,
+        "arr": [1, "two", {"k": []}],
+    }
+    with pytest.raises((ValueError, TypeError)):
+        CanonicalJsonObject.from_python({"file": open(__file__)})  # noqa: SIM115
+
+
+def test_deep_immutability_and_source_mutation_independence() -> None:
+    from mozaiksai.core.semantics.plan_authority import CanonicalJsonObject
+
+    source = {"a": {"b": [1, 2, 3]}, "c": "keep"}
+    frozen = CanonicalJsonObject.from_python(source)
+    # a source dictionary mutated after construction cannot alter the document
+    source["a"]["b"].append(99)
+    source["c"] = "changed"
+    assert frozen.to_python() == {"a": {"b": [1, 2, 3]}, "c": "keep"}
+    # top-level and nested assignment rejected; entries are tuples
+    with pytest.raises(ValidationError):
+        frozen.entries = ()  # type: ignore[misc]
+    entry = frozen.entries[0]
+    with pytest.raises(ValidationError):
+        entry.value = None  # type: ignore[misc]
+    assert isinstance(frozen.entries, tuple)
+    nested = frozen.to_python()
+    nested["a"]["b"].append(4)  # mutating the EXPORT cannot touch the document
+    assert frozen.to_python() == {"a": {"b": [1, 2, 3]}, "c": "keep"}
+    # serialization -> deserialization yields the identical canonical contract
+    revived = CanonicalJsonObject.model_validate(
+        json.loads(json.dumps(frozen.model_dump(mode="json")))
+    )
+    assert revived == frozen
+    assert revived.to_python() == frozen.to_python()
+
+
+def test_model_copy_cannot_smuggle_unchecked_open_values() -> None:
+    """model_copy bypasses validators, but the validator's own cold
+    re-validation of the authority document rejects anything that cannot
+    round-trip the closed contract."""
+    inputs, plan = _authority()
+    smuggled = inputs.model_copy(
+        update={"structured_output_configs": {"AppGenerator": object()}}
+    )
+    with pytest.raises(PlanAuthorityError) as excinfo:
+        validate_compilation_plan_against_authority(plan, smuggled)
+    assert excinfo.value.category is PlanAuthorityMismatch.REQUIRED_AUTHORITY_MISSING
+
+
+# ---------------------------------------------------------------------------
+# Complete derivation-input identity: every canonical derivation parameter is
+# represented by the authority contract. A new authority-bearing parameter on
+# derive_compilation_plan fails this test until the contract carries it.
+# ---------------------------------------------------------------------------
+
+
+def test_every_derivation_input_is_represented_in_authority_inputs() -> None:
+    import inspect
+
+    parameters = set(
+        inspect.signature(derive_compilation_plan).parameters
+    )
+    represented = {
+        "graph": "graph",
+        "payloads": "payloads",
+        "registry": "registry_snapshot",
+        "scope_selection": "scope_selection",
+        "structured_output_configs": "structured_output_configs",
+        "assignment_descriptors": "assignment_contract_registry",
+    }
+    assert parameters == set(represented), (
+        "derive_compilation_plan gained or lost an authority-bearing "
+        "parameter; CompilationPlanAuthorityInputs must be updated in the "
+        f"same change. parameters={sorted(parameters)}"
+    )
+    fields = set(CompilationPlanAuthorityInputs.model_fields)
+    for parameter, field in represented.items():
+        assert field in fields, (parameter, field)

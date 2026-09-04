@@ -52,11 +52,21 @@ content, no filesystem paths, and no hosted state.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 from mozaiksai.core.semantics.compilation_plan import (
     CompilationPlan,
@@ -69,6 +79,11 @@ from mozaiksai.core.semantics.graph import SemanticGraphV2
 from mozaiksai.core.semantics.payloads import (
     SemanticPayload,
     SemanticPayloadBase,
+)
+from mozaiksai.core.workflow.assignment_kinds import (
+    AssignmentContractRegistrySnapshot,
+    descriptors_from_snapshot,
+    snapshot_assignment_contract_registry,
 )
 
 AUTHORITY_INPUTS_SCHEMA_VERSION = "mozaiks.compilation_plan_authority_inputs.v1"
@@ -104,6 +119,105 @@ class PlanAuthorityError(ValueError):
         self.unit_id = unit_id
 
 
+class CanonicalJsonEntry(BaseModel):
+    """One key/value pair of a canonical JSON object."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key: StrictStr
+    value: CanonicalJsonValue
+
+
+class CanonicalJsonObject(BaseModel):
+    """Recursively closed, immutable, deterministic JSON object.
+
+    Entries carry unique string keys in their exact declaration order —
+    declaration order is meaning in structured-output contracts, so the
+    authority pins the document precisely as derivation consumed it; the
+    stored order is itself deterministic and survives serialization. Values
+    are drawn only from the closed JSON algebra: no mutable dict/list
+    survives construction and no non-JSON value can enter.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entries: tuple[CanonicalJsonEntry, ...] = ()
+
+    @model_validator(mode="after")
+    def _unique_keys(self) -> CanonicalJsonObject:
+        keys = [entry.key for entry in self.entries]
+        if len(set(keys)) != len(keys):
+            raise ValueError("canonical JSON object declares duplicate keys")
+        return self
+
+    @classmethod
+    def from_python(cls, value: Mapping[str, Any]) -> CanonicalJsonObject:
+        if not isinstance(value, Mapping):
+            raise ValueError("canonical JSON object requires a mapping")
+        entries = []
+        for key, item in value.items():
+            if type(key) is not str:
+                raise ValueError(
+                    f"canonical JSON object keys must be str, got {type(key).__name__}"
+                )
+            entries.append(CanonicalJsonEntry(key=key, value=_json_value(item)))
+        return cls(entries=tuple(entries))
+
+    def to_python(self) -> dict[str, Any]:
+        return {entry.key: _python_value(entry.value) for entry in self.entries}
+
+
+class CanonicalJsonArray(BaseModel):
+    """Recursively closed, immutable JSON array preserving element order."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    items: tuple[CanonicalJsonValue, ...] = ()
+
+
+CanonicalJsonValue = (
+    None
+    | StrictBool
+    | StrictInt
+    | StrictFloat
+    | StrictStr
+    | CanonicalJsonArray
+    | CanonicalJsonObject
+)
+
+CanonicalJsonEntry.model_rebuild()
+CanonicalJsonArray.model_rebuild()
+CanonicalJsonObject.model_rebuild()
+
+
+def _json_value(value: Any) -> Any:
+    """Normalize one Python value into the closed algebra, failing closed
+    immediately on anything that is not exact JSON."""
+    if value is None or type(value) is bool or type(value) is str:
+        return value
+    if type(value) is int:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("canonical JSON forbids NaN and infinite floats")
+        return value
+    if isinstance(value, Mapping):
+        return CanonicalJsonObject.from_python(value)
+    if type(value) in (list, tuple):
+        return CanonicalJsonArray(items=tuple(_json_value(item) for item in value))
+    raise ValueError(
+        "canonical JSON forbids values of type " f"{type(value).__name__}"
+    )
+
+
+def _python_value(value: Any) -> Any:
+    if isinstance(value, CanonicalJsonObject):
+        return value.to_python()
+    if isinstance(value, CanonicalJsonArray):
+        return [_python_value(item) for item in value.items]
+    return value
+
+
 class CompilationPlanAuthorityInputs(BaseModel):
     """The exact immutable inputs canonical plan derivation consumes.
 
@@ -127,7 +241,8 @@ class CompilationPlanAuthorityInputs(BaseModel):
     payloads: tuple[SemanticPayload, ...]
     registry_snapshot: LayoutRegistrySnapshot
     scope_selection: CompilationScopeSelection = CompilationScopeSelection()
-    structured_output_configs: Mapping[str, Any] | None = None
+    structured_output_configs: CanonicalJsonObject | None = None
+    assignment_contract_registry: AssignmentContractRegistrySnapshot
 
     @field_validator("authority_schema_version")
     @classmethod
@@ -156,6 +271,7 @@ def build_compilation_plan_authority_inputs(
     registry: Any,
     scope_selection: CompilationScopeSelection | None = None,
     structured_output_configs: Mapping[str, Any] | None = None,
+    assignment_contract_registry: AssignmentContractRegistrySnapshot | None = None,
 ) -> CompilationPlanAuthorityInputs:
     """Snapshot live authority objects into the immutable input contract.
 
@@ -173,7 +289,16 @@ def build_compilation_plan_authority_inputs(
         payloads=tuple(payloads),
         registry_snapshot=snapshot,
         scope_selection=scope_selection or CompilationScopeSelection(),
-        structured_output_configs=structured_output_configs,
+        structured_output_configs=(
+            None
+            if structured_output_configs is None
+            else CanonicalJsonObject.from_python(structured_output_configs)
+        ),
+        assignment_contract_registry=(
+            assignment_contract_registry
+            if assignment_contract_registry is not None
+            else snapshot_assignment_contract_registry()
+        ),
     )
 
 
@@ -261,7 +386,14 @@ def validate_compilation_plan_against_authority(
             payloads=verified_inputs.payloads,
             registry=verified_inputs.registry_snapshot,
             scope_selection=verified_inputs.scope_selection,
-            structured_output_configs=verified_inputs.structured_output_configs,
+            structured_output_configs=(
+                None
+                if verified_inputs.structured_output_configs is None
+                else verified_inputs.structured_output_configs.to_python()
+            ),
+            assignment_descriptors=descriptors_from_snapshot(
+                verified_inputs.assignment_contract_registry
+            ),
         )
     except (TypeError, ValueError) as exc:
         raise PlanAuthorityError(
@@ -288,6 +420,9 @@ def validate_compilation_plan_against_authority(
 
 __all__ = [
     "AUTHORITY_INPUTS_SCHEMA_VERSION",
+    "CanonicalJsonArray",
+    "CanonicalJsonEntry",
+    "CanonicalJsonObject",
     "CompilationPlanAuthorityInputs",
     "PlanAuthorityError",
     "PlanAuthorityMismatch",

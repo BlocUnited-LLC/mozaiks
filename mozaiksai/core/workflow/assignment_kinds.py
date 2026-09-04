@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+
 
 class AssignmentKind(StrEnum):
     """Closed assignment vocabulary.
@@ -200,6 +202,119 @@ def registered_assignment_kind_values() -> frozenset[str]:
     return frozenset(kind.value for kind in REGISTERED_ASSIGNMENT_KINDS)
 
 
+ASSIGNMENT_CONTRACT_REGISTRY_SCHEMA_VERSION = (
+    "mozaiks.assignment_contract_registry.v1"
+)
+
+
+class AssignmentContractDescriptorRow(BaseModel):
+    """Serializable identity of one assignment-contract descriptor.
+
+    Describes contract identity only — never runtime behavior: no callable,
+    class object, module, filesystem path, agent, or provider state.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    assignment_kind: AssignmentKind
+    workflow_name: str
+    structured_output_model_id: str
+    owned_artifact_families: tuple[str, ...]
+    validator_ids: tuple[str, ...]
+    identity_bindings: tuple[tuple[str, str], ...]
+
+
+class AssignmentContractRegistrySnapshot(BaseModel):
+    """Deterministic snapshot of the complete descriptor authority.
+
+    Frozen, unknown-field-rejecting, canonically ordered by assignment kind,
+    and digest-identified from canonical content, so a serialized authority
+    document pins exactly the descriptor state canonical plan derivation
+    consumed — ambient module state can never silently change a validation
+    result.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    registry_schema_version: str = ASSIGNMENT_CONTRACT_REGISTRY_SCHEMA_VERSION
+    descriptors: tuple[AssignmentContractDescriptorRow, ...]
+
+    @field_validator("registry_schema_version")
+    @classmethod
+    def _schema_version(cls, value: str) -> str:
+        if value != ASSIGNMENT_CONTRACT_REGISTRY_SCHEMA_VERSION:
+            raise ValueError(
+                "unsupported assignment-contract registry schema version "
+                f"{value!r}"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _canonical_order(self) -> AssignmentContractRegistrySnapshot:
+        ordered = tuple(
+            sorted(self.descriptors, key=lambda row: row.assignment_kind.value)
+        )
+        kinds = [row.assignment_kind for row in ordered]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError(
+                "assignment-contract registry snapshot declares duplicate kinds"
+            )
+        object.__setattr__(self, "descriptors", ordered)
+        return self
+
+    @property
+    def snapshot_digest(self) -> str:
+        import hashlib
+        import json
+
+        return hashlib.sha256(
+            json.dumps(self.model_dump(mode="json"), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+
+def snapshot_assignment_contract_registry() -> AssignmentContractRegistrySnapshot:
+    """Snapshot the canonical descriptor registry as it exists right now."""
+    return AssignmentContractRegistrySnapshot(
+        descriptors=tuple(
+            AssignmentContractDescriptorRow(
+                assignment_kind=descriptor.assignment_kind,
+                workflow_name=descriptor.workflow_name,
+                structured_output_model_id=descriptor.structured_output_model_id,
+                owned_artifact_families=descriptor.owned_artifact_families,
+                validator_ids=descriptor.validator_ids,
+                identity_bindings=descriptor.identity_bindings,
+            )
+            for descriptor in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()
+        )
+    )
+
+
+def descriptors_from_snapshot(
+    snapshot: AssignmentContractRegistrySnapshot,
+) -> Mapping[AssignmentKind, AssignmentContractDescriptor]:
+    """Rebuild the one canonical descriptor type from a validated snapshot.
+
+    This is deserialization, not a second resolution mechanism: the returned
+    mapping holds ordinary :class:`AssignmentContractDescriptor` instances and
+    is consumed by the same derivation code path as the canonical registry.
+    """
+    return MappingProxyType(
+        {
+            row.assignment_kind: AssignmentContractDescriptor(
+                assignment_kind=row.assignment_kind,
+                workflow_name=row.workflow_name,
+                structured_output_model_id=row.structured_output_model_id,
+                owned_artifact_families=tuple(row.owned_artifact_families),
+                validator_ids=tuple(row.validator_ids),
+                identity_bindings=tuple(
+                    (binding[0], binding[1]) for binding in row.identity_bindings
+                ),
+            )
+            for row in snapshot.descriptors
+        }
+    )
+
+
 def app_build_assignment_kind_values() -> frozenset[str]:
     return frozenset(kind.value for kind in APP_BUILD_ASSIGNMENT_KINDS)
 
@@ -207,7 +322,12 @@ def app_build_assignment_kind_values() -> frozenset[str]:
 __all__ = [
     "APP_BUILD_ASSIGNMENT_KINDS",
     "COMPILER_ASSIGNMENT_KINDS",
+    "ASSIGNMENT_CONTRACT_REGISTRY_SCHEMA_VERSION",
+    "AssignmentContractDescriptorRow",
+    "AssignmentContractRegistrySnapshot",
     "REGISTERED_ASSIGNMENT_KINDS",
+    "descriptors_from_snapshot",
+    "snapshot_assignment_contract_registry",
     "AssignmentKind",
     "AssignmentContractDescriptor",
     "ASSIGNMENT_CONTRACT_DESCRIPTORS",
