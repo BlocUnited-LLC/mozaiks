@@ -691,9 +691,22 @@ async def _register_app_bundle_artifact_version(
         if app_dir is not None and written_paths
         else []
     )
+    # The archive identity comes from the one shared canonical formula: the
+    # manifest records the bundle archive at exactly
+    # {bundle_name}/{bundle_name}.zip, and a zip whose on-disk name disagrees
+    # with the canonical archive name fails the build closed instead of
+    # persisting a manifest that cannot be resolved.
+    from mozaiksai.core.artifacts.models import canonical_bundle_archive_path
+
+    canonical_archive_path = canonical_bundle_archive_path(bundle_name)
+    if zip_path.name != f"{bundle_name}.zip":
+        raise RuntimeError(
+            f"bundle archive {zip_path.name!r} does not match the canonical "
+            f"archive name {bundle_name}.zip"
+        )
     files_manifest = [
         {
-            "path": f"{bundle_name}/{zip_path.name}",
+            "path": canonical_archive_path,
             "sha256": sha,
             "size_bytes": zip_path.stat().st_size,
             "content_type": "application/zip",
@@ -782,6 +795,20 @@ async def _register_app_bundle_artifact_version(
             "metadata": bundle_content_metadata,
         },
     )
+    # The persisted record must identify exactly one canonical bundle archive
+    # entry (unique application/zip entry under the persisted bundle_name
+    # path) — the only manifest digest that may ever serve as bundle-digest
+    # authority. A manifest that fails this resolves to no verifiable bundle,
+    # so the build fails closed here instead of persisting an ambiguous record.
+    from mozaiksai.core.artifacts.models import resolve_canonical_bundle_entry
+
+    canonical_bundle_entry = resolve_canonical_bundle_entry(artifact_version)
+    if canonical_bundle_entry.sha256 != sha:
+        raise RuntimeError(
+            "canonical bundle entry digest does not match the archive just "
+            f"written for record {artifact_version.id!r}"
+        )
+
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("artifact_version_id", artifact_version.id)
@@ -983,7 +1010,17 @@ async def generate_and_download(
         pass
 
     # Normalize bundle name to a safe folder name
-    bundle_name = "".join(ch for ch in bundle_name if ch.isalnum() or ch in {"-", "_"}).strip() or "GeneratedApp"
+    # Derivation from the display name, constrained to the closed shared
+    # bundle-name grammar (ASCII letters/digits/hyphen/underscore) that
+    # validate_canonical_bundle_name enforces at read time.
+    bundle_name = (
+        "".join(
+            ch
+            for ch in bundle_name
+            if ch.isascii() and (ch.isalnum() or ch in {"-", "_"})
+        ).strip()
+        or "GeneratedApp"
+    )
 
     app_dir = _resolve_app_output_dir(app_id=app_id, build_id=build_id or chat_id)
     base_dir = app_dir.parent

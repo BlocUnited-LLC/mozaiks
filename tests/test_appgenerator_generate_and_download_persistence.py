@@ -61,7 +61,18 @@ class _FakeArtifactStore:
 
     async def create_build_record(self, **kwargs):
         self.calls.append(dict(kwargs))
-        return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
+        from mozaiksai.core.artifacts.models import BuildRecord
+
+        return BuildRecord(
+            _id="av_bundle_1",
+            app_id=kwargs["app_id"],
+            build_family=kwargs["build_family"],
+            build_key=kwargs["build_key"],
+            version_number=1,
+            lineage_root_id="av_bundle_1",
+            files_manifest=kwargs.get("files_manifest") or [],
+            commit_metadata=kwargs.get("commit_metadata") or {},
+        )
 
 
 def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:

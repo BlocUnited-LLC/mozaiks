@@ -130,6 +130,22 @@ def _context_authority_policy_for_workflow(workflow_name: str):
     )
 
 
+# Server-owned session fields: lifecycle authority facts minted by the
+# runtime (immutable run identity, the run-to-build binding, the terminal
+# build receipt). They are writable ONLY through
+# AG2PersistenceManager.persist_server_owned_session_fields — the privileged,
+# lease-fenced write point. Every generic session write path (create with
+# extra_fields, context persistence, replay merge) must either reject them
+# (direct caller writes) or drop them with an explicit security diagnostic
+# (model/tool-authored context), so an injected value can never reach the
+# session document through a generic API.
+SERVER_OWNED_SESSION_FIELDS = frozenset({
+    "build_terminal_receipt",
+    "run_build_binding",
+    "workflow_run_id",
+})
+
+
 class PersistenceManager:
     """Mongo connection holder for runtime persistence."""
 
@@ -402,6 +418,29 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        # Server-owned lifecycle authority fields are never accepted from a
+        # direct caller. This is pure input validation and must run BEFORE
+        # the idempotent existing-session return: a request carrying a
+        # reserved key is invalid whether the session does not exist, already
+        # exists, or races into existence — deterministic rejection, zero
+        # mutation, never a silent success.
+        if isinstance(extra_fields, dict) and extra_fields:
+            injected_server_owned = sorted(
+                k for k in extra_fields if k in SERVER_OWNED_SESSION_FIELDS
+            )
+            if injected_server_owned:
+                logger.warning(
+                    "[CREATE_CHAT_SESSION] Rejected creation with "
+                    "server-owned session fields %s (chat_id=%s app_id=%s): "
+                    "only persist_server_owned_session_fields may write them",
+                    injected_server_owned,
+                    chat_id,
+                    resolved_app_id,
+                )
+                raise ValueError(
+                    "extra_fields may not contain server-owned session "
+                    f"fields: {injected_server_owned}"
+                )
         assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
         try:
             coll = await self._coll()
@@ -542,6 +581,14 @@ class AG2PersistenceManager:
                 f"context_authority.policy_unavailable workflow={clean_workflow_name} op=replay"
             ) from e
 
+        # Server-owned lifecycle fields are runtime infrastructure, not
+        # workflow-declared context: they bypass the declared-variable replay
+        # policy (which would drop them as unknown) but are only ever written
+        # through the privileged setter, never by workflow context updates.
+        server_owned = {
+            key: extra.pop(key) for key in list(extra) if key in SERVER_OWNED_SESSION_FIELDS
+        }
+
         replay_diagnostics: list[str] = []
         filtered = policy.filter_for_replay(
             extra,
@@ -555,6 +602,7 @@ class AG2PersistenceManager:
                 chat_id,
                 replay_diagnostics,
             )
+        filtered.update(server_owned)
         return filtered
 
     async def persist_context_variables(
@@ -619,6 +667,19 @@ class AG2PersistenceManager:
         for key, value in variables.items():
             if not isinstance(key, str) or not key.strip() or key in protected:
                 continue
+            if key in SERVER_OWNED_SESSION_FIELDS:
+                # Server-owned lifecycle authority fields are never writable
+                # through generic context persistence: a model/tool-authored
+                # context update must not install or replace them. The
+                # rejection is logged so tampering attempts are detectable.
+                logger.warning(
+                    "[PERSIST_CONTEXT_VARIABLES] Rejected write to server-owned "
+                    "session field %r (chat_id=%s workflow=%s)",
+                    key,
+                    chat_id,
+                    clean_workflow_name,
+                )
+                continue
             candidate_updates[key] = value
         if not candidate_updates:
             return
@@ -662,6 +723,66 @@ class AG2PersistenceManager:
         if matched_count is not None and matched_count == 0:
             raise RuntimeError(
                 f"failed to persist workflow context for chat_id={chat_id}: scoped session was not found"
+            )
+
+    async def persist_server_owned_session_fields(
+        self,
+        *,
+        chat_id: str,
+        app_id: str | None = None,
+        workflow_name: str | None = None,
+        fields: dict[str, Any] | None = None,
+    ) -> None:
+        """Write server-owned lifecycle authority fields for a chat session.
+
+        This is the only durable write path for SERVER_OWNED_SESSION_FIELDS
+        (run identity, run/build binding, terminal build receipt). It bypasses
+        workflow-declared context policy because these are runtime
+        infrastructure facts, not workflow context variables — but it writes
+        into the same session document through the same authority; there is
+        no second context store. Keys outside the reserved set are rejected,
+        and the write is lease-fenced: a worker that has lost its chat
+        execution lease to a successor cannot replace the successor run's
+        lifecycle authority.
+        """
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        assert_chat_mutable(app_id=resolved_app_id, chat_id=chat_id)
+        clean_workflow_name = str(workflow_name or "").strip()
+        updates: dict[str, Any] = {}
+        for key, value in (fields or {}).items():
+            if key not in SERVER_OWNED_SESSION_FIELDS:
+                raise ValueError(
+                    f"{key!r} is not a server-owned session field; use "
+                    "persist_context_variables for workflow context"
+                )
+            updates[key] = deepcopy(value)
+        if not updates:
+            return
+        updates["last_updated_at"] = datetime.now(UTC)
+
+        scope: dict[str, Any] = {
+            "_id": chat_id,
+            **build_app_scope_filter(str(resolved_app_id)),
+        }
+        if clean_workflow_name:
+            scope["workflow_name"] = clean_workflow_name
+        coll = await self._coll()
+        result = await coll.update_one(
+            scope,
+            {"$set": updates, "$inc": {"session_version": 1}},
+        )
+        if getattr(result, "acknowledged", True) is False:
+            raise RuntimeError(
+                f"failed to persist server-owned session fields for chat_id={chat_id}: "
+                "write was not acknowledged"
+            )
+        matched_count = getattr(result, "matched_count", None)
+        if matched_count is not None and matched_count == 0:
+            raise RuntimeError(
+                f"failed to persist server-owned session fields for chat_id={chat_id}: "
+                "scoped session was not found"
             )
 
     async def create_general_chat_session(
