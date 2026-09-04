@@ -1,4 +1,4 @@
-﻿# mozaiksai Requirements
+# mozaiksai Requirements
 # Core runtime
 ag2[a2a,openai,tracing]==1.0.3
 a2a-sdk[grpc]>=1.1.0,<2
@@ -28,5 +28,5 @@ python-multipart>=0.0.6
 azure-identity>=1.15.0
 azure-keyvault-secrets>=4.7.0
 # Azure Blob Storage (optional — used when MOZAIKS_MEDIA_CONTENT_BACKEND=azure_blob)
-azure-storage-blob>=12.30.0
+azure-storage-blob>=12.30.1
 
