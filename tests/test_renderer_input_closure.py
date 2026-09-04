@@ -529,6 +529,11 @@ def test_unsupported_renderer_families_remain_explicit_typed_gaps() -> None:
         "app_subscription_config",
         "workflow_manifest",
     } <= renderer_blocked
+    # This corpus declares every optional family absent while pinning auth,
+    # integration, and workflow payloads — contradictory selection evidence.
+    # Slice 5D-0B2A selection honesty therefore keeps app_manifest a typed
+    # incomplete gap here; the honest closure renders only on the
+    # selection-consistent B2A fixture.
     assert any(
         gap.family_kind == "app_manifest"
         and gap.code is PlanGapCode.RENDERER_INPUT_INCOMPLETE

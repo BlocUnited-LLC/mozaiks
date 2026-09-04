@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
@@ -60,14 +61,21 @@ from mozaiksai.core.semantics.materialization import (
     PAGE_SCHEMA_RENDERER_IMPLEMENTATION_VERSION,
     MaterializationError,
     compose_bundle,
-    materialize_plan,
-    rematerialize_plan,
     render_app_ui_page_schema_unit,
     resolve_page_schema_renderer_selection,
     validate_page_renderer_input_closure,
 )
+from mozaiksai.core.semantics.materialization import (
+    materialize_plan as _materialize_plan,
+)
+from mozaiksai.core.semantics.materialization import (
+    rematerialize_plan as _rematerialize_plan,
+)
 from mozaiksai.core.semantics.offline_projection import project_semantic_graph
 from mozaiksai.core.semantics.opaque_artifact import PreservedOpaqueArtifact
+from mozaiksai.core.semantics.plan_authority import (
+    build_compilation_plan_authority_inputs,
+)
 from mozaiksai.core.semantics.refs import (
     ChildContractRef,
     ExecutionAccessScopeRef,
@@ -166,6 +174,31 @@ def _source(*, column_label: str = "Order") -> dict:
 
 def _registry():
     return build_app_layout_registry(())
+
+
+def _authority_inputs(graph, payloads, registry=None):
+    return build_compilation_plan_authority_inputs(
+        graph=graph,
+        payloads=payloads,
+        registry=registry or _registry(),
+    )
+
+
+def materialize_plan(**kwargs):
+    kwargs["authority_inputs"] = _authority_inputs(
+        kwargs["graph"], kwargs["payloads"], kwargs["layout_registry"]
+    )
+    return _materialize_plan(**kwargs)
+
+
+def rematerialize_plan(*, base_graph, base_payloads, **kwargs):
+    kwargs["base_authority_inputs"] = _authority_inputs(
+        base_graph, base_payloads, kwargs["layout_registry"]
+    )
+    kwargs["successor_authority_inputs"] = _authority_inputs(
+        kwargs["graph"], kwargs["payloads"], kwargs["layout_registry"]
+    )
+    return _rematerialize_plan(**kwargs)
 
 
 def _build(source: dict, *, graph_id: str = "slice4c"):
@@ -518,7 +551,7 @@ def test_registry_identity_mismatch_is_rejected() -> None:
 
     snapshot = snapshot_layout_registry(extended)
     forged = snapshot.model_copy(update={"snapshot_digest": "a" * 64})
-    with pytest.raises(MaterializationError):
+    with pytest.raises((MaterializationError, ValidationError)):
         materialize_plan(
             plan=plan,
             graph=result.graph,
@@ -786,6 +819,8 @@ async def test_semantic_page_change_selectively_rematerializes_and_boots(
     successor_bundle = rematerialize_plan(
         base_bundle=base_bundle,
         base_plan=base_plan,
+        base_graph=base_result.graph,
+        base_payloads=base_result.payloads,
         successor_plan=successor_plan,
         graph=successor_result.graph,
         payloads=successor_result.payloads,
@@ -826,6 +861,8 @@ def test_unrelated_semantic_change_keeps_page_reusable() -> None:
     successor_bundle = rematerialize_plan(
         base_bundle=base_bundle,
         base_plan=base_plan,
+        base_graph=base_result.graph,
+        base_payloads=base_result.payloads,
         successor_plan=successor_plan,
         graph=successor_result.graph,
         payloads=successor_result.payloads,

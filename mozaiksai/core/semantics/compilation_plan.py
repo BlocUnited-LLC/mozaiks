@@ -66,6 +66,7 @@ from mozaiksai.core.semantics.payloads import (
     ApplicationPayload,
     ArtifactDeclarationPayload,
     ArtifactDeclarationRole,
+    AuthPayload,
     IntegrationImplementationKind,
     IntegrationPayload,
     LockfileKind,
@@ -94,6 +95,16 @@ from mozaiksai.core.workflow.assignment_kinds import (
 from mozaiksai.core.workflow.structured_output_contracts import (
     StructuredOutputContractRef,
     build_structured_output_contract_ref,
+)
+
+_APP_CONFIG_RENDER_KINDS = frozenset(
+    {
+        "app_manifest",
+        "app_config",
+        "app_integrations_config",
+        "app_secret_references",
+        "app_ui_route_manifest",
+    }
 )
 
 COMPILATION_PLAN_SCHEMA_VERSION: Literal["mozaiks.compilation_plan.v1"] = (
@@ -1311,6 +1322,88 @@ def derive_compilation_plan(
             )
         return value
 
+    def _app_config_inputs_complete(row: RegistryFamilyRow) -> bool:
+        """Slice 5D-0B2A: application-config families with closed inputs.
+
+        Complete only when the accepted authorities can supply every rendered
+        fact for the row's exact output contract; everything else stays a
+        typed gap. Selection honesty is enforced per consuming family: a
+        family whose optional-family selection says SELECTED must have its
+        typed facts present, and a family declared absent must have none —
+        missing selected evidence is never normalized to an empty rendering,
+        and contradictory evidence never renders. ``config/asset_manifest.json``
+        shares the ``app_config`` family but has no typed asset facts yet, so
+        it remains gapped.
+        """
+        applications = [
+            payload
+            for payload in payload_by_node.values()
+            if isinstance(payload, ApplicationPayload)
+        ]
+        if len(applications) != 1:
+            return False
+        application = applications[0]
+
+        def _selected(family: OptionalFamilyKind) -> bool:
+            return any(
+                selection.family is family
+                and selection.status is OptionalFamilySelectionStatus.SELECTED
+                for selection in application.optional_families
+            )
+
+        def _facts_honest(
+            family: OptionalFamilyKind,
+            payload_type: type,
+            *,
+            exactly_one: bool = False,
+        ) -> bool:
+            present = [
+                payload
+                for payload in payload_by_node.values()
+                if isinstance(payload, payload_type)
+            ]
+            if _selected(family):
+                return len(present) == 1 if exactly_one else len(present) >= 1
+            # Declared absent or not applicable: any present fact is
+            # contradictory evidence, which stays a typed gap.
+            return not present
+
+        # Completion is family-local: each family is gated only by the facts
+        # its own byte contract consumes, so a missing or contradictory input
+        # for one family never blocks another whose closure is complete.
+        if row.kind == "app_manifest":
+            # app.json consumes application identity/display facts and the
+            # authRequired flag; auth honesty gates only this family.
+            return _facts_honest(
+                OptionalFamilyKind.AUTH, AuthPayload, exactly_one=True
+            )
+        if row.kind == "app_config":
+            # config/ai.json is deferred: per-workflow startup_mode is not
+            # application-level chat launch authority, and the semantic model
+            # has no application-level AI-launch facts (chat startup mode,
+            # workflow entry point). The family stays a typed gap until that
+            # prerequisite exists — never rendered from inference.
+            return False
+        if row.kind == "app_secret_references":
+            return _facts_honest(OptionalFamilyKind.INTEGRATIONS, IntegrationPayload)
+        if row.kind == "app_integrations_config":
+            return _facts_honest(OptionalFamilyKind.INTEGRATIONS, IntegrationPayload)
+        if row.kind == "app_ui_route_manifest":
+            # Selected custom routes are route-manifest inputs this slice
+            # cannot render; the family stays a typed gap rather than
+            # emitting a manifest that silently omits them.
+            if _selected(OptionalFamilyKind.CUSTOM_ROUTES):
+                return False
+            pages = [
+                payload
+                for payload in payload_by_node.values()
+                if isinstance(payload, PagePayload)
+            ]
+            if not pages or any(not page.route or not page.title for page in pages):
+                return False
+            return application.default_route in {page.route for page in pages}
+        return False
+
     def _renderer_inputs_complete(
         row: RegistryFamilyRow, *, root_node_id: str | None
     ) -> bool:
@@ -1321,6 +1414,8 @@ def derive_compilation_plan(
         gaps until a later prerequisite explicitly closes their normative
         source models.
         """
+        if row.kind in _APP_CONFIG_RENDER_KINDS and root_node_id is None:
+            return _app_config_inputs_complete(row)
         if row.kind != "app_ui_page_schema" or root_node_id is None:
             return False
         page = payload_by_node[root_node_id]

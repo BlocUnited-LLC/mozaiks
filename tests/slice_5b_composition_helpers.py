@@ -209,11 +209,13 @@ def composition_fixture() -> dict[str, object]:
     _materialize_unit(
         rendered,
         payload_by_node=payload_by_id,
+        app_config_selection=None,
         preserved_by_unit={},
         bundle_outputs=rendered_outputs,
         external=[],
         inapplicable=[],
         unsupplied=[],
+        input_only=[],
         deferred=[],
     )
     preserved_output = _output(preserved, b"agents: []\n", origin="preserved")
@@ -223,6 +225,7 @@ def composition_fixture() -> dict[str, object]:
         external_handoff_units=(handoff.unit_id,),
         inapplicable_units=(inapplicable.unit_id,),
         unsupplied_preserved_units=(),
+        input_only_units=(),
         instance_scope_deferred_units=(preserved.unit_id,),
         gap_count=0,
         closure=closure,
