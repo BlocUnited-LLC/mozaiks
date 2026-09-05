@@ -839,6 +839,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Retired write-only workflow `module_interface.yaml` v1 generation and the
+  non-materializing `agent_backend_integration` AppGenerator build-task type.
+  Existing workflow metadata and module callbacks are unchanged.
+
 - **Generated UI browser acceptance retired result vocabulary**: the
   `scripts/generated_ui_acceptance.py` output no longer exposes top-level
   `status`, `findings`, `revision_count`, or `revision_request` fields. Browser

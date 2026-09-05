@@ -5,9 +5,8 @@ Fires as an prompt middleware function on PatternAgent and WorkflowBundleBuilder
 
 Closes Gap #5 (async event callback loop) — ensures that AI-native pack workflows
 generate:
-  1. A module_interface.yaml declaring the callback module action
-  2. A backend_request tool declaration in tools.yaml
-  3. ResultAgent instructions to POST the result to /api/modules/{module_id}/{action_id}
+  1. A backend_request tool declaration in tools.yaml
+  2. ResultAgent instructions to POST the result to /api/modules/{module_id}/{action_id}
 
 **PatternAgent** — detects AI-native workflow surfaces in design_surface_map and
 injects [AI PACK ARCHETYPE CONTEXT] so PatternAgent:
@@ -17,8 +16,8 @@ injects [AI PACK ARCHETYPE CONTEXT] so PatternAgent:
 
 **WorkflowBundleBuilderAgent** — if any AI-native workflow surfaces exist in
 design_surface_map, injects [AI PACK CALLBACK CONTRACT] so any worker generating
-an AI-native pack workflow knows how to generate module_interface.yaml and declare
-the backend_request tool.
+an AI-native pack workflow knows how to declare the backend_request tool and
+call the owning module action.
 
 Both injections are conditional — no-op when no AI-native workflow surfaces are
 detected in design_surface_map.
@@ -186,8 +185,6 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
             f"CALLBACK CONTRACT: the {result_agent} MUST call backend_request "
             f"(POST {callback_endpoint}) to write the result back to the owning module. "
             f"Declare backend_request from mozaiksai.core.workflow.app_backend_tools in tools.yaml. "
-            f"Generate module_interface.yaml at the workflow root declaring "
-            f"module_id={module_id}, action_id={result_action}. "
         )
         if tb:
             initial_msg += "task_batches.yaml is required for parallel worker dispatch. "
@@ -220,25 +217,6 @@ def _to_pascal(capability_id: str) -> str:
 # WorkflowBundleBuilderAgent — callback contract
 # =============================================================================
 
-_MODULE_INTERFACE_TEMPLATE = """schema_version: mozaiks.module_interface.v1
-module_actions:
-  - module_id: {module_id}
-    action_id: {result_action}
-    description: >
-      Write the AI {archetype_label} result back to the owning module.
-      Called by {result_agent} after processing completes.
-"""
-
-_TOOLS_YAML_ENTRY = """  - name: backend_request
-    type: Agent_Tool
-    module: mozaiksai.core.workflow.app_backend_tools
-    function: backend_request
-    description: >
-      Make an HTTP request to the app backend module action API.
-      Use to call POST /api/modules/{module_id}/{result_action} to write results.
-"""
-
-
 def _build_callback_body(ai_surfaces: list[dict]) -> str:
     lines: list[str] = [
         "If your initial_message identifies this workflow as an AI-native pack workflow "
@@ -246,18 +224,7 @@ def _build_callback_body(ai_surfaces: list[dict]) -> str:
         "you MUST follow this callback contract in addition to your standard bundle generation.\n",
         "REQUIRED FILES for AI-native pack workflows:\n"
         "\n"
-        "1. module_interface.yaml (at workflow root)\n"
-        "   Declares the module action this workflow calls to write results back.\n"
-        "   Format:\n"
-        "   ```yaml\n"
-        "   schema_version: mozaiks.module_interface.v1\n"
-        "   module_actions:\n"
-        "     - module_id: {module_id}   # from your initial_message\n"
-        "       action_id: {result_action}  # from your initial_message\n"
-        "       description: Write the AI result back to the owning module\n"
-        "   ```\n"
-        "\n"
-        "2. backend_request tool in tools.yaml\n"
+        "1. backend_request tool in tools.yaml\n"
         "   Add this entry to the tools[] list:\n"
         "   ```yaml\n"
         "   - name: backend_request\n"
@@ -268,14 +235,14 @@ def _build_callback_body(ai_surfaces: list[dict]) -> str:
         "   Assign backend_request to the {result_agent} only.\n"
         "   Do NOT generate a Python stub for backend_request — it is a platform tool.\n"
         "\n"
-        "3. {result_agent} instructions in agents.yaml\n"
+        "2. {result_agent} instructions in agents.yaml\n"
         "   The result/writer/synthesis agent MUST:\n"
         "   - Call backend_request(method='POST', path='/api/modules/{module_id}/{result_action}',\n"
         "     payload={...result fields...})\n"
         "   - Confirm success before terminating\n"
         "   - Terminate to 'terminate' (BackendOnly — no user reply)\n"
         "\n"
-        "4. No Python stub for backend_request\n"
+        "3. No Python stub for backend_request\n"
         "   backend_request is provided by mozaiksai.core.workflow.app_backend_tools.\n"
         "   Only generate stubs for workflow-local custom tools.\n",
     ]
@@ -292,7 +259,7 @@ def _build_callback_body(ai_surfaces: list[dict]) -> str:
             )
         lines.append(
             "\nMatch your initial_message's capability_id against the list above to find "
-            "the exact module_id and result_action for your module_interface.yaml.\n"
+            "the exact module_id and result_action for your backend_request callback.\n"
         )
 
     return "\n".join(lines)
@@ -313,8 +280,8 @@ def inject_ai_pack_archetype_context(
     workflow_startup_mode, and enriched initial_message templates.
 
     WorkflowBundleBuilderAgent: injects [AI PACK CALLBACK CONTRACT] so any
-    worker generating an AI-native pack workflow knows to generate
-    module_interface.yaml and declare backend_request.
+    worker generating an AI-native pack workflow knows to declare backend_request
+    and call the owning module action.
 
     No-ops when no AI-native workflow surfaces are found.
     """

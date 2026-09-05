@@ -14,7 +14,6 @@ from mozaiksai.core.runtime.app.paths import (
     noncanonical_app_root_paths,
     normalize_app_path,
 )
-from mozaiksai.core.workflow.assignment_kinds import app_build_assignment_kind_values
 
 try:
     from .managed_monetization_contract import (
@@ -75,7 +74,6 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
-_ALLOWED_TASK_TYPES = app_build_assignment_kind_values()
 _CANONICAL_INITIAL_AGENTS = {
     "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",
@@ -88,9 +86,11 @@ _CANONICAL_INITIAL_AGENTS = {
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
+# AppGenerator materialization authority is narrower than generic assignment kinds.
+_ALLOWED_TASK_TYPES = frozenset(_CANONICAL_INITIAL_AGENTS)
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "app_policy": frozenset({"subscription_config"}),
-    "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
+    "external_integration": frozenset({"api_surface", "service_foundation"}),
     "refinement": frozenset({"refinement_harness"}),
     "ui_only": frozenset({"page_bundle"}),
 }
@@ -1364,6 +1364,29 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
     for task in build_tasks:
         task_id = str(task.get("task_id") or "<unknown>")
         task_type = str(task.get("task_type") or "<missing>")
+        if task_type == "agent_backend_integration":
+            raise ValueError(
+                f"Build task '{task_id}' uses retired task_type 'agent_backend_integration'. "
+                "This type is non-materializing after legacy module-interface retirement "
+                "and is not valid AppGenerator build-task authority."
+            )
+
+        if task_type == "admin_config":
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses obsolete task_type 'admin_config'. "
+                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
+                "and api_surface for split service admin APIs."
+            )
+
+        if task_type not in _ALLOWED_TASK_TYPES:
+            allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses unsupported task_type '{task_type}'. "
+                f"Use only the canonical AppGenerator task types: {allowed}."
+            )
+
         initial_agent = str(task.get("initial_agent") or "<missing>")
         capability_pack_id = task.get("capability_pack_id")
         owned_paths = _normalized_owned_paths(task)
@@ -1560,14 +1583,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "shell/theme artifacts, not source files."
             )
 
-        if task_type == "admin_config":
-            raise ValueError(
-                "Build task "
-                f"'{task_id}' uses obsolete task_type 'admin_config'. "
-                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
-                "and api_surface for split service admin APIs."
-            )
-
         if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:
             raise ValueError(
                 "Build task "
@@ -1715,14 +1730,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     "Build task "
                     f"'{task_id}' is missing required refinement harness paths: {missing}."
                 )
-
-        if task_type not in _ALLOWED_TASK_TYPES:
-            allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))
-            raise ValueError(
-                "Build task "
-                f"'{task_id}' uses unsupported task_type '{task_type}'. "
-                f"Use only the canonical AppGenerator task types: {allowed}."
-            )
 
         expected_initial_agent = _CANONICAL_INITIAL_AGENTS.get(task_type)
         if expected_initial_agent and initial_agent != expected_initial_agent:

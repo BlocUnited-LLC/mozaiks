@@ -1,0 +1,143 @@
+{
+  "plan": {
+    "app_kind": "document-analysis",
+    "pages": [
+      {
+        "name": "documents",
+        "route": "/documents",
+        "title": "Documents",
+        "workflow_id": "DocumentAnalysis",
+        "sections_hint": [
+          {
+            "primitive": "ActionButton",
+            "section_id_hint": "summarize",
+            "title_hint": "Summarize",
+            "config_hint": "{\"api_endpoint\": \"/api/modules/documents/summarize_document\"}"
+          }
+        ]
+      }
+    ],
+    "entities": [],
+    "roles": [
+      "user"
+    ],
+    "auth_strategy": "none",
+    "service_scope": [
+      "documents"
+    ],
+    "frontend_scope": [
+      "documents"
+    ],
+    "agent_backend_required": true,
+    "capability_packs": [
+      {
+        "capability_pack_id": "documents",
+        "surface_id": "documents",
+        "surface_kind": "module",
+        "pack_type": "crud_pack",
+        "label": "Documents",
+        "summary": "Own document actions.",
+        "implementation_mode": "deterministic",
+        "operations": [
+          "summarize_document"
+        ]
+      }
+    ],
+    "external_integrations": [],
+    "build_tasks": [
+      {
+        "task_id": "module_contract",
+        "task_type": "module_contract",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "surface_id": "documents",
+        "surface_kind": "module",
+        "capability_pack_id": "documents",
+        "execution_target": "AppGenerator",
+        "description": "Materialize module_contract.",
+        "initial_message": "Materialize module_contract in its owned paths.",
+        "owned_paths": [
+          "modules/documents/module.yaml"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "Emit all owned application files."
+        ]
+      },
+      {
+        "task_id": "business_services",
+        "task_type": "business_services",
+        "initial_agent": "ServiceAgent",
+        "surface_id": "documents",
+        "surface_kind": "module",
+        "capability_pack_id": "documents",
+        "execution_target": "AppGenerator",
+        "description": "Materialize business_services.",
+        "initial_message": "Materialize business_services in its owned paths.",
+        "owned_paths": [
+          "modules/documents/backend/handler.py",
+          "modules/documents/backend/service.py"
+        ],
+        "depends_on": [
+          "module_contract"
+        ],
+        "acceptance_criteria": [
+          "Emit all owned application files."
+        ]
+      },
+      {
+        "task_id": "page_bundle",
+        "task_type": "page_bundle",
+        "initial_agent": "AppSchemaAgent",
+        "surface_id": "documents",
+        "surface_kind": "ui_only",
+        "capability_pack_id": null,
+        "execution_target": "AppGenerator",
+        "description": "Materialize page_bundle.",
+        "initial_message": "Materialize page_bundle in its owned paths.",
+        "owned_paths": [
+          "app.json",
+          "ui/pages/documents.yaml"
+        ],
+        "depends_on": [
+          "business_services"
+        ],
+        "acceptance_criteria": [
+          "Emit all owned application files."
+        ]
+      }
+    ],
+    "generation_order": [
+      "module_contract",
+      "business_services",
+      "page_bundle"
+    ],
+    "workflow_touchpoints": [
+      {
+        "page_name": "documents",
+        "workflow_id": "DocumentAnalysis",
+        "action_id": "analyze",
+        "label": "Analyze",
+        "placement": "row_action",
+        "context_variables": [
+          {
+            "key": "document",
+            "value_type": "json",
+            "value": "{\"id\":\"doc-1\"}"
+          }
+        ]
+      }
+    ]
+  },
+  "app_files": {
+    "modules/documents/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: documents\n  display_name: Documents\n  version: 1.0.0\n  handler: backend.handler:DocumentsHandler\nactions:\n- id: summarize_document\n  description: Summarize a document through the module service.\n  handler_method: summarize_document\n  input_schema:\n    type: object\n  output_schema:\n    type: object\n",
+    "modules/documents/backend/handler.py": "from .service import summarize_document\n\nclass DocumentsHandler:\n    async def summarize_document(self, ctx, **params):\n        return summarize_document(**params)\n",
+    "modules/documents/backend/service.py": "def summarize_document(text: str = \"\") -> dict:\n    return {\"summary\": text[:80]}\n",
+    "app.json": "{\"appId\": \"retirement-acceptance\", \"name\": \"Document Analysis\", \"authRequired\": false}",
+    "ui/pages/documents.yaml": "{}\n"
+  },
+  "workflow_files": {
+    "orchestrator.yaml": "workflow_name: DocumentAnalysis\nworkflow_startup_mode: BackendOnly\ntriggers:\n  - type: event\n    event: domain.documents.analysis_requested\n",
+    "tools.yaml": "tools:\n  - name: backend_request\n    type: Agent_Tool\n    module: mozaiksai.core.workflow.app_backend_tools\n    function: backend_request\n",
+    "agents.yaml": "agents:\n  - name: AnalysisAgent\n    system_message: >\n      Call backend_request with method POST and path\n      /api/modules/documents/summarize_document to summarize the input document.\n"
+  }
+}

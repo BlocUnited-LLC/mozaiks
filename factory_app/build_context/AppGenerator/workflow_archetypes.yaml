@@ -336,13 +336,12 @@ archetypes:
     tool_constraints:
       allowed:
         - "list_*, get_*, read_* — read-only tools always allowed"
-        - "Write-path module actions when declared in module_interface.yaml"
+        - "Write-path actions declared by the owning module contract"
         - "emit_event — publish domain events to the app event bus"
       forbidden:
         - "Do not implement business logic that belongs in a deterministic module."
         - "Do not call raw external APIs that bypass the app module action contract."
     hard_constraints:
-      - "Declare all module actions the workflow calls in module_interface.yaml."
       - "Emit domain events only through emit_event, not through direct module calls."
       - "Do not implement business logic that belongs in a deterministic module."
       - "Write-path actions must be declared in the plan before a downstream agent generates them."
