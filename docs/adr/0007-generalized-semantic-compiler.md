@@ -352,6 +352,19 @@ authoritative emitters of these paths until the atomic 5D cutover; hygiene
 guards prove they do not call the B2A renderer and that no production module
 imports it.
 
+Some canonical identities live on the graph node rather than on any typed
+payload — the canonical event identity, for example, is the EVENT node's
+single EVENT-category taxonomy reference. Plan units therefore carry a
+generic `taxonomy_sources` contract (`PlanTaxonomySource`: exact
+`(node, category, identifier)` triples) for node-level identities their
+bytes consume. A pinned taxonomy identity participates consistently in unit
+identity, serialization, canonical authority rederivation, and the
+regeneration/reuse signature — a unit whose node-level identity changed is
+never classified reusable — while empty taxonomy sources are omitted from
+identity and serialization alike, so every payload-only unit's digest and
+serialized form are unchanged. Families that consume node-level identity
+(the re-architected workflow-interface corpus) build on this primitive.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,
