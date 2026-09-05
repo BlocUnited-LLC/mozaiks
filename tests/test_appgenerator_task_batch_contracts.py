@@ -546,11 +546,49 @@ class TicketsModule:
 # ---------------------------------------------------------------------------
 
 
+_RESEARCH_TOUCHPOINT_INPUT = {
+    "page_name": "Research",
+    "section_id_hint": "research_actions",
+    "action_id": "launch_document_analysis",
+    "label": "Analyze documents",
+    "workflow_id": "DocumentAnalysis",
+    "placement": "primary_button",
+    "context_variables": [
+        {"key": "source", "value": "research_page", "value_type": "string"}
+    ],
+    "purpose": "Let researchers launch the analysis workflow from the page.",
+}
+
+_RESEARCH_TOUCHPOINT_NORMALIZED = {
+    "page_name": "Research",
+    "action_id": "launch_document_analysis",
+    "label": "Analyze documents",
+    "workflow_id": "DocumentAnalysis",
+    "purpose": "Let researchers launch the analysis workflow from the page.",
+    "placement": "primary_button",
+    "section_id_hint": "research_actions",
+    "context_variables": {"source": "research_page"},
+}
+
+
 def _workflow_module_plan() -> dict:
     """A workflow→module app plan: one module the AgentGenerator workflow calls,
-    with the normal generated workflow metadata carried in context — and no
+    one persistent Research page with a user-launch workflow touchpoint, the
+    normal generated workflow metadata carried in context — and no
     agent_backend_integration build task, because none is admissible."""
     plan = _base_plan()
+    plan["pages"].append(
+        {
+            "name": "Research",
+            "route": "/research",
+            "purpose": "Launch and review document analysis",
+        }
+    )
+    plan["workflow_touchpoints"] = [dict(_RESEARCH_TOUCHPOINT_INPUT)]
+    plan["build_tasks"][1]["owned_paths"] = [
+        "ui/pages/notifications.yaml",
+        "ui/pages/research.yaml",
+    ]
     plan["capability_packs"].append(
         {
             "capability_pack_id": "documents",
@@ -611,11 +649,14 @@ _WORKFLOW_METADATA_CONTEXT = {
 
 @pytest.mark.asyncio
 async def test_workflow_module_plan_executes_without_integration_build_task() -> None:
-    """The workflow→module scenario after module_interface.v1 retirement:
-    the plan carries no agent_backend_integration task, every admitted batch
-    item owns truthful non-empty paths, the batch executes and assembles, the
-    bundle contains no module_interface.yaml, and the deferred workflow
-    metadata context survives untouched."""
+    """The user-launch workflow→module scenario after module_interface.v1
+    retirement: the plan's workflow_touchpoint survives normalization into
+    the persisted context and the page worker's context, the page bundle
+    materializes the launch affordance from those explicit touchpoint facts
+    (never from ambient generated_workflow_* metadata), the assembled page
+    action validates under the real runtime page contract, no
+    agent_backend_integration task exists, no module_interface.yaml exists,
+    and the deferred workflow metadata context survives untouched."""
     app_build_plan_module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_workflow_module_retirement",
@@ -630,6 +671,12 @@ async def test_workflow_module_plan_executes_without_integration_build_task() ->
         AppBuildPlan=_workflow_module_plan(),
         context_variables=context,
     )
+
+    normalized_plan = context.get("app_build_plan")
+    assert isinstance(normalized_plan, dict)
+    assert normalized_plan["workflow_touchpoints"] == [
+        _RESEARCH_TOUCHPOINT_NORMALIZED
+    ]
 
     task_batch_items = context.get("app_task_batch_items")
     assert isinstance(task_batch_items, list)
@@ -649,17 +696,21 @@ async def test_workflow_module_plan_executes_without_integration_build_task() ->
     from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
     from mozaiksai.core.ports.orchestration import RunStatus
 
+    worker_touchpoints_by_task: dict[str, object] = {}
+
     async def _fake_runner_run(request):
         task = request.context_variables.get("current_build_task") or {}
+        task_id = str(task.get("task_id") or "")
+        worker_plan = request.context_variables.get("app_build_plan") or {}
+        worker_touchpoints_by_task[task_id] = json.loads(
+            json.dumps(worker_plan.get("workflow_touchpoints"))
+        )
         return AG2TaskBatchRunnerResult(
             status=RunStatus.COMPLETED,
             output={
-                "agent_message": f"completed {task.get('task_id', '')}",
+                "agent_message": f"completed {task_id}",
                 "code_files": [
-                    {
-                        "filename": path,
-                        "content": f"# generated for {path}",
-                    }
+                    {"filename": path, "content": f"# generated for {path}"}
                     for path in (task.get("owned_paths") or [])
                 ],
             },
@@ -691,18 +742,164 @@ async def test_workflow_module_plan_executes_without_integration_build_task() ->
         "task_notifications_pages",
         "task_documents_module",
     }
+    # Every worker saw the exact canonical touchpoint facts.
+    assert worker_touchpoints_by_task["task_notifications_pages"] == [
+        _RESEARCH_TOUCHPOINT_NORMALIZED
+    ]
 
     assembled = await assemble_module.assemble_app_tasks(context_variables=context)
-    assembled_names = {item["filename"] for item in assembled["code_files"]}
-    assert "modules/documents/module.yaml" in assembled_names
-    assert not any("module_interface" in name for name in assembled_names)
+    assembled_by_name = {
+        item["filename"]: item["content"] for item in assembled["code_files"]
+    }
+    assert "modules/documents/module.yaml" in assembled_by_name
+    assert not any("module_interface" in name for name in assembled_by_name)
     generated_files = context.get("generated_files")
     assert isinstance(generated_files, dict)
     assert not any("module_interface" in name for name in generated_files)
 
+    # The assembled page (deterministically rendered by the planned-page
+    # contract pass from the normalized plan's touchpoints — not from any
+    # worker output or ambient generated_workflow_* metadata) retains the
+    # workflow launch affordance, and the affordance validates under the real
+    # runtime page-action contract.
+    from mozaiksai.core.runtime.app.page_schema import AppPageAction
+
+    research_page = yaml.safe_load(assembled_by_name["ui/pages/research.yaml"])
+    launch_sections = [
+        section
+        for section in research_page["sections"]
+        if section.get("primitive") == "ActionButton"
+    ]
+    assert len(launch_sections) == 1
+    assert launch_sections[0]["id"] == "research_actions"
+    launch_actions = launch_sections[0]["config"]["actions"]
+    assert len(launch_actions) == 1
+    launch_action = AppPageAction.model_validate(launch_actions[0])
+    assert launch_action.action_type == "workflow"
+    assert launch_action.workflow_id == "DocumentAnalysis"
+    assert launch_action.id == "launch_document_analysis"
+    assert launch_action.context_variables == {"source": "research_page"}
+
+    # The notifications page has no touchpoint and gains no launch section.
+    notifications_page = yaml.safe_load(
+        assembled_by_name["ui/pages/notifications.yaml"]
+    )
+    assert not any(
+        section.get("primitive") == "ActionButton"
+        for section in notifications_page["sections"]
+    )
+
     # The intentionally deferred workflow/module metadata surfaces are intact.
     for key, value in _WORKFLOW_METADATA_CONTEXT.items():
         assert context.get(key) == value
+
+
+@pytest.mark.parametrize(
+    "mutate, expected_error",
+    [
+        pytest.param(
+            lambda tp: tp.pop("workflow_id"),
+            "requires a non-empty\\s+workflow_id",
+            id="missing-workflow-id",
+        ),
+        pytest.param(
+            lambda tp: tp.update(workflow_id=""),
+            "requires a non-empty\\s+workflow_id",
+            id="empty-workflow-id",
+        ),
+        pytest.param(
+            lambda tp: tp.pop("page_name"),
+            "requires a non-empty\\s+page_name",
+            id="missing-page-name",
+        ),
+        pytest.param(
+            lambda tp: tp.update(page_name="Ghost"),
+            "does not declare",
+            id="undeclared-page",
+        ),
+        pytest.param(
+            lambda tp: tp.update(surprise="uninvited"),
+            "undeclared fields",
+            id="unknown-extra-field",
+        ),
+        pytest.param(
+            lambda tp: tp.update(placement="banner"),
+            "placement",
+            id="invalid-placement",
+        ),
+    ],
+)
+def test_workflow_touchpoint_hostile_entries_reject(mutate, expected_error) -> None:
+    """Hostile touchpoint matrix over the declared AppWorkflowTouchpoint
+    contract — malformed entries fail the whole plan, never a silent drop."""
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_touchpoint_hostile",
+    )
+    plan = _workflow_module_plan()
+    mutate(plan["workflow_touchpoints"][0])
+
+    with pytest.raises(ValueError, match=expected_error):
+        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+
+
+def test_workflow_touchpoint_structural_attacks_reject() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_touchpoint_structural",
+    )
+
+    plan = _workflow_module_plan()
+    plan["workflow_touchpoints"] = "not-a-list"
+    with pytest.raises(ValueError, match="must be a list"):
+        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+
+    plan = _workflow_module_plan()
+    plan["workflow_touchpoints"].append("not-a-mapping")
+    with pytest.raises(ValueError, match="must be an AppWorkflowTouchpoint object"):
+        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+
+    plan = _workflow_module_plan()
+    duplicate = dict(_RESEARCH_TOUCHPOINT_INPUT)
+    duplicate["label"] = "A contradictory second definition"
+    plan["workflow_touchpoints"].append(duplicate)
+    with pytest.raises(ValueError, match="duplicates touchpoint identity"):
+        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+
+
+def test_invalid_task_type_remediation_offers_only_local_vocabulary() -> None:
+    """P2 reproduction: the unsupported-task remediation lists only the
+    AppGenerator-local admitted vocabulary — never the retired
+    agent_backend_integration type the generic enum still carries."""
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_invalid_task_vocabulary",
+    )
+    plan = _base_plan()
+    plan["build_tasks"].append(
+        {
+            "task_id": "task_bogus",
+            "task_type": "totally_invalid_type",
+            "capability_pack_id": None,
+            "surface_id": "bogus",
+            "surface_kind": "module",
+            "execution_target": "AppGenerator",
+            "initial_agent": "ConfigMiddlewareAgent",
+            "description": "Bogus task.",
+            "initial_message": "Do bogus work.",
+            "owned_paths": ["config/bogus_targets.json"],
+            "depends_on": [],
+            "acceptance_criteria": ["n/a"],
+        }
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+
+    message = str(excinfo.value)
+    assert "unsupported task_type" in message
+    assert "agent_backend_integration" not in message
+    assert "page_bundle" in message and "module_contract" in message
 
 
 def _integration_task_variant(**overrides) -> dict:

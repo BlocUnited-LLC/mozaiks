@@ -75,7 +75,15 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
-_ALLOWED_TASK_TYPES = app_build_assignment_kind_values()
+# AppGenerator-local admitted materialization vocabulary. The generic
+# assignment-kind enum stays broader: agent_backend_integration remains valid
+# generic vocabulary elsewhere but is retired from AppGenerator admission
+# (non-materializing after the module interface v1 retirement), so it must
+# never appear in AppGenerator's schema enum, validation membership, or
+# remediation text.
+_APPGENERATOR_BUILD_TASK_TYPES = frozenset(app_build_assignment_kind_values()) - {
+    "agent_backend_integration",
+}
 _CANONICAL_INITIAL_AGENTS = {
     "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",
@@ -109,6 +117,104 @@ def _normalize_string_list(value: Any) -> list[str]:
         if text:
             items.append(text)
     return items
+
+
+_WORKFLOW_TOUCHPOINT_PLACEMENTS = frozenset(
+    {"primary_button", "section_action", "row_action", "empty_state"}
+)
+_WORKFLOW_TOUCHPOINT_FIELDS = frozenset(
+    {
+        "page_name",
+        "section_id_hint",
+        "action_id",
+        "label",
+        "workflow_id",
+        "placement",
+        "context_variables",
+        "purpose",
+    }
+)
+_WORKFLOW_TOUCHPOINT_REQUIRED_TEXT_FIELDS = (
+    "page_name",
+    "action_id",
+    "label",
+    "workflow_id",
+    "purpose",
+)
+
+
+def _normalize_workflow_touchpoints(
+    value: Any, *, page_names: frozenset[str]
+) -> list[dict[str, Any]]:
+    """Normalize AppBuildPlan.workflow_touchpoints against the declared
+    AppWorkflowTouchpoint contract.
+
+    Touchpoints are the persistent-UI planning authority for workflow launch
+    affordances, so they must survive normalization exactly: canonical
+    declared fields only, deterministic input order, fail-closed on any
+    malformed entry (never silently dropping one entry while keeping
+    siblings), and no inference of workflow ids from names, context, or
+    generated metadata.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(
+            "AppBuildPlan.workflow_touchpoints must be a list of "
+            "AppWorkflowTouchpoint entries"
+        )
+    normalized: list[dict[str, Any]] = []
+    seen_identities: set[tuple[str, str]] = set()
+    for index, raw in enumerate(value):
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"workflow_touchpoints[{index}] must be an AppWorkflowTouchpoint object"
+            )
+        unknown_fields = sorted(set(raw) - _WORKFLOW_TOUCHPOINT_FIELDS)
+        if unknown_fields:
+            raise ValueError(
+                f"workflow_touchpoints[{index}] carries undeclared fields: "
+                f"{unknown_fields}. AppWorkflowTouchpoint is a closed contract."
+            )
+        entry: dict[str, Any] = {}
+        for field_name in _WORKFLOW_TOUCHPOINT_REQUIRED_TEXT_FIELDS:
+            text = str(raw.get(field_name) or "").strip()
+            if not text:
+                raise ValueError(
+                    f"workflow_touchpoints[{index}] requires a non-empty "
+                    f"{field_name}"
+                )
+            entry[field_name] = text
+        placement = str(raw.get("placement") or "").strip()
+        if placement not in _WORKFLOW_TOUCHPOINT_PLACEMENTS:
+            allowed = ", ".join(sorted(_WORKFLOW_TOUCHPOINT_PLACEMENTS))
+            raise ValueError(
+                f"workflow_touchpoints[{index}] placement "
+                f"{placement!r} is not one of: {allowed}"
+            )
+        entry["placement"] = placement
+        section_id_hint = raw.get("section_id_hint")
+        entry["section_id_hint"] = (
+            str(section_id_hint).strip() or None
+        ) if section_id_hint is not None else None
+        entry["context_variables"] = _normalize_context_variables(
+            raw.get("context_variables")
+        )
+        if entry["page_name"] not in page_names:
+            raise ValueError(
+                f"workflow_touchpoints[{index}] references page "
+                f"{entry['page_name']!r} that AppBuildPlan.pages does not declare"
+            )
+        identity = (entry["page_name"], entry["action_id"])
+        if identity in seen_identities:
+            raise ValueError(
+                f"workflow_touchpoints[{index}] duplicates touchpoint identity "
+                f"{identity!r}; a page action id maps to exactly one launch "
+                "affordance"
+            )
+        seen_identities.add(identity)
+        normalized.append(entry)
+    return normalized
 
 
 def _normalize_object_list(value: Any) -> list[dict[str, Any]]:
@@ -1382,6 +1488,22 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "plan a build task for it."
             )
 
+        if task_type == "admin_config":
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses obsolete task_type 'admin_config'. "
+                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
+                "and api_surface for split service admin APIs."
+            )
+
+        if task_type not in _APPGENERATOR_BUILD_TASK_TYPES:
+            allowed = ", ".join(sorted(_APPGENERATOR_BUILD_TASK_TYPES))
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses unsupported task_type '{task_type}'. "
+                f"Use only the canonical AppGenerator build task types: {allowed}."
+            )
+
         deployment_artifact_paths = _deployment_contract_artifact_paths(owned_paths)
         if deployment_artifact_paths:
             raise ValueError(
@@ -1572,14 +1694,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "shell/theme artifacts, not source files."
             )
 
-        if task_type == "admin_config":
-            raise ValueError(
-                "Build task "
-                f"'{task_id}' uses obsolete task_type 'admin_config'. "
-                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
-                "and api_surface for split service admin APIs."
-            )
-
         if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:
             raise ValueError(
                 "Build task "
@@ -1727,14 +1841,6 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                     "Build task "
                     f"'{task_id}' is missing required refinement harness paths: {missing}."
                 )
-
-        if task_type not in _ALLOWED_TASK_TYPES:
-            allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))
-            raise ValueError(
-                "Build task "
-                f"'{task_id}' uses unsupported task_type '{task_type}'. "
-                f"Use only the canonical AppGenerator task types: {allowed}."
-            )
 
         expected_initial_agent = _CANONICAL_INITIAL_AGENTS.get(task_type)
         if expected_initial_agent and initial_agent != expected_initial_agent:
@@ -2021,6 +2127,15 @@ def app_build_plan(
     if not pages:
         raise ValueError("AppBuildPlan.pages must contain at least one page")
 
+    workflow_touchpoints = _normalize_workflow_touchpoints(
+        AppBuildPlan.get("workflow_touchpoints"),
+        page_names=frozenset(
+            str(page.get("name") or "").strip()
+            for page in pages
+            if isinstance(page, dict)
+        ),
+    )
+
     task_batch_items: list[dict[str, Any]] = []
     normalized_build_tasks: list[dict[str, Any]] = []
     for task in build_tasks:
@@ -2057,6 +2172,7 @@ def app_build_plan(
         "capability_packs": capability_packs,
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
+        "workflow_touchpoints": workflow_touchpoints,
         "build_tasks": normalized_build_tasks,
         "data_contract": data_contract if isinstance(data_contract, dict) else None,
         "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,

@@ -1163,7 +1163,10 @@ def _matrix_specs() -> list[_ArchetypeSpec]:
         {
             "page_name": "research",
             "workflow_id": "ResearchWorkflow",
+            "action_id": "start_research",
             "label": "Start research",
+            "placement": "primary_button",
+            "purpose": "Launch the research workflow from the research page.",
             "context_variables": {"source_text": "Local deterministic source"},
         }
     ]

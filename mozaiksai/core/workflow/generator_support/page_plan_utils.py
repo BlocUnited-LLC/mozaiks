@@ -99,7 +99,69 @@ def _canonical_section_config(primitive: str, config: dict[str, Any], page: dict
     return normalized
 
 
-def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
+def _workflow_touchpoints_for_page(
+    workflow_touchpoints: Any, page: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Select the plan's workflow touchpoints declared for one page, in plan
+    order. Matching is exact page_name identity — no name guessing, no
+    fallback workflow inference."""
+    page_name = str(page.get("name") or "").strip()
+    if not page_name or not isinstance(workflow_touchpoints, list):
+        return []
+    return [
+        touchpoint
+        for touchpoint in workflow_touchpoints
+        if isinstance(touchpoint, dict)
+        and str(touchpoint.get("page_name") or "").strip() == page_name
+    ]
+
+
+def _workflow_touchpoint_section(
+    stem: str,
+    sections: list[dict[str, Any]],
+    workflow_touchpoints: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Render the page's workflow launch affordances as one deterministic
+    ActionButton section built strictly from the declared touchpoint facts."""
+    actions: list[dict[str, Any]] = []
+    for touchpoint in workflow_touchpoints:
+        action: dict[str, Any] = {
+            "id": str(touchpoint.get("action_id") or "").strip(),
+            "label": str(touchpoint.get("label") or "").strip(),
+            "action_type": "workflow",
+            "workflow_id": str(touchpoint.get("workflow_id") or "").strip(),
+        }
+        context_payload = touchpoint.get("context_variables")
+        if isinstance(context_payload, dict) and context_payload:
+            action["context_variables"] = dict(context_payload)
+        actions.append(action)
+    existing_ids = {str(section.get("id") or "") for section in sections}
+    hints = {
+        str(touchpoint.get("section_id_hint") or "").strip()
+        for touchpoint in workflow_touchpoints
+    }
+    hints.discard("")
+    section_id = f"{stem}-workflow-actions"
+    if len(hints) == 1 and next(iter(hints)) not in existing_ids:
+        section_id = next(iter(hints))
+    elif section_id in existing_ids:
+        section_id = f"{stem}-workflow-launch"
+    return {
+        "id": section_id,
+        "primitive": "ActionButton",
+        "title": None,
+        "config": {"actions": actions},
+        "event_triggers": [],
+        "roles": None,
+    }
+
+
+def _page_from_plan(
+    page: dict[str, Any],
+    stem: str,
+    *,
+    workflow_touchpoints: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
     title = str(page.get("title") or page.get("name") or stem.replace("_", " ").title()).strip()
     route = str(page.get("route") or f"/{stem.replace('_', '-')}").strip()
     sections: list[dict[str, Any]] = []
@@ -136,6 +198,15 @@ def _page_from_plan(page: dict[str, Any], stem: str) -> dict[str, Any]:
                 "roles": None,
             }
         )
+    touchpoint_list = [
+        touchpoint
+        for touchpoint in workflow_touchpoints
+        if isinstance(touchpoint, dict)
+    ]
+    if touchpoint_list:
+        sections.append(
+            _workflow_touchpoint_section(stem, sections, touchpoint_list)
+        )
     return {
         "schema_version": "mozaiks.app_page.v1",
         "name": str(page.get("name") or title).strip(),
@@ -164,4 +235,5 @@ __all__ = [
     "_page_stem_from_path",
     "_page_stems",
     "_slug",
+    "_workflow_touchpoints_for_page",
 ]

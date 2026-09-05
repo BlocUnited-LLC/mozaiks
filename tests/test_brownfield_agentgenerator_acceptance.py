@@ -381,7 +381,10 @@ def _workflow_plan() -> dict[str, Any]:
         {
             "page_name": "research",
             "workflow_id": "ResearchReviewWorkflow",
+            "action_id": "start_research_review",
             "label": "Start research review",
+            "placement": "primary_button",
+            "purpose": "Launch the research review workflow from the research page.",
             "context_variables": {"source_text": "Local deterministic source"},
         }
     ]

@@ -925,46 +925,45 @@ class TestTaxonomyAlignment:
 
     def test_task_type_structured_outputs_matches_allowed_task_types(self) -> None:
         """structured_outputs.yaml AppBuildTask.task_type values must be exactly
-        the generic assignment-kind vocabulary minus the retired
-        agent_backend_integration kind.
+        the AppGenerator-local admitted build-task vocabulary.
 
-        agent_backend_integration remains in the generic enum for other
-        subsystems, but it is non-materializing after module_interface.v1
-        retirement: AppGenerator's structured output must not offer it and
-        _validate_build_tasks rejects it fail-closed.
+        agent_backend_integration remains in the generic assignment-kind enum
+        for other subsystems, but it is retired from AppGenerator admission:
+        the local vocabulary, the structured-output enum, and the validation
+        remediation text must all exclude it.
         """
         from factory_app.workflows.AppGenerator.tools.app_build_plan import (
-            _ALLOWED_TASK_TYPES,
+            _APPGENERATOR_BUILD_TASK_TYPES,
+        )
+        from mozaiksai.core.workflow.assignment_kinds import (
+            app_build_assignment_kind_values,
         )
 
         so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
         so_task_types = set(
             so["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
         )
-        expected = _ALLOWED_TASK_TYPES - {"agent_backend_integration"}
-        assert "agent_backend_integration" not in so_task_types
-        assert so_task_types == expected, (
+        assert "agent_backend_integration" not in _APPGENERATOR_BUILD_TASK_TYPES
+        assert "agent_backend_integration" in app_build_assignment_kind_values()
+        assert so_task_types == _APPGENERATOR_BUILD_TASK_TYPES, (
             f"task_type drift.\n"
-            f"  Only in structured_outputs.yaml: {so_task_types - expected}\n"
-            f"  Only in generic vocabulary:      {expected - so_task_types}"
+            f"  Only in structured_outputs.yaml: {so_task_types - _APPGENERATOR_BUILD_TASK_TYPES}\n"
+            f"  Only in local vocabulary:        {_APPGENERATOR_BUILD_TASK_TYPES - so_task_types}"
         )
 
     def test_allowed_task_types_have_canonical_initial_agents(self) -> None:
-        """Every allowed task_type except agent_backend_integration must map to
-        a canonical initial agent for execution planning.
-        """
+        """The AppGenerator-local admitted vocabulary and the canonical
+        initial-agent map must describe exactly the same task types."""
         from factory_app.workflows.AppGenerator.tools.app_build_plan import (
-            _ALLOWED_TASK_TYPES,
+            _APPGENERATOR_BUILD_TASK_TYPES,
             _CANONICAL_INITIAL_AGENTS,
         )
 
-        # agent_backend_integration is exempt — it is a retired,
-        # non-materializing task type that _validate_build_tasks rejects, so
-        # it never reaches execution planning.
-        need_agents = _ALLOWED_TASK_TYPES - {"agent_backend_integration"}
-        missing = need_agents - set(_CANONICAL_INITIAL_AGENTS)
-        assert not missing, (
-            f"task_types without _CANONICAL_INITIAL_AGENTS entry: {missing}"
+        assert set(_CANONICAL_INITIAL_AGENTS) == _APPGENERATOR_BUILD_TASK_TYPES, (
+            "AppGenerator-local task vocabulary and canonical initial-agent "
+            "map drifted: "
+            f"missing agents for {_APPGENERATOR_BUILD_TASK_TYPES - set(_CANONICAL_INITIAL_AGENTS)}; "
+            f"agents for unadmitted types {set(_CANONICAL_INITIAL_AGENTS) - _APPGENERATOR_BUILD_TASK_TYPES}"
         )
 
     # -- module type alignment ----------------------------------------------

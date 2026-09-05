@@ -26,6 +26,7 @@ from .generator_support.page_plan_utils import (
     _page_from_plan,
     _page_stem_from_path,
     _page_stems,
+    _workflow_touchpoints_for_page,
 )
 from .path_ownership import detect_owned_path_collisions, normalize_owned_paths
 from .paths import resolve_workflow_path
@@ -828,6 +829,10 @@ def _normalize_owned_page_files_from_plan(
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
 
+    base_plan = base_context.get("app_build_plan")
+    plan_workflow_touchpoints = (
+        base_plan.get("workflow_touchpoints") if isinstance(base_plan, dict) else None
+    )
     for path in owned_page_paths:
         stem = _page_stem_from_path(path)  # type: ignore[assignment]
         if not stem:
@@ -836,7 +841,13 @@ def _normalize_owned_page_files_from_plan(
         if not planned:
             continue
         file_map[path] = yaml.safe_dump(
-            _page_from_plan(planned, stem),
+            _page_from_plan(
+                planned,
+                stem,
+                workflow_touchpoints=_workflow_touchpoints_for_page(
+                    plan_workflow_touchpoints, planned
+                ),
+            ),
             allow_unicode=True,
             sort_keys=False,
             default_flow_style=False,

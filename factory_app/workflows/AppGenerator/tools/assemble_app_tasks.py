@@ -9,6 +9,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_from_plan,
     _page_stem_from_path,
     _page_stems,
+    _workflow_touchpoints_for_page,
 )
 
 from .assembly_phase import assemble_features
@@ -45,6 +46,7 @@ def _apply_planned_page_contracts(
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
 
+    plan_workflow_touchpoints = app_build_plan.get("workflow_touchpoints")
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename") and f.get("content") is not None}
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
@@ -55,7 +57,13 @@ def _apply_planned_page_contracts(
             if not stem or stem not in planned_by_stem:
                 continue
             file_map[path] = yaml.safe_dump(
-                _page_from_plan(planned_by_stem[stem], stem),
+                _page_from_plan(
+                    planned_by_stem[stem],
+                    stem,
+                    workflow_touchpoints=_workflow_touchpoints_for_page(
+                        plan_workflow_touchpoints, planned_by_stem[stem]
+                    ),
+                ),
                 allow_unicode=True,
                 sort_keys=False,
                 default_flow_style=False,

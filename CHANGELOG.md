@@ -27,10 +27,26 @@ This project follows a practical pre-1.0 changelog format:
   `agent_backend_integration` is no longer a valid AppGenerator build task:
   AppPlanAgent no longer plans it and `AppBuildPlan` validation rejects it
   fail-closed (build tasks are materialization authority; a task with no
-  artifact to materialize cannot be one). The generic assignment-kind
-  vocabulary, the capability-pack family of the same name, the
-  `backend_request` callback contract, and workflow-side module action calls
-  all remain.
+  artifact to materialize cannot be one). AppGenerator now validates against
+  an explicit local admitted task vocabulary, so unsupported-task remediation
+  never recommends the retired type the generic assignment-kind enum still
+  carries. The generic vocabulary, the capability-pack family of the same
+  name, the `backend_request` callback contract, and workflow-side module
+  action calls all remain.
+
+### Fixed
+- **`AppBuildPlan.workflow_touchpoints` survive planning normalization**:
+  the declared user-launch touchpoints (page + workflow_id + action + label +
+  placement) were silently dropped when the plan was normalized into the
+  persisted build context, so no downstream materialization could see them.
+  They are now validated fail-closed against the declared
+  `AppWorkflowTouchpoint` contract (closed fields, required identities,
+  declared-page cross-reference, duplicate page/action rejection) and
+  preserved into the normalized plan, and the deterministic planned-page
+  renderer materializes each page's touchpoints as a workflow launch
+  `ActionButton` section that validates under the runtime page contract —
+  the persistent-UI workflow launch path no longer depends on ambient
+  generated-workflow metadata.
 
 ### Added
 - **Typed module↔workflow capability semantics**: the semantic graph now
