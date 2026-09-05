@@ -131,6 +131,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # and non-importability are proven by its own proof suite and the
         # hygiene scan in tests/test_compilation_plan.py.
         Path("mozaiksai/core/semantics/materialization.py"),
+        # Workflow-interface families: deterministic module_interface.yaml /
+        # workflow_registry.json renderer, offline-only like its app-config
+        # sibling; covered by the same hygiene scan.
+        Path("mozaiksai/core/semantics/workflow_interface_materialization.py"),
         # Slice 5A: the replacement assignment compiler is an explicitly
         # offline substrate consumer of pinned payload and plan-unit refs.
         Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),

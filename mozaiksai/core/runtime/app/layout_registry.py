@@ -103,6 +103,8 @@ class ArtifactKind(StrEnum):
     WORKFLOW_TOOL = "workflow_tool"
     WORKFLOW_UI = "workflow_ui"
     WORKFLOW_TASK_BATCH = "workflow_task_batch"
+    WORKFLOW_MODULE_INTERFACE = "workflow_module_interface"
+    APP_WORKFLOW_REGISTRY = "app_workflow_registry"
     BUILD_CONTEXT_REGISTRY = "build_context_registry"
     BUILD_CONTEXT_ASSET = "build_context_asset"
     CAPABILITY_PACK_OUTPUT = "capability_pack_output"
@@ -174,6 +176,7 @@ class MaterializerIdentifier(StrEnum):
     PAGE_SCHEMA_EXECUTOR = "page_schema_executor"
     APP_CONFIG_EXECUTOR = "app_config_executor"
     WORKFLOW_GENERATOR = "workflow_generator"
+    WORKFLOW_INTERFACE_EXECUTOR = "workflow_interface_executor"
     CAPABILITY_PACK_MATERIALIZER = "capability_pack_materializer"
     DOWNLOAD_DEPLOYMENT_RENDERER = "download_deployment_renderer"
     PRESERVED_OPAQUE = "preserved_opaque"
@@ -723,6 +726,17 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.WORKFLOW_CONFIG, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "ui_config.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.WORKFLOW_MANIFEST,), stubs=(StubKind.JS_FRONTEND,), inputs=("artifact_declaration", "workflow")),
         _family(ArtifactKind.WORKFLOW_CONFIG, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "middleware.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.WORKFLOW_MANIFEST,), inputs=workflow_inputs),
         _family(ArtifactKind.WORKFLOW_TASK_BATCH, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "extended_orchestration/task_batches.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, deps=(ArtifactKind.WORKFLOW_MANIFEST,)),
+        # module_interface.yaml is a deterministic projection of the workflow's
+        # module-capability closure (#478 semantics) — a validation and diff
+        # surface, never runtime input and never independent authority.
+        _family(ArtifactKind.WORKFLOW_MODULE_INTERFACE, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workspace, "workflows/{workflow_id}/module_interface.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.NONE, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, multiplicity=Multiplicity.MANY, materializer=MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.WORKFLOW_MANIFEST,)),
+        _family(ArtifactKind.WORKFLOW_MODULE_INTERFACE, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workflow, "module_interface.yaml", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.NONE, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, materializer=MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.WORKFLOW_MANIFEST,)),
+        # workflows/workflow_registry.json is the app-local workflow registry:
+        # workflows, their capabilities, and event triggers. It is NOT the
+        # factory extension_registry.json (journeys/transitions stay deferred
+        # until sequencing semantics exist) and declares no runtime consumer
+        # until the platform migrates onto it.
+        _family(ArtifactKind.APP_WORKFLOW_REGISTRY, LayoutOwner.APP_WORKSPACE, Requirement.CONDITIONAL, workspace, "workflows/workflow_registry.json", ValidatorIdentifier.APP_PATHS, RuntimeConsumerIdentifier.NONE, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, materializer=MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.WORKFLOW_MANIFEST,)),
         _family(ArtifactKind.WORKFLOW_TOOL, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "tools/{tool_id}.py", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_TOOL_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.WORKFLOW_TOOL_IMPLEMENTATION,), deps=(ArtifactKind.WORKFLOW_MANIFEST,), inputs=("artifact_declaration", "workflow")),
         _family(ArtifactKind.WORKFLOW_UI, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "ui/{workflow_id}/{component_id}.jsx", ValidatorIdentifier.GENERATED_APP_VALIDATOR, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_COMPONENT_DECLARED, multiplicity=Multiplicity.MANY, security=SecurityClass.EXECUTABLE_STUB, assignment=(AssignmentKind.WORKFLOW_UI_IMPLEMENTATION,), deps=(ArtifactKind.WORKFLOW_MANIFEST,), inputs=("artifact_declaration", "workflow")),
         _family(ArtifactKind.MODULE_MANIFEST, LayoutOwner.MODULE, Requirement.REQUIRED, module, "module.yaml", ValidatorIdentifier.MODULE_LOADER, RuntimeConsumerIdentifier.MODULE_LOADER, condition=ConditionIdentifier.WHEN_MODULE_DECLARED, assignment=(AssignmentKind.MODULE_CONTRACT,), stubs=(StubKind.PYTHON_BACKEND,)),
@@ -1129,6 +1143,25 @@ def _semantic_inputs_for_family(kind: ArtifactKind) -> tuple[str, ...]:
             "trigger",
             "event",
             "capability",
+        ),
+        # module_interface.yaml renders the #478 capability-binding closure of
+        # one workflow. ACTION is deliberately absent: action identity is the
+        # node id pinned inside the binding payload, so unrelated action body
+        # changes never invalidate an interface.
+        ArtifactKind.WORKFLOW_MODULE_INTERFACE: (
+            "workflow",
+            "workflow_capability",
+            "workflow_capability_binding",
+            "workflow_result",
+            "module",
+        ),
+        # workflow_registry.json spans every workflow's capability surface and
+        # event triggers only; MODULE/ACTION/RESULT facts stay out so module
+        # churn never reprints the registry.
+        ArtifactKind.APP_WORKFLOW_REGISTRY: (
+            "workflow",
+            "workflow_capability",
+            "workflow_capability_binding",
         ),
         ArtifactKind.APP_DEPLOYMENT_ARTIFACT: (
             "deployment_target",

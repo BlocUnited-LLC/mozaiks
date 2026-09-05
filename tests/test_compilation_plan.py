@@ -73,7 +73,13 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # resolution is ImplementationBinding authority enforced at materialization),
 # so the gap set shrinks by exactly that one structural entry. Identity-only:
 # no unit, byte, footprint, or assignment fact changed.
-_GOLDEN_PLAN_DIGEST = "4e3a809b0982e18fa24f85da753a1df9734ae38132199c0be5931263fbd202f2"
+# Re-pinned once for the workflow-interface-families PR: the registry gains
+# the workflow_module_interface twin rows and the app_workflow_registry row
+# (registry identity), and the corpus plan gains their derived units (the
+# corpus workflow has no capability bindings, so both render as truthful
+# empty projections). Every pre-existing unit digest is unchanged — empty
+# taxonomy_sources is omitted from unit identity and serialization alike.
+_GOLDEN_PLAN_DIGEST = "0969d4e804e007add764224f1f6d6d5e71c1f743551d02c047dfb9a2ca4ca8c1"
 
 
 def _registry():
@@ -558,6 +564,10 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
         Path("mozaiksai/core/semantics/compilation_plan.py"),
         Path("mozaiksai/core/semantics/decl_bytes.py"),
         Path("mozaiksai/core/semantics/app_config_materialization.py"),
+        # Workflow-interface families: deterministic module_interface.yaml /
+        # workflow_registry.json renderer; offline-only like its app-config
+        # sibling, consumed solely through the semantics materialization owner.
+        Path("mozaiksai/core/semantics/workflow_interface_materialization.py"),
         Path("mozaiksai/core/semantics/resolver.py"),
         Path("mozaiksai/core/semantics/refs.py"),
         # Slice 4C offline materializer: consumes the plan inside the
@@ -644,6 +654,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         PlanGap,
         PlanOutput,
         PlanSource,
+        PlanTaxonomySource,
         RegenerationClosure,
     )
 
@@ -672,6 +683,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "outputs",
             "sources",
             "edge_sources",
+            "taxonomy_sources",
             "depends_on_units",
             "materializer",
             "assignment_kind",
@@ -681,6 +693,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         },
         PlanOutput: {"path_scope", "path"},
         PlanSource: {"node_id", "payload_digest"},
+        PlanTaxonomySource: {"node_id", "category", "identifier"},
         PlanEdgeSource: {
             "kind",
             "source_node_id",
@@ -753,6 +766,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         | allowed_fields[FamilyInstancePlan]
         | allowed_fields[PlanOutput]
         | allowed_fields[PlanSource]
+        | allowed_fields[PlanTaxonomySource]
         | allowed_fields[PlanEdgeSource]
         | allowed_fields[PlanGap]
             | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}

@@ -88,6 +88,11 @@ from mozaiksai.core.semantics.plan_authority import (
     build_compilation_plan_authority_inputs,
 )
 from mozaiksai.core.semantics.refs import SemanticGraphRef
+from mozaiksai.core.semantics.workflow_interface_materialization import (
+    WORKFLOW_INTERFACE_FAMILIES,
+    WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_ID,
+    WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_VERSION,
+)
 from tests.test_semantic_payload_graph_v2 import _SCOPE, _corpus_payloads
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -364,6 +369,12 @@ def _binding(graph):
                 implementation_version=APP_CONFIG_RENDERER_IMPLEMENTATION_VERSION,
                 artifact_families=tuple(sorted(APP_CONFIG_FAMILIES)),
             ),
+            RendererSelection(
+                materializer_id=MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR,
+                implementation_id=WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_ID,
+                implementation_version=WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_VERSION,
+                artifact_families=tuple(sorted(WORKFLOW_INTERFACE_FAMILIES)),
+            ),
         ),
     )
 
@@ -387,13 +398,13 @@ def test_accepted_b1_registry_census_is_unchanged() -> None:
     registry = build_app_layout_registry(())
     census = Counter(f.disposition.value for f in registry.families)
     assert dict(census) == {
-        "render": 79,
+        "render": 82,
         "agent_author": 19,
         "external_handoff": 11,
         "input_only": 1,
         "inapplicable": 13,
     }
-    assert sum(census.values()) == 123
+    assert sum(census.values()) == 126
 
 
 # ---------------------------------------------------------------------------
@@ -828,6 +839,9 @@ def test_b2a_renderer_is_unwired_from_production_code() -> None:
         Path("mozaiksai/core/semantics/app_config_materialization.py"),
         Path("mozaiksai/core/semantics/decl_bytes.py"),
         Path("mozaiksai/core/semantics/materialization.py"),
+        # The workflow-interface renderer shares the decl-bytes contracts and
+        # is equally offline-only; the same scan keeps it out of production.
+        Path("mozaiksai/core/semantics/workflow_interface_materialization.py"),
     }
     offenders: list[str] = []
     for root_dir in ("mozaiksai", "factory_app"):
@@ -1019,6 +1033,12 @@ def _binding_with_families(
                 implementation_id=APP_CONFIG_RENDERER_IMPLEMENTATION_ID,
                 implementation_version=implementation_version,
                 artifact_families=tuple(families),
+            ),
+            RendererSelection(
+                materializer_id=MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR,
+                implementation_id=WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_ID,
+                implementation_version=WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_VERSION,
+                artifact_families=tuple(sorted(WORKFLOW_INTERFACE_FAMILIES)),
             ),
         ),
     )

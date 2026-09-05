@@ -430,6 +430,7 @@ def test_agent_author_has_no_slice_4c_materialization_path() -> None:
             unit,
             payload_by_node={},
                 app_config_selection=None,
+                workflow_interface_selection=None,
             preserved_by_unit={},
             bundle_outputs=[],
             external=[],

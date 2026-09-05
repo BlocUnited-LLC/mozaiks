@@ -13,6 +13,28 @@ This project follows a practical pre-1.0 changelog format:
 ## Unreleased
 
 ### Added
+
+- **Deterministic workflow module interfaces and app workflow registries
+  (ADR 0007 compiler slice)**: the offline semantic compiler now plans and
+  renders two new families from the module-workflow capability semantics —
+  `workflows/{workflow_id}/module_interface.yaml`
+  (`mozaiks.module_interface.v2`, an exact projection of one workflow's
+  capabilities, every capability-owned workflow result — committed or
+  advisory — typed module-action/result bindings, and canonical trigger
+  events; a validation and diff surface, never runtime input) and
+  `workflows/workflow_registry.json` (`mozaiks.app_workflow_registry.v1`,
+  the app-local registry of workflows, capability ownership, and event
+  triggers — distinct from the factory `extension_registry.json`; journey,
+  sequencing, entrypoint, and AI-launch facts remain deferred until their
+  semantics exist). Both render through a new binding-resolved authority,
+  `deterministic_workflow_interface_renderer@1`, under the existing
+  canonical byte contracts. Source locality is payload-driven — unrelated
+  module, action-body, or event-payload changes never reprint an interface
+  that does not depend on them — and node-level canonical event identity is
+  pinned into plan-unit identity through new conditional `taxonomy_sources`
+  (every pre-existing unit digest is unchanged).
+
+### Added
 - **Typed module↔workflow capability semantics**: the semantic graph now
   models the relationship between deterministic application capabilities
   (modules, actions, events) and agentic capabilities (workflows) as

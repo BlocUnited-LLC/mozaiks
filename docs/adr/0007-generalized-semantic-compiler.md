@@ -352,6 +352,28 @@ authoritative emitters of these paths until the atomic 5D cutover; hygiene
 guards prove they do not call the B2A renderer and that no production module
 imports it.
 
+The workflow-interface slice extends the deterministic corpus with two
+families rendered by a second binding-resolved authority,
+`deterministic_workflow_interface_renderer@1` on the
+`workflow_interface_executor` materializer: `workflow_module_interface`
+(`workflows/{workflow_id}/module_interface.yaml`, one exact projection of a
+workflow's module-capability closure — capabilities, every capability-owned
+workflow result whether committed or advisory, typed action/result bindings,
+canonical trigger events — a validation and diff surface, never
+runtime input) and `app_workflow_registry`
+(`workflows/workflow_registry.json`, the app-local list of workflows, their
+capability surface, and event triggers; deliberately not the factory
+`extension_registry.json` — journeys, transitions, entrypoints, and AI-launch
+facts stay deferred until their semantics exist). Source locality is
+payload-driven: selection follows typed payload references, ACTION payload
+bodies are never pinned (action identity is the node id inside the binding
+payload), and the registry excludes module/action/result facts entirely.
+Because canonical event identity lives on the EVENT node's taxonomy
+reference rather than any payload, plan units gain `taxonomy_sources` —
+pinned `(node, category, identifier)` triples that enter unit identity and
+serialization only when non-empty, so every payload-only unit's digest and
+serialized form are unchanged.
+
 ## ApplicationManifest
 
 `ApplicationManifest` is the minimal root identity and reference document,

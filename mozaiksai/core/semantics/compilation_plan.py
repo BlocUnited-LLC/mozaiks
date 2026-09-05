@@ -48,7 +48,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from mozaiksai.core.runtime.app.layout_registry import (
     ArtifactDisposition,
@@ -75,7 +75,11 @@ from mozaiksai.core.semantics.payloads import (
     OptionalFamilySelectionStatus,
     PagePayload,
     SemanticPayloadBase,
+    WorkflowCapabilityBindingPayload,
+    WorkflowCapabilityBindingRole,
+    WorkflowCapabilityPayload,
     WorkflowPayload,
+    WorkflowResultPayload,
     parse_semantic_payload,
     validate_semantic_graph_v2_payload_closure,
 )
@@ -86,6 +90,7 @@ from mozaiksai.core.semantics.refs import (
     _validate_digest,
     validate_node_id_grammar,
 )
+from mozaiksai.core.taxonomy import SemanticCategory
 from mozaiksai.core.workflow.assignment_kinds import (
     ASSIGNMENT_CONTRACT_DESCRIPTORS,
     COMPILER_ASSIGNMENT_KINDS,
@@ -106,6 +111,41 @@ _APP_CONFIG_RENDER_KINDS = frozenset(
         "app_ui_route_manifest",
     }
 )
+
+_WORKFLOW_INTERFACE_FAMILY = "workflow_module_interface"
+_APP_WORKFLOW_REGISTRY_FAMILY = "app_workflow_registry"
+_WORKFLOW_INTERFACE_RENDER_KINDS = frozenset(
+    {_WORKFLOW_INTERFACE_FAMILY, _APP_WORKFLOW_REGISTRY_FAMILY}
+)
+
+
+def canonical_instance_identity_value(value: str) -> str:
+    """Validate one canonical renderer instance-identity value.
+
+    The single closed grammar for placeholder identity values; derivation and
+    any renderer that re-verifies instance identity share this exact rule.
+    """
+    text = str(value or "").strip()
+    if _VALUE_RE.fullmatch(text) is None:
+        raise ValueError(f"instance identity value {value!r} is outside the closed domain")
+    return text
+
+
+def canonical_instance_unit_id(
+    family_kind: str, instance_identity: str, row_digest: str
+) -> str:
+    """The exact canonical unit id of one per-instance family unit.
+
+    This is THE unit-id derivation rule — extracted so a renderer verifying
+    a supplied unit against its canonical layout row uses the identical
+    construction the planner used, never a second permissive parse.
+    """
+    return f"{family_kind}/{instance_identity}/{row_digest[:12]}"
+
+
+def canonical_single_unit_id(family_kind: str, row_digest: str) -> str:
+    """The exact canonical unit id of one single-instance family unit."""
+    return f"{family_kind}/{row_digest[:12]}"
 
 COMPILATION_PLAN_SCHEMA_VERSION: Literal["mozaiks.compilation_plan.v1"] = (
     "mozaiks.compilation_plan.v1"
@@ -496,6 +536,39 @@ class PlanSource(SemanticsModel):
         return _validate_digest(value, field_name="payload_digest")
 
 
+class PlanTaxonomySource(SemanticsModel):
+    """One node-level canonical taxonomy identity a unit's bytes depend on.
+
+    Some canonical identities live on the graph node, not on any typed
+    payload — the canonical event identity is the EVENT node's single
+    EVENT-category taxonomy reference.  Payload digests cannot pin such a
+    fact, so a unit that renders it pins the exact ``(node, category,
+    identifier)`` triple here.  Changing the node's canonical identity then
+    changes the unit's reuse signature exactly like a payload change would.
+    """
+
+    node_id: str
+    category: str
+    identifier: str
+
+    @field_validator("node_id")
+    @classmethod
+    def _node(cls, value: str) -> str:
+        return validate_node_id_grammar(value)
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, value: str) -> str:
+        return SemanticCategory(str(value or "").strip()).value
+
+    @model_validator(mode="after")
+    def _grammar(self) -> PlanTaxonomySource:
+        from mozaiksai.core.taxonomy import validate_identifier_grammar
+
+        validate_identifier_grammar(self.category, self.identifier)
+        return self
+
+
 class PlanEdgeSource(SemanticsModel):
     """One complete graph relationship whose facts can affect rendered bytes."""
 
@@ -577,6 +650,10 @@ class FamilyInstancePlan(SemanticsModel):
     outputs: tuple[PlanOutput, ...] = Field(default_factory=tuple)
     sources: tuple[PlanSource, ...] = Field(default_factory=tuple)
     edge_sources: tuple[PlanEdgeSource, ...] = Field(default_factory=tuple)
+    #: Node-level canonical taxonomy identities this unit's bytes consume.
+    #: Empty for every family whose facts are fully payload-pinned; entering
+    #: identity only when non-empty keeps all such units' digests stable.
+    taxonomy_sources: tuple[PlanTaxonomySource, ...] = Field(default_factory=tuple)
     depends_on_units: tuple[str, ...] = Field(default_factory=tuple)
     materializer: str
     assignment_kind: AssignmentKind | None = None
@@ -652,6 +729,19 @@ class FamilyInstancePlan(SemanticsModel):
             raise ValueError("duplicate edge source identities in one unit")
         return ordered
 
+    @field_validator("taxonomy_sources")
+    @classmethod
+    def _taxonomy_sources(
+        cls, value: tuple[PlanTaxonomySource, ...]
+    ) -> tuple[PlanTaxonomySource, ...]:
+        ordered = tuple(
+            sorted(value, key=lambda item: (item.node_id, item.category, item.identifier))
+        )
+        keys = [(item.node_id, item.category) for item in ordered]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate taxonomy source identities in one unit")
+        return ordered
+
     @field_validator("depends_on_units")
     @classmethod
     def _deps(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -659,6 +749,21 @@ class FamilyInstancePlan(SemanticsModel):
         if len(ordered) != len(set(ordered)):
             raise ValueError("duplicate unit dependencies")
         return ordered
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> Any:
+        """Serialize with the exact identity representation.
+
+        ``taxonomy_sources`` is omitted when empty so the serialized unit,
+        the identity payload, and the unit digest all state the same claim
+        ("no node-level identity feeds these bytes") in the same shape —
+        every pre-existing payload-only unit keeps its exact serialized form
+        and digest.
+        """
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("taxonomy_sources"):
+            data.pop("taxonomy_sources", None)
+        return data
 
     @model_validator(mode="after")
     def _shape(self) -> FamilyInstancePlan:
@@ -699,7 +804,7 @@ class FamilyInstancePlan(SemanticsModel):
 
     @property
     def identity_payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "unit_id": self.unit_id,
             "family_kind": self.family_kind,
             "family_identity_digest": self.family_identity_digest,
@@ -726,6 +831,20 @@ class FamilyInstancePlan(SemanticsModel):
             ),
             "base_plan_digest": self.base_plan_digest,
         }
+        # Node-level taxonomy identity enters unit identity only when this
+        # unit actually pins one: absence and emptiness are the same claim
+        # ("no node-level identity feeds these bytes"), and conditional
+        # inclusion keeps every pre-existing payload-only unit digest stable.
+        if self.taxonomy_sources:
+            payload["taxonomy_sources"] = [
+                {
+                    "node_id": item.node_id,
+                    "category": item.category,
+                    "identifier": item.identifier,
+                }
+                for item in self.taxonomy_sources
+            ]
+        return payload
 
     @property
     def unit_digest(self) -> str:
@@ -1242,12 +1361,158 @@ def derive_compilation_plan(
             return tuple(sorted(instances))
         return None
 
+    def _footprint_parts(
+        selected: set[str],
+    ) -> tuple[tuple[PlanSource, ...], tuple[PlanEdgeSource, ...]]:
+        sources = tuple(
+            PlanSource(
+                node_id=node_id,
+                payload_digest=payload_by_node[node_id].payload_digest,
+            )
+            for node_id in sorted(selected)
+        )
+        edge_sources = tuple(
+            PlanEdgeSource(
+                kind=edge.kind,
+                source_node_id=edge.source_node_id,
+                target_node_id=edge.target_node_id,
+                discriminator=edge.discriminator,
+                edge_identity=edge.edge_identity,
+            )
+            for edge in verified_graph.edges
+            if edge.source_node_id in selected and edge.target_node_id in selected
+        )
+        return sources, edge_sources
+
+    workflow_footprint_memo: dict[
+        tuple[str, str | None],
+        tuple[
+            tuple[PlanSource, ...],
+            tuple[PlanEdgeSource, ...],
+            tuple[PlanTaxonomySource, ...],
+        ]
+        | None,
+    ] = {}
+
+    def _workflow_family_footprint(
+        row_kind: str, root_node_id: str | None
+    ) -> tuple[
+        tuple[PlanSource, ...],
+        tuple[PlanEdgeSource, ...],
+        tuple[PlanTaxonomySource, ...],
+    ] | None:
+        """Payload-driven closure selection for the workflow-interface corpus.
+
+        Typed payloads own meaning, so selection follows payload references
+        (never generic edge hops): capabilities owned by the in-scope
+        workflows, their binding nodes, EVERY workflow result each included
+        capability canonically owns (committed or advisory — delivery is a
+        separate relation), the module payloads action bindings name, and the
+        node-level canonical EVENT identity of every bound trigger event.
+        ACTION payloads are deliberately NOT selected — the semantic identity
+        of an action is its node id (pinned inside the binding payload), so
+        unrelated action body changes never move these units.  ``None`` means
+        a bound event lacks exactly one canonical identity; the caller
+        records a typed renderer-input gap.
+        """
+        memo_key = (row_kind, root_node_id)
+        if memo_key in workflow_footprint_memo:
+            return workflow_footprint_memo[memo_key]
+        include_action_bindings = row_kind == _WORKFLOW_INTERFACE_FAMILY
+        if root_node_id is None:
+            workflow_node_ids = {
+                node.node_id
+                for node in verified_graph.nodes
+                if node.kind is SemanticNodeKind.WORKFLOW
+            }
+        else:
+            workflow_node_ids = {root_node_id}
+        selected = set(workflow_node_ids)
+        capability_ids: set[str] = set()
+        for payload in payload_by_node.values():
+            if (
+                isinstance(payload, WorkflowCapabilityPayload)
+                and payload.workflow_node_id in workflow_node_ids
+            ):
+                selected.add(payload.node_id)
+                capability_ids.add(payload.node_id)
+        taxonomy: dict[str, PlanTaxonomySource] = {}
+        result: tuple[
+            tuple[PlanSource, ...],
+            tuple[PlanEdgeSource, ...],
+            tuple[PlanTaxonomySource, ...],
+        ] | None
+        if include_action_bindings:
+            # Result ownership is the capability's DECLARES closure, never a
+            # commit binding: every capability-owned WORKFLOW_RESULT belongs
+            # to the interface whether or not delivery through a module
+            # action exists (advisory results are valid application
+            # semantics).  Commit bindings are a separate delivery relation.
+            for payload in payload_by_node.values():
+                if (
+                    isinstance(payload, WorkflowResultPayload)
+                    and payload.workflow_capability_node_id in capability_ids
+                ):
+                    selected.add(payload.node_id)
+        for payload in payload_by_node.values():
+            if not isinstance(payload, WorkflowCapabilityBindingPayload):
+                continue
+            if payload.workflow_capability_node_id not in capability_ids:
+                continue
+            is_trigger = (
+                payload.binding_role is WorkflowCapabilityBindingRole.TRIGGERED_BY_EVENT
+            )
+            if not include_action_bindings and not is_trigger:
+                continue
+            selected.add(payload.node_id)
+            if include_action_bindings and payload.module_action is not None:
+                selected.add(payload.module_action.module_node_id)
+            if is_trigger and payload.event_node_id is not None:
+                identifiers = tuple(
+                    reference.identifier
+                    for reference in node_by_id[payload.event_node_id].taxonomy_references
+                    if reference.category is SemanticCategory.EVENT
+                )
+                if len(identifiers) != 1:
+                    workflow_footprint_memo[memo_key] = None
+                    return None
+                taxonomy[payload.event_node_id] = PlanTaxonomySource(
+                    node_id=payload.event_node_id,
+                    category=SemanticCategory.EVENT.value,
+                    identifier=identifiers[0],
+                )
+        sources, edge_sources = _footprint_parts(selected)
+        result = (
+            sources,
+            edge_sources,
+            tuple(
+                sorted(
+                    taxonomy.values(),
+                    key=lambda item: (item.node_id, item.category, item.identifier),
+                )
+            ),
+        )
+        workflow_footprint_memo[memo_key] = result
+        return result
+
     def _renderer_footprint(
         row: RegistryFamilyRow, *, root_node_id: str | None = None
-    ) -> tuple[tuple[PlanSource, ...], tuple[PlanEdgeSource, ...]]:
+    ) -> tuple[
+        tuple[PlanSource, ...],
+        tuple[PlanEdgeSource, ...],
+        tuple[PlanTaxonomySource, ...],
+    ]:
+        if row.kind in _WORKFLOW_INTERFACE_RENDER_KINDS:
+            footprint = _workflow_family_footprint(row.kind, root_node_id)
+            if footprint is None:
+                raise CompilationPlanError(
+                    f"family {row.kind!r} footprint requested for a closure its "
+                    "completeness check must have rejected"
+                )
+            return footprint
         allowed = {SemanticNodeKind(kind) for kind in row.semantic_input_kinds}
         if not allowed:
-            return (), ()
+            return (), (), ()
         if root_node_id is None:
             selected = {
                 node.node_id for node in verified_graph.nodes if node.kind in allowed
@@ -1288,25 +1553,8 @@ def derive_compilation_plan(
                         continue
                     if node_by_id[other].kind in allowed:
                         selected.add(other)
-        sources = tuple(
-            PlanSource(
-                node_id=node_id,
-                payload_digest=payload_by_node[node_id].payload_digest,
-            )
-            for node_id in sorted(selected)
-        )
-        edge_sources = tuple(
-            PlanEdgeSource(
-                kind=edge.kind,
-                source_node_id=edge.source_node_id,
-                target_node_id=edge.target_node_id,
-                discriminator=edge.discriminator,
-                edge_identity=edge.edge_identity,
-            )
-            for edge in verified_graph.edges
-            if edge.source_node_id in selected and edge.target_node_id in selected
-        )
-        return sources, edge_sources
+        sources, edge_sources = _footprint_parts(selected)
+        return sources, edge_sources, ()
 
     def _placeholder_value(placeholder: str, node_id: str) -> str:
         identity_fields = {
@@ -1416,6 +1664,20 @@ def derive_compilation_plan(
         """
         if row.kind in _APP_CONFIG_RENDER_KINDS and root_node_id is None:
             return _app_config_inputs_complete(row)
+        if row.kind in _WORKFLOW_INTERFACE_RENDER_KINDS:
+            # Complete exactly when the payload-driven closure resolves: the
+            # interface family roots at one WORKFLOW payload, the registry
+            # spans all of them, and every bound trigger event must carry
+            # exactly one canonical EVENT identity to pin. A workflow with no
+            # capabilities is a truthful empty projection, not a gap.
+            if row.kind == _WORKFLOW_INTERFACE_FAMILY:
+                if root_node_id is None or not isinstance(
+                    payload_by_node.get(root_node_id), WorkflowPayload
+                ):
+                    return False
+            elif root_node_id is not None:
+                return False
+            return _workflow_family_footprint(row.kind, root_node_id) is not None
         if row.kind != "app_ui_page_schema" or root_node_id is None:
             return False
         page = payload_by_node[root_node_id]
@@ -1480,7 +1742,7 @@ def derive_compilation_plan(
             PathScope.MODULE_RELATIVE.value,
         }:
             selected_scope = verified_scope_selection.module_scope
-        elif row.kind == "workflow_manifest":
+        elif row.kind in {"workflow_manifest", _WORKFLOW_INTERFACE_FAMILY}:
             selected_scope = verified_scope_selection.workflow_manifest_scope
         if selected_scope is not None and row.path_scope != selected_scope.value:
             _add_unit(
@@ -1645,8 +1907,8 @@ def derive_compilation_plan(
                         adr_slice=4,
                     )
                     continue
-                unit_sources, unit_edge_sources = _renderer_footprint(
-                    row, root_node_id=root_node_id
+                unit_sources, unit_edge_sources, unit_taxonomy_sources = (
+                    _renderer_footprint(row, root_node_id=root_node_id)
                 )
                 resolved_sources = unit_sources or (
                     PlanSource(
@@ -1656,7 +1918,7 @@ def derive_compilation_plan(
                 )
                 identity = "-".join(value for _name, value in values)
                 unit = FamilyInstancePlan(
-                    unit_id=f"{row.kind}/{identity}/{row_digest[:12]}",
+                    unit_id=canonical_instance_unit_id(row.kind, identity, row_digest),
                     family_kind=row.kind,
                     family_identity_digest=row_digest,
                     disposition=disposition,
@@ -1665,6 +1927,7 @@ def derive_compilation_plan(
                     outputs=(PlanOutput(path_scope=row.path_scope, path=path),),
                     sources=resolved_sources,
                     edge_sources=unit_edge_sources,
+                    taxonomy_sources=unit_taxonomy_sources,
                     materializer=row.materializer,
                     validator=row.validator,
                     assignment_kind=assignment_kind,
@@ -1701,8 +1964,8 @@ def derive_compilation_plan(
                 # their instance identity lives in placeholder_values and the
                 # collision domain, not the relative path.
 
-                unit_sources, unit_edge_sources = _renderer_footprint(
-                    row, root_node_id=node.node_id
+                unit_sources, unit_edge_sources, unit_taxonomy_sources = (
+                    _renderer_footprint(row, root_node_id=node.node_id)
                 )
                 resolved_sources = unit_sources or (
                     PlanSource(
@@ -1719,7 +1982,7 @@ def derive_compilation_plan(
                     )
                     continue
                 unit = FamilyInstancePlan(
-                    unit_id=f"{row.kind}/{local}/{row_digest[:12]}",
+                    unit_id=canonical_instance_unit_id(row.kind, local, row_digest),
                     family_kind=row.kind,
                     family_identity_digest=row_digest,
                     disposition=disposition,
@@ -1728,6 +1991,7 @@ def derive_compilation_plan(
                     outputs=(PlanOutput(path_scope=row.path_scope, path=path),),
                     sources=resolved_sources,
                     edge_sources=unit_edge_sources,
+                    taxonomy_sources=unit_taxonomy_sources,
                     materializer=row.materializer,
                     validator=row.validator,
                     assignment_kind=assignment_kind,
@@ -1742,7 +2006,9 @@ def derive_compilation_plan(
                 _gap(row, PlanGapCode.RENDERER_INPUT_INCOMPLETE, adr_slice=4)
                 continue
             source_kinds = _FAMILY_SOURCE_KINDS.get(row.condition, ())
-            declared_sources, declared_edge_sources = _renderer_footprint(row)
+            declared_sources, declared_edge_sources, declared_taxonomy_sources = (
+                _renderer_footprint(row)
+            )
             graph_wide = not trigger_kinds and not source_kinds and not row.semantic_input_kinds
             resolved_sources = (
                 () if graph_wide else declared_sources or _sources_for(source_kinds)
@@ -1753,7 +2019,7 @@ def derive_compilation_plan(
                 _gap(row, PlanGapCode.SOURCE_FOOTPRINT_INCOMPLETE, adr_slice=5)
                 continue
             unit = FamilyInstancePlan(
-                unit_id=f"{row.kind}/{row_digest[:12]}",
+                unit_id=canonical_single_unit_id(row.kind, row_digest),
                 family_kind=row.kind,
                 family_identity_digest=row_digest,
                 disposition=disposition,
@@ -1763,6 +2029,7 @@ def derive_compilation_plan(
                 outputs=(PlanOutput(path_scope=row.path_scope, path=row.path_template),),
                 sources=resolved_sources,
                 edge_sources=() if graph_wide else declared_edge_sources,
+                taxonomy_sources=() if graph_wide else declared_taxonomy_sources,
                 materializer=row.materializer,
                 validator=row.validator,
                 assignment_kind=assignment_kind,
@@ -2016,6 +2283,10 @@ __all__ = [
     "PlanEdgeSource",
     "PlanOutput",
     "PlanSource",
+    "PlanTaxonomySource",
+    "canonical_instance_identity_value",
+    "canonical_instance_unit_id",
+    "canonical_single_unit_id",
     "PlanSourceScope",
     "RegenerationClosure",
     "RegistryFamilyRow",
