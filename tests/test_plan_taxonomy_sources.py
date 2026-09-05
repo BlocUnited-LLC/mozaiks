@@ -247,6 +247,7 @@ def test_every_preexisting_corpus_unit_keeps_exact_bytes_and_identity() -> None:
             "unit_digest": unit.unit_digest,
         }
         for unit in _corpus_plan().units
+        if unit.family_kind != "workflow_module_interface"
     ]
     assert len(rows) == 59
     assert canonical_digest(rows) == "23a30860c1bad68123df0c3e208fc150e9f0d8aadef8f64d15a993e7333c8e8a"

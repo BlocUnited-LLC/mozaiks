@@ -186,6 +186,7 @@ def _bundle_for(plan, graph, payloads, _authority_inputs) -> MaterializedBundle:
             unit,
             payload_by_node=payload_by_node,
             app_config_selection=selection,
+            workflow_interface_selection=None,
             preserved_by_unit={},
             bundle_outputs=outputs,
             external=[],

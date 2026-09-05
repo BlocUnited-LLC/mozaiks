@@ -385,7 +385,11 @@ def _materialize(graph, payloads, plan):
 
 def test_accepted_b1_registry_census_is_unchanged() -> None:
     registry = build_app_layout_registry(())
-    census = Counter(f.disposition.value for f in registry.families)
+    # The new interface twins have their own layout proof; every B1 row stays.
+    census = Counter(
+        f.disposition.value for f in registry.families
+        if f.kind.value != "workflow_module_interface"
+    )
     assert dict(census) == {
         "render": 79,
         "agent_author": 19,
@@ -827,6 +831,7 @@ def test_b2a_renderer_is_unwired_from_production_code() -> None:
     allowed = {
         Path("mozaiksai/core/semantics/app_config_materialization.py"),
         Path("mozaiksai/core/semantics/decl_bytes.py"),
+        Path("mozaiksai/core/semantics/workflow_interface_materialization.py"),
         Path("mozaiksai/core/semantics/materialization.py"),
     }
     offenders: list[str] = []

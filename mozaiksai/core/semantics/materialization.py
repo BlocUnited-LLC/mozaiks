@@ -1,14 +1,15 @@
 """ADR 0007 Slice 4C deterministic offline materialization (offline-only).
 
-This module implements the first honest deterministic materialization path:
+This module owns the deterministic materialization path:
 
     SemanticGraphV2 -> CompilationPlan -> accepted ImplementationBinding
-    -> canonical ``app_ui_page_schema`` bytes -> composed candidate bundle
+    -> canonical family bytes -> composed candidate bundle
 
-Exactly one renderer family is renderer-ready in this slice:
-``app_ui_page_schema``. Its renderer is a pure function of the plan unit's
-complete semantic source footprint (the page payload plus its linked section
-payloads) and nothing else. It consumes no AppBuildPlan, agent context,
+Page schemas, the closed application-configuration families, and workspace
+workflow module interfaces render from each unit's exact semantic footprint.
+The interface projection includes owned advisory results and pinned event
+taxonomy; its pure renderer lives in the separate interface materialization
+module. This owner consumes no AppBuildPlan, agent context,
 generated files, conversation history, runtime state, environment variables,
 clocks, randomness, or filesystem enumeration — this module deliberately
 imports none of those capabilities.
@@ -17,7 +18,7 @@ Authorities are unchanged: ``layout_registry`` remains the sole
 family/materializer authority; the ``CompilationPlan`` owns dispositions,
 source footprints, and physical output paths; the graph-v2
 ``ImplementationBinding`` pins the one accepted deterministic implementation
-identity/version for the page-schema materializer. This module adds no
+identity/version for each selected materializer. This module adds no
 registry, no alternate family map, no alternate output ownership, and no
 alternate artifact identity.
 
@@ -47,7 +48,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from types import UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel
@@ -98,11 +99,17 @@ from mozaiksai.core.semantics.payloads import (
     AuthPayload,
     IntegrationConfigValueKind,
     IntegrationPayload,
+    ModulePayload,
     OptionalFamilyKind,
     OptionalFamilySelectionStatus,
     PagePayload,
     SectionPayload,
     SemanticPayloadBase,
+    WorkflowCapabilityBindingPayload,
+    WorkflowCapabilityBindingRole,
+    WorkflowCapabilityPayload,
+    WorkflowPayload,
+    WorkflowResultPayload,
     parse_semantic_payload,
 )
 from mozaiksai.core.semantics.plan_authority import (
@@ -111,6 +118,20 @@ from mozaiksai.core.semantics.plan_authority import (
     validate_compilation_plan_against_authority,
 )
 from mozaiksai.core.semantics.portable_path import detect_collisions
+from mozaiksai.core.semantics.workflow_interface_materialization import (
+    WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_ID,
+    WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_VERSION,
+    WORKFLOW_MODULE_INTERFACE,
+    RenderInputCommitsResultBinding,
+    RenderInputConsumesActionBinding,
+    RenderInputTriggeredByEventBinding,
+    RenderInputWorkflowBinding,
+    RenderInputWorkflowCapability,
+    RenderInputWorkflowResult,
+    WorkflowInterfaceMaterializationError,
+    WorkflowInterfaceRenderInput,
+    render_workflow_module_interface_unit,
+)
 
 PAGE_SCHEMA_FAMILY: Literal["app_ui_page_schema"] = "app_ui_page_schema"
 PAGE_BYTES_SCHEMA_VERSION: Literal["mozaiks.page_bytes.v1"] = "mozaiks.page_bytes.v1"
@@ -157,6 +178,8 @@ def _is_closed_annotation(annotation: Any) -> bool:
             return True  # walked separately
         return annotation in _CLOSED_SCALARS
     origin = get_origin(annotation)
+    if origin is Annotated:
+        return _is_closed_annotation(get_args(annotation)[0])
     if origin is Literal:
         return True
     if origin in (Union, UnionType):
@@ -353,8 +376,118 @@ def resolve_app_config_renderer_selection(
 
 
 # ---------------------------------------------------------------------------
-# Application-family render input (the one payload->renderer boundary)
+# Family render input (the one payload->renderer boundary)
 # ---------------------------------------------------------------------------
+
+
+def resolve_workflow_interface_renderer_selection(
+    binding: ImplementationBinding,
+    *,
+    graph: SemanticGraphV2,
+    layout_registry: Any,
+) -> RendererSelection:
+    """Bind the one interface family to its accepted deterministic implementation."""
+    validate_implementation_binding_against_graph(binding, graph, layout_registry=layout_registry)
+    matches = [
+        selection for selection in binding.renderer_selections
+        if WORKFLOW_MODULE_INTERFACE in selection.artifact_families
+    ]
+    if len(matches) != 1:
+        raise WorkflowInterfaceMaterializationError("binding requires one interface renderer selection")
+    selection = matches[0]
+    if (
+        set(selection.artifact_families) != {WORKFLOW_MODULE_INTERFACE}
+        or selection.materializer_id is not MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR
+        or selection.implementation_id != WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_ID
+        or selection.implementation_version != WORKFLOW_INTERFACE_RENDERER_IMPLEMENTATION_VERSION
+    ):
+        raise WorkflowInterfaceMaterializationError("binding pins an unaccepted interface renderer contract")
+    return selection
+
+
+def project_workflow_interface_render_input(
+    *, unit: FamilyInstancePlan, payload_by_node: Mapping[str, SemanticPayloadBase],
+) -> WorkflowInterfaceRenderInput:
+    """Project only plan-pinned payloads and event identities; never consult ambient graph facts."""
+    selected: dict[str, SemanticPayloadBase] = {}
+    for source in unit.sources:
+        payload = payload_by_node.get(source.node_id)
+        if payload is None or payload.payload_digest != source.payload_digest:
+            raise WorkflowInterfaceMaterializationError("interface payload source is absent or stale")
+        selected[source.node_id] = payload
+    workflows = [p for p in selected.values() if isinstance(p, WorkflowPayload)]
+    if len(workflows) != 1:
+        raise WorkflowInterfaceMaterializationError("interface requires exactly one workflow payload")
+    workflow = workflows[0]
+    capabilities = [p for p in selected.values() if isinstance(p, WorkflowCapabilityPayload)]
+    capability_nodes = {p.node_id for p in capabilities}
+    results = [p for p in selected.values() if isinstance(p, WorkflowResultPayload)]
+    bindings = [p for p in selected.values() if isinstance(p, WorkflowCapabilityBindingPayload)]
+    if (
+        any(p.workflow_node_id != workflow.node_id for p in capabilities)
+        or any(p.workflow_capability_node_id not in capability_nodes for p in results)
+        or any(p.workflow_capability_node_id not in capability_nodes for p in bindings)
+    ):
+        raise WorkflowInterfaceMaterializationError("interface source ownership escapes its workflow")
+    expected = {
+        workflow.node_id, *capability_nodes,
+        *(p.node_id for p in results), *(p.node_id for p in bindings),
+        *(p.module_action.module_node_id for p in bindings if p.module_action),
+    }
+    if set(selected) != expected:
+        raise WorkflowInterfaceMaterializationError("interface payload footprint is not exact")
+    referenced_events = {p.event_node_id for p in bindings if p.event_node_id}
+    if (
+        {pin.node_id for pin in unit.taxonomy_sources} != referenced_events
+        or any(pin.category != "event" for pin in unit.taxonomy_sources)
+    ):
+        raise WorkflowInterfaceMaterializationError("interface event taxonomy footprint is not exact")
+    event_identity = {pin.node_id: pin.identifier for pin in unit.taxonomy_sources}
+    projected = []
+    for capability in capabilities:
+        projected_bindings: list[RenderInputWorkflowBinding] = []
+        for binding in bindings:
+            if binding.workflow_capability_node_id != capability.node_id:
+                continue
+            if binding.binding_role is WorkflowCapabilityBindingRole.TRIGGERED_BY_EVENT:
+                if binding.event_node_id is None:
+                    raise WorkflowInterfaceMaterializationError("trigger binding lacks event identity")
+                projected_bindings.append(RenderInputTriggeredByEventBinding(
+                    event_type=event_identity[binding.event_node_id],
+                ))
+                continue
+            ref = binding.module_action
+            module = selected.get(ref.module_node_id) if ref else None
+            if ref is None or not isinstance(module, ModulePayload):
+                raise WorkflowInterfaceMaterializationError("interface action binding lacks its module payload")
+            if binding.binding_role is WorkflowCapabilityBindingRole.CONSUMES_ACTION:
+                projected_bindings.append(RenderInputConsumesActionBinding(
+                    module_id=module.module_id, action_node_id=ref.action_node_id,
+                ))
+            else:
+                result = selected.get(binding.workflow_result_node_id or "")
+                if not isinstance(result, WorkflowResultPayload) or result.workflow_capability_node_id != capability.node_id:
+                    raise WorkflowInterfaceMaterializationError("commit binding lacks its owned result")
+                projected_bindings.append(RenderInputCommitsResultBinding(
+                    module_id=module.module_id, action_node_id=ref.action_node_id,
+                    workflow_result_id=result.result_id,
+                ))
+        projected.append(RenderInputWorkflowCapability(
+            capability_id=capability.capability_id,
+            description=capability.description,
+            results=tuple(
+                RenderInputWorkflowResult(result_id=p.result_id, description=p.description)
+                for p in results if p.workflow_capability_node_id == capability.node_id
+            ),
+            bindings=tuple(projected_bindings),
+        ))
+    return WorkflowInterfaceRenderInput(
+        workflow_id=workflow.workflow_id,
+        sources=unit.sources,
+        edge_sources=unit.edge_sources,
+        taxonomy_sources=unit.taxonomy_sources,
+        capabilities=tuple(projected),
+    )
 
 
 _CONFIG_VALUE_TYPES: dict[IntegrationConfigValueKind, Literal["text", "url", "secret"]] = {
@@ -562,7 +695,7 @@ def project_app_family_render_input(
 
 
 def _canonical_yaml_bytes(document: Mapping[str, Any]) -> bytes:
-    text = yaml.safe_dump(
+    text: str = yaml.safe_dump(
         dict(document),
         sort_keys=False,
         allow_unicode=True,
@@ -840,6 +973,7 @@ def _materialize_unit(
     *,
     payload_by_node: Mapping[str, SemanticPayloadBase],
     app_config_selection: RendererSelection | None,
+    workflow_interface_selection: RendererSelection | None,
     preserved_by_unit: Mapping[str, PreservedOpaqueArtifact],
     bundle_outputs: list[MaterializedOutput],
     external: list[str],
@@ -859,7 +993,16 @@ def _materialize_unit(
             raise MaterializationError(
                 f"render unit {unit.unit_id!r} must own exactly one composable output"
             )
-        if unit.family_kind in APP_CONFIG_FAMILIES:
+        if unit.family_kind == WORKFLOW_MODULE_INTERFACE:
+            if workflow_interface_selection is None:
+                raise WorkflowInterfaceMaterializationError("interface renderer selection was not resolved")
+            content = render_workflow_module_interface_unit(
+                unit=unit,
+                render_input=project_workflow_interface_render_input(
+                    unit=unit, payload_by_node=payload_by_node,
+                ),
+            )
+        elif unit.family_kind in APP_CONFIG_FAMILIES:
             if app_config_selection is None:
                 raise MaterializationError(
                     f"render unit {unit.unit_id!r} requires the resolved "
@@ -943,7 +1086,7 @@ def materialize_plan(
 ) -> MaterializedBundle:
     """Materialize every plan-authorized output for one CompilationPlan.
 
-    Renders exactly the renderer-ready page units through the bound accepted
+    Renders exactly the renderer-ready units through their bound accepted
     implementation, places exact preserved bytes for supplied
     ``preserve_unowned`` units, and reports every other unit's disposition
     explicitly. Canonical authority inputs are required and the submitted plan
@@ -972,6 +1115,16 @@ def materialize_plan(
         app_config_selection = resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
         )
+    workflow_interface_selection: RendererSelection | None = None
+    if any(
+        unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind == WORKFLOW_MODULE_INTERFACE
+        and any(output.path_scope in _COMPOSABLE_PATH_SCOPES for output in unit.outputs)
+        for unit in verified_plan.units
+    ):
+        workflow_interface_selection = resolve_workflow_interface_renderer_selection(
+            binding, graph=verified_graph, layout_registry=layout_registry,
+        )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
 
     outputs: list[MaterializedOutput] = []
@@ -985,6 +1138,7 @@ def materialize_plan(
             unit,
             payload_by_node=payload_by_node,
             app_config_selection=app_config_selection,
+            workflow_interface_selection=workflow_interface_selection,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
             external=external,
@@ -1081,6 +1235,16 @@ def rematerialize_plan(
         app_config_selection = resolve_app_config_renderer_selection(
             binding, graph=verified_graph, layout_registry=layout_registry
         )
+    workflow_interface_selection: RendererSelection | None = None
+    if any(
+        unit.disposition is PlanDisposition.RENDER
+        and unit.family_kind == WORKFLOW_MODULE_INTERFACE
+        and any(output.path_scope in _COMPOSABLE_PATH_SCOPES for output in unit.outputs)
+        for unit in verified_plan.units
+    ):
+        workflow_interface_selection = resolve_workflow_interface_renderer_selection(
+            binding, graph=verified_graph, layout_registry=layout_registry,
+        )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
     base_by_unit: dict[str, list[MaterializedOutput]] = {}
     for output in base_bundle.outputs:
@@ -1138,6 +1302,7 @@ def rematerialize_plan(
             unit,
             payload_by_node=payload_by_node,
             app_config_selection=app_config_selection,
+            workflow_interface_selection=workflow_interface_selection,
             preserved_by_unit=preserved_by_unit,
             bundle_outputs=outputs,
             external=external,
