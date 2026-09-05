@@ -1367,7 +1367,7 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
         if task_type == "agent_backend_integration":
             raise ValueError(
                 f"Build task '{task_id}' uses retired task_type 'agent_backend_integration'. "
-                "This type is non-materializing after legacy module-interface retirement "
+                "This type is non-materializing after module-interface retirement "
                 "and is not valid AppGenerator build-task authority."
             )
 

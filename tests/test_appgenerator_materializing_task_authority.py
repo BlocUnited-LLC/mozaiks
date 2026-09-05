@@ -70,7 +70,7 @@ def test_retired_build_task_fails_closed(owned_paths, surface_kind, initial_agen
         "initial_agent": initial_agent,
     })
     context = Context()
-    with pytest.raises(ValueError, match="non-materializing after legacy module-interface retirement.*not valid AppGenerator build-task authority"):
+    with pytest.raises(ValueError, match="non-materializing after module-interface retirement.*not valid AppGenerator build-task authority"):
         app_build_plan(AppBuildPlan=plan, context_variables=context)
     assert context.get("app_plan_ready") is None
     assert context.get("app_task_batch_items") is None
