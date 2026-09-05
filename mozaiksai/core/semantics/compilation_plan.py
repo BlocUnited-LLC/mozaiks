@@ -48,7 +48,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_serializer, model_validator
 
 from mozaiksai.core.runtime.app.layout_registry import (
     ArtifactDisposition,
@@ -496,6 +496,50 @@ class PlanSource(SemanticsModel):
         return _validate_digest(value, field_name="payload_digest")
 
 
+class PlanTaxonomySource(SemanticsModel):
+    """One node-level canonical taxonomy identity a unit's bytes depend on.
+
+    Some canonical identities live on the graph node, not on any typed
+    payload — the canonical event identity, for example, is the EVENT node's
+    single EVENT-category taxonomy reference. Payload digests cannot pin such
+    a fact, so a unit whose bytes consume it pins the exact ``(node,
+    category, identifier)`` triple here. Changing the node's canonical
+    identity then changes the unit's identity AND its reuse signature exactly
+    like a payload change would — a node-level identity can never change
+    underneath bytes that were classified reusable.
+
+    This is a generic plan primitive: it knows the closed taxonomy category
+    vocabulary and identifier grammars, and nothing about any family that
+    might consume it. No timestamps, no runtime, provider, or model identity.
+    """
+
+    node_id: str
+    category: str
+    identifier: str
+
+    @field_validator("node_id")
+    @classmethod
+    def _node(cls, value: str) -> str:
+        return validate_node_id_grammar(value)
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, value: str) -> str:
+        from mozaiksai.core.taxonomy import SemanticCategory
+
+        return SemanticCategory(str(value or "").strip()).value
+
+    @field_validator("identifier")
+    @classmethod
+    def _identifier(cls, value: str, info: ValidationInfo) -> str:
+        from mozaiksai.core.taxonomy import validate_identifier_grammar
+
+        category = info.data.get("category")
+        if category is None:
+            raise ValueError("identifier requires a valid taxonomy category")
+        return validate_identifier_grammar(category, value)
+
+
 class PlanEdgeSource(SemanticsModel):
     """One complete graph relationship whose facts can affect rendered bytes."""
 
@@ -577,6 +621,11 @@ class FamilyInstancePlan(SemanticsModel):
     outputs: tuple[PlanOutput, ...] = Field(default_factory=tuple)
     sources: tuple[PlanSource, ...] = Field(default_factory=tuple)
     edge_sources: tuple[PlanEdgeSource, ...] = Field(default_factory=tuple)
+    #: Node-level canonical taxonomy identities this unit's bytes consume.
+    #: Empty for every family whose facts are fully payload-pinned; entering
+    #: identity, serialization, and the reuse signature only when non-empty
+    #: keeps every pre-existing payload-only unit byte- and digest-stable.
+    taxonomy_sources: tuple[PlanTaxonomySource, ...] = Field(default_factory=tuple)
     depends_on_units: tuple[str, ...] = Field(default_factory=tuple)
     materializer: str
     assignment_kind: AssignmentKind | None = None
@@ -652,6 +701,19 @@ class FamilyInstancePlan(SemanticsModel):
             raise ValueError("duplicate edge source identities in one unit")
         return ordered
 
+    @field_validator("taxonomy_sources")
+    @classmethod
+    def _taxonomy_sources(
+        cls, value: tuple[PlanTaxonomySource, ...]
+    ) -> tuple[PlanTaxonomySource, ...]:
+        ordered = tuple(
+            sorted(value, key=lambda item: (item.node_id, item.category, item.identifier))
+        )
+        keys = [(item.node_id, item.category) for item in ordered]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate taxonomy source identities in one unit")
+        return ordered
+
     @field_validator("depends_on_units")
     @classmethod
     def _deps(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -659,6 +721,21 @@ class FamilyInstancePlan(SemanticsModel):
         if len(ordered) != len(set(ordered)):
             raise ValueError("duplicate unit dependencies")
         return ordered
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> Any:
+        """Serialize with the exact identity representation.
+
+        ``taxonomy_sources`` is omitted when empty so the serialized unit,
+        the identity payload, and the unit digest all state the same claim
+        ("no node-level identity feeds these bytes") in the same shape —
+        every pre-existing payload-only unit keeps its exact serialized form
+        and digest, byte for byte.
+        """
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("taxonomy_sources"):
+            data.pop("taxonomy_sources", None)
+        return data
 
     @model_validator(mode="after")
     def _shape(self) -> FamilyInstancePlan:
@@ -699,7 +776,7 @@ class FamilyInstancePlan(SemanticsModel):
 
     @property
     def identity_payload(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "unit_id": self.unit_id,
             "family_kind": self.family_kind,
             "family_identity_digest": self.family_identity_digest,
@@ -726,6 +803,20 @@ class FamilyInstancePlan(SemanticsModel):
             ),
             "base_plan_digest": self.base_plan_digest,
         }
+        # Node-level taxonomy identity enters unit identity only when this
+        # unit actually pins one: absence and emptiness are the same claim
+        # ("no node-level identity feeds these bytes"), and conditional
+        # inclusion keeps every pre-existing payload-only unit digest stable.
+        if self.taxonomy_sources:
+            payload["taxonomy_sources"] = [
+                {
+                    "node_id": item.node_id,
+                    "category": item.category,
+                    "identifier": item.identifier,
+                }
+                for item in self.taxonomy_sources
+            ]
+        return payload
 
     @property
     def unit_digest(self) -> str:
@@ -1920,6 +2011,19 @@ def _authoring_contract_identity(unit: FamilyInstancePlan) -> Any:
 
 
 def _reuse_signature(unit: FamilyInstancePlan, plan: CompilationPlan) -> Any:
+    """Every fact capable of changing this unit's authorized bytes.
+
+    The regeneration closure deliberately decomposes unit facts rather than
+    comparing ``unit_digest``, so this tuple is the explicit reuse-authority
+    contract: a fact that can reach bytes but is absent here would let stale
+    bytes be classified reusable. ``unit_id`` keys the join and
+    ``family_kind`` is carried inside the content-addressed
+    ``family_identity_digest``; everything else meaning-bearing appears
+    directly — including node-level ``taxonomy_sources``, which are already
+    canonically sorted, so an order-only permutation of the same identities
+    never regenerates while any identifier, category, node, addition, or
+    removal always does.
+    """
     return (
         unit.family_identity_digest,
         unit.disposition.value,
@@ -1928,6 +2032,10 @@ def _reuse_signature(unit: FamilyInstancePlan, plan: CompilationPlan) -> Any:
         tuple((output.path_scope, output.path) for output in unit.outputs),
         tuple((source.node_id, source.payload_digest) for source in unit.sources),
         tuple(source.edge_identity for source in unit.edge_sources),
+        tuple(
+            (item.node_id, item.category, item.identifier)
+            for item in unit.taxonomy_sources
+        ),
         unit.depends_on_units,
         unit.materializer,
         _authoring_contract_identity(unit),
@@ -2016,6 +2124,7 @@ __all__ = [
     "PlanEdgeSource",
     "PlanOutput",
     "PlanSource",
+    "PlanTaxonomySource",
     "PlanSourceScope",
     "RegenerationClosure",
     "RegistryFamilyRow",

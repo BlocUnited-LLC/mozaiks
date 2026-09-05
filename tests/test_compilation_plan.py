@@ -644,6 +644,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         PlanGap,
         PlanOutput,
         PlanSource,
+        PlanTaxonomySource,
         RegenerationClosure,
     )
 
@@ -672,6 +673,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
             "outputs",
             "sources",
             "edge_sources",
+            "taxonomy_sources",
             "depends_on_units",
             "materializer",
             "assignment_kind",
@@ -681,6 +683,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         },
         PlanOutput: {"path_scope", "path"},
         PlanSource: {"node_id", "payload_digest"},
+        PlanTaxonomySource: {"node_id", "category", "identifier"},
         PlanEdgeSource: {
             "kind",
             "source_node_id",
@@ -753,6 +756,7 @@ def test_plan_models_carry_no_live_runtime_identifiers() -> None:
         | allowed_fields[FamilyInstancePlan]
         | allowed_fields[PlanOutput]
         | allowed_fields[PlanSource]
+        | allowed_fields[PlanTaxonomySource]
         | allowed_fields[PlanEdgeSource]
         | allowed_fields[PlanGap]
             | {"ref_schema_version", "tenant_id", "workspace_id", "pre_app_scope_id"}
