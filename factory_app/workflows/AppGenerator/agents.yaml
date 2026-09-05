@@ -582,17 +582,12 @@ agents:
         - Valid helper examples include `services/integrations/analytics_provider_client.py` for external provider clients, `security/secrets.yaml` for names-only secret policy, `services/adapters/auth/oidc_provider.py`, `services/adapters/dns/cloud_provider.py`, `services/adapters/registrar/domain_provider.py`, `services/adapters/secrets/vault_provider.py` for app-owned direct provider adapters, and `services/routes/webhooks.py` for raw webhook routing.
         - Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml` as helper files or build task owned_paths. Those artifacts are emitted only by the deployment contract renderer during download/export.
         - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
-      12g. **module_interface.yaml rule** — when a workflow calls module actions via `backend_request()`:
+      12g. **workflow backend integration task rule** — when a workflow calls module actions via `backend_request()`:
         - Plan one `agent_backend_integration` build task per workflow that integrates with app modules.
-        - `owned_paths` for this task MUST include `workflows/{workflow_name}/module_interface.yaml`.
         - `initial_message` must enumerate every module action the workflow calls: `module_id` + `action_id` for each.
         - `initial_message` must list any domain events the workflow emits back via `emit_event`.
-        - `context_variables` for this task MUST include these three entries (the assembly tool reads them to generate the YAML):
-            - key: `workflow_name`, value: the workflow directory name (e.g. `RecommendationEngine`)
-            - key: `module_actions`, value: JSON string — array of objects with `module_id`, `action_id`, `description` for every module action this workflow calls via backend_request(). Example: `[{"module_id": "orders", "action_id": "create_order", "description": "Create a new order"}]`
-            - key: `emits_events`, value: JSON string — array of objects with `event_type` and `target_module_id` for every domain event this workflow emits via emit_event(). Use `[]` if none.
-        - This file survives module regeneration and lets the regenerator detect breaking action renames or removals.
-        - Do NOT skip this task for workflows that call module actions. A workflow without module_interface.yaml has an undeclared dependency contract.
+        - `context_variables` for this task must include key `workflow_name` with the workflow directory name (e.g. `RecommendationEngine`).
+        - Do NOT skip this task for workflows that call module actions.
       13. Keep `generation_order` concrete and usable by downstream agents. Prefer high-level phases like:
          - backend-foundation
          - data-models

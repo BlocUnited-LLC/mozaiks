@@ -12,6 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Removed
+- **Write-only `module_interface.yaml` v1 authoring retired**: generated app
+  bundles no longer ship `workflows/{workflow_name}/module_interface.yaml`.
+  The artifact was independently authored by prompts and serialized from
+  JSON-string context variables, then read by nothing — no runtime loader,
+  semantic projection, validation gate, or regenerator ever consumed it.
+  The AppGenerator assembly merge, the interface-file generator tool, the
+  AppPlanAgent planning rule's interface requirements, and the AgentGenerator
+  AI-pack prompt instructions that demanded the file are all removed, and a
+  repository hygiene test now enforces that nothing authors the artifact.
+  The future compiler-owned v2 projection will be reintroduced as the sole
+  producer. Workflow↔module integration behavior is unchanged: the
+  `agent_backend_integration` task type, `backend_request` callback contract,
+  and module action enumeration in task messages all remain.
+
 ### Added
 - **Typed module↔workflow capability semantics**: the semantic graph now
   models the relationship between deterministic application capabilities

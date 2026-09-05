@@ -35,7 +35,7 @@ Covers:
     - analysis surface does NOT include task_batches_required
 
   _build_callback_body:
-    - always includes module_interface.yaml instruction
+    - never authors a module_interface.yaml instruction (retired v1 artifact)
     - always includes backend_request instruction
     - non-empty result for any non-empty ai_surfaces list
     - returns string
@@ -256,9 +256,11 @@ class TestBuildPatternBody:
 # ---------------------------------------------------------------------------
 
 class TestBuildCallbackBody:
-    def test_includes_module_interface_yaml_instruction(self):
+    def test_never_authors_module_interface_yaml(self):
+        # The write-only module_interface.v1 artifact is retired; no prompt
+        # may instruct an agent to author it (absence assertion).
         result = _build_callback_body([_review_surface()])
-        assert "module_interface.yaml" in result
+        assert "module_interface" not in result
 
     def test_includes_backend_request_instruction(self):
         result = _build_callback_body([_review_surface()])
