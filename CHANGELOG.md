@@ -12,6 +12,44 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+- **Typed module↔workflow capability semantics**: the semantic graph now
+  models the relationship between deterministic application capabilities
+  (modules, actions, events) and agentic capabilities (workflows) as
+  canonical typed identity instead of stringly convention. Three new node
+  kinds — `workflow_capability` (the application-semantic identity of one
+  workflow capability: a stable `capability_id` owned by exactly one
+  workflow), `workflow_capability_binding` (one directional, typed
+  relationship per node: `consumes_action`, `commits_result_through_action`,
+  or `triggered_by_event`), and `workflow_result` (the typed,
+  capability-owned semantic identity of one workflow output — never a
+  provider schema, model class, or AG2 runtime id) — plus `ModuleActionRef`,
+  the exact module/action node identity that carries no HTTP path, handler
+  path, or AG2 tool identity. Typed payloads own application meaning; graph
+  edges are derived projections: every action used through `ModuleActionRef`
+  must have exactly one canonical module owner, event-production authority
+  comes from typed `ActionPayload.emits` joined to the EVENT node's canonical
+  taxonomy identity (a bare EMITS edge can never invent production), commit
+  bindings reference a declared `workflow_result` node owned by their own
+  capability (result fan-out is explicit: several commit bindings referencing
+  the same result node), and each capability/binding/result node must
+  participate in exactly its derived edge set — full edge identity,
+  discriminator included — so payload-unbacked edge mutations fail closed.
+  Every module-declared action forms the canonical ownership family: its
+  complete declarer set must close to exactly one module (contradictory
+  non-module DECLARES edges are never filtered away), every typed emit must
+  resolve to exactly one EVENT node carrying exactly one canonical identity
+  — independent of whether any workflow or trigger consumes the event — and
+  its EMITS edge set must equal the typed projection exactly.
+  AG2 Agent/Task/Network identities stay out of the graph — a Mozaiks
+  workflow capability is application semantics; AG2 runtime objects remain
+  execution implementation details. The offline projection now records
+  module-manifest action `emits` into the typed `ActionPayload` it already
+  drew EMITS edges from. The new semantics are offline contracts: no
+  module_interface.yaml rendering, no layout-registry families, and no
+  production AppGenerator/AgentGenerator wiring in this change.
+
+
 ### Fixed
 
 - **Canonical plan authority is now enforced across execution and durable

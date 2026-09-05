@@ -1469,6 +1469,18 @@ class _Builder:
             for j, raw_action in enumerate(_as_list(manifest.get("actions"))):
                 item = _mapping(raw_action)
                 action = _node_id(SemanticNodeKind.ACTION, f"{module_id}_{item.get('id')}")
+                emitted_event_ids = tuple(
+                    sorted({str(event_type) for event_type in _as_list(item.get("emits"))})
+                )
+                if emitted_event_ids:
+                    # Typed payload authority first: the EMITS edges below are
+                    # projections of this typed fact, never the origin of it.
+                    self.content_field(
+                        action,
+                        "emits",
+                        emitted_event_ids,
+                        f"{base}.manifest.actions[{j}].emits",
+                    )
                 for k, event_type in enumerate(_as_list(item.get("emits"))):
                     self.edge(
                         SemanticEdgeKind.EMITS,
