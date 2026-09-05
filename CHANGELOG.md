@@ -23,9 +23,14 @@ This project follows a practical pre-1.0 changelog format:
   AI-pack prompt instructions that demanded the file are all removed, and a
   repository hygiene test now enforces that nothing authors the artifact.
   The future compiler-owned v2 projection will be reintroduced as the sole
-  producer. Workflow↔module integration behavior is unchanged: the
-  `agent_backend_integration` task type, `backend_request` callback contract,
-  and module action enumeration in task messages all remain.
+  producer. Because the retired artifact was that task's only output,
+  `agent_backend_integration` is no longer a valid AppGenerator build task:
+  AppPlanAgent no longer plans it and `AppBuildPlan` validation rejects it
+  fail-closed (build tasks are materialization authority; a task with no
+  artifact to materialize cannot be one). The generic assignment-kind
+  vocabulary, the capability-pack family of the same name, the
+  `backend_request` callback contract, and workflow-side module action calls
+  all remain.
 
 ### Added
 - **Typed module↔workflow capability semantics**: the semantic graph now

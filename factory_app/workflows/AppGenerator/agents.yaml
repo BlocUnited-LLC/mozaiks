@@ -531,7 +531,7 @@ agents:
           - Include `refinement_harness`: builder/refinement assistant that must classify `patch|design|feature|core` and reopen different `workflow_sequences`.
           - Include `refinement_harness`: approval-gated operations console that must choose between automate, clarify, escalate, or resume based on policy.
         - Do NOT use `service_foundation`, `api_surface`, or `module_contract` for refinement surfaces.
-        - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, or `agent_backend_integration` for workflow touchpoints, not `module_contract`. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
+        - `surface_kind = external_integration` packs should use `api_surface` for thin API clients or `service_foundation` for app-owned provider adapters under `services/adapters/**`, not `module_contract`. Workflow-touchpoint packs get no build task at all — they are expressed as `workflow_touchpoints` and page-schema launch entries. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
         - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
         - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, required_by, setup lanes, and required_fields. This is task metadata for the IntegrationReadinessAgent checkpoint, not a manual preflight requirement.
@@ -582,12 +582,7 @@ agents:
         - Valid helper examples include `services/integrations/analytics_provider_client.py` for external provider clients, `security/secrets.yaml` for names-only secret policy, `services/adapters/auth/oidc_provider.py`, `services/adapters/dns/cloud_provider.py`, `services/adapters/registrar/domain_provider.py`, `services/adapters/secrets/vault_provider.py` for app-owned direct provider adapters, and `services/routes/webhooks.py` for raw webhook routing.
         - Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml` as helper files or build task owned_paths. Those artifacts are emitted only by the deployment contract renderer during download/export.
         - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
-      12g. **workflow backend integration task rule** — when a workflow calls module actions via `backend_request()`:
-        - Plan one `agent_backend_integration` build task per workflow that integrates with app modules.
-        - `initial_message` must enumerate every module action the workflow calls: `module_id` + `action_id` for each.
-        - `initial_message` must list any domain events the workflow emits back via `emit_event`.
-        - `context_variables` for this task must include key `workflow_name` with the workflow directory name (e.g. `RecommendationEngine`).
-        - Do NOT skip this task for workflows that call module actions.
+      12g. **no workflow integration build task** — workflows that call module actions via `backend_request()` do NOT get an `agent_backend_integration` build task. That task type is non-materializing and rejected by plan validation. The workflow-module relationship is carried by workflow touchpoints and the generated workflow metadata context, not by a build task.
       13. Keep `generation_order` concrete and usable by downstream agents. Prefer high-level phases like:
          - backend-foundation
          - data-models

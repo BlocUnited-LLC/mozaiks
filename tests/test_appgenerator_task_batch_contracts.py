@@ -541,3 +541,229 @@ class TicketsModule:
     assert parsed["actions"][0]["handler_method"] == "update_status"
 
 
+# ---------------------------------------------------------------------------
+# module_interface.v1 retirement — agent_backend_integration is not a build task
+# ---------------------------------------------------------------------------
+
+
+def _workflow_module_plan() -> dict:
+    """A workflow→module app plan: one module the AgentGenerator workflow calls,
+    with the normal generated workflow metadata carried in context — and no
+    agent_backend_integration build task, because none is admissible."""
+    plan = _base_plan()
+    plan["capability_packs"].append(
+        {
+            "capability_pack_id": "documents",
+            "surface_id": "documents",
+            "surface_kind": "module",
+            "pack_type": "crud_pack",
+            "label": "Documents",
+            "summary": "Documents the analysis workflow reads and writes.",
+            "implementation_mode": "hybrid",
+        }
+    )
+    plan["build_tasks"].append(
+        {
+            "task_id": "task_documents_module",
+            "task_type": "module_contract",
+            "capability_pack_id": "documents",
+            "surface_id": "documents",
+            "surface_kind": "module",
+            "execution_target": "AppGenerator",
+            "initial_agent": "ConfigMiddlewareAgent",
+            "description": "Documents module the analysis workflow integrates with.",
+            "initial_message": (
+                "Generate the documents module contract. The DocumentAnalysis "
+                "workflow calls documents.get_content and commits through "
+                "documents.store_analysis."
+            ),
+            "owned_paths": [
+                "modules/documents/module.yaml",
+                "modules/documents/contracts/events.yaml",
+                "modules/documents/contracts/reactions.yaml",
+            ],
+            "depends_on": [],
+            "acceptance_criteria": ["Documents module contract exists"],
+        }
+    )
+    return plan
+
+
+_WORKFLOW_METADATA_CONTEXT = {
+    "generated_workflow_name": "DocumentAnalysis",
+    "generated_workflow_capability_id": "document-analysis-workflow",
+    "generated_workflow_trigger_events": ["domain.documents.created"],
+    "workflow_integration_metadata": {
+        "contract_version": "1.0",
+        "bundle_name": "DocumentAnalysis",
+        "primary_workflow": "DocumentAnalysis",
+        "workflows": [
+            {
+                "workflow_name": "DocumentAnalysis",
+                "capability_id": "document-analysis-workflow",
+                "workflow_startup_mode": "BackendOnly",
+                "trigger_events": ["domain.documents.created"],
+            }
+        ],
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_workflow_module_plan_executes_without_integration_build_task() -> None:
+    """The workflow→module scenario after module_interface.v1 retirement:
+    the plan carries no agent_backend_integration task, every admitted batch
+    item owns truthful non-empty paths, the batch executes and assembles, the
+    bundle contains no module_interface.yaml, and the deferred workflow
+    metadata context survives untouched."""
+    app_build_plan_module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_workflow_module_retirement",
+    )
+    context = _Context()
+    context.set("app_id", "workflow_module_app")
+    context.set("app_ui_quality_status", "passed")
+    for key, value in _WORKFLOW_METADATA_CONTEXT.items():
+        context.set(key, json.loads(json.dumps(value)))
+
+    app_build_plan_module.app_build_plan(
+        AppBuildPlan=_workflow_module_plan(),
+        context_variables=context,
+    )
+
+    task_batch_items = context.get("app_task_batch_items")
+    assert isinstance(task_batch_items, list)
+    assert len(task_batch_items) == 3
+    assert all(
+        item["current_build_task"]["task_type"] != "agent_backend_integration"
+        for item in task_batch_items
+    )
+    for item in task_batch_items:
+        owned_paths = item["current_build_task"]["owned_paths"]
+        assert isinstance(owned_paths, list) and owned_paths
+        assert all("module_interface" not in str(path) for path in owned_paths)
+
+    config = load_task_batches_config("AppGenerator", workflows_root=WORKFLOWS_ROOT)
+    assert config is not None
+
+    from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
+    from mozaiksai.core.ports.orchestration import RunStatus
+
+    async def _fake_runner_run(request):
+        task = request.context_variables.get("current_build_task") or {}
+        return AG2TaskBatchRunnerResult(
+            status=RunStatus.COMPLETED,
+            output={
+                "agent_message": f"completed {task.get('task_id', '')}",
+                "code_files": [
+                    {
+                        "filename": path,
+                        "content": f"# generated for {path}",
+                    }
+                    for path in (task.get("owned_paths") or [])
+                ],
+            },
+        )
+
+    fake_agent = AsyncMock()
+    with patch("mozaiksai.core.workflow.task_batches.AG2TaskBatchRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.run = _fake_runner_run
+        await execute_task_batches_for_trigger(
+            workflow_name="AppGenerator",
+            trigger_agent="AppPlanAgent",
+            batches_config=config,
+            agents={
+                "ConfigMiddlewareAgent": fake_agent,
+                "AppSchemaAgent": fake_agent,
+            },
+            context_variables=context.data,
+            chat_id="chat-workflow-module",
+            app_id="workflow_module_app",
+            user_id="user-workflow-module",
+            fresh_agents_per_task=False,
+        )
+
+    assert context.get("app_task_batch_status") == "completed"
+    results = context.get("app_task_batch_results")
+    assert isinstance(results, dict)
+    assert set(results["_meta"]["completed_tasks"]) == {
+        "task_service_foundation",
+        "task_notifications_pages",
+        "task_documents_module",
+    }
+
+    assembled = await assemble_module.assemble_app_tasks(context_variables=context)
+    assembled_names = {item["filename"] for item in assembled["code_files"]}
+    assert "modules/documents/module.yaml" in assembled_names
+    assert not any("module_interface" in name for name in assembled_names)
+    generated_files = context.get("generated_files")
+    assert isinstance(generated_files, dict)
+    assert not any("module_interface" in name for name in generated_files)
+
+    # The intentionally deferred workflow/module metadata surfaces are intact.
+    for key, value in _WORKFLOW_METADATA_CONTEXT.items():
+        assert context.get(key) == value
+
+
+def _integration_task_variant(**overrides) -> dict:
+    task = {
+        "task_id": "task_agent_backend_integration",
+        "task_type": "agent_backend_integration",
+        "capability_pack_id": None,
+        "surface_id": "agent_backend",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Retired non-materializing integration task.",
+        "initial_message": "Wire the workflow to module actions.",
+        "owned_paths": [],
+        "depends_on": [],
+        "acceptance_criteria": ["n/a"],
+    }
+    task.update(overrides)
+    return task
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"owned_paths": []}, id="no-owned-paths"),
+        pytest.param(
+            {"owned_paths": ["workflows/DocumentAnalysis/module_interface.yaml"]},
+            id="retired-v1-artifact-path",
+        ),
+        pytest.param({"owned_paths": ["some/fake/output.json"]}, id="fake-owned-path"),
+        pytest.param(
+            {
+                "surface_kind": "external_integration",
+                "owned_paths": ["services/integrations/agent_client.py"],
+            },
+            id="external-integration-surface",
+        ),
+        pytest.param(
+            {
+                "initial_agent": "AppSchemaAgent",
+                "owned_paths": ["ui/pages/agent.yaml"],
+            },
+            id="arbitrary-valid-initial-agent",
+        ),
+    ],
+)
+def test_agent_backend_integration_build_task_rejects(overrides: dict) -> None:
+    """Hostile matrix: no manually constructed build task can revive the
+    retired v1 lane — rejection is typed and independent of owned_paths,
+    surface_kind, and initial_agent."""
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_integration_task_rejection",
+    )
+    plan = _base_plan()
+    plan["build_tasks"].append(_integration_task_variant(**overrides))
+
+    with pytest.raises(ValueError, match="non-materializing"):
+        module.app_build_plan(
+            AppBuildPlan=plan,
+            context_variables=_Context(),
+        )
+
+

@@ -269,19 +269,6 @@ task_contracts:
       - Pages must not bind directly to /api/modules/{managed_capability_id}/{action}. When managed-capability data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the managed capability adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
       - Provider implementation adapters that are not managed-capability API clients belong in services/adapters/ through service_foundation, not under modules/ and not in services/integrations/.
 
-  agent_backend_integration:
-    owner_agent: AppPlanAgent
-    summary: Planning lane for wiring an existing agent backend into the generated app.
-    required_outputs: []
-    optional_outputs:
-      - workflow touchpoints in page schemas
-      - build task initial_message context for downstream agents
-    hard_constraints:
-      - Treat upstream agent metadata as exact values, not inferred values.
-      - Persistent pages launch workflows declaratively; live workflow UI stays workflow-owned.
-      - Do not convert agent integrations into app-owned module collections by default.
-
-
 backend_helper_files:
   description: >
     Rules for backend/{helper_name}.py files generated under app/modules/{module_id}/backend/.

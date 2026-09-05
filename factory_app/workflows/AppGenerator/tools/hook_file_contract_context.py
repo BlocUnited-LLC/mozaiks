@@ -25,7 +25,6 @@ _PLANNING_CONTRACT_ORDER = (
     "service_foundation",
     "refinement_harness",
     "api_surface",
-    "agent_backend_integration",
 )
 
 _AGENT_DEFAULT_CONTRACTS = {

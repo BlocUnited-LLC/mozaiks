@@ -925,10 +925,13 @@ class TestTaxonomyAlignment:
 
     def test_task_type_structured_outputs_matches_allowed_task_types(self) -> None:
         """structured_outputs.yaml AppBuildTask.task_type values must be exactly
-        the set accepted by _ALLOWED_TASK_TYPES in app_build_plan.py.
+        the generic assignment-kind vocabulary minus the retired
+        agent_backend_integration kind.
 
-        If they diverge the LLM can plan tasks that the validator silently
-        rejects, or the validator gate has dead entries.
+        agent_backend_integration remains in the generic enum for other
+        subsystems, but it is non-materializing after module_interface.v1
+        retirement: AppGenerator's structured output must not offer it and
+        _validate_build_tasks rejects it fail-closed.
         """
         from factory_app.workflows.AppGenerator.tools.app_build_plan import (
             _ALLOWED_TASK_TYPES,
@@ -938,10 +941,12 @@ class TestTaxonomyAlignment:
         so_task_types = set(
             so["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
         )
-        assert so_task_types == _ALLOWED_TASK_TYPES, (
+        expected = _ALLOWED_TASK_TYPES - {"agent_backend_integration"}
+        assert "agent_backend_integration" not in so_task_types
+        assert so_task_types == expected, (
             f"task_type drift.\n"
-            f"  Only in structured_outputs.yaml: {so_task_types - _ALLOWED_TASK_TYPES}\n"
-            f"  Only in _ALLOWED_TASK_TYPES:      {_ALLOWED_TASK_TYPES - so_task_types}"
+            f"  Only in structured_outputs.yaml: {so_task_types - expected}\n"
+            f"  Only in generic vocabulary:      {expected - so_task_types}"
         )
 
     def test_allowed_task_types_have_canonical_initial_agents(self) -> None:
@@ -953,8 +958,9 @@ class TestTaxonomyAlignment:
             _CANONICAL_INITIAL_AGENTS,
         )
 
-        # agent_backend_integration is exempt — it does not require a
-        # canonical initial agent mapping.
+        # agent_backend_integration is exempt — it is a retired,
+        # non-materializing task type that _validate_build_tasks rejects, so
+        # it never reaches execution planning.
         need_agents = _ALLOWED_TASK_TYPES - {"agent_backend_integration"}
         missing = need_agents - set(_CANONICAL_INITIAL_AGENTS)
         assert not missing, (

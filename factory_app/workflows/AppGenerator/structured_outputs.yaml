@@ -875,7 +875,6 @@ models:
         - business_services
         - api_surface
         - page_bundle
-        - agent_backend_integration
         - refinement_harness
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
@@ -915,9 +914,9 @@ models:
           at RefinementHarnessAgent — do NOT use service_foundation, api_surface, or
           module_contract for refinement surfaces.
           surface_kind=external_integration may use `api_surface` for thin
-          clients, `service_foundation` for direct app-owned provider adapters under
-          services/adapters/, explicit services/routes/, or security/secrets.yaml, or
-          `agent_backend_integration` for workflow touchpoints.
+          clients or `service_foundation` for direct app-owned provider adapters
+          under services/adapters/, explicit services/routes/, or
+          security/secrets.yaml. Workflow-touchpoint surfaces get no build task.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
       capability_pack_id:
         type: union

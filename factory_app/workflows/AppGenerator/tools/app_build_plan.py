@@ -90,7 +90,7 @@ _CANONICAL_INITIAL_AGENTS = {
 }
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "app_policy": frozenset({"subscription_config"}),
-    "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
+    "external_integration": frozenset({"api_surface", "service_foundation"}),
     "refinement": frozenset({"refinement_harness"}),
     "ui_only": frozenset({"page_bundle"}),
 }
@@ -1369,6 +1369,18 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
         owned_paths = _normalized_owned_paths(task)
         surface_kind_raw = task.get("surface_kind")
         normalized_capability_pack_id = str(capability_pack_id or "").strip()
+
+        if task_type == "agent_backend_integration":
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses task_type='agent_backend_integration'. This "
+                "task type is non-materializing after the module interface v1 "
+                "retirement and is not a valid AppGenerator build task: "
+                "AppBuildPlan.build_tasks are materialization authority, and this "
+                "task owns no application artifact. Workflow-module integration "
+                "remains represented by the workflow metadata surfaces; do not "
+                "plan a build task for it."
+            )
 
         deployment_artifact_paths = _deployment_contract_artifact_paths(owned_paths)
         if deployment_artifact_paths:
