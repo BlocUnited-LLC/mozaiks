@@ -531,7 +531,7 @@ agents:
           - Include `refinement_harness`: builder/refinement assistant that must classify `patch|design|feature|core` and reopen different `workflow_sequences`.
           - Include `refinement_harness`: approval-gated operations console that must choose between automate, clarify, escalate, or resume based on policy.
         - Do NOT use `service_foundation`, `api_surface`, or `module_contract` for refinement surfaces.
-        - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, or `agent_backend_integration` for workflow touchpoints, not `module_contract`. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
+        - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, not `module_contract`. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
         - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
         - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, required_by, setup lanes, and required_fields. This is task metadata for the IntegrationReadinessAgent checkpoint, not a manual preflight requirement.
@@ -582,17 +582,9 @@ agents:
         - Valid helper examples include `services/integrations/analytics_provider_client.py` for external provider clients, `security/secrets.yaml` for names-only secret policy, `services/adapters/auth/oidc_provider.py`, `services/adapters/dns/cloud_provider.py`, `services/adapters/registrar/domain_provider.py`, `services/adapters/secrets/vault_provider.py` for app-owned direct provider adapters, and `services/routes/webhooks.py` for raw webhook routing.
         - Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml` as helper files or build task owned_paths. Those artifacts are emitted only by the deployment contract renderer during download/export.
         - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
-      12g. **module_interface.yaml rule** — when a workflow calls module actions via `backend_request()`:
-        - Plan one `agent_backend_integration` build task per workflow that integrates with app modules.
-        - `owned_paths` for this task MUST include `workflows/{workflow_name}/module_interface.yaml`.
-        - `initial_message` must enumerate every module action the workflow calls: `module_id` + `action_id` for each.
-        - `initial_message` must list any domain events the workflow emits back via `emit_event`.
-        - `context_variables` for this task MUST include these three entries (the assembly tool reads them to generate the YAML):
-            - key: `workflow_name`, value: the workflow directory name (e.g. `RecommendationEngine`)
-            - key: `module_actions`, value: JSON string — array of objects with `module_id`, `action_id`, `description` for every module action this workflow calls via backend_request(). Example: `[{"module_id": "orders", "action_id": "create_order", "description": "Create a new order"}]`
-            - key: `emits_events`, value: JSON string — array of objects with `event_type` and `target_module_id` for every domain event this workflow emits via emit_event(). Use `[]` if none.
-        - This file survives module regeneration and lets the regenerator detect breaking action renames or removals.
-        - Do NOT skip this task for workflows that call module actions. A workflow without module_interface.yaml has an undeclared dependency contract.
+      12g. **materialization authority rule**:
+        - Every build task must own real application files. Do not plan an `agent_backend_integration` build task: this retired type has no AppGenerator-owned materialization output.
+        - A workflow calling module actions via `backend_request()` does not require a separate AppGenerator integration task.
       13. Keep `generation_order` concrete and usable by downstream agents. Prefer high-level phases like:
          - backend-foundation
          - data-models

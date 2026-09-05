@@ -18,10 +18,11 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 class AssignmentKind(StrEnum):
     """Closed assignment vocabulary.
 
-    The first block is the still-live AppBuildPlan vocabulary.  It remains
-    accepted by the production generator until the atomic 5D cutover, but it
-    is not executable semantic-compiler authority.  The second block is the
-    exact family vocabulary used by offline CompilationPlan contracts.
+    The first block is the generic app-build assignment vocabulary. AppGenerator
+    admits only its local materializing subset into AppBuildPlan.build_tasks.
+    This generic vocabulary is not executable semantic-compiler authority. The
+    second block is the exact family vocabulary used by offline CompilationPlan
+    contracts.
     """
 
     SUBSCRIPTION_CONFIG = "subscription_config"

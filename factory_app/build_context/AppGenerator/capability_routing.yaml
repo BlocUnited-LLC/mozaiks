@@ -40,9 +40,7 @@ layers:
         1. Declare a workflow_touchpoint on the relevant page(s)
         2. Generate the deterministic module(s) that own the data the workflow
            reads and writes — actions, events, storage
-        3. Generate a module_interface.yaml alongside the workflow declaring
-           which module actions it will call
-        4. Do NOT generate a deterministic module that tries to implement AI logic
+        3. Do NOT generate a deterministic module that tries to implement AI logic
       AgentGenerator produces the workflow. The module layer owns the data contract.
     examples:
       - '"smart recommendations"  → workflow touchpoint + recommendations storage module'

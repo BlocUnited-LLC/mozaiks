@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TASK_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,6 @@ _PLANNING_CONTRACT_ORDER = (
     "service_foundation",
     "refinement_harness",
     "api_surface",
-    "agent_backend_integration",
 )
 
 _AGENT_DEFAULT_CONTRACTS = {
@@ -150,7 +150,11 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
 
     if agent_name == "AppPlanAgent":
         lines.append("")
-        lines.append("Plan only with the active AppGenerator task vocabulary:")
+        lines.append(
+            "Plan only with the active AppGenerator task vocabulary: "
+            + ", ".join(sorted(_ALLOWED_TASK_TYPES))
+            + "."
+        )
         for contract_name in _PLANNING_CONTRACT_ORDER:
             contract = task_contracts.get(contract_name)  # type: ignore[union-attr]
             if isinstance(contract, dict):

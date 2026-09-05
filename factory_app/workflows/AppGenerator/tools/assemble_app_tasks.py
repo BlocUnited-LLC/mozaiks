@@ -17,7 +17,6 @@ from .code_file_utils import (
     extract_code_file_entries_from_payload,
     extract_deleted_file_paths_from_payload,
 )
-from .generate_module_interface_files import generate_module_interface_files
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
 
@@ -371,22 +370,12 @@ async def assemble_app_tasks(
         ),
     )
 
-    # Merge module_interface.yaml files generated from agent_backend_integration tasks.
-    # AppPlanAgent already reasoned about module action dependencies and stored them as
-    # structured context_variables on each task — this tool just serializes them to YAML.
     app_build_plan = (
         context_variables.get("app_build_plan")
         if context_variables and hasattr(context_variables, "get")
         else None
     )
-    interface_files = generate_module_interface_files(app_build_plan)
     code_files = result.get("code_files", [])
-    if interface_files:
-        # Merge by filename (interface files take precedence over any stub)
-        file_map = {f["filename"]: f["content"] for f in code_files}
-        for f in interface_files:
-            file_map[f["filename"]] = f["content"]
-        code_files = [{"filename": k, "content": v} for k, v in sorted(file_map.items())]
 
     code_files = _apply_planned_page_contracts(code_files, app_build_plan)
     code_files = _apply_module_handler_method_alignment(code_files)
@@ -443,8 +432,6 @@ async def assemble_app_tasks(
             pass
 
     status_note = result.get("message") or "Assembled app task outputs into one bundle."
-    if interface_files:
-        status_note = f"{status_note} (+{len(interface_files)} module_interface.yaml)"
     if isinstance(inject_key, str) and inject_key:
         status_note = f"{status_note} (source={inject_key})"
 
