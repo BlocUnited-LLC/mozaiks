@@ -15,6 +15,7 @@ bytes may be copied.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from mozaiksai.core.semantics.compilation_plan import (
     CompilationPlan,
     FamilyInstancePlan,
     PlanTaxonomySource,
+    _reuse_signature,
     derive_compilation_plan,
     plan_regeneration_closure,
 )
@@ -101,6 +103,86 @@ def test_taxonomy_source_contract_is_closed_and_grammar_validated() -> None:
         PlanTaxonomySource.model_validate({**_TAXONOMY, "created_at": "now"})
 
 
+@pytest.mark.parametrize("category,identifier", [
+    ("event", "domain.order.created"),
+    ("capability", "orders.analysis"),
+    ("artifact_family", "app_manifest"),
+])
+@pytest.mark.parametrize("padding", [(" ", ""), ("", " "), ("\t ", " \n")])
+def test_taxonomy_source_stores_canonical_identity(
+    category: str, identifier: str, padding: tuple[str, str],
+) -> None:
+    canonical = PlanTaxonomySource(**{**_TAXONOMY, "category": category, "identifier": identifier})
+    prefix, suffix = padding
+    supplied = {
+        "node_id": f"{prefix}{canonical.node_id}{suffix}",
+        "category": f"{prefix}{category}{suffix}",
+        "identifier": f"{prefix}{identifier}{suffix}",
+    }
+    source = PlanTaxonomySource.model_validate(supplied)
+    assert source.identifier == identifier
+    assert (source.node_id, source.category, source.identifier) == (
+        canonical.node_id, canonical.category, canonical.identifier,
+    )
+    assert source == canonical
+    assert source.model_dump() == canonical.model_dump()
+    assert source.model_dump(mode="json") == canonical.model_dump(mode="json")
+    assert source.model_dump_json() == canonical.model_dump_json()
+    assert PlanTaxonomySource.model_validate_json(json.dumps(supplied)) == canonical
+    assert PlanTaxonomySource.model_validate_json(source.model_dump_json()) == canonical
+    assert supplied["identifier"] == f"{prefix}{identifier}{suffix}"
+    with pytest.raises(ValidationError, match="frozen"):
+        source.identifier = "domain.order.updated"
+
+
+@pytest.mark.parametrize("category,identifier", [
+    ("event", " domain order.created "),
+    ("event", " Domain.order.created "),
+    ("capability", " orders/analysis "),
+    ("artifact_family", " app.manifest "),
+    ("event", " \t\n "),
+])
+def test_taxonomy_source_normalization_still_rejects_invalid_grammar(
+    category: str, identifier: str,
+) -> None:
+    with pytest.raises(ValidationError, match="identifier must match"):
+        PlanTaxonomySource(**{**_TAXONOMY, "category": category, "identifier": identifier})
+
+
+def test_whitespace_and_order_are_identical_unit_and_reuse_authority() -> None:
+    plan = _corpus_plan()
+    unit_id = _pinned_unit_id(plan)
+    base_unit = plan.unit(unit_id)
+    second = {
+        "node_id": "mozaiks.event.order_paid",
+        "category": "event",
+        "identifier": "domain.order.paid",
+    }
+    canonical = FamilyInstancePlan.model_validate({
+        **base_unit.model_dump(mode="json"), "taxonomy_sources": [_TAXONOMY, second],
+    })
+    padded = FamilyInstancePlan.model_validate({
+        **base_unit.model_dump(mode="json"),
+        "taxonomy_sources": [
+            {key: f" \t{value}\n " for key, value in source.items()}
+            for source in [second, _TAXONOMY]
+        ],
+    })
+    assert padded.taxonomy_sources == canonical.taxonomy_sources
+    assert padded == canonical
+    assert padded.model_dump() == canonical.model_dump()
+    assert padded.model_dump(mode="json") == canonical.model_dump(mode="json")
+    assert padded.identity_payload == canonical.identity_payload
+    assert padded.model_dump_json() == canonical.model_dump_json()
+    assert padded.unit_digest == canonical.unit_digest
+    assert _reuse_signature(padded, plan) == _reuse_signature(canonical, plan)
+    assert FamilyInstancePlan.model_validate_json(padded.model_dump_json()) == canonical
+    base = _with_taxonomy(plan, unit_id, canonical.model_dump(mode="json")["taxonomy_sources"])
+    successor = _with_taxonomy(plan, unit_id, padded.model_dump(mode="json")["taxonomy_sources"])
+    assert base.model_dump_json() == successor.model_dump_json()
+    assert unit_id in plan_regeneration_closure(base, successor).reusable
+
+
 def test_unit_normalizes_orders_and_rejects_duplicate_taxonomy_axes() -> None:
     plan = _corpus_plan()
     base_unit = plan.unit(_pinned_unit_id(plan))
@@ -150,6 +232,24 @@ def test_empty_taxonomy_is_absent_from_serialization_identity_and_digest() -> No
     from tests.test_compilation_plan import _GOLDEN_PLAN_DIGEST
 
     assert plan.plan_digest == _GOLDEN_PLAN_DIGEST
+
+
+def test_every_preexisting_corpus_unit_keeps_exact_bytes_and_identity() -> None:
+    # Independently captured from exact base 36b33e021fb04b68c82a8b144ff4fef608ce9b15.
+    # Pin every unit's serialized JSON, dump, identity payload and unit digest,
+    # rather than relying solely on the aggregate plan's serialization digest.
+    rows = [
+        {
+            "unit_id": unit.unit_id,
+            "model_dump": unit.model_dump(mode="json"),
+            "identity_payload": unit.identity_payload,
+            "serialized_json": unit.model_dump_json(),
+            "unit_digest": unit.unit_digest,
+        }
+        for unit in _corpus_plan().units
+    ]
+    assert len(rows) == 59
+    assert canonical_digest(rows) == "23a30860c1bad68123df0c3e208fc150e9f0d8aadef8f64d15a993e7333c8e8a"
 
 
 def test_nonempty_taxonomy_enters_serialization_identity_and_digest() -> None:

@@ -357,7 +357,9 @@ payload — the canonical event identity, for example, is the EVENT node's
 single EVENT-category taxonomy reference. Plan units therefore carry a
 generic `taxonomy_sources` contract (`PlanTaxonomySource`: exact
 `(node, category, identifier)` triples) for node-level identities their
-bytes consume. A pinned taxonomy identity participates consistently in unit
+bytes consume. The model stores the grammar-normalized identifier during
+construction, so surrounding whitespace cannot change serialization, unit
+identity, digest, or reuse authority. A pinned taxonomy identity participates consistently in unit
 identity, serialization, canonical authority rederivation, and the
 regeneration/reuse signature — a unit whose node-level identity changed is
 never classified reusable — while empty taxonomy sources are omitted from

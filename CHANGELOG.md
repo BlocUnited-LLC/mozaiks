@@ -18,7 +18,9 @@ This project follows a practical pre-1.0 changelog format:
   `CompilationPlan` units gain a generic `taxonomy_sources` contract
   (`PlanTaxonomySource`: exact `(node, category, identifier)` triples under
   the closed taxonomy vocabulary and grammars) for canonical identities that
-  live on graph nodes rather than typed payloads. A pinned taxonomy identity
+  live on graph nodes rather than typed payloads. Identifiers are stored in
+  canonical spelling at model construction, including trimmed whitespace.
+  A pinned taxonomy identity
   now participates in unit identity, serialization, canonical authority
   rederivation, and — closing the defect found in the #479 review — the
   regeneration/reuse signature: a unit whose node-level identity changed can

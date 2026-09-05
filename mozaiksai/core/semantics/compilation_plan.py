@@ -48,7 +48,7 @@ from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_serializer, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_serializer, model_validator
 
 from mozaiksai.core.runtime.app.layout_registry import (
     ArtifactDisposition,
@@ -529,12 +529,15 @@ class PlanTaxonomySource(SemanticsModel):
 
         return SemanticCategory(str(value or "").strip()).value
 
-    @model_validator(mode="after")
-    def _grammar(self) -> PlanTaxonomySource:
+    @field_validator("identifier")
+    @classmethod
+    def _identifier(cls, value: str, info: ValidationInfo) -> str:
         from mozaiksai.core.taxonomy import validate_identifier_grammar
 
-        validate_identifier_grammar(self.category, self.identifier)
-        return self
+        category = info.data.get("category")
+        if category is None:
+            raise ValueError("identifier requires a valid taxonomy category")
+        return validate_identifier_grammar(category, value)
 
 
 class PlanEdgeSource(SemanticsModel):
