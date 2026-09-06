@@ -17,7 +17,7 @@ def test_unique_factory_participant_resolves_ephemerally() -> None:
     assignment, config = compiled_assignment()
     admission = resolve_assignment_admission(
         assignment,
-        structured_output_configs={"AppGenerator": config},
+        exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
         workflow_agent_configs={"AppGenerator": agent_config()},
     )
     assert isinstance(admission, ResolvedAssignmentAdmission)
@@ -34,7 +34,7 @@ def test_zero_and_multiple_participant_matches_fail() -> None:
     with pytest.raises(ValueError, match="no Factory participant"):
         resolve_assignment_admission(
             assignment,
-            structured_output_configs={"AppGenerator": zero},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": zero},
             workflow_agent_configs={"AppGenerator": agent_config()},
         )
 
@@ -44,7 +44,7 @@ def test_zero_and_multiple_participant_matches_fail() -> None:
     with pytest.raises(ValueError, match="ambiguous Factory participants"):
         resolve_assignment_admission(
             assignment,
-            structured_output_configs={"AppGenerator": multiple},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": multiple},
             workflow_agent_configs={
                 "AppGenerator": {
                     "agents": agent_config()["agents"]
@@ -59,13 +59,13 @@ def test_undeclared_participant_and_workflow_mismatch_fail() -> None:
     with pytest.raises(ValueError, match="not declared"):
         resolve_assignment_admission(
             assignment,
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
             workflow_agent_configs={"AppGenerator": agent_config(participant="Other")},
         )
     with pytest.raises(ValueError, match="workflow mismatch"):
         resolve_assignment_admission(
             assignment,
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
             workflow_agent_configs={},
         )
 
@@ -102,6 +102,6 @@ def test_stale_schema_and_runtime_identity_injection_fail() -> None:
     with pytest.raises(ValueError, match="schema digest mismatch"):
         resolve_assignment_admission(
             forged,
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
             workflow_agent_configs={"AppGenerator": agent_config()},
         )

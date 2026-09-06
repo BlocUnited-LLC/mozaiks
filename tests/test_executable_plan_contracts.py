@@ -353,10 +353,10 @@ def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
     ref = build_structured_output_contract_ref(
         workflow_name="AppGenerator",
         model_id="ModuleHelperImplementationOutput",
-        configs={"AppGenerator": APP_GENERATOR_CONFIG},
+        exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs={"AppGenerator": APP_GENERATOR_CONFIG},
     )
     assert resolve_structured_output_contract_ref(
-        ref, configs={"AppGenerator": APP_GENERATOR_CONFIG}
+        ref, exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs={"AppGenerator": APP_GENERATOR_CONFIG}
     )
 
     changed = copy.deepcopy(APP_GENERATOR_CONFIG)
@@ -364,11 +364,11 @@ def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
         " Canonical mutation."
     )
     with pytest.raises(ValueError, match="schema digest mismatch"):
-        resolve_structured_output_contract_ref(ref, configs={"AppGenerator": changed})
+        resolve_structured_output_contract_ref(ref, exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs={"AppGenerator": changed})
     changed_ref = build_structured_output_contract_ref(
         workflow_name="AppGenerator",
         model_id="ModuleHelperImplementationOutput",
-        configs={"AppGenerator": changed},
+        exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs={"AppGenerator": changed},
     )
     assert changed_ref.schema_digest != ref.schema_digest
 
@@ -376,13 +376,13 @@ def test_structured_output_ref_is_cold_and_schema_pinned() -> None:
         build_structured_output_contract_ref(
             workflow_name="AppGenerator",
             model_id="UnknownModel",
-            configs={"AppGenerator": APP_GENERATOR_CONFIG},
+            exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs={"AppGenerator": APP_GENERATOR_CONFIG},
         )
     with pytest.raises(ValueError, match="unknown structured-output workflow"):
         build_structured_output_contract_ref(
             workflow_name="UnknownWorkflow",
             model_id="ModuleHelperImplementationOutput",
-            configs={"AppGenerator": APP_GENERATOR_CONFIG},
+            exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs={"AppGenerator": APP_GENERATOR_CONFIG},
         )
     with pytest.raises(ValidationError, match="canonical workflow/model identifier"):
         StructuredOutputContractRef(

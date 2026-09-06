@@ -79,6 +79,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Provider-neutral structured-output identity**: canonical contracts now pin
+  a versioned acceptance profile and truthful optionality independently of
+  provider wire formatting. Build and cold resolution consume the same explicit
+  model authority. Module schema checking and evaluation failures now reject
+  validation instead of reporting success; explicit empty schemas remain valid.
 - **Canonical plan authority is now enforced across execution and durable
   revision closure (ADR 0007 lane)**: assignment compilation
   (`compile_approved_plan`), composition (`compose_plan_artifacts`, including

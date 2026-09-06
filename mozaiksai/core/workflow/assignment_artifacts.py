@@ -189,6 +189,7 @@ def build_assignment_artifact_result(
     structured_output: Mapping[str, Any] | BaseModel,
     artifacts: Mapping[str, str],
     structured_output_configs: Mapping[str, Any],
+    exact_model_ids: frozenset[str],
     validator_runner: ValidatorRunner,
 ) -> AssignmentArtifactResult:
     """Validate untrusted output and generate Mozaiks-owned validation receipts."""
@@ -197,6 +198,7 @@ def build_assignment_artifact_result(
     model = resolve_structured_output_contract_ref(
         verified_assignment.required_structured_output_ref,
         configs=structured_output_configs,
+        exact_model_ids=exact_model_ids,
     )
     raw_output = (
         structured_output.model_dump(mode="json")

@@ -1047,8 +1047,10 @@ def test_enum_names_are_content_derived_not_process_salted() -> None:
     assert first.__name__.startswith("StatusEnum_")
     suffix = first.__name__.rsplit("_", 1)[1]
     assert len(suffix) == 12 and int(suffix, 16) >= 0
-    different = _build_literal_enum("Status", ["published", "draft"])
-    assert different.__name__ != first.__name__  # order is content
+    reordered = _build_literal_enum("Status", ["published", "draft"])
+    assert reordered.__name__ == first.__name__
+    different = _build_literal_enum("Status", ["draft", "archived"])
+    assert different.__name__ != first.__name__
 
 
 @pytest.mark.parametrize("hash_seed", ["1", "2", "12345"])

@@ -105,7 +105,7 @@ def test_appgenerator_structured_outputs_load_task_batch_build_task_contract() -
     assert task.context_variables[1].key == "current_build_task_id"
 
 
-def test_appgenerator_app_schema_output_schema_uses_strict_section_config_union() -> None:
+def test_appgenerator_provider_schema_uses_strict_section_config_union() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -115,7 +115,7 @@ def test_appgenerator_app_schema_output_schema_uses_strict_section_config_union(
     _structured_mod._workflow_structured_agents.clear()
 
     _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
-    schema = registry["AppSchemaAgent"].model_json_schema()
+    schema = _structured_mod.get_provider_response_model(registry["AppSchemaAgent"]).model_json_schema()
     section_schema = schema["properties"]["pages"]["items"]["properties"]["sections"]["items"]
     config_schema = section_schema["properties"]["config"]
 

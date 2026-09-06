@@ -10,7 +10,7 @@ from typing import Any, Literal, Optional, Union, get_args, get_origin
 
 _UNION_ORIGINS = (Union, _types.UnionType) if hasattr(_types, "UnionType") else (Union,)
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
@@ -44,9 +44,26 @@ def _build_literal_enum(name: str, values: list[Any]) -> type[Enum]:
     # The enum class name enters the compiled model's JSON schema and
     # therefore canonical structured-output identity. Python hash() is
     # process-salted, so the name must be content-derived: a bounded prefix
-    # of the sha256 over the exact ordered value content.
+    # of the sha256 over deterministic value content. Distinct finite JSON
+    # scalar sets have no declaration-order meaning. Equality aliases retain
+    # their order: Python Enum uses the first equal member's exact value/type.
+    # Other runtime literal domains retain their existing compiler behavior.
     import hashlib as _hashlib
     import json as _json
+    import math as _math
+
+    scalar_set = all(
+        type(value) in (type(None), bool, int, float, str)
+        and (type(value) is not float or _math.isfinite(value))
+        for value in values
+    )
+    if scalar_set and len(set(values)) == len(values):
+        values = sorted(
+            values,
+            key=lambda value: _json.dumps(
+                value, ensure_ascii=True, separators=(",", ":"), allow_nan=False,
+            ),
+        )
 
     content = _json.dumps(
         values, ensure_ascii=False, separators=(",", ":"), default=repr
@@ -241,6 +258,12 @@ def _strictify_response_annotation(annotation: Any) -> Any:
 
 
 def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
+    """Build/cache the OpenAI wire model without changing its acceptance model.
+
+    Required-field strengthening and schema ref/object formatting belong only
+    to this separately compiled provider projection. Workflow model caches
+    retain the unpatched acceptance classes regardless of invocation order.
+    """
     cached = _provider_response_model_cache.get(model_cls)
     if cached is not None:
         return cached
@@ -432,7 +455,17 @@ def resolve_field_type(
         return list[inner_type], _build_field(field_kwargs)  # type: ignore
     raise ValueError(f"Unknown field type: {field_type_str}")
 
-def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
+def build_models_from_config(
+    models_config: dict[str, Any], *, exact_model_ids: frozenset[str] = frozenset(),
+) -> dict[str, type]:
+    """Compile provider-neutral acceptance models from workflow declarations.
+
+    Declared defaults and optional fields remain truthful in the model and
+    its ordinary Pydantic schema. Provider response-format preparation is
+    performed separately by ``get_provider_response_model``. Explicit exact
+    model identities configure acceptance closure at construction, before any
+    dependent model captures the child's validation/schema definition.
+    """
     if not models_config:
         return {}
     models: dict[str, type] = {}
@@ -459,8 +492,11 @@ def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
         if unresolved:
             pending.append((name, mdef))
         else:
-            model_cls = create_model(name, **fields)  # type: ignore[arg-type]
-            _patch_model_schema(model_cls)
+            model_cls = create_model(
+                name,
+                __config__=ConfigDict(extra="forbid") if name in exact_model_ids else None,
+                **fields,
+            )  # type: ignore[call-overload]
             models[name] = model_cls
     # iterative resolution
     for _ in range(len(pending)):
@@ -478,8 +514,11 @@ def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
             if unresolved:
                 remaining.append((name, mdef))
             else:
-                model_cls = create_model(name, **fields)  # type: ignore[arg-type]
-                _patch_model_schema(model_cls)
+                model_cls = create_model(
+                    name,
+                    __config__=ConfigDict(extra="forbid") if name in exact_model_ids else None,
+                    **fields,
+                )  # type: ignore[call-overload]
                 models[name] = model_cls
         pending = remaining
         if not pending:

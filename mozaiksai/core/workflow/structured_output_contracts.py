@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -39,16 +39,22 @@ def stable_digest(data: Any) -> str:
 
 _STRUCTURED_OUTPUT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+STRUCTURED_OUTPUT_ACCEPTANCE_PROFILE: Final = (
+    "mozaiks.structured_output_acceptance_profile.v1"
+)
 
 
 class StructuredOutputContractRef(_FrozenModel):
     """Content-pinned locator for a workflow-owned structured-output model."""
 
-    ref_schema_version: Literal["mozaiks.structured_output_contract_ref.v1"] = (
-        "mozaiks.structured_output_contract_ref.v1"
+    ref_schema_version: Literal["mozaiks.structured_output_contract_ref.v2"] = (
+        "mozaiks.structured_output_contract_ref.v2"
     )
     workflow_name: str
     model_id: str
+    acceptance_profile: Literal["mozaiks.structured_output_acceptance_profile.v1"] = (
+        STRUCTURED_OUTPUT_ACCEPTANCE_PROFILE
+    )
     schema_digest: str
 
     @field_validator("workflow_name", "model_id")
@@ -70,49 +76,64 @@ class StructuredOutputContractRef(_FrozenModel):
         return text
 
 
-def structured_output_schema_digest(model: type[BaseModel]) -> str:
-    """Digest the normalized schema emitted by the canonical model compiler."""
+def canonical_structured_output_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Extract the v1 acceptance schema from a canonical compiler model.
 
-    return stable_digest(model.model_json_schema())
-
-
-def _default_exact_model_ids() -> frozenset[str]:
-    """The canonical registry's exact-model ids — an explicit default only.
-
-    Canonical plan derivation never uses this default: it passes the exact
-    model ids resolved from its supplied assignment-descriptor authority, so
-    ambient registry state cannot influence a schema digest on the canonical
-    path. Production assignment execution keeps the canonical registry as its
-    natural default.
+    Invoke Pydantic's validation-schema compiler directly: a provider or caller
+    override of ``model_json_schema`` cannot become identity authority. Retain
+    refs, annotations, defaults, nullable unions and exact-object closure.
+    Object-key ordering and required-name ordering have no acceptance meaning;
+    all other arrays retain their compiler order. Provider response wrappers
+    are projections and must never be supplied as canonical compiler models.
     """
-    from .assignment_kinds import ASSIGNMENT_CONTRACT_DESCRIPTORS
+    schema = cast(Any, BaseModel.model_json_schema).__func__(
+        model, mode="validation", by_alias=True
+    )
 
-    return frozenset(
-        descriptor.structured_output_model_id
-        for descriptor in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()
+    def normalize(node: dict[str, Any]) -> dict[str, Any]:
+        result = dict(node)
+        if "required" in result:
+            result["required"] = sorted(result["required"])
+        # Traverse schema positions only. A default/enum/example may itself
+        # contain a property called "required" whose array order is data.
+        for keyword in ("$defs", "properties", "patternProperties"):
+            if keyword in result:
+                result[keyword] = {
+                    name: normalize(child) for name, child in result[keyword].items()
+                }
+        for keyword in ("items", "additionalProperties"):
+            if isinstance(result.get(keyword), dict):
+                result[keyword] = normalize(result[keyword])
+        for keyword in ("anyOf", "allOf", "oneOf", "prefixItems"):
+            if keyword in result:
+                result[keyword] = [normalize(child) for child in result[keyword]]
+        return result
+
+    return cast(dict[str, Any], _jsonable(normalize(schema)))
+
+
+def structured_output_schema_digest(model: type[BaseModel]) -> str:
+    """Pin the acceptance profile and its provider-neutral compiled schema."""
+    return stable_digest(
+        {
+            "acceptance_profile": STRUCTURED_OUTPUT_ACCEPTANCE_PROFILE,
+            "schema": canonical_structured_output_schema(model),
+        }
     )
 
 
 def _compiled_models(
-    config: Any, *, exact_model_ids: frozenset[str] | None = None
+    config: Any, *, exact_model_ids: frozenset[str]
 ) -> dict[str, type[BaseModel]]:
     from mozaiksai.core.workflow.declarative.contracts import StructuredOutputsConfig
     from mozaiksai.core.workflow.outputs.structured import build_models_from_config
 
     verified = StructuredOutputsConfig.model_validate(config)
     dumped = verified.model_dump(by_alias=True, exclude_unset=True)
-    models = cast(
+    return cast(
         dict[str, type[BaseModel]],
-        build_models_from_config(dumped.get("models", {})),
+        build_models_from_config(dumped.get("models", {}), exact_model_ids=exact_model_ids),
     )
-    resolved_exact_ids = (
-        exact_model_ids if exact_model_ids is not None else _default_exact_model_ids()
-    )
-    for model_id in resolved_exact_ids & models.keys():
-        model = models[model_id]
-        model.model_config = ConfigDict(**model.model_config, extra="forbid")
-        model.model_rebuild(force=True)
-    return models
 
 
 def build_structured_output_contract_ref(
@@ -120,7 +141,7 @@ def build_structured_output_contract_ref(
     workflow_name: str,
     model_id: str,
     configs: Mapping[str, Any],
-    exact_model_ids: frozenset[str] | None = None,
+    exact_model_ids: frozenset[str],
 ) -> StructuredOutputContractRef:
     """Resolve a model through the existing canonical workflow compiler."""
 
@@ -140,7 +161,10 @@ def build_structured_output_contract_ref(
 
 
 def resolve_structured_output_contract_ref(
-    ref: StructuredOutputContractRef, *, configs: Mapping[str, Any]
+    ref: StructuredOutputContractRef,
+    *,
+    configs: Mapping[str, Any],
+    exact_model_ids: frozenset[str],
 ) -> type[BaseModel]:
     """Cold-resolve a ref and reject unknown or schema-stale contracts."""
 
@@ -152,7 +176,7 @@ def resolve_structured_output_contract_ref(
         raise ValueError(
             f"unknown structured-output workflow {verified_ref.workflow_name!r}"
         )
-    model = _compiled_models(config).get(verified_ref.model_id)
+    model = _compiled_models(config, exact_model_ids=exact_model_ids).get(verified_ref.model_id)
     if model is None:
         raise ValueError(
             f"unknown structured-output model {verified_ref.workflow_name!r}/"
@@ -164,8 +188,10 @@ def resolve_structured_output_contract_ref(
 
 
 __all__ = [
+    "STRUCTURED_OUTPUT_ACCEPTANCE_PROFILE",
     "StructuredOutputContractRef",
     "build_structured_output_contract_ref",
+    "canonical_structured_output_schema",
     "resolve_structured_output_contract_ref",
     "stable_digest",
     "structured_output_schema_digest",
