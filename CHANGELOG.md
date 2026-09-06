@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Canonical workflow module interfaces**: the offline compiler renders
+  `mozaiks.module_interface.v2` from exact workflow capability, result,
+  binding, module, and event-taxonomy sources. Advisory results are retained;
+  event identity changes invalidate reuse through the real rematerialization
+  path. Both canonical layout representations enforce row-first output
+  identity. The retired factory writer stays absent. App workflow registry,
+  runtime routing, and persistent workflow launch remain separate/deferred.
 - **Node-level taxonomy identity in plan and reuse authority (ADR 0007)**:
   `CompilationPlan` units gain a generic `taxonomy_sources` contract
   (`PlanTaxonomySource`: exact `(node, category, identifier)` triples under
@@ -26,9 +33,8 @@ This project follows a practical pre-1.0 changelog format:
   regeneration/reuse signature: a unit whose node-level identity changed can
   never be classified reusable, so stale bytes are never copied forward.
   Empty taxonomy sources are omitted from identity and serialization alike,
-  keeping every pre-existing plan unit byte- and digest-identical. No family
-  derives taxonomy sources yet; this is the generic prerequisite for the
-  re-architected workflow-interface families.
+  keeping every pre-existing plan unit byte- and digest-identical. The
+  workflow module interface is the first family deriving these sources.
 - **Typed module↔workflow capability semantics**: the semantic graph now
   models the relationship between deterministic application capabilities
   (modules, actions, events) and agentic capabilities (workflows) as

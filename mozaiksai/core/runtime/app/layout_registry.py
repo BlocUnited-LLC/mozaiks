@@ -99,6 +99,7 @@ class ArtifactKind(StrEnum):
     MODULE_ADMIN_UI = "module_admin_ui"
     MODULE_UI_EXTENSION_BARREL = "module_ui_extension_barrel"
     WORKFLOW_MANIFEST = "workflow_manifest"
+    WORKFLOW_MODULE_INTERFACE = "workflow_module_interface"
     WORKFLOW_CONFIG = "workflow_config"
     WORKFLOW_TOOL = "workflow_tool"
     WORKFLOW_UI = "workflow_ui"
@@ -174,6 +175,7 @@ class MaterializerIdentifier(StrEnum):
     PAGE_SCHEMA_EXECUTOR = "page_schema_executor"
     APP_CONFIG_EXECUTOR = "app_config_executor"
     WORKFLOW_GENERATOR = "workflow_generator"
+    WORKFLOW_INTERFACE_EXECUTOR = "workflow_interface_executor"
     CAPABILITY_PACK_MATERIALIZER = "capability_pack_materializer"
     DOWNLOAD_DEPLOYMENT_RENDERER = "download_deployment_renderer"
     PRESERVED_OPAQUE = "preserved_opaque"
@@ -715,6 +717,28 @@ def _core_families() -> tuple[ArtifactFamily, ...]:
         _family(ArtifactKind.APP_MANIFEST, LayoutOwner.PLATFORM, Requirement.REQUIRED, workspace, "app/app.json", ValidatorIdentifier.APP_LOADER, RuntimeConsumerIdentifier.APP_LOADER, inputs=application_inputs),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workspace, "workflows/{workflow_id}/orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, multiplicity=Multiplicity.MANY, inputs=workflow_inputs),
         _family(ArtifactKind.WORKFLOW_MANIFEST, LayoutOwner.WORKFLOW, Requirement.CONDITIONAL, workflow, "orchestrator.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, inputs=workflow_inputs),
+        *(
+            _family(
+                ArtifactKind.WORKFLOW_MODULE_INTERFACE,
+                LayoutOwner.WORKFLOW,
+                Requirement.CONDITIONAL,
+                scope,
+                template,
+                ValidatorIdentifier.GENERATED_APP_VALIDATOR,
+                RuntimeConsumerIdentifier.NONE,
+                condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED,
+                multiplicity=Multiplicity.MANY,
+                materializer=MaterializerIdentifier.WORKFLOW_INTERFACE_EXECUTOR,
+                disposition=ArtifactDisposition.RENDER,
+                security=SecurityClass.INTERNAL_CONTRACT,
+                deps=(ArtifactKind.WORKFLOW_MANIFEST,),
+                inputs=("workflow", "workflow_capability", "workflow_result", "workflow_capability_binding", "module"),
+            )
+            for scope, template in (
+                (workspace, "workflows/{workflow_id}/module_interface.yaml"),
+                (workflow, "module_interface.yaml"),
+            )
+        ),
         _family(ArtifactKind.WORKFLOW_CONFIG, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "agents.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, assignment=(AssignmentKind.WORKFLOW_PARTICIPANT_IMPLEMENTATION,), deps=(ArtifactKind.WORKFLOW_MANIFEST,), inputs=workflow_inputs),
         _family(ArtifactKind.WORKFLOW_CONFIG, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "context_variables.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, disposition=ArtifactDisposition.RENDER, deps=(ArtifactKind.WORKFLOW_MANIFEST,), inputs=workflow_inputs),
         _family(ArtifactKind.WORKFLOW_CONFIG, LayoutOwner.WORKFLOW, Requirement.OPTIONAL, workflow, "structured_outputs.yaml", ValidatorIdentifier.WORKFLOW_MANAGER, RuntimeConsumerIdentifier.WORKFLOW_MANAGER, condition=ConditionIdentifier.WHEN_WORKFLOW_DECLARED, assignment=(AssignmentKind.WORKFLOW_STRUCTURED_MODELS_IMPLEMENTATION,), deps=(ArtifactKind.WORKFLOW_MANIFEST,), inputs=workflow_inputs),

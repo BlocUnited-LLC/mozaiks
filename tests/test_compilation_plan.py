@@ -73,7 +73,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # resolution is ImplementationBinding authority enforced at materialization),
 # so the gap set shrinks by exactly that one structural entry. Identity-only:
 # no unit, byte, footprint, or assignment fact changed.
-_GOLDEN_PLAN_DIGEST = "4e3a809b0982e18fa24f85da753a1df9734ae38132199c0be5931263fbd202f2"
+# The interface family adds exactly two layout rows and two units (one scope
+# inactive). Its complete pre-family fixture proves all 59 prior units unchanged;
+# only aggregate identity incorporates this newly declared family.
+_GOLDEN_PLAN_DIGEST = "f37b6ef7cd20344a0908eff052cfd83eeaccd8e113f345ea1f37a9c5a73d127d"
 
 
 def _registry():
@@ -557,7 +560,8 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
     excluded = {
         Path("mozaiksai/core/semantics/compilation_plan.py"),
         Path("mozaiksai/core/semantics/decl_bytes.py"),
-        Path("mozaiksai/core/semantics/app_config_materialization.py"),
+            Path("mozaiksai/core/semantics/app_config_materialization.py"),
+            Path("mozaiksai/core/semantics/workflow_interface_materialization.py"),
         Path("mozaiksai/core/semantics/resolver.py"),
         Path("mozaiksai/core/semantics/refs.py"),
         # Slice 4C offline materializer: consumes the plan inside the

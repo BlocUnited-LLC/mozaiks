@@ -365,7 +365,75 @@ regeneration/reuse signature — a unit whose node-level identity changed is
 never classified reusable — while empty taxonomy sources are omitted from
 identity and serialization alike, so every payload-only unit's digest and
 serialized form are unchanged. Families that consume node-level identity
-(the re-architected workflow-interface corpus) build on this primitive.
+(the workflow interface below) build on this primitive.
+
+### Canonical workflow module interface
+
+PR #479 is closed and superseded evidence, not an implementation dependency.
+PR #482 retired the independently authored v1 factory interface and its
+non-materializing AppGenerator task authority. PR #481 supplies canonical
+taxonomy-source identity and reuse authority. This slice restores only
+`module_interface.yaml` as `mozaiks.module_interface.v2`, derived through
+`SemanticGraphV2` → `CompilationPlan` → exact family sources → a closed render
+input → the deterministic interface renderer. There is one compiler byte
+writer and no factory or agent writer for this artifact.
+
+The `workflow_module_interface` family has two canonical layout rows:
+`workspace_root: workflows/{workflow_id}/module_interface.yaml` and
+`workflow_relative: module_interface.yaml`. Both are workflow-owned,
+conditional on `when_workflow_declared`, multiplicity `many`, disposition
+`render`, materializer `workflow_interface_executor`, validator
+`generated_app_validator`, security `internal_contract`, and dependent on
+`workflow_manifest`. Their runtime consumer is **NONE**. The existing workflow
+scope selection chooses one row; both retain exactly the `workflow_id`
+placeholder, including the scope-implied identity of the relative row.
+Bundle composition retains its existing global-root boundary: workspace
+interfaces materialize into bundles, while workflow-relative units remain
+explicitly deferred there and are proven through the direct renderer.
+
+For workflow W, C is every capability it owns, R is every result C owns
+(including advisory results with no commit binding), B is every typed binding
+C owns, M is every module referenced by an action binding, and E is every
+referenced trigger event. Payload sources are exactly `{W} ∪ C ∪ R ∪ B ∪ M`.
+Edge sources are exactly workflow/capability, capability/result and
+capability/binding ownership plus the existing typed binding-edge projection:
+consumes action, commit action with the result-node discriminator, commit
+result reference, and event consumption. Each E contributes only its exact
+EVENT-category `PlanTaxonomySource`. Action and event payload bodies,
+unrelated nodes, ambient registry entries, and unrelated graph edges are
+excluded.
+
+The YAML document contains `schema_version`, semantic `workflow_id`, and
+sorted `capabilities`. Each capability carries its `capability_id`, optional
+payload-owned description, all owned `results` (`result_id`, optional
+description), and sorted typed `bindings`. `consumes_action` carries
+`module_id` and `action_node_id`; `commits_result_through_action` also carries
+`workflow_result_id`; `triggered_by_event` carries `event_type`. No action
+body, request/response schema, result structured-output schema, approval
+policy, runtime workflow identity, provider/model identity, or AG2 identity
+enters the document. Serialization uses the existing canonical YAML byte
+contract, with no clock, filesystem, environment, or runtime registry input.
+
+Direct output validation resolves `family_identity_digest` to an exact live
+canonical row **before** interpreting scope/path. That row and the canonical
+instance derive the shared planner unit ID, exact placeholder set, output
+scope, and expanded path; the input workflow identity must match. A complete
+alternate twin is a valid direct-renderer shape, but substituting it into a
+plan still fails #475/#477 canonical rederivation. Renderer shape validation
+does not replace plan-membership authority.
+
+Selective rematerialization pins actual referenced event taxonomy and all
+owned results. The first end-to-end taxonomy-source family proof exercises
+canonical derivation, serialization/reload, actual historical-byte reuse,
+event-identity mutation, and comparison with clean successor materialization.
+Whole selected payloads remain conservative invalidation boundaries: unused
+fields of a selected WorkflowPayload or ModulePayload may invalidate its
+interface. Field-level PlanSource granularity is not introduced here.
+
+The app workflow registry, runtime capability routing, and production
+AppGenerator/AgentGenerator cutovers remain deferred. Persistent workflow
+launch is a separate contract; workflow touchpoints and page launch semantics
+do not enter this artifact.
 
 ## ApplicationManifest
 
