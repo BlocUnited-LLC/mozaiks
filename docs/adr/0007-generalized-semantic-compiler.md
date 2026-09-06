@@ -184,6 +184,96 @@ resolver, serializer, taxonomy, or binding authority. Implementation binding
 continues to select a verified implementation only for a requirement already
 present in the pinned graph and cannot add payload facts.
 
+### Closed action request contracts
+
+`ActionPayload.request_contract` owns the application's semantic input
+requirement. It is a required, non-null `ObjectContract`; an action accepting
+no request data explicitly declares an empty closed object. The retired
+`request_fields` input is rejected, including when supplied alongside the new
+contract. Response fields, event payloads, data/entity fields, and workflow
+structured outputs retain their existing contracts.
+
+The canonical algebra lives in `mozaiksai.core.semantics.closed_contracts`:
+
+| Variant | Value meaning and fields |
+|---|---|
+| `NullContract` (`null`) | Exactly null; no nullable flag or other variant fields. |
+| `ScalarContract` (`boolean`, `integer`, `number`, `string`) | Required `nullable`; optional nonempty homogeneous scalar `enum`, excluding null. |
+| `ArrayContract` (`array`) | Required `nullable` and one recursive `items` contract. |
+| `ObjectContract` (`object`) | Required `nullable`, property tuple, and explicit `additional_properties: false`. |
+| `ContractProperty` | Exact nonempty `name`, explicit `required`, and a recursive `contract`. |
+
+Property absence, a present null value, a null-only contract, and a nullable
+non-null type are distinct. Optionality belongs to the property; nullability
+belongs to its value. Every object is closed. Duplicate property names or enum
+values reject. Properties sort by exact name and enums sort by scalar value.
+Boolean and integer values never coerce into each other. INTEGER enum members
+are exact signed 64-bit integers; NUMBER enum members are exact finite floats.
+Negative floating zero stores as positive zero. Integer/float enum forms are
+deliberately distinct canonical representations.
+
+The versioned profile `mozaiks.closed_contract_profile.v1` permits depth **32**
+(root depth one) and **1024** total contract occurrences. Property wrappers do
+not add nodes or depth; reused children count at every occurrence. Iterative
+preflight rejects cycles and excessive depth or width before recursive model
+validation. Exceeding a limit is `UNSUPPORTED`, never a compatibility success.
+Raw properties accept only lists or tuples so a lazy iterable cannot bypass
+the aggregate limits. Validated state contains only frozen models, tuples, and
+strict scalar values. Nested instances revalidate; update-copy paths reject.
+Identity and digest use the existing canonical serialization primitives.
+
+`closed_contract_schema.import_closed_contract_schema` is an explicit offline
+import boundary for existing module action `input_schema` documents. It
+supports only the finite profile's JSON-schema-like `type`, scalar `enum`,
+homogeneous `items`, and closed object `properties`/`required` declarations.
+Object `additionalProperties` must explicitly be false. Omission, open or
+schema-valued additional properties, unsupported assertions, unknown keys,
+refs, schema compositions/unions, conditional schemas, and custom validation
+hooks reject. Format, patterns, numeric/string/array bounds, multiples,
+uniqueness, contains, and tuple arrays are never silently erased. This phase
+has no reference expansion, general union semantics, or schema exporter.
+
+The offline projector imports an explicitly supplied module action schema
+into request authority. An identity-only surface mutation can join that same
+module action declaration; without request authority it reports a typed
+`MISSING` gap. Unsupported module schemas report `UNSUPPORTED`. It never
+invents an empty request for unknown input. Bounds apply before the projector
+copies an input schema recursively. The producer audit found only this offline
+projector and semantic test fixtures; no production prompt, generator, or
+runtime consumes the removed shallow request field.
+
+The executable boundary remains:
+
+```text
+ActionPayload.request_contract       semantic application requirement
+module.yaml actions[].input_schema   executable artifact projection
+```
+
+Production module dispatch continues consuming the executable projection.
+Future publication must prove that the selected executable schema realizes
+the semantic request contract. Its initial compatibility policy must require
+normalized equality before broader compatible realization is considered.
+This phase implements neither that proof nor assignability, result/action-input
+projection, compatibility receipts, implementation-binding extensions, runtime
+delivery, or ArtifactRevision evidence changes.
+
+The existing immutable `CanonicalJsonValue` family is shared from
+`mozaiksai.core.semantics.canonical_json`; plan authority imports the same
+classes. Extraction preserves the entire accepted value domain, declaration
+order, serialized bytes, and digest semantics. It does not sort exact pinned
+document entries or replace the canonical serializer.
+
+The action request migration legitimately changes the semantic corpus action
+payload, containing graph, aggregate plan header, and archive digests. These
+golden changes are `EXPECTED_SEMANTIC_MIGRATION`: a permanent proof restores
+only the retired request field and its containing digest pins to recover the
+exact base identities. All 61 corpus units and the historical 59-unit proof
+remain byte/digest identical. The workflow interface excludes action payload
+bodies from its source footprint: changing a referenced action request
+contract preserves actual interface reuse and identical bytes after
+authority serialization and rematerialization. Any other identity change is
+`UNRELATED_DRIFT` and fails the migration proof.
+
 ### Aggregate CompilationPlan authority
 
 Exactly one aggregate `CompilationPlan` is authoritative for a bounded build.

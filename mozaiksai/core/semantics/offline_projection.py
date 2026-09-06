@@ -17,10 +17,12 @@ from types import NoneType
 from typing import Any, Literal, get_args
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from mozaiksai.core.runtime.app.page_schema import AppPageSection
 from mozaiksai.core.semantics.canonical import canonical_digest
+from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
+from mozaiksai.core.semantics.closed_contracts import ClosedContractUnsupported, ObjectContract
 from mozaiksai.core.semantics.graph import (
     SemanticEdge,
     SemanticEdgeKind,
@@ -487,6 +489,45 @@ _PAGE_API_PATH = re.compile(r"^/api/[A-Za-z0-9_./-]+$")
 _PATH_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
 
+def _action_request_contract(value: Any, path: str) -> ObjectContract:
+    try:
+        contract = import_closed_contract_schema(value)
+        if not isinstance(contract, ObjectContract) or contract.nullable:
+            raise ClosedContractUnsupported("UNSUPPORTED: action request root must be a non-null closed object")
+    except ClosedContractUnsupported as exc:
+        raise ProjectionError([
+            ProjectionGap(kind=ProjectionGapKind.UNSUPPORTED, source_path=path, reason=str(exc)),
+        ]) from exc
+    return contract
+
+
+def _preflight_action_request_schemas(source: Any) -> None:
+    """Bound raw action schemas before the existing recursive source copy."""
+    def field(value: Any, name: str) -> Any:
+        if isinstance(value, Mapping):
+            return value.get(name)
+        if isinstance(value, BaseModel):
+            return getattr(value, name, None)
+        return None
+
+    modules = field(source, "modules")
+    if isinstance(modules, Mapping):
+        entries = [(f"modules.{key}", value) for key, value in modules.items()]
+    elif isinstance(modules, Sequence) and not isinstance(modules, (str, bytes, bytearray)):
+        entries = [(f"modules[{index}]", value) for index, value in enumerate(modules)]
+    else:
+        return
+    for path, bundle in entries:
+        manifest = field(bundle, "manifest") or field(bundle, "module_manifest") or bundle
+        actions = field(manifest, "actions")
+        if not isinstance(actions, Sequence) or isinstance(actions, (str, bytes, bytearray)):
+            continue
+        for index, action in enumerate(actions):
+            schema = field(action, "input_schema")
+            if schema is not None:
+                _action_request_contract(schema, f"{path}.manifest.actions[{index}].input_schema")
+
+
 def _plain(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return _plain(value.model_dump(mode="json"))
@@ -676,6 +717,15 @@ class _Builder:
                 if field.is_required() and NoneType in get_args(field.annotation)
             }
             fields.update(self.content.get(node_id, {}))
+            if node.kind is SemanticNodeKind.ACTION and "request_contract" not in fields:
+                source_path = sorted(group for group, subject in self.node_groups if subject == node_id)[0]
+                raise ProjectionError([
+                    ProjectionGap(
+                        kind=ProjectionGapKind.MISSING,
+                        source_path=source_path,
+                        reason=f"action {node_id!r} requires an explicit module input_schema request contract",
+                    ),
+                ])
             try:
                 payloads[node_id] = build_semantic_payload(
                     model,
@@ -1469,6 +1519,19 @@ class _Builder:
             for j, raw_action in enumerate(_as_list(manifest.get("actions"))):
                 item = _mapping(raw_action)
                 action = _node_id(SemanticNodeKind.ACTION, f"{module_id}_{item.get('id')}")
+                request_path = f"{base}.manifest.actions[{j}].input_schema"
+                if item.get("input_schema") is None:
+                    raise ProjectionError([
+                        ProjectionGap(
+                            kind=ProjectionGapKind.MISSING,
+                            source_path=request_path,
+                            reason="action requires an explicit input_schema; an empty request must declare a closed empty object",
+                        ),
+                    ])
+                request_contract = _action_request_contract(item["input_schema"], request_path)
+                self.content_field(action, "request_contract", request_contract, request_path)
+                for leaf_path, _ in _iter_leaves(item["input_schema"], request_path):
+                    self.mark(leaf_path, node=SemanticNodeKind.ACTION, identity="exact request schema normalized into the closed semantic contract")
                 emitted_event_ids = tuple(
                     sorted({str(event_type) for event_type in _as_list(item.get("emits"))})
                 )
@@ -2592,6 +2655,7 @@ def project_semantic_graph(
     effect, and Slice 1 remains the only taxonomy authority, so the caller
     supplies the registry it has pinned.
     """
+    _preflight_action_request_schemas(source)
     plain = _plain(source)
     if not isinstance(plain, dict) or not plain:
         raise ProjectionError(

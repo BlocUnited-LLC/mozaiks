@@ -76,7 +76,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # The interface family adds exactly two layout rows and two units (one scope
 # inactive). Its complete pre-family fixture proves all 59 prior units unchanged;
 # only aggregate identity incorporates this newly declared family.
-_GOLDEN_PLAN_DIGEST = "f37b6ef7cd20344a0908eff052cfd83eeaccd8e113f345ea1f37a9c5a73d127d"
+# EXPECTED_SEMANTIC_MIGRATION: the graph digest changes with action request
+# authority. All 61 unit bodies remain identical; the migration proof restores
+# only the original graph digest to recover the exact pre-migration plan hash.
+_GOLDEN_PLAN_DIGEST = "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
 
 
 def _registry():

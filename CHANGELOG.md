@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Closed semantic action requests**: `ActionPayload.request_contract` replaces
+  shallow request fields with one immutable, bounded contract algebra for null,
+  scalars, homogeneous arrays, and closed objects. Offline module-schema imports
+  reject unproven closure and unsupported assertions. Executable module dispatch
+  schemas retain their current authority; realization proofs remain deferred.
 - **Canonical workflow module interfaces**: the offline compiler renders
   `mozaiks.module_interface.v2` from exact workflow capability, result,
   binding, module, and event-taxonomy sources. Advisory results are retained;
