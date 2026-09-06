@@ -29,7 +29,7 @@ def _write_minimal_workflow(root: Path, workflow_name: str) -> None:
         wf_dir / "orchestrator.yaml",
         "\n".join(
             [
-                f"workflow_name: {workflow_name}",
+                f"schema_version: mozaiks.orchestrator.v1\nworkflow_name: {workflow_name}",
                 "max_turns: 4",
                 "human_in_the_loop: false",
                 "workflow_startup_mode: AgentDriven",

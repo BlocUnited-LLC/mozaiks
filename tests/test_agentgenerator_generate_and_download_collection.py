@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import zipfile
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import AsyncMock
+
+import pytest
+import yaml
 
 
 def _load_generate_and_download_module():
@@ -72,6 +76,7 @@ def _minimal_workflow_files(
         }
     files = {
         "orchestrator.yaml": f"""
+schema_version: mozaiks.orchestrator.v1
 workflow_name: {workflow_name}
 max_turns: 4
 human_in_the_loop: false
@@ -109,6 +114,7 @@ transition_rules:
         ),
         "structured_outputs.yaml": """
 models: {}
+schema_version: mozaiks.structured_outputs.v1
 registry:
   PlannerAgent: null
   WorkerAgent: null
@@ -201,6 +207,69 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
         names = zf.namelist()
     assert any("orchestrator.yaml" in n for n in names)
     assert any("agents.yaml" in n for n in names)
+
+
+@pytest.mark.parametrize("filename", ["orchestrator.yaml", "structured_outputs.yaml"])
+@pytest.mark.parametrize("mutation", ["missing", "null", "unknown", "whitespace"])
+def test_workflow_quality_gate_rejects_invalid_document_versions_without_mutating_input(
+    filename: str, mutation: str,
+) -> None:
+    entries = [{"workflow_name": "ReviewWorkflow", "files": _minimal_workflow_files("ReviewWorkflow")}]
+    assert workflow_quality_gate_module.validate_workflow_bundle_structure(bundle_entries=entries)["valid"]
+    selected = next(item for item in entries[0]["files"] if item["filename"] == filename)
+    document = yaml.safe_load(selected["content"])
+    if mutation == "missing":
+        del document["schema_version"]
+    elif mutation == "null":
+        document["schema_version"] = None
+    elif mutation == "unknown":
+        document["schema_version"] = "mozaiks.unsupported.v99"
+    else:
+        document["schema_version"] = f" {document['schema_version']} "
+    selected["content"] = yaml.safe_dump(document, sort_keys=False)
+    before = copy.deepcopy(entries)
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(bundle_entries=entries)
+
+    assert report["valid"] is False
+    assert len(report["errors"]) == 1
+    assert filename in report["errors"][0]
+    assert "schema_version" in report["errors"][0]
+    assert entries == before
+
+
+def test_generate_and_download_blocks_unversioned_document_before_packaging(monkeypatch, tmp_path: Path) -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    selected = next(item for item in files if item["filename"] == "structured_outputs.yaml")
+    document = yaml.safe_load(selected["content"])
+    del document["schema_version"]
+    selected["content"] = yaml.safe_dump(document, sort_keys=False)
+    bundle_results = _make_bundle_results([{"workflow_name": "ReviewWorkflow", "files": files}])
+    before = copy.deepcopy(bundle_results)
+    context = _Context({
+        "chat_id": "chat-version-blocked", "app_id": "app-version-blocked",
+        "user_id": "user-version-blocked", "pack_name": "ReviewWorkflow",
+        "workflow_bundle_results": bundle_results,
+    })
+    generated_root = tmp_path / "generated"
+    ui_mock = AsyncMock()
+    registration_mock = AsyncMock()
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui_mock)
+    monkeypatch.setattr(generate_and_download_module, "_register_workflow_bundle_artifact_version", registration_mock)
+
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Workflow bundle ready.", context_variables=context,
+    ))
+
+    assert result["status"] == "blocked"
+    assert context.data["workflow_bundle_validation_status"] == "failed"
+    assert any("structured_outputs.yaml" in error and "schema_version" in error for error in result["validation_errors"])
+    assert bundle_results == before
+    assert not generated_root.exists()
+    ui_mock.assert_not_awaited()
+    registration_mock.assert_not_awaited()
 
 
 def test_generate_and_download_multi_workflow_pack_zips_all_bundles(
@@ -612,4 +681,3 @@ def test_merge_workflow_bundle_repair_results_preserves_successful_outputs() -> 
         if not key.startswith("_") and value["workflow_name"] == "BrokenWorkflow"
     )
     assert len(repaired_entry["files"]) == len(_minimal_workflow_files("BrokenWorkflow"))
-

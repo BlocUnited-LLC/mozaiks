@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ResearchWorkflow
 max_turns: 3
 human_in_the_loop: false

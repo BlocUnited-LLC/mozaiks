@@ -106,7 +106,10 @@ def test_workflow_and_provider_cache_order_preserves_canonical_schema(monkeypatc
         structured_output_schema_digest,
     )
 
-    config = {"structured_outputs": {"models": copy.deepcopy(MODELS), "registry": {"ProbeAgent": "Envelope"}}}
+    config = {"structured_outputs": {
+        "schema_version": "mozaiks.structured_outputs.v1",
+        "models": copy.deepcopy(MODELS), "registry": {"ProbeAgent": "Envelope"},
+    }}
     monkeypatch.setattr(structured.workflow_manager, "get_config", lambda _name: config)
     expected_model = structured.build_models_from_config(
         copy.deepcopy(MODELS), exact_model_ids=frozenset(),

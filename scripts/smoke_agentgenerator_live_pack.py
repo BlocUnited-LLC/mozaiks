@@ -159,6 +159,8 @@ def _workflow_generation_prompt(
         f"Generate a minimal but runnable Mozaiks workflow bundle for {workflow_name}.\n"
         f"Role: {role}. Description: {description}\n"
         f"Use AG2 Network pattern {pattern_id}: {pattern_name}.\n"
+        "Emit top-level schema_version: mozaiks.orchestrator.v1 in orchestrator.yaml and "
+        "schema_version: mozaiks.structured_outputs.v1 in structured_outputs.yaml.\n"
         f"Set orchestrator.yaml workflow_startup_mode to {startup_mode}; never emit startup_mode.\n"
         f"Set human_in_the_loop to {str(human_in_the_loop).lower()}.\n"
         f"Required root YAML files: {root_files}.\n"

@@ -24,7 +24,7 @@ from mozaiksai.core.workflow.structured_output_contracts import (
 
 
 def _config():
-    return {"models": {
+    return {"schema_version": "mozaiks.structured_outputs.v1", "models": {
         "Child": {"type": "model", "fields": {"label": {"type": "str"}}},
         "Output": {"type": "model", "fields": {
             "child": {"type": "Child"},

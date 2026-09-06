@@ -70,6 +70,7 @@ class OrchestratorTriggerSpec(DeclarativeModel):
 
 
 class OrchestratorConfig(DeclarativeModel):
+    schema_version: Literal["mozaiks.orchestrator.v1"]
     workflow_name: str
     max_turns: int = 50
     human_in_the_loop: bool = False
@@ -880,6 +881,7 @@ class StructuredOutputUnionSpec(DeclarativeModel):
 
 
 class StructuredOutputsConfig(DeclarativeModel):
+    schema_version: Literal["mozaiks.structured_outputs.v1"]
     registry: dict[str, str | None] = Field(default_factory=dict)
     models: dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec] = (
         Field(default_factory=dict)

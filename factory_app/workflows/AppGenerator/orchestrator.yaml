@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 workflow_name: AppGenerator
 max_turns: 25
 human_in_the_loop: true

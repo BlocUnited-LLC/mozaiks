@@ -890,6 +890,7 @@ def _workflow_files() -> dict[str, str]:
     return {
         "workflows/ResearchWorkflow/orchestrator.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.orchestrator.v1
             workflow_name: ResearchWorkflow
             max_turns: 3
             human_in_the_loop: false
@@ -928,6 +929,7 @@ def _workflow_files() -> dict[str, str]:
         ).lstrip(),
         "workflows/ResearchWorkflow/structured_outputs.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.structured_outputs.v1
             registry:
               ResearchAgent: ResearchSummary
             models:

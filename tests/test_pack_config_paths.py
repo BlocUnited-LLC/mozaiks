@@ -111,7 +111,7 @@ def test_registry_extends_packaged_default_with_app_overlay(monkeypatch, tmp_pat
     hosted_workflow_dir = workflows_root / "HostedOnly"
     hosted_workflow_dir.mkdir()
     (hosted_workflow_dir / "orchestrator.yaml").write_text(
-        "workflow_name: HostedOnly\nworkflow_startup_mode: BackendOnly\n",
+        "schema_version: mozaiks.orchestrator.v1\nworkflow_name: HostedOnly\nworkflow_startup_mode: BackendOnly\n",
         encoding="utf-8",
     )
     target_registry = registry_dir / "extension_registry.json"
@@ -189,7 +189,7 @@ def test_explicit_app_registry_without_extends_does_not_discover_factory_workflo
     hosted_workflow_dir = workflows_root / "HostedOnly"
     hosted_workflow_dir.mkdir()
     (hosted_workflow_dir / "orchestrator.yaml").write_text(
-        "workflow_name: HostedOnly\nworkflow_startup_mode: BackendOnly\n",
+        "schema_version: mozaiks.orchestrator.v1\nworkflow_name: HostedOnly\nworkflow_startup_mode: BackendOnly\n",
         encoding="utf-8",
     )
     (registry_dir / "extension_registry.json").write_text(

@@ -20,6 +20,7 @@ def structured_config(
     *, registry: dict[str, str | None] | None = None
 ) -> dict[str, Any]:
     return {
+        "schema_version": "mozaiks.structured_outputs.v1",
         "models": {
             "ArtifactOutput": {
                 "type": "model",

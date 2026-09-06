@@ -1021,6 +1021,43 @@ their existing warning policy, while an invalid or unevaluable output schema
 returns `INVALID_OUTPUT_SCHEMA`. This does not change module dispatch topology,
 ArtifactRevision evidence, workflow results, or runtime result delivery.
 
+### Explicit workflow document versions
+
+The public `OrchestratorConfig` and `StructuredOutputsConfig` contracts require
+exact in-document literals: `mozaiks.orchestrator.v1` and
+`mozaiks.structured_outputs.v1`, respectively. Both public parsers retain
+`schema_version`. Missing, null, unknown, misspelled, or whitespace-altered
+versions reject; no parser injects a default. The spelling follows the existing
+`mozaiks.<contract>.vN` vocabulary, including underscore-separated contract names.
+
+The version identifies the enclosing YAML document. It is never inserted into
+`registry`, `models`, compiled output fields, or provider response schemas.
+Whole source-document and immutable authority-input identities consequently
+change (`EXPECTED_DOCUMENT_VERSION_MIGRATION`). The captured 61-unit compiler
+corpus, historical 59-unit proof, executable six-unit plans, structured-output
+acceptance references, assignment/artifact results, action contracts, and
+workflow interface bytes remain unchanged. Restoring only version metadata for
+comparison recovers the prior source/authority fingerprints; other changes are
+`UNRELATED_DRIFT`. Historical captures themselves remain immutable.
+
+Authority references and ArtifactRevision identities that pin the whole changed
+document also migrate. In the existing genesis/child revision fixtures, this
+propagates through parent references and enclosing ledger/evidence digests while
+artifact addresses, content digests, exact bodies, and bundle identity remain
+equal. These are expected document-authority changes, not an evidence redesign.
+
+Existing offline orchestrator projection validates this metadata through the
+public contract's literal annotation and does not project it into topology.
+Workflow names, startup, turns, patterns, messages, agents, and triggers retain
+their previous meaning. Parsed versions can later be compared with
+`ChildContractRef.contract_schema_version`; this prerequisite adds no content
+resolver, implementation selection, binding, or ArtifactRevision redesign.
+
+The [workflow document migration census](../architecture/workflows/workflow-document-version-migration.md)
+records governed OSS documents, producers, exclusions, and the required App Zero
+migration when its pinned OSS version advances. Unversioned downstream documents
+receive no compatibility exception.
+
 ## BuildContextBindingRef
 
 Build contexts are immutable, declared compiler inputs — not hidden prompt

@@ -1084,7 +1084,8 @@ def _create_starter_workflow(workflows_dir: Path) -> None:
     (workflow_dir / "tools").mkdir(exist_ok=True)
     (workflow_dir / "ui").mkdir(exist_ok=True)
 
-    orchestrator = """workflow_name: HelloWorkflow
+    orchestrator = """schema_version: mozaiks.orchestrator.v1
+workflow_name: HelloWorkflow
 max_turns: 10
 human_in_the_loop: true
 workflow_startup_mode: UserDriven
@@ -1129,7 +1130,8 @@ agents:
     variables: []
 """
 
-    structured_outputs_yaml = """registry: {}
+    structured_outputs_yaml = """schema_version: mozaiks.structured_outputs.v1
+registry: {}
 models: {}
 """
 

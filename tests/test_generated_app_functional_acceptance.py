@@ -354,6 +354,7 @@ def _generated_workflow_agent_files() -> dict[str, str]:
         ),
         "workflows/ResearchWorkflow/orchestrator.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.orchestrator.v1
             workflow_name: ResearchWorkflow
             max_turns: 3
             human_in_the_loop: false
@@ -392,6 +393,7 @@ def _generated_workflow_agent_files() -> dict[str, str]:
         ),
         "workflows/ResearchWorkflow/structured_outputs.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.structured_outputs.v1
             registry:
               ResearchAgent: ResearchSummary
             models:

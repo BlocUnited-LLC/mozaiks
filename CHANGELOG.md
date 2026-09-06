@@ -206,6 +206,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- **Self-versioned workflow documents**: `orchestrator.yaml` now requires
+  `schema_version: mozaiks.orchestrator.v1`; `structured_outputs.yaml` requires
+  `schema_version: mozaiks.structured_outputs.v1`. Public parsers retain the
+  exact version and reject missing, null, unsupported, or altered spellings.
+  OSS workflows, producers, examples, and authoring guidance migrate together.
+  App workspaces must migrate their documents when upgrading; there is no
+  unversioned fallback. Whole-document identity changes, while compiled output
+  models, workflow interfaces, and unrelated compiler units retain identity.
 - Upgraded the AG2 runtime to 1.0.3, including ACP 0.12.1 compatibility and corrected usage-event accounting coverage.
 
 ### Fixed

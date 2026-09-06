@@ -485,6 +485,7 @@ When an agent needs to produce a UI artifact:
 
 **1. structured_outputs.yaml** - Define model and register to agent:
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 registry:
   MyAgent: MyOutputModel  # Agent outputs this schema
 
