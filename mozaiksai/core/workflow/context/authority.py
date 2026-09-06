@@ -372,6 +372,24 @@ class ScopedContextWriter:
             raise ContextAuthorityError("context_authority.unsupported_target")
 
 
+def resolve_declared_context_writer(
+    key: str,
+    *,
+    base_writer: ContextWriterId,
+    declared_writer: ContextWriterId,
+    policy: ContextAuthorityPolicy | None,
+) -> ContextWriterId:
+    """Resolve a trusted mechanism's declared attribution, without granting rights.
+
+    Callers establish the mutation mechanism before supplying its writer pair.
+    The returned writer still requires the ordinary policy authorization check.
+    """
+    authority = policy.variables.get(key) if policy is not None else None
+    if authority is not None and declared_writer in authority.writer_ids:
+        return declared_writer
+    return base_writer
+
+
 def build_context_authority_policy(
     *,
     workflow_name: str,

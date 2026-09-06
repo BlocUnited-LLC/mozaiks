@@ -7,6 +7,9 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any
 
@@ -21,7 +24,14 @@ from mozaiksai.core.media.ag2 import (
 )
 from mozaiksai.core.media.middleware import build_ag2_media_harvest_middleware
 
-from ..context.authority import CONTEXT_BRIDGE_WRITER, ContextAuthorityPolicy
+from ..context.authority import (
+    CONTEXT_BRIDGE_WRITER,
+    DETERMINISTIC_TOOL_WRITER,
+    ContextAuthorityError,
+    ContextAuthorityPolicy,
+    ContextWriterId,
+    resolve_declared_context_writer,
+)
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
 )
@@ -143,6 +153,31 @@ def _log_existing_app_discovery_projection(
 # CONTEXT BRIDGE
 # ------------------------------------------------------------------
 
+@dataclass(slots=True)
+class _WorkflowToolInvocation:
+    bridge: ContextVariablesBridge
+    policy: ContextAuthorityPolicy | None
+    run_identity: tuple[str, str, str] | None
+    active: bool = True
+
+
+_WORKFLOW_TOOL_INVOCATION: ContextVar[_WorkflowToolInvocation | None] = ContextVar(
+    "mozaiks_workflow_tool_invocation", default=None
+)
+
+
+@contextmanager
+def _workflow_tool_invocation(bridge: ContextVariablesBridge):
+    invocation = _WorkflowToolInvocation(bridge, bridge._authority_policy, bridge._run_identity)
+    token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
+    try:
+        yield
+    finally:
+        # Revocation also invalidates records inherited by unfinished child tasks.
+        invocation.active = False
+        _WORKFLOW_TOOL_INVOCATION.reset(token)
+
+
 class ContextVariablesBridge:
     """Shared workflow context exposed to tools and committed through AG2.
 
@@ -156,8 +191,9 @@ class ContextVariablesBridge:
         "__data",
         "_pending_set",
         "_pending_delete",
+        "_pending_writers",
         "_authority_policy",
-        "_writer_id",
+        "_run_identity",
         "_mozaiks_context_authority_policy",
     )
 
@@ -166,14 +202,41 @@ class ContextVariablesBridge:
         data: dict[str, Any],
         *,
         authority_policy: ContextAuthorityPolicy | None = None,
-        writer_id: str = CONTEXT_BRIDGE_WRITER,
     ) -> None:
         self.__data: dict[str, Any] = detach(data)  # type: ignore[assignment]
         self._pending_set: dict[str, Any] = {}
         self._pending_delete: set[str] = set()
+        self._pending_writers: dict[str, ContextWriterId] = {}
         self._authority_policy = authority_policy
-        self._writer_id = writer_id
+        self._run_identity: tuple[str, str, str] | None = None
         self._mozaiks_context_authority_policy = authority_policy
+
+    def _bind_run(
+        self, run_identity: tuple[str, str, str], policy: ContextAuthorityPolicy | None,
+    ) -> None:
+        if policy is not self._authority_policy:
+            raise ContextAuthorityError("context_authority.bridge_policy_mismatch")
+        if policy is not None and policy.workflow_name != run_identity[0]:
+            raise ContextAuthorityError("context_authority.bridge_workflow_mismatch")
+        if self._run_identity is not None and self._run_identity != run_identity:
+            raise ContextAuthorityError("context_authority.bridge_run_mismatch")
+        self._run_identity = run_identity
+
+    def _effective_writer(self, key: str) -> ContextWriterId:
+        invocation = _WORKFLOW_TOOL_INVOCATION.get()
+        if (
+            invocation is not None
+            and invocation.active
+            and invocation.bridge is self
+            and invocation.policy is self._authority_policy
+            and invocation.run_identity is not None
+            and invocation.run_identity == self._run_identity
+        ):
+            return resolve_declared_context_writer(
+                key, base_writer=CONTEXT_BRIDGE_WRITER,
+                declared_writer=DETERMINISTIC_TOOL_WRITER, policy=self._authority_policy,
+            )
+        return CONTEXT_BRIDGE_WRITER
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
@@ -189,23 +252,27 @@ class ContextVariablesBridge:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
+        writer = self._effective_writer(clean_key)
         if self._authority_policy is not None:
-            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="set")  # type: ignore[arg-type]
+            self._authority_policy.require_can_write(clean_key, writer_id=writer, operation="set")
         self.__data[clean_key] = detach(value)
         self._pending_set[clean_key] = detach(value)
         self._pending_delete.discard(clean_key)
+        self._pending_writers[clean_key] = writer
 
     def pop(self, key: str, default: Any = None) -> Any:
         clean_key = str(key or "").strip()
         if not clean_key:
             raise KeyError("context variable key must be non-empty")
+        writer = self._effective_writer(clean_key)
         if self._authority_policy is not None:
-            self._authority_policy.require_can_write(clean_key, writer_id=self._writer_id, operation="delete")  # type: ignore[arg-type]
+            self._authority_policy.require_can_write(clean_key, writer_id=writer, operation="delete")
         existed = clean_key in self.__data
         value = self.__data.pop(clean_key, default)
         if existed:
             self._pending_set.pop(clean_key, None)
             self._pending_delete.add(clean_key)
+            self._pending_writers[clean_key] = writer
         return detach(value)
 
     def delete(self, key: str) -> None:
@@ -254,6 +321,20 @@ class ContextVariablesBridge:
     def clear_context_updates(self) -> None:
         self._pending_set.clear()
         self._pending_delete.clear()
+        self._pending_writers.clear()
+
+    def consume_authorized_context_updates(
+        self, *, policy: ContextAuthorityPolicy | None, run_identity: tuple[str, str, str],
+    ) -> dict[str, Any]:
+        self._bind_run(run_identity, policy)
+        for operation, keys in (("set", self._pending_set), ("delete", self._pending_delete)):
+            for key in keys:
+                writer = self._pending_writers.get(key)
+                if writer is None:
+                    raise ContextAuthorityError("context_authority.missing_mutation_provenance")
+                if policy is not None:
+                    policy.require_can_write(key, writer_id=writer, operation=operation)
+        return self.consume_context_updates()
 
     def consume_context_updates(self) -> dict[str, Any]:
         updates = {
@@ -324,16 +405,26 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
     if inspect.iscoroutinefunction(fn):
         @wraps(fn)
         async def async_wrapper(*args, **kwargs):
-            kwargs.setdefault("context_variables", context_bridge)
-            return await fn(*args, **kwargs)
+            if "context_variables" in kwargs:
+                raise ContextAuthorityError("context_authority.tool_context_override")
+            bound = new_sig.bind(*args, **kwargs)
+            bound.arguments["context_variables"] = context_bridge
+            call = inspect.BoundArguments(sig, bound.arguments)
+            with _workflow_tool_invocation(context_bridge):
+                return await fn(*call.args, **call.kwargs)
 
         async_wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
         return async_wrapper
     else:
         @wraps(fn)
         def sync_wrapper(*args, **kwargs):
-            kwargs.setdefault("context_variables", context_bridge)
-            return fn(*args, **kwargs)
+            if "context_variables" in kwargs:
+                raise ContextAuthorityError("context_authority.tool_context_override")
+            bound = new_sig.bind(*args, **kwargs)
+            bound.arguments["context_variables"] = context_bridge
+            call = inspect.BoundArguments(sig, bound.arguments)
+            with _workflow_tool_invocation(context_bridge):
+                return fn(*call.args, **call.kwargs)
 
         sync_wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
         return sync_wrapper
