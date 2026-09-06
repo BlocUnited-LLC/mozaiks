@@ -434,12 +434,22 @@ def _mutate(fixture: _Fixture, change: str) -> None:
     elif change in {"action_body", "action_request_schema", "action_response_schema"}:
         field = {
             "action_body": "description",
-            "action_request_schema": "request_fields",
+            "action_request_schema": "request_contract",
             "action_response_schema": "response_fields",
         }[change]
-        value = "Different implementation description" if field == "description" else [
-            {"name": "changed_field", "field_type": "string", "required": False},
-        ]
+        if field == "description":
+            value = "Different implementation description"
+        elif field == "request_contract":
+            value = {
+                "kind": "object", "nullable": False, "additional_properties": False,
+                "properties": [{
+                    "name": "changed_field", "required": True,
+                    "contract": {"kind": "array", "nullable": False,
+                                 "items": {"kind": "string", "nullable": True}},
+                }],
+            }
+        else:
+            value = [{"name": "changed_field", "field_type": "string", "required": False}]
         _replace(fixture, capability_fixture._ACTION_GET, **{field: value})
     elif change in {"event_body", "event_schema"}:
         values = (

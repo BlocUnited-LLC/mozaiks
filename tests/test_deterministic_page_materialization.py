@@ -163,8 +163,20 @@ def _source(*, column_label: str = "Order") -> dict:
                 "manifest": {
                     "module": {"id": "orders", "description": "Order management"},
                     "actions": [
-                        {"id": "list_orders", "description": "List orders."},
-                        {"id": "create_order", "description": "Create an order."},
+                        {
+                            "id": "list_orders", "description": "List orders.",
+                            "input_schema": {
+                                "type": "object", "properties": {}, "additionalProperties": False,
+                            },
+                        },
+                        {
+                            "id": "create_order", "description": "Create an order.",
+                            "input_schema": {
+                                "type": "object", "required": ["customer_name"],
+                                "properties": {"customer_name": {"type": "string"}},
+                                "additionalProperties": False,
+                            },
+                        },
                     ],
                 }
             }

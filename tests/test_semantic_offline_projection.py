@@ -239,10 +239,15 @@ def _corpus_source() -> dict:
                     "actions": [
                         {
                             "id": "export_report",
+                            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
                             "emits": ["domain.reports.generated"],
                             "entitlement_gate": "reports.export",
                         },
-                        {"id": "view_report", "entitlement_gate": "reports.view"},
+                        {
+                            "id": "view_report",
+                            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                            "entitlement_gate": "reports.view",
+                        },
                     ],
                     "permissions": [{"id": "reports.read", "description": "Read reports"}],
                     "capabilities": [
@@ -658,6 +663,7 @@ def test_current_runtime_models_and_agentgenerator_bundle_shape_project() -> Non
                     "id": "export_report",
                     "description": "Export a report.",
                     "handler_method": "export_report",
+                    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
                     "emits": ["domain.reports.generated"],
                     "entitlement_gate": "reports.export",
                 }
@@ -891,15 +897,18 @@ def test_committed_design_docs_subscription_build_context_and_route_sources() ->
     from tests.test_design_docs_bundle_persistence import _bundle
     from tests.test_subscription_contract_designer import _sample_contract
 
-    design_result = project_semantic_graph(
-        {"DesignDocsBundle": _bundle()},
-        graph_id="recorded-design-docs",
-        version=1,
-        scope=SCOPE,
-        taxonomy_registry=_pinned_registry(),
-    )
-    assert design_result.graph.nodes
-    assert design_result.source_facts == design_result.represented_facts
+    # Recorded surface mutations identify actions but contain no request
+    # authority. Missing module contracts must not become guessed empty inputs.
+    with pytest.raises(ProjectionError) as design_error:
+        project_semantic_graph(
+            {"DesignDocsBundle": _bundle()},
+            graph_id="recorded-design-docs",
+            version=1,
+            scope=SCOPE,
+            taxonomy_registry=_pinned_registry(),
+        )
+    assert design_error.value.gaps[0].kind is ProjectionGapKind.MISSING
+    assert "input_schema" in design_error.value.gaps[0].reason
 
     with pytest.raises(ProjectionError) as exc_info:
         project_semantic_graph(
@@ -1135,7 +1144,10 @@ source = {
         {
             "manifest": {
                 "module": {"id": "reports"},
-                "actions": [{"id": "export_report", "entitlement_gate": "reports.export"}],
+                "actions": [{
+                    "id": "export_report", "entitlement_gate": "reports.export",
+                    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+                }],
                 "capabilities": [{"capability_id": "reports.export"}],
             }
         }
@@ -1357,7 +1369,10 @@ def test_entitlement_gate_requires_declared_capability_input_closure() -> None:
     module = {
         "manifest": {
             "module": {"id": "reports"},
-            "actions": [{"id": "export_report", "entitlement_gate": "reports.export"}],
+            "actions": [{
+                "id": "export_report", "entitlement_gate": "reports.export",
+                "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+            }],
         }
     }
     with pytest.raises(ProjectionError) as exc_info:

@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from mozaiksai.core.semantics.closed_contracts import ObjectContract
 from mozaiksai.core.semantics.graph import (
     SemanticEdge,
     SemanticEdgeKind,
@@ -90,6 +91,9 @@ def _action(node_id: str, *, description: str, emits: tuple[str, ...] = ()) -> A
         payload_version=1,
         scope=_SCOPE,
         description=description,
+        request_contract=ObjectContract(
+            nullable=False, properties=(), additional_properties=False,
+        ),
         emits=emits,
     )
 
@@ -345,6 +349,7 @@ def _rebuilt_action(payloads: dict[str, SemanticPayloadBase], node_id: str, **ov
         "payload_version": base.payload_version,
         "scope": base.scope,
         "description": base.description,
+        "request_contract": base.request_contract,
         "emits": base.emits,
     }
     fields.update(overrides)

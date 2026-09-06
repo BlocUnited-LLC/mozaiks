@@ -25,6 +25,11 @@ from mozaiksai.core.semantics.archive import (
 from mozaiksai.core.semantics.binding import ImplementationBinding
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.capabilities import advertised_semantic_compiler_capabilities
+from mozaiksai.core.semantics.closed_contracts import (
+    ContractProperty,
+    ObjectContract,
+    ScalarContract,
+)
 from mozaiksai.core.semantics.graph import (
     SEMANTIC_GRAPH_V2_SCHEMA_VERSION,
     SemanticEdge,
@@ -252,8 +257,11 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden Merkle-root vector: pinned digests for the full-corpus v2 graph and
 # its archived fixture.  Independent of host, process, and input order.
-_GOLDEN_GRAPH_DIGEST = "19d4fa7f8db76e05a3710b58f5909ddb807ccb7ce37facb51e8278de2a19f86b"
-_GOLDEN_ARCHIVE_DIGEST = "sha256:785d575f4e4ab73d16b2e28d54896ede3ea2e0d40a7013e05f2bf361fd6fc2f7"
+# EXPECTED_SEMANTIC_MIGRATION: only the action request contract and containing
+# graph/archive identities change; test_action_request_contracts restores and
+# verifies the exact original identities from the pinned base evidence.
+_GOLDEN_GRAPH_DIGEST = "421b7359cbd42d0f94a1ac9fbb38387240dda7bbea322add2a72027d14cc4810"
+_GOLDEN_ARCHIVE_DIGEST = "sha256:f1d2e8e104e1778b607b7771c1ff0ff6522628d78df52f548ecca91894ab43e4"
 
 
 def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str = "Home"):
@@ -374,7 +382,14 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             payload_version=1,
             scope=scope,
             description="Create one report",
-            request_fields=(field,),
+            request_contract=ObjectContract(
+                nullable=False,
+                additional_properties=False,
+                properties=(ContractProperty(
+                    name="name", required=True,
+                    contract=ScalarContract(kind="string", nullable=False),
+                ),),
+            ),
             response_fields=(
                 TypedFieldSpec(name="report_id", field_type=FieldType.REFERENCE, required=True),
             ),
@@ -1651,13 +1666,21 @@ def test_unordered_identity_collections_remain_permutation_stable() -> None:
         TypedFieldSpec(name="alpha", field_type=FieldType.INTEGER, required=True),
     )
     emits = ("reports.report_updated", "reports.report_created")
+    properties = (
+        ContractProperty(name="zeta", required=False,
+                         contract=ScalarContract(kind="string", nullable=False)),
+        ContractProperty(name="alpha", required=True,
+                         contract=ScalarContract(kind="integer", nullable=False)),
+    )
     first = build_semantic_payload(
         ActionPayload,
         node_id=action.node_id,
         payload_version=action.payload_version,
         scope=action.scope,
         description=action.description,
-        request_fields=fields,
+        request_contract=ObjectContract(
+            nullable=False, properties=properties, additional_properties=False,
+        ),
         response_fields=fields,
         emits=emits,
         entitlement_gate=action.entitlement_gate,
@@ -1668,13 +1691,15 @@ def test_unordered_identity_collections_remain_permutation_stable() -> None:
         payload_version=action.payload_version,
         scope=action.scope,
         description=action.description,
-        request_fields=tuple(reversed(fields)),
+        request_contract=ObjectContract(
+            nullable=False, properties=tuple(reversed(properties)), additional_properties=False,
+        ),
         response_fields=tuple(reversed(fields)),
         emits=tuple(reversed(emits)),
         entitlement_gate=action.entitlement_gate,
     )
     assert permuted.payload_digest == first.payload_digest
-    assert permuted.request_fields == first.request_fields
+    assert permuted.request_contract == first.request_contract
     assert permuted.response_fields == first.response_fields
     assert permuted.emits == first.emits
 

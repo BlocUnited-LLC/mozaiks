@@ -24,11 +24,18 @@ re-verifies it, so a tampered field or digest fails closed at validation.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, TypeAdapter, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from mozaiksai.core.runtime.app.page_schema import (
     AppPageMeta,
@@ -36,6 +43,7 @@ from mozaiksai.core.runtime.app.page_schema import (
     AppPageSection,
 )
 from mozaiksai.core.semantics.canonical import canonical_digest
+from mozaiksai.core.semantics.closed_contracts import ObjectContract
 from mozaiksai.core.semantics.graph import (
     SemanticEdge,
     SemanticEdgeKind,
@@ -122,7 +130,7 @@ def _canonical_id(value: str, *, field_name: str) -> str:
 
 
 class FieldType(StrEnum):
-    """Closed field-type set for typed request/response/data shapes."""
+    """Closed field-type set for response/data shapes."""
 
     STRING = "string"
     TEXT = "text"
@@ -1084,12 +1092,24 @@ class ModulePayload(SemanticPayloadBase):
 
 
 class ActionPayload(SemanticPayloadBase):
+    model_config = ConfigDict(revalidate_instances="always")
+
     payload_kind: Literal[SemanticNodeKind.ACTION] = SemanticNodeKind.ACTION
     description: str | None
-    request_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
+    request_contract: ObjectContract
     response_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
     emits: tuple[str, ...] = Field(default_factory=tuple)
     entitlement_gate: str | None = None
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+        if update is not None:
+            raise TypeError("action updates require build_semantic_payload; unchecked copies are forbidden")
+        return type(self).model_validate(self)
+
+    def copy(self, *, include=None, exclude=None, update=None, deep: bool = False):
+        if include is not None or exclude is not None or update is not None:
+            raise TypeError("action changes require build_semantic_payload; unchecked copies are forbidden")
+        return self.model_copy(deep=deep)
 
     @field_validator("description")
     @classmethod
@@ -1098,7 +1118,14 @@ class ActionPayload(SemanticPayloadBase):
             return None
         return _text(value, field_name="description")
 
-    @field_validator("request_fields", "response_fields")
+    @field_validator("request_contract")
+    @classmethod
+    def _request_contract(cls, value: ObjectContract) -> ObjectContract:
+        if value.nullable:
+            raise ValueError("action request_contract must be a non-null OBJECT")
+        return value
+
+    @field_validator("response_fields")
     @classmethod
     def _fields(
         cls, value: tuple[TypedFieldSpec, ...], info: ValidationInfo
