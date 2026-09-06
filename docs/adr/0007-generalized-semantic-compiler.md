@@ -918,12 +918,10 @@ regions the graph declares.
 
 ## Structured-Output Strictness
 
-The audit found that `structured_outputs.yaml` declarations appear strict
-while the dynamically compiled runtime Pydantic models are permissive: the
-compiler in `mozaiksai/core/workflow/outputs/structured.py` builds models via
-`create_model` with no `model_config`, so unknown fields are ignored at
-runtime. `_patch_model_schema` makes the provider JSON-schema projection look
-strict, but provider/runtime validation therefore disagree. Open-ended dict
+The original audit found that `structured_outputs.yaml` declarations appeared
+strict while dynamically compiled runtime Pydantic models ignored unknown
+fields. `_patch_model_schema` made the provider JSON-schema projection look
+strict, so provider formatting obscured the acceptance contract. Open-ended dict
 fields have two current behaviors that stack on the same live agent-creation
 path: the `get_llm_for_workflow` helper (still called by the agent factory
 for every agent) logs a warning and falls back to a plain LLM configuration,
@@ -945,8 +943,9 @@ This ADR requires, for the compiler's structured-output surface:
   projection;
 - provider projection is deterministic — the same declaration always produces
   the same provider schema, and silent strictness downgrades are removed;
-- runtime validation is equivalent to provider-schema validation, so a payload
-  the provider would reject cannot pass the runtime;
+- runtime validation matches the canonical acceptance contract. A provider
+  protocol may strengthen its wire projection, such as requiring nullable
+  optional fields to be present, without changing application acceptance;
 - validation failure is observable — a typed, recorded failure, never
   warning-and-continue (the current silent no-op on structured-output
   validation failure in `mozaiksai/core/workflow/outputs/runtime_events.py`
@@ -957,6 +956,70 @@ This ADR requires, for the compiler's structured-output surface:
 
 This ADR does not implement the flip; it is rollout work (slice 5) gated on
 the compatibility report.
+
+### Provider-neutral acceptance identity prerequisite
+
+`build_models_from_config` now returns unpatched canonical Pydantic models.
+Explicit `exact_model_ids` applies `extra="forbid"` when models are created,
+before a parent can capture a child schema. Generic runtime loading keeps its
+existing default acceptance policy; this is not the global strictness flip.
+`get_provider_response_model` remains the sole provider adapter. It creates
+separate response models with the current OpenAI strict required fields,
+reference inlining, and object closure. Production agent construction continues
+to use that adapter.
+
+`canonical_structured_output_schema` invokes the unmodified Pydantic validation
+schema compiler directly. Acceptance profile
+`mozaiks.structured_output_acceptance_profile.v1` retains refs, defaults,
+annotations, nullable unions, and canonical exact-object closure. It sorts
+object keys and schema `required` names, while preserving data-array order in
+defaults, examples, and enum members. The model compiler sorts distinct finite
+JSON scalar literal declarations before naming their enum; equality-alias
+declarations retain order because Python Enum gives the first value acceptance
+meaning. Union branch order remains compiler authority.
+
+`StructuredOutputContractRef` is now
+`mozaiks.structured_output_contract_ref.v2`, pinning `workflow_name`, `model_id`,
+`acceptance_profile`, and `schema_digest`. The digest covers the profile and
+canonical schema. The old ref version is rejected. This acceptance profile is
+separate from `mozaiks.closed_contract_profile.v1`: no compatibility algebra or
+assignability proof is inferred from a Pydantic schema.
+
+Both reference APIs require explicit configuration and exact model IDs:
+
+| Caller | Authority classification | Inputs |
+|---|---|---|
+| `derive_compilation_plan` | `CANONICAL_COMPILER` | Supplied configs and the selected assignment-descriptor authority |
+| `compile_approved_plan` | `COLD_AUTHORITY_BOUNDARY` | Configs, exact model IDs, and identity bindings from the same immutable `CompilationPlanAuthorityInputs` |
+| `resolve_assignment_admission` | `COLD_AUTHORITY_BOUNDARY` | Supplied configs and explicit exact model IDs; the pinned ref must match |
+| `build_assignment_artifact_result` | `COLD_AUTHORITY_BOUNDARY` | Supplied configs and explicit exact model IDs; the pinned ref must match |
+| Workflow model loading and provider adaptation | `PRODUCTION_RUNTIME_DEFAULT` | Runtime configuration and caches; never reference identity authority |
+
+Synthetic reference tests also supply explicit exact model sets. Canonical
+rederivation supplies the frozen descriptor snapshot, so later ambient registry
+changes cannot alter either schema exactness or semantic identity bindings.
+A separate persisted schema snapshot is unnecessary for these consumers:
+existing immutable authority inputs already contain the exact source documents.
+
+The exact-base migration fixture records provider-influenced schemas, references,
+plans, assignments, artifact results, and generated bytes from main
+`430d3ffaeab0b27843d7fbeba275c5be316ff586`. Ref-dependent identities are classified
+`EXPECTED_STRUCTURED_OUTPUT_IDENTITY_MIGRATION`; restoring only those references
+and their enclosing digests recovers the captured documents exactly. Authority
+inputs, unrelated units, artifact bytes, the existing 61-unit corpus, historical
+59-unit proof, action request contracts, and workflow interface bytes retain
+their identities. Other changes would be `UNRELATED_DRIFT` and fail the proof.
+
+Runtime module JSON Schema validation remains Draft 7. The shared validator
+normalizes nullable syntax, checks the schema, and evaluates the value. Any
+normalization, checking, construction, or evaluation exception returns a
+deterministic `schema_invalid` diagnostic; value violations return
+`value_invalid`. Explicit `{}` is a universal schema and is checked; `None`
+means absence only at callers that allow no schema. Module inputs, event
+emission, and event routing reject diagnostics. Output value violations retain
+their existing warning policy, while an invalid or unevaluable output schema
+returns `INVALID_OUTPUT_SCHEMA`. This does not change module dispatch topology,
+ArtifactRevision evidence, workflow results, or runtime result delivery.
 
 ## BuildContextBindingRef
 

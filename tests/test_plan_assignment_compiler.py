@@ -103,7 +103,6 @@ def test_closed_spec_compiles_paths_and_identity_from_plan_unit() -> None:
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
         authority_inputs=_AUTHORITY["inputs"],
-        structured_output_configs={"AppGenerator": config},
     )
     assignment = result.ordered_assignments[0]
     assert assignment.owned_paths == tuple(output.path for output in unit.outputs)
@@ -152,7 +151,6 @@ def test_missing_or_extra_source_ref_fails_exact_closure() -> None:
             ApprovedPlan(assignments=(missing,)),
             resolver=resolver,
             authority_inputs=_AUTHORITY["inputs"],
-            structured_output_configs={"AppGenerator": config},
         )
 
 
@@ -206,7 +204,6 @@ def test_source_and_unit_dependency_refs_are_exact_and_same_plan() -> None:
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
         authority_inputs=_AUTHORITY["inputs"],
-        structured_output_configs={"AppGenerator": config},
     ).ordered_assignments[0]
     assert {ref.unit_id for ref in compiled.depends_on_unit_refs} == set(
         unit.depends_on_units
@@ -220,7 +217,6 @@ def test_source_and_unit_dependency_refs_are_exact_and_same_plan() -> None:
             ApprovedPlan(assignments=(missing,)),
             resolver=resolver,
             authority_inputs=_AUTHORITY["inputs"],
-            structured_output_configs={"AppGenerator": config},
         )
 
     foreign_plan_ref = plan_ref.model_copy(update={"subject_id": "foreign_graph"})
@@ -239,7 +235,6 @@ def test_source_and_unit_dependency_refs_are_exact_and_same_plan() -> None:
             ApprovedPlan(assignments=(foreign,)),
             resolver=resolver,
             authority_inputs=_AUTHORITY["inputs"],
-            structured_output_configs={"AppGenerator": config},
         )
 
 
@@ -263,7 +258,6 @@ def test_extra_semantic_source_ref_fails_exact_closure() -> None:
             ApprovedPlan(assignments=(extra,)),
             resolver=resolver,
             authority_inputs=_AUTHORITY["inputs"],
-            structured_output_configs={"AppGenerator": config},
         )
 
 
@@ -289,7 +283,6 @@ def test_stale_structured_output_schema_digest_fails() -> None:
             ApprovedPlan(assignments=(tampered,)),
             resolver=resolver,
             authority_inputs=_AUTHORITY["inputs"],
-            structured_output_configs={"AppGenerator": config},
         )
 
 
@@ -315,7 +308,6 @@ def _compile(config, resolver, spec):
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
         authority_inputs=_AUTHORITY["inputs"],
-        structured_output_configs={"AppGenerator": config},
     )
 
 

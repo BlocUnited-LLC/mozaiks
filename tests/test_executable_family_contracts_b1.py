@@ -131,9 +131,9 @@ def test_compiler_assignment_vocabulary_and_locator_are_exhaustive() -> None:
         ref = build_structured_output_contract_ref(
             workflow_name=descriptor.workflow_name,
             model_id=descriptor.structured_output_model_id,
-            configs=CONFIGS,
+            exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs=CONFIGS,
         )
-        assert resolve_structured_output_contract_ref(ref, configs=CONFIGS)
+        assert resolve_structured_output_contract_ref(ref, exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs=CONFIGS)
 
 
 def test_exact_output_models_reject_unknown_fields_and_arbitrary_paths() -> None:
@@ -143,9 +143,9 @@ def test_exact_output_models_reject_unknown_fields_and_arbitrary_paths() -> None
     ref = build_structured_output_contract_ref(
         workflow_name=descriptor.workflow_name,
         model_id=descriptor.structured_output_model_id,
-        configs=CONFIGS,
+        exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs=CONFIGS,
     )
-    model = resolve_structured_output_contract_ref(ref, configs=CONFIGS)
+    model = resolve_structured_output_contract_ref(ref, exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), configs=CONFIGS)
     valid = {
         "assignment_kind": "module_helper_implementation",
         "module_id": "reports",
@@ -170,7 +170,6 @@ def test_artifact_result_rejects_semantic_identity_substitution() -> None:
         ApprovedPlan(assignments=(spec,)),
         resolver=resolver,
         authority_inputs=_AUTHORITY["inputs"],
-        structured_output_configs={"AppGenerator": config},
     ).ordered_assignments[0]
     assert dict(assignment.semantic_identity_bindings) == {
         "module_id": "reports",
@@ -188,7 +187,7 @@ def test_artifact_result_rejects_semantic_identity_substitution() -> None:
             artifacts={
                 assignment.owned_paths[0]: "def report_hook():\n    return None\n"
             },
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(item.structured_output_model_id for item in ASSIGNMENT_CONTRACT_DESCRIPTORS.values()), structured_output_configs={"AppGenerator": config},
             validator_runner=lambda _validator, _files: True,
         )
 

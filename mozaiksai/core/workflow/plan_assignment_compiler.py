@@ -7,7 +7,6 @@ touch persistence, or participate in production AppBuildPlan flows.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -21,7 +20,7 @@ from mozaiksai.core.semantics.plan_authority import (
 from mozaiksai.core.semantics.refs import PlanUnitRef, SemanticPayloadRef
 from mozaiksai.core.semantics.resolver import SemanticReferenceResolver
 
-from .assignment_kinds import AssignmentKind, assignment_contract_descriptor
+from .assignment_kinds import AssignmentKind, descriptors_from_snapshot
 from .structured_output_contracts import (
     StructuredOutputContractRef,
     resolve_structured_output_contract_ref,
@@ -141,7 +140,6 @@ def compile_approved_plan(
     *,
     resolver: SemanticReferenceResolver,
     authority_inputs: CompilationPlanAuthorityInputs,
-    structured_output_configs: Mapping[str, Any],
 ) -> CompiledAssignmentSet:
     """Cold-resolve and compile approved units without execution side effects.
 
@@ -161,8 +159,11 @@ def compile_approved_plan(
     resolved_plan = resolver.resolve(plan_ref, requesting_scope=scope)
     if not isinstance(resolved_plan, CompilationPlan):
         raise ValueError("compilation plan ref did not resolve to a canonical plan")
+    verified_inputs = CompilationPlanAuthorityInputs.model_validate(
+        authority_inputs.model_dump(mode="json")
+    )
     canonical_plan = validate_compilation_plan_against_authority(
-        resolved_plan, authority_inputs
+        resolved_plan, verified_inputs
     )
     if canonical_plan.plan_digest != plan_ref.content_digest:
         raise ValueError(
@@ -170,6 +171,15 @@ def compile_approved_plan(
         )
     plan_order = {unit.unit_id: index for index, unit in enumerate(canonical_plan.units)}
     canonical_units = {unit.unit_id: unit for unit in canonical_plan.units}
+    structured_output_configs = (
+        verified_inputs.structured_output_configs.to_python()
+        if verified_inputs.structured_output_configs is not None
+        else {}
+    )
+    descriptors = descriptors_from_snapshot(verified_inputs.assignment_contract_registry)
+    exact_model_ids = frozenset(
+        descriptor.structured_output_model_id for descriptor in descriptors.values()
+    )
     for spec in plan.assignments:
         unit = canonical_units.get(spec.plan_unit_ref.unit_id)
         if unit is None:
@@ -217,9 +227,11 @@ def compile_approved_plan(
                 )
 
         resolve_structured_output_contract_ref(
-            spec.required_structured_output_ref, configs=structured_output_configs
+            spec.required_structured_output_ref,
+            configs=structured_output_configs,
+            exact_model_ids=exact_model_ids,
         )
-        descriptor = assignment_contract_descriptor(spec.assignment_kind)
+        descriptor = descriptors.get(spec.assignment_kind)
         if descriptor is None:
             raise ValueError("assignment kind has no executable output contract")
         unit_bindings = dict(unit.placeholder_values)

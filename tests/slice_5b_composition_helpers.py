@@ -2,7 +2,7 @@
 
 Every plan here is produced by the one canonical ``derive_compilation_plan``
 implementation and validates against its exact immutable
-``CompilationPlanAuthorityInputs`` — no synthetic ``model_construct`` plans,
+``CompilationPlanAuthorityInputs`` â€” no synthetic ``model_construct`` plans,
 no re-dispositioned units, no fabricated ``preserve_unowned`` content. The
 layout registry is a reduced but internally consistent authority (page schema,
 the four renderer-ready application families, and the module backend-helper
@@ -165,7 +165,7 @@ def _bundle_for(plan, graph, payloads, _authority_inputs) -> MaterializedBundle:
     ``materialize_plan`` has no execution path for AGENT_AUTHOR units (their
     bytes arrive as validated assignment results at composition), so the
     bundle for an agent-bearing plan is assembled from the fully gated render
-    of the same canonical plan restricted to its composable render outputs —
+    of the same canonical plan restricted to its composable render outputs â€”
     which is exactly what materialization itself produces for those units.
     """
     from mozaiksai.core.semantics.materialization import (
@@ -337,7 +337,6 @@ def _build_derived_products() -> dict[str, object]:
         ),
         resolver=resolver,
         authority_inputs=successor_authority,
-        structured_output_configs=configs,
     )
     helper_source = "def report_hook():\n    return None\n"
     helper_path = agent.outputs[0].path.replace("{module_id}", "reports").replace(
@@ -352,7 +351,7 @@ def _build_derived_products() -> dict[str, object]:
             "helper_source": helper_source,
         },
         artifacts={helper_path: helper_source},
-        structured_output_configs=configs,
+        exact_model_ids=frozenset(row.structured_output_model_id for row in successor_authority.assignment_contract_registry.descriptors), structured_output_configs=configs,
         validator_runner=lambda _validator, files: bool(files),
     )
 
@@ -404,7 +403,7 @@ def _build_derived_products() -> dict[str, object]:
 
 def refinement_execution(fixture, base_revision_digest: str):
     """Recompile the agent assignment and its result pinned to a base
-    revision digest — the canonical way to enter refinement composition."""
+    revision digest â€” the canonical way to enter refinement composition."""
     plan = fixture["successor"]
     resolver = fixture["resolver"]
     configs = fixture["configs"]
@@ -453,7 +452,6 @@ def refinement_execution(fixture, base_revision_digest: str):
         ),
         resolver=resolver,
         authority_inputs=fixture["authority_inputs"],
-        structured_output_configs=configs,
     )
     helper_source = "def report_hook():" + chr(10) + "    return None" + chr(10)
     helper_path = agent.outputs[0].path.replace(
@@ -468,7 +466,7 @@ def refinement_execution(fixture, base_revision_digest: str):
             "helper_source": helper_source,
         },
         artifacts={helper_path: helper_source},
-        structured_output_configs=configs,
+        exact_model_ids=frozenset(row.structured_output_model_id for row in fixture["authority_inputs"].assignment_contract_registry.descriptors), structured_output_configs=configs,
         validator_runner=lambda _validator, files: bool(files),
     )
     return assignments, result

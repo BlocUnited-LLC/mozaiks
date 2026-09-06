@@ -28,6 +28,7 @@ def resolve_assignment_admission(
     assignment: CompiledAssignment,
     *,
     structured_output_configs: Mapping[str, Any],
+    exact_model_ids: frozenset[str],
     workflow_agent_configs: Mapping[str, Any],
 ) -> ResolvedAssignmentAdmission:
     """Resolve exactly one Factory participant without creating runtime identity."""
@@ -37,7 +38,7 @@ def resolve_assignment_admission(
     )
     contract_ref = verified_assignment.required_structured_output_ref
     resolve_structured_output_contract_ref(
-        contract_ref, configs=structured_output_configs
+        contract_ref, configs=structured_output_configs, exact_model_ids=exact_model_ids
     )
 
     raw_structured = structured_output_configs.get(contract_ref.workflow_name)

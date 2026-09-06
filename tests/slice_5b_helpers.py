@@ -52,7 +52,7 @@ def compiled_assignment(
     ref = build_structured_output_contract_ref(
         workflow_name="AppGenerator",
         model_id="ArtifactOutput",
-        configs={"AppGenerator": config},
+        exact_model_ids=frozenset(), configs={"AppGenerator": config},
     )
     scope = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="workspace")
     plan_ref = CompilationPlanRef(

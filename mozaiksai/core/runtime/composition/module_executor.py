@@ -158,13 +158,14 @@ def _normalize_nullable_schema(schema: Any) -> Any:
     return normalize_nullable_schema(schema)
 
 
-def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
+def _validate_schema(value: Any, schema: dict[str, Any] | bool | None) -> str | None:
     """Validate *value* against a JSON Schema dict.
 
     Returns None on success or a short error string on failure.
-    Empty or non-dict schemas are skipped (returns None).
+    ``None`` means no schema was supplied. Every explicit schema is checked,
+    including the universal empty object and boolean Draft 7 schemas.
     """
-    if not schema or not isinstance(schema, dict):
+    if schema is None:
         return None
     diagnostic = validate_json_schema(value, schema)
     return diagnostic.message if diagnostic is not None else None
@@ -442,7 +443,7 @@ class ModuleExecutor:
         schemas = self._action_schemas.get(request.module, {}).get(request.action, {})
         input_schema = schemas.get("input") if schemas else None
         output_schema = schemas.get("output") if schemas else None
-        if input_schema:
+        if input_schema is not None:
             input_error = _validate_schema(request.params, input_schema)
             if input_error:
                 logger.warning(
@@ -603,14 +604,26 @@ class ModuleExecutor:
                 error_code="MODULE_RESULT_NOT_JSON_SAFE",
             )
 
-        # Output schema validation — warn only; don't fail the caller on a
-        # module contract bug. Validates the exact transport shape.
-        if output_schema and result is not None:
-            out_error = _validate_schema(result, output_schema)
-            if out_error:
+        # Output value violations retain the existing warning policy. A schema
+        # that cannot be checked or evaluated cannot establish success.
+        if output_schema is not None:
+            output_diagnostic = validate_json_schema(result, output_schema)
+            if output_diagnostic is not None:
                 logger.warning(
                     "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
-                    request.module, request.action, out_error)
+                    request.module, request.action, output_diagnostic.message)
+                if output_diagnostic.category == "schema_invalid":
+                    asyncio.create_task(
+                        self._emit_dispatch_audit(
+                            replace(dispatch_audit, outcome="failed", reason="INVALID_OUTPUT_SCHEMA"),
+                            error="INVALID_OUTPUT_SCHEMA",
+                        )
+                    )
+                    return ModuleResult(
+                        success=False,
+                        error=f"Output schema validation failed for {request.module}.{request.action}: {output_diagnostic.message}",
+                        error_code="INVALID_OUTPUT_SCHEMA",
+                    )
 
         # Response size gate — the exact wire render. These dump options are
         # byte-for-byte what starlette.responses.JSONResponse.render() emits
@@ -759,7 +772,7 @@ class ModuleExecutor:
                     diagnostic=diagnostic,
                 )
             payload_schema = self._event_payload_schemas.get(request.module, {}).get(event_type_text)
-            if payload_schema:
+            if payload_schema is not None:
                 validation_diagnostic = validate_json_schema(payload, payload_schema)
                 if validation_diagnostic is not None:
                     raise ModuleEventPayloadValidationError(

@@ -24,7 +24,7 @@ def _build(*, paths: tuple[str, ...] = ("data/contract.json",)):
         assignment=assignment,
         structured_output={"message": "complete"},
         artifacts=artifacts,
-        structured_output_configs={"AppGenerator": config},
+        exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
         validator_runner=lambda _validator, _files: True,
     )
     return assignment, config, result
@@ -37,14 +37,14 @@ def test_artifact_result_is_closed_content_bound_and_order_independent() -> None
         assignment=assignment,
         structured_output={"message": "complete"},
         artifacts={paths[0]: "service\n", paths[1]: "handler\n"},
-        structured_output_configs={"AppGenerator": config},
+        exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
         validator_runner=lambda _validator, _files: True,
     )
     second = build_assignment_artifact_result(
         assignment=assignment,
         structured_output={"message": "complete"},
         artifacts={paths[1]: "handler\n", paths[0]: "service\n"},
-        structured_output_configs={"AppGenerator": config},
+        exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
         validator_runner=lambda _validator, _files: True,
     )
     assert first == second
@@ -82,7 +82,7 @@ def test_missing_extra_case_and_parent_child_artifacts_fail(
             assignment=assignment,
             structured_output={"message": "complete"},
             artifacts=artifacts,
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
             validator_runner=lambda _validator, _files: True,
         )
 
@@ -94,7 +94,7 @@ def test_malformed_output_and_failed_validator_never_create_result() -> None:
             assignment=assignment,
             structured_output={"message": {"channel": "runtime"}},
             artifacts={"data/contract.json": "{}\n"},
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
             validator_runner=lambda _validator, _files: True,
         )
     with pytest.raises(ValueError, match="failed"):
@@ -102,7 +102,7 @@ def test_malformed_output_and_failed_validator_never_create_result() -> None:
             assignment=assignment,
             structured_output={"message": "complete"},
             artifacts={"data/contract.json": "{}\n"},
-            structured_output_configs={"AppGenerator": config},
+            exact_model_ids=frozenset(), structured_output_configs={"AppGenerator": config},
             validator_runner=lambda _validator, _files: False,
         )
 
