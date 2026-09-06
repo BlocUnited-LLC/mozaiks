@@ -1,3 +1,4 @@
+schema_version: mozaiks.structured_outputs.v1
 # ExistingAppDiscovery Structured Outputs
 #
 # Only DiscoveryArtifactAssemblerAgent produces structured output.

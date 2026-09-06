@@ -18,7 +18,7 @@ class _Context:
 def _write_orchestrator(workflow_dir: Path) -> None:
     workflow_dir.mkdir(parents=True, exist_ok=True)
     (workflow_dir / "orchestrator.yaml").write_text(
-        f"workflow_name: {workflow_dir.name}\nworkflow_startup_mode: BackendOnly\n",
+        f"schema_version: mozaiks.orchestrator.v1\nworkflow_name: {workflow_dir.name}\nworkflow_startup_mode: BackendOnly\n",
         encoding="utf-8",
     )
 

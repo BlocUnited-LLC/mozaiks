@@ -247,6 +247,7 @@ def test_platform_host_indexes_workflow_capability_routes(tmp_path):
     workflow_dir.mkdir(parents=True)
     workflow_dir.joinpath("orchestrator.yaml").write_text(
         """
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ReviewWorkflow
 workflow_startup_mode: BackendOnly
 triggers:

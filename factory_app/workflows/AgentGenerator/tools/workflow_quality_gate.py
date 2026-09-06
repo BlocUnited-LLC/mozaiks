@@ -280,6 +280,10 @@ def validate_workflow_bundle_structure(
     bundle_entries: list[dict[str, Any]],
     expected_workflows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from mozaiksai.core.workflow.declarative.contracts import (
+        parse_orchestrator_config,
+        parse_structured_outputs_config,
+    )
     from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
     from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 
@@ -309,6 +313,15 @@ def validate_workflow_bundle_structure(
 
         payloads, yaml_errors = _yaml_payloads_from_files(files)
         report["errors"].extend(yaml_errors)
+
+        for filename, parser in (
+            ("orchestrator.yaml", parse_orchestrator_config),
+            ("structured_outputs.yaml", parse_structured_outputs_config),
+        ):
+            try:
+                parser(payloads.get(filename, {}))
+            except ValueError as exc:
+                report["errors"].append(str(exc))
 
         orchestrator = payloads.get("orchestrator.yaml")
         if isinstance(orchestrator, dict):

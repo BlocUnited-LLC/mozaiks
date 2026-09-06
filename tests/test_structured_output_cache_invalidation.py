@@ -37,7 +37,7 @@ def _write_workflow(
     workflow_dir = root / workflow_name
     workflow_dir.mkdir(parents=True, exist_ok=True)
     (workflow_dir / "orchestrator.yaml").write_text(
-        f"workflow_name: {workflow_name}\n"
+        f"schema_version: mozaiks.orchestrator.v1\nworkflow_name: {workflow_name}\n"
         "workflow_startup_mode: BackendOnly\n"
         "initial_agent: ProbeAgent\n"
         "max_turns: 1\n",
@@ -55,7 +55,7 @@ def _write_workflow(
         "    type: model\n"
         "    fields:\n"
         f"      {field_name}: {{ type: str }}\n"
-        "registry:\n"
+        "schema_version: mozaiks.structured_outputs.v1\nregistry:\n"
         f"  {registry_agent}: ProbeOutput\n",
         encoding="utf-8",
     )
@@ -340,6 +340,7 @@ def test_loader_failure_writes_no_partial_cache(isolated_manager, monkeypatch):
     # compilation but before any cache write.
     bad_config = {
         "structured_outputs": {
+            "schema_version": "mozaiks.structured_outputs.v1",
             "models": {
                 "ProbeOutput": {"type": "model", "fields": {"field_a": {"type": "str"}}}
             },

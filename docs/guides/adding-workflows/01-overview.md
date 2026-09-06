@@ -67,6 +67,7 @@ them as contract references, not as full workflow examples.
 === "orchestrator.yaml"
 
     ```yaml
+    schema_version: mozaiks.orchestrator.v1
     workflow_name: IntakeWorkflow
     max_turns: 20
     human_in_the_loop: true
@@ -109,6 +110,7 @@ them as contract references, not as full workflow examples.
 === "structured_outputs.yaml"
 
     ```yaml
+    schema_version: mozaiks.structured_outputs.v1
     registry:
       IntakeAgent: null
       GeneratorAgent: BuildPlan

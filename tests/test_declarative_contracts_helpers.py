@@ -211,6 +211,7 @@ class TestOrchestratorTriggerSpecValidate:
 class TestOrchestratorConfigMaxTurns:
     def _valid_config(self, **kwargs):
         defaults = {
+            "schema_version": "mozaiks.orchestrator.v1",
             "workflow_name": "TestWorkflow",
             "workflow_startup_mode": "UserDriven",
         }
@@ -245,15 +246,20 @@ class TestOrchestratorConfigMaxTurns:
 class TestOrchestratorConfigRequiredText:
     def test_empty_workflow_name_raises(self):
         with pytest.raises(ValidationError):
-            OrchestratorConfig(workflow_name="", workflow_startup_mode="UserDriven")
+            OrchestratorConfig(
+                schema_version="mozaiks.orchestrator.v1", workflow_name="", workflow_startup_mode="UserDriven",
+            )
 
     def test_whitespace_workflow_name_raises(self):
         with pytest.raises(ValidationError):
-            OrchestratorConfig(workflow_name="   ", workflow_startup_mode="UserDriven")
+            OrchestratorConfig(
+                schema_version="mozaiks.orchestrator.v1", workflow_name="   ", workflow_startup_mode="UserDriven",
+            )
 
     def test_empty_orchestration_pattern_raises(self):
         with pytest.raises(ValidationError):
             OrchestratorConfig(
+                schema_version="mozaiks.orchestrator.v1",
                 workflow_name="TestWorkflow",
                 workflow_startup_mode="UserDriven",
                 orchestration_pattern="",

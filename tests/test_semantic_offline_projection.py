@@ -339,7 +339,8 @@ def _corpus_source() -> dict:
                 "files": [
                     {
                         "filename": "orchestrator.yaml",
-                        "content": """workflow_name: report_builder
+                        "content": """schema_version: mozaiks.orchestrator.v1
+workflow_name: report_builder
 max_turns: 4
 human_in_the_loop: false
 workflow_startup_mode: BackendOnly
@@ -437,6 +438,45 @@ def test_archetype_corpus_projects_complete_relationship_spine() -> None:
     } <= edge_kinds
     assert result.source_facts == result.represented_facts
     assert extract_semantic_facts(result.graph) == result.represented_facts
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_kind"),
+    [
+        ("missing", ProjectionGapKind.MISSING),
+        (None, ProjectionGapKind.UNSUPPORTED),
+        ("mozaiks.orchestrator.v2", ProjectionGapKind.UNSUPPORTED),
+        (" mozaiks.orchestrator.v1 ", ProjectionGapKind.UNSUPPORTED),
+    ],
+)
+def test_workflow_projection_requires_the_exact_document_version(mutation, expected_kind) -> None:
+    source = _corpus_source()
+    file = source["agent_workflows"][0]["files"][0]
+    document = yaml.safe_load(file["content"])
+    if mutation == "missing":
+        del document["schema_version"]
+    else:
+        document["schema_version"] = mutation
+    file["content"] = yaml.safe_dump(document, sort_keys=False)
+    before = copy.deepcopy(source)
+    with pytest.raises(ProjectionError, match="schema_version") as failure:
+        _project(source)
+    assert failure.value.gaps[0].kind is expected_kind
+    assert failure.value.gaps[0].source_path == "agent_workflows[0].files[0].content"
+    assert source == before
+
+
+def test_workflow_document_version_is_metadata_without_semantic_payload_fields() -> None:
+    source = _corpus_source()
+    first = _project(source)
+    file = source["agent_workflows"][0]["files"][0]
+    document = yaml.safe_load(file["content"])
+    file["content"] = yaml.safe_dump(dict(reversed(tuple(document.items()))), sort_keys=False)
+    second = _project(source)
+    assert first.graph == second.graph
+    assert first.payloads == second.payloads
+    workflow = _payload_for(first, SemanticNodeKind.WORKFLOW, "report_builder")
+    assert "mozaiks.orchestrator.v1" not in workflow.model_dump_json()
 
 
 def test_independent_source_expectations_equal_every_graph_fact() -> None:
@@ -764,7 +804,8 @@ def test_current_runtime_models_and_agentgenerator_bundle_shape_project() -> Non
         "files": [
             {
                 "filename": "orchestrator.yaml",
-                "content": """workflow_name: report_builder
+                "content": """schema_version: mozaiks.orchestrator.v1
+workflow_name: report_builder
 max_turns: 4
 human_in_the_loop: false
 workflow_startup_mode: BackendOnly

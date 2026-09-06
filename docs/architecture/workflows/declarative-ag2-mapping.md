@@ -165,6 +165,7 @@ Used for:
 Canonical shape:
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 registry:
   AgentName: ModelName
 models:

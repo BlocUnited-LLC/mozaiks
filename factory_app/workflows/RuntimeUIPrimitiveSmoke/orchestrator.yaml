@@ -1,3 +1,4 @@
+schema_version: mozaiks.orchestrator.v1
 workflow_name: RuntimeUIPrimitiveSmoke
 max_turns: 10
 human_in_the_loop: true

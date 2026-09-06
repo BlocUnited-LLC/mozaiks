@@ -1,0 +1,483 @@
+{
+  "base_commit": "5ff00cb1c040d694632e2ec530678c4e9571dc0d",
+  "base_tree": "dd750e01833fb127061d085fc2f718a081d8266c",
+  "documents": [
+    {
+      "path": "examples/canonical-apps/research-ops/workflows/ResearchWorkflow/orchestrator.yaml",
+      "source_bytes_fingerprint": "e680d072da3a364a73036fa61ea0a4f84a76ab3cd55bb5d91e8232802c8ba73c",
+      "source_document_fingerprint": "d14bf545c06a19e1b67d0ee1714257fd33931771c0af5aef2ff697961d15ecd7",
+      "parser_document_fingerprint": "523fde87cd4d47f19291290b45e42e624afa826e6f5b93d623ae6d32c2465686"
+    },
+    {
+      "path": "examples/canonical-apps/research-ops/workflows/ResearchWorkflow/structured_outputs.yaml",
+      "source_bytes_fingerprint": "ad3be434f888c91d7fdfcbe9a8fce8ad11c9d0ee3534605fed0e05f890b929fc",
+      "source_document_fingerprint": "d2f182710ab730e0ee350232ec02e21eb418f50358a2271f0df93cccd7205a6d",
+      "parser_document_fingerprint": "d2f182710ab730e0ee350232ec02e21eb418f50358a2271f0df93cccd7205a6d"
+    },
+    {
+      "path": "factory_app/workflows/AgentGenerator/orchestrator.yaml",
+      "source_bytes_fingerprint": "e0e8b199db082f67abd915bb65f4b4b1759cc702f1cb843adccda24a74a5a903",
+      "source_document_fingerprint": "77f809921d5555302baab72be4d50f5c81ef8c0f8b3f8040d595ac0748dd1d47",
+      "parser_document_fingerprint": "2818d9b94f8ff02f375e2378baf8948c6d2a7371b391a200a992a55af0fed145"
+    },
+    {
+      "path": "factory_app/workflows/AgentGenerator/structured_outputs.yaml",
+      "source_bytes_fingerprint": "1812a3415ca2632d9dfc83c792111488b2ec22e60268a18e7a137051e91e9c3d",
+      "source_document_fingerprint": "2e067eae84b6a93abbb1aa6ca341d2623eaabb0cc564eba4e097671f8a1e5a0d",
+      "parser_document_fingerprint": "4eb8665ffe57d75ca02378735f64239298073659ddc91dce74eacf956b328865"
+    },
+    {
+      "path": "factory_app/workflows/AppGenerator/orchestrator.yaml",
+      "source_bytes_fingerprint": "dd0f2e6000c3bcbbc2bd5ba09d3414c924ace95c974f7f4d48c37ac334b8289c",
+      "source_document_fingerprint": "8ba3da45acacf6535b25bdddb8503530ba4756ec92351faee069754cc5bf266d",
+      "parser_document_fingerprint": "672f2827e531aa4aeeedce8bca750a03f313734b78db6ed018efee20789e8145"
+    },
+    {
+      "path": "factory_app/workflows/AppGenerator/structured_outputs.yaml",
+      "source_bytes_fingerprint": "9efc3b6c3afc2b84611ec9e0215fe74b940d006f840ebfefebf285112c550729",
+      "source_document_fingerprint": "15bb220ae89cff18010ad913aa83163b43c008b0e11c1cf743f126a6b1837cd0",
+      "parser_document_fingerprint": "32d3e5cfebba7ae811128e63a272ac146e8798c5396651b443b06e153ad54383"
+    },
+    {
+      "path": "factory_app/workflows/AppReview/orchestrator.yaml",
+      "source_bytes_fingerprint": "18dbf36f12de21f71c83e8e6d934edb3624f689ffda7297b23f4c4347e1677ad",
+      "source_document_fingerprint": "23f3e3ff4d21d0c2ce62d7e25b076e542e4b6a9b555ab21a5ef648b441c56418",
+      "parser_document_fingerprint": "24242f295468556fe7bc99601299e3bf24b2ab7d05e9f5213a48547bafc87a15"
+    },
+    {
+      "path": "factory_app/workflows/AppReview/structured_outputs.yaml",
+      "source_bytes_fingerprint": "8e458edd5fb20c099052bfcbbd2ea25ede6b84edeea4c4b79164287cb63303b5",
+      "source_document_fingerprint": "6480e0083e8246c82034a124167de79de3c0f5a65a894795484707b0c9a0cb17",
+      "parser_document_fingerprint": "6480e0083e8246c82034a124167de79de3c0f5a65a894795484707b0c9a0cb17"
+    },
+    {
+      "path": "factory_app/workflows/BrandAssetGeneratorWorkflow/orchestrator.yaml",
+      "source_bytes_fingerprint": "a932cf2a62d43e9a83764dc374ab4eaa4929f6dbc02b13b682fef6a33c74850a",
+      "source_document_fingerprint": "22472122cb970db7e6b4767f0b755db4a4ee60912ff2387df05262d0e9c9f317",
+      "parser_document_fingerprint": "c19666878d1222b14d41058ba8feb047a93c986f3ca084f3a1a0fe2588fda3df"
+    },
+    {
+      "path": "factory_app/workflows/BrandAssetGeneratorWorkflow/structured_outputs.yaml",
+      "source_bytes_fingerprint": "651f7ec29822adbd9c3cd02f250d84e8b6df3fc0f7d88081ce8aea682b9bd528",
+      "source_document_fingerprint": "953acda1b1433672ac42c6b18353cfe75f688a143f08e004ad835e7796c6707e",
+      "parser_document_fingerprint": "953acda1b1433672ac42c6b18353cfe75f688a143f08e004ad835e7796c6707e"
+    },
+    {
+      "path": "factory_app/workflows/DesignDocs/orchestrator.yaml",
+      "source_bytes_fingerprint": "a7f58022e1d50e9fd7e9b8aecad096de8e81b35f00a045c356f9c96a7ec08f27",
+      "source_document_fingerprint": "5409c8f3548e95fd5120b11ae3ecb88c5b84f0445ebf1e847e87d8a85851e56a",
+      "parser_document_fingerprint": "0175313d8e3818475c8271717df242ee2702af5179070ba9a56ac16922989e99"
+    },
+    {
+      "path": "factory_app/workflows/DesignDocs/structured_outputs.yaml",
+      "source_bytes_fingerprint": "9a5114888b068fbcdef0d28409b2fcc28cedd9f1689869858edb0828195ae506",
+      "source_document_fingerprint": "f026bfd106b0d6ba946669743f2d9851a3b0e3fc7e38be50324be75beb1b1f94",
+      "parser_document_fingerprint": "b0f6798f6aaf7cae91c97a5334bee0118ec9863037aa06561a36f4b8c478e227"
+    },
+    {
+      "path": "factory_app/workflows/ExistingAppDiscovery/orchestrator.yaml",
+      "source_bytes_fingerprint": "45fbff99742555823df71a91b0f9c25ae7c3aa1ef45801833c423ff902e4aabc",
+      "source_document_fingerprint": "d67a9bf8c1635f2df3f36697281f6f6c7e0928eeeb117dcfb9f4b2ad96591386",
+      "parser_document_fingerprint": "1f297613bfb3f12fed1bdad4a82be8d9faa4c939f6f3bfcedcbf655aab895b47"
+    },
+    {
+      "path": "factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml",
+      "source_bytes_fingerprint": "ee1663aaac67ac961dbf9555581a6e38792625ab98f59be31afeeecd7dbbc05f",
+      "source_document_fingerprint": "bec70b3c12d2c140b08220966892a1e87de40a1e97eb706c1ae6e4bbd592b987",
+      "parser_document_fingerprint": "683c40bb8b8bb7b4a11dbcbcbe75f4de270290bac799dd7a9879f81b1b3a6c06"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeContextExpressionTaskBatchSmoke/orchestrator.yaml",
+      "source_bytes_fingerprint": "362ebf50bb7db50dda46b3bc22a8238f90e5fddb50c0d2e17f813a7091bef9c6",
+      "source_document_fingerprint": "5358b572c3480350fb7a802a6e6af649c143e7f548cee68d6b462476a771cf0e",
+      "parser_document_fingerprint": "eacbb04814b71a7d0eec9d922d5f4d7d83d83995b8330309243f36a4ff67054f"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeContextExpressionTaskBatchSmoke/structured_outputs.yaml",
+      "source_bytes_fingerprint": "0a6bcbb0b8443e8fbcb4afa9f4ae75ce7028d82796698a2691afb96ccbb4834f",
+      "source_document_fingerprint": "0e679040565aa060824654481ab99f241637226586d389c0dca51b221cf7540e",
+      "parser_document_fingerprint": "0e679040565aa060824654481ab99f241637226586d389c0dca51b221cf7540e"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeSmoke/orchestrator.yaml",
+      "source_bytes_fingerprint": "2342ea72f054d3739ec8ced145fd2822ee222b750f43f7113e42376bb9358408",
+      "source_document_fingerprint": "8782302ad28cb48b7d067e0627d1262f2676f33287d41795dc670ae5350bd408",
+      "parser_document_fingerprint": "c8a891c7f45f843f9a387c478c9221e94d2759c9cf4d0e00f7ffa759a05a403a"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeSmoke/structured_outputs.yaml",
+      "source_bytes_fingerprint": "ae2819dc6738a3b87494d2fdcb270a9a1b446fc2966a63433527ef06d3fb2e97",
+      "source_document_fingerprint": "1359db60ba0b06d073cc2f919af153a50305a35e4878586be5bd3ab65c69dee8",
+      "parser_document_fingerprint": "1359db60ba0b06d073cc2f919af153a50305a35e4878586be5bd3ab65c69dee8"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeTaskBatchSmoke/orchestrator.yaml",
+      "source_bytes_fingerprint": "559998f31a1b6fca35538b02105b0b83c0c5dc355a27e3dae34131234065511a",
+      "source_document_fingerprint": "84bfe5ce26c7a22fd5bbfde98f2d964601363a842d2389f60975fdec4219f435",
+      "parser_document_fingerprint": "a2dc4f0a4897199dcd871678f7f9d6ae7e57d124d99e952df20bf6856005ed1b"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeTaskBatchSmoke/structured_outputs.yaml",
+      "source_bytes_fingerprint": "4da57414dc17f46066cdb2f302654b8da7b0f46ca5f79c5f7720d17fd6a99d85",
+      "source_document_fingerprint": "943e2f02e6b07229ae7b014b5480962d5485e7be3ff0d0f9e21154b2fdb1ac65",
+      "parser_document_fingerprint": "943e2f02e6b07229ae7b014b5480962d5485e7be3ff0d0f9e21154b2fdb1ac65"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeToolCallSmoke/orchestrator.yaml",
+      "source_bytes_fingerprint": "9dceee38668ff2302ea9e5cd3ba16f5b80d9e361f38dbb0c8750405d7f68d036",
+      "source_document_fingerprint": "ff92f0990cff07b9503f7c977bc1c6ecba548865b640eec9df5177082718d1c5",
+      "parser_document_fingerprint": "778af8063d2372258598f2d6072a56afd045f522593b7b9b547eeebe48475fe1"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeToolCallSmoke/structured_outputs.yaml",
+      "source_bytes_fingerprint": "7b994c4379476f22fabcdb91fa36f9ff8c99c501982edf4a9063eba5b3705461",
+      "source_document_fingerprint": "66a56852fdfab30476b92d035c0487e53834c5aee1996f56170a17fcf9dcc963",
+      "parser_document_fingerprint": "66a56852fdfab30476b92d035c0487e53834c5aee1996f56170a17fcf9dcc963"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeUIPrimitiveSmoke/orchestrator.yaml",
+      "source_bytes_fingerprint": "8136c5a514ab1a515e27465de75bb0bd8ee88c73d4d730621fb8a085300fd18d",
+      "source_document_fingerprint": "8aa505430f2904dc41b845a173cce8fe50a5ebbc7d391c8db1dcdd61845fbd63",
+      "parser_document_fingerprint": "4f3102c1d4a1006c3cbb8e5c1e0d819dba503e9346415d9360e44ae9a497510e"
+    },
+    {
+      "path": "factory_app/workflows/RuntimeUIPrimitiveSmoke/structured_outputs.yaml",
+      "source_bytes_fingerprint": "a28cb5b547400a61992a7ac5fb665dec556f7899648ae11acdb82c98f5638de4",
+      "source_document_fingerprint": "0d3382c785c380fc3d490040511eb6b99711746008a5ec085aa91d2331037687",
+      "parser_document_fingerprint": "0d3382c785c380fc3d490040511eb6b99711746008a5ec085aa91d2331037687"
+    },
+    {
+      "path": "factory_app/workflows/SubscriptionContractDesigner/orchestrator.yaml",
+      "source_bytes_fingerprint": "071aab0449739eb55d49fcc71ca7b6ccc4ba8d1a36f091e43841f7fb6f2d4e56",
+      "source_document_fingerprint": "a9bbc609cc94c9119cb88f449f78975f080ff1ef294afa25a8931324d3eaf8b1",
+      "parser_document_fingerprint": "7e52b2b617333be946518b6da30d32771613b61061af3d0437d056c14f71a9f9"
+    },
+    {
+      "path": "factory_app/workflows/SubscriptionContractDesigner/structured_outputs.yaml",
+      "source_bytes_fingerprint": "3c29cd15f2f52829310827075c7bd57b1307b67b0ea79a3635308142dbaa3414",
+      "source_document_fingerprint": "293f27dafd447cf791de0635f3143c86232d12d88d107e2cdca5c341fce97725",
+      "parser_document_fingerprint": "293f27dafd447cf791de0635f3143c86232d12d88d107e2cdca5c341fce97725"
+    },
+    {
+      "path": "factory_app/workflows/ThemeCapture/orchestrator.yaml",
+      "source_bytes_fingerprint": "362025fa1d9bdf29c192e6967ac95c689e4d1ab69eb463514160e1ef5704893b",
+      "source_document_fingerprint": "bba65fe1f9480cd5e8601536a31e30fae668e81283b6a205506942c12e73022c",
+      "parser_document_fingerprint": "ff098d3193dfd7fb8b12d6853d1d1c9c698d01b51fb43696eba65145973c7070"
+    },
+    {
+      "path": "factory_app/workflows/ThemeCapture/structured_outputs.yaml",
+      "source_bytes_fingerprint": "ba31c048b379b9511d6dd5ab34e1463bfa27edc1010a51618bf0a0b2ef38ec53",
+      "source_document_fingerprint": "784d89d900a456c9d9310bc0f55b6cbf283d9d77796c6a6ae64d886f34974099",
+      "parser_document_fingerprint": "784d89d900a456c9d9310bc0f55b6cbf283d9d77796c6a6ae64d886f34974099"
+    },
+    {
+      "path": "factory_app/workflows/ValueEngine/orchestrator.yaml",
+      "source_bytes_fingerprint": "6054dcb9155b065e8540bebb79d52996a7832808f44413fbff9f2842f0ff1aee",
+      "source_document_fingerprint": "db6cb293e1476a2e4742bf67ee1d65170f1517c1f4b582abdab96477b72f8003",
+      "parser_document_fingerprint": "4d2add4ac07cad17009547b65dd558a9d458118c65cf8ac124b5ee346cf49e29"
+    },
+    {
+      "path": "factory_app/workflows/ValueEngine/structured_outputs.yaml",
+      "source_bytes_fingerprint": "2a3a53236ea1c6645cf79634031e8808d4fd98cdad23f137e031d2947b05d2b7",
+      "source_document_fingerprint": "fe59deb41c8b6bf7e1d86b68df4febedce148801477c8385e8480f16faa5158f",
+      "parser_document_fingerprint": "a4d0eba8ff5fc4e6a7bce9d256edbb4c6c5f6a4b1c89cf8bed56e51429644ee7"
+    }
+  ],
+  "corpus": {
+    "unit_count": 61,
+    "plan_digest": "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737",
+    "serialized_plan_fingerprint": "39d2ec041e7ebbea124762100556cbe8ec374019624ff9feb9e8ce4f5b2c3185",
+    "unit_records_fingerprint": "2bfd99dee6f2a0e276ba5681ef2044fbd5440a4590327975b0d03cf5362a82db",
+    "graph_digest": "421b7359cbd42d0f94a1ac9fbb38387240dda7bbea322add2a72027d14cc4810",
+    "payload_fingerprints": [
+      {
+        "node_id": "mozaiks.application.corpus",
+        "payload_digest": "efd1b393d586e3e1178eb8f91c32667f239af7c4683d25b09cfea7ddc0325a8d"
+      },
+      {
+        "node_id": "mozaiks.auth.corpus",
+        "payload_digest": "576fa815f0bb22231bc13c9346a51dc203c4e0cfc8bac59b35e751366f504f0b"
+      },
+      {
+        "node_id": "mozaiks.integration.email",
+        "payload_digest": "0fbb4e83c453062debeea752b6469183224dda7a81332e8437d9fb3736f6f6de"
+      },
+      {
+        "node_id": "mozaiks.surface.web",
+        "payload_digest": "8597949cc2890a65e3872e5855ada8bc7cd7e29a7de053083ff48cf9e6638473"
+      },
+      {
+        "node_id": "mozaiks.page.home",
+        "payload_digest": "ffdee8988260326637b7b116f8b947a8b9fb736d9dcadb93f41f7029a1a0f9a7"
+      },
+      {
+        "node_id": "mozaiks.section.hero",
+        "payload_digest": "f7efd17324dca80bca2bed522cd1d9fd792a134f0a63cc0efec0eb0fd9c86167"
+      },
+      {
+        "node_id": "mozaiks.module.reports",
+        "payload_digest": "46c6cbff815ff6e7c5c69f844a988cbfe7420f58a4adb310a1ef7d14b6439a93"
+      },
+      {
+        "node_id": "mozaiks.action.create_report",
+        "payload_digest": "a49bed2a896c17c1c221bf735c9924f6bf2b4122953cc17ded4cfaa6135717fa"
+      },
+      {
+        "node_id": "mozaiks.capability.reporting",
+        "payload_digest": "2d00bb5fe4bf5ab70e9b682b7c0c0845e5e27c2f6f860c26114537fca3a5f9f9"
+      },
+      {
+        "node_id": "mozaiks.permission.report_admin",
+        "payload_digest": "b311da1fc157485c35a7ec5526dc433dfd728f9a8fecfd6b1c91b66ef716a7c8"
+      },
+      {
+        "node_id": "mozaiks.event.report_created",
+        "payload_digest": "ec1e184183fb430371876e16a2078719b67762a7236840942d63f1dd4298d1c2"
+      },
+      {
+        "node_id": "mozaiks.reaction.notify_owner",
+        "payload_digest": "0f70e1174fc1920e8132f8e07585ca2a7fc3cbe09fb8266c5844342eadc2caf1"
+      },
+      {
+        "node_id": "mozaiks.notification.report_ready",
+        "payload_digest": "487c871e0e9203afcf6b6f48de9e4cad90f21f78b3666feaae00453e482f4a29"
+      },
+      {
+        "node_id": "mozaiks.data.reports",
+        "payload_digest": "39faac4197b0135cea8543e43c6c94ba2731b043229d21e99354cdaefedf737e"
+      },
+      {
+        "node_id": "mozaiks.alias.reports",
+        "payload_digest": "4725020bea5632df606dbb0a069f80873dba2ee47baca5a4c633d2204ccf15e1"
+      },
+      {
+        "node_id": "mozaiks.workflow.digest",
+        "payload_digest": "d0ee72589a8a586e808c5272ad36378e8d40b7c38ec383f37981c3262c72b5f2"
+      },
+      {
+        "node_id": "mozaiks.trigger.on_report",
+        "payload_digest": "55cfae61f2a73262eeffcbc97d84d6c21662c8608ccefb5b641feb8561ffa197"
+      },
+      {
+        "node_id": "mozaiks.plan.pro",
+        "payload_digest": "2368a16fbdc29a6578a6f187b599097d0ce655bcf78362f766a92c657ab3725a"
+      },
+      {
+        "node_id": "mozaiks.product.addon",
+        "payload_digest": "48a2faaaab9c2bfc8cd050d1fa36df12f4acd1da391d26a43baef66ebf819cdd"
+      },
+      {
+        "node_id": "mozaiks.meter.report_runs",
+        "payload_digest": "c47cbe03db966df098e9750932af5a3ebf8707f7477f7f715153777002b1cfc0"
+      },
+      {
+        "node_id": "mozaiks.limit.report_runs",
+        "payload_digest": "b9d5f4fd593203ae6508eca92c7a491d42ecfd5ea6600a599b8b75121ab22b4c"
+      },
+      {
+        "node_id": "mozaiks.deploy.container",
+        "payload_digest": "b37a72024b1714742b3ec5fdb7410a6083649e70dbd9e5d636a0ea59d0cd1b28"
+      },
+      {
+        "node_id": "mozaiks.artifact.report_hook",
+        "payload_digest": "fbbaf1bca8d401b0c69f9256522bd74f28a219af4e4e079c1c99fb5799ac6e30"
+      },
+      {
+        "node_id": "mozaiks.section.pricing",
+        "payload_digest": "391e13936b7f6f2ccae1450eab7f97303310e8cd12a00ab38042e8f35c438e94"
+      }
+    ]
+  },
+  "executable": {
+    "configs_fingerprint": "9aa3360290e37b5f5f930208d161eda511d08969efa1acd6faee5e949fe7ed21",
+    "input_document_fingerprint": "dfaa950cf84bd4df7be9086e88b71e9a82b9f3a52e9459303986bd2376b98af7",
+    "input_document_bytes_fingerprint": "c46ef25b950e50d4571e7a771e0a9cfc09211e5c46239185b5652a70c874737f",
+    "base_plan_digest": "0dfb2f09415e12d7bd9e2b51f03dc1529128802ea595c38c9d42c833a12bc1ae",
+    "successor_plan_digest": "675a80ebae13ecc23f467fde7857b2e57e7dd662f4c1bc0378190157afdc37ce",
+    "unit_records_fingerprint": "da930308ca5625451aa0bb5a5c0b177821972e0495599091e7542c1a38e5bcb3",
+    "assignment_set_fingerprint": "2d672369067b320566f84e7daf9c2498a10e78aefb3466bdd586e3d3c7f612e6",
+    "artifact_result_fingerprint": "3405531cb662aa029f351d777c10a0b93904e32709d188c1def00f38a0956556",
+    "selected_reference": {
+      "ref_schema_version": "mozaiks.structured_output_contract_ref.v2",
+      "workflow_name": "AppGenerator",
+      "model_id": "ModuleHelperImplementationOutput",
+      "acceptance_profile": "mozaiks.structured_output_acceptance_profile.v1",
+      "schema_digest": "940f284fa7d88e9c49ebd0f3425baba71608e0be0d7f53d2fabba725bd3ed595"
+    }
+  },
+  "canonical_probe_reference": {
+    "ref_schema_version": "mozaiks.structured_output_contract_ref.v2",
+    "workflow_name": "Probe",
+    "model_id": "Output",
+    "acceptance_profile": "mozaiks.structured_output_acceptance_profile.v1",
+    "schema_digest": "ced2b2151105103cf2cb3c7b979cfa425f781b75b8d6dde5febc6eb911bfabcd"
+  },
+  "canonical_probe_model_schema_fingerprint": "e7cec45300941167d43da747fb414cf963fdae1f973c063d3473a9282ed02d40",
+  "workflow_interface": {
+    "unit_id": "workflow_module_interface/analyze_document/6fb165e08211",
+    "unit_digest": "7d5d5eb0f204101b6c70ea424882cc9679f7b9b2d5c1afe73a80b98a6ee524bc",
+    "identity": {
+      "unit_id": "workflow_module_interface/analyze_document/6fb165e08211",
+      "family_kind": "workflow_module_interface",
+      "family_identity_digest": "6fb165e08211b112834ca5a6831066ce6a8b1d4a38b8bea471b88ec8b86fbc1d",
+      "disposition": "render",
+      "source_scope": "declared",
+      "placeholder_values": [
+        [
+          "workflow_id",
+          "analyze_document"
+        ]
+      ],
+      "outputs": [
+        {
+          "path_scope": "workspace_root",
+          "path": "workflows/analyze_document/module_interface.yaml"
+        }
+      ],
+      "sources": [
+        {
+          "node_id": "mozaiks.module.documents",
+          "payload_digest": "7f324b0244e57aec62ea41cdce7d8c13000cf079a7caef01b6c80a506594eb67"
+        },
+        {
+          "node_id": "mozaiks.workflow.analyze_document",
+          "payload_digest": "5b3f8c4da093e29400ab091dc2a4f6c8cbfb10569833898b1c2877ff00d4bf9a"
+        },
+        {
+          "node_id": "mozaiks.workflow_capability.document_notes",
+          "payload_digest": "b40f2963fa6488a340fc2ace531d47002ca82d91394fac447c35f9d6a84ad8b0"
+        },
+        {
+          "node_id": "mozaiks.workflow_capability.documents_analysis",
+          "payload_digest": "aa3bf95b97930f814736adbb041739b6b8364a4cc30520f84296cadec27665f9"
+        },
+        {
+          "node_id": "mozaiks.workflow_capability_binding.analysis_on_created",
+          "payload_digest": "fd8312194e74ac75275dd14e2932ad956e7d519b0aa023ab3f40028cf63bc0db"
+        },
+        {
+          "node_id": "mozaiks.workflow_capability_binding.analysis_reads_content",
+          "payload_digest": "06d87952d63b7558c12601bea6eec03aafef98afea42719dec1733c039f280ed"
+        },
+        {
+          "node_id": "mozaiks.workflow_capability_binding.analysis_stores_result",
+          "payload_digest": "4a08fab97dee94cf352fd97516fee043aa4e1796415fa55089e2e498e142aea0"
+        },
+        {
+          "node_id": "mozaiks.workflow_result.advisory_summary",
+          "payload_digest": "819bbcd548d5e258753e6328fd30524e699bdd4d3506ff1aa5b80fc8abafd3e2"
+        },
+        {
+          "node_id": "mozaiks.workflow_result.analysis_result",
+          "payload_digest": "6116a04e253ea1fa914a69d0d2b89bf29d9279ef2318a5ff02733f610bda5765"
+        },
+        {
+          "node_id": "mozaiks.workflow_result.document_notes",
+          "payload_digest": "904fd4fad1877dcdf81aa2823fd72bf97ffc4ef81a4beb357ffb43802c11f36f"
+        }
+      ],
+      "edge_sources": [
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow_capability.document_notes",
+          "target_node_id": "mozaiks.workflow_result.document_notes",
+          "discriminator": null,
+          "edge_identity": "0114cd22c4ad092402368992dd5b25792cb8c49a22130c2fb721bb809c6af0fa"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow_capability.documents_analysis",
+          "target_node_id": "mozaiks.workflow_result.analysis_result",
+          "discriminator": null,
+          "edge_identity": "2637e8b626ea6bfaace2bd1d6315bbd38adfaadcd5f5077ed99b9cc25c5aeb8f"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow.analyze_document",
+          "target_node_id": "mozaiks.workflow_capability.document_notes",
+          "discriminator": null,
+          "edge_identity": "30beea598cab25bfcf11266b4de478a86e5cf154f755ab2ad158c8bd469cb937"
+        },
+        {
+          "kind": "consumes",
+          "source_node_id": "mozaiks.workflow_capability_binding.analysis_reads_content",
+          "target_node_id": "mozaiks.action.documents_get_content",
+          "discriminator": null,
+          "edge_identity": "4c1f97bb95650e97ae418661b49befeaf3e6b9146ef290f7b2b37c8ff61d676e"
+        },
+        {
+          "kind": "consumes",
+          "source_node_id": "mozaiks.workflow_capability_binding.analysis_stores_result",
+          "target_node_id": "mozaiks.workflow_result.analysis_result",
+          "discriminator": null,
+          "edge_identity": "5e3e402944cbf25b30b1e35bc5429a83ce7b9e5f198ac86bb5be0a6afc631713"
+        },
+        {
+          "kind": "binds",
+          "source_node_id": "mozaiks.workflow_capability_binding.analysis_stores_result",
+          "target_node_id": "mozaiks.action.documents_store_analysis",
+          "discriminator": "mozaiks.workflow_result.analysis_result",
+          "edge_identity": "851de3ca6a66ca13083aea2236cd7912cf27ada0e14262a91690770538ccc954"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow_capability.documents_analysis",
+          "target_node_id": "mozaiks.workflow_capability_binding.analysis_on_created",
+          "discriminator": null,
+          "edge_identity": "9004aa22eba9344592bdafcfc664ecb2c6c1257e87fd2735181b68a7f4369824"
+        },
+        {
+          "kind": "consumes",
+          "source_node_id": "mozaiks.workflow_capability_binding.analysis_on_created",
+          "target_node_id": "mozaiks.event.documents_created",
+          "discriminator": null,
+          "edge_identity": "94271745314084fbde29a2f1c45f3c71019d548ae9237d5df777311a976e792b"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow_capability.documents_analysis",
+          "target_node_id": "mozaiks.workflow_capability_binding.analysis_stores_result",
+          "discriminator": null,
+          "edge_identity": "c61a546f18d44e5036b38e5e21347c51eed3a82d7913ac7911e7c09e70c8bba5"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow.analyze_document",
+          "target_node_id": "mozaiks.workflow_capability.documents_analysis",
+          "discriminator": null,
+          "edge_identity": "cf95349184b2293ab08c8d201235d31c145224c79a38d2c1eae97b5e35d322ba"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow_capability.documents_analysis",
+          "target_node_id": "mozaiks.workflow_result.advisory_summary",
+          "discriminator": null,
+          "edge_identity": "d5fc6c7b42965f973c8d1ed40df2025f9dd562230ec29bdf1e1585f3d62f7ce7"
+        },
+        {
+          "kind": "declares",
+          "source_node_id": "mozaiks.workflow_capability.documents_analysis",
+          "target_node_id": "mozaiks.workflow_capability_binding.analysis_reads_content",
+          "discriminator": null,
+          "edge_identity": "e31300c02a9659e26617e70357aa38a49d75890c03256e0921b4c017964cf807"
+        }
+      ],
+      "depends_on_units": [
+        "workflow_manifest/scope_inactive/5824543b2240"
+      ],
+      "materializer": "workflow_interface_executor",
+      "assignment_kind": null,
+      "validator": "generated_app_validator",
+      "required_structured_output_ref": null,
+      "base_plan_digest": null,
+      "taxonomy_sources": [
+        {
+          "node_id": "mozaiks.event.documents_created",
+          "category": "event",
+          "identifier": "domain.documents.created"
+        }
+      ]
+    },
+    "content_hex": "736368656d615f76657273696f6e3a206d6f7a61696b732e6d6f64756c655f696e746572666163652e76320a776f726b666c6f775f69643a20616e616c797a655f646f63756d656e740a6361706162696c69746965733a0a2d206361706162696c6974795f69643a20646f63756d656e74732e616e616c797369730a20206465736372697074696f6e3a20416e616c797a652061206372656174656420646f63756d656e740a2020726573756c74733a0a20202d20726573756c745f69643a2061647669736f72795f73756d6d6172790a202020206465736372697074696f6e3a20416e2061647669736f727920726573756c742077697468206e6f20636f6d6d69742062696e64696e670a20202d20726573756c745f69643a20616e616c797369735f726573756c740a202020206465736372697074696f6e3a204f6e6520616e616c79736973206f66206f6e6520646f63756d656e740a202062696e64696e67733a0a20202d20726f6c653a20636f6d6d6974735f726573756c745f7468726f7567685f616374696f6e0a202020206d6f64756c655f69643a20646f63756d656e74730a20202020616374696f6e5f6e6f64655f69643a206d6f7a61696b732e616374696f6e2e646f63756d656e74735f73746f72655f616e616c797369730a20202020776f726b666c6f775f726573756c745f69643a20616e616c797369735f726573756c740a20202d20726f6c653a20636f6e73756d65735f616374696f6e0a202020206d6f64756c655f69643a20646f63756d656e74730a20202020616374696f6e5f6e6f64655f69643a206d6f7a61696b732e616374696f6e2e646f63756d656e74735f6765745f636f6e74656e740a20202d20726f6c653a207472696767657265645f62795f6576656e740a202020206576656e745f747970653a20646f6d61696e2e646f63756d656e74732e637265617465640a2d206361706162696c6974795f69643a20646f63756d656e74732e6e6f7465730a20206465736372697074696f6e3a20496e646570656e64656e74206e6f746573206361706162696c6974790a2020726573756c74733a0a20202d20726573756c745f69643a206e6f7465730a202020206465736372697074696f6e3a20416e2061647669736f727920726573756c742077697468206e6f20636f6d6d69742062696e64696e670a202062696e64696e67733a205b5d0a"
+  }
+}

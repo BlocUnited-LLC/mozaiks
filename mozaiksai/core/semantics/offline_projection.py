@@ -17,7 +17,7 @@ from types import NoneType
 from typing import Any, Literal, get_args
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from mozaiksai.core.runtime.app.page_schema import AppPageSection
 from mozaiksai.core.semantics.canonical import canonical_digest
@@ -65,6 +65,7 @@ from mozaiksai.core.taxonomy import (
     TaxonomyRegistry,
     validate_identifier_grammar,
 )
+from mozaiksai.core.workflow.declarative.contracts import OrchestratorConfig
 
 PROJECTION_SCHEMA_VERSION: Literal["mozaiks.semantic_projection.v2"] = (
     "mozaiks.semantic_projection.v2"
@@ -420,8 +421,12 @@ _WORKFLOW_STARTUP_MODES = {
     "UserDriven": WorkflowStartupMode.USER_DRIVEN,
     "BackendOnly": WorkflowStartupMode.BACKEND_ONLY,
 }
+_ORCHESTRATOR_SCHEMA_VERSION: TypeAdapter[str] = TypeAdapter(
+    OrchestratorConfig.model_fields["schema_version"].annotation
+)
 _ORCHESTRATOR_FIELDS = frozenset(
     {
+        "schema_version",
         "workflow_name",
         "description",
         "max_turns",
@@ -2159,6 +2164,22 @@ class _Builder:
                         )
                     ]
                 )
+            try:
+                _ORCHESTRATOR_SCHEMA_VERSION.validate_python(orchestration.get("schema_version"))
+            except ValidationError as exc:
+                raise ProjectionError(
+                    [
+                        ProjectionGap(
+                            kind=(
+                                ProjectionGapKind.MISSING
+                                if "schema_version" not in orchestration
+                                else ProjectionGapKind.UNSUPPORTED
+                            ),
+                            source_path=path,
+                            reason="orchestrator.yaml schema_version must match the OrchestratorConfig contract",
+                        )
+                    ]
+                ) from exc
             self.mark(
                 path,
                 node=SemanticNodeKind.WORKFLOW,

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from mozaiksai.core.semantics.canonical import canonical_digest
+from mozaiksai.core.semantics.canonical_json import CanonicalJsonObject
 from mozaiksai.core.semantics.plan_authority import compilation_plan_authority_digest
 from mozaiksai.core.workflow.structured_output_contracts import stable_digest
 from tests.slice_5b_composition_helpers import composition_fixture
@@ -49,11 +50,21 @@ def test_exact_base_capture_preserves_provider_influenced_identity_evidence():
 def test_reference_migration_changes_only_exact_ref_dependent_unit_and_plan_identity():
     baseline = _baseline()
     current = composition_fixture()
-    assert stable_digest(current["configs"]) == baseline["config_fingerprint"]
+    # Restore only the later document-version metadata for comparison with
+    # this immutable pre-version capture. No unversioned config is parsed.
+    original_configs = copy.deepcopy(current["configs"])
+    for config in original_configs.values():
+        assert config.pop("schema_version") == "mozaiks.structured_outputs.v1"
+    assert stable_digest(original_configs) == baseline["config_fingerprint"]
     authority = current["authority_inputs"]
     assert authority.assignment_contract_registry.model_dump(mode="json") == baseline["descriptor_snapshot"]
-    assert compilation_plan_authority_digest(authority) == baseline["input_document_fingerprint"]
-    assert hashlib.sha256(authority.model_dump_json().encode()).hexdigest() == baseline["input_document_bytes_fingerprint"]
+    original_document = authority.model_dump(mode="json")
+    original_document["structured_output_configs"] = CanonicalJsonObject.from_python(
+        original_configs
+    ).model_dump(mode="json")
+    original_authority = type(authority).model_validate(original_document)
+    assert compilation_plan_authority_digest(original_authority) == baseline["input_document_fingerprint"]
+    assert hashlib.sha256(original_authority.model_dump_json().encode()).hexdigest() == baseline["input_document_bytes_fingerprint"]
     old_ref = baseline["reference"]
     assert current["configs"][old_ref["workflow_name"]]["models"][old_ref["model_id"]] == baseline["selected_model_config"]
     for key, fixture_key in (("base", "base_plan"), ("successor", "successor_plan")):

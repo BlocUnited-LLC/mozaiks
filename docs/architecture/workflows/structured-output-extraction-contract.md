@@ -53,6 +53,7 @@ UI (receives tool_call/tool_response events)
 Defines Pydantic models and maps agents to their output models.
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 # Registry: agent name → model name
 registry:
   ExampleDecomposerAgent: ExampleDecomposition

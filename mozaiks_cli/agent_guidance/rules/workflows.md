@@ -26,6 +26,7 @@ workflows/{WorkflowName}/
 ## Rules
 
 - Keep workflow configuration declarative and structured-output-first.
+- Require top-level `schema_version: mozaiks.orchestrator.v1` in `orchestrator.yaml` and `schema_version: mozaiks.structured_outputs.v1` in `structured_outputs.yaml`. Missing or unsupported versions fail validation; do not infer them from filenames.
 - Put reasoning in agent prompts and structured outputs.
 - Keep tools deterministic: persist, validate, emit events, or call declared APIs.
 - Do not put classification/inference heuristics in tools.

@@ -490,6 +490,7 @@ def _research_workflow_files() -> dict[str, str]:
     return {
         "orchestrator.yaml": textwrap.dedent(
             """
+            schema_version: mozaiks.orchestrator.v1
             workflow_name: ResearchWorkflow
             workflow_startup_mode: UserDriven
             orchestration_pattern: ag2_network

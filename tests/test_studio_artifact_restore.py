@@ -421,7 +421,7 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
         ),
         "GeneratedApp/workflows/SupportWorkflow/orchestrator.yaml": "\n".join(
             [
-                "workflow_name: SupportWorkflow",
+                "schema_version: mozaiks.orchestrator.v1\nworkflow_name: SupportWorkflow",
                 "workflow_startup_mode: AgentDriven",
             ]
         ),

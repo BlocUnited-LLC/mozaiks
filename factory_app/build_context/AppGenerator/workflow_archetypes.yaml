@@ -29,6 +29,7 @@ archetypes:
     orchestration_pattern: Feedback Loop
     capability_id_suffix: "-review-workflow"
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: false
       workflow_startup_mode: BackendOnly
       max_turns: 20
@@ -72,6 +73,7 @@ archetypes:
     orchestration_pattern: Pipeline
     capability_id_suffix: "-analysis-workflow"
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: false
       workflow_startup_mode: BackendOnly
       max_turns: 15
@@ -114,6 +116,7 @@ archetypes:
     capability_id_suffix: "-extraction-workflow"
     task_batches_required: true
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: false
       workflow_startup_mode: BackendOnly
       max_turns: 30
@@ -157,6 +160,7 @@ archetypes:
       - "High-risk or irreversible actions must be deferred to a downstream execution workflow."
       - "Applicable to: compliance review, migration planning, deployment remediation plan, data cleanup plan, content moderation proposal, change proposal review, deployment impact assessment."
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: true
       max_turns: 30
       workflow_startup_mode: AgentDriven
@@ -331,6 +335,7 @@ archetypes:
       - "The workflow is not exclusively a planning or review surface."
       - "Applicable to: chat assistant, onboarding wizard, content generation, form submission."
     orchestrator_defaults:
+      schema_version: mozaiks.orchestrator.v1
       human_in_the_loop: true
       workflow_startup_mode: AgentDriven
     tool_constraints:

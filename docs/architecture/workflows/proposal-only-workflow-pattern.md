@@ -49,6 +49,7 @@ section provides guidance to select `proposal_only`. The archetype specifies:
 ## Orchestrator Shape
 
 ```yaml
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ContentReviewWorkflow
 max_turns: 30
 human_in_the_loop: true          # Always true for proposal_only
@@ -146,6 +147,9 @@ lifecycle_tools: []
 ## Structured Output
 
 ### Minimum required fields
+
+The following is a `models` fragment; a complete `structured_outputs.yaml`
+also declares `schema_version: mozaiks.structured_outputs.v1` and `registry`.
 
 ```yaml
 models:
@@ -444,4 +448,3 @@ issued, dependency released):
 - [ ] `next_step` field guides operator to the downstream execution workflow
 - [ ] `README.md` states "PLAN ONLY" and "no action is executed by this workflow"
 - [ ] No provider secrets or credentials in any workflow YAML file
-

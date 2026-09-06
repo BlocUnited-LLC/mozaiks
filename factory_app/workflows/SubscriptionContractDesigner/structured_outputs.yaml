@@ -1,3 +1,4 @@
+schema_version: mozaiks.structured_outputs.v1
 registry:
   ContractDesignerAgent: SubscriptionContractOutput
 

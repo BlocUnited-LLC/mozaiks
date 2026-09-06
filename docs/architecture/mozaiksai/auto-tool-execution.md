@@ -29,7 +29,9 @@ When an auto-tool agent outputs structured JSON:
 If the auto-invoked tool is backend-only, use `tool_type: Agent_Tool` and omit
 the `ui` block entirely.
 
-**structured_outputs.yaml** - Register agent to output model:
+**structured_outputs.yaml** - Register agent to output model (registry fragment;
+the full document also requires `schema_version: mozaiks.structured_outputs.v1`
+and the corresponding `models` definitions):
 ```yaml
 registry:
   OutputAgent: MyOutputModel

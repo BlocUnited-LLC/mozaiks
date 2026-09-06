@@ -77,9 +77,10 @@ Always define YAML contracts before implementation.
 
 ### 1. `orchestrator.yaml`
 
-Use the current startup field name:
+Declare the required document version and use the current startup field name:
 
 ```yaml
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ExampleWorkflow
 max_turns: 20
 human_in_the_loop: true
@@ -99,9 +100,10 @@ Rules:
 
 ### 2. `structured_outputs.yaml`
 
-Use the current top-level shape:
+Declare the required document version in the current top-level shape:
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 registry:
   InterviewAgent: null
   GeneratorAgent: MyOutputModel
@@ -244,7 +246,7 @@ with the emitted payload shape.
 Before finishing, verify:
 
 1. `workflow_startup_mode` is used in `orchestrator.yaml`.
-2. `structured_outputs.yaml` uses top-level `registry` and `models`.
+2. `structured_outputs.yaml` declares `schema_version: mozaiks.structured_outputs.v1` with top-level `registry` and `models`.
 3. `transition_graph.yaml` handles only workflow-local routing.
 4. Any cross-workflow sequencing or routed entry behavior is authored in
    `extended_orchestration/extension_registry.json`, not in workflow files.

@@ -56,6 +56,7 @@ def test_extract_workflow_integration_metadata_from_bundle_entries() -> None:
                     {
                         "filename": "orchestrator.yaml",
                         "content": """
+schema_version: mozaiks.orchestrator.v1
 workflow_name: TicketBatchTriageWorkflow
 workflow_startup_mode: BackendOnly
 triggers:

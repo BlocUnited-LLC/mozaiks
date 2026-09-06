@@ -76,6 +76,11 @@ The runtime injects it as `context_variables["structured_output"]` for the worke
 
 ## WorkflowBundleBuilderOutput
 
+The serialized YAML inside each `orchestrator.yaml` file must declare top-level
+`schema_version: mozaiks.orchestrator.v1`; each `structured_outputs.yaml` file
+must declare `schema_version: mozaiks.structured_outputs.v1`. The assembler
+validates these document versions; the outer bundle is not their authority.
+
 The worker emits a single `WorkflowBundleBuilderOutput` structured output:
 
 ```yaml

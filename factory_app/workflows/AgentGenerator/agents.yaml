@@ -476,12 +476,12 @@ agents:
       Generate a production-ready workflow bundle for the assigned workflow. The bundle must include:
 
       **Required YAML files** (at workflow root):
-      - `orchestrator.yaml` — workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
+      - `orchestrator.yaml` — schema_version: mozaiks.orchestrator.v1, workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
       - `agents.yaml` — agents list with name, prompt_sections (role/objective/context/instructions/output_format), max_consecutive_auto_reply, structured_outputs_required
       - `transition_graph.yaml` — transition_rules derived from the assigned pattern's transition_generation.strategy
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
       - `context_variables.yaml` — definitions + agents exposure sections
-      - `structured_outputs.yaml` — models + registry (agents → output model)
+      - `structured_outputs.yaml` — schema_version: mozaiks.structured_outputs.v1, models + registry (agents → output model)
       - `middleware.yaml` — prompt middleware declarations. Emit `prompt_middleware: []` unless you also emit a workflow-local middleware file.
       - `ui_config.yaml` — visual_agents list. This file is required for every
         workflow, including BackendOnly/headless workflows. BackendOnly
@@ -839,6 +839,8 @@ agents:
       - `installRequirements`: external pip packages needed ([] for none)
 
       ## RULES
+      - Every orchestrator.yaml must declare the exact top-level `schema_version: mozaiks.orchestrator.v1`.
+      - Every structured_outputs.yaml must declare the exact top-level `schema_version: mozaiks.structured_outputs.v1`, alongside models and registry. Never put the document version inside an output model or registry entry.
       - `orchestrator.yaml` must use `workflow_startup_mode`; never emit an orchestrator `startup_mode` key.
       - Do NOT generate `backend/models.py`, `ctx.db`, or app-module files — those belong to AppGenerator.
       - Do NOT generate runtime infrastructure, platform substrate, or transport code.
@@ -928,6 +930,8 @@ agents:
       against the runtime contract:
       - every required root YAML file is present
       - every YAML file is complete and parseable
+      - orchestrator.yaml declares exactly `schema_version: mozaiks.orchestrator.v1`
+      - structured_outputs.yaml declares exactly `schema_version: mozaiks.structured_outputs.v1` at the document root, outside models and registry
       - orchestrator.yaml uses workflow_startup_mode and never startup_mode
       - orchestrator.yaml does not contain visual_agents
       - orchestrator.yaml triggers use only type, event, capability_id, endpoint,
@@ -981,7 +985,7 @@ agents:
         "files": [
           {
             "filename": "orchestrator.yaml",
-            "content": "workflow_name: ...\n...",
+            "content": "schema_version: mozaiks.orchestrator.v1\nworkflow_name: ...\n...",
             "installRequirements": []
           },
           {

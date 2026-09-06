@@ -129,9 +129,16 @@ Rules:
 
 ## Canonical File Shapes
 
+Every `orchestrator.yaml` must declare `schema_version: mozaiks.orchestrator.v1`;
+every `structured_outputs.yaml` must declare
+`schema_version: mozaiks.structured_outputs.v1`. These are required top-level
+fields. Missing, blank, or unsupported versions are rejected; the filename does
+not supply a default.
+
 ### `orchestrator.yaml`
 
 ```yaml
+schema_version: mozaiks.orchestrator.v1
 workflow_name: ExampleWorkflow
 max_turns: 20
 human_in_the_loop: true
@@ -274,6 +281,7 @@ Rules:
 ### `structured_outputs.yaml`
 
 ```yaml
+schema_version: mozaiks.structured_outputs.v1
 registry:
   JokeWriterAgent: JokeCollection
 

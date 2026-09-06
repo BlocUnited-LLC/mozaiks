@@ -111,7 +111,11 @@ def test_init_command_starter_scaffold_seeds_entry_workflow(tmp_path) -> None:
     assert ai_json["chat"]["chat_startup_mode"] == "workflow"
     assert ai_json["workflows"]["entry_point"] == "HelloWorkflow"
     assert "control_plane" not in ai_json
-    assert (target_dir / "workflows" / "HelloWorkflow" / "orchestrator.yaml").exists()
+    workflow_dir = target_dir / "workflows" / "HelloWorkflow"
+    orchestrator = yaml.safe_load((workflow_dir / "orchestrator.yaml").read_text(encoding="utf-8"))
+    structured_outputs = yaml.safe_load((workflow_dir / "structured_outputs.yaml").read_text(encoding="utf-8"))
+    assert orchestrator["schema_version"] == "mozaiks.orchestrator.v1"
+    assert structured_outputs["schema_version"] == "mozaiks.structured_outputs.v1"
 
 
 def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:

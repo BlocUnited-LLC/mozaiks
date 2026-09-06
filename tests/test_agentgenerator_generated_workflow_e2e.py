@@ -77,6 +77,7 @@ def _write_agentgenerator_bundle(source_dir: Path, workflow_name: str) -> list[d
     _write_yaml(
         source_dir / "orchestrator.yaml",
         {
+            "schema_version": "mozaiks.orchestrator.v1",
             "workflow_name": workflow_name,
             "max_turns": 6,
             "human_in_the_loop": False,
@@ -134,6 +135,7 @@ def _write_agentgenerator_bundle(source_dir: Path, workflow_name: str) -> list[d
     _write_yaml(
         source_dir / "structured_outputs.yaml",
         {
+            "schema_version": "mozaiks.structured_outputs.v1",
             "registry": {
                 "PlannerAgent": "DecompositionPlan",
                 "WorkerAgent": "WorkerOutput",

@@ -1,3 +1,4 @@
+schema_version: mozaiks.structured_outputs.v1
 # ThemeCapture Structured Outputs
 #
 # Only ThemeConfigAssemblerAgent produces structured output.
