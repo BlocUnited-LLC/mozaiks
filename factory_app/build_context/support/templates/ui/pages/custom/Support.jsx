@@ -98,7 +98,7 @@ export default function Support() {
       subject_app_id: appId,
       related_type: 'support.request',
       related_id: request.request_id,
-      metadata: { request_id: request.request_id },
+      metadata: [{ key: 'request_id', value: request.request_id }],
     }, appId)
     const threadId = threadResult.thread?.thread_id
     if (threadId) {

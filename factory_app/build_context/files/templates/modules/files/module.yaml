@@ -21,6 +21,7 @@ actions:
     handler_method: upload_file
     input_schema:
       type: object
+      additionalProperties: false
       required: [filename, mime_type, size_bytes, storage_url]
       properties:
         filename:
@@ -29,14 +30,24 @@ actions:
           type: string
         size_bytes:
           type: integer
+        # storage_url — opaque provider URL returned by the storage adapter
+        # after blob upload.
         storage_url:
           type: string
-          description: Opaque provider URL returned by the storage adapter after blob upload.
+        # is_public — optional; the service defaults omitted values to false.
         is_public:
           type: boolean
-          default: false
+        # metadata — optional file annotation entries. Stored on the file
+        # record as a {key: value} map built from these typed entries.
         metadata:
-          type: object
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, value]
+            properties:
+              key: { type: string }
+              value: { type: string }
     output_schema:
       type: object
       required: [success, file]
@@ -55,6 +66,7 @@ actions:
     handler_method: get_file
     input_schema:
       type: object
+      additionalProperties: false
       required: [file_id]
       properties:
         file_id:
@@ -73,6 +85,7 @@ actions:
     handler_method: list_files
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         is_public:
           type: boolean
@@ -96,6 +109,7 @@ actions:
     handler_method: delete_file
     input_schema:
       type: object
+      additionalProperties: false
       required: [file_id]
       properties:
         file_id:

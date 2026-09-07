@@ -48,6 +48,18 @@ def timestamp_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def metadata_entries_to_map(entries: list[dict[str, Any]] | None) -> dict[str, str]:
+    """Fold closed {key, value} request entries into the stored metadata map.
+
+    The module request contract carries metadata as typed entries; thread
+    records keep the {key: value} map shape. Later entries win on duplicate keys.
+    """
+    metadata: dict[str, str] = {}
+    for entry in entries or []:
+        metadata[str(entry["key"])] = str(entry["value"])
+    return metadata
+
+
 def coerce_limit(value: Any, *, default: int = 50, maximum: int = 100) -> int:
     try:
         parsed = int(value)

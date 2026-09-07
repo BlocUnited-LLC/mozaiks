@@ -18,6 +18,7 @@ actions:
     handler_method: get_notification_preferences
     input_schema:
       type: object
+      additionalProperties: false
       properties: {}
     output_schema:
       type: object
@@ -31,6 +32,7 @@ actions:
     handler_method: update_notification_preferences
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         email_enabled:
           type: boolean

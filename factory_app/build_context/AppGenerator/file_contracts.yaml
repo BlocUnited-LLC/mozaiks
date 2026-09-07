@@ -113,6 +113,7 @@ task_contracts:
     hard_constraints:
       - module.yaml is always required.
       - module_contract owned_paths are YAML/declarative contract files only - module.yaml, contracts/*.yaml, and optional runtime_extensions.yaml. Do not include backend/*.py in module_contract tasks; use data_models for backend/schemas.py and business_services for handler.py/service.py/repo.py/policy.py.
+      - actions[].input_schema is a closed request contract. Every object level (root, nested objects, array item objects) must declare additionalProperties false, and every accepted request key must be an explicitly declared property. Never emit an open map property such as metadata {type object} in an action input schema - use a closed nested object with declared keys, or an array of closed {key, value} string entries for app-defined annotations. Keep input schemas to closed-profile keywords (type, enum, items, properties, required, additionalProperties); defaults and length limits live in handler/service code.
       - Emit only files declared by owned_paths or explicit file_manifest.
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.

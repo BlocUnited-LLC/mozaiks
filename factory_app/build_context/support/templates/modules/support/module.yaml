@@ -23,19 +23,20 @@ actions:
     handler_method: create_support_request
     input_schema:
       type: object
+      additionalProperties: false
       required: [message]
       properties:
         message: { type: string }
         subject: { type: string }
         page_url: { type: string }
         page_title: { type: string }
+        # severity — optional; the handler defaults omitted values to low.
         severity:
           type: string
           enum: [low, medium, high]
-          default: low
+        # app_id — the app this ticket is about. Stored as subject_app_id.
         app_id:
           type: string
-          description: The app this ticket is about. Stored as subject_app_id.
         message_thread_id:
           type: string
     output_schema:
@@ -53,21 +54,22 @@ actions:
     handler_method: list_support_requests
     input_schema:
       type: object
+      additionalProperties: false
       properties:
+        # status — optional; the handler defaults omitted values to open.
         status:
           type: string
           enum: [open, waiting, resolved, archived, all]
-          default: open
+        # scope — optional; the handler defaults omitted values to user.
         scope:
           type: string
           enum: [user, app, workspace]
-          default: user
+        # app_id — optional subject app id filter.
         app_id:
           type: string
-          description: Optional subject app id filter.
+        # limit — optional; the handler defaults omitted values to 50.
         limit:
           type: integer
-          default: 50
     output_schema:
       type: object
       required: [requests, total]
@@ -81,6 +83,7 @@ actions:
     handler_method: link_message_thread
     input_schema:
       type: object
+      additionalProperties: false
       required: [request_id, message_thread_id]
       properties:
         request_id: { type: string }
@@ -100,6 +103,7 @@ actions:
     handler_method: update_support_status
     input_schema:
       type: object
+      additionalProperties: false
       required: [request_id, status]
       properties:
         request_id: { type: string }

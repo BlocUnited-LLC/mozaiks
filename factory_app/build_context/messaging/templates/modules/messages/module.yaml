@@ -21,6 +21,7 @@ actions:
     handler_method: create_thread
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         title:
           type: string
@@ -28,29 +29,42 @@ actions:
           type: array
           items:
             type: string
+        # thread_type — optional; the service defaults omitted values to group.
         thread_type:
           type: string
           enum: [group, direct, support]
-          default: group
+        # scope_type — whether the conversation belongs to one app or to
+        # workspace-level social context; the service defaults omissions to app.
         scope_type:
           type: string
           enum: [app, workspace]
-          default: app
-          description: Whether the conversation belongs to one app or to workspace-level social context.
+        # scope_id — optional explicit scope id. Defaults to ctx.app_id for app
+        # scope or ctx.workspace_id for workspace scope.
         scope_id:
           type: string
-          description: Optional explicit scope id. Defaults to ctx.app_id for app scope or ctx.workspace_id for workspace scope.
+        # subject_app_id — the app this conversation is about. Support threads
+        # should set this to the supported app id.
         subject_app_id:
           type: string
-          description: The app this conversation is about. Support threads should set this to the supported app id.
+        # related_type — optional owning entity type such as
+        # workspace_support.request.
         related_type:
           type: string
-          description: Optional owning entity type such as workspace_support.request.
+        # related_id — optional owning entity id.
         related_id:
           type: string
-          description: Optional owning entity id.
+        # metadata — optional thread annotation entries (for example the
+        # support pack's request_id link). Stored on the thread as a
+        # {key: value} map built from these typed entries.
         metadata:
-          type: object
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, value]
+            properties:
+              key: { type: string }
+              value: { type: string }
     output_schema:
       type: object
       required: [success, thread]
@@ -69,6 +83,7 @@ actions:
     handler_method: list_threads
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         status:
           type: string
@@ -105,6 +120,7 @@ actions:
     handler_method: get_thread
     input_schema:
       type: object
+      additionalProperties: false
       required: [thread_id]
       properties:
         thread_id:
@@ -127,16 +143,17 @@ actions:
     handler_method: send_message
     input_schema:
       type: object
+      additionalProperties: false
       required: [thread_id, body]
       properties:
         thread_id:
           type: string
         body:
           type: string
+        # message_type — optional; the service defaults omitted values to text.
         message_type:
           type: string
           enum: [text, system]
-          default: text
     output_schema:
       type: object
       required: [success, message]
@@ -155,6 +172,7 @@ actions:
     handler_method: mark_thread_read
     input_schema:
       type: object
+      additionalProperties: false
       required: [thread_id]
       properties:
         thread_id:

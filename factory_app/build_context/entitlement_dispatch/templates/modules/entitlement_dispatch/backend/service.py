@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .repo import EntitlementDispatchRepo
+from .schemas import metadata_entries_to_map
 
 
 class EntitlementDispatchService:
@@ -22,12 +23,16 @@ class EntitlementDispatchService:
         user_id: str,
         plan_id: str,
         activated_at: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Write an active subscription assignment record.
 
         ConfiguredEntitlementAdapter reads the record to grant plan capabilities.
         Call this after payment confirmation or explicit plan assignment.
+
+        ``metadata`` arrives as closed {key, value} entries per the module
+        request contract and is stored as the same {key: value} map records
+        carried before the contract closed.
         """
         if not user_id or not plan_id:
             return {"activated": False, "error": "user_id and plan_id are required"}
@@ -36,7 +41,7 @@ class EntitlementDispatchService:
             user_id=user_id,
             plan_id=plan_id,
             activated_at=activated_at,
-            metadata=metadata,
+            metadata=metadata_entries_to_map(metadata),
         )
         return {"activated": True, "plan_id": plan_id}
 
