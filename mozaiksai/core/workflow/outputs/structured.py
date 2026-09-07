@@ -282,7 +282,14 @@ def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
             field_kwargs["description"] = description
         fields[field_name] = (field_annotation, Field(..., **field_kwargs))
 
-    strict_model = create_model(model_cls.__name__, **fields)  # type: ignore[arg-type]
+    # The wire projection's advertised JSON schema already declares
+    # additionalProperties: false at every object level; its local parse must
+    # honor the same claim. Otherwise a permissive provider-side parse becomes
+    # the first lossy normalization: extras are stripped before the exact
+    # runtime acceptance model ever sees the original candidate.
+    strict_model = create_model(
+        model_cls.__name__, __config__=ConfigDict(extra="forbid"), **fields
+    )  # type: ignore[call-overload]
     _patch_model_schema(strict_model)
     _provider_response_model_cache[model_cls] = strict_model
     return strict_model
@@ -552,8 +559,14 @@ def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type
         _workflow_structured_agents[workflow_name] = set()
         return {}, {}
     
-    # Build models from json config
-    models = build_models_from_config(models_config)
+    # Build models from json config. Runtime acceptance is EXACT: every
+    # declared model id compiles with closed-object acceptance so unknown
+    # candidate fields reject instead of being silently discarded. Nested
+    # named models become exact before any parent captures their definition
+    # (build_models_from_config applies closure at construction).
+    models = build_models_from_config(
+        models_config, exact_model_ids=frozenset(models_config)
+    )
     
     # Build registry mapping agent names to models
     registry = {}
@@ -680,9 +693,12 @@ def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dic
             'fields': fields
         }
     
-    # Build models using existing logic, combining with existing models
+    # Build models using existing logic, combining with existing models.
+    # Dynamic runtime models share the one exact acceptance contract.
     combined_models = existing_models.copy()
-    new_models = build_models_from_config(models_config)
+    new_models = build_models_from_config(
+        models_config, exact_model_ids=frozenset(models_config)
+    )
     combined_models.update(new_models)
     
     return new_models

@@ -12,6 +12,41 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Exact structured-output auto-tool contracts**: declared workflow
+  structured outputs are now exact at runtime — an agent output carrying an
+  undeclared field (top-level or nested) rejects before any normalization, so
+  no `agent_output_validated` event, auto tool, UI emission, or persistence
+  can run on silently stripped data. Deliberately declared open
+  `dict`/`optional_dict` fields keep accepting arbitrary keys inside. The
+  documented auto-tool contract
+  `context_variables.get("structured_output")` is now truthfully served as a
+  transient, runtime-owned, read-only projection of the exact validated
+  output: context-only auto tools work without declaring context variables,
+  explicit-param auto tools receive the same values, and the projection can
+  never be written, persisted, or replayed as workflow state.
+  `structured_output` is reserved runtime vocabulary: declaring it in
+  `context_variables.yaml` now fails workflow validation with no metadata
+  override, and overlay enumeration/snapshots never expose a colliding stale
+  base key. Auto-tool binding caches hold declarative metadata only,
+  self-validated against the live structured-output registry and tool
+  declarations (reload, unload, refresh_all, and failed reloads can never
+  execute a stale binding); the executable tool callable is resolved fresh
+  through the canonical loader on every dispatch, so workflow-owned tool and
+  imported helper changes (in both the `workflows.*` and derived real package
+  namespaces such as `factory_app.workflows.*`) are observed without restart,
+  while external installed packages remain a documented process-restart
+  boundary. Each binding receives its own detached copy of the validated
+  payload (explicit-argument mutation cannot contaminate another binding or
+  the audit record), turns are claimed in-flight atomically, and every
+  binding keeps a finite process-local execution checkpoint: once a tool
+  returns a truthful terminal result (success or failure) it is never
+  re-invoked for that turn — retries after cancellation resume unfinished
+  post-processing stages (write-back, persistence, result emission) instead
+  of re-running the tool. This is process-local runtime idempotency, not
+  distributed exactly-once delivery.
+
 ### Changed
 
 - **Canonical capability-pack action requests are closed**: all 63 actions

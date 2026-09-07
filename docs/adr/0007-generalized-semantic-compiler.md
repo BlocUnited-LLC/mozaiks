@@ -961,12 +961,43 @@ the compatibility report.
 
 `build_models_from_config` now returns unpatched canonical Pydantic models.
 Explicit `exact_model_ids` applies `extra="forbid"` when models are created,
-before a parent can capture a child schema. Generic runtime loading keeps its
-existing default acceptance policy; this is not the global strictness flip.
+before a parent can capture a child schema. The original #485 staging decision
+left generic runtime loading permissive; that decision is retired. **Declared
+structured outputs are exact at runtime**: `load_workflow_structured_outputs`
+compiles every declared model id with closed-object acceptance, so unknown
+candidate fields — top-level and nested — reject and are never silently
+discarded before an exact acceptance boundary sees the original candidate.
+There is no permissive mode, per-workflow acceptance override, or dual
+registry behavior, and reload/unload/refresh can never revive a permissive
+cached model. ``structured_output`` is reserved runtime vocabulary
+(`mozaiksai/core/workflow/reserved_context_keys.py`): every canonical context
+declaration surface rejects an application claim of it, with no metadata
+override. Auto-tool binding caches hold DECLARATIVE metadata only, self-validated
+against the live exact-model identity and tools.yaml declaration; Python
+callable authority is never cached across dispatches — the executable
+function is resolved fresh through the canonical workflow tool loader, whose
+namespace refresh derives the workflow root's real package chain (for example
+``factory_app.workflows``) as well as the synthetic ``workflows`` namespace,
+so workflow-owned source and imported helper changes are observed without a
+process restart. Changes to external installed third-party packages remain a
+process-restart boundary. Each auto-tool turn is claimed atomically before
+its first await, and each binding keeps a finite process-local execution
+checkpoint (PENDING → TOOL_TERMINAL → COMPLETE, with per-stage
+write-back/persistence/emission marks): once a tool returns a truthful
+terminal result — success or failure — that binding is never invoked again
+for the same turn; retries resume the first unfinished binding/stage. This is
+process-local runtime idempotency, not distributed exactly-once delivery: a
+crash after an external non-idempotent side effect but before durable
+recording is out of scope, and such tools must use their owning service's
+idempotency contract. Deliberately declared open `dict`/`optional_dict` fields keep their
+semantics: the field is closed at its containing object level while arbitrary
+keys inside the declared open dict remain valid runtime data.
 `get_provider_response_model` remains the sole provider adapter. It creates
 separate response models with the current OpenAI strict required fields,
-reference inlining, and object closure. Production agent construction continues
-to use that adapter.
+reference inlining, and object closure, and its local parse honors the same
+`additionalProperties: false` claim its advertised schema makes — a permissive
+provider-side parse cannot become the first lossy normalization. Production
+agent construction continues to use that adapter.
 
 `canonical_structured_output_schema` invokes the unmodified Pydantic validation
 schema compiler directly. Acceptance profile
@@ -1382,7 +1413,8 @@ AppGenerator; production-dead AgentGenerator converter normalizers
 (`workflow_converter.py`); lossy, unpersisted `AppBuildPlan` planning path;
 the four control-plane glob taxonomies; `BuildRecordStore`/`ArtifactStore`
 alias duplication in `mozaiksai/core/artifacts/store.py`; multiple event and
-taxonomy registries; structured-output permissiveness; incomplete
+taxonomy registries; structured-output permissiveness (resolved: declared
+structured outputs are exact at runtime); incomplete
 provenance/ownership use in refinement (the `refinement` provenance mode and
 `last_refined_with` field in `mozaiksai/core/runtime/app/provenance.py` are
 declared but never read or written by any control-plane code); lack of refinement replay; dual builder persistence

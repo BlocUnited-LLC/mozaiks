@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..declarative import parse_context_variables_config
+from ..reserved_context_keys import require_application_context_name_allowed
 from .authority import ContextAuthorityClass, ContextWriterId
 
 
@@ -188,7 +189,12 @@ class ContextAgentView(ContextModel):
     @field_validator("variables")
     @classmethod
     def _normalize_variables(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        normalized = _normalize_string_list(value)
+        for name in normalized:
+            require_application_context_name_allowed(
+                name, where="context plan agents.<name>.variables"
+            )
+        return normalized
 
 
 class ContextVariablesPlan(ContextModel):
@@ -204,6 +210,9 @@ class ContextVariablesPlan(ContextModel):
     ) -> dict[str, ContextVariableDefinition]:
         for key in value.keys():
             _required_text(key, field_name="context variable name")
+            require_application_context_name_allowed(
+                key, where="context plan definitions"
+            )
         return value
 
     @model_validator(mode="after")

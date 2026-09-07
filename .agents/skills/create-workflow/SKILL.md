@@ -144,6 +144,11 @@ Rules:
 
 Declare the workflow state and which agents can see which variables.
 
+`structured_output` is RESERVED runtime vocabulary: declaring it (in
+`definitions` or agent `variables`) is rejected at workflow load. Auto tools
+receive it transiently via `context_variables.get("structured_output")` with
+no declaration.
+
 ```yaml
 definitions:
   artifact_request:

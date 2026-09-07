@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,10 @@ from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import (
     DETERMINISTIC_TOOL_WRITER,
     build_context_authority_policy,
+)
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.context.structured_output_overlay import (
+    StructuredOutputOverlay,
 )
 from mozaiksai.core.workflow.declarative import parse_tools_config
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
@@ -44,7 +49,12 @@ async def _get_simple_transport() -> SimpleTransport | None:
 
 @dataclass(frozen=True)
 class AutoToolBinding:
-    """Represents the runtime contract for auto-invoked UI tools."""
+    """Represents the runtime contract for auto-invoked UI tools.
+
+    This is the per-dispatch EXECUTION binding: its ``function`` is resolved
+    fresh through the canonical workflow tool loader for each dispatch and is
+    never cached across dispatches.
+    """
 
     model_name: str
     agent_name: str
@@ -56,15 +66,80 @@ class AutoToolBinding:
     model_cls: Any
 
 
+@dataclass(frozen=True)
+class AutoToolBindingDescriptor:
+    """Cached DECLARATIVE auto-tool binding metadata.
+
+    Python callable authority is never cached: descriptors carry only the
+    declarative facts (workflow tool declaration + exact model identity), and
+    the executable function comes from the current canonical loader/runtime
+    namespace at dispatch time.
+    """
+
+    model_name: str
+    agent_name: str
+    tool_name: str
+    function_name: str
+    ui_config: dict[str, Any]
+    model_cls: Any
+
+
+#: Per-binding execution checkpoint states. "PENDING" is the absence of a
+#: record. Once a binding reaches TOOL_TERMINAL, that binding must never be
+#: invoked again for the same turn; COMPLETE means post-processing finished.
+_TOOL_TERMINAL = "tool_terminal"
+_COMPLETE = "complete"
+
+
+@dataclass
+class _BindingExecutionRecord:
+    """Process-local finite execution checkpoint for one binding of one turn.
+
+    The record is captured synchronously after the tool returns a truthful
+    terminal result — before the next cancellable await — and holds detached
+    facts only (no live mutable aliases), so a retry resumes post-processing
+    without re-running the tool.
+
+    This guarantee is PROCESS-LOCAL runtime idempotency, not distributed
+    exactly-once delivery: a process crash after an external non-idempotent
+    tool side effect but before durable recording cannot be solved by this
+    in-memory handler. Tools requiring cross-process exactly-once semantics
+    must use their owning service's idempotency contract.
+    """
+
+    status: str
+    result_payload: Any
+    result_status: str
+    context_snapshot: dict[str, Any] | None
+    tool_call_emitted: bool = False
+    writeback_done: bool = False
+    persisted: bool = False
+    result_emitted: bool = False
+
+
 class AutoToolEventHandler:
     """Handle runtime.agent_output_validated events by running the mapped UI tool."""
 
     _CACHE_LIMIT = 512
 
     def __init__(self) -> None:
-        self._workflow_bindings: dict[str, dict[str, list[AutoToolBinding]]] = {}
+        # Self-validating DECLARATIVE binding cache: each entry pairs built
+        # binding descriptors with the declarative authority fingerprint they
+        # were built from (exact model identity + tools.yaml declaration). A
+        # cached entry is reusable only while those inputs still match; the
+        # executable callable is never part of the cache.
+        self._workflow_binding_descriptors: dict[
+            str, tuple[tuple[Any, ...], dict[str, list[AutoToolBindingDescriptor]]]
+        ] = {}
         self._processed_keys: set[str] = set()
         self._processed_order: asyncio.Queue[str] = asyncio.Queue()
+        # Turns claimed atomically before the first await: a duplicate
+        # delivery observing an IN_FLIGHT (or COMPLETED) turn never executes.
+        self._in_flight_keys: set[str] = set()
+        # Per-turn, per-binding execution checkpoints (process-local). Popped
+        # when a turn completes; bounded by _CACHE_LIMIT with active in-flight
+        # state never evicted.
+        self._turn_checkpoints: dict[str, dict[str, _BindingExecutionRecord]] = {}
 
     async def handle_tool_dispatch(self, event: dict[str, Any]) -> None:
         """Process an agent_output_validated event and trigger the corresponding tool."""
@@ -106,10 +181,46 @@ class AutoToolEventHandler:
             return
 
         cache_key = f"{chat_id}:{turn_key}"
-        if cache_key in self._processed_keys:
+        # Atomic in-flight claim: check-and-add with no await in between is
+        # atomic within one event loop, and all handler access is loop-local.
+        # A concurrent duplicate delivery of the same turn observes IN_FLIGHT
+        # (or COMPLETED) and never executes the tool.
+        if cache_key in self._processed_keys or cache_key in self._in_flight_keys:
             logger.debug("[AUTO_TOOL] Duplicate turn detected -> skipping (key=%s)", cache_key)
             return
+        self._in_flight_keys.add(cache_key)
+        try:
+            await self._dispatch_claimed_turn(
+                cache_key=cache_key,
+                workflow_name=workflow_name,
+                model_name=model_name,
+                agent_name=agent_name,
+                structured_data=structured_data,
+                context=context,
+                chat_id=chat_id,
+                turn_key=turn_key,
+                pattern_context_ref=pattern_context_ref,
+            )
+        finally:
+            # An unexpected interruption (cancellation, unforeseen exception)
+            # before a truthful terminal result releases the claim so a
+            # legitimate retry can execute. Terminal outcomes have already
+            # registered COMPLETED via _register_turn by this point.
+            self._in_flight_keys.discard(cache_key)
 
+    async def _dispatch_claimed_turn(
+        self,
+        *,
+        cache_key: str,
+        workflow_name: str,
+        model_name: str,
+        agent_name: str,
+        structured_data: dict[str, Any],
+        context: dict[str, Any],
+        chat_id: Any,
+        turn_key: str,
+        pattern_context_ref: Any,
+    ) -> None:
         bindings = await self._resolve_bindings(workflow_name, model_name, agent_name)
         if not bindings:
             logger.warning(
@@ -123,7 +234,9 @@ class AutoToolEventHandler:
 
         try:
             validated = bindings[0].model_cls.model_validate(structured_data)
-            normalized = validated.model_dump(mode='json')  # type: ignore[attr-defined] - Force JSON serialization for enums
+            # ONE untouched canonical detached payload represents the accepted
+            # event result. It is never handed to a tool by mutable reference.
+            canonical_payload = detach(validated.model_dump(mode='json'))  # type: ignore[attr-defined] - Force JSON serialization for enums
         except ValidationError as err:
             logger.error(
                 "[AUTO_TOOL] Structured data failed validation for model=%s agent=%s errors=%s",
@@ -142,100 +255,282 @@ class AutoToolEventHandler:
             await self._register_turn(cache_key)
             return
 
-        for binding in bindings:
-            logger.debug("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
-            kwargs = self._build_tool_kwargs(binding, normalized, {
-                **context,
-                "turn_idempotency_key": turn_key,
-                "agent_name": agent_name,
-            }, pattern_context_ref)
-            logger.debug("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
-            await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
-            result_payload, status = await self._invoke_tool(binding, kwargs)
+        # Per-turn execution checkpoints: a retry after cancellation resumes
+        # at the first unfinished binding/stage; a binding whose tool already
+        # returned a terminal result is NEVER invoked again for this turn.
+        self._trim_turn_checkpoints()
+        checkpoints = self._turn_checkpoints.setdefault(cache_key, {})
 
-            # Write back context changes to pattern context if available
-            container = kwargs.get("context_variables")
-            if pattern_context_ref and container:
-                try:
-                    if hasattr(container, "snapshot") and callable(getattr(container, "snapshot", None)):
-                        container_snapshot = container.snapshot()
-                    elif hasattr(container, "to_dict") and callable(getattr(container, "to_dict", None)):
-                        container_snapshot = container.to_dict()
-                    else:
-                        container_snapshot = {}
-                    if not isinstance(container_snapshot, dict):
-                        container_snapshot = {}
-                    # Copy changes from tool's container back to the shared pattern context
-                    for key, value in container_snapshot.items():
-                        try:
-                            pattern_context_ref.set(key, value)
-                        except Exception as _set_err:
-                            logger.debug("[AUTO_TOOL] Context write-back failed key=%s: %s", key, _set_err)
-                    logger.debug(
-                        "[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution",
-                        len(container_snapshot),
-                        binding.tool_name,
+        for index, binding in enumerate(bindings):
+            binding_key = f"{index}:{binding.agent_name}:{binding.tool_name}"
+            record = checkpoints.get(binding_key)
+            if record is not None and record.status == _COMPLETE:
+                continue
+
+            if record is None:
+                # PENDING: execute the tool. Pre-execution interruption keeps
+                # the binding PENDING, so a retry may execute it.
+                logger.debug("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
+                # Each binding gets its own detached copy: a tool mutating an
+                # explicit nested argument can never contaminate the canonical
+                # payload, another binding's arguments, or another binding's
+                # structured_output overlay.
+                binding_payload = detach(canonical_payload)
+                kwargs = self._build_tool_kwargs(binding, binding_payload, {
+                    **context,
+                    "turn_idempotency_key": turn_key,
+                    "agent_name": agent_name,
+                }, pattern_context_ref)
+                logger.debug("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
+                await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
+                result_payload, status = await self._invoke_tool(binding, kwargs)
+                # TOOL_TERMINAL: recorded SYNCHRONOUSLY before the next
+                # cancellable await, with detached facts only. A truthful tool
+                # failure is also a terminal execution result for this turn.
+                record = _BindingExecutionRecord(
+                    status=_TOOL_TERMINAL,
+                    result_payload=self._detached_or_original(result_payload),
+                    result_status=status,
+                    context_snapshot=self._container_snapshot(kwargs.get("context_variables")),
+                    tool_call_emitted=True,
+                )
+                checkpoints[binding_key] = record
+
+            # TOOL_TERMINAL: finish post-processing stages exactly once each.
+            if not record.writeback_done:
+                # Synchronous write-back from the detached terminal snapshot.
+                if pattern_context_ref and record.context_snapshot:
+                    self._write_back_context(
+                        pattern_context_ref, record.context_snapshot, binding.tool_name
                     )
-                except Exception as wb_err:
-                    logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
+                record.writeback_done = True
 
-            await self._persist_context_variables(
-                chat_id=chat_id,
-                app_id=context.get("app_id"),
-                workflow_name=workflow_name,
-                context_variables=container,
-            )
+            if not record.persisted:
+                await self._persist_context_variables(
+                    chat_id=chat_id,
+                    app_id=context.get("app_id"),
+                    workflow_name=workflow_name,
+                    context_variables=record.context_snapshot,
+                )
+                record.persisted = True
 
-            await self._emit_tool_result(binding, agent_name, chat_id, result_payload, status, turn_key)
+            if not record.result_emitted:
+                await self._emit_tool_result(
+                    binding, agent_name, chat_id, record.result_payload, record.result_status, turn_key
+                )
+                record.result_emitted = True
+
+            record.status = _COMPLETE
         await self._register_turn(cache_key)
+
+    @staticmethod
+    def _detached_or_original(value: Any) -> Any:
+        try:
+            return detach(value)
+        except Exception:  # pragma: no cover - non-copyable tool result
+            logger.debug("[AUTO_TOOL] Tool result could not be detached; storing original")
+            return value
+
+    @staticmethod
+    def _container_snapshot(container: Any) -> dict[str, Any] | None:
+        """Detached context facts captured at the terminal-record boundary."""
+        if container is None:
+            return None
+        try:
+            for method_name in ("snapshot", "to_dict"):
+                method = getattr(container, method_name, None)
+                if callable(method):
+                    data = method()
+                    if isinstance(data, dict):
+                        return data
+            if isinstance(container, dict):
+                return dict(container)
+        except Exception as snap_err:  # pragma: no cover - defensive
+            logger.debug("[AUTO_TOOL] Context snapshot capture failed: %s", snap_err)
+        return None
+
+    @staticmethod
+    def _write_back_context(
+        pattern_context_ref: Any, snapshot: dict[str, Any], tool_name: str
+    ) -> None:
+        try:
+            for key, value in snapshot.items():
+                try:
+                    pattern_context_ref.set(key, value)
+                except Exception as _set_err:
+                    logger.debug("[AUTO_TOOL] Context write-back failed key=%s: %s", key, _set_err)
+            logger.debug(
+                "[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution",
+                len(snapshot),
+                tool_name,
+            )
+        except Exception as wb_err:
+            logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
+
+    def _trim_turn_checkpoints(self) -> None:
+        """Bounded checkpoint bookkeeping: never evict active in-flight state."""
+        if len(self._turn_checkpoints) <= self._CACHE_LIMIT:
+            return
+        for key in list(self._turn_checkpoints):
+            if len(self._turn_checkpoints) <= self._CACHE_LIMIT:
+                break
+            if key in self._in_flight_keys:
+                continue
+            self._turn_checkpoints.pop(key, None)
 
     async def _resolve_bindings(
         self, workflow_name: str, model_name: str, agent_name: str
     ) -> list[AutoToolBinding]:
-        bindings = await self._load_bindings_for_workflow(workflow_name)
-        candidates = bindings.get(model_name) or []
+        descriptors = await self._load_binding_descriptors(workflow_name)
+        candidates = [
+            descriptor
+            for descriptor in descriptors.get(model_name) or []
+            if descriptor.agent_name == agent_name
+        ]
         if not candidates:
             logger.debug("[AUTO_TOOL] No cached binding for workflow=%s model=%s agent=%s", workflow_name, model_name, agent_name)
             return []
-        matched = [binding for binding in candidates if binding.agent_name == agent_name]
-        return matched
+        # Python callable authority is never cached across dispatches: the
+        # executable function is resolved fresh through the canonical
+        # workflow tool loader so workflow-owned source/helper changes are
+        # observed without a process restart. (External installed packages
+        # remain a restart boundary.)
+        tool_functions = load_agent_tool_functions(workflow_name, include_auto_only=True)
+        function_index: dict[str, dict[str, Callable[..., Any]]] = {}
+        for agent, funcs in tool_functions.items():
+            function_index[agent] = {
+                getattr(fn, "__name__", f"fn_{idx}"): fn for idx, fn in enumerate(funcs)
+            }
+        bindings: list[AutoToolBinding] = []
+        for descriptor in candidates:
+            func = function_index.get(descriptor.agent_name, {}).get(descriptor.function_name)
+            if func is None:
+                logger.warning(
+                    "[AUTO_TOOL] Tool function '%s' not currently loadable for agent %s",
+                    descriptor.function_name,
+                    descriptor.agent_name,
+                )
+                continue
+            sig = inspect.signature(func)
+            param_names = tuple(
+                name
+                for name, param in sig.parameters.items()
+                if param.kind in (
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                )
+                and name not in {"self"}
+            )
+            bindings.append(
+                AutoToolBinding(
+                    model_name=descriptor.model_name,
+                    agent_name=descriptor.agent_name,
+                    tool_name=descriptor.tool_name,
+                    function=func,
+                    param_names=param_names,
+                    accepts_context="context_variables" in sig.parameters,
+                    ui_config=descriptor.ui_config,
+                    model_cls=descriptor.model_cls,
+                )
+            )
+        return bindings
 
-    async def _load_bindings_for_workflow(self, workflow_name: str) -> dict[str, list[AutoToolBinding]]:
-        cached = self._workflow_bindings.get(workflow_name)
-        if cached is not None:
-            logger.debug("[AUTO_TOOL] Returning cached bindings for workflow=%s (count=%d)", workflow_name, len(cached))
-            return cached
+    def _resolve_registry(self, workflow_name: str) -> tuple[dict[str, Any], bool]:
+        """Resolve the current structured-output registry authority.
 
-        mapping: dict[str, list[AutoToolBinding]] = {}
+        Returns ``(registry, resolved)``. ``resolved=False`` means the current
+        configuration could not be loaded (unloaded workflow, failed reload):
+        a cached binding must never be reused on top of that failure, and the
+        empty result must not be cached as authority either.
+        """
         try:
             registry = get_structured_outputs_for_workflow(workflow_name)
-            logger.debug("[AUTO_TOOL] Loaded structured outputs registry for workflow=%s: %s", workflow_name, list(registry.keys()))
+            logger.debug(
+                "[AUTO_TOOL] Loaded structured outputs registry for workflow=%s: %s",
+                workflow_name,
+                list(registry.keys()),
+            )
+            return dict(registry), True
         except Exception as err:
             logger.debug(
                 "[AUTO_TOOL] Structured outputs unavailable for workflow %s: %s",
                 workflow_name,
                 err,
             )
-            registry = {}
+            return {}, False
 
+    @staticmethod
+    def _file_digest(path: Any) -> str | None:
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    def _binding_authority_fingerprint(
+        self, workflow_name: str, registry: dict[str, Any]
+    ) -> tuple[Any, ...]:
+        """Declarative authority inputs that decide descriptor-cache reuse.
+
+        Covers the exact structured-output model class identity per agent and
+        the workflow's tools.yaml declaration bytes. Callable behavior is
+        deliberately NOT fingerprinted here — file bytes cannot prove full
+        callable behavior (imported helpers change behavior without touching
+        the tool file), so the executable function is resolved fresh through
+        the canonical loader at every dispatch instead of being cached.
+        """
+        registry_identity = tuple(
+            sorted(
+                (agent, getattr(model_cls, "__name__", str(model_cls)), id(model_cls))
+                for agent, model_cls in registry.items()
+            )
+        )
+        workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
+        tools_digest: str | None = None
+        if workflow_path is not None:
+            tools_digest = self._file_digest(workflow_path / "tools.yaml")
+        return (
+            str(workflow_path or ""),
+            registry_identity,
+            tools_digest,
+        )
+
+    async def _load_binding_descriptors(
+        self, workflow_name: str
+    ) -> dict[str, list[AutoToolBindingDescriptor]]:
+        # Self-validating DECLARATIVE cache: resolve the current authority
+        # BEFORE any cached descriptors are reused. Cached descriptors are
+        # reusable only while the declarative fingerprint (exact model
+        # identity + tools.yaml declaration) still matches; the executable
+        # callable is never cached here.
+        registry, registry_resolved = self._resolve_registry(workflow_name)
+        fingerprint = self._binding_authority_fingerprint(workflow_name, registry)
+        cached = self._workflow_binding_descriptors.get(workflow_name)
+        if cached is not None:
+            cached_fingerprint, cached_mapping = cached
+            if registry_resolved and cached_fingerprint == fingerprint:
+                logger.debug(
+                    "[AUTO_TOOL] Returning cached binding descriptors for workflow=%s (count=%d)",
+                    workflow_name,
+                    len(cached_mapping),
+                )
+                return cached_mapping
+            logger.debug(
+                "[AUTO_TOOL] Binding authority changed for workflow=%s -> rebuilding",
+                workflow_name,
+            )
+            self._workflow_binding_descriptors.pop(workflow_name, None)
+
+        mapping: dict[str, list[AutoToolBindingDescriptor]] = {}
         if not registry:
             logger.warning("[AUTO_TOOL] Empty registry for workflow=%s - no bindings possible", workflow_name)
-            self._workflow_bindings[workflow_name] = mapping
+            if registry_resolved:
+                self._workflow_binding_descriptors[workflow_name] = (fingerprint, mapping)
             return mapping
-
-        tool_functions = load_agent_tool_functions(workflow_name, include_auto_only=True)
-        logger.debug("[AUTO_TOOL] Loaded tool functions for workflow=%s: agents=%s", workflow_name, list(tool_functions.keys()))
-        agent_function_index: dict[str, dict[str, Callable[..., Any]]] = {}
-        for agent, funcs in tool_functions.items():
-            agent_function_index[agent] = {
-                getattr(fn, "__name__", f"fn_{idx}"): fn for idx, fn in enumerate(funcs)
-            }
-            logger.debug("[AUTO_TOOL] Agent %s has functions: %s", agent, list(agent_function_index[agent].keys()))
 
         workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
         if workflow_path is None:
             logger.warning("[AUTO_TOOL] Workflow path not found for workflow=%s", workflow_name)
-            self._workflow_bindings[workflow_name] = mapping
+            self._workflow_binding_descriptors[workflow_name] = (fingerprint, mapping)
             return mapping
         tools_yaml_path = workflow_path / "tools.yaml"
         tools_data: dict[str, Any] = {}
@@ -290,43 +585,20 @@ class AutoToolEventHandler:
                     continue
                 model_name = getattr(model_cls, "__name__", str(model_cls))
                 logger.debug("[AUTO_TOOL] Agent %s has model_name=%s", agent_name, model_name)
-                fn_lookup = agent_function_index.get(agent_name, {})
-                func = fn_lookup.get(function_name)
-                if not func:
-                    logger.debug(
-                        "[AUTO_TOOL] Tool function '%s' not loaded for agent %s",
-                        function_name,
-                        agent_name,
-                    )
-                    continue
-                logger.debug("[AUTO_TOOL] Found function %s for agent %s", function_name, agent_name)
-                sig = inspect.signature(func)
-                param_names = [
-                    name
-                    for name, param in sig.parameters.items()
-                    if param.kind in (
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        inspect.Parameter.KEYWORD_ONLY,
-                    )
-                    and name not in {"self"}
-                ]
-                accepts_context = "context_variables" in sig.parameters
                 ui_cfg = entry.get("ui") if isinstance(entry.get("ui"), dict) else {}
-                binding = AutoToolBinding(
+                descriptor = AutoToolBindingDescriptor(
                     model_name=model_name,
                     agent_name=agent_name,
                     tool_name=entry.get("name") or function_name,
-                    function=func,
-                    param_names=tuple(param_names),
-                    accepts_context=accepts_context,
+                    function_name=function_name,
                     ui_config=ui_cfg,
                     model_cls=model_cls,
                 )
-                mapping.setdefault(model_name, []).append(binding)
-                logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, binding.tool_name)
+                mapping.setdefault(model_name, []).append(descriptor)
+                logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, descriptor.tool_name)
 
-        logger.debug("[AUTO_TOOL] Loaded %d total bindings for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))
-        self._workflow_bindings[workflow_name] = mapping
+        logger.debug("[AUTO_TOOL] Loaded %d total binding descriptors for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))
+        self._workflow_binding_descriptors[workflow_name] = (fingerprint, mapping)
         return mapping
 
     def _build_tool_kwargs(
@@ -364,9 +636,18 @@ class AutoToolEventHandler:
             if matched and matched not in kwargs:
                 kwargs[matched] = value
         if binding.accepts_context:
+            # The documented auto-tool contract is
+            # context_variables.get("structured_output") -> the exact validated
+            # structured_data for THIS turn. The runtime satisfies it with a
+            # transient read-only overlay over the live context: no
+            # application-declared variable is required, the key is never
+            # written into pattern/workflow state, and snapshots/persistence
+            # never include it. All other keys keep ordinary context behavior.
             # Prefer using the pattern's actual context reference if available
             if pattern_context_ref and hasattr(pattern_context_ref, "get") and hasattr(pattern_context_ref, "set"):
-                kwargs["context_variables"] = pattern_context_ref
+                kwargs["context_variables"] = StructuredOutputOverlay(
+                    pattern_context_ref, normalized_payload
+                )
                 logger.debug("[AUTO_TOOL] Using live pattern context reference for %s", binding.tool_name)
             else:
                 # Fallback: create ephemeral container from snapshot
@@ -397,7 +678,9 @@ class AutoToolEventHandler:
                             container.set(key, value)
                         except Exception as _cs_err:
                             logger.debug("[AUTO_TOOL] Container seed failed key=%s: %s", key, _cs_err)
-                kwargs["context_variables"] = container
+                kwargs["context_variables"] = StructuredOutputOverlay(
+                    container, normalized_payload
+                )
         return kwargs
 
     async def _invoke_tool(
@@ -565,6 +848,9 @@ class AutoToolEventHandler:
             logger.debug("[AUTO_TOOL] Failed to emit tool_result for agent=%s", agent_name)
 
     async def _register_turn(self, cache_key: str) -> None:
+        # A completed (or terminally consumed) turn keeps only its bounded
+        # membership in the processed set; per-binding checkpoints are dropped.
+        self._turn_checkpoints.pop(cache_key, None)
         if cache_key in self._processed_keys:
             return
         self._processed_keys.add(cache_key)
@@ -580,4 +866,4 @@ class AutoToolEventHandler:
                 break
 
 
-__all__ = ["AutoToolEventHandler", "AutoToolBinding"]
+__all__ = ["AutoToolEventHandler", "AutoToolBinding", "AutoToolBindingDescriptor"]

@@ -284,10 +284,15 @@ async def test_ag2_structured_outputs_emit_runtime_event_and_update_context(
         wf_logger=SimpleNamespace(debug=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
     )
 
-    assert context_dict["structured_output"] == {"app_name": "ContractorFlow CRM"}
-    assert context_dict["_ConceptBlueprintLite"] == {"app_name": "ContractorFlow CRM"}
-    assert context_bridge.get("structured_output") == {"app_name": "ContractorFlow CRM"}
-    assert context_bridge.get("_ConceptBlueprintLite") == {"app_name": "ContractorFlow CRM"}
+    # structured_output is a runtime-owned transient projection: it must NOT
+    # be written into application context state or the pattern bridge. Auto
+    # tools observe it through the read-only overlay instead.
+    assert "structured_output" not in context_dict
+    assert "_ConceptBlueprintLite" not in context_dict
+    assert "structured_output_agent" not in context_dict
+    assert "structured_output_model" not in context_dict
+    assert context_bridge.get("structured_output") is None
+    assert context_bridge.get("_ConceptBlueprintLite") is None
     assert len(dispatcher.calls) == 1
     kind, payload = dispatcher.calls[0]
     assert kind == "runtime.agent_output_validated"
