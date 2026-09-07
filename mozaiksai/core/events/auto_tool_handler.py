@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -25,6 +26,7 @@ from mozaiksai.core.workflow.context.authority import (
     DETERMINISTIC_TOOL_WRITER,
     build_context_authority_policy,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.structured_output_overlay import (
     StructuredOutputOverlay,
 )
@@ -65,9 +67,17 @@ class AutoToolEventHandler:
     _CACHE_LIMIT = 512
 
     def __init__(self) -> None:
-        self._workflow_bindings: dict[str, dict[str, list[AutoToolBinding]]] = {}
+        # Self-validating binding cache: each entry pairs the built bindings
+        # with the authority fingerprint they were built from. A cached entry
+        # is reusable only while the current authority inputs still match.
+        self._workflow_bindings: dict[
+            str, tuple[tuple[Any, ...], dict[str, list[AutoToolBinding]]]
+        ] = {}
         self._processed_keys: set[str] = set()
         self._processed_order: asyncio.Queue[str] = asyncio.Queue()
+        # Turns claimed atomically before the first await: a duplicate
+        # delivery observing an IN_FLIGHT (or COMPLETED) turn never executes.
+        self._in_flight_keys: set[str] = set()
 
     async def handle_tool_dispatch(self, event: dict[str, Any]) -> None:
         """Process an agent_output_validated event and trigger the corresponding tool."""
@@ -109,10 +119,46 @@ class AutoToolEventHandler:
             return
 
         cache_key = f"{chat_id}:{turn_key}"
-        if cache_key in self._processed_keys:
+        # Atomic in-flight claim: check-and-add with no await in between is
+        # atomic within one event loop, and all handler access is loop-local.
+        # A concurrent duplicate delivery of the same turn observes IN_FLIGHT
+        # (or COMPLETED) and never executes the tool.
+        if cache_key in self._processed_keys or cache_key in self._in_flight_keys:
             logger.debug("[AUTO_TOOL] Duplicate turn detected -> skipping (key=%s)", cache_key)
             return
+        self._in_flight_keys.add(cache_key)
+        try:
+            await self._dispatch_claimed_turn(
+                cache_key=cache_key,
+                workflow_name=workflow_name,
+                model_name=model_name,
+                agent_name=agent_name,
+                structured_data=structured_data,
+                context=context,
+                chat_id=chat_id,
+                turn_key=turn_key,
+                pattern_context_ref=pattern_context_ref,
+            )
+        finally:
+            # An unexpected interruption (cancellation, unforeseen exception)
+            # before a truthful terminal result releases the claim so a
+            # legitimate retry can execute. Terminal outcomes have already
+            # registered COMPLETED via _register_turn by this point.
+            self._in_flight_keys.discard(cache_key)
 
+    async def _dispatch_claimed_turn(
+        self,
+        *,
+        cache_key: str,
+        workflow_name: str,
+        model_name: str,
+        agent_name: str,
+        structured_data: dict[str, Any],
+        context: dict[str, Any],
+        chat_id: Any,
+        turn_key: str,
+        pattern_context_ref: Any,
+    ) -> None:
         bindings = await self._resolve_bindings(workflow_name, model_name, agent_name)
         if not bindings:
             logger.warning(
@@ -126,7 +172,9 @@ class AutoToolEventHandler:
 
         try:
             validated = bindings[0].model_cls.model_validate(structured_data)
-            normalized = validated.model_dump(mode='json')  # type: ignore[attr-defined] - Force JSON serialization for enums
+            # ONE untouched canonical detached payload represents the accepted
+            # event result. It is never handed to a tool by mutable reference.
+            canonical_payload = detach(validated.model_dump(mode='json'))  # type: ignore[attr-defined] - Force JSON serialization for enums
         except ValidationError as err:
             logger.error(
                 "[AUTO_TOOL] Structured data failed validation for model=%s agent=%s errors=%s",
@@ -147,7 +195,12 @@ class AutoToolEventHandler:
 
         for binding in bindings:
             logger.debug("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
-            kwargs = self._build_tool_kwargs(binding, normalized, {
+            # Each binding gets its own detached copy: a tool mutating an
+            # explicit nested argument can never contaminate the canonical
+            # payload, another binding's arguments, or another binding's
+            # structured_output overlay.
+            binding_payload = detach(canonical_payload)
+            kwargs = self._build_tool_kwargs(binding, binding_payload, {
                 **context,
                 "turn_idempotency_key": turn_key,
                 "agent_name": agent_name,
@@ -203,27 +256,112 @@ class AutoToolEventHandler:
         matched = [binding for binding in candidates if binding.agent_name == agent_name]
         return matched
 
-    async def _load_bindings_for_workflow(self, workflow_name: str) -> dict[str, list[AutoToolBinding]]:
-        cached = self._workflow_bindings.get(workflow_name)
-        if cached is not None:
-            logger.debug("[AUTO_TOOL] Returning cached bindings for workflow=%s (count=%d)", workflow_name, len(cached))
-            return cached
+    def _resolve_registry(self, workflow_name: str) -> tuple[dict[str, Any], bool]:
+        """Resolve the current structured-output registry authority.
 
-        mapping: dict[str, list[AutoToolBinding]] = {}
+        Returns ``(registry, resolved)``. ``resolved=False`` means the current
+        configuration could not be loaded (unloaded workflow, failed reload):
+        a cached binding must never be reused on top of that failure, and the
+        empty result must not be cached as authority either.
+        """
         try:
             registry = get_structured_outputs_for_workflow(workflow_name)
-            logger.debug("[AUTO_TOOL] Loaded structured outputs registry for workflow=%s: %s", workflow_name, list(registry.keys()))
+            logger.debug(
+                "[AUTO_TOOL] Loaded structured outputs registry for workflow=%s: %s",
+                workflow_name,
+                list(registry.keys()),
+            )
+            return dict(registry), True
         except Exception as err:
             logger.debug(
                 "[AUTO_TOOL] Structured outputs unavailable for workflow %s: %s",
                 workflow_name,
                 err,
             )
-            registry = {}
+            return {}, False
 
+    @staticmethod
+    def _file_digest(path: Any) -> str | None:
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    def _binding_authority_fingerprint(
+        self, workflow_name: str, registry: dict[str, Any]
+    ) -> tuple[Any, ...]:
+        """Current authority inputs that decide whether cached bindings are reusable.
+
+        Covers the exact structured-output model class identity per agent, the
+        workflow's tools.yaml declaration bytes, and the bytes of every tool
+        file it names (rebuilt callables come from those bytes, so byte
+        identity is callable identity for this cache). Any change discards and
+        rebuilds the workflow's bindings.
+        """
+        registry_identity = tuple(
+            sorted(
+                (agent, getattr(model_cls, "__name__", str(model_cls)), id(model_cls))
+                for agent, model_cls in registry.items()
+            )
+        )
+        workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
+        tools_digest: str | None = None
+        tool_file_digests: tuple[tuple[str, str], ...] = ()
+        if workflow_path is not None:
+            tools_yaml_path = workflow_path / "tools.yaml"
+            tools_digest = self._file_digest(tools_yaml_path)
+            file_names: set[str] = set()
+            if tools_digest is not None:
+                try:
+                    raw = yaml.safe_load(tools_yaml_path.read_text(encoding="utf-8")) or {}
+                    for entry in raw.get("tools") or []:
+                        if isinstance(entry, dict) and entry.get("file"):
+                            file_names.add(str(entry["file"]))
+                except Exception:
+                    file_names = set()
+            digests: list[tuple[str, str]] = []
+            for file_name in sorted(file_names):
+                for candidate in (workflow_path / file_name, workflow_path / "tools" / file_name):
+                    digest = self._file_digest(candidate)
+                    if digest is not None:
+                        digests.append((file_name, digest))
+                        break
+            tool_file_digests = tuple(digests)
+        return (
+            str(workflow_path or ""),
+            registry_identity,
+            tools_digest,
+            tool_file_digests,
+        )
+
+    async def _load_bindings_for_workflow(self, workflow_name: str) -> dict[str, list[AutoToolBinding]]:
+        # Self-validating cache: resolve the current authority BEFORE any
+        # cached binding is reused. A cached workflow binding is reusable only
+        # while its authority fingerprint still matches the live registry and
+        # tool declarations.
+        registry, registry_resolved = self._resolve_registry(workflow_name)
+        fingerprint = self._binding_authority_fingerprint(workflow_name, registry)
+        cached = self._workflow_bindings.get(workflow_name)
+        if cached is not None:
+            cached_fingerprint, cached_mapping = cached
+            if registry_resolved and cached_fingerprint == fingerprint:
+                logger.debug(
+                    "[AUTO_TOOL] Returning cached bindings for workflow=%s (count=%d)",
+                    workflow_name,
+                    len(cached_mapping),
+                )
+                return cached_mapping
+            logger.debug(
+                "[AUTO_TOOL] Binding authority changed for workflow=%s -> rebuilding",
+                workflow_name,
+            )
+            self._workflow_bindings.pop(workflow_name, None)
+
+        mapping: dict[str, list[AutoToolBinding]] = {}
         if not registry:
             logger.warning("[AUTO_TOOL] Empty registry for workflow=%s - no bindings possible", workflow_name)
-            self._workflow_bindings[workflow_name] = mapping
+            if registry_resolved:
+                self._workflow_bindings[workflow_name] = (fingerprint, mapping)
             return mapping
 
         tool_functions = load_agent_tool_functions(workflow_name, include_auto_only=True)
@@ -238,7 +376,7 @@ class AutoToolEventHandler:
         workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
         if workflow_path is None:
             logger.warning("[AUTO_TOOL] Workflow path not found for workflow=%s", workflow_name)
-            self._workflow_bindings[workflow_name] = mapping
+            self._workflow_bindings[workflow_name] = (fingerprint, mapping)
             return mapping
         tools_yaml_path = workflow_path / "tools.yaml"
         tools_data: dict[str, Any] = {}
@@ -329,7 +467,7 @@ class AutoToolEventHandler:
                 logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, binding.tool_name)
 
         logger.debug("[AUTO_TOOL] Loaded %d total bindings for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))
-        self._workflow_bindings[workflow_name] = mapping
+        self._workflow_bindings[workflow_name] = (fingerprint, mapping)
         return mapping
 
     def _build_tool_kwargs(

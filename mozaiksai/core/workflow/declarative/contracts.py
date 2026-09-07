@@ -12,6 +12,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from mozaiksai.core.media.types import MediaPromotionTargetValue
+from mozaiksai.core.workflow.reserved_context_keys import (
+    require_application_context_name_allowed,
+)
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     infer_workflow_ui_realization,
     validate_workflow_renderable_primitive_ids,
@@ -423,7 +426,12 @@ class ContextAgentViewSpec(DeclarativeModel):
     @field_validator("variables")
     @classmethod
     def _normalize_variables(cls, value: list[str]) -> list[str]:
-        return _normalize_string_list(value)
+        normalized = _normalize_string_list(value)
+        for name in normalized:
+            require_application_context_name_allowed(
+                name, where="context_variables.yaml agents.<name>.variables"
+            )
+        return normalized
 
 
 class ContextVariablesConfig(DeclarativeModel):
@@ -437,6 +445,9 @@ class ContextVariablesConfig(DeclarativeModel):
     ) -> dict[str, ContextVariableDefinitionSpec]:
         for key in value.keys():
             _required_text(key, field_name="context variable name")
+            require_application_context_name_allowed(
+                key, where="context_variables.yaml definitions"
+            )
         return value
 
 

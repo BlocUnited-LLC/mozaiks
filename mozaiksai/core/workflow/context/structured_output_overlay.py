@@ -26,11 +26,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, cast
 
+from ..reserved_context_keys import STRUCTURED_OUTPUT_CONTEXT_KEY
 from .authority import ContextAuthorityError
 from .frozen import detach, freeze
 
 #: The documented public auto-tool context key for validated agent output.
-STRUCTURED_OUTPUT_KEY = "structured_output"
+#: The canonical vocabulary lives in ``reserved_context_keys``; this alias is
+#: kept for existing overlay consumers.
+STRUCTURED_OUTPUT_KEY = STRUCTURED_OUTPUT_CONTEXT_KEY
 
 
 class StructuredOutputWriteError(ContextAuthorityError):
@@ -80,11 +83,20 @@ class StructuredOutputOverlay:
         return self.contains(key)
 
     def keys(self) -> Iterable[str]:
-        """Underlying context keys only — the projection is not enumerable state."""
+        """Underlying context keys only — the projection is not enumerable state.
+
+        A base key named ``structured_output`` is illegal application state
+        (stale, caller-planted, or replayed); the overlay shadows it for reads
+        and excludes it from enumeration without mutating the base.
+        """
         base_keys = getattr(self._base, "keys", None)
-        if callable(base_keys):
-            return cast(Iterable[str], base_keys())
-        return ()
+        if not callable(base_keys):
+            return ()
+        return tuple(
+            key
+            for key in cast(Iterable[str], base_keys())
+            if key != STRUCTURED_OUTPUT_KEY
+        )
 
     # -- writes --------------------------------------------------------------
 

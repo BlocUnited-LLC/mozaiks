@@ -969,7 +969,15 @@ candidate fields — top-level and nested — reject and are never silently
 discarded before an exact acceptance boundary sees the original candidate.
 There is no permissive mode, per-workflow acceptance override, or dual
 registry behavior, and reload/unload/refresh can never revive a permissive
-cached model. Deliberately declared open `dict`/`optional_dict` fields keep their
+cached model. ``structured_output`` is reserved runtime vocabulary
+(`mozaiksai/core/workflow/reserved_context_keys.py`): every canonical context
+declaration surface rejects an application claim of it, with no metadata
+override. Auto-tool binding caches are self-validating — a cached binding is
+reusable only while its authority fingerprint (exact model class identity,
+tool declarations, tool file bytes) still matches — and each auto-tool turn
+is claimed atomically before its first await, so concurrent duplicate
+deliveries of one turn produce exactly one side effect while unexpected
+interruptions release the claim for a legitimate retry. Deliberately declared open `dict`/`optional_dict` fields keep their
 semantics: the field is closed at its containing object level while arbitrary
 keys inside the declared open dict remain valid runtime data.
 `get_provider_response_model` remains the sole provider adapter. It creates

@@ -527,6 +527,11 @@ async def save_my_output(context_variables=None):
     )
 ```
 
+`structured_output` is reserved runtime vocabulary: auto tools receive it as a
+transient read-only projection. Never declare it in `context_variables.yaml`
+(workflow validation rejects it); persist chosen data under your own declared
+context keys.
+
 ## Tool Design Philosophy
 
 **Tools are dumb. LLMs reason.**

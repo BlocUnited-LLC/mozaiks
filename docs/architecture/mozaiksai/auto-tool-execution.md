@@ -27,8 +27,10 @@ not application state.** The runtime exposes the exact validated
 `structured_data` for the current turn through a read-only overlay on the
 live context:
 
-- tools read it with `context_variables.get("structured_output")`; no
-  `context_variables.yaml` declaration is needed (or allowed to seize it);
+- tools read it with `context_variables.get("structured_output")`;
+  `structured_output` is reserved runtime vocabulary — declaring it in
+  `context_variables.yaml` (definitions or agent views) is rejected at
+  workflow load, with no metadata override;
 - tools cannot set, delete, replace, or mutate it — attempts fail closed;
 - it is never written into AG2 workflow state, never persisted, never
   replayed, and never appears in context snapshots; to keep any of it, a tool

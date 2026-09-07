@@ -67,6 +67,23 @@ async def save_explicit(title: str, status: str, context_variables=None):
     return {"status": "ok"}
 
 
+async def mutate_nested(meta=None, context_variables=None):
+    if meta is not None:
+        meta["label"] = "MUTATED"
+        meta["injected_temp"] = True
+    overlay_view = context_variables.get("structured_output")
+    context_variables.set(
+        "mutator_overlay_after_own_mutation", dict(dict(overlay_view)["meta"])
+    )
+    return {"status": "ok"}
+
+
+async def read_nested(context_variables=None):
+    data = context_variables.get("structured_output")
+    context_variables.set("reader_saw_meta", dict(dict(data)["meta"]))
+    return {"status": "ok"}
+
+
 async def try_mutation(context_variables=None):
     outcomes = {}
     try:
@@ -110,6 +127,30 @@ _TOOLS_YAML = """tools:
   description: Mutation-attempt auto tool.
   tool_type: Agent_Tool
   auto_tool_call: true
+- agent: PairMutateFirstAgent
+  file: probe_tools.py
+  function: mutate_nested
+  description: Explicit-param tool that mutates its nested argument.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: PairMutateFirstAgent
+  file: probe_tools.py
+  function: read_nested
+  description: Context-only tool reading structured_output after the mutator.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: PairReadFirstAgent
+  file: probe_tools.py
+  function: read_nested
+  description: Context-only tool reading structured_output before the mutator.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: PairReadFirstAgent
+  file: probe_tools.py
+  function: mutate_nested
+  description: Explicit-param tool that mutates its nested argument.
+  tool_type: Agent_Tool
+  auto_tool_call: true
 """
 
 _STRUCTURED_OUTPUTS = """schema_version: mozaiks.structured_outputs.v1
@@ -117,12 +158,23 @@ registry:
   ContextOnlyAgent: ProbeOutput
   ExplicitAgent: ProbeOutput
   MutatorAgent: ProbeOutput
+  PairMutateFirstAgent: NestedOutput
+  PairReadFirstAgent: NestedOutput
 models:
   ProbeOutput:
     type: model
     fields:
       title: { type: str }
       status: { type: str }
+  MetaLeaf:
+    type: model
+    fields:
+      label: { type: str }
+  NestedOutput:
+    type: model
+    fields:
+      title: { type: str }
+      meta: { type: MetaLeaf }
 """
 
 # The declared application keys the probe tools write. structured_output is
@@ -173,7 +225,9 @@ def _write_workflow(root: Path) -> None:
         "agents:\n"
         + _AGENT_TEMPLATE.format(name="ContextOnlyAgent")
         + _AGENT_TEMPLATE.format(name="ExplicitAgent")
-        + _AGENT_TEMPLATE.format(name="MutatorAgent"),
+        + _AGENT_TEMPLATE.format(name="MutatorAgent")
+        + _AGENT_TEMPLATE.format(name="PairMutateFirstAgent")
+        + _AGENT_TEMPLATE.format(name="PairReadFirstAgent"),
         encoding="utf-8",
     )
     (workflow_dir / "structured_outputs.yaml").write_text(_STRUCTURED_OUTPUTS, encoding="utf-8")
@@ -335,12 +389,23 @@ def test_overlay_snapshot_and_to_dict_never_expose_the_projection():
 
 
 def test_overlay_shadows_caller_seeded_projection_without_erasing_base():
-    base = _PatternContext({STRUCTURED_OUTPUT_KEY: {"planted": "by-caller"}})
+    """A stale/caller-planted/replayed base structured_output key is shadowed
+    for reads and excluded from every enumeration-derived durable view."""
+    base = _PatternContext(
+        {STRUCTURED_OUTPUT_KEY: {"planted": "by-caller"}, "declared_key": "value"}
+    )
     overlay = StructuredOutputOverlay(base, PAYLOAD)
+    # get() serves the runtime transient projection, never the planted value.
     assert dict(overlay.get(STRUCTURED_OUTPUT_KEY)) == PAYLOAD
+    # keys(), snapshot(), and to_dict() never expose the colliding base key.
+    assert STRUCTURED_OUTPUT_KEY not in list(overlay.keys())
+    assert "declared_key" in list(overlay.keys())
     assert STRUCTURED_OUTPUT_KEY not in overlay.snapshot()
+    assert STRUCTURED_OUTPUT_KEY not in overlay.to_dict()
+    assert overlay.snapshot()["declared_key"] == "value"
     # The base is not silently erased; only the turn-local view is shadowed.
     assert base.data[STRUCTURED_OUTPUT_KEY] == {"planted": "by-caller"}
+    assert base.data["declared_key"] == "value"
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +536,54 @@ async def test_hitl_style_resequencing_keeps_distinct_turns_independent(
         _event("ContextOnlyAgent", structured_data=PAYLOAD, pattern_context=pattern, turn=2)
     )
     assert pattern.data["context_only_runs"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Cross-binding payload isolation: one validated output, multiple bindings
+# ---------------------------------------------------------------------------
+
+NESTED_PAYLOAD = {"title": "Nested Probe", "meta": {"label": "ORIGINAL"}}
+
+
+def _nested_event(agent: str, pattern, *, turn: int = 21):
+    return build_runtime_agent_output_validated_event(
+        agent=agent,
+        model_name="NestedOutput",
+        structured_data={
+            "title": NESTED_PAYLOAD["title"],
+            "meta": dict(NESTED_PAYLOAD["meta"]),
+        },
+        auto_tool_call=True,
+        context={"chat_id": "chat-1", "app_id": "app-1", "workflow_name": WORKFLOW},
+        turn_idempotency_key=build_turn_idempotency_key("chat-1", turn),
+        pattern_context_ref=pattern,
+        validation_passed=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "agent", ["PairMutateFirstAgent", "PairReadFirstAgent"], ids=["mutate-first", "read-first"]
+)
+async def test_explicit_mutation_cannot_contaminate_other_bindings(
+    probe_manager, persisted_snapshots, quiet_transport, agent
+):
+    """One exact validated payload, two bindings, both orders: the mutator's
+    explicit nested-argument mutation never reaches the canonical payload,
+    the other binding's structured_output overlay, or the event audit data."""
+    handler = AutoToolEventHandler()
+    pattern = _PatternContext()
+    event = _nested_event(agent, pattern)
+    await handler.handle_tool_dispatch(event)
+
+    # The context-only binding saw the ORIGINAL accepted nested object.
+    assert pattern.data["reader_saw_meta"] == {"label": "ORIGINAL"}
+    # Same-binding consistency: the mutator's own overlay projection is
+    # unaffected by its explicit-argument mutation.
+    assert pattern.data["mutator_overlay_after_own_mutation"] == {"label": "ORIGINAL"}
+    # Event audit data keeps the exact accepted content — no shared alias.
+    assert event["structured_data"] == NESTED_PAYLOAD
+    assert "injected_temp" not in event["structured_data"]["meta"]
+    assert STRUCTURED_OUTPUT_KEY not in pattern.data
 
 
 # ---------------------------------------------------------------------------

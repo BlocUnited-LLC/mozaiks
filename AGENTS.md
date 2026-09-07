@@ -280,7 +280,9 @@ products, and customer workspaces use the same shape:
   owning workflow's `ui/` folder.
 - `context_variables.yaml` declares runtime/session state. Large static prompt
   catalogs are injected by deterministic hooks; do not stuff them into context
-  variables.
+  variables. `structured_output` is reserved runtime vocabulary — auto tools
+  receive it as a transient read-only projection; declaring it as a context
+  variable fails workflow validation.
 - Reusable OSS build packs are named build contexts. `context.yaml` owns the
   pack descriptor through a `pack:` section plus capabilities and facades. It
   should be useful LLM/build context, not a placeholder

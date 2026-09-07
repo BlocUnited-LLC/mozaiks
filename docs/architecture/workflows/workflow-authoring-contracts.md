@@ -304,9 +304,11 @@ Rules:
   when arbitrary keys are genuinely part of the contract.
 - Auto tools read the exact validated output through
   `context_variables.get("structured_output")` — a transient, read-only,
-  runtime-owned projection. Do not declare `structured_output` in
-  `context_variables.yaml`, and do not try to write it from tools; persist
-  chosen data under your own declared context keys instead.
+  runtime-owned projection. `structured_output` is RESERVED runtime
+  vocabulary: declaring it in `context_variables.yaml` (as a definition or an
+  agent view variable) is rejected at workflow load, no declaration metadata
+  can claim it, and tools cannot write it; persist chosen data under your own
+  declared context keys instead.
 
 ### `tools.yaml`
 

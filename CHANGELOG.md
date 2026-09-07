@@ -26,6 +26,16 @@ This project follows a practical pre-1.0 changelog format:
   output: context-only auto tools work without declaring context variables,
   explicit-param auto tools receive the same values, and the projection can
   never be written, persisted, or replayed as workflow state.
+  `structured_output` is reserved runtime vocabulary: declaring it in
+  `context_variables.yaml` now fails workflow validation with no metadata
+  override, and overlay enumeration/snapshots never expose a colliding stale
+  base key. Auto-tool binding caches self-validate against the live
+  structured-output registry and tool declarations (reload, unload,
+  refresh_all, and failed reloads can never execute a stale binding or stale
+  callable), each binding receives its own detached copy of the validated
+  payload (explicit-argument mutation cannot contaminate another binding or
+  the audit record), and turns are claimed in-flight atomically so concurrent
+  duplicate deliveries produce exactly one tool side effect.
 
 ### Changed
 
