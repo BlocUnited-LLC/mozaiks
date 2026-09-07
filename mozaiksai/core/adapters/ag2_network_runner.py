@@ -43,10 +43,12 @@ from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import (
     AGENT_TEXT_WRITER,
     CONTEXT_BRIDGE_WRITER,
-    DETERMINISTIC_TOOL_WRITER,
     LIVE_USER_CONTEXT_WRITER,
     SENTINEL_TEXT_TRIGGER_WRITER,
+    ContextAuthorityError,
     ContextAuthorityPolicy,
+    ContextWriterId,
+    resolve_declared_context_writer,
 )
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
@@ -90,36 +92,19 @@ def _json_safe_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return serialized if isinstance(serialized, dict) else {}
 
 
-def _resolve_declared_writer(
-    key: str,
-    *,
-    base_writer: str,
-    elevated_writer: str,
-    context_authority_policy: ContextAuthorityPolicy | None,
-) -> str:
-    """Label a write with the highest-fidelity writer the declaration
-    authorizes for this mechanism. The policy stays the single authority —
-    this only picks between the mechanism's base writer and its declared
-    deterministic form (e.g. a bridge write to a variable whose declaration
-    authorizes deterministic tools, or an agent-text derive for a variable
-    declared with an exact-match sentinel trigger)."""
-    if context_authority_policy is None:
-        return base_writer
-    authority = context_authority_policy.variables.get(key)
-    if authority is not None and elevated_writer in authority.writer_ids:
-        return elevated_writer
-    return base_writer
-
-
 def _authorized_context_updates(
     updates: Mapping[str, Any] | None,
     *,
-    writer_id: str,
+    writer_id: ContextWriterId,
     context_authority_policy: ContextAuthorityPolicy | None,
-    elevated_writer_id: str | None = None,
+    elevated_writer_id: ContextWriterId | None = None,
 ) -> dict[str, Any]:
     if not updates:
         return {}
+    if elevated_writer_id is not None and (
+        writer_id != AGENT_TEXT_WRITER or elevated_writer_id != SENTINEL_TEXT_TRIGGER_WRITER
+    ):
+        raise ContextAuthorityError("context_authority.untrusted_writer_attribution")
     safe: dict[str, Any] = {}
     for key, value in updates.items():
         clean_key = str(key or "").strip()
@@ -127,14 +112,14 @@ def _authorized_context_updates(
             continue
         effective_writer = writer_id
         if elevated_writer_id is not None:
-            effective_writer = _resolve_declared_writer(
+            effective_writer = resolve_declared_context_writer(
                 clean_key,
                 base_writer=writer_id,
-                elevated_writer=elevated_writer_id,
-                context_authority_policy=context_authority_policy,
+                declared_writer=elevated_writer_id,
+                policy=context_authority_policy,
             )
         if context_authority_policy is not None:
-            context_authority_policy.require_can_write(clean_key, writer_id=effective_writer, operation="set")  # type: ignore[arg-type]
+            context_authority_policy.require_can_write(clean_key, writer_id=effective_writer, operation="set")
         safe[clean_key] = value
     return safe
 
@@ -374,6 +359,7 @@ class AG2NetworkRunner:
                     agent=agent,
                     client=client,
                     agent_name=name,
+                    run_identity=(request.workflow_name, request.app_id, request.chat_id),
                     agent_text_context_deriver=request.agent_text_context_deriver,
                     context_authority_policy=request.context_authority_policy,
                 )
@@ -923,6 +909,7 @@ def _install_context_update_handler(
     agent: Any,
     client: Any,
     agent_name: str,
+    run_identity: tuple[str, str, str],
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None,
     context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> None:
@@ -935,13 +922,14 @@ def _install_context_update_handler(
     before AG2 selects the next speaker.
     """
 
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
     bridge = getattr(agent, "_mozaiks_context_bridge", None)
-    has_bridge = (
-        bridge is not None
-        and callable(getattr(bridge, "clear_context_updates", None))
-        and callable(getattr(bridge, "consume_context_updates", None))
-    )
-    if not has_bridge and agent_text_context_deriver is None:
+    if bridge is not None:
+        if not isinstance(bridge, ContextVariablesBridge):
+            raise ContextAuthorityError("context_authority.untrusted_bridge")
+        bridge._bind_run(run_identity, context_authority_policy)
+    if bridge is None and agent_text_context_deriver is None and context_authority_policy is None:
         return
 
     async def _handler(envelope: Any) -> None:
@@ -955,12 +943,26 @@ def _install_context_update_handler(
                 and str(getattr(out_envelope, "channel_id", "") or "")
                 == str(getattr(envelope, "channel_id", "") or "")
             ):
+                event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
+                existing = dict(event_data.get("context_updates") or {})
+                existing_set = _authorized_context_updates(
+                    existing.get("set") or {},
+                    writer_id=CONTEXT_BRIDGE_WRITER,
+                    context_authority_policy=context_authority_policy,
+                )
+                existing_delete = [str(key) for key in existing.get("delete") or []]
+                if context_authority_policy is not None:
+                    for key in existing_delete:
+                        context_authority_policy.require_can_write(
+                            key, writer_id=CONTEXT_BRIDGE_WRITER, operation="delete",
+                        )
                 bridge_updates = (
-                    bridge.consume_context_updates()
+                    bridge.consume_authorized_context_updates(
+                        policy=context_authority_policy, run_identity=run_identity,
+                    )
                     if bridge is not None
                     else {"set": {}, "delete": []}
                 )
-                event_data = _json_safe_dict(getattr(out_envelope, "event_data", {}) or {})
                 derived_updates: Mapping[str, Any] = {}
                 if agent_text_context_deriver is not None:
                     text = _packet_body_text(event_data)
@@ -982,30 +984,18 @@ def _install_context_update_handler(
                                 elevated_writer_id=SENTINEL_TEXT_TRIGGER_WRITER,
                             )
                 if (
-                    bridge_updates.get("set")
+                    existing
+                    or bridge_updates.get("set")
                     or bridge_updates.get("delete")
                     or derived_updates
                 ):
-                    existing = dict(event_data.get("context_updates") or {})
-                    bridge_set = _authorized_context_updates(
-                        bridge_updates.get("set") or {},
-                        writer_id=CONTEXT_BRIDGE_WRITER,
-                        context_authority_policy=context_authority_policy,
-                        elevated_writer_id=DETERMINISTIC_TOOL_WRITER,
-                    )
-                    existing_set = _authorized_context_updates(
-                        existing.get("set") or {},
-                        writer_id=CONTEXT_BRIDGE_WRITER,
-                        context_authority_policy=context_authority_policy,
-                        elevated_writer_id=DETERMINISTIC_TOOL_WRITER,
-                    )
                     merged_set = {
                         **_json_safe_dict(existing_set),
                         **_json_safe_dict(derived_updates),
-                        **_json_safe_dict(bridge_set),
+                        **_json_safe_dict(bridge_updates.get("set") or {}),
                     }
                     merged_delete = [
-                        *list(existing.get("delete") or []),
+                        *existing_delete,
                         *list(bridge_updates.get("delete") or []),
                     ]
                     event_data["context_updates"] = {

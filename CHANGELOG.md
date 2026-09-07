@@ -79,6 +79,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **AG2 Network tool routing**: declared tools retain authorized context writes
+  and hand off from actual tool-call events, including turns with no text.
+  Source-agent scoping and context-write policy remain enforced through graph
+  reload and packet publication.
 - **Provider-neutral structured-output identity**: canonical contracts now pin
   a versioned acceptance profile and truthful optionality independently of
   provider wire formatting. Build and cold resolution consume the same explicit
