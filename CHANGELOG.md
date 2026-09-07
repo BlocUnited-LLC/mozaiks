@@ -29,13 +29,23 @@ This project follows a practical pre-1.0 changelog format:
   `structured_output` is reserved runtime vocabulary: declaring it in
   `context_variables.yaml` now fails workflow validation with no metadata
   override, and overlay enumeration/snapshots never expose a colliding stale
-  base key. Auto-tool binding caches self-validate against the live
-  structured-output registry and tool declarations (reload, unload,
-  refresh_all, and failed reloads can never execute a stale binding or stale
-  callable), each binding receives its own detached copy of the validated
+  base key. Auto-tool binding caches hold declarative metadata only,
+  self-validated against the live structured-output registry and tool
+  declarations (reload, unload, refresh_all, and failed reloads can never
+  execute a stale binding); the executable tool callable is resolved fresh
+  through the canonical loader on every dispatch, so workflow-owned tool and
+  imported helper changes (in both the `workflows.*` and derived real package
+  namespaces such as `factory_app.workflows.*`) are observed without restart,
+  while external installed packages remain a documented process-restart
+  boundary. Each binding receives its own detached copy of the validated
   payload (explicit-argument mutation cannot contaminate another binding or
-  the audit record), and turns are claimed in-flight atomically so concurrent
-  duplicate deliveries produce exactly one tool side effect.
+  the audit record), turns are claimed in-flight atomically, and every
+  binding keeps a finite process-local execution checkpoint: once a tool
+  returns a truthful terminal result (success or failure) it is never
+  re-invoked for that turn — retries after cancellation resume unfinished
+  post-processing stages (write-back, persistence, result emission) instead
+  of re-running the tool. This is process-local runtime idempotency, not
+  distributed exactly-once delivery.
 
 ### Changed
 

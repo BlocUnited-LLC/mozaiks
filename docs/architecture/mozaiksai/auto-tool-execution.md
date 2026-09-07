@@ -43,6 +43,27 @@ live context:
   `context_variables` also works: the structured-output model validates the
   agent's output, not the tool's argument list.
 
+**Callable freshness.** Declarative binding metadata may be cached, but the
+executable Python function is resolved fresh through the canonical workflow
+tool loader on every dispatch. The loader refreshes workflow-owned modules —
+per-workflow tool files and the workflows root's `_shared` helpers — under
+both the synthetic `workflows.<name>` namespace and the derived real package
+chain (for example `factory_app.workflows.<name>`), so changing a tool file
+or an imported workflow helper is observed on the next dispatch without a
+process restart. **Changes to external installed third-party packages are a
+process-restart boundary** — they are never hot-replaced.
+
+**Execution idempotency.** Each turn is claimed atomically, and every binding
+keeps a finite process-local checkpoint (PENDING → TOOL_TERMINAL → COMPLETE,
+with per-stage write-back/persistence/result-emission marks). Once a tool
+returns a truthful terminal result — success or failure — that binding is
+never invoked again for the same turn; a retry after cancellation resumes at
+the first unfinished binding/stage instead of re-running completed tools.
+**This guarantee is process-local**: a process crash after an external
+non-idempotent tool side effect but before durable recording cannot be
+solved by this in-memory handler. Tools that need cross-process exactly-once
+semantics must rely on their owning service's idempotency contract.
+
 ## Configuration
 
 **tools.yaml** - Mark tool for auto-invocation:

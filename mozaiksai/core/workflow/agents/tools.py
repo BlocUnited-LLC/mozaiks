@@ -63,14 +63,54 @@ def _ensure_workflow_import_paths(*, base_dir: Path, file_path: Path) -> None:
             sys.path.insert(0, value)
 
 
-def _reset_workflow_package_namespace(*, base_dir: Path, workflow_name: str) -> None:
-    """Bind ``workflows.<workflow_name>`` imports to the active repo workflow root.
+def _workflow_root_package_names(workflows_root: Path) -> list[str]:
+    """Derive the importable dotted package names of one workflows root.
 
-    Some local environments have another checkout on ``sys.path`` that also exposes a
-    top-level ``workflows`` package. Tool modules use relative imports like
-    ``from .workflow_converter import ...``; if Python resolves the parent package from
-    the wrong checkout, the live workflow pulls stale code. Rebinding the workflow
-    package namespace here keeps dynamic tool imports pinned to the active root.
+    Workflow-owned Python (per-workflow tool modules and the shared
+    ``_shared`` helpers beside them) can be imported both through the
+    synthetic ``workflows.<name>`` namespace this loader binds and through the
+    real package chain that contains the workflows root on disk (for example
+    ``factory_app.workflows.<name>``). The real chain is derived from the
+    filesystem — walking up while ``__init__.py`` parents exist — rather than
+    hardcoding any repository-specific package name.
+    """
+    names = ["workflows"]
+    parts: list[str] = []
+    current = workflows_root
+    try:
+        while (current / "__init__.py").exists():
+            parts.append(current.name)
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+    except OSError:
+        parts = []
+    if parts:
+        dotted = ".".join(reversed(parts))
+        if dotted and dotted not in names:
+            names.append(dotted)
+    return names
+
+
+def _reset_workflow_package_namespace(*, base_dir: Path, workflow_name: str) -> None:
+    """Refresh workflow-owned Python modules for the workflow being loaded.
+
+    Two freshness rules:
+
+    - the synthetic ``workflows.<workflow_name>`` namespace is rebound to the
+      active workflow root so relative tool imports resolve against the live
+      checkout;
+    - every cached module under this workflow (and the workflows root's shared
+      ``_shared`` helpers) is dropped from ``sys.modules`` for EVERY dotted
+      package name that reaches this workflows root — both the synthetic
+      ``workflows`` namespace and the derived real package chain (for example
+      ``factory_app.workflows``). A tool whose behavior lives in an imported
+      workflow helper therefore observes helper changes on the next load
+      without a process restart.
+
+    Unrelated workflows are not cleared. External installed third-party
+    packages are never hot-replaced: changing them requires a process restart.
     """
 
     workflows_root = base_dir.parent
@@ -82,10 +122,17 @@ def _reset_workflow_package_namespace(*, base_dir: Path, workflow_name: str) -> 
     if tools_root.exists():
         package_roots[f"workflows.{workflow_name}.tools"] = tools_root
 
-    workflow_prefix = f"workflows.{workflow_name}"
-    for module_name in list(sys.modules):
-        if module_name == "workflows" or module_name == workflow_prefix or module_name.startswith(f"{workflow_prefix}."):
-            sys.modules.pop(module_name, None)
+    for root_package in _workflow_root_package_names(workflows_root):
+        stale_prefixes = (
+            f"{root_package}.{workflow_name}",
+            f"{root_package}._shared",
+        )
+        for module_name in list(sys.modules):
+            if module_name == "workflows" or any(
+                module_name == prefix or module_name.startswith(f"{prefix}.")
+                for prefix in stale_prefixes
+            ):
+                sys.modules.pop(module_name, None)
 
     for package_name, package_root in package_roots.items():
         module = types.ModuleType(package_name)

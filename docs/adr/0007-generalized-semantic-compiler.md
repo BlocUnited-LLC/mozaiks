@@ -972,12 +972,24 @@ registry behavior, and reload/unload/refresh can never revive a permissive
 cached model. ``structured_output`` is reserved runtime vocabulary
 (`mozaiksai/core/workflow/reserved_context_keys.py`): every canonical context
 declaration surface rejects an application claim of it, with no metadata
-override. Auto-tool binding caches are self-validating — a cached binding is
-reusable only while its authority fingerprint (exact model class identity,
-tool declarations, tool file bytes) still matches — and each auto-tool turn
-is claimed atomically before its first await, so concurrent duplicate
-deliveries of one turn produce exactly one side effect while unexpected
-interruptions release the claim for a legitimate retry. Deliberately declared open `dict`/`optional_dict` fields keep their
+override. Auto-tool binding caches hold DECLARATIVE metadata only, self-validated
+against the live exact-model identity and tools.yaml declaration; Python
+callable authority is never cached across dispatches — the executable
+function is resolved fresh through the canonical workflow tool loader, whose
+namespace refresh derives the workflow root's real package chain (for example
+``factory_app.workflows``) as well as the synthetic ``workflows`` namespace,
+so workflow-owned source and imported helper changes are observed without a
+process restart. Changes to external installed third-party packages remain a
+process-restart boundary. Each auto-tool turn is claimed atomically before
+its first await, and each binding keeps a finite process-local execution
+checkpoint (PENDING → TOOL_TERMINAL → COMPLETE, with per-stage
+write-back/persistence/emission marks): once a tool returns a truthful
+terminal result — success or failure — that binding is never invoked again
+for the same turn; retries resume the first unfinished binding/stage. This is
+process-local runtime idempotency, not distributed exactly-once delivery: a
+crash after an external non-idempotent side effect but before durable
+recording is out of scope, and such tools must use their owning service's
+idempotency contract. Deliberately declared open `dict`/`optional_dict` fields keep their
 semantics: the field is closed at its containing object level while arbitrary
 keys inside the declared open dict remain valid runtime data.
 `get_provider_response_model` remains the sole provider adapter. It creates
