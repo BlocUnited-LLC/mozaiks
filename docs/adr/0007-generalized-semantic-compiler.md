@@ -967,9 +967,9 @@ structured outputs are exact at runtime**: `load_workflow_structured_outputs`
 compiles every declared model id with closed-object acceptance, so unknown
 candidate fields — top-level and nested — reject and are never silently
 discarded before an exact acceptance boundary sees the original candidate.
-There is no legacy mode, per-workflow permissive fallback, or dual registry
-behavior, and reload/unload/refresh can never fall back to a permissive cached
-model. Deliberately declared open `dict`/`optional_dict` fields keep their
+There is no permissive mode, per-workflow acceptance override, or dual
+registry behavior, and reload/unload/refresh can never revive a permissive
+cached model. Deliberately declared open `dict`/`optional_dict` fields keep their
 semantics: the field is closed at its containing object level while arbitrary
 keys inside the declared open dict remain valid runtime data.
 `get_provider_response_model` remains the sole provider adapter. It creates

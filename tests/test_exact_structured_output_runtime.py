@@ -4,8 +4,8 @@ The generic runtime registry compiles every declared structured-output model
 with closed-object acceptance: unknown candidate fields reject — top-level and
 nested — before any operation capable of deleting unknown information runs.
 The #485 staging decision that left generic runtime loading permissive is
-retired; there is no legacy mode, no per-workflow fallback, and no permissive
-cached model after reload.
+retired; there is no permissive mode, no per-workflow acceptance override,
+and no permissive cached model after reload.
 
 Deliberately-open ``dict``/``optional_dict`` fields keep their semantics: the
 FIELD is closed at its containing object level, while arbitrary keys inside
