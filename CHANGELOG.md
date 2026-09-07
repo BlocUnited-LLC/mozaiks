@@ -12,6 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- **Exact structured-output auto-tool contracts**: declared workflow
+  structured outputs are now exact at runtime — an agent output carrying an
+  undeclared field (top-level or nested) rejects before any normalization, so
+  no `agent_output_validated` event, auto tool, UI emission, or persistence
+  can run on silently stripped data. Deliberately declared open
+  `dict`/`optional_dict` fields keep accepting arbitrary keys inside. The
+  documented auto-tool contract
+  `context_variables.get("structured_output")` is now truthfully served as a
+  transient, runtime-owned, read-only projection of the exact validated
+  output: context-only auto tools work without declaring context variables,
+  explicit-param auto tools receive the same values, and the projection can
+  never be written, persisted, or replayed as workflow state.
+
 ### Changed
 
 - **Canonical capability-pack action requests are closed**: all 63 actions

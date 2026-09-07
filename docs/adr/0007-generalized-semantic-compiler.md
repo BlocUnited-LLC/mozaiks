@@ -961,12 +961,23 @@ the compatibility report.
 
 `build_models_from_config` now returns unpatched canonical Pydantic models.
 Explicit `exact_model_ids` applies `extra="forbid"` when models are created,
-before a parent can capture a child schema. Generic runtime loading keeps its
-existing default acceptance policy; this is not the global strictness flip.
+before a parent can capture a child schema. The original #485 staging decision
+left generic runtime loading permissive; that decision is retired. **Declared
+structured outputs are exact at runtime**: `load_workflow_structured_outputs`
+compiles every declared model id with closed-object acceptance, so unknown
+candidate fields — top-level and nested — reject and are never silently
+discarded before an exact acceptance boundary sees the original candidate.
+There is no legacy mode, per-workflow permissive fallback, or dual registry
+behavior, and reload/unload/refresh can never fall back to a permissive cached
+model. Deliberately declared open `dict`/`optional_dict` fields keep their
+semantics: the field is closed at its containing object level while arbitrary
+keys inside the declared open dict remain valid runtime data.
 `get_provider_response_model` remains the sole provider adapter. It creates
 separate response models with the current OpenAI strict required fields,
-reference inlining, and object closure. Production agent construction continues
-to use that adapter.
+reference inlining, and object closure, and its local parse honors the same
+`additionalProperties: false` claim its advertised schema makes — a permissive
+provider-side parse cannot become the first lossy normalization. Production
+agent construction continues to use that adapter.
 
 `canonical_structured_output_schema` invokes the unmodified Pydantic validation
 schema compiler directly. Acceptance profile
@@ -1382,7 +1393,8 @@ AppGenerator; production-dead AgentGenerator converter normalizers
 (`workflow_converter.py`); lossy, unpersisted `AppBuildPlan` planning path;
 the four control-plane glob taxonomies; `BuildRecordStore`/`ArtifactStore`
 alias duplication in `mozaiksai/core/artifacts/store.py`; multiple event and
-taxonomy registries; structured-output permissiveness; incomplete
+taxonomy registries; structured-output permissiveness (resolved: declared
+structured outputs are exact at runtime); incomplete
 provenance/ownership use in refinement (the `refinement` provenance mode and
 `last_refined_with` field in `mozaiksai/core/runtime/app/provenance.py` are
 declared but never read or written by any control-plane code); lack of refinement replay; dual builder persistence

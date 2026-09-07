@@ -297,6 +297,16 @@ models:
 Rules:
 - `models.<Name>.type` must be `model`.
 - `registry` values must reference existing `models` keys.
+- Declared models are exact at runtime: an agent output carrying a field the
+  model does not declare (top-level or nested) is rejected — never silently
+  stripped — and no auto tool runs for that turn. Declare every field the
+  agent may emit, or declare a deliberate open `dict`/`optional_dict` field
+  when arbitrary keys are genuinely part of the contract.
+- Auto tools read the exact validated output through
+  `context_variables.get("structured_output")` — a transient, read-only,
+  runtime-owned projection. Do not declare `structured_output` in
+  `context_variables.yaml`, and do not try to write it from tools; persist
+  chosen data under your own declared context keys instead.
 
 ### `tools.yaml`
 

@@ -420,7 +420,18 @@ def load_agent_tool_functions(
             # For agent tools that are manually invoked (auto_tool_call=false), validating kwargs against the
             # agent's structured output model will reject legitimate tool payloads. Only enforce schema
             # for auto-invoked tools where kwargs are expected to match the agent's structured output.
-            enforce_schema = ag in structured_registry and should_auto_tool_call and not is_ui_tool
+            # include_auto_only=True is the AutoToolEventHandler load path: its
+            # payload already passed exact agent-output acceptance, and its
+            # kwargs are runtime-decomposed (possibly context-only), so the
+            # wrapper must not re-validate them against the agent OUTPUT model.
+            # Agent-bound loads (include_auto_only=False) keep validating
+            # LLM-requested tool-call arguments for auto-tagged agent tools.
+            enforce_schema = (
+                ag in structured_registry
+                and should_auto_tool_call
+                and not is_ui_tool
+                and not include_auto_only
+            )
             wrapped_func = _wrap_with_validation(
                 workflow_name=workflow_name,
                 agent_name=ag,

@@ -25,6 +25,9 @@ from mozaiksai.core.workflow.context.authority import (
     DETERMINISTIC_TOOL_WRITER,
     build_context_authority_policy,
 )
+from mozaiksai.core.workflow.context.structured_output_overlay import (
+    StructuredOutputOverlay,
+)
 from mozaiksai.core.workflow.declarative import parse_tools_config
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -364,9 +367,18 @@ class AutoToolEventHandler:
             if matched and matched not in kwargs:
                 kwargs[matched] = value
         if binding.accepts_context:
+            # The documented auto-tool contract is
+            # context_variables.get("structured_output") -> the exact validated
+            # structured_data for THIS turn. The runtime satisfies it with a
+            # transient read-only overlay over the live context: no
+            # application-declared variable is required, the key is never
+            # written into pattern/workflow state, and snapshots/persistence
+            # never include it. All other keys keep ordinary context behavior.
             # Prefer using the pattern's actual context reference if available
             if pattern_context_ref and hasattr(pattern_context_ref, "get") and hasattr(pattern_context_ref, "set"):
-                kwargs["context_variables"] = pattern_context_ref
+                kwargs["context_variables"] = StructuredOutputOverlay(
+                    pattern_context_ref, normalized_payload
+                )
                 logger.debug("[AUTO_TOOL] Using live pattern context reference for %s", binding.tool_name)
             else:
                 # Fallback: create ephemeral container from snapshot
@@ -397,7 +409,9 @@ class AutoToolEventHandler:
                             container.set(key, value)
                         except Exception as _cs_err:
                             logger.debug("[AUTO_TOOL] Container seed failed key=%s: %s", key, _cs_err)
-                kwargs["context_variables"] = container
+                kwargs["context_variables"] = StructuredOutputOverlay(
+                    container, normalized_payload
+                )
         return kwargs
 
     async def _invoke_tool(

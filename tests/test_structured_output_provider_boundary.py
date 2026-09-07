@@ -111,15 +111,18 @@ def test_workflow_and_provider_cache_order_preserves_canonical_schema(monkeypatc
         "models": copy.deepcopy(MODELS), "registry": {"ProbeAgent": "Envelope"},
     }}
     monkeypatch.setattr(structured.workflow_manager, "get_config", lambda _name: config)
+    # Runtime acceptance is exact: the canonical authority baseline compiles
+    # every declared model id with closed-object acceptance, matching what
+    # load_workflow_structured_outputs registers for the live runtime.
     expected_model = structured.build_models_from_config(
-        copy.deepcopy(MODELS), exact_model_ids=frozenset(),
+        copy.deepcopy(MODELS), exact_model_ids=frozenset(MODELS),
     )["Envelope"]
     expected = expected_model.model_json_schema()
     expected_acceptance = canonical_structured_output_schema(expected_model)
     expected_digest = structured_output_schema_digest(expected_model)
     authority = {
         "configs": {"ProviderBoundaryProbe": config["structured_outputs"]},
-        "exact_model_ids": frozenset(),
+        "exact_model_ids": frozenset(MODELS),
     }
     expected_ref = build_structured_output_contract_ref(
         workflow_name="ProviderBoundaryProbe", model_id="Envelope", **authority,

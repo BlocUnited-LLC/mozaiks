@@ -390,22 +390,6 @@ def _safe_handoff_context_preview(
     return preview
 
 
-def _set_context_value(context_ref: Any, key: str, value: Any) -> None:
-    if context_ref is None or not key:
-        return
-    try:
-        if hasattr(context_ref, "set"):
-            context_ref.set(key, value)
-            return
-    except Exception:
-        pass
-    try:
-        if hasattr(context_ref, "__setitem__"):
-            context_ref[key] = value
-    except Exception:
-        return
-
-
 def _structured_model_for_agent(
     structured_registry: dict[str, Any] | None,
     agent_name: str,
@@ -483,15 +467,11 @@ async def _emit_validated_structured_outputs_from_runner_result(
             continue
 
         model_name = str(entry.get("model_name") or getattr(model_cls, "__name__", "") or "").strip()
-        if model_name:
-            _set_context_value(context_vars_dict, model_name, structured_data)
-            _set_context_value(context_bridge, model_name, structured_data)
-        _set_context_value(context_vars_dict, "structured_output", structured_data)
-        _set_context_value(context_vars_dict, "structured_output_agent", agent_name)
-        _set_context_value(context_vars_dict, "structured_output_model", model_name)
-        _set_context_value(context_bridge, "structured_output", structured_data)
-        _set_context_value(context_bridge, "structured_output_agent", agent_name)
-        _set_context_value(context_bridge, "structured_output_model", model_name)
+        # structured_output is a runtime-owned transient projection, not
+        # application context state. It reaches auto tools through the
+        # read-only overlay in AutoToolEventHandler, never through
+        # pattern/workflow context writes (which would collide with declared
+        # context authority and leak into persistence and replay).
 
         auto_tool_enabled = _normalized_agent_name(agent_name) in auto_tool_agent_keys
         _conv_logger.info(

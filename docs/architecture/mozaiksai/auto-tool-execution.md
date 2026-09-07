@@ -12,6 +12,35 @@ When an auto-tool agent outputs structured JSON:
 3. `AutoToolEventHandler` automatically invokes the tool
 4. Tool reads from `context_variables["structured_output"]` and persists/emits
 
+## Runtime Contracts
+
+**Declared structured outputs are exact at runtime.** Every model declared in
+`structured_outputs.yaml` compiles with closed-object acceptance: an output
+carrying an undeclared field — at the top level or nested — is rejected before
+any normalization, no `agent_output_validated` event fires, and no auto tool
+runs. Unknown fields are never silently discarded. A field deliberately
+declared as `dict`/`optional_dict` stays open inside: arbitrary keys within
+that declared open dict remain valid data.
+
+**`structured_output` is a transient, runtime-owned, read-only projection —
+not application state.** The runtime exposes the exact validated
+`structured_data` for the current turn through a read-only overlay on the
+live context:
+
+- tools read it with `context_variables.get("structured_output")`; no
+  `context_variables.yaml` declaration is needed (or allowed to seize it);
+- tools cannot set, delete, replace, or mutate it — attempts fail closed;
+- it is never written into AG2 workflow state, never persisted, never
+  replayed, and never appears in context snapshots; to keep any of it, a tool
+  must deliberately save selected data under a different declared application
+  key (ordinary declared context writes work unchanged);
+- explicit function parameters that match model fields (for example
+  `async def save_output(title: str, status: str, context_variables=None)`)
+  keep working and receive the same exact validated values — the two views
+  never disagree. A context-only tool whose only parameter is
+  `context_variables` also works: the structured-output model validates the
+  agent's output, not the tool's argument list.
+
 ## Configuration
 
 **tools.yaml** - Mark tool for auto-invocation:
