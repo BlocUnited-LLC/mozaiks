@@ -12,6 +12,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- **Canonical capability-pack action requests are closed**: all 63 actions
+  across the 10 workspace_handler_split pack modules (commerce, entitlement
+  dispatch, files, messaging, MozaiksPay billing portal, notification settings,
+  activity feed, friends, user posts, support) now declare
+  `additionalProperties: false` at every object level and import under the
+  closed-contract profile. Unknown extra request keys are rejected at dispatch.
+  Open metadata maps became typed `{key, value}` entry lists (entitlement
+  dispatch, files, messaging) or closed objects with declared keys (activity
+  feed, commerce `raw_event`); handlers store the same record shapes as before.
+  Schema `default`/`maxLength`/`nullable` keywords moved to handler and service
+  code with identical behavior; post/comment body length limits are now
+  service-enforced. Generated modules and workspace action extensions must keep
+  request schemas closed by default.
+
 ### Added
 
 - **Closed semantic action requests**: `ActionPayload.request_contract` replaces

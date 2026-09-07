@@ -11,6 +11,7 @@ from .schemas import (
     build_thread_record,
     coerce_limit,
     message_preview,
+    metadata_entries_to_map,
     normalize_participant_ids,
     normalize_scope_type,
     normalize_status,
@@ -52,7 +53,7 @@ class MessageService:
         subject_app_id: str | None = None,
         related_type: str | None = None,
         related_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         created_by = actor_id(ctx)
         resolved_scope_id = scope_id or (getattr(ctx, "workspace_id", None) if scope_type == "workspace" else getattr(ctx, "app_id", None))
@@ -67,7 +68,7 @@ class MessageService:
             thread_type=thread_type,
             related_type=related_type,
             related_id=related_id,
-            metadata=metadata,
+            metadata=metadata_entries_to_map(metadata),
         )
         await self.threads.insert(ctx, record=thread)
         await self._emit(

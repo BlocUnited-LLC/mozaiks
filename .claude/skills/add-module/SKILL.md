@@ -87,6 +87,11 @@ comparison or metrics snapshot; otherwise omit them or return `null`.
 
 ### 1. Write `module.yaml`
 
+Action `input_schema` documents are closed request contracts: declare
+`additionalProperties: false` on every object level and list every accepted
+key as an explicit property. Do not use open map properties such as
+`metadata: { type: object }`.
+
 ```yaml
 schema_version: mozaiks.module.v1
 module:
@@ -110,6 +115,7 @@ actions:
     handler_method: list_{name}s
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         limit: { type: integer }
     output_schema:
@@ -122,6 +128,7 @@ actions:
     handler_method: create_{name}
     input_schema:
       type: object
+      additionalProperties: false
       required: [name]
       properties:
         name: { type: string }

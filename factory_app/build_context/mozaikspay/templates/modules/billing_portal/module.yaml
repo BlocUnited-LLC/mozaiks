@@ -25,6 +25,7 @@ actions:
     handler_method: get_subscription_status
     input_schema:
       type: object
+      additionalProperties: false
       properties: {}
     output_schema:
       type: object
@@ -47,8 +48,10 @@ actions:
     handler_method: get_usage_status
     input_schema:
       type: object
+      additionalProperties: false
       properties:
-        limit: {type: integer, default: 500}
+        # limit — optional; the service defaults omitted values to 500.
+        limit: {type: integer}
     output_schema:
       type: object
       required: [success]
@@ -65,8 +68,10 @@ actions:
     handler_method: get_token_status
     input_schema:
       type: object
+      additionalProperties: false
       properties:
-        limit: {type: integer, default: 500}
+        # limit — optional; the service defaults omitted values to 500.
+        limit: {type: integer}
     output_schema:
       type: object
       required: [success]
@@ -88,6 +93,7 @@ actions:
     api_surface: public_readonly
     input_schema:
       type: object
+      additionalProperties: false
       properties: {}
     output_schema:
       type: object
@@ -116,12 +122,14 @@ actions:
     handler_method: start_subscription_checkout
     input_schema:
       type: object
+      additionalProperties: false
       required: [plan_id, success_url, cancel_url]
       properties:
         plan_id: {type: string}
         success_url: {type: string}
         cancel_url: {type: string}
-        customer_email: {type: string, nullable: true}
+        # customer_email — optional; omit when unknown.
+        customer_email: {type: string}
     output_schema:
       type: object
       required: [success]
@@ -142,6 +150,7 @@ actions:
     handler_method: start_token_top_up
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id, success_url, cancel_url]
       properties:
         product_id: {type: string}
@@ -170,6 +179,7 @@ actions:
     handler_method: open_billing_portal
     input_schema:
       type: object
+      additionalProperties: false
       required: [return_url]
       properties:
         return_url: {type: string}

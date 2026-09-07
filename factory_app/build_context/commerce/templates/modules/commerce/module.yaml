@@ -33,6 +33,7 @@ actions:
     handler_method: list_products
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         search: { type: string }
         category: { type: string }
@@ -70,6 +71,7 @@ actions:
     handler_method: get_product
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         product_id: { type: string }
         slug: { type: string }
@@ -87,6 +89,7 @@ actions:
     entitlement_gate: commerce.products.manage
     input_schema:
       type: object
+      additionalProperties: false
       required: [title, price_amount]
       properties:
         title: { type: string }
@@ -112,6 +115,7 @@ actions:
     handler_method: update_product
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id]
       properties:
         product_id: { type: string }
@@ -138,6 +142,7 @@ actions:
     handler_method: archive_product
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id]
       properties:
         product_id: { type: string }
@@ -153,6 +158,7 @@ actions:
     handler_method: adjust_inventory
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id, delta]
       properties:
         product_id: { type: string }
@@ -170,6 +176,7 @@ actions:
     handler_method: get_cart
     input_schema:
       type: object
+      additionalProperties: false
       properties: {}
     output_schema:
       type: object
@@ -182,6 +189,7 @@ actions:
     handler_method: add_cart_item
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id]
       properties:
         product_id: { type: string }
@@ -198,6 +206,7 @@ actions:
     handler_method: update_cart_item
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id, quantity]
       properties:
         product_id: { type: string }
@@ -214,6 +223,7 @@ actions:
     handler_method: remove_cart_item
     input_schema:
       type: object
+      additionalProperties: false
       required: [product_id]
       properties:
         product_id: { type: string }
@@ -229,6 +239,7 @@ actions:
     handler_method: clear_cart
     input_schema:
       type: object
+      additionalProperties: false
       properties: {}
     output_schema:
       type: object
@@ -243,6 +254,7 @@ actions:
     entitlement_gate: commerce.checkout.start
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         payment_provider: { type: string }
         success_url: { type: string }
@@ -264,13 +276,20 @@ actions:
     handler_method: record_checkout_result
     input_schema:
       type: object
+      additionalProperties: false
       required: [order_id, status]
       properties:
         order_id: { type: string }
         status: { type: string, enum: [paid, failed, cancelled, expired] }
         provider: { type: string }
         provider_reference: { type: string }
-        raw_event: { type: object }
+        # Closed provider-event summary. The service records only the event
+        # type (payment_event.event_type); providers keep the full payload.
+        raw_event:
+          type: object
+          additionalProperties: false
+          properties:
+            type: { type: string }
     output_schema:
       type: object
       required: [success, order]
@@ -283,6 +302,7 @@ actions:
     handler_method: list_orders
     input_schema:
       type: object
+      additionalProperties: false
       properties:
         status: { type: string }
         before: { type: string }
@@ -319,6 +339,7 @@ actions:
     handler_method: get_order
     input_schema:
       type: object
+      additionalProperties: false
       required: [order_id]
       properties:
         order_id: { type: string }
@@ -333,6 +354,7 @@ actions:
     handler_method: update_order_status
     input_schema:
       type: object
+      additionalProperties: false
       required: [order_id, status]
       properties:
         order_id: { type: string }

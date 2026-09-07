@@ -4,7 +4,7 @@ import inspect
 from typing import Any
 
 from .repo import get_file, list_files, register_file, soft_delete_file
-from .schemas import build_file_record, safe_file_record
+from .schemas import build_file_record, metadata_entries_to_map, safe_file_record
 
 
 class FilesService:
@@ -25,7 +25,7 @@ class FilesService:
         size_bytes: int,
         storage_url: str,
         is_public: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         filename = str(filename or "").strip()
         if not filename:
@@ -57,7 +57,7 @@ class FilesService:
             storage_url=storage_url,
             is_public=is_public,
             created_by=created_by,
-            metadata=metadata,
+            metadata=metadata_entries_to_map(metadata),
         )
 
         await register_file(

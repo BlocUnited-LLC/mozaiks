@@ -29,6 +29,18 @@ def new_file_id() -> str:
     return f"file_{uuid4().hex}"
 
 
+def metadata_entries_to_map(entries: list[dict[str, Any]] | None) -> dict[str, str]:
+    """Fold closed {key, value} request entries into the stored metadata map.
+
+    The module request contract carries metadata as typed entries; file records
+    keep the {key: value} map shape. Later entries win on duplicate keys.
+    """
+    metadata: dict[str, str] = {}
+    for entry in entries or []:
+        metadata[str(entry["key"])] = str(entry["value"])
+    return metadata
+
+
 def build_file_record(
     *,
     app_id: str,

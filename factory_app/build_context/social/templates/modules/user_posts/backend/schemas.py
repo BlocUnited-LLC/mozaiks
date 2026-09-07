@@ -14,6 +14,11 @@ VISIBILITY_PRIVATE = "private"
 REACTION_TYPES = {"like", "love", "celebrate", "support"}
 DEFAULT_REACTION = "like"
 
+# Body length limits enforced by the service. The closed module request
+# contract cannot carry maxLength, so these are the behavioral authority.
+MAX_POST_BODY_LENGTH = 5000
+MAX_COMMENT_BODY_LENGTH = 2000
+
 
 class Post(TypedDict, total=False):
     post_id: str
