@@ -72,8 +72,17 @@ This project follows a practical pre-1.0 changelog format:
   `module.yaml` — resolved only through the immutable blob store, never a
   filesystem path. Structured-output contract refs resolve only against the
   selected workflow's exact configuration, and module handler sources carry a
-  bounded static export proof: the declared handler class and action
-  `handler_method` must be explicitly present in the selected verified source.
+  bounded static export proof with exactly two certification modes and no
+  general source closure: `EXPLICIT_HANDLER` (the selected `handler.py`
+  explicitly defines the action `handler_method`) and
+  `CANONICAL_BASE_HANDLER` (the capability-pack contract proves the canonical
+  workspace_handler_split ownership and the regenerated `base_handler.py`
+  class explicitly defines the method behind the preserved leaf subclass).
+  Certified implementation identity covers both source digests, and the
+  entire real canonical split-pack corpus — 10 modules, 63 actions —
+  certifies end to end. The commerce module manifest's capability entries
+  were repaired to the canonical `ModuleCapability` contract (unique
+  capability ids with `kind`/`title`), which module loading requires.
 
 - **Closed semantic action requests**: `ActionPayload.request_contract` replaces
   shallow request fields with one immutable, bounded contract algebra for null,

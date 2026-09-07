@@ -1195,13 +1195,24 @@ proof boundary of its own
 - handler sources are selected as `AccountedArtifact`s with a mandatory
   non-null `content_digest` at a canonical `module_backend_handler` address
   that matches the manifest's declared handler entrypoint, and carry a
-  **bounded static export proof**: the declared handler class and action
-  `handler_method` must be explicitly present in the selected verified source
-  (AST-level, never executed). Inherited methods, redefinitions, conditional
-  or decorated definitions, monkeypatching, `__getattr__` tricks, and other
-  dynamic exports fail closed. Certified implementation selection requires
-  the selected source to expose the declared handler explicitly; no
-  source-closure engine exists.
+  **bounded static export proof** (AST-level, never executed). Certification
+  supports exactly two bounded modes and no general Python source closure:
+  `EXPLICIT_HANDLER` — the selected `handler.py` explicitly defines the
+  selected `handler_method`; and `CANONICAL_BASE_HANDLER` — the module's
+  owning capability-pack contract proves the canonical
+  `workspace_handler_split` ownership (preserved workspace-owned `handler.py`,
+  regenerated template-owned `base_handler.py`), the leaf class directly
+  subclasses the single canonical base imported exactly as
+  `from .base_handler import <Base>`, and the base class — itself with no
+  bases — explicitly defines the selected method. Both sources resolve as
+  digest-mandatory verified blobs in the same module scope and instance, and
+  the certified implementation identity covers BOTH source digests, so
+  regenerating only the base — or editing only the preserved leaf — changes
+  identity. A leaf override of the selected method certifies as
+  `EXPLICIT_HANDLER`. Arbitrary imports, mixins, multiple or transitive
+  inheritance, star or dynamic imports, redefinitions, conditional or
+  decorated definitions, monkeypatching, `__getattr__` tricks, and every
+  other dynamic export fail closed.
 
 ## OSS And Proprietary Intelligence
 
