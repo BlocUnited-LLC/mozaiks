@@ -1131,6 +1131,47 @@ the graph, and a `BuildContextBindingRef` proves which inputs were available
 but cannot itself select output semantics. This keeps private strategy and
 provider resolution injectable without making either a second semantic author.
 
+### Content-resolved implementation artifact authority
+
+A future ImplementationBinding v2 must be able to truthfully claim "this exact
+implementation realizes this semantic workflow/action". A `ChildContractRef`
+or digest alone cannot carry that claim, so implementation selection is a
+proof boundary of its own
+(`mozaiksai/core/semantics/implementation_artifacts.py`):
+
+- a **selected contract artifact** couples one `ChildContractRef` to one
+  canonical `ArtifactAddress`; the reference path and address path must be
+  equal, and the canonical layout registry then independently proves artifact
+  family, path scope, placeholder identity (in the planner's closed instance
+  domain), and owner kind. Path equality alone is never authority.
+- bytes come only from `ArtifactContentStore.get_verified_blob()` — no
+  filesystem fallback, sibling checkout, glob/path discovery, mutable alias,
+  or caller assertion, and never from an opaque resolver registration with
+  `content=None`. The exact verified bytes then parse under the strict
+  document contract, and the parsed document's own `schema_version` must
+  equal the reference's `contract_schema_version`
+  (`mozaiks.orchestrator.v1`, `mozaiks.structured_outputs.v1`,
+  `mozaiks.module.v1`).
+- workflow implementation facts (`orchestrator.yaml`,
+  `structured_outputs.yaml`) expose the runtime workflow name and the exact
+  structured-output configuration; a `StructuredOutputContractRef` resolves
+  only against that selected configuration, so a same-schema contract from
+  another workflow is not interchangeable.
+- module implementation facts (`module.yaml`) expose module identity, the
+  declared action, `handler_method`, and the action request contract imported
+  through the closed-contract profile; a manifest declaring another module id
+  cannot be selected for a module instance.
+- handler sources are selected as `AccountedArtifact`s with a mandatory
+  non-null `content_digest` at a canonical `module_backend_handler` address
+  that matches the manifest's declared handler entrypoint, and carry a
+  **bounded static export proof**: the declared handler class and action
+  `handler_method` must be explicitly present in the selected verified source
+  (AST-level, never executed). Inherited methods, redefinitions, conditional
+  or decorated definitions, monkeypatching, `__getattr__` tricks, and other
+  dynamic exports fail closed. Certified implementation selection requires
+  the selected source to expose the declared handler explicitly; no
+  source-closure engine exists.
+
 ## OSS And Proprietary Intelligence
 
 Per the boundary ADR 0005 reserves (PR #394) and

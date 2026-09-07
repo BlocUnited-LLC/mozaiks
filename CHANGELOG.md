@@ -14,6 +14,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Content-resolved implementation artifact authority**: implementation
+  selection for the future ImplementationBinding v2 now proves exact scope,
+  canonical artifact family/address, exact verified bytes, and exact document
+  schema versions for `orchestrator.yaml`, `structured_outputs.yaml`, and
+  `module.yaml` — resolved only through the immutable blob store, never a
+  filesystem path. Structured-output contract refs resolve only against the
+  selected workflow's exact configuration, and module handler sources carry a
+  bounded static export proof: the declared handler class and action
+  `handler_method` must be explicitly present in the selected verified source.
+
 - **Closed semantic action requests**: `ActionPayload.request_contract` replaces
   shallow request fields with one immutable, bounded contract algebra for null,
   scalars, homogeneous arrays, and closed objects. Offline module-schema imports
