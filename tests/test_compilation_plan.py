@@ -578,6 +578,10 @@ def test_no_production_imports_no_advertisement_no_ag2() -> None:
             # through the one derivation function; offline-only, and this
             # same scan proves no production module imports it.
             Path("mozaiksai/core/semantics/plan_authority.py"),
+            # Content-resolved implementation artifact authority: offline
+            # selection proofs reuse the planner's closed instance-identity
+            # domain; no production module imports it (this scan proves so).
+            Path("mozaiksai/core/semantics/implementation_artifacts.py"),
             # Slice 5C offline immutable revision closure and persistence owner.
             Path("mozaiksai/core/semantics/artifact_revision.py"),
             Path("mozaiksai/core/artifacts/revision_store.py"),

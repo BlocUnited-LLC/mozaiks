@@ -1162,6 +1162,96 @@ the graph, and a `BuildContextBindingRef` proves which inputs were available
 but cannot itself select output semantics. This keeps private strategy and
 provider resolution injectable without making either a second semantic author.
 
+### Content-resolved implementation artifact authority
+
+A future ImplementationBinding v2 must be able to truthfully claim "this exact
+implementation realizes this semantic workflow/action". A `ChildContractRef`
+or digest alone cannot carry that claim, so implementation selection is a
+proof boundary of its own
+(`mozaiksai/core/semantics/implementation_artifacts.py`):
+
+- a **selected contract artifact** couples one `ChildContractRef` to one
+  canonical `ArtifactAddress`; the reference path and address path must be
+  equal, and the canonical layout registry then independently proves artifact
+  family, path scope, placeholder identity (in the planner's closed instance
+  domain), and owner kind. Path equality alone is never authority.
+- bytes come only from `ArtifactContentStore.get_verified_blob()` — no
+  filesystem fallback, sibling checkout, glob/path discovery, mutable alias,
+  or caller assertion, and never from an opaque resolver registration with
+  `content=None`. The exact verified bytes then parse under the strict
+  document contract, and the parsed document's own `schema_version` must
+  equal the reference's `contract_schema_version`
+  (`mozaiks.orchestrator.v1`, `mozaiks.structured_outputs.v1`,
+  `mozaiks.module.v1`).
+- workflow implementation facts (`orchestrator.yaml`,
+  `structured_outputs.yaml`) expose the runtime workflow name and the exact
+  structured-output configuration; a `StructuredOutputContractRef` resolves
+  only against that selected configuration, so a same-schema contract from
+  another workflow is not interchangeable.
+- module implementation facts (`module.yaml`) expose module identity, the
+  declared action, `handler_method`, and the action request contract imported
+  through the closed-contract profile; a manifest declaring another module id
+  cannot be selected for a module instance.
+- handler, base-handler, and pack-contract sources are selected as
+  scope-bound `SelectedAccountedArtifact`s (execution scope plus
+  digest-mandatory `AccountedArtifact`); the selection scope must equal both
+  the requesting scope and the module selection's scope, so identical bytes
+  under another tenant or workspace scope are never the same selection. The
+  handler address must be canonical `module_backend_handler` and match the
+  manifest's declared entrypoint, and certification carries a **bounded
+  static export proof** (AST-level, never executed) with exactly two modes
+  and no general Python source closure. `EXPLICIT_HANDLER` — a true
+  standalone one-source class: the declared handler class has ZERO bases and
+  explicitly defines the selected `handler_method` (a class declaring any
+  base is not eligible, even with an explicit method).
+  `CANONICAL_BASE_HANDLER` — the two-source `workspace_handler_split`
+  closure: the split authority is content-resolved from the exact verified
+  bytes of the module's owning capability-pack contract (canonical
+  `build_context/{contract_id}/contract.yaml` path derived from the parsed
+  contract id; the contract must own this module's manifest, its
+  workspace-owned `handler.py` leaf, and its template-owned
+  `base_handler.py`) — never caller-asserted and never inferred from
+  filenames. The leaf class directly subclasses the single canonical base,
+  bound by exactly one `from .base_handler import <Base>` that is an
+  unconditional top-level statement appearing before the class definition;
+  the base class — itself with no bases — explicitly defines the selected
+  method, or the leaf explicitly overrides it (the proof records
+  `method_source`, and an override remains a two-source
+  `CANONICAL_BASE_HANDLER` certification). The certified implementation
+  identity covers the leaf digest, the base digest, AND the pack-contract
+  digest, so regenerating only the base, editing only the preserved leaf, or
+  changing only the certification authority changes identity; module/action
+  identity stays outside it for `ImplementationBinding v2` to pin
+  separately. Rebinding analysis is closed over the Python binding grammar —
+  including exception-handler captures, match-pattern captures, walrus
+  targets (also inside comprehensions and default arguments), and type-alias
+  statements. Direct dynamic-execution primitives (`exec`, `eval`,
+  `setattr`, `locals`, ...) are rejected in construction scope even when
+  reached through `builtins` access, aliased builtins imports, or simple
+  rebinding, and uninspected locally-defined callables (functions, classes,
+  bound lambdas) may exist but may not be referenced during module/class
+  construction — no direct or aliased invocation, no local class
+  construction, no decorator application. Construction-time anonymous
+  lambdas are prohibited except a lambda stored directly in a simple named
+  binding (`helper = lambda: ...`); a stored lambda becomes an ordinary
+  local callable name covered by the Load-reference rule, and every other
+  lambda position (walrus, call arguments, containers, subscripts,
+  conditionals, decorators, defaults, annotations, class bases) rejects
+  generically — locally supplied executable callbacks cannot cross the
+  construction boundary. Within this bounded own-source construction
+  grammar the certified visible class/method binding IS the effective
+  import-time export. Deferred function/method bodies may freely use local helpers
+  (runtime behavior, outside the import-time proof), and arbitrary imported
+  dependency behavior remains outside the proof. Pack-contract `required_outputs` must be
+  unambiguous at this boundary: duplicate paths reject, and
+  authority-relevant ownership must be explicit (never defaulted).
+  `resolve_module_action_implementation` is the only public
+  authority-producing API — no exported function accepts a preconstructed
+  split authority. Arbitrary imports, mixins, multiple or transitive
+  inheritance, star or dynamic or nested/conditional/late imports,
+  redefinitions, conditional or decorated definitions, monkeypatching,
+  `__getattr__` tricks, and every other dynamic export fail closed.
+
 ## OSS And Proprietary Intelligence
 
 Per the boundary ADR 0005 reserves (PR #394) and

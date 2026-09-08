@@ -65,6 +65,46 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Content-resolved implementation artifact authority**: implementation
+  selection for the future ImplementationBinding v2 now proves exact scope,
+  canonical artifact family/address, exact verified bytes, and exact document
+  schema versions for `orchestrator.yaml`, `structured_outputs.yaml`, and
+  `module.yaml` — resolved only through the immutable blob store, never a
+  filesystem path. Structured-output contract refs resolve only against the
+  selected workflow's exact configuration. Handler, base-handler, and
+  pack-contract sources are scope-bound selections (execution scope must
+  equal the requesting scope and the module selection's scope), and module
+  handler sources carry a bounded static export proof with exactly two
+  certification modes and no general source closure: `EXPLICIT_HANDLER` (a
+  true standalone class — zero bases — explicitly defining the action
+  `handler_method`) and `CANONICAL_BASE_HANDLER` (the two-source
+  workspace_handler_split closure, whose ownership authority is
+  content-resolved from the exact verified bytes of the module's owning
+  capability-pack `contract.yaml`, never caller-asserted; the canonical base
+  import must be an unconditional top-level statement before the class, and
+  a leaf override of the selected method stays a two-source certification
+  with a recorded `method_source`). Certified implementation identity covers
+  the leaf digest, base digest, and pack-contract digest; rebinding
+  analysis is closed over the full Python binding grammar including
+  exception-handler and match-pattern captures. The entire real canonical
+  split-pack corpus — 10 modules, 63 actions — certifies end to end with
+  proven pack-contract blob reads. The split-capable certifier is internal:
+  `resolve_module_action_implementation` is the only public
+  authority-producing API (no exported function accepts a preconstructed
+  split authority), direct dynamic-execution primitives are rejected in
+  construction scope even through `builtins` access, aliased builtins
+  imports, or simple rebinding, uninspected locally-defined callables cannot
+  be invoked or applied as decorators during module/class construction, and
+  construction-time anonymous lambdas are prohibited except a lambda stored
+  directly in a simple named binding (deferred runtime helpers remain
+  allowed; a bounded own-source proof — not a proof of arbitrary imported
+  dependency behavior), and pack-contract
+  `required_outputs` must be unambiguous: duplicate paths and omitted or
+  non-canonical authority-relevant owners reject. The commerce module
+  manifest's capability entries were repaired to the canonical
+  `ModuleCapability` contract (unique capability ids with `kind`/`title`),
+  which module loading requires.
+
 - **Closed semantic action requests**: `ActionPayload.request_contract` replaces
   shallow request fields with one immutable, bounded contract algebra for null,
   scalars, homogeneous arrays, and closed objects. Offline module-schema imports

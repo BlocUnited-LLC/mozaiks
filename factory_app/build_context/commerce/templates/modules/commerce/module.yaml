@@ -366,32 +366,33 @@ actions:
     permissions: [commerce.orders.manage]
     emits: [domain.commerce.order.updated]
 
+# Capability ids are unique public surface identifiers (ModuleDefinition
+# rejects duplicates). Each grants its capability group through one primary
+# action target; the remaining actions stay reachable through the standard
+# /api/modules/commerce/{action} surface and share the same permissions and
+# entitlement gates.
 capabilities:
   - capability_id: commerce.products.browse
+    kind: action
     target: list_products
+    title: Browse products
   - capability_id: commerce.products.manage
+    kind: action
     target: create_product
-  - capability_id: commerce.products.manage
-    target: update_product
-  - capability_id: commerce.products.manage
-    target: archive_product
+    title: Manage products
   - capability_id: commerce.inventory.manage
+    kind: action
     target: adjust_inventory
+    title: Adjust inventory
   - capability_id: commerce.cart.manage
+    kind: action
     target: get_cart
-  - capability_id: commerce.cart.manage
-    target: add_cart_item
-  - capability_id: commerce.cart.manage
-    target: update_cart_item
-  - capability_id: commerce.cart.manage
-    target: remove_cart_item
-  - capability_id: commerce.cart.manage
-    target: clear_cart
+    title: Manage cart
   - capability_id: commerce.checkout.start
+    kind: action
     target: start_checkout
+    title: Start checkout
   - capability_id: commerce.orders.manage
+    kind: action
     target: list_orders
-  - capability_id: commerce.orders.manage
-    target: get_order
-  - capability_id: commerce.orders.manage
-    target: update_order_status
+    title: Manage orders
