@@ -139,6 +139,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # Slice 5A: the replacement assignment compiler is an explicitly
         # offline substrate consumer of pinned payload and plan-unit refs.
         Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
+        # ImplementationBinding v2: typed graph-closure validation over
+        # graph v2 + payloads is the binding's own authority surface. The
+        # binding stays behind the same offline semantics seams.
+        Path("mozaiksai/core/semantics/binding.py"),
         # Canonical plan-authority contract: consumes graph/payload authority
         # as typed inputs and re-derives plans through the one canonical
         # derivation function. Offline-only; its production non-importability

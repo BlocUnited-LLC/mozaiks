@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from mozaiksai.core.semantics.binding import ImplementationBinding
 from mozaiksai.core.semantics.compilation_plan import CompilationPlan
 from mozaiksai.core.semantics.graph import SemanticGraph, SemanticGraphV2
 from mozaiksai.core.semantics.manifest import ApplicationManifest
@@ -34,6 +33,7 @@ from mozaiksai.core.taxonomy import TaxonomyNamespace
 
 if TYPE_CHECKING:
     from mozaiksai.core.semantics.artifact_revision import ArtifactRevision
+    from mozaiksai.core.semantics.binding import ImplementationBinding
 
 
 class ReferenceResolutionError(ValueError):

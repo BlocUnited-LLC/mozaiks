@@ -31,7 +31,7 @@ import yaml
 
 from mozaiksai.core.artifacts.content_store import LocalArtifactContentStore
 from mozaiksai.core.runtime.app.layout_registry import PathScope
-from mozaiksai.core.semantics.composition_ledger import AccountedArtifact, ArtifactAddress
+from mozaiksai.core.semantics.artifact_address import AccountedArtifact, ArtifactAddress
 from mozaiksai.core.semantics.implementation_artifacts import (
     HandlerCertificationMode,
     HandlerMethodSource,

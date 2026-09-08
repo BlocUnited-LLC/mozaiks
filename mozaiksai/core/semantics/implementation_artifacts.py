@@ -58,11 +58,11 @@ from mozaiksai.core.runtime.app.layout_registry import (
     Requirement,
     default_app_layout_registry,
 )
+from mozaiksai.core.semantics.artifact_address import AccountedArtifact, ArtifactAddress
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.semantics.closed_contracts import ClosedContract
 from mozaiksai.core.semantics.compilation_plan import canonical_instance_identity_value
-from mozaiksai.core.semantics.composition_ledger import AccountedArtifact, ArtifactAddress
 from mozaiksai.core.semantics.refs import (
     ChildContractRef,
     ExecutionAccessScopeRef,

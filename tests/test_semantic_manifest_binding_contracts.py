@@ -287,6 +287,11 @@ def test_binding_has_no_fields_that_could_add_semantics() -> None:
         "capability_pack_selections",
         "renderer_selections",
         "deployment_profile_selections",
+        "projection_profile_version",
+        "request_context_contract",
+        "workflow_implementation_selections",
+        "module_action_implementation_selections",
+        "workflow_result_bindings",
         "binding_digest",
     }
     with pytest.raises(pydantic.ValidationError):

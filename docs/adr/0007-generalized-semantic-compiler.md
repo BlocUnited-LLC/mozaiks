@@ -1164,10 +1164,9 @@ provider resolution injectable without making either a second semantic author.
 
 ### Content-resolved implementation artifact authority
 
-A future ImplementationBinding v2 must be able to truthfully claim "this exact
-implementation realizes this semantic workflow/action". A `ChildContractRef`
-or digest alone cannot carry that claim, so implementation selection is a
-proof boundary of its own
+ImplementationBinding v2 truthfully claims "this exact implementation realizes
+this semantic workflow/action". A `ChildContractRef` or digest alone cannot
+carry that claim, so implementation selection is a proof boundary of its own
 (`mozaiksai/core/semantics/implementation_artifacts.py`):
 
 - a **selected contract artifact** couples one `ChildContractRef` to one
@@ -1221,8 +1220,8 @@ proof boundary of its own
   identity covers the leaf digest, the base digest, AND the pack-contract
   digest, so regenerating only the base, editing only the preserved leaf, or
   changing only the certification authority changes identity; module/action
-  identity stays outside it for `ImplementationBinding v2` to pin
-  separately. Rebinding analysis is closed over the Python binding grammar —
+  identity stays outside it — `ImplementationBinding v2` pins it separately.
+  Rebinding analysis is closed over the Python binding grammar —
   including exception-handler captures, match-pattern captures, walrus
   targets (also inside comprehensions and default arguments), and type-alias
   statements. Direct dynamic-execution primitives (`exec`, `eval`,
@@ -1251,6 +1250,100 @@ proof boundary of its own
   inheritance, star or dynamic or nested/conditional/late imports,
   redefinitions, conditional or decorated definitions, monkeypatching,
   `__getattr__` tricks, and every other dynamic export fail closed.
+
+### ImplementationBinding v2 — exact workflow, action, and result authority
+
+`mozaiks.implementation_binding.v2` (`mozaiksai/core/semantics/binding.py`)
+is the realized binding contract. The authority split is unchanged:
+
+- **SemanticGraph** = what the application means.
+- **ImplementationBinding v2** = exact implementation selection and
+  deterministic semantic-result wiring.
+- **CompilationPlan** = derived plan; a later slice pins the exact binding
+  reference into plan identity.
+- **Runtime state, approval receipts, provider/model/runtime ids, and AG2
+  Agent/Task/Network identities are excluded** — the schema has no field
+  that could carry them, and unknown fields reject.
+
+On top of the v1 authorities (capability-pack, renderer, and
+deployment-profile selections, all preserved with their scope validation and
+graph pinning), v2 adds:
+
+- **`workflow_implementation_selections`** — every semantic WORKFLOW that
+  owns at least one WORKFLOW_CAPABILITY binds exactly once to its exact
+  `orchestrator.yaml` and `structured_outputs.yaml` documents through the
+  #488 `SelectedContractArtifact` primitive. Cold resolution derives the
+  runtime workflow identity from the exact document bytes (never a
+  caller-authored name) and requires it to equal the typed
+  `WorkflowPayload.workflow_id`. Cross-workflow document pairs, duplicate
+  selections, and selections for capability-free or absent workflows reject.
+- **`module_action_implementation_selections`** — every canonical module
+  action referenced by a `WorkflowCapabilityBindingPayload` with role
+  `consumes_action` or `commits_result_through_action` binds exactly once to
+  its certified #488 implementation: the exact `module.yaml` selection, the
+  scope-bound handler selection, and (for the canonical split) the exact
+  base-handler and pack-contract selections. The selection pins the
+  recomputable certification identity — `certification_mode`,
+  `method_source`, and the certified source-closure
+  `implementation_digest` — and cold validation re-runs
+  `resolve_module_action_implementation(...)` and requires the recomputed
+  proof to equal the pinned identity exactly; the resolved action's closed
+  request contract must also equal the semantic `ActionPayload`'s. No bare
+  or fabricated proof becomes authority. `consumes_action` proves only that
+  the exact implementation exists — its call arguments remain workflow
+  execution behavior; no static wiring is invented for it.
+- **`workflow_result_bindings`** — every semantic WORKFLOW_RESULT node gets
+  exactly one realization: a `StructuredOutputContractRef` that must
+  cold-resolve against the owning workflow's exact selected
+  structured-outputs document (same-schema models from another workflow are
+  not interchangeable), one projection under the closed
+  `mozaiks.result_projection.v1` profile, and one
+  `WorkflowResultCommitBinding` per semantic
+  `commits_result_through_action` binding node of that exact result.
+- **Result projection profile** (`projection_profile_version`, a required
+  literal) — exactly two variants: `IdentityProjection` (the exact selected
+  structured output is the semantic result as-is) and `FieldsProjection`
+  (a finite, unique, canonically sorted set of TOP-LEVEL property names of
+  the exact resolved object contract; names are preserved, never renamed).
+  No JSONPath, dotted paths, nested traversal, indexes, wildcards,
+  expressions, functions, coercion, defaulting, or computed values — the
+  property-name grammar structurally excludes them.
+- **Commit wiring** — each commit binding carries a static
+  `approval_requirement` (`AUTOMATIC` or `HUMAN_APPROVAL_REQUIRED`; static
+  application semantics, never an approval receipt or runtime state) and
+  explicit `action_inputs`: one binding per top-level property of the exact
+  selected action's closed #484 request contract, with exactly three source
+  variants — `ResultProperty` (one top-level projected-result property),
+  `Constant` (a canonical JSON value), and `RequestContextProperty` (one
+  top-level property of the binding's own `request_context_contract`).
+  Every required request property is wired exactly once; optional
+  properties may be omitted; unknown or duplicate targets reject. Formal
+  source/target structural compatibility is deferred to the later
+  `ResultProjectionReceipt`/`ActionInputCompatibilityReceipt` slice — v2
+  proves identity, closure, and explicit wiring.
+- **`request_context_contract`** — an inline, closed, non-null
+  `ObjectContract` (the existing closed-contract primitives) describing the
+  application request context available to deterministic wiring. It is not
+  authenticated runtime identity, session state, AG2 context, secrets, or
+  provider state.
+
+`binding_digest` covers every v2 field; all collections are canonically
+ordered by semantic identity and duplicate-free, so the digest is independent
+of caller input order while any meaning-bearing change — a selected document
+digest, a handler or base or pack-contract digest, the certified
+implementation identity, `method_source`, a projection, a commit approval, an
+action-input source, or the request-context contract — changes it.
+
+Validation is two-layered. `validate_implementation_binding_against_graph`
+continues every v1 protection and, for graph-v2 subjects declaring
+workflow-capability semantics, requires the graph's complete typed payload
+closure and proves workflow/action/result completeness, semantic commit
+closure, and explicit action-input closure against the typed payloads.
+`validate_implementation_binding_content_authority` is the cold entrypoint:
+it takes the binding, graph, payloads, and the `ArtifactContentStore`,
+re-validates everything, and resolves every selection through the #488
+exact-content resolvers — no filesystem fallback, no mutable working-tree
+authority, no caller-supplied resolved objects.
 
 ## OSS And Proprietary Intelligence
 

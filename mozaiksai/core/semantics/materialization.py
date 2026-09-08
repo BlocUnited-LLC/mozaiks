@@ -48,7 +48,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from types import UnionType
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel
@@ -77,11 +77,6 @@ from mozaiksai.core.semantics.app_config_materialization import (
     RouteManifestRenderInput,
     SecretReferencesRenderInput,
     render_app_config_unit,
-)
-from mozaiksai.core.semantics.binding import (
-    ImplementationBinding,
-    RendererSelection,
-    validate_implementation_binding_against_graph,
 )
 from mozaiksai.core.semantics.compilation_plan import (
     CompilationPlan,
@@ -132,6 +127,14 @@ from mozaiksai.core.semantics.workflow_interface_materialization import (
     WorkflowInterfaceRenderInput,
     render_workflow_module_interface_unit,
 )
+
+if TYPE_CHECKING:
+    # Deferred to break the import cycle binding -> implementation_artifacts
+    # -> composition_ledger -> materialization; runtime access is lazy.
+    from mozaiksai.core.semantics.binding import (
+        ImplementationBinding,
+        RendererSelection,
+    )
 
 PAGE_SCHEMA_FAMILY: Literal["app_ui_page_schema"] = "app_ui_page_schema"
 PAGE_BYTES_SCHEMA_VERSION: Literal["mozaiks.page_bytes.v1"] = "mozaiks.page_bytes.v1"
@@ -270,6 +273,7 @@ def resolve_page_schema_renderer_selection(
     *,
     graph: SemanticGraphV2,
     layout_registry: Any,
+    payloads: Iterable[SemanticPayloadBase] | None = None,
 ) -> RendererSelection:
     """Resolve the accepted page-schema renderer through the binding.
 
@@ -279,9 +283,13 @@ def resolve_page_schema_renderer_selection(
     single accepted deterministic implementation of this slice. There is no
     fallback to any historical generator path.
     """
+    from mozaiksai.core.semantics.binding import (
+        validate_implementation_binding_against_graph,
+    )
+
     try:
         validate_implementation_binding_against_graph(
-            binding, graph, layout_registry=layout_registry
+            binding, graph, layout_registry=layout_registry, payloads=payloads
         )
     except ValueError as exc:
         raise MaterializationError(f"implementation binding rejected: {exc}") from exc
@@ -318,6 +326,7 @@ def resolve_app_config_renderer_selection(
     *,
     graph: SemanticGraphV2,
     layout_registry: Any,
+    payloads: Iterable[SemanticPayloadBase] | None = None,
 ) -> RendererSelection:
     """Resolve the accepted app-config renderer through the binding.
 
@@ -327,9 +336,13 @@ def resolve_app_config_renderer_selection(
     deterministic implementation of this slice. There is no fallback to any
     historical generator path.
     """
+    from mozaiksai.core.semantics.binding import (
+        validate_implementation_binding_against_graph,
+    )
+
     try:
         validate_implementation_binding_against_graph(
-            binding, graph, layout_registry=layout_registry
+            binding, graph, layout_registry=layout_registry, payloads=payloads
         )
     except ValueError as exc:
         raise AppConfigMaterializationError(
@@ -385,9 +398,16 @@ def resolve_workflow_interface_renderer_selection(
     *,
     graph: SemanticGraphV2,
     layout_registry: Any,
+    payloads: Iterable[SemanticPayloadBase] | None = None,
 ) -> RendererSelection:
     """Bind the one interface family to its accepted deterministic implementation."""
-    validate_implementation_binding_against_graph(binding, graph, layout_registry=layout_registry)
+    from mozaiksai.core.semantics.binding import (
+        validate_implementation_binding_against_graph,
+    )
+
+    validate_implementation_binding_against_graph(
+        binding, graph, layout_registry=layout_registry, payloads=payloads
+    )
     matches = [
         selection for selection in binding.renderer_selections
         if WORKFLOW_MODULE_INTERFACE in selection.artifact_families
@@ -1104,7 +1124,10 @@ def materialize_plan(
     )
     _assert_registry_identity(verified_plan, layout_registry)
     resolve_page_schema_renderer_selection(
-        binding, graph=verified_graph, layout_registry=layout_registry
+        binding,
+        graph=verified_graph,
+        layout_registry=layout_registry,
+        payloads=payload_by_node.values(),
     )
     app_config_selection: RendererSelection | None = None
     if any(
@@ -1113,7 +1136,10 @@ def materialize_plan(
         for unit in verified_plan.units
     ):
         app_config_selection = resolve_app_config_renderer_selection(
-            binding, graph=verified_graph, layout_registry=layout_registry
+            binding,
+            graph=verified_graph,
+            layout_registry=layout_registry,
+            payloads=payload_by_node.values(),
         )
     workflow_interface_selection: RendererSelection | None = None
     if any(
@@ -1123,7 +1149,10 @@ def materialize_plan(
         for unit in verified_plan.units
     ):
         workflow_interface_selection = resolve_workflow_interface_renderer_selection(
-            binding, graph=verified_graph, layout_registry=layout_registry,
+            binding,
+            graph=verified_graph,
+            layout_registry=layout_registry,
+            payloads=payload_by_node.values(),
         )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
 
@@ -1224,7 +1253,10 @@ def rematerialize_plan(
     )
     _assert_registry_identity(verified_plan, layout_registry)
     resolve_page_schema_renderer_selection(
-        binding, graph=verified_graph, layout_registry=layout_registry
+        binding,
+        graph=verified_graph,
+        layout_registry=layout_registry,
+        payloads=payload_by_node.values(),
     )
     app_config_selection: RendererSelection | None = None
     if any(
@@ -1233,7 +1265,10 @@ def rematerialize_plan(
         for unit in verified_plan.units
     ):
         app_config_selection = resolve_app_config_renderer_selection(
-            binding, graph=verified_graph, layout_registry=layout_registry
+            binding,
+            graph=verified_graph,
+            layout_registry=layout_registry,
+            payloads=payload_by_node.values(),
         )
     workflow_interface_selection: RendererSelection | None = None
     if any(
@@ -1243,7 +1278,10 @@ def rematerialize_plan(
         for unit in verified_plan.units
     ):
         workflow_interface_selection = resolve_workflow_interface_renderer_selection(
-            binding, graph=verified_graph, layout_registry=layout_registry,
+            binding,
+            graph=verified_graph,
+            layout_registry=layout_registry,
+            payloads=payload_by_node.values(),
         )
     preserved_by_unit = _match_preserved(verified_plan, preserved_artifacts)
     base_by_unit: dict[str, list[MaterializedOutput]] = {}
