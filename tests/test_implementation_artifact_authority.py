@@ -917,6 +917,84 @@ async def _handler_for_source(content_store, source: str):
             '    exec("TasksHandler = 1", globals())\n',
             "dynamic export primitive",
         ),
+        # A local function invoked during module construction executes an
+        # uninspected body at import time.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "def mutate():\n"
+            '    globals()["TasksHandler"] = None\n\n'
+            "mutate()\n",
+            "locally-defined callable",
+        ),
+        # Constructing a local class executes uninspected __init__ at import.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "class Mutator:\n"
+            "    def __init__(self):\n"
+            '        globals()["TasksHandler"] = None\n\n'
+            "Mutator()\n",
+            "locally-defined callable",
+        ),
+        # A lambda decorator executes during sibling class construction.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            '@(lambda c: exec("TasksHandler = None", globals()) or c)\n'
+            "class Sibling:\n    pass\n",
+            "lambda decorator",
+        ),
+        # A local function applied as a decorator executes at import.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "def decorate(c):\n"
+            '    globals()["TasksHandler"] = None\n'
+            "    return c\n\n"
+            "@decorate\n"
+            "class Sibling:\n    pass\n",
+            "locally-defined callable",
+        ),
+        # Alias laundering of a local callable before invocation.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "def mutate():\n    pass\n\n"
+            "alias = mutate\n"
+            "alias()\n",
+            "locally-defined callable",
+        ),
+        # A locally-bound lambda invoked during construction.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "mutate = lambda: None\n"
+            "mutate()\n",
+            "locally-defined callable",
+        ),
+        # A lambda invoked directly during construction.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            '(lambda: globals().update(TasksHandler=None))()\n',
+            "invokes a lambda|dynamic export primitive",
+        ),
+        # locals() is a dynamic introspection primitive at construction scope.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'locals()["TasksHandler"] = None\n',
+            "dynamic export primitive",
+        ),
+        # A class-scope local callable invoked while the class constructs.
+        (
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n        return {}\n"
+            "    def _mutate():\n        pass\n"
+            "    _mutate()\n",
+            "locally-defined callable",
+        ),
+        # A sibling class body invoking its own local callable at import.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "class Evil:\n"
+            "    def mutate():\n        pass\n"
+            "    mutate()\n",
+            "locally-defined callable",
+        ),
         # Unparseable source is unprovable.
         ("class TasksHandler(:\n", "not statically parseable"),
     ],
@@ -932,3 +1010,47 @@ async def test_static_export_proof_accepts_explicit_export(content_store):
     proof = prove_module_action_export(handler, handler_method="create_task")
     assert proof.handler_class == "TasksHandler"
     assert proof.handler_method == "create_task"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # An uninvoked local helper may exist.
+        pytest.param(
+            "def helper():\n    return 1\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n",
+            id="uninvoked-local-helper",
+        ),
+        # A helper invoked only from the selected method body is deferred
+        # runtime behavior, outside the import-time proof.
+        pytest.param(
+            "def helper():\n    return 1\n\n"
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n"
+            '        return {"value": helper()}\n',
+            id="helper-used-from-method-body",
+        ),
+        # A lambda stored but never invoked or applied during construction.
+        pytest.param(
+            "fallback = lambda: {}\n\n"
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n"
+            "        return fallback()\n",
+            id="stored-lambda-never-construction-invoked",
+        ),
+        # Imported external callables stay outside the own-source proof.
+        pytest.param(
+            "import logging\n\n"
+            "logger = logging.getLogger(__name__)\n\n"
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n"
+            '        logger.debug("create")\n'
+            "        return {}\n",
+            id="imported-callable-at-construction",
+        ),
+    ],
+)
+async def test_deferred_local_helpers_remain_certifiable(content_store, source):
+    handler = await _handler_for_source(content_store, source)
+    proof = prove_module_action_export(handler, handler_method="create_task")
+    assert proof.handler_class == "TasksHandler"

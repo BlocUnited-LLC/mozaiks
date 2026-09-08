@@ -1055,6 +1055,54 @@ async def test_override_and_inherited_certifications_have_distinct_identity(
             "dynamic export primitive",
             id="leaf-class-body-exec-of-method",
         ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "def mutate():\n"
+            '    globals()["FilesHandler"] = None\n'
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "mutate()\n",
+            "locally-defined callable",
+            id="leaf-construction-call-of-local-function",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "class Mutator:\n"
+            "    def __init__(self):\n"
+            '        globals()["FilesHandler"] = None\n'
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "Mutator()\n",
+            "locally-defined callable",
+            id="leaf-local-class-construction",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "def mutate():\n    pass\n"
+            "alias_one = mutate\n"
+            "alias_two = alias_one\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "alias_two()\n",
+            "locally-defined callable",
+            id="leaf-alias-chain-invocation",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            '@(lambda c: exec("FilesHandler = None", globals()) or c)\n'
+            "class Sibling:\n    pass\n",
+            "lambda decorator",
+            id="leaf-lambda-decorator-on-sibling",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "def decorate(c):\n"
+            '    globals()["FilesHandler"] = None\n'
+            "    return c\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "@decorate\n"
+            "class Sibling:\n    pass\n",
+            "locally-defined callable",
+            id="leaf-local-decorator-on-sibling",
+        ),
     ],
 )
 async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reason: str) -> None:
@@ -1149,8 +1197,55 @@ async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reas
             "dynamic export primitive",
             id="base-class-body-exec-of-method",
         ),
+        pytest.param(
+            "def mutate():\n"
+            '    globals()["FilesBaseHandler"] = None\n'
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            "mutate()\n",
+            "locally-defined callable",
+            id="base-construction-call-of-local-function",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            "    def _mutate():\n        pass\n"
+            "    _mutate()\n",
+            "locally-defined callable",
+            id="base-class-scope-local-call",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            '@(lambda c: exec("FilesBaseHandler = None", globals()) or c)\n'
+            "class Sibling:\n    pass\n",
+            "lambda decorator",
+            id="base-lambda-decorator-on-sibling",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            'locals()["FilesBaseHandler"] = None\n',
+            "dynamic export primitive",
+            id="base-locals-mutation",
+        ),
     ],
 )
 async def test_base_split_grammar_hostiles_reject(content_store, base: str, reason: str) -> None:
     with pytest.raises(ImplementationArtifactError, match=reason):
         await _certify_sources(content_store, CANONICAL_LEAF, base)
+
+
+async def test_deferred_base_helper_remains_certifiable(content_store) -> None:
+    """A local helper used only from a deferred method body stays certifiable:
+    runtime behavior is outside the import-time effective-export proof."""
+    base = (
+        "def _normalize(value):\n"
+        "    return value or {}\n"
+        "class FilesBaseHandler:\n"
+        "    async def get_file(self, ctx, file_id=None):\n"
+        '        return {"file": _normalize(file_id)}\n'
+    )
+    resolved = await _certify_sources(content_store, CANONICAL_LEAF, base)
+    assert resolved.export_proof.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER
+    assert resolved.export_proof.method_source is HandlerMethodSource.BASE_HANDLER

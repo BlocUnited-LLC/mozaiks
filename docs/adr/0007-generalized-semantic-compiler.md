@@ -1226,10 +1226,17 @@ proof boundary of its own
   including exception-handler captures, match-pattern captures, walrus
   targets (also inside comprehensions and default arguments), and type-alias
   statements. Direct dynamic-execution primitives (`exec`, `eval`,
-  `setattr`, ...) are rejected in construction scope even when reached
-  through `builtins` access, aliased builtins imports, or simple rebinding —
-  a bounded static own-source export/binding proof, not a proof of arbitrary
-  imported dependency behavior. Pack-contract `required_outputs` must be
+  `setattr`, `locals`, ...) are rejected in construction scope even when
+  reached through `builtins` access, aliased builtins imports, or simple
+  rebinding, and uninspected locally-defined callables (functions, classes,
+  bound lambdas) may exist but may not be referenced during module/class
+  construction — no direct or aliased invocation, no local class
+  construction, no decorator application, no lambda invoked or applied as a
+  decorator — so within this bounded own-source construction grammar the
+  certified visible class/method binding IS the effective import-time
+  export. Deferred function/method bodies may freely use local helpers
+  (runtime behavior, outside the import-time proof), and arbitrary imported
+  dependency behavior remains outside the proof. Pack-contract `required_outputs` must be
   unambiguous at this boundary: duplicate paths reject, and
   authority-relevant ownership must be explicit (never defaulted).
   `resolve_module_action_implementation` is the only public

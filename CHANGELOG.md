@@ -93,8 +93,10 @@ This project follows a practical pre-1.0 changelog format:
   authority-producing API (no exported function accepts a preconstructed
   split authority), direct dynamic-execution primitives are rejected in
   construction scope even through `builtins` access, aliased builtins
-  imports, or simple rebinding (a bounded own-source proof — not a proof of
-  arbitrary imported dependency behavior), and pack-contract
+  imports, or simple rebinding, uninspected locally-defined callables cannot
+  be invoked or applied as decorators during module/class construction
+  (deferred runtime helpers remain allowed; a bounded own-source proof — not
+  a proof of arbitrary imported dependency behavior), and pack-contract
   `required_outputs` must be unambiguous: duplicate paths and omitted or
   non-canonical authority-relevant owners reject. The commerce module
   manifest's capability entries were repaired to the canonical

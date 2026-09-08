@@ -96,7 +96,18 @@ _INSTANCE_PLACEHOLDER_BY_SCOPE: dict[PathScope, PlaceholderIdentifier] = {
 #: Builtins whose presence in module/class statement space defeats static
 #: export proof (they can create, replace, or hide exports at import time).
 _DYNAMIC_EXPORT_BUILTINS = frozenset(
-    {"setattr", "delattr", "getattr", "globals", "vars", "eval", "exec", "__import__", "type"}
+    {
+        "setattr",
+        "delattr",
+        "getattr",
+        "globals",
+        "locals",
+        "vars",
+        "eval",
+        "exec",
+        "__import__",
+        "type",
+    }
 )
 
 #: ``type X = ...`` statements bind ``X``; the node exists on Python >= 3.12.
@@ -1229,6 +1240,112 @@ def _reject_dynamic_builtins(statements: list[ast.stmt], *, where: str) -> None:
                     )
 
 
+def _local_callable_names(body: list[ast.stmt]) -> set[str]:
+    """Names bound to locally-defined callables in one lexical scope.
+
+    Covers def/class statements (classes are callables too — constructing one
+    executes uninspected ``__new__``/``__init__`` bodies), simple lambda
+    bindings (``name = lambda``, ``name: T = lambda``), and walrus bindings
+    to a lambda.
+    """
+    names: set[str] = set()
+    for stmt in _iter_scope_statements(body):
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(stmt.name)
+        elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Lambda):
+            for target in stmt.targets:
+                names |= _assignment_target_names(target)
+        elif (
+            isinstance(stmt, ast.AnnAssign)
+            and stmt.value is not None
+            and isinstance(stmt.value, ast.Lambda)
+        ):
+            names |= _assignment_target_names(stmt.target)
+        for node in _construction_expression_nodes(stmt):
+            if (
+                isinstance(node, ast.NamedExpr)
+                and isinstance(node.value, ast.Lambda)
+                and isinstance(node.target, ast.Name)
+            ):
+                names.add(node.target.id)
+    return names
+
+
+def _construction_expression_nodes(stmt: ast.stmt):
+    """Expression nodes of one scope statement that evaluate at construction.
+
+    Deferred function/lambda bodies are excluded (only their enclosing-scope
+    positions — decorators, defaults, annotations — are entered), and nested
+    class BODIES are excluded here because each class scope is scanned
+    recursively with its own local-callable vocabulary; class decorators,
+    bases, and keywords still evaluate in this scope and are entered.
+    """
+    if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        pending: list[ast.AST] = _enclosing_scope_children(stmt)
+    else:
+        pending = list(ast.iter_child_nodes(stmt))
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            pending.extend(_enclosing_scope_children(node))
+        else:
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def _reject_construction_time_local_callables(
+    body: list[ast.stmt], *, where: str, inherited: frozenset[str] = frozenset()
+) -> None:
+    """Enforce the finite construction grammar over uninspected local callables.
+
+    Locally-defined callables (functions, classes, bound lambdas) may exist,
+    but their bodies are uninspected — so nothing may reference them while
+    the certified module or a class in it is being CONSTRUCTED: no direct or
+    aliased invocation, no local class construction, no decorator
+    application, no argument laundering, no lambda invoked or applied as a
+    decorator.  Any construction-time ``Name`` reference to such a callable
+    fails closed (this deliberately subsumes every invocation form without
+    building a call graph or dataflow).  Deferred function/method bodies may
+    freely use local helpers — that is runtime behavior, outside this
+    import-time proof.  Class bodies execute during import, so each nested
+    class scope is scanned recursively against its own locals plus every
+    enclosing scope's (a fail-closed over-approximation of Python's actual
+    class-scope name resolution).
+    """
+    known = frozenset(_local_callable_names(body)) | inherited
+    for stmt in _iter_scope_statements(body):
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            for decorator in stmt.decorator_list:
+                if isinstance(decorator, ast.Lambda):
+                    raise ImplementationArtifactError(
+                        f"{where} applies a lambda decorator during construction; the "
+                        "effective export is not statically provable"
+                    )
+        for node in _construction_expression_nodes(stmt):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Lambda):
+                raise ImplementationArtifactError(
+                    f"{where} invokes a lambda during construction; the effective "
+                    "export is not statically provable"
+                )
+            if (
+                isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+                and node.id in known
+            ):
+                # Only Load references can cause or enable execution; the
+                # binding statement's own Store target is the definition.
+                raise ImplementationArtifactError(
+                    f"{where} references locally-defined callable {node.id!r} during "
+                    "construction; its uninspected body must not execute at import "
+                    "time"
+                )
+    for stmt in _iter_scope_statements(body):
+        if isinstance(stmt, ast.ClassDef):
+            _reject_construction_time_local_callables(
+                stmt.body, where=where, inherited=known
+            )
+
+
 def prove_module_action_export(
     handler: ResolvedModuleHandlerSource, *, handler_method: str
 ) -> ModuleActionExportProof:
@@ -1349,6 +1466,7 @@ def prove_module_action_export(
                 f"handler class {handler_class!r} is referenced dynamically; the "
                 "export is not statically provable"
             )
+    _reject_construction_time_local_callables(tree.body, where="handler module scope")
     return ModuleActionExportProof(
         mode=HandlerCertificationMode.EXPLICIT_HANDLER,
         method_source=HandlerMethodSource.HANDLER,
@@ -1547,6 +1665,7 @@ def _prove_canonical_leaf_subclass(
                 f"handler class {handler_class!r} is referenced dynamically; the "
                 "export is not statically provable"
             )
+    _reject_construction_time_local_callables(tree.body, where="handler module scope")
     return base_name, leaf_method is not None
 
 
@@ -1679,6 +1798,9 @@ def _prove_base_handler_closure(
                 f"base class {base_class!r} is referenced dynamically; the export is "
                 "not statically provable"
             )
+    _reject_construction_time_local_callables(
+        tree.body, where="base-handler module scope"
+    )
 
 
 def _certify_module_action_export(
