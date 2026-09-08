@@ -11,12 +11,19 @@ returns the exact verified bytes, the strict document parser accepts them, and
 the parsed document's own schema version must equal the reference's declared
 ``contract_schema_version``.
 
-Module handler sources additionally carry a bounded static export proof: the
-declared handler class and each certified action ``handler_method`` must be
-explicitly present in the selected verified source.  Certified implementation
-selection requires the selected source to expose the declared handler
-explicitly — inherited methods, monkeypatching, ``__getattr__`` tricks, and
-other dynamic exports are rejected, never executed to find out.
+Module handler sources additionally carry a bounded static export proof with
+exactly two certification modes.  ``EXPLICIT_HANDLER`` certifies a true
+standalone one-source class: the declared handler class has zero bases and
+explicitly defines the selected ``handler_method``.  ``CANONICAL_BASE_HANDLER``
+certifies the bounded canonical ``workspace_handler_split`` two-source closure:
+the split is proven from the exact verified bytes of the module's owning
+capability-pack contract (never asserted by the caller, never inferred from
+filenames), and exactly ``handler.py`` plus ``base_handler.py`` participate.
+Monkeypatching, ``__getattr__`` tricks, arbitrary inheritance, and every other
+dynamic export are rejected, never executed to find out.  Every handler, base
+handler, and pack-contract selection is execution-scope-bound: the selection's
+:class:`ExecutionAccessScopeRef` must equal both the requesting scope and the
+module selection's scope.
 
 There is no filesystem fallback, sibling checkout, glob/open/path discovery,
 mutable alias, or caller assertion anywhere on this path.  Opaque resolver
@@ -92,6 +99,9 @@ _DYNAMIC_EXPORT_BUILTINS = frozenset(
     {"setattr", "delattr", "getattr", "globals", "vars", "eval", "exec", "__import__", "type"}
 )
 
+#: ``type X = ...`` statements bind ``X``; the node exists on Python >= 3.12.
+_TYPE_ALIAS_NODE: type[ast.stmt] | None = getattr(ast, "TypeAlias", None)
+
 
 class SelectedContractArtifact(SemanticsModel):
     """One immutable contract selection: typed reference plus physical address.
@@ -113,68 +123,110 @@ class SelectedContractArtifact(SemanticsModel):
         return self
 
 
+class SelectedAccountedArtifact(SemanticsModel):
+    """One scope-bound exact source selection: execution scope plus artifact.
+
+    Handler, base-handler, and pack-contract selections all pass through this
+    wrapper so no source can be selected without carrying the execution scope
+    it was selected under.  Resolution requires the scope to equal both the
+    requesting scope and the parent module selection's scope: identical bytes
+    under a different tenant or workspace scope are not the same selection.
+    """
+
+    scope: ExecutionAccessScopeRef
+    artifact: AccountedArtifact
+
+
 class HandlerCertificationMode(StrEnum):
     """The two bounded implementation-certification modes.
 
-    ``EXPLICIT_HANDLER``: the selected canonical ``handler.py`` explicitly
-    defines the selected ``handler_method``.
+    ``EXPLICIT_HANDLER``: a true standalone one-source class — the declared
+    handler class has ZERO bases and explicitly defines the selected
+    ``handler_method`` in the selected ``handler.py``.  A class that declares
+    any base is not eligible for this mode, even when it explicitly defines
+    the selected method.
 
-    ``CANONICAL_BASE_HANDLER``: the module uses the canonical
-    ``workspace_handler_split`` contract — a preserved workspace-owned
-    ``handler.py`` leaf that directly subclasses the regenerated
-    template-owned ``base_handler.py`` class, which explicitly defines the
-    selected method.  Exactly these two sources may participate; there is no
-    general Python source closure.
+    ``CANONICAL_BASE_HANDLER``: the bounded canonical
+    ``workspace_handler_split`` two-source closure — a preserved
+    workspace-owned ``handler.py`` leaf that directly subclasses the single
+    regenerated template-owned ``base_handler.py`` class.  Both source
+    digests are meaning-bearing for every split-certified action, including a
+    leaf override of the selected method.  Exactly these two sources may
+    participate; there is no general Python source closure.
     """
 
     EXPLICIT_HANDLER = "explicit_handler"
     CANONICAL_BASE_HANDLER = "canonical_base_handler"
 
 
-class WorkspaceHandlerSplitAuthority(SemanticsModel):
-    """Proof that one module legitimately uses the canonical handler split.
+class HandlerMethodSource(StrEnum):
+    """Which certified source explicitly defines the selected method."""
 
-    The split is never inferred merely because files carry the split names:
-    the owning capability-pack contract must declare the canonical ownership —
-    ``handler.py`` as the preserved workspace-owned leaf and
-    ``base_handler.py`` as the regenerated template-owned implementation.
-    Build it with :func:`workspace_handler_split_authority_from_pack_contract`.
-    """
-
-    contract_id: str
-    module_instance: str
-    handler_path: str
-    base_handler_path: str
+    HANDLER = "handler"
+    BASE_HANDLER = "base_handler"
 
 
 class ModuleActionExportProof(SemanticsModel):
     """Static proof that one certified selection explicitly exports one method.
 
-    ``implementation_digest`` is the certified implementation identity: for
-    ``CANONICAL_BASE_HANDLER`` it covers BOTH meaning-bearing source digests,
-    so changing only ``base_handler.py`` — or only the preserved
-    ``handler.py`` — changes the certified identity.
+    ``implementation_digest`` is the certified source-closure identity: for
+    ``CANONICAL_BASE_HANDLER`` it covers BOTH meaning-bearing source digests
+    plus the exact pack-contract digest that authorized the split, so changing
+    only ``base_handler.py``, only the preserved ``handler.py``, or only the
+    certification authority changes the certified identity.  Module and
+    action identity stay deliberately outside this digest — a future
+    ``ImplementationBinding v2`` pins them separately.
     """
 
     mode: HandlerCertificationMode
+    method_source: HandlerMethodSource
     handler_class: str
     handler_method: str
     content_digest: str
     base_handler_class: str | None = None
     base_content_digest: str | None = None
+    split_contract_content_digest: str | None = None
+
+    @model_validator(mode="after")
+    def _mode_shape(self) -> ModuleActionExportProof:
+        if self.mode is HandlerCertificationMode.EXPLICIT_HANDLER:
+            if self.method_source is not HandlerMethodSource.HANDLER:
+                raise ValueError(
+                    "EXPLICIT_HANDLER proofs certify the handler source method"
+                )
+            if (
+                self.base_handler_class is not None
+                or self.base_content_digest is not None
+                or self.split_contract_content_digest is not None
+            ):
+                raise ValueError(
+                    "EXPLICIT_HANDLER proofs carry no base or pack-contract identity"
+                )
+        else:
+            if self.base_handler_class is None or self.base_content_digest is None:
+                raise ValueError(
+                    "CANONICAL_BASE_HANDLER proofs require both source identities"
+                )
+            if self.split_contract_content_digest is None:
+                raise ValueError(
+                    "CANONICAL_BASE_HANDLER proofs require the pack-contract digest"
+                )
+        return self
 
     @property
     def implementation_digest(self) -> str:
-        return canonical_digest(
-            {
-                "mode": self.mode.value,
-                "handler_class": self.handler_class,
-                "handler_method": self.handler_method,
-                "content_digest": self.content_digest,
-                "base_handler_class": self.base_handler_class,
-                "base_content_digest": self.base_content_digest,
-            }
-        )
+        payload: dict[str, str | None] = {
+            "mode": self.mode.value,
+            "method_source": self.method_source.value,
+            "handler_class": self.handler_class,
+            "handler_method": self.handler_method,
+            "content_digest": self.content_digest,
+        }
+        if self.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER:
+            payload["base_handler_class"] = self.base_handler_class
+            payload["base_content_digest"] = self.base_content_digest
+            payload["split_contract_content_digest"] = self.split_contract_content_digest
+        return canonical_digest(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,8 +309,8 @@ class ResolvedModuleHandlerSource:
 class ResolvedModuleBaseHandlerSource:
     """Exact digest-verified canonical base-handler source for one module.
 
-    Participates in certification only under a proven
-    :class:`WorkspaceHandlerSplitAuthority` for the same module instance.
+    Participates in certification only under the module's content-resolved
+    :class:`ResolvedWorkspaceHandlerSplitAuthority` for the same instance.
     """
 
     artifact: AccountedArtifact
@@ -268,8 +320,35 @@ class ResolvedModuleBaseHandlerSource:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolvedWorkspaceHandlerSplitAuthority:
+    """Content-resolved proof that one module uses the canonical handler split.
+
+    Produced only by :func:`resolve_workspace_handler_split_authority`, which
+    derives every field from the exact verified bytes of the module's owning
+    capability-pack contract.  This is a resolution RESULT, not an input
+    token: no public resolution API accepts a caller-authored ownership
+    claim, and the certified proof pins ``contract_content_digest`` so
+    changing the certification authority invalidates the implementation
+    identity.
+    """
+
+    contract_selection: SelectedAccountedArtifact
+    contract_content_digest: str
+    scope: ExecutionAccessScopeRef
+    contract_id: str
+    module_instance: str
+    handler_path: str
+    base_handler_path: str
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedModuleActionImplementation:
-    """One certified module action: manifest, handler source(s), export proof."""
+    """One certified module action: manifest, handler source(s), export proof.
+
+    ``split_authority`` carries the exact resolved pack-contract authority for
+    ``CANONICAL_BASE_HANDLER`` certifications so a future
+    ``ImplementationBinding`` can pin and revalidate it.
+    """
 
     module: ResolvedModuleManifest
     handler: ResolvedModuleHandlerSource
@@ -277,6 +356,7 @@ class ResolvedModuleActionImplementation:
     request_contract: ClosedContract
     export_proof: ModuleActionExportProof
     base_handler: ResolvedModuleBaseHandlerSource | None = None
+    split_authority: ResolvedWorkspaceHandlerSplitAuthority | None = None
 
 
 def _prove_canonical_layout(
@@ -593,29 +673,64 @@ async def resolve_module_manifest_artifact(
     )
 
 
+def _verify_scoped_source_selection(
+    selection: SelectedAccountedArtifact,
+    *,
+    module: ResolvedModuleManifest,
+    requesting_scope: ExecutionAccessScopeRef,
+    description: str,
+) -> tuple[SelectedAccountedArtifact, str]:
+    """Cold-verify one scope-bound source selection against both scopes.
+
+    Every certified source selection must carry the execution scope it was
+    selected under, and that scope must equal the requesting scope AND the
+    parent module selection's scope.  Identical module ids and identical bytes
+    under a different tenant or workspace scope fail closed here, before any
+    bytes are read.  Returns the verified selection and its mandatory digest.
+    """
+    try:
+        verified = SelectedAccountedArtifact.model_validate(selection.model_dump(mode="json"))
+    except (TypeError, ValueError) as exc:
+        raise ImplementationArtifactError(
+            f"{description} selection failed cold validation: {exc}"
+        ) from exc
+    if verified.scope != requesting_scope:
+        raise ImplementationArtifactError(
+            f"cross-scope {description} selection fails closed"
+        )
+    if verified.scope != module.selection.contract_ref.scope:
+        raise ImplementationArtifactError(
+            f"{description} selection scope does not equal the module "
+            "selection's execution scope"
+        )
+    if verified.artifact.content_digest is None:
+        raise ImplementationArtifactError(
+            f"certified {description} selection requires a non-null content digest"
+        )
+    return verified, verified.artifact.content_digest
+
+
 async def resolve_module_handler_source(
-    artifact: AccountedArtifact,
+    selection: SelectedAccountedArtifact,
     *,
     module: ResolvedModuleManifest,
     content_store: ArtifactContentStore,
+    requesting_scope: ExecutionAccessScopeRef,
     layout_registry: AppLayoutRegistry | None = None,
 ) -> ResolvedModuleHandlerSource:
     """Resolve the exact handler source the module manifest declares.
 
-    The selection is an ``AccountedArtifact`` whose ``content_digest`` is
-    mandatory at this boundary: an address without exact content identity is
-    not a certified selection.
+    The selection is scope-bound and its ``content_digest`` is mandatory at
+    this boundary: an address without exact content identity, or under the
+    wrong execution scope, is not a certified selection.
     """
-    try:
-        verified = AccountedArtifact.model_validate(artifact.model_dump(mode="json"))
-    except (TypeError, ValueError) as exc:
-        raise ImplementationArtifactError(
-            f"handler source artifact failed cold validation: {exc}"
-        ) from exc
-    if verified.content_digest is None:
-        raise ImplementationArtifactError(
-            "certified handler selection requires a non-null content digest"
-        )
+    verified_selection, content_digest = _verify_scoped_source_selection(
+        selection,
+        module=module,
+        requesting_scope=requesting_scope,
+        description="handler source",
+    )
+    verified = verified_selection.artifact
     _family, instance = _prove_canonical_layout(
         verified.address,
         expected_kind=ArtifactKind.MODULE_BACKEND_HANDLER,
@@ -638,7 +753,7 @@ async def resolve_module_handler_source(
             f"{expected_path!r}, not {verified.address.path!r}"
         )
     try:
-        data = await content_store.get_verified_blob(verified.content_digest)
+        data = await content_store.get_verified_blob(content_digest)
     except (ContentNotFoundError, ContentIntegrityError) as exc:
         raise ImplementationArtifactError(
             f"selected handler bytes did not resolve exactly: {exc}"
@@ -651,54 +766,90 @@ async def resolve_module_handler_source(
         artifact=verified,
         module_instance=module_instance,
         handler_class=module.handler_class,
-        content_digest=verified.content_digest,
+        content_digest=content_digest,
         source_text=source_text,
     )
 
 
-def workspace_handler_split_authority_from_pack_contract(
-    contract: Mapping[str, Any], *, module_instance: str
-) -> WorkspaceHandlerSplitAuthority:
-    """Prove the canonical workspace_handler_split ownership from a pack contract.
+async def resolve_workspace_handler_split_authority(
+    contract_selection: SelectedAccountedArtifact,
+    *,
+    module: ResolvedModuleManifest,
+    content_store: ArtifactContentStore,
+    requesting_scope: ExecutionAccessScopeRef,
+) -> ResolvedWorkspaceHandlerSplitAuthority:
+    """Resolve the workspace_handler_split authority from exact contract bytes.
 
-    The owning capability-pack ``contract.yaml`` must declare, in
-    ``required_outputs``, this module's ``handler.py`` as the preserved
-    workspace-owned leaf (``owner: workspace``) and its ``base_handler.py`` as
-    the regenerated template-owned implementation (``owner: templates``, the
-    canonical materializer default).  Absent or inconsistent declarations
-    reject: the split is contract authority, never a filename coincidence.
+    The caller supplies only the exact scope-bound pack-contract selection;
+    every authority fact — contract type, contract id, canonical path, and the
+    ownership of this module's manifest, leaf, and base — is derived from the
+    digest-verified bytes.  The selection is a bounded workspace-root
+    build-context input: its path must equal
+    ``build_context/{contract_id}/contract.yaml`` for the contract id the
+    verified bytes themselves declare.  The contract must own THIS module —
+    declaring its ``module.yaml``, its ``handler.py`` as the preserved
+    workspace-owned leaf (``owner: workspace``), and its ``base_handler.py``
+    as the regenerated template-owned implementation (``owner: templates``,
+    the canonical materializer default).  Absent, inconsistent, or unrelated
+    declarations reject: the split is contract authority, never a filename
+    coincidence and never a caller assertion.
     """
-    if not isinstance(contract, Mapping):
-        raise ImplementationArtifactError("pack contract must be a mapping document")
-    contract_type = str(contract.get("contract_type") or "").strip()
+    verified_selection, contract_digest = _verify_scoped_source_selection(
+        contract_selection,
+        module=module,
+        requesting_scope=requesting_scope,
+        description="pack-contract",
+    )
+    address = verified_selection.artifact.address
+    if address.path_scope is not PathScope.WORKSPACE_ROOT:
+        raise ImplementationArtifactError(
+            "pack-contract selections are bounded workspace-root build-context "
+            f"inputs, not {address.path_scope.value!r} artifacts"
+        )
+    try:
+        data = await content_store.get_verified_blob(contract_digest)
+    except (ContentNotFoundError, ContentIntegrityError) as exc:
+        raise ImplementationArtifactError(
+            f"selected pack-contract bytes did not resolve exactly: {exc}"
+        ) from exc
+    raw = _parse_yaml_mapping(data, description="pack contract.yaml")
+    contract_type = str(raw.get("contract_type") or "").strip()
     if contract_type != "build_pack_instructions":
         raise ImplementationArtifactError(
             "workspace_handler_split authority requires a build_pack_instructions "
             f"contract, got {contract_type!r}"
         )
-    contract_id = str(contract.get("contract_id") or "").strip()
-    if not contract_id:
+    declared_id = str(raw.get("contract_id") or "").strip()
+    if not declared_id:
         raise ImplementationArtifactError("pack contract declares no contract_id")
-    instance = canonical_instance_identity_value(str(module_instance or "").strip())
-    handler_path = f"modules/{instance}/backend/handler.py"
-    base_handler_path = f"modules/{instance}/backend/base_handler.py"
+    try:
+        contract_id = canonical_instance_identity_value(declared_id)
+    except ValueError as exc:
+        raise ImplementationArtifactError(
+            f"pack contract_id {declared_id!r} is not a canonical identity: {exc}"
+        ) from exc
+    expected_contract_path = f"build_context/{contract_id}/contract.yaml"
+    if address.path != expected_contract_path:
+        raise ImplementationArtifactError(
+            f"pack contract {contract_id!r} lives at {expected_contract_path!r}, "
+            f"not {address.path!r}"
+        )
+    manifest_path = f"modules/{module.module_instance}/module.yaml"
+    handler_path = f"modules/{module.module_instance}/backend/handler.py"
+    base_handler_path = f"modules/{module.module_instance}/backend/base_handler.py"
     owners: dict[str, str] = {}
-    for entry in contract.get("required_outputs") or []:
+    for entry in raw.get("required_outputs") or []:
         if not isinstance(entry, Mapping):
             continue
         path = str(entry.get("path") or "").strip()
-        if path in {handler_path, base_handler_path}:
+        if path in {manifest_path, handler_path, base_handler_path}:
             owners[path] = str(entry.get("owner") or "templates").strip()
-    if handler_path not in owners:
-        raise ImplementationArtifactError(
-            f"pack contract {contract_id!r} does not declare {handler_path!r}; "
-            "the workspace_handler_split authority is absent"
-        )
-    if base_handler_path not in owners:
-        raise ImplementationArtifactError(
-            f"pack contract {contract_id!r} does not declare {base_handler_path!r}; "
-            "the workspace_handler_split authority is absent"
-        )
+    for required in (manifest_path, handler_path, base_handler_path):
+        if required not in owners:
+            raise ImplementationArtifactError(
+                f"pack contract {contract_id!r} does not declare {required!r}; "
+                "the workspace_handler_split authority is absent"
+            )
     if owners[handler_path] != "workspace":
         raise ImplementationArtifactError(
             f"pack contract {contract_id!r} declares {handler_path!r} with owner "
@@ -711,59 +862,45 @@ def workspace_handler_split_authority_from_pack_contract(
             f"{owners[base_handler_path]!r}; the canonical split requires the "
             "regenerated implementation to be template-owned"
         )
-    return WorkspaceHandlerSplitAuthority(
+    return ResolvedWorkspaceHandlerSplitAuthority(
+        contract_selection=verified_selection,
+        contract_content_digest=contract_digest,
+        scope=verified_selection.scope,
         contract_id=contract_id,
-        module_instance=instance,
+        module_instance=module.module_instance,
         handler_path=handler_path,
         base_handler_path=base_handler_path,
     )
 
 
-async def resolve_module_base_handler_source(
-    artifact: AccountedArtifact,
+async def _resolve_base_handler_with_authority(
+    selection: SelectedAccountedArtifact,
     *,
     module: ResolvedModuleManifest,
     handler: ResolvedModuleHandlerSource,
-    split_authority: WorkspaceHandlerSplitAuthority,
+    split_authority: ResolvedWorkspaceHandlerSplitAuthority,
     content_store: ArtifactContentStore,
-    layout_registry: AppLayoutRegistry | None = None,
+    requesting_scope: ExecutionAccessScopeRef,
+    layout_registry: AppLayoutRegistry,
 ) -> ResolvedModuleBaseHandlerSource:
-    """Resolve the exact canonical base-handler source for one module.
-
-    The base participates only under the module's proven split authority, in
-    the SAME module scope and instance as the selected leaf handler, at the
-    canonical ``base_handler.py`` sibling of the declared handler entrypoint,
-    with a mandatory verified content digest.
-    """
-    try:
-        verified_authority = WorkspaceHandlerSplitAuthority.model_validate(
-            split_authority.model_dump(mode="json")
-        )
-    except (TypeError, ValueError) as exc:
-        raise ImplementationArtifactError(
-            f"workspace_handler_split authority failed cold validation: {exc}"
-        ) from exc
-    if verified_authority.module_instance != module.module_instance:
+    if split_authority.module_instance != module.module_instance:
         raise ImplementationArtifactError(
             f"workspace_handler_split authority for module "
-            f"{verified_authority.module_instance!r} cannot certify module "
+            f"{split_authority.module_instance!r} cannot certify module "
             f"{module.module_instance!r}"
         )
-    try:
-        verified = AccountedArtifact.model_validate(artifact.model_dump(mode="json"))
-    except (TypeError, ValueError) as exc:
-        raise ImplementationArtifactError(
-            f"base-handler source artifact failed cold validation: {exc}"
-        ) from exc
-    if verified.content_digest is None:
-        raise ImplementationArtifactError(
-            "certified base-handler selection requires a non-null content digest"
-        )
+    verified_selection, content_digest = _verify_scoped_source_selection(
+        selection,
+        module=module,
+        requesting_scope=requesting_scope,
+        description="base-handler source",
+    )
+    verified = verified_selection.artifact
     _family, instance = _prove_canonical_layout(
         verified.address,
         expected_kind=ArtifactKind.MODULE_BACKEND_BASE_HANDLER,
         expected_owner=LayoutOwner.MODULE,
-        layout_registry=layout_registry or default_app_layout_registry(),
+        layout_registry=layout_registry,
     )
     module_instance = _require_instance(instance, PlaceholderIdentifier.MODULE_ID)
     if module_instance != module.module_instance:
@@ -787,8 +924,14 @@ async def resolve_module_base_handler_source(
             f"module {module.module_instance!r} declares its canonical base handler "
             f"at {expected_path!r}, not {verified.address.path!r}"
         )
+    authorized_path = f"modules/{module.module_instance}/{base_relative}"
+    if authorized_path != split_authority.base_handler_path:
+        raise ImplementationArtifactError(
+            f"module {module.module_instance!r} declares its handler outside the "
+            f"canonical split layout {split_authority.base_handler_path!r}"
+        )
     try:
-        data = await content_store.get_verified_blob(verified.content_digest)
+        data = await content_store.get_verified_blob(content_digest)
     except (ContentNotFoundError, ContentIntegrityError) as exc:
         raise ImplementationArtifactError(
             f"selected base-handler bytes did not resolve exactly: {exc}"
@@ -800,8 +943,44 @@ async def resolve_module_base_handler_source(
     return ResolvedModuleBaseHandlerSource(
         artifact=verified,
         module_instance=module_instance,
-        content_digest=verified.content_digest,
+        content_digest=content_digest,
         source_text=source_text,
+    )
+
+
+async def resolve_module_base_handler_source(
+    selection: SelectedAccountedArtifact,
+    *,
+    module: ResolvedModuleManifest,
+    handler: ResolvedModuleHandlerSource,
+    pack_contract_selection: SelectedAccountedArtifact,
+    content_store: ArtifactContentStore,
+    requesting_scope: ExecutionAccessScopeRef,
+    layout_registry: AppLayoutRegistry | None = None,
+) -> ResolvedModuleBaseHandlerSource:
+    """Resolve the exact canonical base-handler source for one module.
+
+    The base participates only under the module's content-resolved split
+    authority — the caller supplies the exact scope-bound pack-contract
+    selection, never a preconstructed ownership claim — in the SAME module
+    scope and instance as the selected leaf handler, at the canonical
+    ``base_handler.py`` sibling of the declared handler entrypoint, with a
+    mandatory verified content digest.
+    """
+    split_authority = await resolve_workspace_handler_split_authority(
+        pack_contract_selection,
+        module=module,
+        content_store=content_store,
+        requesting_scope=requesting_scope,
+    )
+    return await _resolve_base_handler_with_authority(
+        selection,
+        module=module,
+        handler=handler,
+        split_authority=split_authority,
+        content_store=content_store,
+        requesting_scope=requesting_scope,
+        layout_registry=layout_registry or default_app_layout_registry(),
     )
 
 
@@ -817,41 +996,143 @@ def _iter_scope_statements(body: list[ast.stmt]):
         pending.extend(ast.iter_child_nodes(node))
 
 
-def _target_names(target: ast.AST) -> set[str]:
+def _assignment_target_names(target: ast.expr) -> set[str]:
+    """Names bound in the current scope by one assignment/loop/with target.
+
+    Attribute and subscript stores mutate objects, not the scope's namespace;
+    they bind no name here (the blanket protected-name reference walk rejects
+    them separately).
+    """
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _assignment_target_names(target.value)
+    if isinstance(target, ast.Tuple | ast.List):
+        names: set[str] = set()
+        for element in target.elts:
+            names |= _assignment_target_names(element)
+        return names
+    return set()
+
+
+def _pattern_binding_names(pattern: ast.pattern) -> set[str]:
+    """Every name one match pattern captures into the current scope."""
     names: set[str] = set()
-    for node in ast.walk(target):
-        if isinstance(node, ast.Name):
-            names.add(node.id)
+    if isinstance(pattern, ast.MatchAs):
+        if pattern.name is not None:
+            names.add(pattern.name)
+        if pattern.pattern is not None:
+            names |= _pattern_binding_names(pattern.pattern)
+    elif isinstance(pattern, ast.MatchStar):
+        if pattern.name is not None:
+            names.add(pattern.name)
+    elif isinstance(pattern, ast.MatchMapping):
+        if pattern.rest is not None:
+            names.add(pattern.rest)
+        for sub_pattern in pattern.patterns:
+            names |= _pattern_binding_names(sub_pattern)
+    elif isinstance(pattern, ast.MatchSequence | ast.MatchOr):
+        for sub_pattern in pattern.patterns:
+            names |= _pattern_binding_names(sub_pattern)
+    elif isinstance(pattern, ast.MatchClass):
+        for sub_pattern in (*pattern.patterns, *pattern.kwd_patterns):
+            names |= _pattern_binding_names(sub_pattern)
+    return names
+
+
+def _enclosing_scope_children(node: ast.AST) -> list[ast.AST]:
+    """Child nodes of one AST node that evaluate in the ENCLOSING scope.
+
+    Nested function/class/lambda bodies bind their own locals, not this
+    scope — but their decorators, argument defaults, annotations, and class
+    bases DO evaluate in the enclosing scope and can smuggle bindings (for
+    example a walrus inside a default argument).
+    """
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        children: list[ast.AST] = [*node.decorator_list, *node.args.defaults]
+        children.extend(default for default in node.args.kw_defaults if default is not None)
+        arguments = (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+            *((node.args.vararg,) if node.args.vararg is not None else ()),
+            *((node.args.kwarg,) if node.args.kwarg is not None else ()),
+        )
+        children.extend(arg.annotation for arg in arguments if arg.annotation is not None)
+        if node.returns is not None:
+            children.append(node.returns)
+        return children
+    if isinstance(node, ast.Lambda):
+        lambda_children: list[ast.AST] = [*node.args.defaults]
+        lambda_children.extend(
+            default for default in node.args.kw_defaults if default is not None
+        )
+        return lambda_children
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases, *node.keywords]
+    return list(ast.iter_child_nodes(node))
+
+
+def _nested_binding_names(stmt: ast.stmt) -> set[str]:
+    """Current-scope bindings created inside one statement by non-target forms.
+
+    Collects exception-handler names (``except E as name``), match-pattern
+    captures (``case name`` / ``case [*name]`` / ``case {**name}``), and
+    assignment expressions — walrus targets bind in the containing scope,
+    including from inside comprehensions.  Nested function/class/lambda
+    scopes are not entered except through their enclosing-scope expression
+    positions; comprehension iteration targets stay comprehension-local and
+    are never collected.
+    """
+    names: set[str] = set()
+    pending: list[ast.AST] = _enclosing_scope_children(stmt)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.ExceptHandler) and node.name is not None:
+            names.add(node.name)
+        elif isinstance(node, ast.match_case):
+            names |= _pattern_binding_names(node.pattern)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        pending.extend(_enclosing_scope_children(node))
     return names
 
 
 def _statement_binds_name(stmt: ast.stmt, name: str) -> bool:
-    """True when one scope statement (re)binds ``name`` in that scope."""
+    """True when one scope statement (re)binds ``name`` in the current scope.
+
+    Closed over the Python 3.12 binding forms: definition statements, import
+    aliases, assignment/annotated/augmented assignment targets, deletes, loop
+    and with-statement targets, global/nonlocal declarations, type-alias
+    statements, exception-handler names, match-pattern captures, and
+    assignment expressions.  Nested function/class/lambda scopes bind their
+    own locals, not this scope.
+    """
+    direct: set[str] = set()
     if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-        return stmt.name == name
-    if isinstance(stmt, ast.Assign):
-        return any(name in _target_names(target) for target in stmt.targets)
-    if isinstance(stmt, ast.AnnAssign | ast.AugAssign):
-        return name in _target_names(stmt.target)
-    if isinstance(stmt, ast.Delete):
-        return any(name in _target_names(target) for target in stmt.targets)
-    if isinstance(stmt, ast.For | ast.AsyncFor):
-        return name in _target_names(stmt.target)
-    if isinstance(stmt, ast.With | ast.AsyncWith):
-        return any(
-            item.optional_vars is not None and name in _target_names(item.optional_vars)
-            for item in stmt.items
-        )
-    if isinstance(stmt, ast.Import | ast.ImportFrom):
-        return any((alias.asname or alias.name.split(".")[0]) == name for alias in stmt.names)
-    if isinstance(stmt, ast.Global | ast.Nonlocal):
-        return name in stmt.names
-    return any(
-        isinstance(node, ast.NamedExpr)
-        and isinstance(node.target, ast.Name)
-        and node.target.id == name
-        for node in ast.walk(stmt)
-    )
+        direct.add(stmt.name)
+    elif isinstance(stmt, ast.Assign | ast.Delete):
+        for target in stmt.targets:
+            direct |= _assignment_target_names(target)
+    elif isinstance(stmt, ast.AnnAssign | ast.AugAssign):
+        direct |= _assignment_target_names(stmt.target)
+    elif isinstance(stmt, ast.For | ast.AsyncFor):
+        direct |= _assignment_target_names(stmt.target)
+    elif isinstance(stmt, ast.With | ast.AsyncWith):
+        for item in stmt.items:
+            if item.optional_vars is not None:
+                direct |= _assignment_target_names(item.optional_vars)
+    elif isinstance(stmt, ast.Import | ast.ImportFrom):
+        direct |= {alias.asname or alias.name.split(".")[0] for alias in stmt.names}
+    elif isinstance(stmt, ast.Global | ast.Nonlocal):
+        direct |= set(stmt.names)
+    elif _TYPE_ALIAS_NODE is not None and isinstance(stmt, _TYPE_ALIAS_NODE):
+        alias_name = getattr(stmt, "name", None)
+        if isinstance(alias_name, ast.Name):
+            direct.add(alias_name.id)
+    if name in direct:
+        return True
+    return name in _nested_binding_names(stmt)
 
 
 def _reject_dynamic_builtins(statements: list[ast.stmt], *, where: str) -> None:
@@ -872,13 +1153,18 @@ def _reject_dynamic_builtins(statements: list[ast.stmt], *, where: str) -> None:
 def prove_module_action_export(
     handler: ResolvedModuleHandlerSource, *, handler_method: str
 ) -> ModuleActionExportProof:
-    """Prove the declared class explicitly exports ``handler_method`` in this source.
+    """Prove one TRUE STANDALONE class explicitly exports ``handler_method``.
 
-    The proof is bounded and static: the source is parsed, never executed.  It
-    fails closed on every construct that could make the visible definition not
-    be the effective export — redefinition, conditional or decorated
-    definitions, name rebinding, monkeypatching, ``__getattr__`` tricks, and
-    any further reference to the handler class name.
+    ``EXPLICIT_HANDLER`` certification means a one-source class: the declared
+    handler class must have ZERO bases — a class that declares any base
+    (single, multiple, or mixin) is not eligible for this mode even when it
+    explicitly defines the selected method, because its behavior is not
+    provable from this source alone.  The proof is bounded and static: the
+    source is parsed, never executed.  It fails closed on every construct
+    that could make the visible definition not be the effective export —
+    redefinition, conditional or decorated definitions, name rebinding,
+    monkeypatching, ``__getattr__`` tricks, and any further reference to the
+    handler class name.
     """
     handler_class = handler.handler_class
     try:
@@ -913,6 +1199,12 @@ def prove_module_action_export(
         raise ImplementationArtifactError(
             f"handler class {handler_class!r} uses decorators or class keywords; the "
             "export is not statically provable"
+        )
+    if class_def.bases:
+        raise ImplementationArtifactError(
+            f"handler class {handler_class!r} declares base classes and is not a "
+            "standalone one-source class; EXPLICIT_HANDLER certification requires "
+            "zero bases"
         )
     for stmt in module_statements:
         if stmt is class_def:
@@ -980,43 +1272,30 @@ def prove_module_action_export(
             )
     return ModuleActionExportProof(
         mode=HandlerCertificationMode.EXPLICIT_HANDLER,
+        method_source=HandlerMethodSource.HANDLER,
         handler_class=handler_class,
         handler_method=handler_method,
         content_digest=handler.content_digest,
     )
 
 
-def _leaf_explicitly_defines_method(source_text: str, *, handler_class: str, handler_method: str) -> bool:
-    """Cheap mode probe: does the leaf directly define the selected method?
-
-    Only decides WHICH bounded certification mode applies; every actual
-    guarantee is enforced by the full mode-specific proof afterwards.
-    """
-    try:
-        tree = ast.parse(source_text)
-    except SyntaxError:
-        return True  # let the explicit proof produce the canonical rejection
-    for stmt in tree.body:
-        if isinstance(stmt, ast.ClassDef) and stmt.name == handler_class:
-            return any(
-                isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
-                and child.name == handler_method
-                for child in stmt.body
-            )
-    return True  # absent class: the explicit proof owns that rejection too
-
-
 def _prove_canonical_leaf_subclass(
     handler: ResolvedModuleHandlerSource, *, handler_method: str
-) -> str:
-    """Prove the leaf is the bounded canonical subclass and return its base name.
+) -> tuple[str, bool]:
+    """Prove the leaf is the bounded canonical subclass.
 
     Exactly one top-level handler class with exactly one plain-name base,
-    bound by exactly one ``from .base_handler import <Base>`` — no aliasing,
-    no star imports, no second base, no mixins, no conditional or dynamic
-    construction, no rebinding, no ``__getattr__``/setattr tricks, and no
-    leaf binding of the selected method (a leaf override is certified through
-    EXPLICIT_HANDLER instead).
+    bound by exactly one ``from .base_handler import <Base>`` that is itself
+    an unconditional DIRECT member of the module body appearing BEFORE the
+    handler class definition — so the class construction provably sees the
+    exact proven base binding.  No aliasing, no star imports, no second base,
+    no mixins, no conditional/nested/late imports, no conditional or dynamic
+    construction, no rebinding, and no ``__getattr__``/setattr tricks.
+
+    A leaf override of the selected method is allowed under the same strict
+    direct-method grammar as every explicit definition; the certification
+    stays two-source (``CANONICAL_BASE_HANDLER``).  Returns the base class
+    name and whether the leaf explicitly defines the selected method.
     """
     handler_class = handler.handler_class
     try:
@@ -1066,32 +1345,17 @@ def _prove_canonical_leaf_subclass(
         )
     base_name = base_expr.id
 
-    canonical_imports: list[ast.ImportFrom] = []
+    class_index = next(
+        index for index, stmt in enumerate(tree.body) if stmt is class_def
+    )
+    canonical_import: ast.ImportFrom | None = None
     for stmt in module_statements:
         if stmt is class_def:
             continue
-        if isinstance(stmt, ast.ImportFrom):
-            if any(alias.name == "*" for alias in stmt.names):
-                raise ImplementationArtifactError(
-                    "star imports defeat static export proof"
-                )
-            binds_base = any(
-                (alias.asname or alias.name) == base_name for alias in stmt.names
-            )
-            if binds_base:
-                if (
-                    stmt.level == 1
-                    and stmt.module == "base_handler"
-                    and len(stmt.names) == 1
-                    and stmt.names[0].name == base_name
-                    and stmt.names[0].asname is None
-                ):
-                    canonical_imports.append(stmt)
-                    continue
-                raise ImplementationArtifactError(
-                    f"base class {base_name!r} must be imported exactly as "
-                    f"'from .base_handler import {base_name}'"
-                )
+        if isinstance(stmt, ast.ImportFrom) and any(
+            alias.name == "*" for alias in stmt.names
+        ):
+            raise ImplementationArtifactError("star imports defeat static export proof")
         if isinstance(stmt, ast.FunctionDef) and stmt.name == "__getattr__":
             raise ImplementationArtifactError(
                 "module-level __getattr__ defeats static export proof"
@@ -1101,10 +1365,43 @@ def _prove_canonical_leaf_subclass(
                 f"handler class {handler_class!r} is rebound outside its definition"
             )
         if _statement_binds_name(stmt, base_name):
-            raise ImplementationArtifactError(
-                f"base class {base_name!r} is rebound outside its canonical import"
+            if not isinstance(stmt, ast.ImportFrom):
+                raise ImplementationArtifactError(
+                    f"base class {base_name!r} is rebound outside its canonical import"
+                )
+            if not (
+                stmt.level == 1
+                and stmt.module == "base_handler"
+                and len(stmt.names) == 1
+                and stmt.names[0].name == base_name
+                and stmt.names[0].asname is None
+            ):
+                raise ImplementationArtifactError(
+                    f"base class {base_name!r} must be imported exactly as "
+                    f"'from .base_handler import {base_name}'"
+                )
+            import_index = next(
+                (index for index, body_stmt in enumerate(tree.body) if body_stmt is stmt),
+                None,
             )
-    if len(canonical_imports) != 1:
+            if import_index is None:
+                raise ImplementationArtifactError(
+                    f"the canonical base import of {base_name!r} must be an "
+                    "unconditional top-level module statement, not nested in "
+                    "control flow"
+                )
+            if import_index > class_index:
+                raise ImplementationArtifactError(
+                    f"the canonical base import of {base_name!r} must appear before "
+                    "the handler class definition"
+                )
+            if canonical_import is not None:
+                raise ImplementationArtifactError(
+                    f"base class {base_name!r} must be bound by exactly one "
+                    f"'from .base_handler import {base_name}' import"
+                )
+            canonical_import = stmt
+    if canonical_import is None:
         raise ImplementationArtifactError(
             f"base class {base_name!r} must be bound by exactly one "
             f"'from .base_handler import {base_name}' import"
@@ -1112,7 +1409,35 @@ def _prove_canonical_leaf_subclass(
     _reject_dynamic_builtins(module_statements, where="handler module scope")
 
     class_statements = list(_iter_scope_statements(class_def.body))
+    method_defs = [
+        stmt
+        for stmt in class_statements
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
+        and stmt.name == handler_method
+    ]
+    leaf_method: ast.stmt | None = None
+    if method_defs:
+        if len(method_defs) != 1:
+            raise ImplementationArtifactError(
+                f"handler_method {handler_method!r} is bound more than once on class "
+                f"{handler_class!r}; the export is not statically provable"
+            )
+        leaf_method = method_defs[0]
+        if leaf_method not in class_def.body:
+            raise ImplementationArtifactError(
+                f"handler_method {handler_method!r} is defined conditionally; the "
+                "export is not statically provable"
+            )
+        if isinstance(leaf_method, ast.FunctionDef | ast.AsyncFunctionDef) and (
+            leaf_method.decorator_list
+        ):
+            raise ImplementationArtifactError(
+                f"handler_method {handler_method!r} is decorated; the export is not "
+                "statically provable"
+            )
     for stmt in class_statements:
+        if stmt is leaf_method:
+            continue
         if (
             isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
             and stmt.name in {"__getattr__", "__getattribute__"}
@@ -1143,21 +1468,26 @@ def _prove_canonical_leaf_subclass(
                 f"handler class {handler_class!r} is referenced dynamically; the "
                 "export is not statically provable"
             )
-    return base_name
+    return base_name, leaf_method is not None
 
 
-def _prove_base_handler_method(
+def _prove_base_handler_closure(
     base_handler: ResolvedModuleBaseHandlerSource,
     *,
     base_class: str,
     handler_method: str,
+    require_method: bool,
 ) -> None:
-    """Prove the canonical base class explicitly defines the selected method.
+    """Prove the canonical base class closure, and the method when required.
 
     The base class must be the single top-level class of the regenerated
     base-handler source, with no bases of its own (no transitive
-    inheritance), no dynamic construction, and an explicit undecorated
-    definition of the selected method.
+    inheritance) and no dynamic construction.  With ``require_method`` the
+    selected method must be explicitly defined there under the strict
+    direct-method grammar; without it (the leaf override case) the base
+    remains meaning-bearing for construction, inherited helpers, and lookup —
+    the full closure proof still runs, and a base definition of the selected
+    method is allowed only in the same strict explicit form.
     """
     try:
         tree = ast.parse(base_handler.source_text)
@@ -1222,27 +1552,31 @@ def _prove_base_handler_method(
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
         and stmt.name == handler_method
     ]
-    if not method_defs:
+    if not method_defs and require_method:
         raise ImplementationArtifactError(
             f"action handler_method {handler_method!r} is not explicitly defined on "
             f"canonical base class {base_class!r} in the selected source"
         )
-    if len(method_defs) != 1:
-        raise ImplementationArtifactError(
-            f"handler_method {handler_method!r} is bound more than once on base "
-            f"class {base_class!r}; the export is not statically provable"
-        )
-    method_def = method_defs[0]
-    if method_def not in class_def.body:
-        raise ImplementationArtifactError(
-            f"handler_method {handler_method!r} is defined conditionally; the export "
-            "is not statically provable"
-        )
-    if method_def.decorator_list:
-        raise ImplementationArtifactError(
-            f"handler_method {handler_method!r} is decorated; the export is not "
-            "statically provable"
-        )
+    method_def: ast.stmt | None = None
+    if method_defs:
+        if len(method_defs) != 1:
+            raise ImplementationArtifactError(
+                f"handler_method {handler_method!r} is bound more than once on base "
+                f"class {base_class!r}; the export is not statically provable"
+            )
+        method_def = method_defs[0]
+        if method_def not in class_def.body:
+            raise ImplementationArtifactError(
+                f"handler_method {handler_method!r} is defined conditionally; the "
+                "export is not statically provable"
+            )
+        if isinstance(method_def, ast.FunctionDef | ast.AsyncFunctionDef) and (
+            method_def.decorator_list
+        ):
+            raise ImplementationArtifactError(
+                f"handler_method {handler_method!r} is decorated; the export is not "
+                "statically provable"
+            )
     for stmt in class_statements:
         if stmt is method_def:
             continue
@@ -1273,60 +1607,83 @@ def certify_module_action_export(
     *,
     handler_method: str,
     base_handler: ResolvedModuleBaseHandlerSource | None = None,
+    split_authority: ResolvedWorkspaceHandlerSplitAuthority | None = None,
 ) -> ModuleActionExportProof:
     """Certify one action export through exactly one of the two bounded modes.
 
-    A leaf that explicitly defines the selected method certifies as
-    ``EXPLICIT_HANDLER`` (the strict single-source proof).  Otherwise, and
-    only when the canonical base-handler source is selected under proven
-    split authority, the ``CANONICAL_BASE_HANDLER`` proof runs over exactly
-    the two canonical sources.  No other source may participate.
+    Without a base selection, certification is the strict standalone
+    ``EXPLICIT_HANDLER`` proof (zero bases).  With the canonical base-handler
+    source AND the content-resolved split authority — both are required
+    together — the ``CANONICAL_BASE_HANDLER`` proof runs over exactly the two
+    canonical sources.  A canonical split leaf that explicitly overrides the
+    selected method stays a two-source ``CANONICAL_BASE_HANDLER``
+    certification with ``method_source = handler``; both source digests and
+    the pack-contract digest remain meaning-bearing.  No other source may
+    participate.  The resolution APIs are the authority boundary: they derive
+    ``split_authority`` from exact verified pack-contract bytes.
     """
-    if base_handler is not None and base_handler.module_instance != handler.module_instance:
+    if base_handler is None and split_authority is None:
+        return prove_module_action_export(handler, handler_method=handler_method)
+    if base_handler is None or split_authority is None:
+        raise ImplementationArtifactError(
+            "canonical split certification requires the base-handler source and "
+            "the content-resolved workspace_handler_split authority together"
+        )
+    if base_handler.module_instance != handler.module_instance:
         raise ImplementationArtifactError(
             f"base handler of module {base_handler.module_instance!r} cannot certify "
             f"module {handler.module_instance!r}"
         )
-    if _leaf_explicitly_defines_method(
-        handler.source_text,
-        handler_class=handler.handler_class,
+    if split_authority.module_instance != handler.module_instance:
+        raise ImplementationArtifactError(
+            f"workspace_handler_split authority for module "
+            f"{split_authority.module_instance!r} cannot certify module "
+            f"{handler.module_instance!r}"
+        )
+    base_class, leaf_defines_method = _prove_canonical_leaf_subclass(
+        handler, handler_method=handler_method
+    )
+    _prove_base_handler_closure(
+        base_handler,
+        base_class=base_class,
         handler_method=handler_method,
-    ):
-        return prove_module_action_export(handler, handler_method=handler_method)
-    if base_handler is None:
-        # Preserve the strict single-source rejection.
-        return prove_module_action_export(handler, handler_method=handler_method)
-    base_class = _prove_canonical_leaf_subclass(handler, handler_method=handler_method)
-    _prove_base_handler_method(
-        base_handler, base_class=base_class, handler_method=handler_method
+        require_method=not leaf_defines_method,
     )
     return ModuleActionExportProof(
         mode=HandlerCertificationMode.CANONICAL_BASE_HANDLER,
+        method_source=(
+            HandlerMethodSource.HANDLER
+            if leaf_defines_method
+            else HandlerMethodSource.BASE_HANDLER
+        ),
         handler_class=handler.handler_class,
         handler_method=handler_method,
         content_digest=handler.content_digest,
         base_handler_class=base_class,
         base_content_digest=base_handler.content_digest,
+        split_contract_content_digest=split_authority.contract_content_digest,
     )
 
 
 async def resolve_module_action_implementation(
     module_selection: SelectedContractArtifact,
-    handler_artifact: AccountedArtifact,
+    handler_selection: SelectedAccountedArtifact,
     *,
     action_id: str,
     content_store: ArtifactContentStore,
     requesting_scope: ExecutionAccessScopeRef,
     layout_registry: AppLayoutRegistry | None = None,
-    base_handler_artifact: AccountedArtifact | None = None,
-    split_authority: WorkspaceHandlerSplitAuthority | None = None,
+    base_handler_selection: SelectedAccountedArtifact | None = None,
+    pack_contract_selection: SelectedAccountedArtifact | None = None,
 ) -> ResolvedModuleActionImplementation:
     """Resolve and prove one certified module action implementation end to end.
 
-    Without a base selection, certification is the strict single-source
-    ``EXPLICIT_HANDLER`` proof.  A ``base_handler_artifact`` participates only
-    together with the module's proven :class:`WorkspaceHandlerSplitAuthority`;
-    a base selection without split authority rejects.
+    Without a base selection, certification is the strict standalone
+    ``EXPLICIT_HANDLER`` proof.  A ``base_handler_selection`` participates
+    only together with ``pack_contract_selection`` — the exact scope-bound
+    selection of the module's owning capability-pack contract, from whose
+    verified bytes the split authority is derived.  There is no way to
+    substitute a caller-authored ownership claim for those bytes.
     """
     registry = layout_registry or default_app_layout_registry()
     module = await resolve_module_manifest_artifact(
@@ -1336,29 +1693,41 @@ async def resolve_module_action_implementation(
         layout_registry=registry,
     )
     handler = await resolve_module_handler_source(
-        handler_artifact,
+        handler_selection,
         module=module,
         content_store=content_store,
+        requesting_scope=requesting_scope,
         layout_registry=registry,
     )
+    if (base_handler_selection is None) != (pack_contract_selection is None):
+        raise ImplementationArtifactError(
+            "canonical split certification requires the base-handler selection and "
+            "the module's exact pack-contract selection together"
+        )
     base_handler: ResolvedModuleBaseHandlerSource | None = None
-    if base_handler_artifact is not None:
-        if split_authority is None:
-            raise ImplementationArtifactError(
-                "a base-handler selection requires the module's proven "
-                "workspace_handler_split authority"
-            )
-        base_handler = await resolve_module_base_handler_source(
-            base_handler_artifact,
+    split_authority: ResolvedWorkspaceHandlerSplitAuthority | None = None
+    if base_handler_selection is not None and pack_contract_selection is not None:
+        split_authority = await resolve_workspace_handler_split_authority(
+            pack_contract_selection,
+            module=module,
+            content_store=content_store,
+            requesting_scope=requesting_scope,
+        )
+        base_handler = await _resolve_base_handler_with_authority(
+            base_handler_selection,
             module=module,
             handler=handler,
             split_authority=split_authority,
             content_store=content_store,
+            requesting_scope=requesting_scope,
             layout_registry=registry,
         )
     action = module.action(action_id)
     export_proof = certify_module_action_export(
-        handler, handler_method=action.handler_method, base_handler=base_handler
+        handler,
+        handler_method=action.handler_method,
+        base_handler=base_handler,
+        split_authority=split_authority,
     )
     return ResolvedModuleActionImplementation(
         module=module,
@@ -1367,11 +1736,13 @@ async def resolve_module_action_implementation(
         request_contract=module.action_request_contract(action_id),
         export_proof=export_proof,
         base_handler=base_handler,
+        split_authority=split_authority,
     )
 
 
 __all__ = [
     "HandlerCertificationMode",
+    "HandlerMethodSource",
     "ImplementationArtifactError",
     "ModuleActionExportProof",
     "ResolvedModuleActionImplementation",
@@ -1381,8 +1752,9 @@ __all__ = [
     "ResolvedWorkflowImplementation",
     "ResolvedWorkflowOrchestrator",
     "ResolvedWorkflowStructuredOutputs",
+    "ResolvedWorkspaceHandlerSplitAuthority",
+    "SelectedAccountedArtifact",
     "SelectedContractArtifact",
-    "WorkspaceHandlerSplitAuthority",
     "certify_module_action_export",
     "pair_workflow_implementation_artifacts",
     "prove_module_action_export",
@@ -1393,4 +1765,5 @@ __all__ = [
     "resolve_selected_structured_output_contract",
     "resolve_workflow_orchestrator_artifact",
     "resolve_workflow_structured_outputs_artifact",
+    "resolve_workspace_handler_split_authority",
 ]

@@ -25,6 +25,7 @@ from mozaiksai.core.semantics.closed_contracts import ClosedContractUnsupported,
 from mozaiksai.core.semantics.composition_ledger import AccountedArtifact, ArtifactAddress
 from mozaiksai.core.semantics.implementation_artifacts import (
     ImplementationArtifactError,
+    SelectedAccountedArtifact,
     SelectedContractArtifact,
     pair_workflow_implementation_artifacts,
     prove_module_action_export,
@@ -151,16 +152,23 @@ def _module_selection(
     )
 
 
-def _handler_artifact(
-    *, digest: str | None, module: str = "tasks", path: str = "backend/handler.py"
-) -> AccountedArtifact:
-    return AccountedArtifact(
-        address=ArtifactAddress(
-            path_scope=PathScope.MODULE_RELATIVE,
-            placeholder_values=(("module_id", module),),
-            path=path,
+def _handler_selection(
+    *,
+    digest: str | None,
+    module: str = "tasks",
+    path: str = "backend/handler.py",
+    scope: ExecutionAccessScopeRef = SCOPE,
+) -> SelectedAccountedArtifact:
+    return SelectedAccountedArtifact(
+        scope=scope,
+        artifact=AccountedArtifact(
+            address=ArtifactAddress(
+                path_scope=PathScope.MODULE_RELATIVE,
+                placeholder_values=(("module_id", module),),
+                path=path,
+            ),
+            content_digest=digest,
         ),
-        content_digest=digest,
     )
 
 
@@ -556,7 +564,45 @@ async def test_handler_selection_requires_content_digest(content_store):
     module = await _resolved_module(content_store)
     with pytest.raises(ImplementationArtifactError, match="non-null content digest"):
         await resolve_module_handler_source(
-            _handler_artifact(digest=None), module=module, content_store=content_store
+            _handler_selection(digest=None),
+            module=module,
+            content_store=content_store,
+            requesting_scope=SCOPE,
+        )
+
+
+async def test_handler_selection_scope_must_match_both_scopes(content_store):
+    module = await _resolved_module(content_store)
+    digest = await _put(content_store, HANDLER_SOURCE.encode("utf-8"))
+    # Same module id and same bytes selected under another workspace scope:
+    # the selection satisfies the requesting scope but not the module's scope.
+    with pytest.raises(
+        ImplementationArtifactError, match="module selection's execution scope"
+    ):
+        await resolve_module_handler_source(
+            _handler_selection(digest=digest, scope=OTHER_SCOPE),
+            module=module,
+            content_store=content_store,
+            requesting_scope=OTHER_SCOPE,
+        )
+    # The selection scope must also equal the requesting scope itself.
+    with pytest.raises(ImplementationArtifactError, match="cross-scope"):
+        await resolve_module_handler_source(
+            _handler_selection(digest=digest, scope=OTHER_SCOPE),
+            module=module,
+            content_store=content_store,
+            requesting_scope=SCOPE,
+        )
+    # Same module id and same bytes under a different tenant entirely.
+    other_tenant = ExecutionAccessScopeRef(tenant_id="rival", workspace_id="workspace")
+    with pytest.raises(
+        ImplementationArtifactError, match="module selection's execution scope"
+    ):
+        await resolve_module_handler_source(
+            _handler_selection(digest=digest, scope=other_tenant),
+            module=module,
+            content_store=content_store,
+            requesting_scope=other_tenant,
         )
 
 
@@ -565,9 +611,10 @@ async def test_handler_missing_blob_rejects(content_store):
     absent_digest = hashlib.sha256(HANDLER_SOURCE.encode("utf-8")).hexdigest()
     with pytest.raises(ImplementationArtifactError, match="did not resolve exactly"):
         await resolve_module_handler_source(
-            _handler_artifact(digest=absent_digest),
+            _handler_selection(digest=absent_digest),
             module=module,
             content_store=content_store,
+            requesting_scope=SCOPE,
         )
 
 
@@ -576,9 +623,10 @@ async def test_handler_from_other_module_rejects(content_store):
     digest = await _put(content_store, HANDLER_SOURCE.encode("utf-8"))
     with pytest.raises(ImplementationArtifactError, match="cannot implement module"):
         await resolve_module_handler_source(
-            _handler_artifact(digest=digest, module="billing"),
+            _handler_selection(digest=digest, module="billing"),
             module=module,
             content_store=content_store,
+            requesting_scope=SCOPE,
         )
 
 
@@ -587,9 +635,10 @@ async def test_handler_at_wrong_family_or_path_rejects(content_store):
     digest = await _put(content_store, HANDLER_SOURCE.encode("utf-8"))
     with pytest.raises(ImplementationArtifactError, match="not 'module_backend_handler'"):
         await resolve_module_handler_source(
-            _handler_artifact(digest=digest, path="backend/service.py"),
+            _handler_selection(digest=digest, path="backend/service.py"),
             module=module,
             content_store=content_store,
+            requesting_scope=SCOPE,
         )
     custom_document = {
         **MODULE_DOCUMENT,
@@ -598,9 +647,10 @@ async def test_handler_at_wrong_family_or_path_rejects(content_store):
     custom_module = await _resolved_module(content_store, custom_document)
     with pytest.raises(ImplementationArtifactError, match="declares its handler at"):
         await resolve_module_handler_source(
-            _handler_artifact(digest=digest),
+            _handler_selection(digest=digest),
             module=custom_module,
             content_store=content_store,
+            requesting_scope=SCOPE,
         )
 
 
@@ -609,7 +659,7 @@ async def test_module_action_implementation_resolves_end_to_end(content_store):
     handler_digest = await _put(content_store, HANDLER_SOURCE.encode("utf-8"))
     resolved = await resolve_module_action_implementation(
         _module_selection(digest=module_digest),
-        _handler_artifact(digest=handler_digest),
+        _handler_selection(digest=handler_digest),
         action_id="create_task",
         content_store=content_store,
         requesting_scope=SCOPE,
@@ -619,22 +669,26 @@ async def test_module_action_implementation_resolves_end_to_end(content_store):
     assert resolved.export_proof.handler_class == "TasksHandler"
     assert resolved.export_proof.handler_method == "create_task"
     assert resolved.export_proof.content_digest == handler_digest
+    assert resolved.split_authority is None
     assert isinstance(resolved.request_contract, ObjectContract)
 
 
 async def test_handler_at_app_bundle_scope_resolves(content_store):
     module = await _resolved_module(content_store)
     digest = await _put(content_store, HANDLER_SOURCE.encode("utf-8"))
-    artifact = AccountedArtifact(
-        address=ArtifactAddress(
-            path_scope=PathScope.APP_BUNDLE_ROOT,
-            placeholder_values=(),
-            path="modules/tasks/backend/handler.py",
+    selection = SelectedAccountedArtifact(
+        scope=SCOPE,
+        artifact=AccountedArtifact(
+            address=ArtifactAddress(
+                path_scope=PathScope.APP_BUNDLE_ROOT,
+                placeholder_values=(),
+                path="modules/tasks/backend/handler.py",
+            ),
+            content_digest=digest,
         ),
-        content_digest=digest,
     )
     handler = await resolve_module_handler_source(
-        artifact, module=module, content_store=content_store
+        selection, module=module, content_store=content_store, requesting_scope=SCOPE
     )
     assert handler.module_instance == "tasks"
     proof = prove_module_action_export(handler, handler_method="create_task")
@@ -645,7 +699,10 @@ async def _handler_for_source(content_store, source: str):
     module = await _resolved_module(content_store)
     digest = await _put(content_store, source.encode("utf-8"))
     return await resolve_module_handler_source(
-        _handler_artifact(digest=digest), module=module, content_store=content_store
+        _handler_selection(digest=digest),
+        module=module,
+        content_store=content_store,
+        requesting_scope=SCOPE,
     )
 
 
@@ -654,12 +711,29 @@ async def _handler_for_source(content_store, source: str):
     [
         # Unrelated source at a valid digest: the declared class is absent.
         ("class OtherHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n", "absent"),
-        # Inherited action methods are not explicit exports of the selected source.
+        # A subclass is never a standalone one-source class, even without the method.
         (
             "from .base_handler import TasksBaseHandler\n\n"
             "class TasksHandler(TasksBaseHandler):\n"
             '    """Thin preserved subclass."""\n',
-            "not explicitly defined",
+            "zero bases",
+        ),
+        # A subclass that explicitly overrides the method is still not standalone.
+        (
+            "from .base_handler import TasksBaseHandler\n\n"
+            "class TasksHandler(TasksBaseHandler):\n"
+            "    async def create_task(self, ctx, payload):\n"
+            '        return {"status": "created"}\n',
+            "zero bases",
+        ),
+        # Mixins/multiple inheritance are not standalone either.
+        (
+            "class _Mixin:\n    pass\n\n"
+            "class _Base:\n    pass\n\n"
+            "class TasksHandler(_Mixin, _Base):\n"
+            "    async def create_task(self, ctx, payload):\n"
+            '        return {"status": "created"}\n',
+            "zero bases",
         ),
         # Method on the wrong class.
         (
@@ -731,6 +805,55 @@ async def _handler_for_source(content_store, source: str):
             "class _Shadow:\n    pass\n\n"
             "TasksHandler = _Shadow\n",
             "more than once|rebound|referenced dynamically",
+        ),
+        # Exception-handler capture rebinds the class name in module scope.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "try:\n    pass\n"
+            "except Exception as TasksHandler:\n    pass\n",
+            "rebound|referenced dynamically",
+        ),
+        # Match-pattern mapping capture rebinds the class name.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "match {}:\n"
+            '    case {"x": TasksHandler}:\n        pass\n    case _:\n        pass\n',
+            "rebound|referenced dynamically",
+        ),
+        # Match-pattern star capture rebinds the class name.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "match []:\n"
+            "    case [*TasksHandler]:\n        pass\n    case _:\n        pass\n",
+            "rebound|referenced dynamically",
+        ),
+        # Match-pattern mapping rest capture rebinds the class name.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "match {}:\n"
+            '    case {"x": _ignored, **TasksHandler}:\n        pass\n    case _:\n        pass\n',
+            "rebound|referenced dynamically",
+        ),
+        # Exception-handler capture rebinds the method name in the class body.
+        (
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n        return {}\n"
+            "    try:\n        pass\n"
+            "    except Exception as create_task:\n        pass\n",
+            "rebound",
+        ),
+        # A walrus hidden in another function's default argument still rebinds.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "def helper(value=(TasksHandler := None)):\n    return value\n",
+            "rebound|referenced dynamically",
+        ),
+        # A type-alias statement rebinds the class name (a syntax error on 3.11,
+        # a TypeAlias binding on 3.12+ — both fail closed).
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "type TasksHandler = int\n",
+            "rebound|referenced dynamically|not statically parseable",
         ),
         # Unparseable source is unprovable.
         ("class TasksHandler(:\n", "not statically parseable"),

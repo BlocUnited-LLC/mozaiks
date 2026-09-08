@@ -3,20 +3,27 @@
 Every workspace_handler_split pack module certifies through the bounded
 CANONICAL_BASE_HANDLER mode: the preserved workspace-owned ``handler.py``
 leaf directly subclasses the regenerated template-owned ``base_handler.py``
-class, which explicitly defines each declared ``handler_method``. Exactly
-those two verified sources participate — no general Python source closure —
-and the certified implementation identity covers BOTH source digests.
+class.  Exactly those two verified sources participate — no general Python
+source closure — and the certified implementation identity covers BOTH
+source digests plus the exact pack-contract digest that authorized the
+split.
+
+The split authority itself is content-resolved: the caller supplies only the
+exact scope-bound pack-contract selection, and every ownership fact is
+derived from digest-verified bytes.  There is no caller-constructible
+authority token anywhere on the public resolution API.
 
 The corpus is discovered independently from the checked-in factory packs and
 pinned: 10 modules, 63 actions, all certifying end to end through
-``resolve_module_action_implementation`` with exact verified bytes, the #484
-closed request import, and the pack contract's workspace_handler_split
-ownership authority.
+``resolve_module_action_implementation`` with exact verified bytes for the
+manifest, leaf, base, AND pack contract (the blob-read count proves the
+contract bytes are actually read), and the #484 closed request import.
 """
 
 from __future__ import annotations
 
 import hashlib
+import inspect
 from pathlib import Path
 
 import pytest
@@ -27,10 +34,14 @@ from mozaiksai.core.runtime.app.layout_registry import PathScope
 from mozaiksai.core.semantics.composition_ledger import AccountedArtifact, ArtifactAddress
 from mozaiksai.core.semantics.implementation_artifacts import (
     HandlerCertificationMode,
+    HandlerMethodSource,
     ImplementationArtifactError,
+    SelectedAccountedArtifact,
     SelectedContractArtifact,
     resolve_module_action_implementation,
-    workspace_handler_split_authority_from_pack_contract,
+    resolve_module_base_handler_source,
+    resolve_module_manifest_artifact,
+    resolve_workspace_handler_split_authority,
 )
 from mozaiksai.core.semantics.refs import ChildContractRef, ExecutionAccessScopeRef
 
@@ -38,6 +49,8 @@ WORKSPACE = Path(__file__).resolve().parents[1]
 BUILD_CONTEXT = WORKSPACE / "factory_app" / "build_context"
 
 SCOPE = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="workspace")
+OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="elsewhere")
+OTHER_TENANT = ExecutionAccessScopeRef(tenant_id="rival", workspace_id="workspace")
 
 EXPECTED_MODULE_COUNT = 10
 EXPECTED_ACTION_COUNT = 63
@@ -61,13 +74,25 @@ def _module_root(pack: str, module: str) -> Path:
     return BUILD_CONTEXT / pack / "templates" / "modules" / module
 
 
-def _pack_contract(pack: str) -> dict:
-    return yaml.safe_load((BUILD_CONTEXT / pack / "contract.yaml").read_text(encoding="utf-8")) or {}
+def _pack_contract_bytes(pack: str) -> bytes:
+    return (BUILD_CONTEXT / pack / "contract.yaml").read_bytes()
+
+
+class _CountingContentStore(LocalArtifactContentStore):
+    """Records every verified blob read so tests can prove reads happen."""
+
+    def __init__(self, *, root) -> None:
+        super().__init__(root=root)
+        self.verified_reads: list[str] = []
+
+    async def get_verified_blob(self, digest: str) -> bytes:
+        self.verified_reads.append(digest)
+        return await super().get_verified_blob(digest)
 
 
 @pytest.fixture
 def content_store(tmp_path):
-    return LocalArtifactContentStore(root=tmp_path)
+    return _CountingContentStore(root=tmp_path)
 
 
 async def _put(content_store, data: bytes) -> str:
@@ -76,9 +101,11 @@ async def _put(content_store, data: bytes) -> str:
     return digest
 
 
-# Selections use APP_BUNDLE_ROOT: the canonical layout registry registers the
-# module_backend_base_handler family at app scope (the module-relative sibling
-# row does not exist yet — a registry asymmetry outside this slice's scope).
+# Source selections use APP_BUNDLE_ROOT: the canonical layout registry
+# registers the module_backend_base_handler family at app scope (the
+# module-relative sibling row does not exist yet — a registry asymmetry
+# outside this slice's scope).  Pack-contract selections are bounded
+# workspace-root build-context inputs.
 def _module_selection(*, digest: str, module: str) -> SelectedContractArtifact:
     return SelectedContractArtifact(
         contract_ref=ChildContractRef(
@@ -98,41 +125,75 @@ def _module_selection(*, digest: str, module: str) -> SelectedContractArtifact:
     )
 
 
-def _backend_artifact(*, digest: str | None, module: str, file_name: str) -> AccountedArtifact:
-    return AccountedArtifact(
-        address=ArtifactAddress(
-            path_scope=PathScope.APP_BUNDLE_ROOT,
-            placeholder_values=(),
-            path=f"modules/{module}/backend/{file_name}",
+def _source_selection(
+    *,
+    digest: str | None,
+    module: str,
+    file_name: str,
+    scope: ExecutionAccessScopeRef = SCOPE,
+) -> SelectedAccountedArtifact:
+    return SelectedAccountedArtifact(
+        scope=scope,
+        artifact=AccountedArtifact(
+            address=ArtifactAddress(
+                path_scope=PathScope.APP_BUNDLE_ROOT,
+                placeholder_values=(),
+                path=f"modules/{module}/backend/{file_name}",
+            ),
+            content_digest=digest,
         ),
-        content_digest=digest,
+    )
+
+
+def _contract_selection(
+    *,
+    digest: str | None,
+    pack: str,
+    scope: ExecutionAccessScopeRef = SCOPE,
+    path: str | None = None,
+    path_scope: PathScope = PathScope.WORKSPACE_ROOT,
+) -> SelectedAccountedArtifact:
+    return SelectedAccountedArtifact(
+        scope=scope,
+        artifact=AccountedArtifact(
+            address=ArtifactAddress(
+                path_scope=path_scope,
+                placeholder_values=(),
+                path=path or f"build_context/{pack}/contract.yaml",
+            ),
+            content_digest=digest,
+        ),
     )
 
 
 async def _stage_module(content_store, pack: str, module: str):
-    """Load the real pack module into the content store and build selections."""
+    """Load the real pack module AND its pack contract into the content store."""
     root = _module_root(pack, module)
-    manifest_bytes = (root / "module.yaml").read_bytes()
-    handler_bytes = (root / "backend" / "handler.py").read_bytes()
-    base_bytes = (root / "backend" / "base_handler.py").read_bytes()
-    manifest_digest = await _put(content_store, manifest_bytes)
-    handler_digest = await _put(content_store, handler_bytes)
-    base_digest = await _put(content_store, base_bytes)
-    authority = workspace_handler_split_authority_from_pack_contract(
-        _pack_contract(pack), module_instance=module
-    )
+    manifest_digest = await _put(content_store, (root / "module.yaml").read_bytes())
+    handler_digest = await _put(content_store, (root / "backend" / "handler.py").read_bytes())
+    base_digest = await _put(content_store, (root / "backend" / "base_handler.py").read_bytes())
+    contract_digest = await _put(content_store, _pack_contract_bytes(pack))
     return {
         "module_selection": _module_selection(digest=manifest_digest, module=module),
-        "handler_artifact": _backend_artifact(
+        "handler_selection": _source_selection(
             digest=handler_digest, module=module, file_name="handler.py"
         ),
-        "base_artifact": _backend_artifact(
+        "base_selection": _source_selection(
             digest=base_digest, module=module, file_name="base_handler.py"
         ),
-        "authority": authority,
+        "contract_selection": _contract_selection(digest=contract_digest, pack=pack),
         "handler_digest": handler_digest,
         "base_digest": base_digest,
+        "contract_digest": contract_digest,
     }
+
+
+async def _resolved_module_for(content_store, staged):
+    return await resolve_module_manifest_artifact(
+        staged["module_selection"],
+        content_store=content_store,
+        requesting_scope=SCOPE,
+    )
 
 
 def test_census_is_pinned() -> None:
@@ -147,6 +208,18 @@ def test_census_is_pinned() -> None:
     assert total_actions == EXPECTED_ACTION_COUNT
 
 
+def test_public_resolution_accepts_no_authority_token() -> None:
+    """The public resolution APIs take pack-contract selections, never a
+    preconstructed ownership result — fabricated authority strings have no
+    entry point."""
+    aggregate = inspect.signature(resolve_module_action_implementation)
+    assert "pack_contract_selection" in aggregate.parameters
+    assert "split_authority" not in aggregate.parameters
+    base = inspect.signature(resolve_module_base_handler_source)
+    assert "pack_contract_selection" in base.parameters
+    assert "split_authority" not in base.parameters
+
+
 @pytest.mark.parametrize("pack,module", SPLIT_MODULES, ids=SPLIT_IDS)
 async def test_every_real_pack_action_certifies(content_store, pack: str, module: str) -> None:
     staged = await _stage_module(content_store, pack, module)
@@ -156,158 +229,409 @@ async def test_every_real_pack_action_certifies(content_store, pack: str, module
     action_ids = [action["id"] for action in manifest.get("actions") or []]
     assert action_ids
     for action_id in action_ids:
+        reads_before = len(content_store.verified_reads)
         resolved = await resolve_module_action_implementation(
             staged["module_selection"],
-            staged["handler_artifact"],
+            staged["handler_selection"],
             action_id=action_id,
             content_store=content_store,
             requesting_scope=SCOPE,
-            base_handler_artifact=staged["base_artifact"],
-            split_authority=staged["authority"],
+            base_handler_selection=staged["base_selection"],
+            pack_contract_selection=staged["contract_selection"],
         )
         proof = resolved.export_proof
         assert proof.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER, (
             f"{pack}/{module}:{action_id} certified as {proof.mode}"
         )
+        # No checked-in pack leaf overrides an action today.
+        assert proof.method_source is HandlerMethodSource.BASE_HANDLER
         assert proof.content_digest == staged["handler_digest"]
         assert proof.base_content_digest == staged["base_digest"]
+        assert proof.split_contract_content_digest == staged["contract_digest"]
         assert proof.base_handler_class
         assert resolved.request_contract is not None
         assert resolved.base_handler is not None
+        assert resolved.split_authority is not None
+        assert resolved.split_authority.contract_id == pack
+        assert resolved.split_authority.contract_content_digest == staged["contract_digest"]
         assert len(proof.implementation_digest) == 64
+        # The certification actually read the pack-contract bytes, plus the
+        # manifest, leaf, and base bytes, through the verified blob store.
+        reads = content_store.verified_reads[reads_before:]
+        assert staged["contract_digest"] in reads
+        assert staged["handler_digest"] in reads
+        assert staged["base_digest"] in reads
 
 
-async def test_implementation_identity_covers_both_sources(content_store) -> None:
-    """Changing ONLY the base — or ONLY the preserved leaf — changes identity."""
+async def test_implementation_identity_covers_both_sources_and_authority(content_store) -> None:
+    """Changing ONLY the base, ONLY the preserved leaf, or ONLY the pack
+    contract changes the certified identity."""
     staged = await _stage_module(content_store, "files", "files")
-    baseline = await resolve_module_action_implementation(
-        staged["module_selection"],
-        staged["handler_artifact"],
-        action_id="get_file",
-        content_store=content_store,
-        requesting_scope=SCOPE,
-        base_handler_artifact=staged["base_artifact"],
-        split_authority=staged["authority"],
-    )
+
+    async def _resolve(
+        *, handler_selection=None, base_selection=None, contract_selection=None
+    ):
+        return await resolve_module_action_implementation(
+            staged["module_selection"],
+            handler_selection or staged["handler_selection"],
+            action_id="get_file",
+            content_store=content_store,
+            requesting_scope=SCOPE,
+            base_handler_selection=base_selection or staged["base_selection"],
+            pack_contract_selection=contract_selection or staged["contract_selection"],
+        )
+
+    baseline = await _resolve()
     root = _module_root("files", "files")
 
-    changed_base = (root / "backend" / "base_handler.py").read_text(encoding="utf-8") + "\n# regenerated\n"
+    changed_base = (
+        (root / "backend" / "base_handler.py").read_text(encoding="utf-8") + "\n# regenerated\n"
+    )
     changed_base_digest = await _put(content_store, changed_base.encode("utf-8"))
-    with_new_base = await resolve_module_action_implementation(
-        staged["module_selection"],
-        staged["handler_artifact"],
-        action_id="get_file",
-        content_store=content_store,
-        requesting_scope=SCOPE,
-        base_handler_artifact=_backend_artifact(
+    with_new_base = await _resolve(
+        base_selection=_source_selection(
             digest=changed_base_digest, module="files", file_name="base_handler.py"
-        ),
-        split_authority=staged["authority"],
+        )
     )
-    changed_leaf = (root / "backend" / "handler.py").read_text(encoding="utf-8") + "\n# workspace note\n"
+
+    changed_leaf = (
+        (root / "backend" / "handler.py").read_text(encoding="utf-8") + "\n# workspace note\n"
+    )
     changed_leaf_digest = await _put(content_store, changed_leaf.encode("utf-8"))
-    with_new_leaf = await resolve_module_action_implementation(
-        staged["module_selection"],
-        _backend_artifact(digest=changed_leaf_digest, module="files", file_name="handler.py"),
-        action_id="get_file",
-        content_store=content_store,
-        requesting_scope=SCOPE,
-        base_handler_artifact=staged["base_artifact"],
-        split_authority=staged["authority"],
+    with_new_leaf = await _resolve(
+        handler_selection=_source_selection(
+            digest=changed_leaf_digest, module="files", file_name="handler.py"
+        )
     )
+
+    changed_contract = _pack_contract_bytes("files") + b"\n# authority revision\n"
+    changed_contract_digest = await _put(content_store, changed_contract)
+    with_new_contract = await _resolve(
+        contract_selection=_contract_selection(digest=changed_contract_digest, pack="files")
+    )
+
     identities = {
         baseline.export_proof.implementation_digest,
         with_new_base.export_proof.implementation_digest,
         with_new_leaf.export_proof.implementation_digest,
+        with_new_contract.export_proof.implementation_digest,
     }
-    assert len(identities) == 3
+    assert len(identities) == 4
 
 
 # ---------------------------------------------------------------------------
-# Split authority hostile matrix
+# Content-resolved split authority hostile matrix
 # ---------------------------------------------------------------------------
 
 
-def test_split_authority_requires_canonical_ownership() -> None:
-    contract = _pack_contract("files")
-    # Wrong leaf ownership cannot establish the split.
-    tampered = yaml.safe_load(yaml.safe_dump(contract))
-    for entry in tampered["required_outputs"]:
-        if entry.get("path") == "modules/files/backend/handler.py":
-            entry["owner"] = "templates"
-    with pytest.raises(ImplementationArtifactError, match="workspace-owned"):
-        workspace_handler_split_authority_from_pack_contract(tampered, module_instance="files")
-    # Workspace-owned base cannot establish the split.
-    tampered = yaml.safe_load(yaml.safe_dump(contract))
-    for entry in tampered["required_outputs"]:
-        if entry.get("path") == "modules/files/backend/base_handler.py":
-            entry["owner"] = "workspace"
-    with pytest.raises(ImplementationArtifactError, match="template-owned"):
-        workspace_handler_split_authority_from_pack_contract(tampered, module_instance="files")
-    # Absent declarations reject.
-    with pytest.raises(ImplementationArtifactError, match="absent"):
-        workspace_handler_split_authority_from_pack_contract(
-            contract, module_instance="undeclared_module"
-        )
-    # Non-pack contract types carry no split authority.
-    with pytest.raises(ImplementationArtifactError, match="build_pack_instructions"):
-        workspace_handler_split_authority_from_pack_contract(
-            {"contract_type": "provider_api_contract", "contract_id": "x"},
-            module_instance="files",
-        )
+async def _resolve_authority(content_store, staged, contract_selection):
+    module = await _resolved_module_for(content_store, staged)
+    return await resolve_workspace_handler_split_authority(
+        contract_selection,
+        module=module,
+        content_store=content_store,
+        requesting_scope=SCOPE,
+    )
 
 
-async def test_base_selection_without_split_authority_rejects(content_store) -> None:
+async def _stage_tampered_contract(content_store, pack: str, mutate) -> str:
+    document = yaml.safe_load(_pack_contract_bytes(pack).decode("utf-8"))
+    mutate(document)
+    return await _put(
+        content_store, yaml.safe_dump(document, sort_keys=False).encode("utf-8")
+    )
+
+
+async def test_split_authority_resolves_from_exact_contract_bytes(content_store) -> None:
     staged = await _stage_module(content_store, "files", "files")
-    with pytest.raises(ImplementationArtifactError, match="split authority"):
+    authority = await _resolve_authority(content_store, staged, staged["contract_selection"])
+    assert authority.contract_id == "files"
+    assert authority.module_instance == "files"
+    assert authority.contract_content_digest == staged["contract_digest"]
+    assert authority.handler_path == "modules/files/backend/handler.py"
+    assert authority.base_handler_path == "modules/files/backend/base_handler.py"
+    assert staged["contract_digest"] in content_store.verified_reads
+
+
+async def test_split_authority_ownership_hostiles_reject(content_store) -> None:
+    staged = await _stage_module(content_store, "files", "files")
+
+    def _set_owner(path: str, owner: str):
+        def mutate(document):
+            for entry in document["required_outputs"]:
+                if entry.get("path") == path:
+                    entry["owner"] = owner
+
+        return mutate
+
+    # Wrong leaf ownership cannot establish the split.
+    digest = await _stage_tampered_contract(
+        content_store, "files", _set_owner("modules/files/backend/handler.py", "templates")
+    )
+    with pytest.raises(ImplementationArtifactError, match="workspace-owned"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=digest, pack="files")
+        )
+
+    # Workspace-owned base cannot establish the split.
+    digest = await _stage_tampered_contract(
+        content_store,
+        "files",
+        _set_owner("modules/files/backend/base_handler.py", "workspace"),
+    )
+    with pytest.raises(ImplementationArtifactError, match="template-owned"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=digest, pack="files")
+        )
+
+    # A contract that does not declare the module manifest owns nothing here.
+    def _drop_manifest(document):
+        document["required_outputs"] = [
+            entry
+            for entry in document["required_outputs"]
+            if entry.get("path") != "modules/files/module.yaml"
+        ]
+
+    digest = await _stage_tampered_contract(content_store, "files", _drop_manifest)
+    with pytest.raises(ImplementationArtifactError, match="module.yaml.*absent"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=digest, pack="files")
+        )
+
+    # An unrelated pack contract does not own this module at all.
+    messaging_digest = await _put(content_store, _pack_contract_bytes("messaging"))
+    with pytest.raises(ImplementationArtifactError, match="absent"):
+        await _resolve_authority(
+            content_store,
+            staged,
+            _contract_selection(digest=messaging_digest, pack="messaging"),
+        )
+
+    # Non-pack contract types carry no split authority.
+    non_pack = yaml.safe_dump(
+        {"contract_type": "provider_api_contract", "contract_id": "files"}
+    ).encode("utf-8")
+    digest = await _put(content_store, non_pack)
+    with pytest.raises(ImplementationArtifactError, match="build_pack_instructions"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=digest, pack="files")
+        )
+
+
+async def test_split_authority_content_hostiles_reject(content_store, tmp_path) -> None:
+    staged = await _stage_module(content_store, "files", "files")
+
+    # Absent digest: the selection carries no content identity.
+    with pytest.raises(ImplementationArtifactError, match="non-null content digest"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=None, pack="files")
+        )
+
+    # Correct filename, no exact bytes behind the digest.
+    with pytest.raises(ImplementationArtifactError, match="did not resolve exactly"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest="e" * 64, pack="files")
+        )
+
+    # Tampered bytes under a valid digest path.
+    digest = hashlib.sha256(b"real contract bytes").hexdigest()
+    blob_path = tmp_path / "sha256" / digest[:2] / digest
+    blob_path.parent.mkdir(parents=True, exist_ok=True)
+    blob_path.write_bytes(b"tampered contract bytes")
+    with pytest.raises(ImplementationArtifactError, match="did not resolve exactly"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=digest, pack="files")
+        )
+
+    # Correct filename whose bytes are not a pack contract document.
+    with pytest.raises(
+        ImplementationArtifactError, match="not valid YAML|mapping|build_pack_instructions"
+    ):
+        await _resolve_authority(
+            content_store,
+            staged,
+            _contract_selection(digest=staged["base_digest"], pack="files"),
+        )
+
+    # The address must equal the canonical path for the contract id the bytes
+    # declare — the files contract cannot be smuggled under another pack path.
+    with pytest.raises(ImplementationArtifactError, match="lives at"):
+        await _resolve_authority(
+            content_store,
+            staged,
+            _contract_selection(
+                digest=staged["contract_digest"],
+                pack="files",
+                path="build_context/messaging/contract.yaml",
+            ),
+        )
+
+    # Pack contracts are workspace-root build-context inputs, not app-bundle
+    # artifacts.
+    with pytest.raises(ImplementationArtifactError, match="workspace-root build-context"):
+        await _resolve_authority(
+            content_store,
+            staged,
+            _contract_selection(
+                digest=staged["contract_digest"],
+                pack="files",
+                path_scope=PathScope.APP_BUNDLE_ROOT,
+            ),
+        )
+
+
+async def test_standalone_base_resolver_derives_authority_from_contract_bytes(
+    content_store,
+) -> None:
+    """The public base resolver takes the pack-contract selection and derives
+    authority internally — and refuses a contract smuggled under another
+    pack's canonical path."""
+    staged = await _stage_module(content_store, "files", "files")
+    module = await _resolved_module_for(content_store, staged)
+    from mozaiksai.core.semantics.implementation_artifacts import (
+        resolve_module_handler_source,
+    )
+
+    handler = await resolve_module_handler_source(
+        staged["handler_selection"],
+        module=module,
+        content_store=content_store,
+        requesting_scope=SCOPE,
+    )
+    base = await resolve_module_base_handler_source(
+        staged["base_selection"],
+        module=module,
+        handler=handler,
+        pack_contract_selection=staged["contract_selection"],
+        content_store=content_store,
+        requesting_scope=SCOPE,
+    )
+    assert base.module_instance == "files"
+    assert base.content_digest == staged["base_digest"]
+    assert staged["contract_digest"] in content_store.verified_reads
+    with pytest.raises(ImplementationArtifactError, match="lives at"):
+        await resolve_module_base_handler_source(
+            staged["base_selection"],
+            module=module,
+            handler=handler,
+            pack_contract_selection=_contract_selection(
+                digest=staged["contract_digest"],
+                pack="files",
+                path="build_context/messaging/contract.yaml",
+            ),
+            content_store=content_store,
+            requesting_scope=SCOPE,
+        )
+
+
+async def test_split_certification_requires_both_selections_together(content_store) -> None:
+    staged = await _stage_module(content_store, "files", "files")
+    with pytest.raises(ImplementationArtifactError, match="together"):
         await resolve_module_action_implementation(
             staged["module_selection"],
-            staged["handler_artifact"],
+            staged["handler_selection"],
             action_id="get_file",
             content_store=content_store,
             requesting_scope=SCOPE,
-            base_handler_artifact=staged["base_artifact"],
-            split_authority=None,
+            base_handler_selection=staged["base_selection"],
+        )
+    with pytest.raises(ImplementationArtifactError, match="together"):
+        await resolve_module_action_implementation(
+            staged["module_selection"],
+            staged["handler_selection"],
+            action_id="get_file",
+            content_store=content_store,
+            requesting_scope=SCOPE,
+            pack_contract_selection=staged["contract_selection"],
         )
 
 
-async def test_without_base_selection_the_single_source_rejection_is_preserved(
+async def test_without_base_selection_the_standalone_rejection_is_preserved(
     content_store,
 ) -> None:
     staged = await _stage_module(content_store, "files", "files")
-    with pytest.raises(ImplementationArtifactError, match="not explicitly defined"):
+    with pytest.raises(ImplementationArtifactError, match="zero bases"):
         await resolve_module_action_implementation(
             staged["module_selection"],
-            staged["handler_artifact"],
+            staged["handler_selection"],
             action_id="get_file",
             content_store=content_store,
             requesting_scope=SCOPE,
         )
+
+
+async def test_cross_scope_source_selections_reject(content_store) -> None:
+    """Same module id and same bytes under another scope fail closed for the
+    leaf, the base, and the pack contract."""
+    staged = await _stage_module(content_store, "files", "files")
+
+    async def _resolve(
+        *, handler_selection=None, base_selection=None, contract_selection=None
+    ):
+        return await resolve_module_action_implementation(
+            staged["module_selection"],
+            handler_selection or staged["handler_selection"],
+            action_id="get_file",
+            content_store=content_store,
+            requesting_scope=SCOPE,
+            base_handler_selection=base_selection or staged["base_selection"],
+            pack_contract_selection=contract_selection or staged["contract_selection"],
+        )
+
+    scope_error = "cross-scope|module selection's execution scope"
+    for hostile_scope in (OTHER_SCOPE, OTHER_TENANT):
+        with pytest.raises(ImplementationArtifactError, match=scope_error):
+            await _resolve(
+                handler_selection=_source_selection(
+                    digest=staged["handler_digest"],
+                    module="files",
+                    file_name="handler.py",
+                    scope=hostile_scope,
+                )
+            )
+        # Leaf in the correct scope, base selected from another scope.
+        with pytest.raises(ImplementationArtifactError, match=scope_error):
+            await _resolve(
+                base_selection=_source_selection(
+                    digest=staged["base_digest"],
+                    module="files",
+                    file_name="base_handler.py",
+                    scope=hostile_scope,
+                )
+            )
+        # Correct sources, pack contract selected from another scope.
+        with pytest.raises(ImplementationArtifactError, match=scope_error):
+            await _resolve(
+                contract_selection=_contract_selection(
+                    digest=staged["contract_digest"], pack="files", scope=hostile_scope
+                )
+            )
 
 
 async def test_base_content_hostiles_reject(content_store, tmp_path) -> None:
     staged = await _stage_module(content_store, "files", "files")
 
-    async def _resolve(base_artifact, authority=None):
+    async def _resolve(base_selection, contract_selection=None):
         return await resolve_module_action_implementation(
             staged["module_selection"],
-            staged["handler_artifact"],
+            staged["handler_selection"],
             action_id="get_file",
             content_store=content_store,
             requesting_scope=SCOPE,
-            base_handler_artifact=base_artifact,
-            split_authority=authority or staged["authority"],
+            base_handler_selection=base_selection,
+            pack_contract_selection=contract_selection or staged["contract_selection"],
         )
 
     # Missing digest.
     with pytest.raises(ImplementationArtifactError, match="non-null content digest"):
-        await _resolve(_backend_artifact(digest=None, module="files", file_name="base_handler.py"))
+        await _resolve(
+            _source_selection(digest=None, module="files", file_name="base_handler.py")
+        )
 
     # Missing bytes (stale ref after base regeneration).
-    absent = "e" * 64
     with pytest.raises(ImplementationArtifactError, match="did not resolve exactly"):
         await _resolve(
-            _backend_artifact(digest=absent, module="files", file_name="base_handler.py")
+            _source_selection(digest="e" * 64, module="files", file_name="base_handler.py")
         )
 
     # Tampered bytes under a valid digest path.
@@ -317,13 +641,13 @@ async def test_base_content_hostiles_reject(content_store, tmp_path) -> None:
     blob_path.write_bytes(b"tampered base bytes")
     with pytest.raises(ImplementationArtifactError, match="did not resolve exactly"):
         await _resolve(
-            _backend_artifact(digest=digest, module="files", file_name="base_handler.py")
+            _source_selection(digest=digest, module="files", file_name="base_handler.py")
         )
 
     # Base from another module instance.
     with pytest.raises(ImplementationArtifactError, match="cannot implement module"):
         await _resolve(
-            _backend_artifact(
+            _source_selection(
                 digest=staged["base_digest"], module="messages", file_name="base_handler.py"
             )
         )
@@ -331,28 +655,32 @@ async def test_base_content_hostiles_reject(content_store, tmp_path) -> None:
     # Base path outside the canonical family.
     with pytest.raises(ImplementationArtifactError, match="not 'module_backend_base_handler'"):
         await _resolve(
-            _backend_artifact(
+            _source_selection(
                 digest=staged["base_digest"], module="files", file_name="service.py"
             )
         )
 
-    # Authority borrowed from another module.
-    other_authority = workspace_handler_split_authority_from_pack_contract(
-        _pack_contract("messaging"), module_instance="messages"
-    )
-    with pytest.raises(ImplementationArtifactError, match="cannot certify module"):
-        await _resolve(staged["base_artifact"], authority=other_authority)
+    # Authority borrowed from another module's pack contract.
+    messaging_digest = await _put(content_store, _pack_contract_bytes("messaging"))
+    with pytest.raises(ImplementationArtifactError, match="absent"):
+        await _resolve(
+            staged["base_selection"],
+            contract_selection=_contract_selection(digest=messaging_digest, pack="messaging"),
+        )
 
     # Scope mismatch between leaf and base selections: the module-relative
     # base row is unregistered today, so the mismatch rejects at the layout
     # proof; the explicit same-scope rule remains as defense-in-depth.
-    module_scope_base = AccountedArtifact(
-        address=ArtifactAddress(
-            path_scope=PathScope.MODULE_RELATIVE,
-            placeholder_values=(("module_id", "files"),),
-            path="backend/base_handler.py",
+    module_scope_base = SelectedAccountedArtifact(
+        scope=SCOPE,
+        artifact=AccountedArtifact(
+            address=ArtifactAddress(
+                path_scope=PathScope.MODULE_RELATIVE,
+                placeholder_values=(("module_id", "files"),),
+                path="backend/base_handler.py",
+            ),
+            content_digest=staged["base_digest"],
         ),
-        content_digest=staged["base_digest"],
     )
     with pytest.raises(
         ImplementationArtifactError, match="no canonical layout row|same module scope"
@@ -380,14 +708,14 @@ async def _certify_sources(
     base_digest = await _put(content_store, base_source.encode("utf-8"))
     return await resolve_module_action_implementation(
         staged["module_selection"],
-        _backend_artifact(digest=leaf_digest, module="files", file_name="handler.py"),
+        _source_selection(digest=leaf_digest, module="files", file_name="handler.py"),
         action_id=action_id,
         content_store=content_store,
         requesting_scope=SCOPE,
-        base_handler_artifact=_backend_artifact(
+        base_handler_selection=_source_selection(
             digest=base_digest, module="files", file_name="base_handler.py"
         ),
-        split_authority=staged["authority"],
+        pack_contract_selection=staged["contract_selection"],
     )
 
 
@@ -397,23 +725,54 @@ CANONICAL_LEAF = (
     "    \"\"\"Preserved workspace leaf.\"\"\"\n"
 )
 
+OVERRIDE_LEAF = (
+    "from .base_handler import FilesBaseHandler\n\n\n"
+    "class FilesHandler(FilesBaseHandler):\n"
+    "    async def get_file(self, ctx, file_id=None):\n"
+    "        return {\"file\": {\"overridden\": True}}\n"
+)
+
 
 async def test_canonical_minimal_split_certifies(content_store) -> None:
     resolved = await _certify_sources(content_store, CANONICAL_LEAF)
-    assert resolved.export_proof.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER
-    assert resolved.export_proof.base_handler_class == "FilesBaseHandler"
+    proof = resolved.export_proof
+    assert proof.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER
+    assert proof.method_source is HandlerMethodSource.BASE_HANDLER
+    assert proof.base_handler_class == "FilesBaseHandler"
+    assert proof.split_contract_content_digest is not None
 
 
-async def test_leaf_override_certifies_as_explicit_handler(content_store) -> None:
-    leaf = (
-        "from .base_handler import FilesBaseHandler\n\n\n"
-        "class FilesHandler(FilesBaseHandler):\n"
-        "    async def get_file(self, ctx, file_id=None):\n"
-        "        return {\"file\": {\"overridden\": True}}\n"
+async def test_split_leaf_override_stays_two_source(content_store) -> None:
+    """A canonical split leaf override is still a CANONICAL_BASE_HANDLER
+    certification: both source digests and the pack-contract digest stay
+    meaning-bearing; only the method source moves to the leaf."""
+    resolved = await _certify_sources(content_store, OVERRIDE_LEAF)
+    proof = resolved.export_proof
+    assert proof.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER
+    assert proof.method_source is HandlerMethodSource.HANDLER
+    assert proof.base_content_digest is not None
+    assert proof.split_contract_content_digest is not None
+    assert resolved.base_handler is not None
+    assert resolved.split_authority is not None
+
+
+async def test_leaf_override_certifies_even_when_base_lacks_the_method(content_store) -> None:
+    base_without_method = "class FilesBaseHandler:\n    pass\n"
+    resolved = await _certify_sources(content_store, OVERRIDE_LEAF, base_without_method)
+    proof = resolved.export_proof
+    assert proof.mode is HandlerCertificationMode.CANONICAL_BASE_HANDLER
+    assert proof.method_source is HandlerMethodSource.HANDLER
+
+
+async def test_override_and_inherited_certifications_have_distinct_identity(
+    content_store,
+) -> None:
+    inherited = await _certify_sources(content_store, CANONICAL_LEAF)
+    overridden = await _certify_sources(content_store, OVERRIDE_LEAF)
+    assert (
+        inherited.export_proof.implementation_digest
+        != overridden.export_proof.implementation_digest
     )
-    resolved = await _certify_sources(content_store, leaf)
-    assert resolved.export_proof.mode is HandlerCertificationMode.EXPLICIT_HANDLER
-    assert resolved.export_proof.base_content_digest is None
 
 
 @pytest.mark.parametrize(
@@ -465,6 +824,44 @@ async def test_leaf_override_certifies_as_explicit_handler(content_store) -> Non
             id="conditional-class",
         ),
         pytest.param(
+            "if True:\n"
+            "    from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "unconditional top-level",
+            id="conditional-import",
+        ),
+        pytest.param(
+            "try:\n"
+            "    from .base_handler import FilesBaseHandler\n"
+            "finally:\n"
+            "    pass\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "unconditional top-level",
+            id="try-import",
+        ),
+        pytest.param(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "unconditional top-level",
+            id="type-checking-import",
+        ),
+        pytest.param(
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "from .base_handler import FilesBaseHandler\n",
+            "before the handler class definition",
+            id="import-after-class",
+        ),
+        pytest.param(
+            "def _load():\n"
+            "    from .base_handler import FilesBaseHandler\n"
+            "    return FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "exactly one",
+            id="nested-function-import",
+        ),
+        pytest.param(
             "from .base_handler import FilesBaseHandler\n"
             "class FilesHandler(FilesBaseHandler):\n    pass\n"
             "FilesHandler.get_file = None\n",
@@ -506,6 +903,38 @@ async def test_leaf_override_certifies_as_explicit_handler(content_store) -> Non
             "    get_file = FilesBaseHandler\n",
             "bound dynamically|referenced only",
             id="leaf-method-rebinding",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "try:\n    pass\n"
+            "except Exception as FilesBaseHandler:\n    pass\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "rebound outside its canonical import",
+            id="except-capture-of-base",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "match {}:\n"
+            "    case {\"x\": FilesHandler}:\n        pass\n    case _:\n        pass\n",
+            "rebound|referenced dynamically",
+            id="match-capture-of-handler",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "match []:\n"
+            "    case [*FilesBaseHandler]:\n        pass\n    case _:\n        pass\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "rebound outside its canonical import",
+            id="match-star-capture-of-base",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "match {}:\n"
+            "    case {\"x\": _v, **FilesBaseHandler}:\n        pass\n    case _:\n        pass\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n",
+            "rebound outside its canonical import",
+            id="match-mapping-rest-capture-of-base",
         ),
     ],
 )
@@ -562,6 +991,22 @@ async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reas
             "        async def get_file(self, ctx):\n            return {}\n",
             "conditionally",
             id="base-conditional-method",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            "    try:\n        pass\n"
+            "    except Exception as get_file:\n        pass\n",
+            "rebound",
+            id="base-except-capture-of-method",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            "match []:\n"
+            "    case [*FilesBaseHandler]:\n        pass\n    case _:\n        pass\n",
+            "rebound|referenced dynamically",
+            id="base-match-star-capture-of-class",
         ),
     ],
 )

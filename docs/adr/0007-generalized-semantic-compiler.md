@@ -1192,27 +1192,43 @@ proof boundary of its own
   declared action, `handler_method`, and the action request contract imported
   through the closed-contract profile; a manifest declaring another module id
   cannot be selected for a module instance.
-- handler sources are selected as `AccountedArtifact`s with a mandatory
-  non-null `content_digest` at a canonical `module_backend_handler` address
-  that matches the manifest's declared handler entrypoint, and carry a
-  **bounded static export proof** (AST-level, never executed). Certification
-  supports exactly two bounded modes and no general Python source closure:
-  `EXPLICIT_HANDLER` — the selected `handler.py` explicitly defines the
-  selected `handler_method`; and `CANONICAL_BASE_HANDLER` — the module's
-  owning capability-pack contract proves the canonical
-  `workspace_handler_split` ownership (preserved workspace-owned `handler.py`,
-  regenerated template-owned `base_handler.py`), the leaf class directly
-  subclasses the single canonical base imported exactly as
-  `from .base_handler import <Base>`, and the base class — itself with no
-  bases — explicitly defines the selected method. Both sources resolve as
-  digest-mandatory verified blobs in the same module scope and instance, and
-  the certified implementation identity covers BOTH source digests, so
-  regenerating only the base — or editing only the preserved leaf — changes
-  identity. A leaf override of the selected method certifies as
-  `EXPLICIT_HANDLER`. Arbitrary imports, mixins, multiple or transitive
-  inheritance, star or dynamic imports, redefinitions, conditional or
-  decorated definitions, monkeypatching, `__getattr__` tricks, and every
-  other dynamic export fail closed.
+- handler, base-handler, and pack-contract sources are selected as
+  scope-bound `SelectedAccountedArtifact`s (execution scope plus
+  digest-mandatory `AccountedArtifact`); the selection scope must equal both
+  the requesting scope and the module selection's scope, so identical bytes
+  under another tenant or workspace scope are never the same selection. The
+  handler address must be canonical `module_backend_handler` and match the
+  manifest's declared entrypoint, and certification carries a **bounded
+  static export proof** (AST-level, never executed) with exactly two modes
+  and no general Python source closure. `EXPLICIT_HANDLER` — a true
+  standalone one-source class: the declared handler class has ZERO bases and
+  explicitly defines the selected `handler_method` (a class declaring any
+  base is not eligible, even with an explicit method).
+  `CANONICAL_BASE_HANDLER` — the two-source `workspace_handler_split`
+  closure: the split authority is content-resolved from the exact verified
+  bytes of the module's owning capability-pack contract (canonical
+  `build_context/{contract_id}/contract.yaml` path derived from the parsed
+  contract id; the contract must own this module's manifest, its
+  workspace-owned `handler.py` leaf, and its template-owned
+  `base_handler.py`) — never caller-asserted and never inferred from
+  filenames. The leaf class directly subclasses the single canonical base,
+  bound by exactly one `from .base_handler import <Base>` that is an
+  unconditional top-level statement appearing before the class definition;
+  the base class — itself with no bases — explicitly defines the selected
+  method, or the leaf explicitly overrides it (the proof records
+  `method_source`, and an override remains a two-source
+  `CANONICAL_BASE_HANDLER` certification). The certified implementation
+  identity covers the leaf digest, the base digest, AND the pack-contract
+  digest, so regenerating only the base, editing only the preserved leaf, or
+  changing only the certification authority changes identity; module/action
+  identity stays outside it for `ImplementationBinding v2` to pin
+  separately. Rebinding analysis is closed over the Python binding grammar —
+  including exception-handler captures, match-pattern captures, walrus
+  targets (also inside comprehensions and default arguments), and type-alias
+  statements. Arbitrary imports, mixins, multiple or transitive inheritance,
+  star or dynamic or nested/conditional/late imports, redefinitions,
+  conditional or decorated definitions, monkeypatching, `__getattr__`
+  tricks, and every other dynamic export fail closed.
 
 ## OSS And Proprietary Intelligence
 
