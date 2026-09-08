@@ -77,10 +77,90 @@ def test_current_corpus_has_no_changed_units_plans_graph_or_payloads():
     } for unit in plan.units]
     assert len(records) == before["unit_count"] == 61
     assert canonical_digest(records) == before["unit_records_fingerprint"]
-    assert plan.plan_digest == before["plan_digest"]
-    assert hashlib.sha256(plan.model_dump_json().encode()).hexdigest() == before["serialized_plan_fingerprint"]
-    assert graph.graph_digest == before["graph_digest"]
-    assert [{"node_id": payload.node_id, "payload_digest": payload.payload_digest} for payload in payloads] == before["payload_fingerprints"]
+    # EXPECTED_SEMANTIC_MIGRATION: the typed module-local ActionPayload.action_id
+    # (#494 correction) changes exactly one payload digest and the graph/plan
+    # identities pinning it. All 61 unit bodies remain byte-identical (proven
+    # above); the restoration below recovers the exact captured identities.
+    before_payloads = {
+        row["node_id"]: row["payload_digest"] for row in before["payload_fingerprints"]
+    }
+    changed = [
+        payload for payload in payloads
+        if payload.payload_digest != before_payloads[payload.node_id]
+    ]
+    assert [payload.node_id for payload in changed] == ["mozaiks.action.create_report"]
+    action = changed[0]
+    restored_action = action.canonical_payload(include_digest=False)
+    assert restored_action.pop("action_id") == "create_report"
+    assert canonical_digest(restored_action) == before_payloads[action.node_id]
+    restored_graph = graph.canonical_payload(include_digest=False)
+    node = next(
+        row for row in restored_graph["nodes"] if row["node_id"] == action.node_id
+    )
+    node["payload_ref"]["content_digest"] = before_payloads[action.node_id]
+    assert canonical_digest(restored_graph) == before["graph_digest"]
+    restored_plan = plan.canonical_payload(include_digest=False)
+    restored_plan["graph_digest"] = before["graph_digest"]
+    assert canonical_digest(restored_plan) == before["plan_digest"]
+    restored_plan_bytes = (
+        plan.model_dump_json()
+        .replace(graph.graph_digest, before["graph_digest"])
+        .replace(plan.plan_digest, before["plan_digest"])
+    )
+    assert hashlib.sha256(restored_plan_bytes.encode()).hexdigest() == before["serialized_plan_fingerprint"]
+
+
+def _pre_action_identity_graph_digest(graph, digest_swaps: dict[str, str]) -> str:
+    """The graph's digest with pre-#494 action payload identities restored."""
+    document = graph.canonical_payload(include_digest=False)
+    for node in document["nodes"]:
+        ref = node["payload_ref"]
+        ref["content_digest"] = digest_swaps.get(
+            ref["content_digest"], ref["content_digest"]
+        )
+    return canonical_digest(document)
+
+
+def _strip_typed_action_identity(
+    document: dict, serialized: str, graph
+) -> tuple[dict[str, str], str]:
+    """Restore the pre-#494 shape of one serialized authority document.
+
+    Removes the typed ``ActionPayload.action_id`` fact from every action
+    payload, restores the pre-migration payload and graph digests, and applies
+    the same restoration to the exact serialized byte stream.  The historical
+    document cannot revalidate under current models (``action_id`` is
+    required), so restoration operates on the serialized forms only.  Returns
+    the ``{new_digest: old_digest}`` swaps and the restored byte stream.
+    """
+    digest_swaps: dict[str, str] = {}
+    for payload_document in document["payloads"]:
+        if payload_document["payload_kind"] != "action":
+            continue
+        new_digest = payload_document.pop("payload_digest")
+        action_id = payload_document.pop("action_id")
+        old_digest = canonical_digest(payload_document)
+        payload_document["payload_digest"] = old_digest
+        digest_swaps[new_digest] = old_digest
+        fragment = f'"payload_kind":"action","action_id":"{action_id}",'
+        assert serialized.count(fragment) == 1
+        serialized = serialized.replace(fragment, '"payload_kind":"action",', 1)
+    assert digest_swaps
+    graph_document = document["graph"]
+    for node in graph_document["nodes"]:
+        ref = node["payload_ref"]
+        ref["content_digest"] = digest_swaps.get(
+            ref["content_digest"], ref["content_digest"]
+        )
+    # The graph digest is a Merkle root over node/edge identity projections,
+    # not the full serialized graph document — recompute it canonically.
+    new_graph_digest = graph_document["graph_digest"]
+    old_graph_digest = _pre_action_identity_graph_digest(graph, digest_swaps)
+    graph_document["graph_digest"] = old_graph_digest
+    digest_swaps[new_graph_digest] = old_graph_digest
+    for new_digest, old_digest in digest_swaps.items():
+        serialized = serialized.replace(new_digest, old_digest)
+    return digest_swaps, serialized
 
 
 def test_document_version_changes_only_whole_source_authority_identity():
@@ -98,16 +178,59 @@ def test_document_version_changes_only_whole_source_authority_identity():
     original_document["structured_output_configs"] = CanonicalJsonObject.from_python(original_configs).model_dump(mode="json")
     # Restore only metadata for historical comparison, never runtime parsing.
     restored = type(authority).model_validate(original_document)
-    assert compilation_plan_authority_digest(restored) == before["input_document_fingerprint"]
-    assert hashlib.sha256(restored.model_dump_json().encode()).hexdigest() == before["input_document_bytes_fingerprint"]
+    # EXPECTED_SEMANTIC_MIGRATION (#494 correction): additionally restore the
+    # pre-action_id payload/graph identities on the serialized document.
+    restored_document = restored.model_dump(mode="json")
+    digest_swaps, restored_bytes = _strip_typed_action_identity(
+        restored_document, restored.model_dump_json(), current["graph"]
+    )
+    assert canonical_digest(restored_document) == before["input_document_fingerprint"]
+    assert hashlib.sha256(restored_bytes.encode()).hexdigest() == before["input_document_bytes_fingerprint"]
 
-    assert current["base"].plan_digest == before["base_plan_digest"]
-    assert current["successor"].plan_digest == before["successor_plan_digest"]
+    old_base_graph_digest = _pre_action_identity_graph_digest(
+        current["base_graph"], digest_swaps
+    )
+    for key, digest_key, old_graph_digest in (
+        ("base", "base_plan_digest", old_base_graph_digest),
+        ("successor", "successor_plan_digest", None),
+    ):
+        plan = current[key]
+        assert plan.plan_digest != before[digest_key]
+        restored_plan = plan.canonical_payload(include_digest=False)
+        restored_plan["graph_digest"] = (
+            old_graph_digest
+            if old_graph_digest is not None
+            else digest_swaps[restored_plan["graph_digest"]]
+        )
+        assert canonical_digest(restored_plan) == before[digest_key]
     units = current["successor"].units
     assert len(units) == 6
     assert canonical_digest([unit.model_dump(mode="json") for unit in units]) == before["unit_records_fingerprint"]
-    assert current["assignments"].assignment_set_digest == before["assignment_set_fingerprint"]
-    assert current["result"].result_digest == before["artifact_result_fingerprint"]
+
+    # Assignments and results pin the plan digest; restore it and recompute
+    # their content digests exactly as their builders do.
+    assignments = current["assignments"].model_dump(mode="json")
+    assert current["assignments"].assignment_set_digest != before["assignment_set_fingerprint"]
+    assert len(assignments["ordered_assignments"]) == 1
+    assignment = assignments["ordered_assignments"][0]
+    assignment["plan_unit_ref"]["compilation_plan_ref"]["content_digest"] = before["successor_plan_digest"]
+    assignment["assignment_digest"] = stable_digest({
+        key: value for key, value in assignment.items()
+        if key not in {"assignment_id", "assignment_digest"}
+    })
+    assignment["assignment_id"] = f"wa_{assignment['assignment_digest'][:24]}"
+    assert stable_digest([assignment["assignment_digest"]]) == before["assignment_set_fingerprint"]
+
+    result = current["result"].model_dump(mode="json")
+    assert current["result"].result_digest != before["artifact_result_fingerprint"]
+    result["assignment_id"] = assignment["assignment_id"]
+    result["assignment_digest"] = assignment["assignment_digest"]
+    result["plan_unit_ref"] = assignment["plan_unit_ref"]
+    result["result_digest"] = stable_digest({
+        key: value for key, value in result.items() if key != "result_digest"
+    })
+    assert result["result_digest"] == before["artifact_result_fingerprint"]
+
     selected = [unit.required_structured_output_ref.model_dump(mode="json") for unit in units if unit.required_structured_output_ref is not None]
     assert selected == [before["selected_reference"]]
 

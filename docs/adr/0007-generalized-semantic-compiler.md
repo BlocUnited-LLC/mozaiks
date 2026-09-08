@@ -1272,11 +1272,16 @@ graph pinning), v2 adds:
 - **`workflow_implementation_selections`** — every semantic WORKFLOW that
   owns at least one WORKFLOW_CAPABILITY binds exactly once to its exact
   `orchestrator.yaml` and `structured_outputs.yaml` documents through the
-  #488 `SelectedContractArtifact` primitive. Cold resolution derives the
-  runtime workflow identity from the exact document bytes (never a
-  caller-authored name) and requires it to equal the typed
-  `WorkflowPayload.workflow_id`. Cross-workflow document pairs, duplicate
-  selections, and selections for capability-free or absent workflows reject.
+  #488 `SelectedContractArtifact` primitive. Cold validation unconditionally
+  joins the semantic `WorkflowPayload.workflow_id`, the selected workflow
+  instance, and the exact orchestrator-declared `workflow_name` under the
+  runtime's canonical case-insensitive workflow identity comparison
+  (`mozaiksai.core.workflow.workflow_identity`, the same helper the runtime
+  loader consumes) — the join needs no result binding, so a foreign runtime
+  workflow's bytes reject even for a capability-owning workflow with zero
+  results. Normalization is comparison-only; original document spelling is
+  preserved. Cross-workflow document pairs, duplicate selections, and
+  selections for capability-free or absent workflows reject.
 - **`module_action_implementation_selections`** — every canonical module
   action referenced by a `WorkflowCapabilityBindingPayload` with role
   `consumes_action` or `commits_result_through_action` binds exactly once to
@@ -1289,7 +1294,13 @@ graph pinning), v2 adds:
   `resolve_module_action_implementation(...)` and requires the recomputed
   proof to equal the pinned identity exactly; the resolved action's closed
   request contract must also equal the semantic `ActionPayload`'s. No bare
-  or fabricated proof becomes authority. `consumes_action` proves only that
+  or fabricated proof becomes authority. The manifest action is addressed by
+  the required, digest-covered `ActionPayload.action_id` — the typed
+  module-local semantic action identity, unique among the actions one module
+  solely DECLARES. Graph node identity (the canonical projection's
+  digest-suffixed slug) and module-local action identity are two explicit,
+  independent facts: no implementation authority parses meaning out of
+  ACTION node-id format. `consumes_action` proves only that
   the exact implementation exists — its call arguments remain workflow
   execution behavior; no static wiring is invented for it.
 - **`workflow_result_bindings`** — every semantic WORKFLOW_RESULT node gets

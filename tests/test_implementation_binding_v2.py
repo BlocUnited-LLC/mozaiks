@@ -55,6 +55,7 @@ from mozaiksai.core.semantics.closed_contracts import (
 from mozaiksai.core.semantics.graph import (
     SemanticEdge,
     SemanticEdgeKind,
+    SemanticNodeKind,
     SemanticNodeV2,
     build_semantic_graph_v2,
 )
@@ -65,6 +66,7 @@ from mozaiksai.core.semantics.implementation_artifacts import (
     SelectedAccountedArtifact,
     SelectedContractArtifact,
 )
+from mozaiksai.core.semantics.offline_projection import _node_id as _projection_node_id
 from mozaiksai.core.semantics.payloads import (
     ActionPayload,
     ModuleActionRef,
@@ -99,8 +101,12 @@ _BINDING_READ = "mozaiks.workflow_capability_binding.reads_note"
 _BINDING_COMMIT = "mozaiks.workflow_capability_binding.stores_result"
 _TASKS_MODULE = "mozaiks.module.tasks"
 _NOTES_MODULE = "mozaiks.module.notes"
-_ACTION_CREATE = "mozaiks.action.tasks_create_task"
-_ACTION_GET = "mozaiks.action.notes_get_note"
+# The EXACT node identities the canonical offline projection generates for
+# these module actions — digest-suffixed slugs, not parseable module prefixes.
+# ImplementationBinding must resolve them through the typed
+# ``ActionPayload.action_id`` only; node-id format carries no meaning.
+_ACTION_CREATE = _projection_node_id(SemanticNodeKind.ACTION, "tasks_create_task")
+_ACTION_GET = _projection_node_id(SemanticNodeKind.ACTION, "notes_get_note")
 
 ORCHESTRATOR_DOCUMENT = {
     "schema_version": "mozaiks.orchestrator.v1",
@@ -306,7 +312,11 @@ def _pack_contract_selection(
     )
 
 
-def _payloads() -> dict[str, SemanticPayloadBase]:
+def _payloads(
+    *,
+    create_node_id: str = _ACTION_CREATE,
+    create_action_id: str = "create_task",
+) -> dict[str, SemanticPayloadBase]:
     payloads: dict[str, SemanticPayloadBase] = {}
 
     def _add(payload: SemanticPayloadBase) -> None:
@@ -326,7 +336,8 @@ def _payloads() -> dict[str, SemanticPayloadBase]:
     )
     _add(
         build_semantic_payload(
-            ActionPayload, node_id=_ACTION_CREATE, payload_version=1, scope=SCOPE,
+            ActionPayload, node_id=create_node_id, payload_version=1, scope=SCOPE,
+            action_id=create_action_id,
             description="Create one task",
             request_contract=import_closed_contract_schema(CREATE_TASK_INPUT_SCHEMA),
         )
@@ -334,6 +345,7 @@ def _payloads() -> dict[str, SemanticPayloadBase]:
     _add(
         build_semantic_payload(
             ActionPayload, node_id=_ACTION_GET, payload_version=1, scope=SCOPE,
+            action_id="get_note",
             description="Read one note",
             request_contract=import_closed_contract_schema(GET_NOTE_INPUT_SCHEMA),
         )
@@ -384,7 +396,7 @@ def _payloads() -> dict[str, SemanticPayloadBase]:
             binding_role=WorkflowCapabilityBindingRole.COMMITS_RESULT_THROUGH_ACTION,
             workflow_capability_node_id=_CAPABILITY,
             module_action=ModuleActionRef(
-                module_node_id=_TASKS_MODULE, action_node_id=_ACTION_CREATE
+                module_node_id=_TASKS_MODULE, action_node_id=create_node_id
             ),
             workflow_result_node_id=_RESULT,
         )
@@ -398,17 +410,24 @@ def _graph(payloads: dict[str, SemanticPayloadBase]):
         derive_workflow_result_edges,
     )
 
+    # Module ownership edges come from the typed binding refs — never from
+    # parsing action node-id text, which carries no semantic meaning.
+    ownership: dict[str, str] = {}
+    for payload in payloads.values():
+        if (
+            isinstance(payload, WorkflowCapabilityBindingPayload)
+            and payload.module_action is not None
+        ):
+            ownership[payload.module_action.action_node_id] = (
+                payload.module_action.module_node_id
+            )
     edges: list[SemanticEdge] = [
         SemanticEdge(
             kind=SemanticEdgeKind.DECLARES,
-            source_node_id=_TASKS_MODULE,
-            target_node_id=_ACTION_CREATE,
-        ),
-        SemanticEdge(
-            kind=SemanticEdgeKind.DECLARES,
-            source_node_id=_NOTES_MODULE,
-            target_node_id=_ACTION_GET,
-        ),
+            source_node_id=module_node_id,
+            target_node_id=action_node_id,
+        )
+        for action_node_id, module_node_id in sorted(ownership.items())
     ]
     for payload in payloads.values():
         if isinstance(payload, WorkflowCapabilityPayload):
@@ -461,7 +480,12 @@ def _output_contract_ref():
     )
 
 
-async def _fixture(content_store) -> dict:
+async def _fixture(
+    content_store,
+    *,
+    create_node_id: str = _ACTION_CREATE,
+    create_action_id: str = "create_task",
+) -> dict:
     """The realistic positive scenario over real exact bytes."""
     orchestrator_digest = await _put(content_store, _yaml_bytes(ORCHESTRATOR_DOCUMENT))
     outputs_digest = await _put(content_store, _yaml_bytes(STRUCTURED_OUTPUTS_DOCUMENT))
@@ -474,7 +498,9 @@ async def _fixture(content_store) -> dict:
         content_store, _yaml_bytes(NOTES_PACK_CONTRACT_DOCUMENT)
     )
 
-    payloads = _payloads()
+    payloads = _payloads(
+        create_node_id=create_node_id, create_action_id=create_action_id
+    )
     graph = _graph(payloads)
 
     workflow_selection = WorkflowImplementationSelection(
@@ -500,7 +526,7 @@ async def _fixture(content_store) -> dict:
         content_digest=tasks_handler_digest,
     )
     create_selection = ModuleActionImplementationSelection(
-        action_node_id=_ACTION_CREATE,
+        action_node_id=create_node_id,
         module_selection=_module_manifest_selection(
             digest=tasks_module_digest, module="tasks"
         ),
@@ -1541,14 +1567,271 @@ async def test_workflow_bytes_of_another_runtime_workflow_reject_cold(content_st
     )
     binding = _rebuilt(fixture, workflow_implementation_selections=(swapped,))
     # Graph validation passes (the addressed instance is still versionprobe);
-    # the resolved runtime name then breaks result-contract resolution cold.
+    # cold validation rejects at the UNCONDITIONAL workflow identity join —
+    # long before any result binding could be needed to notice, and the
+    # selection address claiming the right instance cannot rescue the bytes.
     validate_implementation_binding_against_graph(
         binding, fixture["graph"], payloads=fixture["payloads"]
     )
-    with pytest.raises(ImplementationBindingError, match="structured-output contract"):
+    with pytest.raises(
+        ImplementationBindingError, match="workflow identity comparison"
+    ):
         await validate_implementation_binding_content_authority(
             binding,
             fixture["graph"],
             payloads=fixture["payloads"],
             content_store=content_store,
         )
+
+
+# ---------------------------------------------------------------------------
+# Workflow identity join — unconditional, results or no results
+# ---------------------------------------------------------------------------
+
+
+def _capability_only_graph() -> tuple:
+    """A capability-owning workflow with ZERO results and ZERO actions."""
+    workflow = build_semantic_payload(
+        WorkflowPayload, node_id=_WORKFLOW, payload_version=1, scope=SCOPE,
+        workflow_id="versionprobe", description="Analyze notes into tasks",
+        startup_mode=None, topology=None,
+    )
+    capability = build_semantic_payload(
+        WorkflowCapabilityPayload, node_id=_CAPABILITY, payload_version=1,
+        scope=SCOPE, capability_id="tasks.analysis",
+        description="Analyze one note", workflow_node_id=_WORKFLOW,
+    )
+    payloads = (workflow, capability)
+    graph = build_semantic_graph_v2(
+        graph_id="binding-v2-zero-results",
+        version=1,
+        scope=SCOPE,
+        nodes=[
+            SemanticNodeV2(
+                node_id=payload.node_id,
+                kind=payload.payload_kind,
+                payload_ref=semantic_payload_ref(payload),
+            )
+            for payload in payloads
+        ],
+        edges=[
+            SemanticEdge(
+                kind=SemanticEdgeKind.DECLARES,
+                source_node_id=_WORKFLOW,
+                target_node_id=_CAPABILITY,
+            )
+        ],
+    )
+    return graph, payloads
+
+
+async def _capability_only_binding(content_store, orchestrator_document: dict):
+    orchestrator_digest = await _put(content_store, _yaml_bytes(orchestrator_document))
+    outputs_digest = await _put(content_store, _yaml_bytes(STRUCTURED_OUTPUTS_DOCUMENT))
+    graph, payloads = _capability_only_graph()
+    binding = build_implementation_binding(
+        binding_id="binding-v2-zero-results",
+        version=1,
+        scope=SCOPE,
+        semantic_graph_ref=SemanticGraphRef(
+            subject_id=graph.graph_id,
+            subject_version=graph.version,
+            content_digest=graph.graph_digest,
+            scope=SCOPE,
+        ),
+        workflow_implementation_selections=(
+            WorkflowImplementationSelection(
+                workflow_node_id=_WORKFLOW,
+                orchestrator_selection=_workflow_document_selection(
+                    path="orchestrator.yaml",
+                    family="workflow_manifest",
+                    digest=orchestrator_digest,
+                    schema_version="mozaiks.orchestrator.v1",
+                ),
+                structured_outputs_selection=_workflow_document_selection(
+                    path="structured_outputs.yaml",
+                    family="workflow_config",
+                    digest=outputs_digest,
+                    schema_version="mozaiks.structured_outputs.v1",
+                ),
+            ),
+        ),
+    )
+    return binding, graph, payloads
+
+
+async def test_foreign_workflow_name_rejects_cold_even_with_zero_results(
+    content_store,
+):
+    """No result binding is needed to complete the workflow identity proof."""
+    binding, graph, payloads = await _capability_only_binding(
+        content_store, {**ORCHESTRATOR_DOCUMENT, "workflow_name": "ForeignWorkflow"}
+    )
+    validate_implementation_binding_against_graph(binding, graph, payloads=payloads)
+    with pytest.raises(
+        ImplementationBindingError, match="workflow identity comparison"
+    ):
+        await validate_implementation_binding_content_authority(
+            binding, graph, payloads=payloads, content_store=content_store
+        )
+
+
+async def test_workflow_name_case_variation_passes_and_preserves_spelling(
+    content_store,
+):
+    """The loader-accepted case-insensitive spelling passes; bytes stay exact."""
+    binding, graph, payloads = await _capability_only_binding(
+        content_store, {**ORCHESTRATOR_DOCUMENT, "workflow_name": "VERSIONPROBE"}
+    )
+    authority = await validate_implementation_binding_content_authority(
+        binding, graph, payloads=payloads, content_store=content_store
+    )
+    implementation = authority.workflow_implementations[_WORKFLOW]
+    # Normalization is comparison-only: the resolved config and document keep
+    # the original declared spelling byte for byte.
+    assert implementation.workflow_name == "VERSIONPROBE"
+    assert implementation.orchestrator.document["workflow_name"] == "VERSIONPROBE"
+    assert implementation.workflow_instance == "versionprobe"
+
+
+async def test_exact_matching_workflow_name_passes_zero_results(content_store):
+    binding, graph, payloads = await _capability_only_binding(
+        content_store, dict(ORCHESTRATOR_DOCUMENT)
+    )
+    authority = await validate_implementation_binding_content_authority(
+        binding, graph, payloads=payloads, content_store=content_store
+    )
+    assert authority.workflow_implementations[_WORKFLOW].workflow_name == "VersionProbe"
+
+
+# ---------------------------------------------------------------------------
+# Typed ActionPayload.action_id — node-id format never carries meaning
+# ---------------------------------------------------------------------------
+
+
+def test_fixture_action_nodes_are_canonical_projection_identities():
+    """The fixture ACTION nodes use the digest-suffixed producer format."""
+    import re as _re
+
+    for node_id, local in (
+        (_ACTION_CREATE, "tasks_create_task"),
+        (_ACTION_GET, "notes_get_note"),
+    ):
+        pattern = rf"mozaiks\.action\.{local}_[0-9a-f]{{12}}"
+        assert _re.fullmatch(pattern, node_id), node_id
+
+
+async def test_canonical_projected_action_node_resolves_declared_action(
+    content_store,
+):
+    """The reachable-producer probe: a canonical digest-suffixed ACTION node
+    id resolves the DECLARED manifest action, never a digest-bearing guess."""
+    fixture = await _fixture(content_store)
+    authority = await validate_implementation_binding_content_authority(
+        fixture["binding"],
+        fixture["graph"],
+        payloads=fixture["payloads"],
+        content_store=content_store,
+    )
+    get = authority.module_action_implementations[_ACTION_GET]
+    assert get.action.id == "get_note"
+    create = authority.module_action_implementations[_ACTION_CREATE]
+    assert create.action.id == "create_task"
+
+
+async def test_action_node_id_format_cannot_change_action_selection(content_store):
+    """An opaque ACTION node id with the same typed action_id resolves the
+    same exact implementation: node identity carries no action meaning."""
+    opaque = "mozaiks.action.opaque_reachability_probe"
+    fixture = await _fixture(content_store, create_node_id=opaque)
+    validate_implementation_binding_against_graph(
+        fixture["binding"], fixture["graph"], payloads=fixture["payloads"]
+    )
+    authority = await validate_implementation_binding_content_authority(
+        fixture["binding"],
+        fixture["graph"],
+        payloads=fixture["payloads"],
+        content_store=content_store,
+    )
+    assert authority.module_action_implementations[opaque].action.id == "create_task"
+
+
+async def test_semantic_action_id_absent_from_manifest_fails_cold(content_store):
+    """A typed action_id the exact module manifest does not declare fails
+    closed through the existing #488 resolver."""
+    fixture = await _fixture(content_store, create_action_id="ghost_action")
+    validate_implementation_binding_against_graph(
+        fixture["binding"], fixture["graph"], payloads=fixture["payloads"]
+    )
+    with pytest.raises(ImplementationBindingError, match="did not resolve exactly"):
+        await validate_implementation_binding_content_authority(
+            fixture["binding"],
+            fixture["graph"],
+            payloads=fixture["payloads"],
+            content_store=content_store,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Resolved authority — immutable snapshots
+# ---------------------------------------------------------------------------
+
+
+async def test_cold_validation_returns_immutable_mapping_snapshots(content_store):
+    fixture = await _fixture(content_store)
+    authority = await validate_implementation_binding_content_authority(
+        fixture["binding"],
+        fixture["graph"],
+        payloads=fixture["payloads"],
+        content_store=content_store,
+    )
+    with pytest.raises(TypeError):
+        authority.workflow_implementations["evil"] = None  # type: ignore[index]
+    with pytest.raises(TypeError):
+        authority.module_action_implementations["evil"] = None  # type: ignore[index]
+    with pytest.raises(TypeError):
+        authority.result_output_models["evil"] = None  # type: ignore[index]
+    with pytest.raises(TypeError):
+        del authority.workflow_implementations[_WORKFLOW]  # type: ignore[attr-defined]
+
+
+async def test_direct_construction_snapshots_detach_from_source_dicts(content_store):
+    import dataclasses
+
+    from mozaiksai.core.semantics.binding import ResolvedImplementationBindingAuthority
+
+    fixture = await _fixture(content_store)
+    authority = await validate_implementation_binding_content_authority(
+        fixture["binding"],
+        fixture["graph"],
+        payloads=fixture["payloads"],
+        content_store=content_store,
+    )
+    source_workflows = dict(authority.workflow_implementations)
+    source_actions = dict(authority.module_action_implementations)
+    source_models = dict(authority.result_output_models)
+    direct = ResolvedImplementationBindingAuthority(
+        workflow_implementations=source_workflows,
+        module_action_implementations=source_actions,
+        result_output_models=source_models,
+    )
+    # Mutating the caller-owned source dicts after construction does not
+    # alter the snapshot: construction copies FIRST, then proxies.
+    source_workflows["evil"] = None  # type: ignore[assignment]
+    source_actions.clear()
+    source_models["evil"] = None  # type: ignore[assignment]
+    assert "evil" not in direct.workflow_implementations
+    assert set(direct.module_action_implementations) == {_ACTION_CREATE, _ACTION_GET}
+    assert "evil" not in direct.result_output_models
+    with pytest.raises(TypeError):
+        direct.workflow_implementations["evil"] = None  # type: ignore[index]
+    # Attribute rebinding stays blocked, and nested values remain the exact
+    # frozen resolved-authority models.
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        direct.workflow_implementations = {}  # type: ignore[misc]
+    resolved_workflow = direct.workflow_implementations[_WORKFLOW]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        resolved_workflow.orchestrator = None  # type: ignore[misc]
+    resolved_action = direct.module_action_implementations[_ACTION_CREATE]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        resolved_action.export_proof = None  # type: ignore[misc]

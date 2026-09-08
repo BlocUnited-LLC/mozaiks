@@ -42,6 +42,21 @@ This project follows a practical pre-1.0 changelog format:
   selection through verified content only. CompilationPlan identity and
   ArtifactRevision closure are unchanged in this slice.
 
+  Correction round 1 (review): cold validation now unconditionally joins the
+  semantic `WorkflowPayload.workflow_id`, the selected workflow instance, and
+  the exact orchestrator-declared `workflow_name` under the runtime loader's
+  canonical case-insensitive workflow identity comparison — shared via the
+  new `mozaiksai.core.workflow.workflow_identity` helper consumed by both the
+  loader and semantics, with no result binding required to complete the
+  proof. Module actions now resolve by the required, digest-covered typed
+  `ActionPayload.action_id` (module-local, unique per owning module,
+  populated by the canonical offline projection from the declared manifest
+  action id); the node-id prefix parser is deleted, so ACTION node-id format
+  never carries implementation meaning. `ResolvedImplementationBindingAuthority`
+  mappings are now immutable copied snapshots (`MappingProxyType`). Adding
+  `ActionPayload.action_id` changes ActionPayload payload digests and the
+  identities of graphs pinning them.
+
 ### Fixed
 
 - **Exact structured-output auto-tool contracts**: declared workflow

@@ -34,6 +34,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
@@ -87,6 +88,7 @@ from mozaiksai.core.semantics.refs import (
 from mozaiksai.core.workflow.structured_output_contracts import (
     StructuredOutputContractRef,
 )
+from mozaiksai.core.workflow.workflow_identity import workflow_identity_names_equal
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -320,9 +322,11 @@ class WorkflowImplementationSelection(SemanticsModel):
     Both selections use the public #488 artifact-selection primitive: cold
     resolution proves canonical layout, exact bytes, strict document
     contracts, and same-workflow pairing.  The selection carries NO
-    caller-authored workflow name — the runtime workflow identity is derived
-    from the exact document bytes and checked against the semantic
-    ``WorkflowPayload`` during validation.
+    caller-authored workflow name.  Cold validation unconditionally joins the
+    semantic ``WorkflowPayload.workflow_id``, the selected workflow instance,
+    and the exact orchestrator-declared ``workflow_name`` under the runtime's
+    canonical case-insensitive workflow identity comparison — no result
+    binding is needed to complete the identity proof.
     """
 
     workflow_node_id: str
@@ -1224,29 +1228,32 @@ class ResolvedImplementationBindingAuthority:
     Produced only by :func:`validate_implementation_binding_content_authority`
     after every selection resolved through verified content.  Keys are the
     semantic node ids the binding realizes.
+
+    Every mapping is an immutable snapshot: construction copies the supplied
+    mapping and wraps the copy in :class:`types.MappingProxyType`, so neither
+    post-construction writes through the authority nor later mutation of a
+    caller-owned source dict can alter it.  This is defense in depth, not a
+    bearer token — cold validation remains the one authority boundary, and
+    possessing this object proves nothing by itself.
     """
 
     workflow_implementations: Mapping[str, ResolvedWorkflowImplementation]
     module_action_implementations: Mapping[str, ResolvedModuleActionImplementation]
     result_output_models: Mapping[str, type[BaseModel]]
 
-
-def _derived_action_id(action_node_id: str, module_id: str) -> str:
-    """The declared action id one canonical ACTION node addresses.
-
-    Canonical ACTION node identity is ``{namespace}.{module_id}_{action_id}``
-    and the module id comes from the typed ``ModulePayload`` — the one exact
-    prefix strip is unambiguous under that typed authority and fails closed
-    on any node identity that does not carry it.
-    """
-    local = action_node_id.rsplit(".", 1)[1]
-    prefix = f"{module_id}_"
-    if not local.startswith(prefix) or len(local) <= len(prefix):
-        raise ImplementationBindingError(
-            f"action node {action_node_id!r} does not carry the canonical "
-            f"{module_id!r}-owned action identity"
-        )
-    return local[len(prefix):]
+    def __post_init__(self) -> None:
+        # Copy FIRST, then proxy: proxying a caller-owned dict directly would
+        # leave the snapshot mutable through the caller's reference.
+        for snapshot_field in (
+            "workflow_implementations",
+            "module_action_implementations",
+            "result_output_models",
+        ):
+            object.__setattr__(
+                self,
+                snapshot_field,
+                MappingProxyType(dict(getattr(self, snapshot_field))),
+            )
 
 
 async def validate_implementation_binding_content_authority(
@@ -1266,6 +1273,13 @@ async def validate_implementation_binding_content_authority(
     fallback, no mutable working-tree authority, and no caller-supplied
     resolved object: bytes come only from ``content_store`` and every
     recomputable certification identity must equal the pinned one.
+
+    Two identity joins are unconditional: every capability-owning workflow's
+    exact orchestrator-declared ``workflow_name`` must equal the selected
+    instance and the semantic ``WorkflowPayload.workflow_id`` under the
+    runtime's canonical case-insensitive comparison, and every module action
+    resolves by the typed ``ActionPayload.action_id`` — node-id format never
+    carries implementation meaning.
     """
     try:
         verified = ImplementationBinding.model_validate(binding.model_dump(mode="json"))
@@ -1310,16 +1324,33 @@ async def validate_implementation_binding_content_authority(
                 f"does not truthfully correspond to semantic workflow "
                 f"{workflow_payload.workflow_id!r}"
             )
+        # Unconditional workflow identity join: the exact orchestrator bytes'
+        # declared workflow_name must be this workflow's identity under the
+        # runtime loader's canonical case-insensitive comparison.  This holds
+        # for every capability-owning workflow — results or no results — so a
+        # foreign runtime workflow's bytes can never realize this workflow.
+        if not workflow_identity_names_equal(
+            implementation.workflow_name, workflow_payload.workflow_id
+        ) or not workflow_identity_names_equal(
+            implementation.workflow_name, implementation.workflow_instance
+        ):
+            raise ImplementationBindingError(
+                f"exact orchestrator bytes declare runtime workflow "
+                f"{implementation.workflow_name!r}, which is not the selected "
+                f"workflow instance {implementation.workflow_instance!r} / "
+                f"semantic workflow {workflow_payload.workflow_id!r} under the "
+                "canonical case-insensitive workflow identity comparison"
+            )
         workflow_implementations[selection.workflow_node_id] = implementation
 
     module_action_implementations: dict[str, ResolvedModuleActionImplementation] = {}
     for action_selection in verified.module_action_implementation_selections:
-        module_payload = context.module_payload_by_action[
+        # The module-local action identity is the typed, digest-covered
+        # ``ActionPayload.action_id`` — never parsed out of the globally
+        # unique graph node id, whose format carries no semantic meaning.
+        action_id = context.action_payloads[
             action_selection.action_node_id
-        ]
-        action_id = _derived_action_id(
-            action_selection.action_node_id, module_payload.module_id
-        )
+        ].action_id
         try:
             resolved = await resolve_module_action_implementation(
                 action_selection.module_selection,

@@ -25,6 +25,7 @@ def _empty_request() -> dict:
 
 
 def _action(**fields) -> ActionPayload:
+    fields.setdefault("action_id", "request")
     return build_semantic_payload(
         ActionPayload, node_id="mozaiks.action.request", payload_version=1,
         scope=ExecutionAccessScopeRef(tenant_id="tenant1"), description=None, **fields,
@@ -125,6 +126,9 @@ def test_semantic_migration_changes_only_action_request_and_containing_identity(
     }
     restored_action = action.canonical_payload(include_digest=False)
     restored_action.pop("request_contract")
+    # The baseline predates both the #484 request-contract authority and the
+    # typed module-local action identity; reconstruct its exact field set.
+    restored_action.pop("action_id")
     restored_action["request_fields"] = original_action["request_fields"]
     assert canonical_digest(restored_action) == original_action["payload_digest"]
     restored_action["payload_digest"] = original_action["payload_digest"]

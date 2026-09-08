@@ -9,9 +9,11 @@ from pathlib import Path
 
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.canonical_json import CanonicalJsonObject
-from mozaiksai.core.semantics.plan_authority import compilation_plan_authority_digest
 from mozaiksai.core.workflow.structured_output_contracts import stable_digest
 from tests.slice_5b_composition_helpers import composition_fixture
+from tests.test_workflow_document_identity_migration import (
+    _strip_typed_action_identity,
+)
 
 _FIXTURE = Path(__file__).parent / "fixtures/structured-output-identity-migration.json"
 _BASE = "430d3ffaeab0b27843d7fbeba275c5be316ff586"
@@ -63,8 +65,15 @@ def test_reference_migration_changes_only_exact_ref_dependent_unit_and_plan_iden
         original_configs
     ).model_dump(mode="json")
     original_authority = type(authority).model_validate(original_document)
-    assert compilation_plan_authority_digest(original_authority) == baseline["input_document_fingerprint"]
-    assert hashlib.sha256(original_authority.model_dump_json().encode()).hexdigest() == baseline["input_document_bytes_fingerprint"]
+    # EXPECTED_SEMANTIC_MIGRATION (#494 correction): additionally restore the
+    # pre-action_id payload/graph identities on the serialized document — the
+    # historical shape cannot revalidate under current models.
+    restored_document = original_authority.model_dump(mode="json")
+    digest_swaps, restored_bytes = _strip_typed_action_identity(
+        restored_document, original_authority.model_dump_json(), current["graph"]
+    )
+    assert canonical_digest(restored_document) == baseline["input_document_fingerprint"]
+    assert hashlib.sha256(restored_bytes.encode()).hexdigest() == baseline["input_document_bytes_fingerprint"]
     old_ref = baseline["reference"]
     assert current["configs"][old_ref["workflow_name"]]["models"][old_ref["model_id"]] == baseline["selected_model_config"]
     for key, fixture_key in (("base", "base_plan"), ("successor", "successor_plan")):
@@ -93,6 +102,9 @@ def test_reference_migration_changes_only_exact_ref_dependent_unit_and_plan_iden
         assert changed == ["module_backend_helper/report_hook-reports/a641fcf1cb52"]
         restored = plan.canonical_payload(include_digest=False)
         restored["units"] = captured["document"]["units"]
+        # #494 correction: the plan pins the graph identity, which moved with
+        # the typed action_id; restore the captured pre-migration graph digest.
+        restored["graph_digest"] = captured["document"]["graph_digest"]
         assert canonical_digest(restored) == captured["document"]["plan_digest"]
         restored["plan_digest"] = captured["document"]["plan_digest"]
         assert restored == captured["document"]

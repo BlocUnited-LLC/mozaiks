@@ -1092,9 +1092,22 @@ class ModulePayload(SemanticPayloadBase):
 
 
 class ActionPayload(SemanticPayloadBase):
+    """The typed application-semantic identity of one module action.
+
+    ``action_id`` is the module-local semantic action identity — the exact
+    declared action id of the owning module's manifest.  It is NOT a handler
+    method, Python function name, runtime tool id, provider id, or AG2
+    identity, and it is never derived from the globally unique graph
+    ``node_id``: node identity and module-local action identity are two
+    explicit, independent facts.  Payload closure requires ``action_id`` to be
+    unique among the actions one module solely DECLARES; two different modules
+    may both truthfully declare ``get``.
+    """
+
     model_config = ConfigDict(revalidate_instances="always")
 
     payload_kind: Literal[SemanticNodeKind.ACTION] = SemanticNodeKind.ACTION
+    action_id: str
     description: str | None
     request_contract: ObjectContract
     response_fields: tuple[TypedFieldSpec, ...] = Field(default_factory=tuple)
@@ -1110,6 +1123,11 @@ class ActionPayload(SemanticPayloadBase):
         if include is not None or exclude is not None or update is not None:
             raise TypeError("action changes require build_semantic_payload; unchecked copies are forbidden")
         return self.model_copy(deep=deep)
+
+    @field_validator("action_id")
+    @classmethod
+    def _action_id(cls, value: str) -> str:
+        return _field_name(value, field_name="action_id")
 
     @field_validator("description")
     @classmethod
@@ -2167,14 +2185,26 @@ def validate_semantic_graph_v2_payload_closure(
     # historical graph content outside the family: their EMITS edges keep the
     # floor rules above and confer no event-production authority.
     module_owned_action_owners: dict[str, str] = {}
+    seen_module_action_ids: dict[tuple[str, str], str] = {}
     for family_action_id, family_emitted_ids in action_emits_by_node.items():
         if not declares_by_target.get(family_action_id):
             continue
-        module_owned_action_owners[family_action_id] = (
-            _require_canonical_module_owned_action(
-                family_action_id, subject="declared"
-            )
+        family_owner_node_id = _require_canonical_module_owned_action(
+            family_action_id, subject="declared"
         )
+        module_owned_action_owners[family_action_id] = family_owner_node_id
+        family_action_payload = payload_by_node[family_action_id]
+        assert isinstance(family_action_payload, ActionPayload)
+        action_identity_key = (family_owner_node_id, family_action_payload.action_id)
+        previous_action_node = seen_module_action_ids.get(action_identity_key)
+        if previous_action_node is not None:
+            raise SemanticPayloadError(
+                f"module {family_owner_node_id!r} declares action_id "
+                f"{family_action_payload.action_id!r} on two distinct action "
+                f"nodes {previous_action_node!r} and {family_action_id!r}; "
+                "module-local action identity must be unique"
+            )
+        seen_module_action_ids[action_identity_key] = family_action_id
         expected_emits_projection: dict[str, SemanticEdge] = {}
         for family_emitted_id in family_emitted_ids:
             family_event_nodes = event_nodes_by_identity.get(family_emitted_id, [])
