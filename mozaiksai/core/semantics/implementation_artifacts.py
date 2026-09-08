@@ -787,12 +787,16 @@ async def resolve_workspace_handler_split_authority(
     build-context input: its path must equal
     ``build_context/{contract_id}/contract.yaml`` for the contract id the
     verified bytes themselves declare.  The contract must own THIS module —
-    declaring its ``module.yaml``, its ``handler.py`` as the preserved
-    workspace-owned leaf (``owner: workspace``), and its ``base_handler.py``
-    as the regenerated template-owned implementation (``owner: templates``,
-    the canonical materializer default).  Absent, inconsistent, or unrelated
-    declarations reject: the split is contract authority, never a filename
-    coincidence and never a caller assertion.
+    declaring its ``module.yaml`` (canonical ``owner: templates``), its
+    ``handler.py`` as the preserved workspace-owned leaf
+    (``owner: workspace``), and its ``base_handler.py`` as the regenerated
+    template-owned implementation (``owner: templates``).  The verified
+    bytes must be unambiguous: every ``required_outputs`` entry must be a
+    mapping with a unique path, and authority-relevant ownership must be
+    EXPLICIT — this boundary never defaults an omitted owner.  Absent,
+    duplicate, inconsistent, or unrelated declarations reject: the split is
+    contract authority, never a filename coincidence and never a caller
+    assertion.
     """
     verified_selection, contract_digest = _verify_scoped_source_selection(
         contract_selection,
@@ -838,18 +842,41 @@ async def resolve_workspace_handler_split_authority(
     handler_path = f"modules/{module.module_instance}/backend/handler.py"
     base_handler_path = f"modules/{module.module_instance}/backend/base_handler.py"
     owners: dict[str, str] = {}
+    seen_paths: set[str] = set()
     for entry in raw.get("required_outputs") or []:
         if not isinstance(entry, Mapping):
-            continue
+            raise ImplementationArtifactError(
+                f"pack contract {contract_id!r} has a non-mapping required_outputs "
+                "entry; ownership is ambiguous"
+            )
         path = str(entry.get("path") or "").strip()
+        if path in seen_paths:
+            raise ImplementationArtifactError(
+                f"pack contract {contract_id!r} declares required output {path!r} "
+                "more than once; ownership is ambiguous"
+            )
+        seen_paths.add(path)
         if path in {manifest_path, handler_path, base_handler_path}:
-            owners[path] = str(entry.get("owner") or "templates").strip()
+            declared_owner = entry.get("owner")
+            owner = declared_owner.strip() if isinstance(declared_owner, str) else ""
+            if not owner:
+                raise ImplementationArtifactError(
+                    f"pack contract {contract_id!r} declares {path!r} without an "
+                    "explicit owner; this certification authority does not default "
+                    "ownership"
+                )
+            owners[path] = owner
     for required in (manifest_path, handler_path, base_handler_path):
         if required not in owners:
             raise ImplementationArtifactError(
                 f"pack contract {contract_id!r} does not declare {required!r}; "
                 "the workspace_handler_split authority is absent"
             )
+    if owners[manifest_path] != "templates":
+        raise ImplementationArtifactError(
+            f"pack contract {contract_id!r} declares {manifest_path!r} with owner "
+            f"{owners[manifest_path]!r}; the canonical manifest owner is 'templates'"
+        )
     if owners[handler_path] != "workspace":
         raise ImplementationArtifactError(
             f"pack contract {contract_id!r} declares {handler_path!r} with owner "
@@ -1135,19 +1162,71 @@ def _statement_binds_name(stmt: ast.stmt, name: str) -> bool:
     return name in _nested_binding_names(stmt)
 
 
+def _iter_construction_nodes(stmt: ast.stmt):
+    """Every AST node of one scope statement that executes at construction time.
+
+    Class bodies execute when the module is imported, so they are entered;
+    function and lambda bodies are deferred and are inspected only through
+    their enclosing-scope expression positions (decorators, defaults,
+    annotations, bases), consistent with the binding grammar.
+    """
+    pending: list[ast.AST] = [stmt]
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            pending.extend(_enclosing_scope_children(node))
+        elif isinstance(node, ast.ClassDef):
+            pending.extend(_enclosing_scope_children(node))
+            pending.extend(node.body)
+        else:
+            pending.extend(ast.iter_child_nodes(node))
+
+
 def _reject_dynamic_builtins(statements: list[ast.stmt], *, where: str) -> None:
+    """Reject direct dynamic export/execution primitives in construction scope.
+
+    This is a bounded OWN-SOURCE export/binding proof, not a proof of
+    arbitrary imported dependency behavior.  Within the certified source's
+    module/class construction scope it fails closed on any reference to a
+    dynamic primitive name (``exec``, ``eval``, ``setattr``, ...), on
+    importing such a primitive (or ``*``) from ``builtins``, and on any use
+    of a name bound to the ``builtins`` module (including ``__builtins__``)
+    — so ``builtins.exec``, aliased imports, and simple rebinding of a
+    primitive name cannot reach the same escape.  Function and lambda bodies
+    are deferred execution and are out of scope by design.
+    """
+    builtins_aliases = {"__builtins__"}
     for stmt in statements:
-        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            continue
-        for node in ast.walk(stmt):
+        for node in _iter_construction_nodes(stmt):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "builtins" or alias.name.startswith("builtins."):
+                        builtins_aliases.add(alias.asname or alias.name.split(".")[0])
+    for stmt in statements:
+        for node in _iter_construction_nodes(stmt):
             if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in _DYNAMIC_EXPORT_BUILTINS
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module == "builtins"
             ):
-                raise ImplementationArtifactError(
-                    f"{where} calls {node.func.id!r}; the export is not statically provable"
-                )
+                for alias in node.names:
+                    if alias.name == "*" or alias.name in _DYNAMIC_EXPORT_BUILTINS:
+                        raise ImplementationArtifactError(
+                            f"{where} imports {alias.name!r} from builtins; the export "
+                            "is not statically provable"
+                        )
+            if isinstance(node, ast.Name):
+                if node.id in _DYNAMIC_EXPORT_BUILTINS:
+                    raise ImplementationArtifactError(
+                        f"{where} references dynamic export primitive {node.id!r}; the "
+                        "export is not statically provable"
+                    )
+                if node.id in builtins_aliases:
+                    raise ImplementationArtifactError(
+                        f"{where} accesses the builtins module through {node.id!r}; the "
+                        "export is not statically provable"
+                    )
 
 
 def prove_module_action_export(
@@ -1602,7 +1681,7 @@ def _prove_base_handler_closure(
             )
 
 
-def certify_module_action_export(
+def _certify_module_action_export(
     handler: ResolvedModuleHandlerSource,
     *,
     handler_method: str,
@@ -1610,6 +1689,13 @@ def certify_module_action_export(
     split_authority: ResolvedWorkspaceHandlerSplitAuthority | None = None,
 ) -> ModuleActionExportProof:
     """Certify one action export through exactly one of the two bounded modes.
+
+    INTERNAL: :func:`resolve_module_action_implementation` is the only public
+    authority-producing API — it derives ``split_authority`` from exact
+    verified pack-contract bytes before this proof runs, so no caller can
+    substitute a preconstructed authority object for those bytes.  The public
+    standalone helper surface is :func:`prove_module_action_export`, the
+    zero-base ``EXPLICIT_HANDLER`` proof only.
 
     Without a base selection, certification is the strict standalone
     ``EXPLICIT_HANDLER`` proof (zero bases).  With the canonical base-handler
@@ -1619,8 +1705,7 @@ def certify_module_action_export(
     selected method stays a two-source ``CANONICAL_BASE_HANDLER``
     certification with ``method_source = handler``; both source digests and
     the pack-contract digest remain meaning-bearing.  No other source may
-    participate.  The resolution APIs are the authority boundary: they derive
-    ``split_authority`` from exact verified pack-contract bytes.
+    participate.
     """
     if base_handler is None and split_authority is None:
         return prove_module_action_export(handler, handler_method=handler_method)
@@ -1723,7 +1808,7 @@ async def resolve_module_action_implementation(
             layout_registry=registry,
         )
     action = module.action(action_id)
-    export_proof = certify_module_action_export(
+    export_proof = _certify_module_action_export(
         handler,
         handler_method=action.handler_method,
         base_handler=base_handler,
@@ -1755,7 +1840,6 @@ __all__ = [
     "ResolvedWorkspaceHandlerSplitAuthority",
     "SelectedAccountedArtifact",
     "SelectedContractArtifact",
-    "certify_module_action_export",
     "pair_workflow_implementation_artifacts",
     "prove_module_action_export",
     "resolve_module_action_implementation",

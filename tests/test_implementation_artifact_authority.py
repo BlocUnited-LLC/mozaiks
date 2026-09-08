@@ -855,6 +855,68 @@ async def _handler_for_source(content_store, source: str):
             "type TasksHandler = int\n",
             "rebound|referenced dynamically|not statically parseable",
         ),
+        # Bare exec at module scope.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'exec("TasksHandler = 1")\n',
+            "dynamic export primitive",
+        ),
+        # exec reached through the builtins module.
+        (
+            "import builtins\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'builtins.exec("TasksHandler = 1")\n',
+            "accesses the builtins module",
+        ),
+        # exec reached through an aliased builtins import.
+        (
+            "import builtins as b\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'b.exec("TasksHandler = 1")\n',
+            "accesses the builtins module",
+        ),
+        # exec imported from builtins.
+        (
+            "from builtins import exec\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'exec("TasksHandler = 1")\n',
+            "imports 'exec' from builtins|dynamic export primitive",
+        ),
+        # exec imported from builtins under an alias.
+        (
+            "from builtins import exec as e\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'e("TasksHandler = 1")\n',
+            "imports 'exec' from builtins",
+        ),
+        # exec laundered through a simple rebinding.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "e = exec\n"
+            'e("TasksHandler = 1")\n',
+            "dynamic export primitive",
+        ),
+        # exec fetched via getattr on the builtins module.
+        (
+            "import builtins\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            'getattr(builtins, "exec")("TasksHandler = 1")\n',
+            "dynamic export primitive|accesses the builtins module",
+        ),
+        # exec inside the class body binds in the class namespace at import.
+        (
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n        return {}\n"
+            '    exec("create_task = 1")\n',
+            "dynamic export primitive",
+        ),
+        # Import-time execution hidden inside another class body.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "class _Evil:\n"
+            '    exec("TasksHandler = 1", globals())\n',
+            "dynamic export primitive",
+        ),
         # Unparseable source is unprovable.
         ("class TasksHandler(:\n", "not statically parseable"),
     ],

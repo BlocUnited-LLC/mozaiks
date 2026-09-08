@@ -1225,10 +1225,19 @@ proof boundary of its own
   separately. Rebinding analysis is closed over the Python binding grammar —
   including exception-handler captures, match-pattern captures, walrus
   targets (also inside comprehensions and default arguments), and type-alias
-  statements. Arbitrary imports, mixins, multiple or transitive inheritance,
-  star or dynamic or nested/conditional/late imports, redefinitions,
-  conditional or decorated definitions, monkeypatching, `__getattr__`
-  tricks, and every other dynamic export fail closed.
+  statements. Direct dynamic-execution primitives (`exec`, `eval`,
+  `setattr`, ...) are rejected in construction scope even when reached
+  through `builtins` access, aliased builtins imports, or simple rebinding —
+  a bounded static own-source export/binding proof, not a proof of arbitrary
+  imported dependency behavior. Pack-contract `required_outputs` must be
+  unambiguous at this boundary: duplicate paths reject, and
+  authority-relevant ownership must be explicit (never defaulted).
+  `resolve_module_action_implementation` is the only public
+  authority-producing API — no exported function accepts a preconstructed
+  split authority. Arbitrary imports, mixins, multiple or transitive
+  inheritance, star or dynamic or nested/conditional/late imports,
+  redefinitions, conditional or decorated definitions, monkeypatching,
+  `__getattr__` tricks, and every other dynamic export fail closed.
 
 ## OSS And Proprietary Intelligence
 

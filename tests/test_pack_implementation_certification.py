@@ -220,6 +220,26 @@ def test_public_resolution_accepts_no_authority_token() -> None:
     assert "split_authority" not in base.parameters
 
 
+def test_public_surface_has_no_fabricated_authority_entry_point() -> None:
+    """No exported function accepts a ResolvedWorkspaceHandlerSplitAuthority:
+    the split-capable certifier is internal, prove_module_action_export stays
+    the only standalone proof helper (zero-base EXPLICIT_HANDLER), and
+    resolve_module_action_implementation is the public authority boundary."""
+    import mozaiksai.core.semantics.implementation_artifacts as impl
+
+    assert "certify_module_action_export" not in impl.__all__
+    assert not hasattr(impl, "certify_module_action_export")
+    assert "prove_module_action_export" in impl.__all__
+    assert "resolve_module_action_implementation" in impl.__all__
+    for name in impl.__all__:
+        exported = getattr(impl, name)
+        if callable(exported) and not isinstance(exported, type):
+            for parameter in inspect.signature(exported).parameters.values():
+                assert "ResolvedWorkspaceHandlerSplitAuthority" not in str(
+                    parameter.annotation
+                ), (name, parameter.name)
+
+
 @pytest.mark.parametrize("pack,module", SPLIT_MODULES, ids=SPLIT_IDS)
 async def test_every_real_pack_action_certifies(content_store, pack: str, module: str) -> None:
     staged = await _stage_module(content_store, pack, module)
@@ -521,6 +541,82 @@ async def test_standalone_base_resolver_derives_authority_from_contract_bytes(
             ),
             content_store=content_store,
             requesting_scope=SCOPE,
+        )
+
+
+async def test_ambiguous_or_implicit_required_outputs_reject(content_store) -> None:
+    """The verified pack-contract bytes must be unambiguous at this boundary:
+    duplicate required_outputs paths reject globally, and authority-relevant
+    ownership must be explicit — omitted, null, or empty owners never default."""
+    staged = await _stage_module(content_store, "files", "files")
+    handler_path = "modules/files/backend/handler.py"
+    base_path = "modules/files/backend/base_handler.py"
+    manifest_path = "modules/files/module.yaml"
+
+    def _append_dup(path: str, owner: str):
+        def mutate(document):
+            document["required_outputs"].append({"path": path, "owner": owner})
+
+        return mutate
+
+    def _prepend_dup(path: str, owner: str):
+        def mutate(document):
+            document["required_outputs"].insert(0, {"path": path, "owner": owner})
+
+        return mutate
+
+    duplicate_cases = [
+        _append_dup(handler_path, "templates"),  # workspace then templates
+        _prepend_dup(handler_path, "templates"),  # templates then workspace
+        _append_dup(base_path, "workspace"),
+        _append_dup(manifest_path, "templates"),
+        # ANY duplicate path is structurally ambiguous, relevant or not.
+        _append_dup("modules/files/backend/service.py", "templates"),
+    ]
+    for mutate in duplicate_cases:
+        digest = await _stage_tampered_contract(content_store, "files", mutate)
+        with pytest.raises(ImplementationArtifactError, match="more than once"):
+            await _resolve_authority(
+                content_store, staged, _contract_selection(digest=digest, pack="files")
+            )
+
+    def _strip_owner(path: str):
+        def mutate(document):
+            for entry in document["required_outputs"]:
+                if entry.get("path") == path:
+                    entry.pop("owner", None)
+
+        return mutate
+
+    def _set_owner_value(path: str, value):
+        def mutate(document):
+            for entry in document["required_outputs"]:
+                if entry.get("path") == path:
+                    entry["owner"] = value
+
+        return mutate
+
+    implicit_cases = [
+        _strip_owner(handler_path),
+        _strip_owner(base_path),
+        _strip_owner(manifest_path),
+        _set_owner_value(handler_path, None),
+        _set_owner_value(base_path, ""),
+    ]
+    for mutate in implicit_cases:
+        digest = await _stage_tampered_contract(content_store, "files", mutate)
+        with pytest.raises(ImplementationArtifactError, match="explicit owner"):
+            await _resolve_authority(
+                content_store, staged, _contract_selection(digest=digest, pack="files")
+            )
+
+    # The manifest owner must be the exact canonical owner, not merely present.
+    digest = await _stage_tampered_contract(
+        content_store, "files", _set_owner_value(manifest_path, "workspace")
+    )
+    with pytest.raises(ImplementationArtifactError, match="canonical manifest owner"):
+        await _resolve_authority(
+            content_store, staged, _contract_selection(digest=digest, pack="files")
         )
 
 
@@ -936,6 +1032,29 @@ async def test_override_and_inherited_certifications_have_distinct_identity(
             "rebound outside its canonical import",
             id="match-mapping-rest-capture-of-base",
         ),
+        pytest.param(
+            "import builtins\n"
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            'builtins.exec("FilesHandler = 1")\n',
+            "accesses the builtins module",
+            id="leaf-builtins-exec",
+        ),
+        pytest.param(
+            "from builtins import exec as e\n"
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            'e("FilesHandler = 1")\n',
+            "imports 'exec' from builtins",
+            id="leaf-aliased-builtins-exec-import",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n"
+            '    exec("get_file = 1")\n',
+            "dynamic export primitive",
+            id="leaf-class-body-exec-of-method",
+        ),
     ],
 )
 async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reason: str) -> None:
@@ -1007,6 +1126,28 @@ async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reas
             "    case [*FilesBaseHandler]:\n        pass\n    case _:\n        pass\n",
             "rebound|referenced dynamically",
             id="base-match-star-capture-of-class",
+        ),
+        pytest.param(
+            "e = eval\n"
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n",
+            "dynamic export primitive",
+            id="base-rebound-eval",
+        ),
+        pytest.param(
+            "import builtins as b\n"
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            'b.setattr(FilesBaseHandler, "get_file", None)\n',
+            "accesses the builtins module|referenced dynamically",
+            id="base-builtins-setattr",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            '    exec("get_file = 1")\n',
+            "dynamic export primitive",
+            id="base-class-body-exec-of-method",
         ),
     ],
 )

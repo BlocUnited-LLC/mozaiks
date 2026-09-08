@@ -88,9 +88,18 @@ This project follows a practical pre-1.0 changelog format:
   analysis is closed over the full Python binding grammar including
   exception-handler and match-pattern captures. The entire real canonical
   split-pack corpus — 10 modules, 63 actions — certifies end to end with
-  proven pack-contract blob reads. The commerce module manifest's capability
-  entries were repaired to the canonical `ModuleCapability` contract (unique
-  capability ids with `kind`/`title`), which module loading requires.
+  proven pack-contract blob reads. The split-capable certifier is internal:
+  `resolve_module_action_implementation` is the only public
+  authority-producing API (no exported function accepts a preconstructed
+  split authority), direct dynamic-execution primitives are rejected in
+  construction scope even through `builtins` access, aliased builtins
+  imports, or simple rebinding (a bounded own-source proof — not a proof of
+  arbitrary imported dependency behavior), and pack-contract
+  `required_outputs` must be unambiguous: duplicate paths and omitted or
+  non-canonical authority-relevant owners reject. The commerce module
+  manifest's capability entries were repaired to the canonical
+  `ModuleCapability` contract (unique capability ids with `kind`/`title`),
+  which module loading requires.
 
 - **Closed semantic action requests**: `ActionPayload.request_contract` replaces
   shallow request fields with one immutable, bounded contract algebra for null,
