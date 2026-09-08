@@ -1103,6 +1103,20 @@ async def test_override_and_inherited_certifications_have_distinct_identity(
             "locally-defined callable",
             id="leaf-local-decorator-on-sibling",
         ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "(f := lambda: None)()\n",
+            "anonymous lambda",
+            id="leaf-walrus-lambda-invocation",
+        ),
+        pytest.param(
+            "from .base_handler import FilesBaseHandler\n"
+            "class FilesHandler(FilesBaseHandler):\n    pass\n"
+            "[lambda: None][0]()\n",
+            "anonymous lambda",
+            id="leaf-list-laundered-lambda",
+        ),
     ],
 )
 async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reason: str) -> None:
@@ -1228,6 +1242,21 @@ async def test_leaf_split_grammar_hostiles_reject(content_store, leaf: str, reas
             'locals()["FilesBaseHandler"] = None\n',
             "dynamic export primitive",
             id="base-locals-mutation",
+        ),
+        pytest.param(
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            "{0: lambda: None}[0]()\n",
+            "anonymous lambda",
+            id="base-dict-laundered-lambda",
+        ),
+        pytest.param(
+            "from typing import cast as external\n"
+            "class FilesBaseHandler:\n"
+            "    async def get_file(self, ctx):\n        return {}\n"
+            "external(lambda: None)\n",
+            "anonymous lambda",
+            id="base-lambda-passed-to-external-call",
         ),
     ],
 )

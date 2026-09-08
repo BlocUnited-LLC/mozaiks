@@ -995,6 +995,93 @@ async def _handler_for_source(content_store, source: str):
             "    mutate()\n",
             "locally-defined callable",
         ),
+        # Reviewer's weaponized attack: a walrus-wrapped lambda invoked at
+        # import replaces the certified export through globals().
+        (
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "(f := lambda: globals().__setitem__(\n"
+            '    "TasksHandler",\n'
+            '    type("Evil", (), {\n'
+            '        "create_task": lambda self, ctx: "EVIL"\n'
+            "    })\n"
+            "))()\n",
+            "anonymous lambda",
+        ),
+        # Walrus-wrapped lambda invocation.
+        (
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "(f := lambda: mutate())()\n",
+            "anonymous lambda",
+        ),
+        # Lambda laundered through a list subscript.
+        (
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "[lambda: mutate()][0]()\n",
+            "anonymous lambda",
+        ),
+        # Lambda laundered through a tuple subscript.
+        (
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "(lambda: mutate(),)[0]()\n",
+            "anonymous lambda",
+        ),
+        # Lambda laundered through a dict subscript.
+        (
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "{0: lambda: mutate()}[0]()\n",
+            "anonymous lambda",
+        ),
+        # Lambda laundered through a conditional expression.
+        (
+            "def mutate():\n    pass\n\n"
+            "def other():\n    pass\n\n"
+            "cond = True\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "((lambda: mutate()) if cond else (lambda: other()))()\n",
+            "anonymous lambda",
+        ),
+        # Own-source lambda passed to an imported construction-time call.
+        (
+            "from typing import cast as external\n\n"
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "external(lambda: mutate())\n",
+            "anonymous lambda",
+        ),
+        # Own-source lambda inside an imported decorator factory.
+        (
+            "from typing import cast as external\n\n"
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "@external(lambda cls: mutate() or cls)\n"
+            "class Sibling:\n    pass\n",
+            "anonymous lambda",
+        ),
+        # Lambda in a function default evaluates at construction time.
+        (
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "def f(cb=lambda: mutate()):\n    return cb\n",
+            "anonymous lambda",
+        ),
+        # Lambda invoked inside a sibling class base expression.
+        (
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "class Sibling((lambda: object)()):\n    pass\n",
+            "anonymous lambda|invokes a lambda",
+        ),
+        # Lambda stored in a container binding, even without invocation.
+        (
+            "def mutate():\n    pass\n\n"
+            "class TasksHandler:\n    async def create_task(self, ctx, payload):\n        return {}\n\n"
+            "value = [lambda: mutate()]\n",
+            "anonymous lambda",
+        ),
         # Unparseable source is unprovable.
         ("class TasksHandler(:\n", "not statically parseable"),
     ],
@@ -1047,6 +1134,33 @@ async def test_static_export_proof_accepts_explicit_export(content_store):
             '        logger.debug("create")\n'
             "        return {}\n",
             id="imported-callable-at-construction",
+        ),
+        # An annotated simple lambda binding is the other permitted form.
+        pytest.param(
+            "from typing import Callable\n\n"
+            "helper: Callable[..., object] = lambda: 1\n\n"
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n"
+            '        return {"value": helper()}\n',
+            id="annotated-lambda-binding",
+        ),
+        # Lambdas inside deferred method bodies are runtime behavior.
+        pytest.param(
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n"
+            "        local = lambda: 1\n"
+            "        return {\"value\": local()}\n",
+            id="lambda-inside-method-body",
+        ),
+        # Lambdas inside deferred function bodies are runtime behavior.
+        pytest.param(
+            "def runtime_helper():\n"
+            "    local = lambda: 1\n"
+            "    return local()\n\n"
+            "class TasksHandler:\n"
+            "    async def create_task(self, ctx, payload):\n"
+            '        return {"value": runtime_helper()}\n',
+            id="lambda-inside-function-body",
         ),
     ],
 )

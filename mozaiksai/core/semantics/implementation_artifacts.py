@@ -1240,34 +1240,49 @@ def _reject_dynamic_builtins(statements: list[ast.stmt], *, where: str) -> None:
                     )
 
 
+def _permitted_lambda_binding(stmt: ast.stmt) -> tuple[str, ast.Lambda] | None:
+    """The ONLY permitted construction-scope lambda position: a simple binding.
+
+    ``helper = lambda: ...`` or ``helper: T = lambda: ...`` — exactly one
+    plain ``Name`` storage target with the lambda as the ENTIRE direct value.
+    Returns the bound name and the lambda node, or ``None``.  A walrus
+    (``(f := lambda: ...)``) is NOT a permitted binding: it is
+    expression-valued and lets the new callable object flow directly into
+    another construction-time operation without a subsequent Name Load.
+    """
+    if (
+        isinstance(stmt, ast.Assign)
+        and len(stmt.targets) == 1
+        and isinstance(stmt.targets[0], ast.Name)
+        and isinstance(stmt.value, ast.Lambda)
+    ):
+        return stmt.targets[0].id, stmt.value
+    if (
+        isinstance(stmt, ast.AnnAssign)
+        and isinstance(stmt.target, ast.Name)
+        and isinstance(stmt.value, ast.Lambda)
+    ):
+        return stmt.target.id, stmt.value
+    return None
+
+
 def _local_callable_names(body: list[ast.stmt]) -> set[str]:
     """Names bound to locally-defined callables in one lexical scope.
 
     Covers def/class statements (classes are callables too — constructing one
-    executes uninspected ``__new__``/``__init__`` bodies), simple lambda
-    bindings (``name = lambda``, ``name: T = lambda``), and walrus bindings
-    to a lambda.
+    executes uninspected ``__new__``/``__init__`` bodies) and permitted
+    simple lambda bindings (``name = lambda``, ``name: T = lambda``).  Every
+    other construction-scope lambda position rejects outright, so no other
+    form can define a callable here.
     """
     names: set[str] = set()
     for stmt in _iter_scope_statements(body):
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             names.add(stmt.name)
-        elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Lambda):
-            for target in stmt.targets:
-                names |= _assignment_target_names(target)
-        elif (
-            isinstance(stmt, ast.AnnAssign)
-            and stmt.value is not None
-            and isinstance(stmt.value, ast.Lambda)
-        ):
-            names |= _assignment_target_names(stmt.target)
-        for node in _construction_expression_nodes(stmt):
-            if (
-                isinstance(node, ast.NamedExpr)
-                and isinstance(node.value, ast.Lambda)
-                and isinstance(node.target, ast.Name)
-            ):
-                names.add(node.target.id)
+        else:
+            binding = _permitted_lambda_binding(stmt)
+            if binding is not None:
+                names.add(binding[0])
     return names
 
 
@@ -1305,12 +1320,22 @@ def _reject_construction_time_local_callables(
     application, no argument laundering, no lambda invoked or applied as a
     decorator.  Any construction-time ``Name`` reference to such a callable
     fails closed (this deliberately subsumes every invocation form without
-    building a call graph or dataflow).  Deferred function/method bodies may
-    freely use local helpers — that is runtime behavior, outside this
-    import-time proof.  Class bodies execute during import, so each nested
-    class scope is scanned recursively against its own locals plus every
-    enclosing scope's (a fail-closed over-approximation of Python's actual
-    class-scope name resolution).
+    building a call graph or dataflow).
+
+    Anonymous lambdas are additionally position-restricted: a
+    construction-scope lambda is permitted ONLY as the entire direct value
+    of a simple named binding (``helper = lambda: ...``).  Every other
+    position — walrus, call arguments, containers, subscripts, conditional
+    expressions, decorators, defaults, annotations, class bases — rejects
+    generically, so a laundered lambda can never cross the construction
+    boundary as an executable object.  A stored lambda becomes an ordinary
+    local callable name covered by the Load-reference rule.
+
+    Deferred function/method bodies may freely use local helpers — that is
+    runtime behavior, outside this import-time proof.  Class bodies execute
+    during import, so each nested class scope is scanned recursively against
+    its own locals plus every enclosing scope's (a fail-closed
+    over-approximation of Python's actual class-scope name resolution).
     """
     known = frozenset(_local_callable_names(body)) | inherited
     for stmt in _iter_scope_statements(body):
@@ -1321,11 +1346,19 @@ def _reject_construction_time_local_callables(
                         f"{where} applies a lambda decorator during construction; the "
                         "effective export is not statically provable"
                     )
+        binding = _permitted_lambda_binding(stmt)
+        permitted_lambda = binding[1] if binding is not None else None
         for node in _construction_expression_nodes(stmt):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Lambda):
                 raise ImplementationArtifactError(
                     f"{where} invokes a lambda during construction; the effective "
                     "export is not statically provable"
+                )
+            if isinstance(node, ast.Lambda) and node is not permitted_lambda:
+                raise ImplementationArtifactError(
+                    f"{where} places an anonymous lambda in a construction-time "
+                    "expression; only a lambda stored directly in a simple named "
+                    "binding is certifiable"
                 )
             if (
                 isinstance(node, ast.Name)

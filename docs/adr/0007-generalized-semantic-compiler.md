@@ -1231,10 +1231,16 @@ proof boundary of its own
   rebinding, and uninspected locally-defined callables (functions, classes,
   bound lambdas) may exist but may not be referenced during module/class
   construction — no direct or aliased invocation, no local class
-  construction, no decorator application, no lambda invoked or applied as a
-  decorator — so within this bounded own-source construction grammar the
-  certified visible class/method binding IS the effective import-time
-  export. Deferred function/method bodies may freely use local helpers
+  construction, no decorator application. Construction-time anonymous
+  lambdas are prohibited except a lambda stored directly in a simple named
+  binding (`helper = lambda: ...`); a stored lambda becomes an ordinary
+  local callable name covered by the Load-reference rule, and every other
+  lambda position (walrus, call arguments, containers, subscripts,
+  conditionals, decorators, defaults, annotations, class bases) rejects
+  generically — locally supplied executable callbacks cannot cross the
+  construction boundary. Within this bounded own-source construction
+  grammar the certified visible class/method binding IS the effective
+  import-time export. Deferred function/method bodies may freely use local helpers
   (runtime behavior, outside the import-time proof), and arbitrary imported
   dependency behavior remains outside the proof. Pack-contract `required_outputs` must be
   unambiguous at this boundary: duplicate paths reject, and
