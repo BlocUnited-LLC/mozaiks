@@ -34,6 +34,7 @@ Fail-closed contract:
   newer configuration.
 """
 
+import inspect
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -42,6 +43,7 @@ from typing import Literal
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters.base import AuthAdapter, AuthError, BaseAuthAdapter
+from mozaiksai.core.auth.cache_ttl import CacheTtlConfigError, parse_cache_ttl_seconds
 from mozaiksai.core.environment import (
     ENVIRONMENT_ENV_VARS,
     EnvironmentConfigError,
@@ -138,33 +140,112 @@ ResolvedAuthSource = Literal[
 # ---------------------------------------------------------------------------
 
 
+def _validate_config_identity_value(value: object, *, source: str) -> str:
+    """Validate one config-identity value against the documented contract.
+
+    The contract is a non-blank string. Values of any other type — ``None``,
+    lists, mappings, numbers — are rejected rather than coerced with ``str()``,
+    which would otherwise mint a cache key that does not truthfully identify a
+    configured revision. Empty and whitespace-only strings are rejected for the
+    same reason: they cannot distinguish one revision from another.
+    """
+    if not isinstance(value, str):
+        raise AuthError(
+            f"Auth adapter config_identity {source} must be a string, got "
+            f"{type(value).__name__}. Provide a string that changes whenever the "
+            "adapter's configuration changes, or omit config_identity to opt out "
+            "of caching entirely.",
+            500,
+            "registry",
+        )
+    if not value.strip():
+        raise AuthError(
+            f"Auth adapter config_identity {source} must be a non-blank string; "
+            "an empty or whitespace-only identity does not identify a configured "
+            "revision. Omit config_identity to opt out of caching entirely.",
+            500,
+            "registry",
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class _AdapterRegistration:
-    """A registered adapter class plus its cache-identity contract.
+    """A registered adapter class plus its construction and cache contracts.
 
     ``config_identity`` is how a provider states "my configuration changed".
     Built-in providers derive it from their declared environment census.
-    Custom providers must supply one explicitly (a string or a callable
-    returning a string) to be cacheable; without it the adapter is rebuilt on
-    every resolution, because the runtime cannot know what configures a
+    Custom providers must supply one explicitly (a non-blank string, or a
+    callable returning one) to be cacheable; without it the adapter is rebuilt
+    on every resolution, because the runtime cannot know what configures a
     third-party adapter and must never reuse one validated under an older
     configuration.
+
+    ``accepts_settings`` is determined once, at registration, by inspecting the
+    constructor signature. Construction never infers signature support from a
+    caught ``TypeError`` — an exception raised inside a constructor body is a
+    real failure and must propagate.
     """
 
     adapter_class: type[BaseAuthAdapter]
     generation: int
     builtin: bool
+    accepts_settings: bool
     config_identity: str | Callable[[], str] | None = None
 
     def identity_token(self) -> str | None:
-        """Return the provider-declared identity, or None when uncacheable."""
+        """Return the provider-declared identity, or None when uncacheable.
+
+        Raises :class:`AuthError` when a declared identity is malformed, so a
+        misconfigured provider fails closed instead of silently caching under a
+        meaningless key.
+        """
         if self.builtin:
             return "builtin"
         if self.config_identity is None:
             return None
         if callable(self.config_identity):
-            return str(self.config_identity())
-        return str(self.config_identity)
+            try:
+                produced = self.config_identity()
+            except AuthError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - reported as AuthError
+                raise AuthError(
+                    f"Auth adapter config_identity callable raised {type(exc).__name__}: "
+                    f"{exc}. The identity must be produced deterministically.",
+                    500,
+                    "registry",
+                ) from exc
+            return _validate_config_identity_value(produced, source="callable return value")
+        return _validate_config_identity_value(self.config_identity, source="value")
+
+
+def _constructor_accepts_settings(adapter_class: type) -> bool:
+    """Determine settings-argument support BEFORE any construction attempt.
+
+    Uses signature inspection only. When a signature cannot be inspected (C
+    extensions, exotic callables), the answer is False: the adapter is
+    constructed without the snapshot and — lacking a declared config identity —
+    is not cached, which is the safe direction.
+    """
+    try:
+        signature = inspect.signature(adapter_class)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Could not inspect %s constructor signature; constructing without the "
+            "configuration snapshot.",
+            getattr(adapter_class, "__name__", adapter_class),
+        )
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        if parameter.name == "settings" and parameter.kind in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -317,6 +398,18 @@ def resolve_auth_config() -> ResolvedAuthConfig:
     except EnvironmentConfigError as exc:
         raise AuthError(str(exc), 500, "registry") from exc
 
+    # Cache TTLs are parsed here, during canonical resolution, so a malformed
+    # value fails startup rather than surfacing later inside lazy discovery or
+    # JWKS client construction on a request path.
+    for ttl_name, ttl_default in (
+        ("AUTH_JWKS_CACHE_TTL", 3600),
+        ("AUTH_DISCOVERY_CACHE_TTL", 86400),
+    ):
+        try:
+            parse_cache_ttl_seconds(ttl_name, settings.get(ttl_name), default=ttl_default)
+        except CacheTtlConfigError as exc:
+            raise AuthError(str(exc), 500, "registry") from exc
+
     enabled_setting = _auth_enabled_setting(settings)
     explicit_provider = settings.get("AUTH_PROVIDER", "").strip().lower()
 
@@ -442,15 +535,22 @@ def register_adapter(
         name: Adapter identifier (e.g., "supabase", "keycloak")
         adapter_class: The adapter class to register
         config_identity: Cache-identity contract for custom adapters — a
-            string, or a callable returning one, that changes whenever the
-            adapter's configuration changes. Without it a custom adapter is
+            non-blank string, or a callable returning one, that changes
+            whenever the adapter's configuration changes. Malformed identities
+            (non-string values, or empty/whitespace-only strings) are rejected
+            rather than coerced. Without a config_identity a custom adapter is
             never cached across resolutions (it is rebuilt every time), so a
             changed configuration can never silently reuse an adapter built
             under an older one.
 
+    Raises:
+        AuthError: when a literal config_identity violates the contract.
+
     Example:
         register_adapter("my-custom", MyCustomAdapter, config_identity=lambda: cfg.revision)
     """
+    if config_identity is not None and not callable(config_identity):
+        _validate_config_identity_value(config_identity, source="value")
     _register(name, adapter_class, builtin=False, config_identity=config_identity)
 
 
@@ -467,6 +567,7 @@ def _register(
         adapter_class=adapter_class,
         generation=_registry_generation,
         builtin=builtin,
+        accepts_settings=_constructor_accepts_settings(adapter_class),
         config_identity=config_identity,
     )
     logger.debug("Registered auth adapter: %s (builtin=%s)", name, builtin)
@@ -517,17 +618,16 @@ def _build_adapter(
             "registry",
         )
 
+    # Constructor argument compatibility was decided at registration by
+    # signature inspection. There is deliberately no "try with settings, catch
+    # TypeError, retry without" path: a TypeError raised inside a constructor
+    # body is a real construction failure and must fail closed, never silently
+    # rebuild the adapter without its canonical configuration.
     try:
-        adapter = registration.adapter_class(settings=settings)  # type: ignore[call-arg]
-    except TypeError:
-        # Custom adapters predating the snapshot contract may not accept it.
-        # They fall back to reading the live environment and are not cached
-        # unless they declare a config identity.
-        try:
+        if registration.accepts_settings:
+            adapter = registration.adapter_class(settings=settings)  # type: ignore[call-arg]
+        else:
             adapter = registration.adapter_class()
-        except Exception as e:  # noqa: BLE001 - reported as AuthError below
-            logger.error("Failed to instantiate %s adapter: %s", provider, e, exc_info=True)
-            raise AuthError(f"Failed to configure {provider} auth: {e}", 500, provider) from e
     except Exception as e:  # noqa: BLE001 - reported as AuthError below
         logger.error("Failed to instantiate %s adapter: %s", provider, e, exc_info=True)
         raise AuthError(f"Failed to configure {provider} auth: {e}", 500, provider) from e

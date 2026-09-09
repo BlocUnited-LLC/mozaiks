@@ -53,9 +53,22 @@ This project follows a practical pre-1.0 changelog format:
   and anonymous-persona settings — so changing any of them rebuilds the
   adapter and no stale adapter can serve requests under newer configuration.
   Custom adapters declare a `config_identity` at registration to participate
-  in that cache identity, and are never cached without one. Implicit demo
-  mode (no auth configuration at all, in an environment that permits it)
-  still boots for local getting-started use.
+  in that cache identity, and are never cached without one; malformed
+  identities (non-string, empty, whitespace-only, or a raising callable) are
+  rejected rather than coerced into a cache key. Adapter constructors are
+  checked for `settings` support by signature inspection *before*
+  construction, so an exception raised inside a constructor body — including
+  `TypeError` — fails closed instead of triggering a retry that would discard
+  the canonical configuration. An adapter's lazily created OIDC discovery and
+  JWKS clients now inherit its snapshot (URLs and cache TTLs) and never
+  consult live environment or global `AuthConfig`, so an adapter built under
+  one configuration cannot begin validating tokens against another; explicit
+  constructor input to those clients is authoritative. `AUTH_JWKS_CACHE_TTL`
+  and `AUTH_DISCOVERY_CACHE_TTL` are validated (integer seconds, zero or
+  greater) during configuration resolution, so malformed values fail startup
+  instead of surfacing during lazy client creation on a request path.
+  Implicit demo mode (no auth configuration at all, in an environment that
+  permits it) still boots for local getting-started use.
 - **Fail-closed billing fulfillment ingress**:
   `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
   now requires the internal API key, an *authenticated* billing-admin

@@ -201,6 +201,23 @@ discovery cache TTL, Keycloak claim mappings, Supabase secret, anonymous
 persona settings) rebuilds the adapter, so request-time validation always uses
 the configuration startup validated.
 
+An adapter is bound to its snapshot for its whole lifetime, including the
+discovery and JWKS clients it creates lazily on first use. Those clients
+receive the adapter's own URLs and cache TTLs and are constructed with
+environment consultation disabled, so an adapter created under one
+configuration can never begin validating tokens against another after the
+environment changes. A configuration change produces a *new* adapter; the
+previous one stays internally consistent. Explicit constructor input to
+`OIDCDiscoveryClient` and `JWKSClient` is authoritative and is never
+overridden by live environment or global `AuthConfig`.
+
+`AUTH_JWKS_CACHE_TTL` and `AUTH_DISCOVERY_CACHE_TTL` must be integer seconds,
+zero or greater (`0` means always refetch). They are parsed during
+configuration resolution, so a malformed value fails startup rather than
+surfacing later during lazy client construction on a request path.
+
+### Custom adapter contracts
+
 Custom adapters registered via `register_adapter` declare their own cache
 identity:
 
@@ -208,11 +225,21 @@ identity:
 register_adapter("my-custom", MyCustomAdapter, config_identity=lambda: cfg.revision)
 ```
 
-`config_identity` (a string or callable returning one) must change whenever
-the adapter's configuration changes. Without it the adapter is deliberately
+`config_identity` must be a **non-blank string**, or a callable returning one,
+that changes whenever the adapter's configuration changes. Malformed
+identities fail closed rather than being coerced: a non-string value, an empty
+or whitespace-only string, or a callable that raises is rejected with an
+`AuthError` (literal values are validated at registration; callable results at
+each resolution). Without a `config_identity` the adapter is deliberately
 never cached — it is rebuilt on every resolution — so a changed custom
 configuration can never silently reuse an adapter validated under an older
 one. Re-registering a provider also invalidates any cached adapter.
+
+Adapter constructors may accept a `settings` argument to receive the
+configuration snapshot; support is determined by signature inspection at
+registration, before any construction attempt. An exception raised inside a
+constructor body — including `TypeError` — is a real construction failure and
+fails closed. The runtime never retries construction without the snapshot.
 
 Privileged HTTP surfaces can additionally require authenticated provenance:
 `UserPrincipal.is_authenticated` is true only for principals produced by

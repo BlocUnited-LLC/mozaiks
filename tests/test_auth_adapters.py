@@ -1225,3 +1225,611 @@ class TestCachePublicationCoherence:
         bound = reg._adapter_cache
         assert bound is not None
         assert reg.get_auth_adapter() is bound.adapter
+
+
+# ---------------------------------------------------------------------------
+# D5-A: lazy client chain is bound to the adapter's own snapshot
+# ---------------------------------------------------------------------------
+
+
+class TestLazyClientSnapshotBinding:
+    """Once an adapter exists, later environment changes must not alter its
+    behaviour — including through lazily created discovery/JWKS clients that
+    had not been instantiated yet when the environment changed."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in (*_AUTH_MATRIX_VARS, "AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL",
+                    "MOZAIKS_OIDC_TENANT_ID"):
+            monkeypatch.delenv(var, raising=False)
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
+
+    def _config_a(self, monkeypatch) -> None:
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("MOZAIKS_OIDC_DISCOVERY_URL", "https://a.example.com/.well-known")
+        # An explicit JWKS URL keeps key resolution off the network while still
+        # exercising the full lazy construction path.
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+        monkeypatch.setenv("AUTH_DISCOVERY_CACHE_TTL", "31")
+        monkeypatch.setenv("AUTH_JWKS_CACHE_TTL", "31")
+
+    def _mutate_to_config_b(self, monkeypatch) -> None:
+        monkeypatch.setenv("MOZAIKS_OIDC_DISCOVERY_URL", "https://b.example.com/.well-known")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://b.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_DISCOVERY_CACHE_TTL", "47")
+        monkeypatch.setenv("AUTH_JWKS_CACHE_TTL", "47")
+
+    @pytest.mark.asyncio
+    async def test_old_adapter_lazy_clients_use_original_snapshot(self, monkeypatch):
+        """The mandatory race proof: build under A, mutate the live env to B
+        WITHOUT resolving a new adapter, then trigger the old adapter's lazy
+        clients for the first time. They must still use A / TTL 31."""
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._config_a(monkeypatch)
+        adapter = get_auth_adapter()
+        assert adapter.name == "jwt"
+
+        # Lazy clients have NOT been created yet.
+        assert adapter._discovery_client is None
+        assert adapter._jwks_client is None
+
+        self._mutate_to_config_b(monkeypatch)
+
+        # First-ever instantiation of the lazy chain, after the mutation.
+        discovery = adapter._get_discovery_client()
+        assert discovery.discovery_url == "https://a.example.com/.well-known"
+        assert discovery.cache_ttl_seconds == 31
+
+        jwks = await adapter._get_jwks_client_async()
+        assert jwks.cache_ttl_seconds == 31
+        assert jwks._explicit_jwks_url == "https://a.example.com/jwks.json"
+        # Key resolution routes through the adapter's own discovery client,
+        # never the process-wide singleton.
+        assert jwks._discovery_client is discovery
+
+    @pytest.mark.asyncio
+    async def test_new_resolution_after_change_uses_new_snapshot(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._config_a(monkeypatch)
+        old = get_auth_adapter()
+        old_discovery = old._get_discovery_client()
+
+        self._mutate_to_config_b(monkeypatch)
+        new = get_auth_adapter()
+        assert new is not old
+
+        new_discovery = new._get_discovery_client()
+        assert new_discovery.discovery_url == "https://b.example.com/.well-known"
+        assert new_discovery.cache_ttl_seconds == 47
+        new_jwks = await new._get_jwks_client_async()
+        assert new_jwks.cache_ttl_seconds == 47
+
+        # The old adapter is still internally bound to its old snapshot.
+        assert old_discovery.discovery_url == "https://a.example.com/.well-known"
+        assert old_discovery.cache_ttl_seconds == 31
+
+    def test_discovery_client_cannot_be_repointed_by_environment(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "https://authority-a.example.com")
+        adapter = get_auth_adapter()
+
+        monkeypatch.setenv("MOZAIKS_OIDC_DISCOVERY_URL", "https://attacker.example.com/.well-known")
+        discovery = adapter._get_discovery_client()
+        assert "attacker" not in (discovery.discovery_url or "")
+        assert discovery.discovery_url.startswith("https://authority-a.example.com")
+
+    @pytest.mark.asyncio
+    async def test_jwks_client_cannot_be_repointed_by_global_config(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+        adapter = get_auth_adapter()
+
+        # Repoint the global AuthConfig, then create the lazy client.
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://attacker.example.com/jwks.json")
+        clear_auth_config_cache()
+        jwks = await adapter._get_jwks_client_async()
+        assert jwks._explicit_jwks_url == "https://a.example.com/jwks.json"
+
+    def test_adapter_config_carries_snapshot_ttls(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._config_a(monkeypatch)
+        adapter = get_auth_adapter()
+        assert adapter._config.discovery_cache_ttl_seconds == 31
+        assert adapter._config.jwks_cache_ttl_seconds == 31
+
+    def test_ttl_change_alone_rebuilds_adapter(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._config_a(monkeypatch)
+        first = get_auth_adapter()
+        monkeypatch.setenv("AUTH_JWKS_CACHE_TTL", "47")
+        second = get_auth_adapter()
+        assert second is not first
+        assert second._config.jwks_cache_ttl_seconds == 47
+
+
+# ---------------------------------------------------------------------------
+# D5-A: cache TTL validation happens at configuration resolution
+# ---------------------------------------------------------------------------
+
+
+class TestCacheTtlValidation:
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in (*_AUTH_MATRIX_VARS, "AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL"):
+            monkeypatch.delenv(var, raising=False)
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
+
+    @pytest.mark.parametrize("ttl_var", ["AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL"])
+    @pytest.mark.parametrize("bad_value", ["abc", "1.5", "", "  ", "-1", "1e3", "0x10", "3,600"])
+    def test_malformed_ttl_rejected_at_resolution(self, monkeypatch, ttl_var, bad_value):
+        """Malformed TTLs fail during canonical resolution, long before a
+        request can reach lazy client construction."""
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+        monkeypatch.setenv(ttl_var, bad_value)
+
+        if bad_value.strip() == "":
+            # Blank falls back to the documented default rather than failing.
+            assert resolve_auth_config().provider == "jwt"
+            return
+        with pytest.raises(AuthError, match=ttl_var):
+            resolve_auth_config()
+
+    @pytest.mark.parametrize("good_value", ["0", "1", "31", "3600", "86400"])
+    def test_valid_ttl_accepted(self, monkeypatch, good_value):
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+        monkeypatch.setenv("AUTH_JWKS_CACHE_TTL", good_value)
+        assert resolve_auth_config().provider == "jwt"
+
+    def test_parse_helper_domain(self):
+        from mozaiksai.core.auth.cache_ttl import CacheTtlConfigError, parse_cache_ttl_seconds
+
+        assert parse_cache_ttl_seconds("X", "60") == 60
+        assert parse_cache_ttl_seconds("X", "0") == 0
+        assert parse_cache_ttl_seconds("X", None, default=42) == 42
+        assert parse_cache_ttl_seconds("X", "  ", default=42) == 42
+        for bad in ("abc", "-1", "1.5", "1e3"):
+            with pytest.raises(CacheTtlConfigError):
+                parse_cache_ttl_seconds("X", bad)
+
+
+# ---------------------------------------------------------------------------
+# D5-B: constructor compatibility is decided before invocation
+# ---------------------------------------------------------------------------
+
+
+class TestConstructorContract:
+    """A TypeError raised inside a constructor body is a real failure. It must
+    never be mistaken for 'this constructor does not accept settings' and
+    trigger a second, unconfigured construction."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        import mozaiksai.core.auth.adapters.registry as reg
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in _AUTH_MATRIX_VARS:
+            monkeypatch.delenv(var, raising=False)
+        saved = dict(reg._adapter_registry)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+        yield
+        reg._adapter_registry.clear()
+        reg._adapter_registry.update(saved)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+
+    def _select(self, monkeypatch, provider: str) -> None:
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", provider)
+
+    def test_settings_aware_adapter_receives_snapshot(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        class _SettingsAware(BaseAuthAdapter):
+            name = "settingsaware"
+
+            def __init__(self, settings=None):
+                super().__init__(settings)
+                self.got_settings = settings
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        register_adapter("settingsaware", _SettingsAware, config_identity="v1")
+        self._select(monkeypatch, "settingsaware")
+        adapter = get_auth_adapter()
+        assert adapter.got_settings is not None
+        assert "AUTH_PROVIDER" in adapter.got_settings
+
+    def test_legacy_adapter_without_settings_still_constructs(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        class _Legacy(BaseAuthAdapter):
+            name = "legacyadapter"
+
+            def __init__(self):
+                super().__init__()
+                self.constructed = True
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        register_adapter("legacyadapter", _Legacy, config_identity="v1")
+        self._select(monkeypatch, "legacyadapter")
+        assert get_auth_adapter().constructed is True
+
+    def test_constructor_body_typeerror_never_retries_without_settings(self, monkeypatch):
+        """The exact D5-B defect: a TypeError from inside the body must fail
+        closed, not silently rebuild the adapter without its configuration."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        attempts: list[dict] = []
+
+        class _BodyTypeError(BaseAuthAdapter):
+            name = "bodytypeerror"
+
+            def __init__(self, settings=None):
+                super().__init__(settings)
+                attempts.append({"settings": settings})
+                raise TypeError("defective adapter body")
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        register_adapter("bodytypeerror", _BodyTypeError, config_identity="v1")
+        self._select(monkeypatch, "bodytypeerror")
+
+        with pytest.raises(AuthError, match="Failed to configure"):
+            get_auth_adapter()
+        assert len(attempts) == 1, "must not retry construction without settings"
+        assert attempts[0]["settings"] is not None
+
+    def test_constructor_valueerror_fails_closed(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        attempts: list[int] = []
+
+        class _BodyValueError(BaseAuthAdapter):
+            name = "bodyvalueerror"
+
+            def __init__(self, settings=None):
+                super().__init__(settings)
+                attempts.append(1)
+                raise ValueError("bad configuration")
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        register_adapter("bodyvalueerror", _BodyValueError, config_identity="v1")
+        self._select(monkeypatch, "bodyvalueerror")
+
+        with pytest.raises(AuthError, match="Failed to configure"):
+            get_auth_adapter()
+        assert len(attempts) == 1
+
+    def test_malformed_signature_adapter_fails_closed(self, monkeypatch):
+        """A constructor requiring an unknown argument cannot be built; it
+        fails rather than being retried in some other shape."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        class _NeedsUnknownArg(BaseAuthAdapter):
+            name = "needsunknownarg"
+
+            def __init__(self, required_thing):
+                super().__init__()
+                self.required_thing = required_thing
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        register_adapter("needsunknownarg", _NeedsUnknownArg, config_identity="v1")
+        self._select(monkeypatch, "needsunknownarg")
+        with pytest.raises(AuthError, match="Failed to configure"):
+            get_auth_adapter()
+
+    def test_kwargs_constructor_is_treated_as_settings_aware(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        class _Kwargs(BaseAuthAdapter):
+            name = "kwargsadapter"
+
+            def __init__(self, **kwargs):
+                super().__init__(kwargs.get("settings"))
+                self.kwargs = kwargs
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        register_adapter("kwargsadapter", _Kwargs, config_identity="v1")
+        self._select(monkeypatch, "kwargsadapter")
+        assert get_auth_adapter().kwargs.get("settings") is not None
+
+    @pytest.mark.parametrize("provider", ["none", "jwt", "supabase", "keycloak"])
+    def test_builtin_adapters_are_settings_aware(self, provider):
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        reg._ensure_builtin_adapters()
+        assert reg._adapter_registry[provider].accepts_settings is True
+
+
+# ---------------------------------------------------------------------------
+# D5-C: custom config identity contract is strict
+# ---------------------------------------------------------------------------
+
+
+class TestConfigIdentityContract:
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        import mozaiksai.core.auth.adapters.registry as reg
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in _AUTH_MATRIX_VARS:
+            monkeypatch.delenv(var, raising=False)
+        saved = dict(reg._adapter_registry)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+        yield
+        reg._adapter_registry.clear()
+        reg._adapter_registry.update(saved)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+
+    def _adapter_class(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+
+        class _Custom(BaseAuthAdapter):
+            name = "identityprobe"
+
+            def __init__(self, settings=None):
+                super().__init__(settings)
+
+            async def validate_token(self, token):
+                return UserClaims(user_id="u", provider=self.name)
+
+            def is_enabled(self):
+                return True
+
+        return _Custom
+
+    @pytest.mark.parametrize(
+        "bad_identity",
+        [123, 1.5, True, ["rev-a"], {"rev": "a"}, ("rev",), object()],
+    )
+    def test_malformed_literal_identity_rejected_at_registration(self, bad_identity):
+        from mozaiksai.core.auth.adapters.registry import register_adapter
+
+        with pytest.raises(AuthError, match="must be a string"):
+            register_adapter("identityprobe", self._adapter_class(), config_identity=bad_identity)
+
+    @pytest.mark.parametrize("blank_identity", ["", "   ", "\t", "\n"])
+    def test_blank_literal_identity_rejected(self, blank_identity):
+        from mozaiksai.core.auth.adapters.registry import register_adapter
+
+        with pytest.raises(AuthError, match="non-blank"):
+            register_adapter("identityprobe", self._adapter_class(), config_identity=blank_identity)
+
+    @pytest.mark.parametrize("bad_return", [None, 123, ["rev"], {"rev": "a"}])
+    def test_callable_returning_non_string_rejected(self, monkeypatch, bad_return):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        register_adapter(
+            "identityprobe", self._adapter_class(), config_identity=lambda: bad_return
+        )
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "identityprobe")
+        with pytest.raises(AuthError, match="must be a string"):
+            get_auth_adapter()
+
+    @pytest.mark.parametrize("blank_return", ["", "  "])
+    def test_callable_returning_blank_rejected(self, monkeypatch, blank_return):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        register_adapter(
+            "identityprobe", self._adapter_class(), config_identity=lambda: blank_return
+        )
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "identityprobe")
+        with pytest.raises(AuthError, match="non-blank"):
+            get_auth_adapter()
+
+    def test_callable_raising_fails_closed(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        def _boom():
+            raise RuntimeError("identity source unavailable")
+
+        register_adapter("identityprobe", self._adapter_class(), config_identity=_boom)
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "identityprobe")
+        with pytest.raises(AuthError, match="config_identity callable raised"):
+            get_auth_adapter()
+
+    def test_valid_identity_accepted_and_cached(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        register_adapter("identityprobe", self._adapter_class(), config_identity="rev-a")
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "identityprobe")
+        assert get_auth_adapter() is get_auth_adapter()
+
+    def test_no_identity_remains_uncached_not_an_error(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        register_adapter("identityprobe", self._adapter_class())
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "identityprobe")
+        assert get_auth_adapter() is not get_auth_adapter()
+
+
+# ---------------------------------------------------------------------------
+# Built-in snapshot-consumption census
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinSnapshotConsumption:
+    """Captured values must be the values actually consumed all the way down,
+    for every built-in provider."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in (*_AUTH_MATRIX_VARS, "AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL",
+                    "KEYCLOAK_CLIENT_ID", "KEYCLOAK_APP_ID_CLAIM", "KEYCLOAK_TENANT_ID_CLAIM",
+                    "KEYCLOAK_WORKSPACE_ID_CLAIM", "SUPABASE_JWT_SECRET",
+                    "AUTH_ANON_USER_ID", "AUTH_ANON_ROLES", "AUTH_ANON_SCOPES",
+                    "AUTH_ANON_EMAIL", "AUTH_WORKSPACE_ID_CLAIM", "AUTH_CLOCK_SKEW"):
+            monkeypatch.delenv(var, raising=False)
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
+
+    def test_jwt_consumes_captured_values(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+        monkeypatch.setenv("AUTH_AUDIENCE", "aud-a")
+        monkeypatch.setenv("AUTH_WORKSPACE_ID_CLAIM", "ws_a")
+        monkeypatch.setenv("AUTH_CLOCK_SKEW", "77")
+        monkeypatch.setenv("AUTH_JWKS_CACHE_TTL", "31")
+        monkeypatch.setenv("AUTH_DISCOVERY_CACHE_TTL", "33")
+
+        a = get_auth_adapter()
+        assert a._config.jwks_url == "https://a.example.com/jwks.json"
+        assert a._config.issuer == "https://a.example.com"
+        assert a._config.audience == "aud-a"
+        assert a._config.workspace_id_claim == "ws_a"
+        assert a._config.clock_skew_seconds == 77
+        assert a._config.jwks_cache_ttl_seconds == 31
+        assert a._config.discovery_cache_ttl_seconds == 33
+
+    def test_keycloak_consumes_captured_values(self, monkeypatch):
+        """Programmatic only — no admin console or browser login involved."""
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "keycloak")
+        monkeypatch.setenv("KEYCLOAK_URL", "https://kc-a.example.com/")
+        monkeypatch.setenv("KEYCLOAK_REALM", "realm-a")
+        monkeypatch.setenv("KEYCLOAK_CLIENT_ID", "client-a")
+        monkeypatch.setenv("KEYCLOAK_APP_ID_CLAIM", "app_a")
+        monkeypatch.setenv("KEYCLOAK_TENANT_ID_CLAIM", "tenant_a")
+        monkeypatch.setenv("KEYCLOAK_WORKSPACE_ID_CLAIM", "ws_a")
+
+        a = get_auth_adapter()
+        assert a._keycloak_url == "https://kc-a.example.com"
+        assert a._realm == "realm-a"
+        assert a._client_id == "client-a"
+        assert a._app_id_claim == "app_a"
+        assert a._tenant_id_claim == "tenant_a"
+        assert a._workspace_id_claim == "ws_a"
+        # Derived URLs follow the captured values.
+        assert a._issuer == "https://kc-a.example.com/realms/realm-a"
+        assert a._jwks_url.startswith("https://kc-a.example.com/realms/realm-a")
+
+        # Mutating the environment does not mutate the existing adapter.
+        monkeypatch.setenv("KEYCLOAK_REALM", "realm-b")
+        assert a._realm == "realm-a"
+        assert a._issuer == "https://kc-a.example.com/realms/realm-a"
+
+    def test_supabase_consumes_captured_values(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("SUPABASE_URL", "https://proj-a.supabase.co/")
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "secret-a")
+
+        a = get_auth_adapter()
+        assert a._supabase_url == "https://proj-a.supabase.co"
+        assert a._jwt_secret == "secret-a"
+        assert a._issuer == "https://proj-a.supabase.co/auth/v1"
+
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "secret-b")
+        assert a._jwt_secret == "secret-a"
+
+    def test_no_auth_consumes_captured_values(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.setenv("AUTH_ANON_USER_ID", "dev_alice")
+        monkeypatch.setenv("AUTH_ANON_EMAIL", "alice@example.com")
+        monkeypatch.setenv("AUTH_ANON_ROLES", "admin,user")
+        monkeypatch.setenv("AUTH_ANON_SCOPES", "access_as_user,extra.scope")
+
+        a = get_auth_adapter()
+        assert a._default_user_id == "dev_alice"
+        assert a._default_email == "alice@example.com"
+        assert a._default_roles == ["admin", "user"]
+        assert a._default_scopes == ["access_as_user", "extra.scope"]
+
+        monkeypatch.setenv("AUTH_ANON_USER_ID", "dev_bob")
+        assert a._default_user_id == "dev_alice"

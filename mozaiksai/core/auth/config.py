@@ -14,6 +14,8 @@ import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 
+from mozaiksai.core.auth.cache_ttl import parse_cache_ttl_seconds
+
 
 @dataclass(frozen=True)
 class AuthConfig:
@@ -128,8 +130,12 @@ def get_auth_config() -> AuthConfig:
         email_claim=os.getenv("AUTH_EMAIL_CLAIM", "email"),
         roles_claim=os.getenv("AUTH_ROLES_CLAIM", "roles"),
         # Cache TTLs
-        jwks_cache_ttl_seconds=int(os.getenv("AUTH_JWKS_CACHE_TTL", "3600")),
-        discovery_cache_ttl_seconds=int(os.getenv("AUTH_DISCOVERY_CACHE_TTL", "86400")),
+        jwks_cache_ttl_seconds=parse_cache_ttl_seconds(
+            "AUTH_JWKS_CACHE_TTL", os.getenv("AUTH_JWKS_CACHE_TTL"), default=3600
+        ),
+        discovery_cache_ttl_seconds=parse_cache_ttl_seconds(
+            "AUTH_DISCOVERY_CACHE_TTL", os.getenv("AUTH_DISCOVERY_CACHE_TTL"), default=86400
+        ),
         # Other
         algorithms=algorithms,
         clock_skew_seconds=int(os.getenv("AUTH_CLOCK_SKEW", "120")),

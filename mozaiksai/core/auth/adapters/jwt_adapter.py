@@ -14,6 +14,7 @@ from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
+from mozaiksai.core.auth.cache_ttl import parse_cache_ttl_seconds
 from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
 from mozaiksai.core.auth.jwks import JWKSClient
 
@@ -88,6 +89,12 @@ class JWTAdapterConfig:
     # Optional: required scope for user endpoints
     required_scope: str = ""
 
+    # Cache TTLs for this adapter's own discovery/JWKS clients. Held here so
+    # the lazily created clients derive from the same immutable snapshot that
+    # identifies the adapter, never from live environment.
+    jwks_cache_ttl_seconds: int = 3600
+    discovery_cache_ttl_seconds: int = 86400
+
     def __post_init__(self):
         if self.algorithms is None:
             self.algorithms = ["RS256"]
@@ -117,6 +124,13 @@ class JWTAdapterConfig:
                 f"AUTH_CLOCK_SKEW must be an integer number of seconds, got {raw_clock_skew!r}"
             ) from exc
 
+        jwks_cache_ttl_seconds = parse_cache_ttl_seconds(
+            "AUTH_JWKS_CACHE_TTL", _get("AUTH_JWKS_CACHE_TTL", "3600")
+        )
+        discovery_cache_ttl_seconds = parse_cache_ttl_seconds(
+            "AUTH_DISCOVERY_CACHE_TTL", _get("AUTH_DISCOVERY_CACHE_TTL", "86400")
+        )
+
         return cls(
             jwks_url=_get("AUTH_JWKS_URL"),
             issuer=_get("AUTH_ISSUER"),
@@ -137,6 +151,8 @@ class JWTAdapterConfig:
             algorithms=algorithms,
             clock_skew_seconds=clock_skew_seconds,
             required_scope=_get("AUTH_REQUIRED_SCOPE"),
+            jwks_cache_ttl_seconds=jwks_cache_ttl_seconds,
+            discovery_cache_ttl_seconds=discovery_cache_ttl_seconds,
         )
 
 
@@ -191,9 +207,13 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
     def _get_discovery_client(self) -> OIDCDiscoveryClient:
         if self._discovery_client is None:
+            # Snapshot-bound: the URL and TTL come from this adapter's own
+            # immutable config, and consult_environment=False forbids the
+            # client from reading live environment for anything.
             self._discovery_client = OIDCDiscoveryClient(
                 discovery_url=self._configured_discovery_url(),
-                cache_ttl=None,
+                cache_ttl=self._config.discovery_cache_ttl_seconds,
+                consult_environment=False,
             )
         return self._discovery_client
 
@@ -223,7 +243,13 @@ class GenericJWTAdapter(BaseAuthAdapter):
                         500,
                         self.name,
                     ) from exc
-            self._jwks_client = JWKSClient(jwks_url=jwks_url, use_discovery=False)
+            self._jwks_client = JWKSClient(
+                jwks_url=jwks_url,
+                cache_ttl=self._config.jwks_cache_ttl_seconds,
+                use_discovery=False,
+                consult_environment=False,
+                discovery_client=self._get_discovery_client(),
+            )
         return self._jwks_client
 
     async def _get_expected_issuer(self) -> str:
