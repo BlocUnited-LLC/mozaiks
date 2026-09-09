@@ -545,6 +545,39 @@ agents:
       - `transition_graph.yaml` must use flat rule objects with `source_agent`,
         `target_agent`, and `transition_type`. Never emit nested keys such as
         `after_turn: {source_agent: ...}`.
+  - id: operation_outcomes
+    heading: '[OPERATION OUTCOMES]'
+    content: |-
+      Include outcome_plans in WorkflowBundleBuilderOutput. Declare a plan for every
+      operation whose success or failure determines the workflow's next step, including
+      validation, persistence, and external actions. Use [] only when none exist.
+      Each plan names agent, function, context_key, attempts_key, result_field,
+      error_value, max_attempts, retry_on, and routes [{value, target_agent}].
+      Use one registered structured-output agent and one auto-invoked tool per planned
+      operation. Its implementation accepts context_variables and returns a mapping
+      containing the declared result_field with one of the route values.
+      Planned operations belong to network agents, not task-batch triggers or workers.
+      Use task_batches.yaml failure_policy/retry_limit for parallel task execution;
+      place an outcome-dependent check in a separate network agent after the batch.
+      The factory owns outcome bindings in tools.yaml, the two context definitions,
+      and all transitions from that agent. Omit those generated definitions and
+      source-agent transitions from files; do not duplicate them or write the outcome
+      and attempt keys from custom tools. Other agents may route into this agent.
+      Every result has one explicit destination. error_value routes to user for
+      interactive recovery or terminate with termination_reason=workflow_failed
+      for unattended workflows. Other routes use termination_reason=null unless
+      explicitly ending the workflow.
+      Default to max_attempts=1 and retry_on=[]. Permit retries only for named results
+      known to occur before side effects, or operations whose implementation prevents
+      duplicate effects. max_attempts includes the first invocation; the runtime owns
+      the counter. Unexpected exceptions and unknown outcomes never authorize retries.
+      A timeout may mean an external action already succeeded. Reconcile that state
+      through a separate declared operation before attempting the action again.
+      Use app-specific outcome names for app-specific recovery. Keep business checks
+      in app modules and provider mechanics behind the declared integration boundary.
+      An agent's statement of success is not evidence that an external action succeeded.
+      Implement concrete error handling in Python; do not invent new YAML routing kinds,
+      additional schedulers, or prompt-only retry counters.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -847,7 +880,7 @@ agents:
       - Do NOT generate `backend/models.py`, `ctx.db`, or app-module files — those belong to AppGenerator.
       - Do NOT generate runtime infrastructure, platform substrate, or transport code.
       - Do NOT import from `_shared/` — all imports must be workflow-local or `mozaiksai.*`.
-      - Tool implementations must be `async def` and implement the declared operation. There is no later agent that fills in tool bodies.
+      - Tool implementations must be `async def`, implement the declared operation, and return the declared outcomes. There is no later agent that fills in tool bodies. Never return invented success data.
       - Emit each filename exactly once. Workflow declaratives use `.yaml`; do not emit retired `.json`/`.yml` alternatives or unrendered `.j2` files.
       - YAML files must be valid YAML. No duplicate keys.
       - Every agent in agents.yaml must have a registry entry in structured_outputs.yaml (null if no structured output).

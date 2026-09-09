@@ -202,6 +202,7 @@ class TransitionRuleSpec(DeclarativeModel):
     context_expression: str | None = None
     tool_name: str | None = None
     transition_target: str | None = None
+    termination_reason: Literal["workflow_complete", "workflow_failed"] | None = None
 
     @field_validator("source_agent", "target_agent")
     @classmethod
@@ -221,6 +222,8 @@ class TransitionRuleSpec(DeclarativeModel):
 
     @model_validator(mode="after")
     def _validate_condition_shape(self) -> TransitionRuleSpec:
+        if self.termination_reason is not None and self.target_agent != "terminate":
+            raise ValueError("termination_reason requires target_agent='terminate'")
         if self.transition_type == "after_turn":
             if (
                 self.condition_type
@@ -548,6 +551,46 @@ class UIToolContractSpec(DeclarativeModel):
         return value
 
 
+class ToolOutcomeSpec(DeclarativeModel):
+    """Finite results and invocation budget for one auto-invoked operation."""
+
+    context_key: str
+    attempts_key: str
+    result_field: str = "status"
+    values: list[str] = Field(min_length=1)
+    error_value: str
+    max_attempts: int = Field(default=1, strict=True, ge=1, le=100)
+    retry_on: list[str] = Field(default_factory=list)
+
+    @field_validator("context_key", "attempts_key", "result_field", "error_value")
+    @classmethod
+    def _validate_names(cls, value: str) -> str:
+        if not value or value != value.strip():
+            raise ValueError("outcome names must be non-empty and have no surrounding whitespace")
+        return value
+
+    @field_validator("values", "retry_on")
+    @classmethod
+    def _validate_values(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values) or any(not v or v != v.strip() for v in values):
+            raise ValueError("outcome values must be unique non-empty strings")
+        return values
+
+    @model_validator(mode="after")
+    def _validate_contract(self) -> ToolOutcomeSpec:
+        for key in (self.context_key, self.attempts_key):
+            require_application_context_name_allowed(key, where="tools.yaml outcome")
+        if self.context_key == self.attempts_key:
+            raise ValueError("outcome context_key and attempts_key must differ")
+        if self.error_value not in self.values:
+            raise ValueError("outcome error_value must be declared in values")
+        if not set(self.retry_on).issubset(self.values) or self.error_value in self.retry_on:
+            raise ValueError("retry_on must contain declared outcomes excluding error_value")
+        if bool(self.retry_on) != (self.max_attempts > 1):
+            raise ValueError("retry_on requires max_attempts > 1, and vice versa")
+        return self
+
+
 class ToolSpec(DeclarativeModel):
     agent: str | list[str]
     file: str
@@ -556,6 +599,7 @@ class ToolSpec(DeclarativeModel):
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"]
     auto_tool_call: bool = False
     bind_to_agent: bool = True
+    outcome: ToolOutcomeSpec | None = None
     ui: ToolUIConfig | None = None
     ui_contract: UIToolContractSpec | None = None
 
@@ -596,6 +640,10 @@ class ToolSpec(DeclarativeModel):
 
     @model_validator(mode="after")
     def _validate_ui_requirements(self) -> ToolSpec:
+        if self.outcome is not None and (not self.auto_tool_call or self.bind_to_agent):
+            raise ValueError("tool outcome requires auto_tool_call=true and bind_to_agent=false")
+        if self.outcome is not None and not isinstance(self.agent, str):
+            raise ValueError("tool outcome requires one agent name, not an agent list")
         if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(

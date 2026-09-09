@@ -412,98 +412,48 @@ def _structured_output_validation_failed(runner_result: Any) -> bool:
     )
 
 
-async def _emit_validated_structured_outputs_from_runner_result(
+async def _dispatch_agent_packet_output(
     *,
-    runner_result: Any,
+    agent_name: str,
+    packet: Any,
     workflow_name: str,
     chat_id: str,
     app_id: str,
     user_id: str | None,
-    turn_sequence_start: int,
-    context_vars_dict: dict[str, Any],
-    context_bridge: Any | None,
-    structured_registry: dict[str, Any] | None,
+    context_bridge: Any,
+    structured_registry: dict[str, Any],
+    auto_tool_agents: set[str],
     wf_logger: Any,
 ) -> None:
-    """Emit runtime structured-output events from AG2 Network results."""
+    """Validate and dispatch this turn's output before AG2 folds its packet."""
+    from .outputs.runtime_events import emit_validated_agent_output
 
-    if _structured_output_validation_failed(runner_result):
+    model_cls = _structured_model_for_agent(structured_registry, agent_name)
+    if model_cls is None:
         return
-
-    structured_outputs = list(getattr(runner_result, "structured_outputs", []) or [])
-    if not structured_outputs:
-        return
-
-    try:
-        from .outputs.runtime_events import emit_validated_agent_output
-        from .workflow_manager import workflow_manager
-
-        auto_tool_agent_keys = {
-            _normalized_agent_name(name)
-            for name in workflow_manager.get_auto_tool_agents(workflow_name)
-        }
-    except Exception as err:
-        wf_logger.debug(
-            "[%s] STRUCTURED_OUTPUT_EVENT_SETUP_FAILED: %s",
-            workflow_name.upper(),
-            err,
-        )
-        return
-
-    for output_index, entry in enumerate(structured_outputs):
-        if not isinstance(entry, dict):
-            continue
-        agent_name = str(entry.get("agent") or "").strip()
-        structured_data = entry.get("structured_data")
-        if not agent_name or not isinstance(structured_data, dict):
-            continue
-        model_cls = _structured_model_for_agent(structured_registry, agent_name)
-        if model_cls is None:
-            wf_logger.debug(
-                "[%s] STRUCTURED_OUTPUT_MODEL_LOOKUP_MISSED agent=%s",
-                workflow_name.upper(),
-                agent_name,
-            )
-            continue
-
-        model_name = str(entry.get("model_name") or getattr(model_cls, "__name__", "") or "").strip()
-        # structured_output is a runtime-owned transient projection, not
-        # application context state. It reaches auto tools through the
-        # read-only overlay in AutoToolEventHandler, never through
-        # pattern/workflow context writes (which would collide with declared
-        # context authority and leak into persistence and replay).
-
-        auto_tool_enabled = _normalized_agent_name(agent_name) in auto_tool_agent_keys
-        _conv_logger.info(
-            "[%s] STRUCTURED_OUTPUT_VALIDATED agent=%s model=%s keys=%s auto_tool=%s",
-            workflow_name,
-            agent_name,
-            model_name,
-            sorted(str(key) for key in structured_data),
-            auto_tool_enabled,
-            extra={
-                "agent_transcript_scope": "summary",
-                "workflow_name": workflow_name,
-                "chat_id": chat_id,
-                "app_id": app_id,
-                "agent_name": agent_name,
-            },
-        )
-
-        await emit_validated_agent_output(
-            current_agent_name=agent_name,
-            last_reply=structured_data,
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=app_id,
-            user_id=user_id,
-            turn_sequence=int(turn_sequence_start) + output_index,
-            context_vars_dict=context_vars_dict,
-            context_bridge=context_bridge,
-            structured_registry={agent_name: model_cls},
-            auto_tool_agents={agent_name} if auto_tool_enabled else set(),
-            wf_logger=wf_logger,
-        )
+    causation_id = str(getattr(packet, "causation_id", "") or "")
+    channel_id = str(getattr(packet, "channel_id", "") or "")
+    if not causation_id or not channel_id:
+        raise ValueError("structured_output_missing_packet_identity")
+    payload = (getattr(packet, "event_data", {}) or {}).get("body")
+    snapshot = context_bridge.snapshot() if context_bridge is not None else {}
+    accepted = await emit_validated_agent_output(
+        current_agent_name=agent_name,
+        last_reply=payload,
+        workflow_name=workflow_name,
+        chat_id=chat_id,
+        app_id=app_id,
+        user_id=user_id,
+        turn_sequence=0,
+        turn_idempotency_key=f"{chat_id}:{channel_id}:{agent_name}:{causation_id}",
+        context_vars_dict=snapshot,
+        context_bridge=context_bridge,
+        structured_registry={agent_name: model_cls},
+        auto_tool_agents=auto_tool_agents,
+        wf_logger=wf_logger,
+    )
+    if accepted is None:
+        raise ValueError(f"structured output validation failed for {agent_name}: invalid packet output")
 
 
 async def _project_ag2_wal_to_mozaiks_transport(
@@ -626,6 +576,7 @@ async def _run_ag2_network_phase(
     context_authority_policy: Any = None,
     resume_existing_only: bool = False,
     resume_context_updates: Mapping[str, Any] | None = None,
+    agent_output_handler: Callable | None = None,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -640,6 +591,7 @@ async def _run_ag2_network_phase(
             structured_registry=structured_registry,
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
+            agent_output_handler=agent_output_handler,
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
@@ -1055,23 +1007,21 @@ async def run_workflow_orchestration(
             max_turns=max_turns,
         )
 
-        emitted_structured_result_ids: set[int] = set()
+        from .workflow_manager import workflow_manager
 
-        async def _emit_structured_once(runner_result_for_emit: Any, sequence_start: int) -> None:
-            result_id = id(runner_result_for_emit)
-            if result_id in emitted_structured_result_ids:
-                return
-            emitted_structured_result_ids.add(result_id)
-            await _emit_validated_structured_outputs_from_runner_result(
-                runner_result=runner_result_for_emit,
+        auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
+
+        async def _before_agent_packet(agent_name: str, packet: Any) -> None:
+            await _dispatch_agent_packet_output(
+                agent_name=agent_name,
+                packet=packet,
                 workflow_name=workflow_name,
                 chat_id=chat_id,
                 app_id=app_id,
                 user_id=user_id,
-                turn_sequence_start=sequence_start,
-                context_vars_dict=ctx_dict,
                 context_bridge=context_bridge,
                 structured_registry=structured_registry,
+                auto_tool_agents=auto_tool_agents,
                 wf_logger=wf_logger,
             )
 
@@ -1103,6 +1053,7 @@ async def run_workflow_orchestration(
                 initial_agent_name=trigger_agent_name,
                 initial_message=network_prompt,
                 context_variables=dict(ctx_dict),
+                agent_output_handler=_before_agent_packet,
                 structured_registry=structured_registry,
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
@@ -1114,7 +1065,6 @@ async def run_workflow_orchestration(
             if first_phase_result.status is not RunStatus.COMPLETED:
                 runner_result = first_phase_result
             else:
-                await _emit_structured_once(first_phase_result, projected_sequence)
                 projected_sequence = await _project_ag2_wal_to_mozaiks_transport(
                     runner_result=first_phase_result,
                     transport=transport,
@@ -1175,6 +1125,7 @@ async def run_workflow_orchestration(
                         transition_rules=transition_rules,
                         initial_agent_name=continuation_agent,
                         initial_message="Continue with the completed deterministic task batch outputs.",
+                        agent_output_handler=_before_agent_packet,
                         context_variables=ctx_dict,
                         structured_registry=structured_registry,
                         max_turns=max_turns,
@@ -1197,6 +1148,7 @@ async def run_workflow_orchestration(
                 initial_agent_name=initial_agent_name,
                 initial_message=network_prompt,
                 context_variables=ctx_dict,
+                agent_output_handler=_before_agent_packet,
                 structured_registry=structured_registry,
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
@@ -1207,8 +1159,6 @@ async def run_workflow_orchestration(
             )
 
         structured_validation_failed = _structured_output_validation_failed(runner_result)
-        if not structured_validation_failed:
-            await _emit_structured_once(runner_result, projected_sequence)
 
         if project_final_runner_result and not structured_validation_failed:
             sequence_counter = await _project_ag2_wal_to_mozaiks_transport(

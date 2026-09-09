@@ -355,6 +355,79 @@ Rules:
 - `ui_contract` belongs only on `UI_Tool`.
 - Tool references use `file` and `function`.
 
+#### Operation Outcomes
+
+An outcome-dependent operation uses one structured-output agent and one
+auto-invoked tool. The optional `tools[].outcome` contract gives that operation
+a finite result vocabulary and an invocation budget:
+
+```yaml
+tools:
+  - agent: CheckAgent
+    file: tools/check_document.py
+    function: check_document
+    tool_type: Agent_Tool
+    auto_tool_call: true
+    bind_to_agent: false
+    outcome:
+      context_key: document_outcome
+      attempts_key: document_attempts
+      result_field: status
+      values: [ready, needs_revision, blocked]
+      error_value: blocked
+      max_attempts: 2
+      retry_on: [needs_revision]
+```
+
+The function accepts `context_variables` and returns a mapping or Pydantic model
+whose top-level `status` field is one of these values. Custom code implements
+the operation but must not write its outcome or attempt keys. The runtime:
+
+1. writes `error_value` before execution so a prior success cannot survive;
+2. checks and increments the operation's attempt count;
+3. invokes the tool once and validates its returned outcome;
+4. commits the result into context before AG2 evaluates the next transition.
+
+Exceptions, invalid results, invalid counter state, and exhausted attempts map
+to `error_value`. Cancellation propagates and leaves the operation blocked.
+Only a prior `retry_on` result permits another invocation. `max_attempts` counts
+all invocations, including the first, across this workflow execution and its
+continuations; it is a static integer from 1 to 100. The default is one attempt
+with no retry outcomes. Use a new workflow execution for a new operation.
+
+Both context keys must be declared with `source.type: state`, `persisted: true`,
+and `writer_ids: [deterministic_tool]`. The outcome key has `type: string`,
+`authority_class: closed_writer_routing_state`, and default `error_value`.
+The counter has `type: integer`, `authority_class: closed_writer_quality_state`,
+and default `0`. Model output and user input cannot set these protected values.
+
+Every declared value requires exactly one source-scoped `context_equals` rule
+on the outcome key. `error_value` routes to `user`, or to `terminate` with
+`termination_reason: workflow_failed` for an unattended workflow. The latter
+produces a failed run, not successful completion. An optional `after_turn`
+fallback uses one of these failure destinations; unrelated conditions from this source agent
+are rejected because they could bypass outcome handling. A missing current-turn
+result or a dynamic handoff/finish bypass fails execution before routing.
+
+Application-specific outcomes and recovery agents remain extensible. A known
+recoverable result can route to a repair agent, an alternative operation, or a
+partial-result review. Unexpected errors pause for attention or end as failed. Side-effecting
+actions need application-owned idempotency or reconciliation; an invocation
+budget does not provide distributed exactly-once execution or rollback of
+external actions. AG2 provider-call retries are separate from business retries.
+
+Validated structured outputs are dispatched at the packet boundary, before AG2
+folds state and chooses the next agent. Auto-tool delivery uses the channel,
+agent, and incoming envelope's causation identity; collected output history is
+not dispatched again after the run. The runtime retains the existing auto-tool
+execution checkpoints for duplicate delivery within a process.
+
+These graph-bound operations belong to network agents, not task-batch triggers
+or workers. Task batches retain their existing `failure_policy` and
+`retry_limit`; put an outcome-dependent check in a separate network agent
+after the batch. Invalid combinations fail validation rather than bypassing
+the declared outcome routes.
+
 ### `extended_orchestration/task_batches.yaml`
 
 Only add this file if the workflow uses workflow-local task batches. Task

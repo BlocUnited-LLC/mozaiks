@@ -143,8 +143,9 @@ conveyors:
     ]
 
 
+@pytest.mark.parametrize("export_result", ["not_requested", {"success": True}, {"success": False}, None, "exception"])
 def test_generate_and_download_writes_bundle_files_and_creates_zip(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, export_result,
 ) -> None:
     """generate_and_download writes WorkflowBundleBuilderOutput files to disk and zips them."""
     files = _minimal_workflow_files("ReviewWorkflow")
@@ -190,8 +191,15 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     monkeypatch.setattr(
         generate_and_download_module,
         "use_ui_tool",
-        AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}}),
+        AsyncMock(return_value={
+            "status": "completed", "data": {}, "agentContext": {},
+            **({"action": "export_to_github"} if export_result != "not_requested" else {}),
+        }),
     )
+    monkeypatch.setattr(generate_and_download_module, "export_agent_workflow_to_github", AsyncMock(
+        return_value=export_result,
+        side_effect=TimeoutError("export timed out") if export_result == "exception" else None,
+    ))
 
     result = asyncio.run(
         generate_and_download_module.generate_and_download(
@@ -201,7 +209,9 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
         )
     )
 
-    assert result["status"] == "success"
+    succeeded = export_result in ("not_requested", {"success": True})
+    assert result["status"] == ("success" if succeeded else "error")
+    assert result["outcome"] == ("ready" if succeeded else "blocked")
     assert context.data["workflow_bundle_validation_status"] == "passed"
     assert len(result["ui_files"]) == 1
     zip_entry = result["ui_files"][0]

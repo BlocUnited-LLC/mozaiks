@@ -18,6 +18,10 @@ This project follows a practical pre-1.0 changelog format:
   implementations before packaging or repair. Capability-pack templates reject
   missing inputs and invalid rendered YAML/JSON; readiness configuration preserves
   string values containing YAML punctuation.
+- Workflow operations can declare validated outcomes and enforced attempt budgets.
+  AgentGenerator materializes their context and transition rules from typed plans;
+  factory export failures now route to bounded repair or user attention instead of
+  completing as successful downloads.
 
 - **Exact structured-output auto-tool contracts**: declared workflow
   structured outputs are now exact at runtime — an agent output carrying an

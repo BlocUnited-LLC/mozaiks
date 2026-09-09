@@ -2,6 +2,10 @@ version: 1
 description: Canonical AG2 1.0 Network patternbook for generated Mozaiks workflows.
 authority: factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml
 global_rules:
+  - Outcome-dependent operations use WorkflowBundleBuilderOutput.outcome_plans; the factory materializes tools.yaml outcome contracts, protected state, and ordinary context_equals graph rules.
+  - Each operation declares every result route, an error route to user or terminate with termination_reason workflow_failed, and a total attempt budget. Only declared retry_on results permit another invocation; exceptions and unknown results stop for attention.
+  - Graph outcome operations belong to network agents, not task-batch triggers or workers; task_batches.yaml owns parallel task failure policy.
+  - Use app-specific recovery agents and tool implementations within this contract. AG2 executes the resulting graph; workflow code must not introduce another scheduler.
   - Workflow YAML remains the authoring contract; runtime compiles it to AG2 1.0 Network objects.
   - Handoff conditions are deterministic only. Do not generate llm or string_llm condition types.
   - LLM reasoning can classify intent by setting context variables or returning structured output before routing.

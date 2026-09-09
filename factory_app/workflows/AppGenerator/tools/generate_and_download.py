@@ -491,6 +491,23 @@ async def _inject_agent_context_env(*, files_map: dict[str, str], app_id: str, c
     files_map[".env.example"] = "\n".join(lines).rstrip() + "\n"
 
 
+def _export_repair_outcome(acceptance: dict[str, Any]) -> str:
+    integration = acceptance.get("workflow_integration_repair") or {}
+    bundle = acceptance.get("bundle_repair") or {}
+    if integration.get("status") == "blocked" or bundle.get("status") == "blocked":
+        return "blocked"
+    if integration.get("status") == "needs_revision":
+        return "repair_integration"
+    if bundle.get("status") == "needs_revision":
+        return {
+            "AppSchemaAgent": "repair_schema",
+            "ConfigMiddlewareAgent": "repair_integration",
+            "ServiceAgent": "repair_service",
+            "FrontendStubAgent": "repair_frontend",
+        }.get(bundle.get("target_agent"), "blocked")
+    return "blocked"
+
+
 async def _emit_deployment_event(*, chat_id: str | None, status: str, data: dict) -> None:
     if not chat_id:
         return
@@ -988,6 +1005,7 @@ async def generate_and_download(
             wf_logger.error("App bundle acceptance failure: %s", failed_test)
         return {
             "status": "error",
+            "outcome": _export_repair_outcome(acceptance_result),
             "message": (
                 "Generated app bundle failed deterministic acceptance. "
                 "Fix the reported contract errors and regenerate."
@@ -1173,6 +1191,7 @@ async def generate_and_download(
         _context_set(context_variables, "app_download_ready", False)
         return {
             "status": "cancelled",
+            "outcome": "cancelled",
             "ui_response": response,
             "agent_message_id": agent_message_id,
             "ui_files": [],
@@ -1220,7 +1239,8 @@ async def generate_and_download(
                 }
                 action = None
                 return {
-                    "status": "success",
+                    "status": "blocked",
+                    "outcome": "blocked",
                     "ui_response": response,
                     "agent_message_id": agent_message_id,
                     "ui_files": ui_files,
@@ -1254,6 +1274,7 @@ async def generate_and_download(
             )
     except Exception as deploy_err:
         wf_logger.warning("GitHub export flow failed: %s", deploy_err)
+        deployment_result = {"success": False, "error": "GitHub export failed; inspect export status before retrying."}
 
     download_result = {
         "bundle_dir": str(app_dir.resolve()),
@@ -1268,8 +1289,12 @@ async def generate_and_download(
     _context_set(context_variables, "app_download_ready", True)
     _context_set(context_variables, "download_result", download_result)
 
+    export_failed = action == "export_to_github" and (
+        not isinstance(deployment_result, dict) or deployment_result.get("success") is not True
+    )
     return {
-        "status": "success",
+        "status": "error" if export_failed else "success",
+        "outcome": "blocked" if export_failed else "ready",
         "ui_response": response,
         "agent_message_id": agent_message_id,
         "ui_files": ui_files,
