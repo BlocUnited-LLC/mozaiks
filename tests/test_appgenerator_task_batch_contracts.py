@@ -416,7 +416,7 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
             },
         )
 
-    fake_agent = AsyncMock()
+    fake_agent = AsyncMock(_mozaiks_tool_outcome=None)
 
     with patch("mozaiksai.core.workflow.task_batches.AG2TaskBatchRunner") as mock_runner_cls:
         mock_runner_cls.return_value.run = _fake_runner_run
