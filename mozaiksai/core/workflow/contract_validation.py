@@ -15,9 +15,9 @@ def validate_workflow_context_contract(
     *,
     workflow_name: str,
     workflow_config: dict[str, Any],
-    workflow_path: Path,
+    workflow_path: Path | None = None,
 ) -> None:
-    """Validate context declarations against routing and task-batch contracts."""
+    """Validate context references, including on-disk task batches when supplied."""
 
     context_config = workflow_config.get("context_variables")
     declared = set((context_config or {}).get("definitions") or {})
@@ -56,8 +56,8 @@ def validate_workflow_context_contract(
                     f"transition_graph {source}->{target} references undeclared context variable {variable!r}"
                 )
 
-    task_batches_path = workflow_path / "extended_orchestration" / "task_batches.yaml"
-    if task_batches_path.exists():
+    task_batches_path = workflow_path / "extended_orchestration" / "task_batches.yaml" if workflow_path else None
+    if task_batches_path is not None and task_batches_path.exists():
         from mozaiksai.core.workflow.task_batches import parse_task_batches_config
 
         raw = yaml.safe_load(task_batches_path.read_text(encoding="utf-8")) or {}

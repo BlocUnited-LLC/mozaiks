@@ -177,7 +177,7 @@ def _workflow_generation_prompt(
         f"{task_batch_clause}\n"
         "Keep the smoke bundle concise: small agent roster, small structured models, "
         "no external integrations, and no custom UI unless the assigned pattern truly requires it.\n"
-        "Keep tool stubs workflow-local under tools/. Raise NotImplementedError for unimplemented stubs.\n"
+        "Keep complete tool implementations workflow-local under tools/. Unfinished stubs block export.\n"
         "Return only WorkflowBundleBuilderOutput JSON."
     )
 

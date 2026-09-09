@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated workflow exports now validate all runtime YAML contracts and tool
+  implementations before packaging or repair. Capability-pack templates reject
+  missing inputs and invalid rendered YAML/JSON; readiness configuration preserves
+  string values containing YAML punctuation.
+
 - **Exact structured-output auto-tool contracts**: declared workflow
   structured outputs are now exact at runtime — an agent output carrying an
   undeclared field (top-level or nested) rejects before any normalization, so

@@ -507,7 +507,7 @@ async def test_typed_plan_materializes_validates_loads_and_serves_same_bundle(
     }
     assert required <= files_one.keys()
     assert list(files_one) == sorted(files_one)
-    assert "readiness_profile: host_operator_platform" in files_one["config/operator_readiness.yaml"]
+    assert yaml.safe_load(files_one["config/operator_readiness.yaml"])["readiness_profile"] == "host_operator_platform"
     assert "{{ readiness_profile }}" not in files_one["config/operator_readiness.yaml"]
     page = yaml.safe_load(files_one["ui/pages/reports.yaml"])
     assert page["sections"][0]["primitive"] == "DataTable"
