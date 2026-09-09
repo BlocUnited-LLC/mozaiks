@@ -1,7 +1,7 @@
 # AgentGenerator Output Assembly Contract
 
 **Status:** CANONICAL — describes what actually exists
-**Last verified:** 2026-06-14
+**Last verified:** 2026-09-09
 **Source files:**
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
@@ -24,14 +24,14 @@ AgentGenerator uses the **task batch pattern**:
 2. The `workflow_generation_tasks` task batch fires — one `WorkflowBundleBuilderAgent` instance per workflow in the pack, running in parallel
 3. Each worker emits a `WorkflowBundleBuilderOutput` with a `files` list of `CodeFile` entries
 4. The runtime collects all results into `context_variables["workflow_bundle_results"]`, keyed by task_id
-5. `generate_and_download` reads `workflow_bundle_results`, writes each bundle to disk, zips them, and presents the download UI
+5. `generate_and_download` validates `workflow_bundle_results` against the runtime contracts, then writes each accepted bundle to disk, zips it, and presents the download UI
 
 There are no sequential planning agents scraping MongoDB. Each `WorkflowBundleBuilderAgent` instance owns its full bundle output end-to-end.
 
 Generated workflow bundles are staged at:
 
 ```text
-$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{workflow_name}/
+$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{build_id}/{workflow_name}/
 ```
 
 They do not become active runtime-loaded workflows until an explicit promotion
@@ -111,6 +111,19 @@ files:
 Each `CodeFile` has:
 - `filename` — workflow-local relative path (e.g., `tools/save_result.py`, `ui/index.js`)
 - `content` — full file content as a string
+
+The outer structured response does not validate the YAML or Python inside
+`content`. The quality gate parses all eight required workflow documents, plus
+optional `a2a.yaml`, through the same schema parsers used by the runtime.
+It also checks context references, transition compilation, and task-batch
+contracts. Duplicate filenames, retired declarative JSON/YML variants, and
+unrendered `.j2` files block export.
+
+Declared tools must have an included Python file and matching top-level function.
+Python syntax errors and unfinished tool implementations block export. Workers
+must implement the tool behavior; there is no later tool-implementation stage.
+These static checks do not prove arbitrary business logic or external integrations
+work. Functional execution tests remain necessary for those behaviors.
 
 ---
 
@@ -221,7 +234,7 @@ smoke.
 ### Files Written
 
 ```
-$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/
+$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{build_id}/
 ├── {WorkflowName}/
 │   ├── orchestrator.yaml
 │   ├── agents.yaml

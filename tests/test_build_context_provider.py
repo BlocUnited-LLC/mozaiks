@@ -366,3 +366,30 @@ def test_load_and_materialization_reject_same_representative_pack(tmp_path: Path
     with pytest.raises(ManagedCapabilityTemplateError, match="schema validation"):
         resolve_templates_for_pack(pack_root, "invalid_pack")
 
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [("config/settings.yaml.j2", "setting: [unterminated"),
+     ("config/settings.json.j2", '{"setting": }')],
+)
+def test_materialization_rejects_invalid_rendered_format(tmp_path: Path, filename: str, content: str) -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+        resolve_templates_for_pack,
+    )
+
+    pack_root = tmp_path / "example_pack"
+    _write_yaml(pack_root / "context.yaml", {
+        "context_id": "example_pack",
+        "applies_to_workflows": ["AppGenerator"],
+        "assets": [{"path": "templates", "kind": "templates"}],
+        "pack": {"id": "example_pack", "version": "0.1.0", "status": "active", "capability_source": "config_file"},
+    })
+    template = pack_root / "templates" / filename
+    template.parent.mkdir(parents=True)
+    template.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ManagedCapabilityTemplateError, match="could not render valid") as error:
+        resolve_templates_for_pack(pack_root, "example_pack")
+    assert filename in str(error.value)
+

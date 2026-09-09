@@ -579,10 +579,9 @@ def _validate_mozaikspay_facade(
             )
 
 
-def _validate_placeholders(
-    files: dict[str, str],
-    diagnostics: list[FunctionalGeneratedAppDiagnostic],
-) -> None:
+def scan_placeholder_implementations(files: dict[str, str]) -> list[FunctionalGeneratedAppDiagnostic]:
+    """Find unfinished implementations in generated app and workflow source."""
+    diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     for path, content in sorted(files.items()):
         pure = PurePosixPath(path)
         if pure.suffix.lower() not in {".py", ".js", ".jsx", ".ts", ".tsx", ".yaml", ".yml"}:
@@ -603,6 +602,7 @@ def _validate_placeholders(
                     path=path,
                 )
             )
+    return diagnostics
 
 
 def scan_functional_generated_app(
@@ -625,11 +625,12 @@ def scan_functional_generated_app(
     refs = _collect_module_refs(safe_files, diagnostics)
     _validate_module_refs(actions, refs, diagnostics)
     _validate_mozaikspay_facade(safe_files, actions, capability_packs or [], diagnostics)
-    _validate_placeholders(safe_files, diagnostics)
+    diagnostics.extend(scan_placeholder_implementations(safe_files))
     return diagnostics
 
 
 __all__ = [
     "FunctionalGeneratedAppDiagnostic",
     "scan_functional_generated_app",
+    "scan_placeholder_implementations",
 ]

@@ -67,7 +67,7 @@ CANONICAL_APP_ROOT_DIRS = frozenset(
     }
 )
 
-_CANONICAL_APP_CONFIG_SUFFIXES = (".json", ".yaml", ".yml")
+_CANONICAL_INTEGRATION_CONFIG_SUFFIX = ".yaml"
 _SENSITIVE_CONFIG_TOKEN_RE = re.compile(
     r"(?:^|[._/-])(?:api[_-]?keys?|credentials?|passwords?|secrets?|tokens?)(?:[._/-]|$)",
     re.IGNORECASE,
@@ -147,7 +147,7 @@ def is_canonical_app_config_path(path: str) -> bool:
         return False
     if normalized in CANONICAL_APP_CONFIG_FILES:
         return True
-    if normalized.startswith("config/integrations/") and normalized.endswith(_CANONICAL_APP_CONFIG_SUFFIXES):
+    if normalized.startswith("config/integrations/") and normalized.endswith(_CANONICAL_INTEGRATION_CONFIG_SUFFIX):
         return True
     return False
 

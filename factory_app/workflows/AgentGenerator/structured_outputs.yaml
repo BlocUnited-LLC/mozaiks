@@ -1463,7 +1463,7 @@ models:
       visual_agents:
         type: optional_list
         items: str
-        description: Agents permitted to render UI/text to the user (mirrors ui_config.json
+        description: Agents permitted to render UI/text to the user (mirrors ui_config.yaml
           visual_agents list). Use null for backend-only/headless workflows.
       triggers:
         type: list
@@ -2273,7 +2273,7 @@ models:
     type: model
     description: >
       Complete workflow bundle produced by one WorkflowBundleBuilderAgent task batch worker.
-      Contains all files needed to run the workflow: YAML declarations, Python tool stubs,
+      Contains all files needed to run the workflow: YAML declarations, implemented Python tools,
       and optional UI components. Each file's filename is relative to the workflow root.
     fields:
       workflow_name:
@@ -2296,7 +2296,7 @@ models:
           orchestrator.yaml, agents.yaml, transition_graph.yaml, tools.yaml,
           context_variables.yaml, structured_outputs.yaml, middleware.yaml, ui_config.yaml.
           middleware.yaml is a prompt middleware declaration file.
-          Python tool stubs go under tools/<name>.py.
+          Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:
     type: model

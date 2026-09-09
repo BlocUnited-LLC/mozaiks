@@ -5,6 +5,28 @@
 
 ---
 
+## File Creation and Formats
+
+Agents return structured JSON responses. This transport format does not determine
+the format of generated files. App schemas, module contracts, and build plans
+feed the existing deterministic materializers; bounded implementation tasks
+provide Python/React source through `CodeFile` entries. Assembly combines those
+outputs with explicitly declared capability-pack templates.
+
+Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,
+data contracts, migrations, and tooling manifests retain their canonical `.json`
+paths. Jinja templates are build inputs: `name.yaml.j2` renders to `name.yaml`,
+and the `.j2` suffix is removed. Required missing template values or invalid
+rendered YAML/JSON stop materialization with the pack and template path in the
+error. Optional values must declare their defaults in the template. String
+substitutions in YAML must be serialized, for example with Jinja's `tojson`
+filter, so punctuation does not change the YAML structure or scalar type.
+
+`generate_and_download` runs `run_app_bundle_acceptance_gate` on the assembled
+files before packaging. That gate is the deterministic check of generated
+contracts and their connections; it does not substitute for exercising an app's
+business behavior and configured integrations.
+
 ## Owned Artifacts
 
 AppGenerator emits deterministic app-bundle artifacts for persistent app UI:

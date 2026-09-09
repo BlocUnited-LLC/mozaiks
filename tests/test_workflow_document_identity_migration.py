@@ -48,7 +48,7 @@ def test_exact_base_capture_and_governed_document_census():
 
 
 @pytest.mark.parametrize("before", BASELINE["documents"], ids=lambda row: row["path"])
-def test_only_document_version_changes_static_source_and_parser_identity(before):
+def test_document_version_and_reviewed_guidance_changes_preserve_contract_shape(before):
     path = ROOT / before["path"]
     version, parser = VERSIONS[path.name]
     raw = path.read_bytes()
@@ -62,6 +62,23 @@ def test_only_document_version_changes_static_source_and_parser_identity(before)
     # dictionary is accepted as an unversioned runtime document.
     del document["schema_version"]
     del parsed["schema_version"]
+    if before["path"] == "factory_app/workflows/AgentGenerator/structured_outputs.yaml":
+        # Restore only the three reviewed guidance edits for historical comparison;
+        # the original migration capture remains immutable.
+        guidance_edits = [
+            (("OrchestrationConfigOutput", "fields", "visual_agents"), "ui_config.yaml", "ui_config.json"),
+            (("WorkflowBundleBuilderOutput",), "implemented Python tools", "Python tool stubs"),
+            (("WorkflowBundleBuilderOutput", "fields", "files"),
+             "Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.",
+             "Python tool stubs go under tools/<name>.py."),
+        ]
+        for restored in (document, parsed):
+            for keys, current, historical in guidance_edits:
+                node = restored["models"]
+                for key in keys:
+                    node = node[key]
+                assert node["description"].count(current) == 1
+                node["description"] = node["description"].replace(current, historical)
     assert canonical_digest(document) == before["source_document_fingerprint"]
     assert canonical_digest(parsed) == before["parser_document_fingerprint"]
 

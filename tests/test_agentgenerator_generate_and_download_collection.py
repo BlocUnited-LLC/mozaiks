@@ -90,7 +90,8 @@ triggers: {triggers or [{"type": "chat", "description": "Start the generated wor
             [
                 "agents:",
                 *[
-                    f"  - name: {agent}\n    system_message: {agent} executes workflow work."
+                    f"  - name: {agent}\n    system_message: {agent} executes workflow work.\n"
+                    "    structured_outputs_required: false"
                     for agent in agents
                 ],
             ]
@@ -146,10 +147,18 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     monkeypatch, tmp_path: Path
 ) -> None:
     """generate_and_download writes WorkflowBundleBuilderOutput files to disk and zips them."""
+    files = _minimal_workflow_files("ReviewWorkflow")
+    tools_file = next(item for item in files if item["filename"] == "tools.yaml")
+    tools_file["content"] = yaml.safe_dump({"tools": [{
+        "agent": "PlannerAgent", "file": "tools/total.py", "function": "total", "tool_type": "Agent_Tool",
+    }]})
+    files.append({"filename": "tools/total.py", "content": (
+        "async def total(values: list[int]) -> dict:\n    return {'total': sum(values)}\n"
+    )})
     bundle_results = _make_bundle_results([
         {
             "workflow_name": "ReviewWorkflow",
-            "files": _minimal_workflow_files("ReviewWorkflow"),
+            "files": files,
         }
     ])
 
@@ -208,6 +217,20 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     assert any("orchestrator.yaml" in n for n in names)
     assert any("agents.yaml" in n for n in names)
 
+    from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
+
+    monkeypatch.setattr(UnifiedWorkflowManager, "_instance", None)
+    manager = UnifiedWorkflowManager(workflows_base_path=str(zip_path.parent))
+    info = manager.get_workflow_info("ReviewWorkflow")
+    assert info["status"] == "loaded", info["error"]
+
+    from mozaiksai.core.workflow.agents import tools as runtime_tools
+
+    monkeypatch.setattr(runtime_tools, "workflow_manager", manager)
+    loaded_tools = runtime_tools.load_agent_tool_functions("ReviewWorkflow")
+    assert len(loaded_tools["PlannerAgent"]) == 1
+    assert asyncio.run(loaded_tools["PlannerAgent"][0](values=[2, 3, 5])) == {"total": 10}
+
 
 @pytest.mark.parametrize("filename", ["orchestrator.yaml", "structured_outputs.yaml"])
 @pytest.mark.parametrize("mutation", ["missing", "null", "unknown", "whitespace"])
@@ -236,6 +259,81 @@ def test_workflow_quality_gate_rejects_invalid_document_versions_without_mutatin
     assert filename in report["errors"][0]
     assert "schema_version" in report["errors"][0]
     assert entries == before
+
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("agents.yaml", "agents: [{name: PlannerAgent, system_message: Plan work.}]"),
+        ("agents.yaml", "[]"),
+        ("tools.yaml", "tools: [{name: invented_tool}]"),
+        ("middleware.yaml", "prompt_middleware: [unknown_hook]"),
+        ("ui_config.yaml", "visual_agents: PlannerAgent"),
+        ("context_variables.yaml", "definitions: {ready: {type: invented}}"),
+        ("a2a.yaml", "agents: [unknown_agent]"),
+    ],
+)
+def test_workflow_quality_gate_rejects_runtime_invalid_documents(filename, content) -> None:
+    files = [item for item in _minimal_workflow_files("ReviewWorkflow") if item["filename"] != filename]
+    files.append({"filename": filename, "content": content})
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any(filename in error for error in report["errors"])
+
+
+def test_workflow_quality_gate_rejects_undeclared_context_references() -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    context_file = next(item for item in files if item["filename"] == "context_variables.yaml")
+    payload = yaml.safe_load(context_file["content"])
+    payload["agents"]["PlannerAgent"]["variables"].append("missing_state")
+    context_file["content"] = yaml.safe_dump(payload)
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any("missing_state" in error for error in report["errors"])
+
+
+@pytest.mark.parametrize("filename", ["agents.json", "tools.yml", "agents.yaml.j2", "agents.yaml"])
+def test_workflow_quality_gate_rejects_ambiguous_file_outputs(filename) -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    files.append({"filename": filename, "content": "{}"})
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any(filename in error for error in report["errors"])
+
+
+@pytest.mark.parametrize(
+    "implementation",
+    [None, "async def run(:", "return 1\n", "async def other():\n    return 1\n",
+     "async def run():\n    raise NotImplementedError\n", "async def run():\n    pass\n",
+     "async def run():\n    ...\n"],
+)
+def test_workflow_quality_gate_rejects_unfinished_tools(implementation) -> None:
+    files = _minimal_workflow_files("ReviewWorkflow")
+    tools = next(item for item in files if item["filename"] == "tools.yaml")
+    tools["content"] = yaml.safe_dump({"tools": [{
+        "agent": "PlannerAgent", "file": "tools/run.py", "function": "run", "tool_type": "Agent_Tool",
+    }]})
+    if implementation is not None:
+        files.append({"filename": "tools/run.py", "content": implementation})
+
+    report = workflow_quality_gate_module.validate_workflow_bundle_structure(
+        bundle_entries=[{"workflow_name": "ReviewWorkflow", "files": files}],
+    )
+
+    assert not report["valid"]
+    assert any("tools/run.py" in error for error in report["errors"])
 
 
 def test_generate_and_download_blocks_unversioned_document_before_packaging(monkeypatch, tmp_path: Path) -> None:
