@@ -357,7 +357,7 @@ class TestAdapterRegistryAutoDetection:
         clean.update(env_overrides)
         import mozaiksai.core.auth.adapters.registry as reg
         with patch.dict(os.environ, clean, clear=True):
-            return reg._auto_detect_provider()
+            return reg.resolve_auth_config().provider
 
     def test_explicit_auth_provider_wins(self) -> None:
         assert self._detect({"AUTH_PROVIDER": "keycloak"}) == "keycloak"

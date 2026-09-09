@@ -139,23 +139,47 @@ If `AUTH_PROVIDER` is not set, the system auto-detects based on environment vari
 | `MOZAIKS_OIDC_AUTHORITY` or `MOZAIKS_OIDC_DISCOVERY_URL` | `jwt` |
 | Nothing | `none` (demo mode) |
 
-Auto-detection fails closed when auth is explicitly enabled:
+Resolution is canonical and fails closed. One parser
+(`mozaiksai.core.auth.adapters.registry.resolve_auth_config`) interprets the
+auth environment into an immutable resolved state; every predicate, the
+adapter cache, and startup validation consume that same interpretation:
 
 - `AUTH_ENABLED=true` with no detectable provider is a fatal configuration
   error in every environment (startup refuses to boot; provider resolution
   raises). The runtime never silently falls back to the trusted-bypass
   `none` adapter when auth was explicitly requested.
-- `AUTH_ENABLED=true` combined with `AUTH_PROVIDER=none`, an unknown
-  `AUTH_PROVIDER` value, or a named provider whose configuration is
-  incomplete (for example `AUTH_PROVIDER=jwt` without JWKS/issuer/discovery
-  settings) is fatal for the same reason.
+- Contradictory explicit declarations are fatal instead of silently picking
+  one: `AUTH_ENABLED=true` + `AUTH_PROVIDER=none`, and `AUTH_ENABLED=false`
+  + a real explicit `AUTH_PROVIDER`. (Passive provider signals such as a
+  `SUPABASE_URL` left in a developer `.env` do not contradict an explicit
+  disable — the explicit switch wins over passive presence.)
+- An unknown `AUTH_PROVIDER` value, or a selected provider whose
+  configuration cannot validate tokens (for example `AUTH_PROVIDER=jwt`
+  without JWKS/issuer/discovery settings), is fatal.
 - An unrecognized `AUTH_ENABLED` value (for example a typo like `tru`) is
   fatal instead of silently disabling auth.
+- **Protected environments refuse no-auth operation entirely.** When
+  `ENV`/`ENVIRONMENT` is `staging` or `production` (including `stage`/`prod`
+  spellings), any configuration that resolves to no authentication —
+  explicit `AUTH_ENABLED=false`, explicit `AUTH_PROVIDER=none`, or implicit
+  demo mode — is fatal at startup and at provider resolution, independent of
+  `MOZAIKS_STARTUP_CHECKS` mode. Explicit no-auth remains a local
+  development/test contract only.
 - Demo mode (`none` without explicit disablement) applies only when no auth
-  configuration is present at all. Security-sensitive bypasses (such as the
-  billing fulfillment ingress) additionally require *explicit* disablement —
-  `AUTH_ENABLED=false` or `AUTH_PROVIDER=none` — and are not available in
-  implicit demo mode.
+  configuration is present at all, in an unprotected environment.
+  Security-sensitive bypasses (such as the billing fulfillment ingress)
+  additionally require *explicit* disablement — `AUTH_ENABLED=false` or
+  `AUTH_PROVIDER=none` — and are not available in implicit demo mode.
+- The cached adapter instance is keyed by a fingerprint of the resolved
+  configuration: when auth-relevant environment variables change, the stale
+  adapter is discarded and rebuilt, so request-time validation always uses
+  the configuration that startup validated.
+
+Privileged HTTP surfaces can additionally require authenticated provenance:
+`UserPrincipal.is_authenticated` is true only for principals produced by
+validating a real bearer token against the configured adapter. Anonymous
+demo principals and request-scoped dev personas may carry admin-looking
+roles/scopes, but they are never authenticated provenance.
 
 ---
 

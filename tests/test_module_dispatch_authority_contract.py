@@ -80,6 +80,9 @@ def test_workflow_authority_always_enforces() -> None:
 
 def test_local_development_rejected_when_auth_enabled(monkeypatch) -> None:
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    # A developer .env may set AUTH_ENABLED=false; with an explicit provider
+    # that would be a fatal contradiction rather than "auth enabled".
+    monkeypatch.delenv("AUTH_ENABLED", raising=False)
     with pytest.raises(ValueError, match="local_development"):
         ModuleDispatchAuthority(
             kind="local_development",

@@ -21,20 +21,37 @@ This project follows a practical pre-1.0 changelog format:
   `action_method_map`) are dispatchable; unknown or undeclared actions —
   including event-reaction handlers, private helpers, and arbitrary handler
   attributes — return `ACTION_NOT_FOUND` before any handler resolution, for
-  trusted and enforce-mode authorities alike.
-- **Fail-closed authentication configuration**: with `AUTH_ENABLED=true`, a
-  missing, misspelled, or incomplete auth provider configuration is now fatal
-  at startup (and at provider resolution) in every environment — the runtime
-  no longer silently falls back to the trusted-bypass `none` adapter. An
-  unrecognized `AUTH_ENABLED` value is also fatal instead of silently
-  disabling auth. Implicit demo mode (no auth configuration at all) still
-  boots for local getting-started use.
+  trusted and enforce-mode authorities alike. The rejection path never
+  touches the handler object (no `getattr`/`hasattr`, so hostile
+  properties/descriptors/`__getattr__` cannot execute), and denied audits
+  carry only a bounded, sanitized action string.
+- **Fail-closed authentication configuration**: auth-mode environment
+  variables are interpreted by one canonical resolver
+  (`resolve_auth_config`) consumed by every predicate, adapter resolution,
+  and startup validation. With `AUTH_ENABLED=true`, a missing, misspelled,
+  or incomplete auth provider configuration is fatal at startup (runtime and
+  platform/Studio hosts) and at provider resolution, in every environment.
+  Contradictory explicit declarations (`AUTH_ENABLED=true` +
+  `AUTH_PROVIDER=none`; `AUTH_ENABLED=false` + a real explicit
+  `AUTH_PROVIDER`) and unrecognized `AUTH_ENABLED` values are fatal instead
+  of silently resolving. **Protected environments (`ENV`/`ENVIRONMENT` of
+  staging/production) refuse all no-auth operation** — explicit disable or
+  implicit demo mode — independent of `MOZAIKS_STARTUP_CHECKS` mode; the
+  explicit no-auth switches remain local development/test contracts. The
+  cached auth adapter is keyed by a resolved-configuration fingerprint, so
+  request-time validation always uses the configuration startup validated
+  and a stale trusted-bypass adapter cannot survive a configuration change.
+  Implicit demo mode (no auth configuration at all, unprotected
+  environment) still boots for local getting-started use.
 - **Fail-closed billing fulfillment ingress**:
   `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
-  now requires the internal API key, a billing-admin principal, or
-  *explicitly* disabled authentication (`AUTH_ENABLED=false` /
-  `AUTH_PROVIDER=none`). Auth being merely unconfigured no longer makes the
-  ingress callable without authentication.
+  now requires the internal API key, an *authenticated* billing-admin
+  principal (`UserPrincipal.is_authenticated` — real bearer-token
+  provenance, not role/scope strings, which anonymous and dev-persona
+  principals can carry), or explicitly disabled authentication
+  (`AUTH_ENABLED=false` / `AUTH_PROVIDER=none`, which protected
+  environments reject outright). Auth being merely unconfigured no longer
+  makes the ingress callable without authentication.
 
 ### Fixed
 

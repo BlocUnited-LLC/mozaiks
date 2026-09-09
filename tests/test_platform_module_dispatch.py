@@ -574,19 +574,21 @@ def test_internal_surface_action_is_rejected_via_http_post(monkeypatch, surface:
 
 
 def test_internal_surface_block_applies_regardless_of_auth_enabled(monkeypatch) -> None:
-    """The internal-surface guard fires before auth checks — it is independent of AUTH_ENABLED."""
+    """The internal-surface guard fires before route-level auth checks — it is
+    independent of AUTH_ENABLED. (A garbage bearer token is still rejected 401
+    by the auth dependency itself; the invariant is that the internal action is
+    unreachable either way.)"""
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
+    monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
 
     client = _client(
         failed_module_names=[],
         action_surfaces={"orders": {"process_settlement": "internal"}},
     )
-    # Even with a valid-looking bearer token the action should be unreachable.
-    resp = client.get(
-        "/api/modules/orders/process_settlement",
-        headers={"Authorization": "Bearer any-token"},
-    )
+    # Anonymous request: the internal-surface 404 fires before the missing-token 401.
+    resp = client.get("/api/modules/orders/process_settlement")
     assert resp.status_code == 404
 
 
@@ -674,3 +676,28 @@ def test_http_dispatch_declared_action_still_executes(monkeypatch) -> None:
 
     assert resp.status_code == 200
     assert resp.json() == {"invoices": []}
+
+
+def test_platform_startup_gate_fails_closed_in_protected_no_auth_env(monkeypatch) -> None:
+    """_platform_startup refuses to boot when the canonical auth resolution
+    rejects no-auth operation in a protected environment (Studio reuses the
+    platform app, so this gate covers the Studio host too)."""
+    import asyncio
+
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    for var in (
+        "AUTH_PROVIDER", "SUPABASE_URL", "KEYCLOAK_URL", "KEYCLOAK_REALM",
+        "AUTH_JWKS_URL", "AUTH_ISSUER", "MOZAIKS_OIDC_AUTHORITY",
+        "MOZAIKS_OIDC_DISCOVERY_URL", "ENVIRONMENT",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("ENV", "staging")
+    reset_auth_adapter()
+    try:
+        with pytest.raises(AuthError, match="not permitted"):
+            asyncio.run(platform_host._platform_startup())
+    finally:
+        reset_auth_adapter()

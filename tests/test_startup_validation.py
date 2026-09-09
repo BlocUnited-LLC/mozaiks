@@ -638,19 +638,19 @@ def _configure_valid_jwt_provider(monkeypatch) -> None:
 
 class TestAuthEnabledCheck:
     @pytest.mark.asyncio
-    async def test_warns_when_auth_disabled_in_production(self, monkeypatch):
+    async def test_fatal_when_auth_disabled_in_production(self, monkeypatch):
+        """Explicit no-auth in a protected environment aborts startup — not a warning."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
         monkeypatch.setenv("ENV", "production")
         monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.delenv("AUTH_PROVIDER", raising=False)
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
-        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
-
-        assert any("AUTH_ENABLED" in w for w in warnings)
-        assert any("production" in w.lower() for w in warnings)
+        with pytest.raises(StartupConfigError, match="not permitted in the 'production'"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
     @pytest.mark.asyncio
     async def test_no_warning_when_auth_disabled_in_development(self, monkeypatch):
@@ -882,16 +882,13 @@ class TestAuthProviderCheck:
         assert not any("authentication configuration" in w.lower() for w in warnings)
 
     @pytest.mark.asyncio
-    async def test_no_warning_when_auth_explicitly_disabled_and_no_provider(self, monkeypatch):
-        """AUTH_ENABLED=false already caught by the auth_enabled check; provider check skips."""
+    async def test_fatal_when_auth_explicitly_disabled_in_production(self, monkeypatch):
+        """Explicit disable is a development contract only — fatal in protected envs."""
         self._base_env(monkeypatch)
         monkeypatch.setenv("AUTH_ENABLED", "false")
 
-        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
-
-        # auth_enabled fires, auth_provider does not
-        assert any("AUTH_ENABLED" in w for w in warnings)
-        assert not any("no auth provider" in w.lower() for w in warnings)
+        with pytest.raises(StartupConfigError, match="not permitted in the 'production'"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
     @pytest.mark.asyncio
     async def test_strict_mode_also_raises_when_auth_enabled_but_no_provider(self, monkeypatch):
@@ -1048,3 +1045,90 @@ class TestRedisConnectivityCheck:
             warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert any("REDIS_URL" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Protected-environment startup matrix (D2)
+# ---------------------------------------------------------------------------
+
+
+class TestProtectedEnvironmentStartupMatrix:
+    """Staging/production reject every form of no-auth operation at boot,
+    independent of MOZAIKS_STARTUP_CHECKS mode."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_auth_caches(self):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
+
+    def _base_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
+        for var in (
+            "MOZAIKS_STARTUP_CHECKS",
+            "MOZAIKS_WORKFLOWS_PATH",
+            "AUTH_ENABLED",
+            "AUTH_PROVIDER",
+            "SUPABASE_URL",
+            "KEYCLOAK_URL",
+            "KEYCLOAK_REALM",
+            "AUTH_JWKS_URL",
+            "AUTH_ISSUER",
+            "MOZAIKS_OIDC_AUTHORITY",
+            "MOZAIKS_OIDC_DISCOVERY_URL",
+            "ENV",
+            "ENVIRONMENT",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("environment", ["staging", "production"])
+    @pytest.mark.parametrize("startup_mode", ["warn", "strict"])
+    @pytest.mark.parametrize(
+        "no_auth_env",
+        [
+            {"AUTH_ENABLED": "false"},
+            {"AUTH_PROVIDER": "none"},
+            {},  # implicit demo mode
+        ],
+    )
+    async def test_protected_env_no_auth_boot_is_fatal(
+        self, monkeypatch, environment, startup_mode, no_auth_env
+    ):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", environment)
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", startup_mode)
+        for key, value in no_auth_env.items():
+            monkeypatch.setenv(key, value)
+
+        with pytest.raises(StartupConfigError, match="not permitted"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("environment", ["staging", "production"])
+    async def test_protected_env_boots_with_configured_provider(self, monkeypatch, environment):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", environment)
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+        assert not any("authentication configuration" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("environment", ["development", "test", ""])
+    async def test_dev_and_test_envs_keep_explicit_no_auth_contract(self, monkeypatch, environment):
+        self._base_env(monkeypatch)
+        if environment:
+            monkeypatch.setenv("ENV", environment)
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+        assert not any("authentication configuration" in w.lower() for w in warnings)

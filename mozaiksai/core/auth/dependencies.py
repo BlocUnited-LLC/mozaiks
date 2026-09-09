@@ -52,6 +52,20 @@ class UserPrincipal:
     chat_id: str | None = None
     tenant_id: str | None = None
     workspace_id: str | None = None
+    # Server-side provenance fact: how this principal came into existence.
+    # "token_validated" is set ONLY where a bearer token was actually
+    # validated by the configured auth adapter. "anonymous" covers the
+    # no-auth/demo principal; "dev_override" covers request-scoped local dev
+    # personas. Privileged surfaces must check is_authenticated rather than
+    # inferring authenticated identity from role/scope strings, which dev
+    # personas can freely carry.
+    auth_provenance: str = "anonymous"
+
+    @property
+    def is_authenticated(self) -> bool:
+        """True only when this principal was produced by validating a real
+        bearer token against the configured auth adapter."""
+        return self.auth_provenance == "token_validated"
 
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role."""
@@ -90,8 +104,17 @@ class UserPrincipal:
         return str(self.workspace_id) == str(path_workspace_id)
 
     @classmethod
-    def from_claims(cls, claims: UserClaims) -> "UserPrincipal":
-        """Create UserPrincipal from adapter UserClaims."""
+    def from_claims(
+        cls,
+        claims: UserClaims,
+        *,
+        auth_provenance: str = "anonymous",
+    ) -> "UserPrincipal":
+        """Create UserPrincipal from adapter UserClaims.
+
+        ``auth_provenance`` must be "token_validated" only at call sites that
+        actually validated a bearer token via the configured auth adapter.
+        """
         return cls(
             user_id=claims.user_id,
             email=claims.email,
@@ -104,6 +127,7 @@ class UserPrincipal:
             chat_id=claims.chat_id,
             tenant_id=claims.tenant_id,
             workspace_id=claims.workspace_id,
+            auth_provenance=auth_provenance,
         )
 
 
@@ -159,6 +183,9 @@ def _no_auth_dev_override_principal(request: Request, principal: UserPrincipal) 
         chat_id=principal.chat_id,
         tenant_id=principal.tenant_id,
         workspace_id=principal.workspace_id,
+        # Dev personas are never authenticated provenance, no matter which
+        # roles/scopes the request-scoped override assigns them.
+        auth_provenance="dev_override",
     )
 
 
@@ -200,7 +227,9 @@ async def _validate_and_attach(
         )
         raise HTTPException(status_code=e.status_code, detail=e.message) from e
 
-    principal = UserPrincipal.from_claims(claims)
+    # The only place "token_validated" provenance is minted: a bearer token
+    # was actually validated by the configured auth adapter just above.
+    principal = UserPrincipal.from_claims(claims, auth_provenance="token_validated")
 
     # Attach to request state for downstream access
     request.state.user = principal

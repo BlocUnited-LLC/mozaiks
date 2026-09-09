@@ -829,3 +829,170 @@ class TestDeclaredActionAuthorityBoundary:
         )
         assert result.success is False
         assert result.error_code == "ACTION_NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# 11. Undeclared rejection must never touch the handler object (D1)
+# ---------------------------------------------------------------------------
+
+
+class _TouchCounter:
+    """Class-level counters for every dynamic-lookup channel."""
+
+    def __init__(self) -> None:
+        self.property_reads = 0
+        self.getattr_calls = 0
+        self.descriptor_gets = 0
+
+
+class _CallableReturningDescriptor:
+    """Non-data descriptor whose __get__ records execution and returns a callable."""
+
+    def __get__(self, obj, objtype=None):
+        if obj is not None:
+            obj.touches.descriptor_gets += 1
+        async def _would_run(ctx, **kwargs):
+            return {"descriptor_dispatched": True}
+        return _would_run
+
+
+class _WeaponizedBase:
+    """Base class contributing an inherited undeclared property."""
+
+    @property
+    def inherited_trap(self):
+        self.touches.property_reads += 1
+        raise RuntimeError("inherited descriptor executed")
+
+
+class _WeaponizedHandler(_WeaponizedBase):
+    """Handler where every undeclared attribute lookup is instrumented or raises."""
+
+    descriptor_action = _CallableReturningDescriptor()
+
+    def __init__(self) -> None:
+        self.touches = _TouchCounter()
+
+    async def declared_ok(self, ctx, **kwargs):
+        return {"ok": True}
+
+    @property
+    def raising_prop(self):
+        self.touches.property_reads += 1
+        raise RuntimeError("property descriptor executed")
+
+    @property
+    def side_effect_prop(self):
+        self.touches.property_reads += 1
+        return {"leaked": True}
+
+    def __getattr__(self, name):
+        # Fires for any attribute not found through normal lookup.
+        # object.__getattribute__ bypass keeps the counter itself readable.
+        object.__getattribute__(self, "touches").getattr_calls += 1
+        if name == "phantom_raises":
+            raise RuntimeError("__getattr__ executed and raised")
+        async def _phantom(ctx, **kwargs):
+            return {"phantom_dispatched": True}
+        return _phantom
+
+
+class TestUndeclaredRejectionNeverTouchesHandler:
+    """D1: absent from the declared action map → rejected with zero handler
+    attribute access. No getattr, no hasattr, no descriptor execution."""
+
+    def _executor(self, handler: _WeaponizedHandler) -> ModuleExecutor:
+        ex = ModuleExecutor()
+        ex.register(
+            "armory",
+            handler,
+            action_method_map={"declared_ok": "declared_ok"},
+        )
+        return ex
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "undeclared_action",
+        [
+            "raising_prop",          # property that raises on access
+            "side_effect_prop",      # property with a side effect counter
+            "inherited_trap",        # inherited property descriptor
+            "descriptor_action",     # non-data descriptor returning a callable
+            "phantom_raises",        # __getattr__ that raises
+            "phantom_callable",      # __getattr__ returning a callable
+        ],
+    )
+    async def test_undeclared_lookup_channels_never_execute(self, undeclared_action):
+        handler = _WeaponizedHandler()
+        ex = self._executor(handler)
+
+        result = await ex.execute(
+            _request(module="armory", action=undeclared_action, authority=trusted_framework_authority())
+        )
+
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+        assert handler.touches.property_reads == 0
+        assert handler.touches.getattr_calls == 0
+        assert handler.touches.descriptor_gets == 0
+
+    @pytest.mark.asyncio
+    async def test_denial_identical_whether_attribute_exists_or_not(self):
+        handler = _WeaponizedHandler()
+        ex = self._executor(handler)
+
+        existing = await ex.execute(
+            _request(module="armory", action="side_effect_prop", authority=trusted_framework_authority())
+        )
+        # 'nonexistent_zz' does not correspond to any class attribute, but
+        # __getattr__ would still fire if the executor probed — it must not.
+        missing = await ex.execute(
+            _request(module="armory", action="nonexistent_zz", authority=trusted_framework_authority())
+        )
+
+        assert (existing.success, existing.error_code) == (missing.success, missing.error_code)
+        assert existing.error.replace("side_effect_prop", "X") == missing.error.replace("nonexistent_zz", "X")
+        assert handler.touches.property_reads == 0
+        assert handler.touches.getattr_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_denied_audit_uses_bounded_sanitized_action(self, monkeypatch):
+        audits: list = []
+
+        class _Audit:
+            async def log_module_action(self, **kwargs):
+                audits.append(kwargs)
+
+        import mozaiksai.core.runtime.composition.module_executor as mod_exec
+
+        monkeypatch.setattr(mod_exec, "get_audit_logger", lambda: _Audit())
+        handler = _WeaponizedHandler()
+        ex = self._executor(handler)
+
+        hostile_action = "raising_prop\n\x00<script>" + "A" * 500
+        result = await ex.execute(
+            _request(module="armory", action=hostile_action, authority=trusted_framework_authority())
+        )
+        # Let the fire-and-forget audit task run.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert result.error_code == "ACTION_NOT_FOUND"
+        assert len(result.error) < 200
+        assert "\x00" not in result.error and "<script>" not in result.error
+        assert handler.touches.property_reads == 0
+        assert handler.touches.getattr_calls == 0
+        assert audits, "denied dispatch must emit an audit record"
+        audited_action = audits[0]["action_id"]
+        assert len(audited_action) <= 67  # bounded (64 + ellipsis)
+        assert "\x00" not in audited_action and "<" not in audited_action
+
+    @pytest.mark.asyncio
+    async def test_declared_action_still_dispatches_on_weaponized_handler(self):
+        handler = _WeaponizedHandler()
+        ex = self._executor(handler)
+        result = await ex.execute(
+            _request(module="armory", action="declared_ok", authority=trusted_framework_authority())
+        )
+        assert result.success is True
+        assert result.data == {"ok": True}
