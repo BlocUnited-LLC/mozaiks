@@ -135,6 +135,7 @@ __all__ = [
     "is_auth_enabled",
     "is_auth_explicitly_disabled",
     "resolve_auth_config",
+    "validate_auth_provider_configuration",
     "reset_auth_adapter",
     # HTTP Dependencies
     "UserPrincipal",

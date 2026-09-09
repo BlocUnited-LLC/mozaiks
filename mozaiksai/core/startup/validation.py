@@ -21,8 +21,9 @@ Checks performed:
   Auth configuration   — mode-INDEPENDENT hard gate: the canonical auth
                          resolution must succeed. Enabled auth without a usable
                          provider, contradictory declarations, unrecognized
-                         AUTH_ENABLED values, and any no-auth operation in a
-                         protected environment (staging/production) abort
+                         AUTH_ENABLED values, conflicting ENV/ENVIRONMENT
+                         declarations, and any no-auth operation outside a
+                         recognized local/development/test environment abort
                          startup regardless of ``MOZAIKS_STARTUP_CHECKS``.
   INTERNAL_API_KEY     — warns when the key is absent or shorter than 32 chars
                          (defense-in-depth; not a hard gate).
@@ -45,7 +46,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from mozaiksai.core.core_config import get_mongo_client, get_secret
-from mozaiksai.core.environment import deployment_environment
+from mozaiksai.core.environment import EnvironmentConfigError, deployment_environment
 
 logger = logging.getLogger("mozaiksai.startup.validation")
 
@@ -230,14 +231,15 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     # The canonical auth resolution (mozaiksai.core.auth.adapters.registry)
     # is fatal — never a warning — for: explicitly enabled auth whose provider
     # is missing/unknown/incomplete, contradictory explicit declarations,
-    # unrecognized AUTH_ENABLED values, and ANY no-auth operation (explicit
-    # disable or implicit demo mode) in a protected deployed environment
-    # (staging/production). MOZAIKS_STARTUP_CHECKS mode does not weaken this.
-    env_name = deployment_environment()
+    # unrecognized AUTH_ENABLED values, conflicting ENV/ENVIRONMENT
+    # declarations, and ANY no-auth operation (explicit disable or implicit
+    # demo mode) outside a recognized local/development/test environment.
+    # MOZAIKS_STARTUP_CHECKS mode does not weaken this.
     from mozaiksai.core.auth.adapters.base import AuthError
     from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
 
     try:
+        env_name = deployment_environment()
         resolved_provider = validate_auth_provider_configuration()
         logger.info(
             "STARTUP_CHECK_OK: auth provider resolved (%s, env=%s)",
@@ -245,7 +247,7 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
             env_name or "unset",
             extra={"check": "auth_provider_resolution", "mode": mode},
         )
-    except AuthError as auth_exc:
+    except (AuthError, EnvironmentConfigError) as auth_exc:
         msg = f"Authentication configuration is invalid: {auth_exc}"
         logger.error(
             "STARTUP_CHECK_FAILED: %s",

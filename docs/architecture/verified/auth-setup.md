@@ -158,22 +158,61 @@ adapter cache, and startup validation consume that same interpretation:
   without JWKS/issuer/discovery settings), is fatal.
 - An unrecognized `AUTH_ENABLED` value (for example a typo like `tru`) is
   fatal instead of silently disabling auth.
-- **Protected environments refuse no-auth operation entirely.** When
-  `ENV`/`ENVIRONMENT` is `staging` or `production` (including `stage`/`prod`
-  spellings), any configuration that resolves to no authentication —
-  explicit `AUTH_ENABLED=false`, explicit `AUTH_PROVIDER=none`, or implicit
-  demo mode — is fatal at startup and at provider resolution, independent of
-  `MOZAIKS_STARTUP_CHECKS` mode. Explicit no-auth remains a local
-  development/test contract only.
+- **Unauthenticated operation is allowlisted, not denylisted.** No-auth
+  operation — explicit `AUTH_ENABLED=false`, explicit `AUTH_PROVIDER=none`,
+  or implicit demo mode — is permitted **only** when the resolved environment
+  is one of the recognized local names `development`, `local`, `test`
+  (`dev` normalizes to `development`), or when no environment is configured
+  at all. Every other explicit value rejects it, fatally, at startup and at
+  provider resolution, independent of `MOZAIKS_STARTUP_CHECKS` mode. That
+  includes known deployments (`production`, `staging`, and the `prod`/`stage`
+  aliases) **and** unknown or regional names such as `prod-us`,
+  `staging-eu`, `production-east`, `preview`, `qa`, or any custom value — an
+  unrecognized environment never inherits development privilege. Unknown
+  environments may still boot normally with authentication configured.
 - Demo mode (`none` without explicit disablement) applies only when no auth
-  configuration is present at all, in an unprotected environment.
+  configuration is present at all, in an environment that permits no-auth.
   Security-sensitive bypasses (such as the billing fulfillment ingress)
   additionally require *explicit* disablement — `AUTH_ENABLED=false` or
   `AUTH_PROVIDER=none` — and are not available in implicit demo mode.
-- The cached adapter instance is keyed by a fingerprint of the resolved
-  configuration: when auth-relevant environment variables change, the stale
-  adapter is discarded and rebuilt, so request-time validation always uses
-  the configuration that startup validated.
+
+### ENV / ENVIRONMENT resolution
+
+`ENV` is the primary signal and `ENVIRONMENT` the fallback, but the two are
+resolved canonically rather than by precedence alone:
+
+- both values are trimmed first; empty or whitespace-only means *absent*, so a
+  blank `ENV` never masks a non-blank `ENVIRONMENT`
+- recognized aliases (`dev`/`prod`/`stage`) normalize before comparison
+- if both are non-blank and resolve to **different** environments (for example
+  `ENV=development` with `ENVIRONMENT=production`), that is a fatal
+  configuration error — the runtime refuses to silently choose one
+- if both resolve to the same environment, that is accepted
+- both absent keeps the documented implicit local default
+
+### Adapter cache coherence
+
+The cached adapter is keyed by a fingerprint derived from the same immutable
+configuration snapshot the adapter is constructed from, covering the
+**complete** set of inputs for the resolved provider — not just provider
+selection. Changing any meaning-bearing value (issuer, JWKS/discovery URL,
+audience, any claim mapping, scope format, clock skew, algorithms, JWKS or
+discovery cache TTL, Keycloak claim mappings, Supabase secret, anonymous
+persona settings) rebuilds the adapter, so request-time validation always uses
+the configuration startup validated.
+
+Custom adapters registered via `register_adapter` declare their own cache
+identity:
+
+```python
+register_adapter("my-custom", MyCustomAdapter, config_identity=lambda: cfg.revision)
+```
+
+`config_identity` (a string or callable returning one) must change whenever
+the adapter's configuration changes. Without it the adapter is deliberately
+never cached — it is rebuilt on every resolution — so a changed custom
+configuration can never silently reuse an adapter validated under an older
+one. Re-registering a provider also invalidates any cached adapter.
 
 Privileged HTTP surfaces can additionally require authenticated provenance:
 `UserPrincipal.is_authenticated` is true only for principals produced by

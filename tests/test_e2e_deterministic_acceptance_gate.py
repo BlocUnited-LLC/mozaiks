@@ -604,7 +604,7 @@ def _save_platform_state() -> dict[str, Any]:
         # rather than clearing it (which would lose builtins registered by
         # prior tests or by _register_builtin_adapters).
         "auth_adapter_registry": dict(auth_registry._adapter_registry),
-        "auth_adapter_instance": auth_registry._adapter_instance,
+        "auth_adapter_cache": auth_registry._adapter_cache,
     }
 
 
@@ -621,7 +621,7 @@ def _restore_platform_state(state: dict[str, Any]) -> None:
     # clearing it unconditionally.
     auth_registry._adapter_registry.clear()
     auth_registry._adapter_registry.update(state["auth_adapter_registry"])
-    auth_registry._adapter_instance = state["auth_adapter_instance"]
+    auth_registry._adapter_cache = state["auth_adapter_cache"]
 
 
 # ===========================================================================

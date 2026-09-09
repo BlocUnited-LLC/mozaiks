@@ -547,8 +547,9 @@ class TestResolvedAuthStateMatrix:
         assert config.provider == "supabase"
         assert config.enabled is True
 
-    @pytest.mark.parametrize("environment", ["", "development", "dev", "test", "local", "qa-lab"])
-    def test_unprotected_environments_follow_dev_contract(self, monkeypatch, environment):
+    @pytest.mark.parametrize("environment", ["", "development", "dev", "test", "local"])
+    def test_recognized_local_environments_follow_dev_contract(self, monkeypatch, environment):
+        """Only the finite recognized local/dev/test allowlist (plus absent)."""
         from mozaiksai.core.auth.adapters.registry import resolve_auth_config
 
         env = {"AUTH_ENABLED": "false"}
@@ -558,6 +559,63 @@ class TestResolvedAuthStateMatrix:
         config = resolve_auth_config()
         assert config.provider == "none"
         assert config.explicitly_disabled is True
+
+    @pytest.mark.parametrize(
+        "environment",
+        [
+            "staging-us",
+            "prod-us",
+            "production-east",
+            "preview",
+            "qa",
+            "qa-lab",
+            "customer-prod",
+            "sandbox",
+            "uat",
+            "integration",
+            "dev-cluster",
+            "testing",
+            "локальный",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "env",
+        [
+            {"AUTH_ENABLED": "false"},
+            {"AUTH_PROVIDER": "none"},
+            {},
+        ],
+    )
+    def test_unknown_environments_never_inherit_no_auth(self, monkeypatch, environment, env):
+        """An unknown explicit environment must NOT silently become development.
+
+        Regional/custom production-looking names and arbitrary values alike are
+        denied no-auth privilege — the allowlist is finite and fail-closed.
+        """
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        _set_matrix_env(monkeypatch, {**env, "ENV": environment})
+        with pytest.raises(AuthError, match="not permitted"):
+            resolve_auth_config()
+
+    @pytest.mark.parametrize(
+        "environment", ["staging-us", "prod-us", "preview", "qa", "customer-prod"]
+    )
+    def test_unknown_environments_boot_with_configured_auth(self, monkeypatch, environment):
+        """Unknown environments may still boot — they just cannot run no-auth."""
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        _set_matrix_env(
+            monkeypatch,
+            {
+                "AUTH_ENABLED": "true",
+                "SUPABASE_URL": "https://x.supabase.co",
+                "ENV": environment,
+            },
+        )
+        config = resolve_auth_config()
+        assert config.provider == "supabase"
+        assert config.enabled is True
 
     def test_environment_var_fallback_also_protected(self, monkeypatch):
         """ENVIRONMENT (without ENV) is the same canonical vocabulary."""
@@ -675,3 +733,495 @@ class TestAdapterCacheCoherence:
         assert get_auth_adapter().name == "none"
         self._jwt_env(monkeypatch)
         assert get_auth_adapter().name == "jwt"
+
+
+# ---------------------------------------------------------------------------
+# ENV / ENVIRONMENT canonical resolution (D2)
+# ---------------------------------------------------------------------------
+
+
+class TestEnvironmentResolution:
+    """Both inputs resolve canonically: trimmed, alias-normalized, blank means
+    absent, a blank primary never masks a non-blank fallback, and genuine
+    conflicts fail configuration instead of silently picking one."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch):
+        monkeypatch.delenv("ENV", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        yield
+
+    def _resolve(self, monkeypatch, env=None, environment=None):
+        from mozaiksai.core.environment import resolve_environment
+
+        monkeypatch.delenv("ENV", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        if env is not None:
+            monkeypatch.setenv("ENV", env)
+        if environment is not None:
+            monkeypatch.setenv("ENVIRONMENT", environment)
+        return resolve_environment()
+
+    # -- blank primary must not mask the fallback ---------------------------
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\t"])
+    @pytest.mark.parametrize("deployed", ["production", "staging"])
+    def test_blank_env_does_not_mask_deployed_environment(self, monkeypatch, blank, deployed):
+        resolved = self._resolve(monkeypatch, env=blank, environment=deployed)
+        assert resolved.name == deployed
+        assert resolved.permits_no_auth is False
+
+    def test_blank_env_does_not_mask_unknown_environment(self, monkeypatch):
+        resolved = self._resolve(monkeypatch, env="  ", environment="prod-us")
+        assert resolved.name == "prod-us"
+        assert resolved.classification == "unknown_deployment"
+        assert resolved.permits_no_auth is False
+
+    # -- conflicts ----------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        ("env", "environment"),
+        [
+            ("development", "production"),
+            ("development", "staging"),
+            ("local", "production"),
+            ("test", "prod"),
+            ("production", "development"),
+            ("staging", "test"),
+            ("prod-us", "production"),
+            ("foo", "bar"),
+        ],
+    )
+    def test_conflicting_declarations_fail(self, monkeypatch, env, environment):
+        from mozaiksai.core.environment import EnvironmentConfigError
+
+        with pytest.raises(EnvironmentConfigError, match="Conflicting"):
+            self._resolve(monkeypatch, env=env, environment=environment)
+
+    @pytest.mark.parametrize(
+        ("env", "environment"),
+        [
+            ("test", "development"),
+            ("development", "test"),
+            ("local", "development"),
+            ("test", "local"),
+            ("dev", "test"),
+        ],
+    )
+    def test_same_class_local_declarations_are_accepted(self, monkeypatch, env, environment):
+        """CI (ENV=test) beside a developer .env (ENVIRONMENT=development) is
+        not a conflict: both are recognized local environments, so they agree
+        on the only security-relevant question."""
+        resolved = self._resolve(monkeypatch, env=env, environment=environment)
+        assert resolved.permits_no_auth is True
+        assert resolved.classification == "local_development"
+        # ENV keeps precedence for the resolved name.
+        assert resolved.name == env.replace("dev", "development") if env == "dev" else True
+
+    @pytest.mark.parametrize(
+        ("env", "environment"),
+        [
+            ("production", "staging"),
+            ("staging", "production"),
+            ("prod-us", "staging-eu"),
+        ],
+    )
+    def test_different_deployed_environments_still_conflict(self, monkeypatch, env, environment):
+        """Two distinct deployments are never silently resolved to one."""
+        from mozaiksai.core.environment import EnvironmentConfigError
+
+        with pytest.raises(EnvironmentConfigError, match="Conflicting"):
+            self._resolve(monkeypatch, env=env, environment=environment)
+
+    @pytest.mark.parametrize(
+        ("env", "environment", "expected"),
+        [
+            ("prod", "production", "production"),
+            ("stage", "staging", "staging"),
+            ("dev", "development", "development"),
+            ("production", "production", "production"),
+            ("PRODUCTION", " production ", "production"),
+            ("test", "test", "test"),
+            ("prod-us", "prod-us", "prod-us"),
+        ],
+    )
+    def test_agreeing_declarations_accepted(self, monkeypatch, env, environment, expected):
+        resolved = self._resolve(monkeypatch, env=env, environment=environment)
+        assert resolved.name == expected
+
+    # -- classification -----------------------------------------------------
+
+    @pytest.mark.parametrize("value", ["development", "dev", "local", "test", "  TEST  "])
+    def test_recognized_local_values_permit_no_auth(self, monkeypatch, value):
+        resolved = self._resolve(monkeypatch, env=value)
+        assert resolved.permits_no_auth is True
+        assert resolved.classification == "local_development"
+
+    @pytest.mark.parametrize("value", ["production", "prod", "staging", "stage"])
+    def test_known_deployed_values_reject_no_auth(self, monkeypatch, value):
+        resolved = self._resolve(monkeypatch, env=value)
+        assert resolved.permits_no_auth is False
+        assert resolved.classification == "protected_deployment"
+
+    @pytest.mark.parametrize(
+        "value",
+        ["staging-us", "prod-us", "production-east", "preview", "qa", "customer-prod", "xyzzy"],
+    )
+    def test_unknown_values_reject_no_auth(self, monkeypatch, value):
+        resolved = self._resolve(monkeypatch, env=value)
+        assert resolved.permits_no_auth is False
+        assert resolved.classification == "unknown_deployment"
+
+    def test_both_absent_keeps_documented_local_default(self, monkeypatch):
+        resolved = self._resolve(monkeypatch)
+        assert resolved.classification == "absent"
+        assert resolved.permits_no_auth is True
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_whitespace_only_both_is_absence(self, monkeypatch, blank):
+        resolved = self._resolve(monkeypatch, env=blank, environment=blank)
+        assert resolved.classification == "absent"
+        assert resolved.permits_no_auth is True
+
+    def test_unknown_env_with_absent_fallback_rejects_no_auth(self, monkeypatch):
+        resolved = self._resolve(monkeypatch, env="preview")
+        assert resolved.permits_no_auth is False
+
+    def test_environment_conflict_surfaces_as_auth_error(self, monkeypatch):
+        """resolve_auth_config translates the environment conflict into the
+        canonical auth failure so every auth surface fails closed uniformly."""
+        from mozaiksai.core.auth.adapters.registry import resolve_auth_config
+
+        _set_matrix_env(monkeypatch, {"ENV": "development", "ENVIRONMENT": "production"})
+        with pytest.raises(AuthError, match="Conflicting"):
+            resolve_auth_config()
+
+
+# ---------------------------------------------------------------------------
+# Provider-complete adapter configuration identity (D5)
+# ---------------------------------------------------------------------------
+
+
+class TestProviderConfigIdentity:
+    """Changing ANY meaning-bearing construction input for the resolved
+    provider must change adapter identity and rebuild the adapter."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in _AUTH_MATRIX_VARS:
+            monkeypatch.delenv(var, raising=False)
+        for var in (
+            "AUTH_NAME_CLAIM", "AUTH_SCOPES_CLAIM", "AUTH_SCOPES_FORMAT", "AUTH_APP_ID_CLAIM",
+            "AUTH_CHAT_ID_CLAIM", "AUTH_TENANT_ID_CLAIM", "AUTH_WORKSPACE_ID_CLAIM",
+            "AUTH_CLOCK_SKEW", "AUTH_ALGORITHMS", "AUTH_AUDIENCE", "AUTH_REQUIRED_SCOPE",
+            "AUTH_USER_ID_CLAIM", "AUTH_EMAIL_CLAIM", "AUTH_ROLES_CLAIM",
+            "AUTH_JWKS_CACHE_TTL", "AUTH_DISCOVERY_CACHE_TTL", "MOZAIKS_OIDC_TENANT_ID",
+            "KEYCLOAK_CLIENT_ID", "KEYCLOAK_APP_ID_CLAIM", "KEYCLOAK_TENANT_ID_CLAIM",
+            "KEYCLOAK_WORKSPACE_ID_CLAIM", "SUPABASE_JWT_SECRET",
+            "AUTH_ANON_USER_ID", "AUTH_ANON_EMAIL", "AUTH_ANON_ROLES", "AUTH_ANON_SCOPES",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
+
+    def _jwt_base(self, monkeypatch) -> None:
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/.well-known/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+
+    @pytest.mark.parametrize(
+        ("var", "value"),
+        [
+            ("AUTH_ISSUER", "https://b.example.com"),
+            ("AUTH_JWKS_URL", "https://b.example.com/.well-known/jwks.json"),
+            ("AUTH_AUDIENCE", "other-api"),
+            ("AUTH_CLOCK_SKEW", "300"),
+            ("AUTH_SCOPES_FORMAT", "array"),
+            ("AUTH_SCOPES_CLAIM", "scope"),
+            ("AUTH_NAME_CLAIM", "display_name"),
+            ("AUTH_USER_ID_CLAIM", "oid"),
+            ("AUTH_EMAIL_CLAIM", "upn"),
+            ("AUTH_ROLES_CLAIM", "realm_access"),
+            ("AUTH_APP_ID_CLAIM", "appid"),
+            ("AUTH_CHAT_ID_CLAIM", "cid"),
+            ("AUTH_TENANT_ID_CLAIM", "tenant"),
+            ("AUTH_WORKSPACE_ID_CLAIM", "ws"),
+            ("AUTH_ALGORITHMS", "RS256,ES256"),
+            ("AUTH_REQUIRED_SCOPE", "access_as_user"),
+            ("AUTH_JWKS_CACHE_TTL", "60"),
+            ("AUTH_DISCOVERY_CACHE_TTL", "60"),
+            ("MOZAIKS_OIDC_TENANT_ID", "tenant-b"),
+        ],
+    )
+    def test_jwt_input_change_rebuilds_adapter(self, monkeypatch, var, value):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._jwt_base(monkeypatch)
+        first = get_auth_adapter()
+        monkeypatch.setenv(var, value)
+        second = get_auth_adapter()
+        assert second is not first, f"{var} change must rebuild the adapter"
+
+    def test_jwt_rebuilt_adapter_reflects_new_config(self, monkeypatch):
+        """The rebuilt adapter carries the NEW values, not the stale ones."""
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._jwt_base(monkeypatch)
+        first = get_auth_adapter()
+        assert first._config.issuer == "https://a.example.com"
+        assert first._config.clock_skew_seconds == 120
+
+        monkeypatch.setenv("AUTH_ISSUER", "https://b.example.com")
+        monkeypatch.setenv("AUTH_CLOCK_SKEW", "300")
+        monkeypatch.setenv("AUTH_WORKSPACE_ID_CLAIM", "ws_b")
+        second = get_auth_adapter()
+        assert second._config.issuer == "https://b.example.com"
+        assert second._config.clock_skew_seconds == 300
+        assert second._config.workspace_id_claim == "ws_b"
+
+    @pytest.mark.parametrize(
+        ("var", "value"),
+        [
+            ("KEYCLOAK_CLIENT_ID", "other-client"),
+            ("KEYCLOAK_APP_ID_CLAIM", "app"),
+            ("KEYCLOAK_TENANT_ID_CLAIM", "tenant"),
+            ("KEYCLOAK_WORKSPACE_ID_CLAIM", "ws_b"),
+            ("KEYCLOAK_REALM", "realm-b"),
+            ("KEYCLOAK_URL", "https://kc-b.example.com"),
+        ],
+    )
+    def test_keycloak_input_change_rebuilds_adapter(self, monkeypatch, var, value):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("KEYCLOAK_URL", "https://kc-a.example.com")
+        monkeypatch.setenv("KEYCLOAK_REALM", "realm-a")
+        first = get_auth_adapter()
+        monkeypatch.setenv(var, value)
+        second = get_auth_adapter()
+        assert second is not first, f"{var} change must rebuild the adapter"
+
+    def test_keycloak_rebuilt_adapter_reflects_new_claim_mapping(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("KEYCLOAK_URL", "https://kc-a.example.com")
+        monkeypatch.setenv("KEYCLOAK_REALM", "realm-a")
+        first = get_auth_adapter()
+        assert first._workspace_id_claim == "workspace_id"
+
+        monkeypatch.setenv("KEYCLOAK_WORKSPACE_ID_CLAIM", "ws_b")
+        second = get_auth_adapter()
+        assert second._workspace_id_claim == "ws_b"
+
+    def test_supabase_secret_change_rebuilds_adapter(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+        first = get_auth_adapter()
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "s3cret")
+        second = get_auth_adapter()
+        assert second is not first
+        assert second._jwt_secret == "s3cret"
+
+    @pytest.mark.parametrize(
+        ("var", "value"),
+        [
+            ("AUTH_ANON_USER_ID", "dev_bob"),
+            ("AUTH_ANON_EMAIL", "bob@example.com"),
+            ("AUTH_ANON_ROLES", "admin,user"),
+            ("AUTH_ANON_SCOPES", "access_as_user,billing.admin"),
+        ],
+    )
+    def test_no_auth_input_change_rebuilds_adapter(self, monkeypatch, var, value):
+        """Permitted local dev: changing the anonymous persona rebuilds."""
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.setenv("ENV", "development")
+        first = get_auth_adapter()
+        monkeypatch.setenv(var, value)
+        second = get_auth_adapter()
+        assert second is not first, f"{var} change must rebuild the adapter"
+
+    def test_no_auth_rebuilt_adapter_reflects_new_roles(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.setenv("ENV", "development")
+        first = get_auth_adapter()
+        assert first._default_roles == []
+
+        monkeypatch.setenv("AUTH_ANON_ROLES", "admin,user")
+        second = get_auth_adapter()
+        assert second._default_roles == ["admin", "user"]
+
+    def test_environment_change_local_to_protected_fails_closed(self, monkeypatch):
+        """local → protected must not keep serving the cached no-auth adapter."""
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.setenv("ENV", "development")
+        assert get_auth_adapter().name == "none"
+
+        monkeypatch.setenv("ENV", "production")
+        with pytest.raises(AuthError, match="not permitted"):
+            get_auth_adapter()
+
+    def test_unchanged_config_returns_same_instance(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        self._jwt_base(monkeypatch)
+        assert get_auth_adapter() is get_auth_adapter()
+
+
+# ---------------------------------------------------------------------------
+# Custom-provider cache invalidation contract (D5)
+# ---------------------------------------------------------------------------
+
+
+class TestCustomProviderCacheContract:
+    """A custom provider's changed configuration may never silently reuse an
+    adapter validated under an older configuration."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        import mozaiksai.core.auth.adapters.registry as reg
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in _AUTH_MATRIX_VARS:
+            monkeypatch.delenv(var, raising=False)
+        saved = dict(reg._adapter_registry)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+        yield
+        reg._adapter_registry.clear()
+        reg._adapter_registry.update(saved)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+
+    def _custom_adapter_class(self, revision_box):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+
+        class _CustomAdapter(BaseAuthAdapter):
+            name = "custom"
+
+            def __init__(self, settings=None):
+                super().__init__(settings)
+                self.revision = revision_box["value"]
+
+            async def validate_token(self, token: str) -> UserClaims:
+                return UserClaims(user_id="custom-user", provider=self.name)
+
+            def is_enabled(self) -> bool:
+                return True
+
+        return _CustomAdapter
+
+    def test_declared_config_identity_invalidates_on_revision_change(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        box = {"value": "rev-a"}
+        register_adapter(
+            "custom",
+            self._custom_adapter_class(box),
+            config_identity=lambda: box["value"],
+        )
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "custom")
+
+        first = get_auth_adapter()
+        assert first.revision == "rev-a"
+        assert get_auth_adapter() is first  # cached while identity is unchanged
+
+        box["value"] = "rev-b"
+        second = get_auth_adapter()
+        assert second is not first
+        assert second.revision == "rev-b"
+
+    def test_adapter_without_config_identity_is_never_cached(self, monkeypatch):
+        """Truthful bounded contract: no declared identity → no caching, so a
+        changed configuration can never reuse a stale adapter."""
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        box = {"value": "rev-a"}
+        register_adapter("custom", self._custom_adapter_class(box))
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "custom")
+
+        first = get_auth_adapter()
+        second = get_auth_adapter()
+        assert second is not first  # rebuilt every resolution
+
+        box["value"] = "rev-b"
+        assert get_auth_adapter().revision == "rev-b"
+
+    def test_reregistration_invalidates_cached_adapter(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter, register_adapter
+
+        box = {"value": "rev-a"}
+        register_adapter("custom", self._custom_adapter_class(box), config_identity="static")
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "custom")
+        first = get_auth_adapter()
+
+        box["value"] = "rev-b"
+        register_adapter("custom", self._custom_adapter_class(box), config_identity="static")
+        second = get_auth_adapter()
+        assert second is not first
+        assert second.revision == "rev-b"
+
+
+# ---------------------------------------------------------------------------
+# Cache record coherence (D5)
+# ---------------------------------------------------------------------------
+
+
+class TestCachePublicationCoherence:
+    """Fingerprint, provider, and adapter are published as one immutable record."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in _AUTH_MATRIX_VARS:
+            monkeypatch.delenv(var, raising=False)
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
+
+    def test_cache_entry_matches_resolved_config(self, monkeypatch):
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://a.example.com/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://a.example.com")
+
+        adapter = reg.get_auth_adapter()
+        entry = reg._adapter_cache
+        config = reg.resolve_auth_config()
+
+        assert entry is not None
+        assert entry.adapter is adapter
+        assert entry.provider == config.provider == "jwt"
+        assert entry.fingerprint == config.fingerprint
+
+    def test_startup_validation_binds_the_adapter_requests_use(self, monkeypatch):
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+
+        assert reg.validate_auth_provider_configuration() == "supabase"
+        bound = reg._adapter_cache
+        assert bound is not None
+        assert reg.get_auth_adapter() is bound.adapter

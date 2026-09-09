@@ -34,15 +34,28 @@ This project follows a practical pre-1.0 changelog format:
   Contradictory explicit declarations (`AUTH_ENABLED=true` +
   `AUTH_PROVIDER=none`; `AUTH_ENABLED=false` + a real explicit
   `AUTH_PROVIDER`) and unrecognized `AUTH_ENABLED` values are fatal instead
-  of silently resolving. **Protected environments (`ENV`/`ENVIRONMENT` of
-  staging/production) refuse all no-auth operation** — explicit disable or
-  implicit demo mode — independent of `MOZAIKS_STARTUP_CHECKS` mode; the
-  explicit no-auth switches remain local development/test contracts. The
-  cached auth adapter is keyed by a resolved-configuration fingerprint, so
-  request-time validation always uses the configuration startup validated
-  and a stale trusted-bypass adapter cannot survive a configuration change.
-  Implicit demo mode (no auth configuration at all, unprotected
-  environment) still boots for local getting-started use.
+  of silently resolving. **Unauthenticated operation is now allowlisted:** it
+  is permitted only in the recognized local environments `development`,
+  `local`, `test` (`dev` normalizes to `development`) or with no environment
+  configured. Every other explicit `ENV`/`ENVIRONMENT` value — `production`,
+  `staging`, and unknown or regional names such as `prod-us`,
+  `production-east`, `preview`, or `qa` — refuses no-auth operation
+  (explicit disable or implicit demo) independent of
+  `MOZAIKS_STARTUP_CHECKS` mode, while still booting normally with
+  authentication configured. `ENV` and `ENVIRONMENT` are resolved
+  canonically: blank values are absence (a blank `ENV` cannot mask a
+  deployed `ENVIRONMENT`), aliases normalize before comparison, and two
+  non-blank values that disagree are a fatal configuration error rather than
+  a silent pick. The cached auth adapter is keyed by the complete
+  provider-specific configuration snapshot it is built from — issuer, JWKS
+  and discovery URLs, audience, every claim mapping, scope format, clock
+  skew, algorithms, cache TTLs, Keycloak claim mappings, Supabase secret,
+  and anonymous-persona settings — so changing any of them rebuilds the
+  adapter and no stale adapter can serve requests under newer configuration.
+  Custom adapters declare a `config_identity` at registration to participate
+  in that cache identity, and are never cached without one. Implicit demo
+  mode (no auth configuration at all, in an environment that permits it)
+  still boots for local getting-started use.
 - **Fail-closed billing fulfillment ingress**:
   `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
   now requires the internal API key, an *authenticated* billing-admin

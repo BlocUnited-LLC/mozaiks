@@ -227,6 +227,9 @@ def test_local_development_rejected_in_production_profile(monkeypatch) -> None:
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.delenv("AUTH_PROVIDER", raising=False)
     monkeypatch.setenv("ENV", "production")
+    # ENV and ENVIRONMENT must agree; a developer .env commonly sets
+    # ENVIRONMENT=development, which would be a conflicting declaration.
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     with pytest.raises(ValueError, match="local_development"):
         ModuleDispatchAuthority(
             kind="local_development",
