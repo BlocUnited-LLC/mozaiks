@@ -422,6 +422,12 @@ agent, and incoming envelope's causation identity; collected output history is
 not dispatched again after the run. The runtime retains the existing auto-tool
 execution checkpoints for duplicate delivery within a process.
 
+Workflows declaring interactive `UI_Tool` bindings do not use the adapter's
+whole-channel settlement deadline: user response waits remain unbounded, as
+required by the UI tool contract. Provider-call timeouts, graph turn limits,
+and operation attempt budgets remain in effect. Noninteractive channels retain
+the adapter's settlement deadline.
+
 These graph-bound operations belong to network agents, not task-batch triggers
 or workers. Task batches retain their existing `failure_policy` and
 `retry_limit`; put an outcome-dependent check in a separate network agent

@@ -373,7 +373,7 @@ async def test_generated_workflow_loads_and_executes_in_real_ag2(tmp_path, monke
         workflow_name="DocumentCheck", app_id="app", chat_id="chat", agents=agents,
         transition_rules=config["transition_graph"]["transition_rules"], initial_agent_name="CheckAgent",
         initial_message="Check the document.", context_variables=bridge.snapshot(),
-        context_authority_policy=policy, max_turns=12, close_timeout_seconds=5,
+        context_authority_policy=policy, max_turns=12, close_timeout_seconds=float("inf") if resume else 5,
         agent_output_handler=before_packet,
     ))
     live_run = result.live_run

@@ -577,6 +577,7 @@ async def _run_ag2_network_phase(
     resume_existing_only: bool = False,
     resume_context_updates: Mapping[str, Any] | None = None,
     agent_output_handler: Callable | None = None,
+    close_timeout_seconds: float = 120.0,
 ) -> Any:
     return await AG2NetworkRunner().run(
         AG2NetworkRunnerRequest(
@@ -592,6 +593,7 @@ async def _run_ag2_network_phase(
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             agent_output_handler=agent_output_handler,
+            close_timeout_seconds=close_timeout_seconds,
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
@@ -1010,6 +1012,10 @@ async def run_workflow_orchestration(
         from .workflow_manager import workflow_manager
 
         auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
+        # UI tools wait for a person, not the adapter's settlement deadline.
+        close_timeout_seconds = (
+            float("inf") if any(tool.get("tool_type") == "UI_Tool" for tool in config.get("tools", [])) else 120.0
+        )
 
         async def _before_agent_packet(agent_name: str, packet: Any) -> None:
             await _dispatch_agent_packet_output(
@@ -1054,6 +1060,7 @@ async def run_workflow_orchestration(
                 initial_message=network_prompt,
                 context_variables=dict(ctx_dict),
                 agent_output_handler=_before_agent_packet,
+                close_timeout_seconds=close_timeout_seconds,
                 structured_registry=structured_registry,
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
@@ -1126,6 +1133,7 @@ async def run_workflow_orchestration(
                         initial_agent_name=continuation_agent,
                         initial_message="Continue with the completed deterministic task batch outputs.",
                         agent_output_handler=_before_agent_packet,
+                        close_timeout_seconds=close_timeout_seconds,
                         context_variables=ctx_dict,
                         structured_registry=structured_registry,
                         max_turns=max_turns,
@@ -1149,6 +1157,7 @@ async def run_workflow_orchestration(
                 initial_message=network_prompt,
                 context_variables=ctx_dict,
                 agent_output_handler=_before_agent_packet,
+                close_timeout_seconds=close_timeout_seconds,
                 structured_registry=structured_registry,
                 max_turns=max_turns,
                 agent_text_context_deriver=agent_text_context_deriver,
