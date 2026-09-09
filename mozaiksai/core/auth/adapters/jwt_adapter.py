@@ -14,7 +14,13 @@ from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
-from mozaiksai.core.auth.cache_ttl import parse_cache_ttl_seconds
+from mozaiksai.core.auth.cache_ttl import (
+    DEFAULT_DISCOVERY_CACHE_TTL_SECONDS,
+    DEFAULT_JWKS_CACHE_TTL_SECONDS,
+    DISCOVERY_CACHE_TTL_ENV,
+    JWKS_CACHE_TTL_ENV,
+    resolve_cache_ttl_setting,
+)
 from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
 from mozaiksai.core.auth.jwks import JWKSClient
 
@@ -92,8 +98,8 @@ class JWTAdapterConfig:
     # Cache TTLs for this adapter's own discovery/JWKS clients. Held here so
     # the lazily created clients derive from the same immutable snapshot that
     # identifies the adapter, never from live environment.
-    jwks_cache_ttl_seconds: int = 3600
-    discovery_cache_ttl_seconds: int = 86400
+    jwks_cache_ttl_seconds: int = DEFAULT_JWKS_CACHE_TTL_SECONDS
+    discovery_cache_ttl_seconds: int = DEFAULT_DISCOVERY_CACHE_TTL_SECONDS
 
     def __post_init__(self):
         if self.algorithms is None:
@@ -106,6 +112,10 @@ class JWTAdapterConfig:
         The auth registry passes the same snapshot it derived the adapter cache
         identity from, so the constructed adapter always matches that identity.
         """
+
+        def _raw(name: str) -> str | None:
+            """Return the configured value untouched (no default substitution)."""
+            return settings.get(name) if settings is not None else os.getenv(name)
 
         def _get(name: str, default: str = "") -> str:
             # Absent and empty are equivalent here: a blank AUTH_* variable in
@@ -124,11 +134,14 @@ class JWTAdapterConfig:
                 f"AUTH_CLOCK_SKEW must be an integer number of seconds, got {raw_clock_skew!r}"
             ) from exc
 
-        jwks_cache_ttl_seconds = parse_cache_ttl_seconds(
-            "AUTH_JWKS_CACHE_TTL", _get("AUTH_JWKS_CACHE_TTL", "3600")
+        # Raw values go straight to the canonical resolver: absent, empty, and
+        # whitespace-only all normalize to the same default here as they do in
+        # canonical auth resolution.
+        jwks_cache_ttl_seconds = resolve_cache_ttl_setting(
+            JWKS_CACHE_TTL_ENV, _raw(JWKS_CACHE_TTL_ENV)
         )
-        discovery_cache_ttl_seconds = parse_cache_ttl_seconds(
-            "AUTH_DISCOVERY_CACHE_TTL", _get("AUTH_DISCOVERY_CACHE_TTL", "86400")
+        discovery_cache_ttl_seconds = resolve_cache_ttl_setting(
+            DISCOVERY_CACHE_TTL_ENV, _raw(DISCOVERY_CACHE_TTL_ENV)
         )
 
         return cls(

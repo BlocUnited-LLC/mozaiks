@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.cache_ttl import (
+    DEFAULT_JWKS_CACHE_TTL_SECONDS,
+    cache_entry_is_expired,
+)
 from mozaiksai.core.auth.config import get_auth_config
 
 if TYPE_CHECKING:
@@ -20,7 +24,8 @@ if TYPE_CHECKING:
 
 logger = get_core_logger("auth.jwks")
 
-_DEFAULT_JWKS_CACHE_TTL = 3600  # 1 hour
+# Canonical default lives in cache_ttl.py; aliased for local readability.
+_DEFAULT_JWKS_CACHE_TTL = DEFAULT_JWKS_CACHE_TTL_SECONDS
 
 
 @dataclass
@@ -33,7 +38,7 @@ class CachedJWKS:
     source_url: str  # Track which URL was used
 
     def is_expired(self) -> bool:
-        return time.time() > (self.fetched_at + self.ttl_seconds)
+        return cache_entry_is_expired(self.fetched_at, self.ttl_seconds, now=time.time())
 
 
 class JWKSClient:

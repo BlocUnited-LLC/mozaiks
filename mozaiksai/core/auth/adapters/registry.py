@@ -43,7 +43,11 @@ from typing import Literal
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters.base import AuthAdapter, AuthError, BaseAuthAdapter
-from mozaiksai.core.auth.cache_ttl import CacheTtlConfigError, parse_cache_ttl_seconds
+from mozaiksai.core.auth.cache_ttl import (
+    CACHE_TTL_DEFAULTS,
+    CacheTtlConfigError,
+    resolve_cache_ttl_setting,
+)
 from mozaiksai.core.environment import (
     ENVIRONMENT_ENV_VARS,
     EnvironmentConfigError,
@@ -127,6 +131,13 @@ _ALL_AUTH_ENV_VARS: tuple[str, ...] = tuple(
 
 BUILTIN_PROVIDERS: frozenset[str] = frozenset(_PROVIDER_CONFIG_ENV_VARS)
 
+SETTINGS_PARAMETER = "settings"
+
+#: How an adapter constructor must be invoked. Established positively at
+#: registration — never inferred from a failed construction attempt.
+ConstructorMode = Literal["settings_keyword", "no_settings"]
+_CONSTRUCTOR_MODES: frozenset[str] = frozenset({"settings_keyword", "no_settings"})
+
 ResolvedAuthSource = Literal[
     "explicit_provider",
     "explicit_disable",
@@ -181,17 +192,22 @@ class _AdapterRegistration:
     third-party adapter and must never reuse one validated under an older
     configuration.
 
-    ``accepts_settings`` is determined once, at registration, by inspecting the
-    constructor signature. Construction never infers signature support from a
-    caught ``TypeError`` — an exception raised inside a constructor body is a
-    real failure and must propagate.
+    ``constructor_mode`` is established once, at registration, by positively
+    classifying the constructor signature (or by an explicit declaration for
+    uninspectable constructors). Construction never infers signature support
+    from a caught ``TypeError`` — an exception raised inside a constructor body
+    is a real failure and must propagate.
     """
 
     adapter_class: type[BaseAuthAdapter]
     generation: int
     builtin: bool
-    accepts_settings: bool
+    constructor_mode: ConstructorMode
     config_identity: str | Callable[[], str] | None = None
+
+    @property
+    def accepts_settings(self) -> bool:
+        return self.constructor_mode == "settings_keyword"
 
     def identity_token(self) -> str | None:
         """Return the provider-declared identity, or None when uncacheable.
@@ -220,32 +236,96 @@ class _AdapterRegistration:
         return _validate_config_identity_value(self.config_identity, source="value")
 
 
-def _constructor_accepts_settings(adapter_class: type) -> bool:
-    """Determine settings-argument support BEFORE any construction attempt.
+def _classify_constructor(
+    adapter_class: type,
+    *,
+    declared_mode: ConstructorMode | None,
+) -> ConstructorMode:
+    """Positively establish how an adapter constructor must be invoked.
 
-    Uses signature inspection only. When a signature cannot be inspected (C
-    extensions, exotic callables), the answer is False: the adapter is
-    constructed without the snapshot and — lacking a declared config identity —
-    is not cached, which is the safe direction.
+    An adapter may be constructed WITHOUT the resolved settings snapshot only
+    when inspection proves it takes no settings argument at all.
+    "Could not inspect" and "no ``settings`` keyword found" are not evidence of
+    configuration.
+
+    ``declared_mode`` is the escape hatch for constructors that genuinely
+    cannot be inspected (C extensions, exotic callables): the registrant states
+    the contract explicitly rather than the registry guessing it.
     """
+    name = getattr(adapter_class, "__name__", repr(adapter_class))
+
+    if declared_mode is not None:
+        if declared_mode not in _CONSTRUCTOR_MODES:
+            raise AuthError(
+                f"Unknown constructor_mode {declared_mode!r} for auth adapter {name}. "
+                f"Valid modes: {', '.join(sorted(_CONSTRUCTOR_MODES))}.",
+                500,
+                "registry",
+            )
+        return declared_mode
+
     try:
         signature = inspect.signature(adapter_class)
-    except (TypeError, ValueError):
-        logger.warning(
-            "Could not inspect %s constructor signature; constructing without the "
-            "configuration snapshot.",
-            getattr(adapter_class, "__name__", adapter_class),
-        )
-        return False
-    for parameter in signature.parameters.values():
-        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
-            return True
-        if parameter.name == "settings" and parameter.kind in {
+    except (TypeError, ValueError) as exc:
+        raise AuthError(
+            f"Cannot establish the constructor contract for auth adapter {name}: "
+            f"its signature could not be inspected ({type(exc).__name__}). Register it "
+            "with an explicit constructor_mode "
+            f"({', '.join(sorted(_CONSTRUCTOR_MODES))}) so the runtime knows whether it "
+            "consumes the configuration snapshot. Refusing to assume it takes none.",
+            500,
+            "registry",
+        ) from exc
+
+    settings_parameter = signature.parameters.get(SETTINGS_PARAMETER)
+    if settings_parameter is not None:
+        if settings_parameter.kind in {
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
             inspect.Parameter.KEYWORD_ONLY,
         }:
-            return True
-    return False
+            return "settings_keyword"
+        if settings_parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+            # Positional-only configuration is not part of the plugin contract;
+            # accepting it silently would risk passing the snapshot in the wrong
+            # slot, and ignoring it would discard the configuration entirely.
+            raise AuthError(
+                f"Auth adapter {name} declares {SETTINGS_PARAMETER!r} as a positional-only "
+                "parameter, which the adapter contract does not support. Make it accept "
+                f"{SETTINGS_PARAMETER}= as a keyword so the configuration snapshot can be "
+                "supplied unambiguously.",
+                500,
+                "registry",
+            )
+        raise AuthError(
+            f"Auth adapter {name} declares {SETTINGS_PARAMETER!r} with unsupported "
+            f"parameter kind {settings_parameter.kind.name}.",
+            500,
+            "registry",
+        )
+
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            # **kwargs is an established part of the adapter extension contract.
+            return "settings_keyword"
+
+    # No settings parameter at all: this mode is valid only when every remaining
+    # parameter is optional, so zero-argument construction is provably safe.
+    required = [
+        parameter.name
+        for parameter in signature.parameters.values()
+        if parameter.default is inspect.Parameter.empty
+        and parameter.kind
+        not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+    ]
+    if required:
+        raise AuthError(
+            f"Auth adapter {name} requires constructor argument(s) {required} that the "
+            "runtime cannot supply. Accept the configuration snapshot as "
+            f"{SETTINGS_PARAMETER}=, or give those parameters defaults.",
+            500,
+            "registry",
+        )
+    return "no_settings"
 
 
 @dataclass(frozen=True)
@@ -401,12 +481,9 @@ def resolve_auth_config() -> ResolvedAuthConfig:
     # Cache TTLs are parsed here, during canonical resolution, so a malformed
     # value fails startup rather than surfacing later inside lazy discovery or
     # JWKS client construction on a request path.
-    for ttl_name, ttl_default in (
-        ("AUTH_JWKS_CACHE_TTL", 3600),
-        ("AUTH_DISCOVERY_CACHE_TTL", 86400),
-    ):
+    for ttl_name in CACHE_TTL_DEFAULTS:
         try:
-            parse_cache_ttl_seconds(ttl_name, settings.get(ttl_name), default=ttl_default)
+            resolve_cache_ttl_setting(ttl_name, settings.get(ttl_name))
         except CacheTtlConfigError as exc:
             raise AuthError(str(exc), 500, "registry") from exc
 
@@ -527,6 +604,7 @@ def register_adapter(
     adapter_class: type[BaseAuthAdapter],
     *,
     config_identity: str | Callable[[], str] | None = None,
+    constructor_mode: ConstructorMode | None = None,
 ) -> None:
     """
     Register an auth adapter.
@@ -543,15 +621,30 @@ def register_adapter(
             changed configuration can never silently reuse an adapter built
             under an older one.
 
+        constructor_mode: Explicit constructor contract, required only when the
+            constructor cannot be inspected (C extensions, exotic callables).
+            ``"settings_keyword"`` means it accepts the configuration snapshot as
+            ``settings=``; ``"no_settings"`` means it takes no canonical
+            settings argument. When omitted, the contract is established by
+            signature inspection, and registration fails rather than assuming a
+            constructor takes no settings.
+
     Raises:
-        AuthError: when a literal config_identity violates the contract.
+        AuthError: when a literal config_identity violates the contract, or the
+            constructor contract cannot be positively established.
 
     Example:
         register_adapter("my-custom", MyCustomAdapter, config_identity=lambda: cfg.revision)
     """
     if config_identity is not None and not callable(config_identity):
         _validate_config_identity_value(config_identity, source="value")
-    _register(name, adapter_class, builtin=False, config_identity=config_identity)
+    _register(
+        name,
+        adapter_class,
+        builtin=False,
+        config_identity=config_identity,
+        constructor_mode=constructor_mode,
+    )
 
 
 def _register(
@@ -560,17 +653,21 @@ def _register(
     *,
     builtin: bool,
     config_identity: str | Callable[[], str] | None = None,
+    constructor_mode: ConstructorMode | None = None,
 ) -> None:
     global _registry_generation
+    mode = _classify_constructor(adapter_class, declared_mode=constructor_mode)
     _registry_generation += 1
     _adapter_registry[name.lower()] = _AdapterRegistration(
         adapter_class=adapter_class,
         generation=_registry_generation,
         builtin=builtin,
-        accepts_settings=_constructor_accepts_settings(adapter_class),
+        constructor_mode=mode,
         config_identity=config_identity,
     )
-    logger.debug("Registered auth adapter: %s (builtin=%s)", name, builtin)
+    logger.debug(
+        "Registered auth adapter: %s (builtin=%s, constructor_mode=%s)", name, builtin, mode
+    )
 
 
 def list_adapters() -> list[str]:
@@ -580,8 +677,14 @@ def list_adapters() -> list[str]:
 
 
 def _ensure_builtin_adapters() -> None:
-    """Register built-in adapters once."""
-    if _adapter_registry:
+    """Ensure every built-in adapter is registered.
+
+    Registration is per-provider and idempotent rather than gated on the whole
+    registry being empty: a custom adapter registered before the first auth
+    resolution must not suppress the built-in providers. An intentional
+    override of a built-in name is preserved.
+    """
+    if BUILTIN_PROVIDERS.issubset(_adapter_registry.keys()):
         return
     # Import here to avoid circular imports
     from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter
@@ -589,10 +692,14 @@ def _ensure_builtin_adapters() -> None:
     from mozaiksai.core.auth.adapters.no_auth import NoAuthAdapter
     from mozaiksai.core.auth.adapters.supabase import SupabaseAuthAdapter
 
-    _register("none", NoAuthAdapter, builtin=True)
-    _register("jwt", GenericJWTAdapter, builtin=True)
-    _register("supabase", SupabaseAuthAdapter, builtin=True)
-    _register("keycloak", KeycloakAuthAdapter, builtin=True)
+    for name, adapter_class in (
+        ("none", NoAuthAdapter),
+        ("jwt", GenericJWTAdapter),
+        ("supabase", SupabaseAuthAdapter),
+        ("keycloak", KeycloakAuthAdapter),
+    ):
+        if name not in _adapter_registry:
+            _register(name, adapter_class, builtin=True)
 
 
 def _build_adapter(
@@ -624,7 +731,7 @@ def _build_adapter(
     # body is a real construction failure and must fail closed, never silently
     # rebuild the adapter without its canonical configuration.
     try:
-        if registration.accepts_settings:
+        if registration.constructor_mode == "settings_keyword":
             adapter = registration.adapter_class(settings=settings)  # type: ignore[call-arg]
         else:
             adapter = registration.adapter_class()

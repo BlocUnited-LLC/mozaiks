@@ -25,12 +25,18 @@ from typing import Any
 import aiohttp
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.auth.cache_ttl import parse_cache_ttl_seconds
+from mozaiksai.core.auth.cache_ttl import (
+    DEFAULT_DISCOVERY_CACHE_TTL_SECONDS,
+    DISCOVERY_CACHE_TTL_ENV,
+    cache_entry_is_expired,
+    resolve_cache_ttl_setting,
+)
 
 logger = get_core_logger("auth.discovery")
 
 
-_DEFAULT_DISCOVERY_CACHE_TTL = 86400  # 24 hours (discovery rarely changes)
+# Canonical default lives in cache_ttl.py; aliased for local readability.
+_DEFAULT_DISCOVERY_CACHE_TTL = DEFAULT_DISCOVERY_CACHE_TTL_SECONDS
 
 
 @dataclass
@@ -42,7 +48,7 @@ class CachedDiscovery:
     ttl_seconds: int
 
     def is_expired(self) -> bool:
-        return time.time() > (self.fetched_at + self.ttl_seconds)
+        return cache_entry_is_expired(self.fetched_at, self.ttl_seconds, now=time.time())
 
     @property
     def jwks_uri(self) -> str | None:
@@ -119,10 +125,8 @@ class OIDCDiscoveryClient:
         elif not consult_environment:
             self._cache_ttl = _DEFAULT_DISCOVERY_CACHE_TTL
         else:
-            self._cache_ttl = parse_cache_ttl_seconds(
-                "AUTH_DISCOVERY_CACHE_TTL",
-                os.getenv("AUTH_DISCOVERY_CACHE_TTL"),
-                default=_DEFAULT_DISCOVERY_CACHE_TTL,
+            self._cache_ttl = resolve_cache_ttl_setting(
+                DISCOVERY_CACHE_TTL_ENV, os.getenv(DISCOVERY_CACHE_TTL_ENV)
             )
         self._cache: CachedDiscovery | None = None
         self._lock = asyncio.Lock()

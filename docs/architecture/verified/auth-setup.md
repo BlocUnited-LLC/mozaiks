@@ -211,10 +211,16 @@ previous one stays internally consistent. Explicit constructor input to
 `OIDCDiscoveryClient` and `JWKSClient` is authoritative and is never
 overridden by live environment or global `AuthConfig`.
 
-`AUTH_JWKS_CACHE_TTL` and `AUTH_DISCOVERY_CACHE_TTL` must be integer seconds,
-zero or greater (`0` means always refetch). They are parsed during
-configuration resolution, so a malformed value fails startup rather than
-surfacing later during lazy client construction on a request path.
+`AUTH_JWKS_CACHE_TTL` (default `3600`) and `AUTH_DISCOVERY_CACHE_TTL`
+(default `86400`) must be integer seconds, zero or greater, where `0` means
+always refetch and is never treated as "unset". Absent, empty, and
+whitespace-only values all normalize to the same canonical default, resolved
+once by `mozaiksai.core.auth.cache_ttl` and reused by configuration
+resolution, the adapter's own config, and `AuthConfig` — the layers can never
+disagree. Malformed values fail startup rather than surfacing later during
+lazy client construction on a request path. Cache expiry compares elapsed time
+against the TTL rather than adding it to a timestamp, so any accepted value —
+including a very large one — stays valid during real cache use.
 
 ### Custom adapter contracts
 
@@ -235,11 +241,31 @@ never cached — it is rebuilt on every resolution — so a changed custom
 configuration can never silently reuse an adapter validated under an older
 one. Re-registering a provider also invalidates any cached adapter.
 
-Adapter constructors may accept a `settings` argument to receive the
-configuration snapshot; support is determined by signature inspection at
-registration, before any construction attempt. An exception raised inside a
-constructor body — including `TypeError` — is a real construction failure and
-fails closed. The runtime never retries construction without the snapshot.
+Adapter constructors receive the configuration snapshot as `settings=`. The
+constructor contract is established **positively** at registration, before any
+construction attempt, and registration fails rather than assuming an adapter
+takes no configuration:
+
+| Constructor | Outcome |
+|---|---|
+| `settings` as a normal or keyword-only parameter | snapshot supplied |
+| `**kwargs` | snapshot supplied |
+| no `settings`, all other parameters optional | constructed with no arguments |
+| `settings` positional-only | **rejected** — make it keyword-accessible |
+| a required parameter the runtime cannot supply | **rejected** |
+| signature cannot be inspected | **rejected** unless `constructor_mode` is declared |
+
+For constructors that genuinely cannot be inspected (C extensions, exotic
+callables), declare the contract explicitly:
+
+```python
+register_adapter("my-custom", MyAdapter, config_identity="v1",
+                 constructor_mode="settings_keyword")  # or "no_settings"
+```
+
+An exception raised inside a constructor body — including `TypeError` — is a
+real construction failure and fails closed. The runtime never retries
+construction without the snapshot.
 
 Privileged HTTP surfaces can additionally require authenticated provenance:
 `UserPrincipal.is_authenticated` is true only for principals produced by
