@@ -968,7 +968,7 @@ def _greenfield_integrations(paths: list[str]) -> list[IntegrationInventory]:
             integration_ids.add(path.rsplit("/", 1)[-1].removesuffix("_client.py"))
         elif path == "config/integrations.yaml":
             config_ids.add("integrations")
-        elif path.startswith("config/integrations/") and path.endswith(".json"):
+        elif path.startswith("config/integrations/") and path.endswith(".yaml"):
             config_ids.add(path.rsplit("/", 1)[-1].split(".", 1)[0])
 
     return [

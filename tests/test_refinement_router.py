@@ -1203,10 +1203,10 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
                         {"path": "modules/reports/backend/schemas.py", "content": "connector_id = 'analytics_provider'"},
                         {"path": "modules/reports/backend/policy.py"},
                         {"path": "modules/reports/module.yaml"},
-                        {"path": "config/integrations.json"},
+                        {"path": "config/integrations.yaml"},
                         {"path": "docs/integrations.md"},
                         {"path": ".env"},
-                        {"path": "config/integrations.credentials.json"},
+                        {"path": "config/integrations.credentials.yaml"},
                     ]
                 },
             }
@@ -1224,12 +1224,12 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
         "modules/reports/backend/service.py",
         "modules/reports/backend/policy.py",
         "modules/reports/backend/schemas.py",
-        "config/integrations.json",
+        "config/integrations.yaml",
         "docs/integrations.md",
     ]
     assert "services/integrations/reporting_provider_client.py" not in decision.impact_set.affected_bundle_paths
     assert ".env" not in decision.impact_set.affected_bundle_paths
-    assert "config/integrations.credentials.json" not in decision.impact_set.affected_bundle_paths
+    assert "config/integrations.credentials.yaml" not in decision.impact_set.affected_bundle_paths
     assert "Integration readiness may need to be rechecked." in decision.impact_set.scope_summary
 
 
@@ -1261,7 +1261,7 @@ async def test_integration_impact_without_manifest_uses_conservative_hints() -> 
         "modules/*/backend/service.py",
         "modules/*/backend/schemas.py",
         "modules/*/module.yaml",
-        "config/integrations*.json",
+        "config/integrations*.yaml",
         "docs/integrations*.md",
     ]
     assert "Integration readiness may need to be rechecked." in decision.impact_set.scope_summary
@@ -1362,8 +1362,8 @@ async def test_integration_impact_never_emits_secret_path_hints() -> None:
                     "files_manifest": [
                         {"path": "services/integrations/storage_provider_client.py"},
                         {"path": "services/integrations/storage_provider_secret.py"},
-                        {"path": "config/integrations.json"},
-                        {"path": "config/integrations.keys.json"},
+                        {"path": "config/integrations.yaml"},
+                        {"path": "config/integrations.keys.yaml"},
                         {"path": "secrets/storage_provider.json"},
                     ]
                 },
@@ -1378,7 +1378,7 @@ async def test_integration_impact_never_emits_secret_path_hints() -> None:
 
     assert decision.impact_set.affected_bundle_paths == [
         "services/integrations/storage_provider_client.py",
-        "config/integrations.json",
+        "config/integrations.yaml",
     ]
     assert all("secret" not in path for path in decision.impact_set.affected_bundle_paths)
     assert all("key" not in path for path in decision.impact_set.affected_bundle_paths)

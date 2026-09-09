@@ -35,7 +35,7 @@ VERSIONS = {
 def test_exact_base_capture_and_governed_document_census():
     assert BASELINE["base_commit"] == "5ff00cb1c040d694632e2ec530678c4e9571dc0d"
     assert BASELINE["base_tree"] == "dd750e01833fb127061d085fc2f718a081d8266c"
-    assert canonical_digest(BASELINE) == "a3d53b6dc39f4bd110bd1a51b52e74fed98ae260cce9f792eb4f214a31011a94"
+    assert canonical_digest(BASELINE) == "f6d4648bd230b291690a69b3eb0159f40f1adc3a4be7c0b4794ab42c0d4e6615"
     actual = sorted(
         path.relative_to(ROOT).as_posix()
         for directory in (ROOT / "factory_app/workflows", ROOT / "examples")

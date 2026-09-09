@@ -104,6 +104,27 @@ def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
     assert '"/tools.json"' not in export_helper
 
 
+def test_factory_workflows_do_not_ship_legacy_json_declaratives() -> None:
+    workflows_root = _workspace() / "factory_app" / "workflows"
+    legacy_config_names = {
+        "agents.json",
+        "context_variables.json",
+        "middleware.json",
+        "orchestrator.json",
+        "structured_outputs.json",
+        "tools.json",
+        "transition_graph.json",
+        "ui_config.json",
+    }
+    offenders = [
+        path.relative_to(workflows_root).as_posix()
+        for path in workflows_root.rglob("*.json")
+        if path.name in legacy_config_names or path.name.endswith("Prompt.json")
+    ]
+
+    assert offenders == []
+
+
 def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> None:
     from tests.conftest import _resolve_active_app_root
     app_root = _resolve_active_app_root()

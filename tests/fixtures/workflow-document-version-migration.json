@@ -23,8 +23,8 @@
     {
       "path": "factory_app/workflows/AgentGenerator/structured_outputs.yaml",
       "source_bytes_fingerprint": "1812a3415ca2632d9dfc83c792111488b2ec22e60268a18e7a137051e91e9c3d",
-      "source_document_fingerprint": "2e067eae84b6a93abbb1aa6ca341d2623eaabb0cc564eba4e097671f8a1e5a0d",
-      "parser_document_fingerprint": "4eb8665ffe57d75ca02378735f64239298073659ddc91dce74eacf956b328865"
+      "source_document_fingerprint": "77631d5f5d3d538c51b4923604f78b077448d3b52f984322b51296333caed1ef",
+      "parser_document_fingerprint": "86b7b1daec71a6e20b6b37f0189666b28d69183a473a9c4beca98a3703dc9a1d"
     },
     {
       "path": "factory_app/workflows/AppGenerator/orchestrator.yaml",

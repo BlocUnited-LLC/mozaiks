@@ -754,7 +754,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     def _is_integration_config_path(path: str) -> bool:
-        return bool(re.fullmatch(r"config/integrations[^/]*\.json", path))
+        return bool(re.fullmatch(r"config/integrations[^/]*\.yaml", path))
 
     @staticmethod
     def _is_integration_doc_path(path: str) -> bool:
@@ -831,7 +831,7 @@ class RefinementTriggerRouteResolver:
                 "modules/*/backend/service.py",
                 "modules/*/backend/schemas.py",
                 "modules/*/module.yaml",
-                "config/integrations*.json",
+                "config/integrations*.yaml",
                 "docs/integrations*.md",
             ]
             if cls._is_ui_facing_request(request=request, intent=intent):

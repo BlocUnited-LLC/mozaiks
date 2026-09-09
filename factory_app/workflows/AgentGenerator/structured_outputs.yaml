@@ -1463,7 +1463,7 @@ models:
       visual_agents:
         type: optional_list
         items: str
-        description: Agents permitted to render UI/text to the user (mirrors ui_config.json
+        description: Agents permitted to render UI/text to the user (mirrors ui_config.yaml
           visual_agents list). Use null for backend-only/headless workflows.
       triggers:
         type: list
