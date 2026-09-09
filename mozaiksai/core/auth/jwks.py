@@ -8,12 +8,15 @@ Supports OIDC discovery-driven jwks_uri or explicit URL override.
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.config import get_auth_config
+
+if TYPE_CHECKING:
+    from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
 
 logger = get_core_logger("auth.jwks")
 
@@ -51,7 +54,7 @@ class JWKSClient:
         use_discovery: bool = True,
         *,
         consult_environment: bool = True,
-        discovery_client: Any | None = None,
+        discovery_client: "OIDCDiscoveryClient | None" = None,
     ):
         """
         Initialize JWKS client.
