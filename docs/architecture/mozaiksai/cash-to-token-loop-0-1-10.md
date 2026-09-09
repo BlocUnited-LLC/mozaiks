@@ -176,6 +176,7 @@ class BillingFulfillmentCommand(BaseModel):
     ]
     plan_id: str | None = None
     status: str | None = None
+    subject_revision: int | None = None  # monotonic per entitlement subject
     token_wallet_id: str = "ai_tokens"
     token_amount: int | None = None
     occurred_at: datetime | None = None
@@ -186,6 +187,9 @@ class BillingFulfillmentCommand(BaseModel):
 Rules:
 
 - `command_id` is the idempotency key across all fulfillment effects.
+- `subject_revision` is the optional *ordering* authority, and is orthogonal to
+  `command_id`: idempotency answers "have I already applied this command?",
+  ordering answers "is this command still the newest truth for this subject?".
 - Metadata must use the existing token wallet safe-metadata policy: no secrets,
   raw credentials, API keys, bearer tokens, private keys, customer payment
   identifiers, or checkout session secrets.
@@ -217,6 +221,169 @@ For `subscription_cancelled`:
 - Do not delete the record.
 - Effective entitlement behavior falls back through
   `ConfiguredEntitlementAdapter.current_plan_id()` to the default plan.
+
+### Revision Fencing
+
+Fulfillment is delivered over a network, so an older command can complete at
+the receiver *after* a newer one — a local timeout at the sender does not stop
+the request that caused it. Idempotency alone cannot prevent that: the two
+commands have different `command_id`s, so both are "new".
+
+`subject_revision` closes it. The upstream billing source allocates a
+monotonically increasing integer per entitlement subject each time it commits a
+canonical entitlement revision, and carries it on the command. At write time
+the receiver compares it against `assignment_store.revision_field` on the
+subject's own assignment document, in the same atomic operation that performs
+the update:
+
+- **newer** (strictly greater than the stored value, or the subject has no
+  stored revision yet) — the assignment commits and the new revision is
+  stamped.
+- **stale or equal** — nothing commits. The assignment and plan-allowance
+  effects come back `skipped` with reason `stale_revision`, and the result
+  status is `superseded`. Allowances are suppressed with the assignment because
+  their idempotency key is plan-and-period scoped, so a stale command naming a
+  different plan would otherwise mint tokens behind a fenced assignment.
+- **absent** (`subject_revision` omitted) — the command applies unfenced, for
+  callers that have no ordering authority.
+
+`superseded` is a success outcome, not an error: the command was understood and
+safely ignored. A sender should settle it and stop retrying. Equal revisions are
+suppressed because equality carries no ordering information — the upstream
+source must allocate a fresh ordinal for every meaning-bearing revision.
+
+The entitlement subject is the assignment query itself
+(`app_id` plus whichever of tenant/workspace/user the store declares), which is
+already the assignment document's identity — so fencing needs no new
+collection and no transaction.
+
+Creation and update share one predicate. The fenced write is a single
+revision-filtered upsert carrying the deterministic subject id, so a subject
+that does not exist yet is created under the same comparison that guards an
+existing one. There is deliberately no unfenced fallback write: two concurrent
+first-revisions would both observe absence, and the loser's unfenced upsert
+would then overwrite the winner.
+
+Because that subject id is derived by string-formatting scope values, a null
+scope and the literal string `"None"` produce the same id. A duplicate-key
+collision is therefore not by itself proof that a row belongs to the incoming
+subject: the persisted scope fields are compared with typed equality first, and
+a mismatch is rejected as `subject_identity_collision` rather than being read
+as evidence of supersession.
+
+**Fencing needs one row per subject.** The deterministic assignment id cannot
+supply that on its own: an assignment created before this contract carries an
+ObjectId, so a stale revision-filtered upsert would insert a second,
+deterministic row for the same subject and report itself applied. Enabling
+fencing therefore requires a unique index over the exact configured subject
+paths, which follows a store that maps them to dotted or renamed fields. What
+matters is the guarantee, not the name: a store that already carries an index
+with the same ordered key fields, the same directions, and `unique: true`
+already provides it and is accepted as is. An index that narrows its coverage
+(`sparse`, a `partialFilterExpression`) or changes which values compare equal
+(a non-simple collation) is a different promise and does not count; when none
+qualifies, `mozaiks_billing_subject_unique` is created. Pre-existing duplicate
+subjects make that index
+impossible; that is a data-migration decision for an operator, so it fails
+closed with an actionable error rather than picking a winner or deleting rows.
+`billing_revision` is reserved while fencing is on — no other assignment
+mapping may equal it or nest under it — and configured paths resolve the same
+way for the Mongo query, the write, and the typed subject comparison.
+
+**One decision governs the whole command.** Fencing is on only when the command
+carries a revision AND the store declares the revision field. Deciding per
+effect produced a half-fenced system: an app that opted out still had its
+wallet allowances refused as stale while its assignment happily took the older
+revision.
+
+**Every effect carries the fence.** Assignment success observed before an
+`await` is not authority afterwards, so plan allowances are fenced at their own
+commit: `TokenWalletLedger.record_entry` accepts an opaque
+`subject_key`/`subject_revision` pair and folds the ordering predicate into the
+same single-document update that moves the balance. A stale revision that was
+already mid-flight when a newer one committed is refused there, with the entry
+marked `stale_subject_revision`. Wallet top-ups and refunds are keyed by
+`command_id` and carry no subject ordering, so they are unaffected.
+
+The wallet-side head advances for **every** accepted revision, not only ones
+that mint. A cancellation, a plan with no allowance, and a return to a plan
+whose period allocation already exists all supersede everything older; if the
+head only moved when tokens were credited it would mean "last revision that
+minted" and a delayed older allowance would sail past it. A stale movement is
+also refused without persisting anything under the identity a *successful*
+allocation owns — that identity is plan- and period-scoped, so recording a
+rejection there would permanently deny the allocation a later valid revision of
+the same plan and period is entitled to make.
+
+**Authority is claimed before the assignment commits.** The head cannot be
+advanced *after* the assignment lands: that ordering leaves a window in which
+the subject is already at revision 2 while every wallet still admits revision
+1, and if the head write then fails there is nothing to repair — an older
+allowance may already be in flight. So the fenced path claims the head on every
+wallet the subject can reach first, and only then writes the assignment. A
+wallet that declines — it already holds a strictly newer revision — means the
+command was overtaken, so nothing applies and the result is `superseded`; that
+decline is the only thing that catches a subject whose assignment row is
+missing, where the assignment-side comparison has nothing to compare against. A
+head write that *fails* is not a decline: it propagates, the command applies
+nothing, and the retry succeeds because equal revisions are accepted.
+
+**A pre-effect failure releases the durable reservation.** `apply_durable`
+marks the command `pending` before effects run, so a propagating ordering
+failure would otherwise refuse every identical retry forever. Failures raised
+inside the ordering prerequisite are a distinct kind — `BillingFulfillmentPreEffectError`
+— because the caller knows with certainty that no assignment, allowance, or
+wallet movement was written. Only those release the reservation, by
+compare-and-delete on the exact command id, the still-pending status, and the
+exact command hash, and only while unwinding the invocation that owns it. A
+concurrent identical caller that arrives before the release still sees
+`pending`: exclusivity is unchanged, and only a later retry can start. A
+failure after any effect has committed stays pending, as it must. This is not
+general crash recovery for the command store — that remains a separate,
+unsolved follow-up.
+
+Heads claimed by a partially-successful attempt are **not** reversed. If
+wallet A advanced and wallet B failed, the retry finds A equal (which
+succeeds), advances B, and commits. Reversing A would reopen exactly the window
+an older revision could credit in; forward authority is the safe direction.
+
+**Pending allowance reservations are owned.** A movement reserves its ledger
+entry before committing the balance, and a stale movement rolls that
+reservation back. Because the reservation identity is plan- and period-scoped,
+a newer revision legitimately entitled to the same allocation may adopt that
+same reservation — so adoption transfers ownership atomically, and rollback
+only ever deletes a reservation the rolling-back attempt still owns. The
+crash-recovery case is unaffected: an entry already counted in the balance but
+never marked is finished, not rolled back.
+
+**No balance moves without an acquired reservation.** Observing a reservation
+is not holding one: between the read and the write it may be deleted by the
+attempt that made it, adopted by a newer revision, or finalized. Acquisition is
+therefore a compare-and-swap on exactly the reservation fields the stored
+document carries — a field that is *absent* is compared as absent, never read
+as a Python `None` or `0` and then queried for that value, because Mongo would
+never match the very record the swap is trying to take over and a movement
+whose balance already committed would become unrecoverable. A lost swap is not
+permission to continue — it means the world moved, so the
+ledger re-reads and answers the new state: reserve afresh if the reservation is
+gone, return the idempotent outcome if it settled, retry if someone else now
+holds it. Attempts are bounded; unresolvable contention is reported as an
+operational refusal rather than resolved by writing anyway. The postcondition
+is that a balance counting an entry always has that entry, applied, with its
+wallet and amount intact.
+
+Terminal status follows one precedence: `partial` (something rejected and
+something landed) outranks `rejected` (everything rejected), which outranks
+`superseded` (nothing rejected and at least one revision-scoped effect stood
+down for a newer revision), which outranks `applied`. A command whose earlier
+effect applied and whose remaining effects were then invalidated is
+`superseded` — individual effect history stays truthful, but the command as a
+whole was overtaken.
+
+Replay preserves meaning: a replayed result reports `status: "replayed"` and
+`original_status` — whether the original application was `applied`, `rejected`,
+`partial`, or `superseded` — so a caller never has to infer prior semantics
+from counters.
 
 ### Token Credits
 

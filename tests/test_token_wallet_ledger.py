@@ -416,3 +416,139 @@ async def test_list_entries_returns_public_entries() -> None:
 def test_runtime_collections_include_token_wallet_collections() -> None:
     assert RuntimeCollections.RUNTIME_TOKEN_WALLET_BALANCES == "RuntimeTokenWalletBalances"
     assert RuntimeCollections.RUNTIME_TOKEN_WALLET_ENTRIES == "RuntimeTokenWalletEntries"
+
+
+# ── reservation acquisition never yields without ownership ───────────────────
+
+
+def _reservation_entry(entry_id: str) -> dict:
+    return {
+        "_id": entry_id,
+        "entry_id": entry_id,
+        "balance_id": "app:ai_tokens:user:u1",
+        "operation": "allocation",
+        "direction": "credit",
+        "amount": 100,
+        "signed_amount": 100,
+        "status": "pending",
+        "reservation_owner": "rsv_original",
+        "reservation_generation": 0,
+    }
+
+
+class _ContendedEntries:
+    """Every compare-and-swap loses to a competitor that never settles."""
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+        self.generation = 0
+        self.swaps = 0
+
+    async def find_one(self, _filter, _projection=None):
+        document = _reservation_entry(self.entry_id)
+        document["reservation_generation"] = self.generation
+        return document
+
+    async def find_one_and_update(self, *_args, **_kwargs):
+        self.swaps += 1
+        self.generation += 1
+        return None
+
+    async def insert_one(self, _document):  # pragma: no cover - not reached
+        raise AssertionError("a pending reservation exists; insert must not run")
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_contention_refuses_instead_of_writing() -> None:
+    """Bounded attempts, then an operational refusal. Spinning forever is not
+    an option and neither is moving the balance without the reservation that
+    explains the movement."""
+    from mozaiksai.core.tokens.wallet import (
+        TokenWalletLedger,
+        TokenWalletReservationUnavailable,
+        _now,
+    )
+
+    entry_id = "token_wallet_entry:contended"
+    entries = _ContendedEntries(entry_id)
+    ledger = TokenWalletLedger(database=object())
+
+    with pytest.raises(TokenWalletReservationUnavailable):
+        await ledger._acquire_entry_reservation(
+            entries,
+            entry_id=entry_id,
+            entry=_reservation_entry(entry_id),
+            reservation_owner="rsv_mine",
+            now=_now(),
+        )
+    assert entries.swaps > 1, "the attempt must be retried, not abandoned at once"
+
+
+class _VanishingEntries:
+    """The observed reservation is deleted before the swap can take it."""
+
+    def __init__(self, entry_id: str) -> None:
+        self.entry_id = entry_id
+        self.present = True
+        self.inserted: dict | None = None
+
+    async def find_one(self, _filter, _projection=None):
+        if not self.present:
+            return None
+        return _reservation_entry(self.entry_id)
+
+    async def find_one_and_update(self, *_args, **_kwargs):
+        self.present = False
+        return None
+
+    async def insert_one(self, document):
+        self.inserted = dict(document)
+
+
+@pytest.mark.asyncio
+async def test_a_lost_swap_is_followed_by_a_fresh_reservation() -> None:
+    """A swap that matches nothing means the world moved. The next attempt
+    re-reads, finds the reservation gone, and makes one it owns."""
+    from mozaiksai.core.tokens.wallet import TokenWalletLedger, _now
+
+    entry_id = "token_wallet_entry:vanishing"
+    entries = _VanishingEntries(entry_id)
+    ledger = TokenWalletLedger(database=object())
+
+    acquired = await ledger._acquire_entry_reservation(
+        entries,
+        entry_id=entry_id,
+        entry=_reservation_entry(entry_id) | {"reservation_owner": "rsv_mine"},
+        reservation_owner="rsv_mine",
+        now=_now(),
+    )
+
+    assert acquired is None, "ownership, not a terminal outcome"
+    assert entries.inserted is not None
+    assert entries.inserted["reservation_owner"] == "rsv_mine"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["applied", "rejected"])
+async def test_a_settled_entry_is_returned_rather_than_reserved(status) -> None:
+    from mozaiksai.core.tokens.wallet import TokenWalletLedger, _now
+
+    entry_id = "token_wallet_entry:settled"
+
+    class _Settled:
+        async def find_one(self, _filter, _projection=None):
+            return _reservation_entry(entry_id) | {"status": status}
+
+        async def insert_one(self, _document):  # pragma: no cover
+            raise AssertionError("a settled entry must not be re-reserved")
+
+    ledger = TokenWalletLedger(database=object())
+    acquired = await ledger._acquire_entry_reservation(
+        _Settled(),
+        entry_id=entry_id,
+        entry=_reservation_entry(entry_id),
+        reservation_owner="rsv_mine",
+        now=_now(),
+    )
+    assert acquired is not None
+    assert acquired["status"] == status
