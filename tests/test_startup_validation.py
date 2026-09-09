@@ -618,6 +618,24 @@ class TestUploadStorageDirCheck:
 # ---------------------------------------------------------------------------
 
 
+def _configure_valid_jwt_provider(monkeypatch) -> None:
+    """Give tests that enable auth a fully configured jwt provider.
+
+    AUTH_ENABLED=true now fails closed at startup unless the configured
+    provider can validate tokens, so non-auth-focused checks configure a
+    valid provider explicitly. Caches are cleared so the adapter reads the
+    monkeypatched environment instead of a previously cached AuthConfig.
+    """
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+    from mozaiksai.core.auth.config import clear_auth_config_cache
+
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
+    monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+    clear_auth_config_cache()
+    reset_auth_adapter()
+
+
 class TestAuthEnabledCheck:
     @pytest.mark.asyncio
     async def test_warns_when_auth_disabled_in_production(self, monkeypatch):
@@ -656,7 +674,7 @@ class TestAuthEnabledCheck:
         monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
         monkeypatch.setenv("ENV", "production")
         monkeypatch.setenv("AUTH_ENABLED", "true")
-        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        _configure_valid_jwt_provider(monkeypatch)
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
@@ -907,7 +925,7 @@ class TestRateLimitEnabledCheck:
         monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
         monkeypatch.setenv("AUTH_ENABLED", "true")
-        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        _configure_valid_jwt_provider(monkeypatch)
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
         monkeypatch.delenv("REDIS_URL", raising=False)
@@ -966,6 +984,7 @@ class TestRedisConnectivityCheck:
         monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
         monkeypatch.setenv("AUTH_ENABLED", "true")
+        _configure_valid_jwt_provider(monkeypatch)
         monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
         monkeypatch.delenv("ENV", raising=False)
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
