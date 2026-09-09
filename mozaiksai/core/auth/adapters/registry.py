@@ -133,6 +133,10 @@ BUILTIN_PROVIDERS: frozenset[str] = frozenset(_PROVIDER_CONFIG_ENV_VARS)
 
 SETTINGS_PARAMETER = "settings"
 
+#: Placeholder used only to test-bind a constructor signature at registration.
+#: It is never passed to a real constructor.
+_SETTINGS_BINDING_PROBE = object()
+
 #: How an adapter constructor must be invoked. Established positively at
 #: registration — never inferred from a failed construction attempt.
 ConstructorMode = Literal["settings_keyword", "no_settings"]
@@ -236,6 +240,26 @@ class _AdapterRegistration:
         return _validate_config_identity_value(self.config_identity, source="value")
 
 
+def _bind_invocation(
+    signature: inspect.Signature, mode: ConstructorMode
+) -> tuple[bool, str | None]:
+    """Try to bind the exact call the runtime performs for ``mode``.
+
+    Returns ``(ok, reason)``. This is the single source of truth for whether a
+    constructor mode is usable: the registry never reasons about parameter
+    kinds to decide invocability, it asks Python's own binding machinery
+    whether its intended call would succeed.
+    """
+    try:
+        if mode == "settings_keyword":
+            signature.bind(**{SETTINGS_PARAMETER: _SETTINGS_BINDING_PROBE})
+        else:
+            signature.bind()
+    except TypeError as exc:
+        return False, str(exc)
+    return True, None
+
+
 def _classify_constructor(
     adapter_class: type,
     *,
@@ -243,30 +267,40 @@ def _classify_constructor(
 ) -> ConstructorMode:
     """Positively establish how an adapter constructor must be invoked.
 
-    An adapter may be constructed WITHOUT the resolved settings snapshot only
-    when inspection proves it takes no settings argument at all.
-    "Could not inspect" and "no ``settings`` keyword found" are not evidence of
-    configuration.
+    A mode is accepted only when the exact invocation the runtime intends to
+    perform binds successfully against the complete inspected signature —
+    ``Constructor(settings=...)`` for ``settings_keyword`` and
+    ``Constructor()`` for ``no_settings``. Recognizing a usable ``settings``
+    parameter (or ``**kwargs``) is necessary but never sufficient: a
+    constructor that also demands arguments the runtime cannot supply is
+    rejected here rather than at first use.
+
+    "Could not inspect" and "no ``settings`` keyword found" are likewise not
+    evidence that a constructor takes no configuration — both raise instead of
+    silently discarding the canonical snapshot.
 
     ``declared_mode`` is the escape hatch for constructors that genuinely
-    cannot be inspected (C extensions, exotic callables): the registrant states
-    the contract explicitly rather than the registry guessing it.
+    cannot be inspected (C extensions, exotic callables). When the signature
+    *is* inspectable the declaration is verified against it, so explicit
+    metadata cannot claim an invocation that provably would not work.
     """
     name = getattr(adapter_class, "__name__", repr(adapter_class))
 
-    if declared_mode is not None:
-        if declared_mode not in _CONSTRUCTOR_MODES:
-            raise AuthError(
-                f"Unknown constructor_mode {declared_mode!r} for auth adapter {name}. "
-                f"Valid modes: {', '.join(sorted(_CONSTRUCTOR_MODES))}.",
-                500,
-                "registry",
-            )
-        return declared_mode
+    if declared_mode is not None and declared_mode not in _CONSTRUCTOR_MODES:
+        raise AuthError(
+            f"Unknown constructor_mode {declared_mode!r} for auth adapter {name}. "
+            f"Valid modes: {', '.join(sorted(_CONSTRUCTOR_MODES))}.",
+            500,
+            "registry",
+        )
 
     try:
         signature = inspect.signature(adapter_class)
     except (TypeError, ValueError) as exc:
+        if declared_mode is not None:
+            # Genuinely uninspectable: the registrant's declaration is the only
+            # available contract, which is exactly what it exists for.
+            return declared_mode
         raise AuthError(
             f"Cannot establish the constructor contract for auth adapter {name}: "
             f"its signature could not be inspected ({type(exc).__name__}). Register it "
@@ -277,55 +311,63 @@ def _classify_constructor(
             "registry",
         ) from exc
 
-    settings_parameter = signature.parameters.get(SETTINGS_PARAMETER)
-    if settings_parameter is not None:
-        if settings_parameter.kind in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }:
-            return "settings_keyword"
-        if settings_parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
-            # Positional-only configuration is not part of the plugin contract;
-            # accepting it silently would risk passing the snapshot in the wrong
-            # slot, and ignoring it would discard the configuration entirely.
+    if declared_mode is not None:
+        # Inspection is available, so verify rather than trust.
+        ok, reason = _bind_invocation(signature, declared_mode)
+        if not ok:
             raise AuthError(
-                f"Auth adapter {name} declares {SETTINGS_PARAMETER!r} as a positional-only "
-                "parameter, which the adapter contract does not support. Make it accept "
-                f"{SETTINGS_PARAMETER}= as a keyword so the configuration snapshot can be "
-                "supplied unambiguously.",
+                f"Auth adapter {name} was registered as constructor_mode "
+                f"{declared_mode!r}, but the runtime's invocation cannot bind to its "
+                f"signature {signature}: {reason}.",
                 500,
                 "registry",
             )
+        return declared_mode
+
+    settings_parameter = signature.parameters.get(SETTINGS_PARAMETER)
+    if settings_parameter is not None and settings_parameter.kind is (
+        inspect.Parameter.POSITIONAL_ONLY
+    ):
+        # Positional-only configuration is not part of the plugin contract;
+        # accepting it silently would risk passing the snapshot in the wrong
+        # slot, and ignoring it would discard the configuration entirely.
         raise AuthError(
-            f"Auth adapter {name} declares {SETTINGS_PARAMETER!r} with unsupported "
-            f"parameter kind {settings_parameter.kind.name}.",
+            f"Auth adapter {name} declares {SETTINGS_PARAMETER!r} as a positional-only "
+            "parameter, which the adapter contract does not support. Make it accept "
+            f"{SETTINGS_PARAMETER}= as a keyword so the configuration snapshot can be "
+            "supplied unambiguously.",
             500,
             "registry",
         )
 
-    for parameter in signature.parameters.values():
-        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
-            # **kwargs is an established part of the adapter extension contract.
-            return "settings_keyword"
-
-    # No settings parameter at all: this mode is valid only when every remaining
-    # parameter is optional, so zero-argument construction is provably safe.
-    required = [
-        parameter.name
+    # A constructor is settings-aware when it names ``settings`` as a keyword or
+    # absorbs keywords via ``**kwargs``; either way the full invocation must bind.
+    accepts_settings_keyword = settings_parameter is not None or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in signature.parameters.values()
-        if parameter.default is inspect.Parameter.empty
-        and parameter.kind
-        not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
-    ]
-    if required:
+    )
+    candidate: ConstructorMode = "settings_keyword" if accepts_settings_keyword else "no_settings"
+
+    ok, reason = _bind_invocation(signature, candidate)
+    if ok:
+        return candidate
+
+    if candidate == "settings_keyword":
         raise AuthError(
-            f"Auth adapter {name} requires constructor argument(s) {required} that the "
-            "runtime cannot supply. Accept the configuration snapshot as "
-            f"{SETTINGS_PARAMETER}=, or give those parameters defaults.",
+            f"Auth adapter {name} accepts {SETTINGS_PARAMETER}= but the runtime cannot "
+            f"construct it: {signature} also requires argument(s) the runtime does not "
+            f"supply ({reason}). Give those parameters defaults so construction needs "
+            f"only {SETTINGS_PARAMETER}=.",
             500,
             "registry",
         )
-    return "no_settings"
+    raise AuthError(
+        f"Auth adapter {name} requires constructor argument(s) that the runtime cannot "
+        f"supply: {signature} ({reason}). Accept the configuration snapshot as "
+        f"{SETTINGS_PARAMETER}=, or give those parameters defaults.",
+        500,
+        "registry",
+    )
 
 
 @dataclass(frozen=True)

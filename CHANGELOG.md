@@ -56,12 +56,14 @@ This project follows a practical pre-1.0 changelog format:
   in that cache identity, and are never cached without one; malformed
   identities (non-string, empty, whitespace-only, or a raising callable) are
   rejected rather than coerced into a cache key. The adapter constructor
-  contract is established *positively* at registration by signature
-  inspection: `settings` as a keyword (or `**kwargs`) receives the snapshot,
-  a constructor whose other parameters are all optional is built with no
-  arguments, and anything the runtime cannot classify — a positional-only
-  `settings`, a required parameter it cannot supply, or a signature it cannot
-  inspect — is rejected instead of being assumed to take no configuration
+  contract is established *positively* at registration by binding the
+  runtime's exact invocation against the complete signature: `settings` as a
+  keyword (or `**kwargs`) receives the snapshot, a constructor whose other
+  parameters are all optional is built with no arguments, and anything the
+  runtime cannot actually invoke — `(settings, required)`,
+  `(required, **kwargs)`, a positional-only `settings`, any required parameter
+  it cannot supply, or a signature it cannot inspect — is rejected instead of
+  being assumed to take no configuration
   (`register_adapter(..., constructor_mode=...)` declares the contract
   explicitly for uninspectable constructors). An exception raised inside a
   constructor body — including `TypeError` — fails closed instead of

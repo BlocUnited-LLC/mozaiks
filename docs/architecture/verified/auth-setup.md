@@ -246,12 +246,21 @@ constructor contract is established **positively** at registration, before any
 construction attempt, and registration fails rather than assuming an adapter
 takes no configuration:
 
+A mode is accepted only when the runtime's exact invocation —
+`Adapter(settings=...)` or `Adapter()` — binds successfully against the
+complete signature. Naming a usable `settings` parameter is necessary but not
+sufficient: a constructor that also demands arguments the runtime cannot
+supply is rejected when it registers, not at first use.
+
 | Constructor | Outcome |
 |---|---|
-| `settings` as a normal or keyword-only parameter | snapshot supplied |
-| `**kwargs` | snapshot supplied |
-| no `settings`, all other parameters optional | constructed with no arguments |
-| `settings` positional-only | **rejected** — make it keyword-accessible |
+| `(settings)` / `(*, settings)` | snapshot supplied |
+| `(settings=None, optional=None)` | snapshot supplied |
+| `(**kwargs)` | snapshot supplied |
+| `()` / all parameters optional / `(*args)` | constructed with no arguments |
+| `(settings, required)` / `(settings, *, required)` | **rejected** — the call cannot bind |
+| `(required, **kwargs)` | **rejected** — the call cannot bind |
+| `(settings)` positional-only | **rejected** — make it keyword-accessible |
 | a required parameter the runtime cannot supply | **rejected** |
 | signature cannot be inspected | **rejected** unless `constructor_mode` is declared |
 
@@ -262,6 +271,9 @@ callables), declare the contract explicitly:
 register_adapter("my-custom", MyAdapter, config_identity="v1",
                  constructor_mode="settings_keyword")  # or "no_settings"
 ```
+
+When the signature *is* inspectable the declaration is verified against it, so
+explicit metadata cannot claim an invocation that provably would not work.
 
 An exception raised inside a constructor body — including `TypeError` — is a
 real construction failure and fails closed. The runtime never retries

@@ -35,6 +35,8 @@ Covers:
 """
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from mozaiksai.core.auth.adapters.base import (
@@ -2384,3 +2386,342 @@ class TestCacheTtlNormalization:
             assert config.discovery_cache_ttl_seconds == DEFAULT_DISCOVERY_CACHE_TTL_SECONDS
         finally:
             clear_auth_config_cache()
+
+
+# ---------------------------------------------------------------------------
+# Complete constructor signature validation at registration
+#
+# A mode is accepted only when the runtime's exact invocation binds against the
+# complete signature. Recognizing a usable `settings` parameter (or **kwargs)
+# is necessary but never sufficient.
+# ---------------------------------------------------------------------------
+
+
+class TestConstructorSignatureBinding:
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        import mozaiksai.core.auth.adapters.registry as reg
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        for var in _AUTH_MATRIX_VARS:
+            monkeypatch.delenv(var, raising=False)
+        saved = dict(reg._adapter_registry)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+        yield
+        reg._adapter_registry.clear()
+        reg._adapter_registry.update(saved)
+        clear_auth_config_cache()
+        reg.reset_auth_adapter()
+
+    def _adapter(self, init):
+        """Build an adapter class whose __init__ is the supplied function."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
+
+        async def validate_token(self, token):
+            return UserClaims(user_id="u", provider="probe")
+
+        return type(
+            "_ProbeAdapter",
+            (BaseAuthAdapter,),
+            {
+                "name": "probe",
+                "__init__": init,
+                "validate_token": validate_token,
+                "is_enabled": lambda self: True,
+            },
+        )
+
+    def _register(self, adapter_class, **kwargs):
+        from mozaiksai.core.auth.adapters.registry import register_adapter
+
+        register_adapter("probe", adapter_class, config_identity="v1", **kwargs)
+
+    def _mode(self):
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        return reg._adapter_registry["probe"].constructor_mode
+
+    # -- 1-5: MUST register -------------------------------------------------
+
+    def test_settings_only_accepted(self):
+        """def adapter(settings) — required settings, nothing else."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings):
+            BaseAuthAdapter.__init__(self, settings)
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "settings_keyword"
+
+    def test_keyword_only_settings_accepted(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, *, settings):
+            BaseAuthAdapter.__init__(self, settings)
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "settings_keyword"
+
+    def test_settings_plus_optional_arg_accepted(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings=None, optional=None):
+            BaseAuthAdapter.__init__(self, settings)
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "settings_keyword"
+
+    def test_var_keyword_only_accepted(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, **kwargs):
+            BaseAuthAdapter.__init__(self, kwargs.get("settings"))
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "settings_keyword"
+
+    def test_no_arguments_accepted(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self):
+            BaseAuthAdapter.__init__(self)
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "no_settings"
+
+    def test_all_optional_arguments_accepted_as_no_settings(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, url=None, secret=None):
+            BaseAuthAdapter.__init__(self)
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "no_settings"
+
+    def test_var_positional_only_accepted_as_no_settings(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, *args):
+            BaseAuthAdapter.__init__(self)
+
+        self._register(self._adapter(__init__))
+        assert self._mode() == "no_settings"
+
+    # -- 6-10: MUST reject at registration ----------------------------------
+
+    def test_settings_plus_required_positional_rejected(self):
+        """def adapter(settings, required) — the exact Codex case."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings, required):
+            BaseAuthAdapter.__init__(self, settings)
+
+        with pytest.raises(AuthError, match="cannot construct it"):
+            self._register(self._adapter(__init__))
+
+    def test_settings_plus_required_keyword_only_rejected(self):
+        """def adapter(settings, *, required) — the exact Codex case."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings, *, required):
+            BaseAuthAdapter.__init__(self, settings)
+
+        with pytest.raises(AuthError, match="cannot construct it"):
+            self._register(self._adapter(__init__))
+
+    def test_required_positional_plus_var_keyword_rejected(self):
+        """def adapter(required, **kwargs) — the exact Codex case."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, required, **kwargs):
+            BaseAuthAdapter.__init__(self, kwargs.get("settings"))
+
+        with pytest.raises(AuthError, match="cannot construct it"):
+            self._register(self._adapter(__init__))
+
+    def test_multiple_required_unsupported_arguments_rejected(self):
+        """def adapter(settings, one, two) — the exact Codex case."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings, one, two):
+            BaseAuthAdapter.__init__(self, settings)
+
+        with pytest.raises(AuthError, match="cannot construct it"):
+            self._register(self._adapter(__init__))
+
+    def test_required_argument_without_settings_rejected(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, required):
+            BaseAuthAdapter.__init__(self)
+
+        with pytest.raises(AuthError, match="requires constructor argument"):
+            self._register(self._adapter(__init__))
+
+    def test_positional_only_settings_still_rejected(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings=None, /):
+            BaseAuthAdapter.__init__(self, settings)
+
+        with pytest.raises(AuthError, match="positional-only"):
+            self._register(self._adapter(__init__))
+
+    def test_uninspectable_without_declaration_still_rejected(self):
+        from mozaiksai.core.auth.adapters.registry import register_adapter
+
+        class _Uninspectable:
+            __init__ = print
+
+        with pytest.raises(AuthError, match="could not be inspected"):
+            register_adapter("probe", _Uninspectable, config_identity="v1")
+
+    # -- 12/13: explicit mode preserved, but verified when inspectable ------
+
+    def test_explicit_mode_preserved_for_uninspectable_settings_adapter(self):
+        import mozaiksai.core.auth.adapters.registry as reg
+        from mozaiksai.core.auth.adapters.registry import register_adapter
+
+        class _Uninspectable:
+            __init__ = print
+
+        register_adapter(
+            "probe", _Uninspectable, config_identity="v1", constructor_mode="settings_keyword"
+        )
+        assert reg._adapter_registry["probe"].constructor_mode == "settings_keyword"
+
+    def test_explicit_mode_preserved_for_uninspectable_no_settings_adapter(self):
+        import mozaiksai.core.auth.adapters.registry as reg
+        from mozaiksai.core.auth.adapters.registry import register_adapter
+
+        class _Uninspectable:
+            __init__ = print
+
+        register_adapter(
+            "probe", _Uninspectable, config_identity="v1", constructor_mode="no_settings"
+        )
+        assert reg._adapter_registry["probe"].constructor_mode == "no_settings"
+
+    def test_explicit_mode_cannot_lie_about_an_inspectable_signature(self):
+        """When inspection is available, verification beats trust."""
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, required):
+            BaseAuthAdapter.__init__(self)
+
+        adapter_class = self._adapter(__init__)
+        with pytest.raises(AuthError, match="cannot bind"):
+            self._register(adapter_class, constructor_mode="settings_keyword")
+        with pytest.raises(AuthError, match="cannot bind"):
+            self._register(adapter_class, constructor_mode="no_settings")
+
+    def test_explicit_no_settings_rejected_when_settings_is_required(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings):
+            BaseAuthAdapter.__init__(self, settings)
+
+        with pytest.raises(AuthError, match="cannot bind"):
+            self._register(self._adapter(__init__), constructor_mode="no_settings")
+
+    def test_explicit_settings_mode_accepted_when_signature_supports_it(self):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+
+        def __init__(self, settings=None):
+            BaseAuthAdapter.__init__(self, settings)
+
+        self._register(self._adapter(__init__), constructor_mode="settings_keyword")
+        assert self._mode() == "settings_keyword"
+
+    # -- 14/15: constructor body semantics unchanged ------------------------
+
+    @pytest.mark.parametrize("exc_type", [TypeError, ValueError])
+    def test_constructor_body_exception_invoked_exactly_once(self, monkeypatch, exc_type):
+        from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        attempts: list[object] = []
+
+        def __init__(self, settings=None):
+            BaseAuthAdapter.__init__(self, settings)
+            attempts.append(settings)
+            raise exc_type("defective body")
+
+        self._register(self._adapter(__init__))
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "probe")
+
+        with pytest.raises(AuthError, match="Failed to configure"):
+            get_auth_adapter()
+        assert len(attempts) == 1
+        assert attempts[0] is not None
+
+    # -- 16: built-ins still register and resolve ---------------------------
+
+    @pytest.mark.parametrize("provider", ["none", "jwt", "supabase", "keycloak"])
+    def test_builtin_providers_still_classify_and_bind(self, provider):
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        reg._ensure_builtin_adapters()
+        registration = reg._adapter_registry[provider]
+        assert registration.constructor_mode == "settings_keyword"
+        signature = inspect.signature(registration.adapter_class)
+        ok, reason = reg._bind_invocation(signature, "settings_keyword")
+        assert ok, reason
+
+    def test_builtin_providers_still_resolve(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+
+        for env, expected in (
+            ({"AUTH_ENABLED": "false", "ENV": "development"}, "none"),
+            (
+                {
+                    "AUTH_ENABLED": "true",
+                    "AUTH_PROVIDER": "jwt",
+                    "AUTH_JWKS_URL": "https://a.example.com/jwks.json",
+                    "AUTH_ISSUER": "https://a.example.com",
+                },
+                "jwt",
+            ),
+            ({"AUTH_ENABLED": "true", "SUPABASE_URL": "https://x.supabase.co"}, "supabase"),
+            (
+                {
+                    "AUTH_ENABLED": "true",
+                    "KEYCLOAK_URL": "https://kc.example.com",
+                    "KEYCLOAK_REALM": "r",
+                },
+                "keycloak",
+            ),
+        ):
+            _set_matrix_env(monkeypatch, env)
+            assert get_auth_adapter().name == expected
+
+    # -- binding helper is the single source of truth -----------------------
+
+    @pytest.mark.parametrize(
+        ("signature_text", "mode", "expected"),
+        [
+            ("(settings)", "settings_keyword", True),
+            ("(*, settings)", "settings_keyword", True),
+            ("(settings=None, optional=None)", "settings_keyword", True),
+            ("(**kwargs)", "settings_keyword", True),
+            ("(settings, required)", "settings_keyword", False),
+            ("(settings, *, required)", "settings_keyword", False),
+            ("(required, **kwargs)", "settings_keyword", False),
+            ("(settings, one, two)", "settings_keyword", False),
+            ("()", "no_settings", True),
+            ("(optional=None)", "no_settings", True),
+            ("(*args)", "no_settings", True),
+            ("(required)", "no_settings", False),
+            ("(settings)", "no_settings", False),
+        ],
+    )
+    def test_bind_invocation_truth_table(self, signature_text, mode, expected):
+        import mozaiksai.core.auth.adapters.registry as reg
+
+        namespace: dict = {}
+        exec(f"def _probe{signature_text}: pass", namespace)  # noqa: S102
+        signature = inspect.signature(namespace["_probe"])
+        ok, _ = reg._bind_invocation(signature, mode)
+        assert ok is expected
