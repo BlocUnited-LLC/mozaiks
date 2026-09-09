@@ -848,7 +848,7 @@ agents:
       - Do NOT generate runtime infrastructure, platform substrate, or transport code.
       - Do NOT import from `_shared/` — all imports must be workflow-local or `mozaiksai.*`.
       - Tool implementations must be `async def` and implement the declared operation. There is no later agent that fills in tool bodies.
-      - Emit each filename exactly once. Workflow declaratives use `.yaml`; do not emit legacy `.json`/`.yml` alternatives or unrendered `.j2` files.
+      - Emit each filename exactly once. Workflow declaratives use `.yaml`; do not emit retired `.json`/`.yml` alternatives or unrendered `.j2` files.
       - YAML files must be valid YAML. No duplicate keys.
       - Every agent in agents.yaml must have a registry entry in structured_outputs.yaml (null if no structured output).
       - Every tool declared in tools.yaml must have a corresponding `tools/<name>.py` file in `files[]`.

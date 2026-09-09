@@ -56,7 +56,7 @@ This project follows a practical pre-1.0 changelog format:
 
 - **YAML-first workflow and integration config contracts**: generated workflow
   declaratives and app integration sub-configs now consistently use `.yaml`;
-  legacy JSON prompt artifacts and stale JSON-path guidance were removed.
+  retired JSON prompt artifacts and stale JSON-path guidance were removed.
 
 - **Canonical capability-pack action requests are closed**: all 63 actions
   across the 10 workspace_handler_split pack modules (commerce, entitlement
