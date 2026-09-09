@@ -254,6 +254,13 @@ async def _platform_startup() -> None:
     """Initialize platform/app-shell composition after runtime startup."""
     global _runtime_services
 
+    # Fail closed before serving any route: explicitly enabled authentication
+    # whose provider cannot be established must abort platform boot in every
+    # environment, never degrade to the trusted-bypass "none" adapter.
+    from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
+
+    validate_auth_provider_configuration()
+
     app_root = resolve_app_root()
     database_startup_policy = get_database_startup_policy()
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)

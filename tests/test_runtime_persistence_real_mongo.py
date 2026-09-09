@@ -159,7 +159,7 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
         assert "get_mongo_client" not in handler_source
 
         executor = ModuleExecutor()
-        executor.register("projects", RealPersistenceHandler())
+        executor.register("projects", RealPersistenceHandler(), action_method_map={"create_project": "create_project", "list_projects": "list_projects"})
 
         create_result = await executor.execute(
             ModuleRequest(

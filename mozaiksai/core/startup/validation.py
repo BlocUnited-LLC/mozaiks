@@ -250,6 +250,31 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
             extra={"check": "auth_enabled", "mode": mode},
         )
 
+    # ── Auth provider resolution (fail closed, mode-independent) ─────────────
+    # When authentication is explicitly enabled (AUTH_ENABLED=true), inability
+    # to establish the configured provider is fatal in EVERY environment and
+    # EVERY startup-check mode — never a warning. A typo'd or missing provider
+    # configuration must not silently boot the host into trusted-bypass
+    # ("none") operation. See mozaiksai.core.auth.adapters.registry.
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
+
+    try:
+        resolved_provider = validate_auth_provider_configuration()
+        logger.info(
+            "STARTUP_CHECK_OK: auth provider resolved (%s)",
+            resolved_provider,
+            extra={"check": "auth_provider_resolution", "mode": mode},
+        )
+    except AuthError as auth_exc:
+        msg = f"Authentication configuration is invalid: {auth_exc}"
+        logger.error(
+            "STARTUP_CHECK_FAILED: %s",
+            msg,
+            extra={"check": "auth_provider_resolution", "mode": mode},
+        )
+        raise StartupConfigError(msg) from auth_exc
+
     # ── Auth provider configured in production ───────────────────────────────
     # When auth is not explicitly disabled but no provider env vars are set,
     # _auto_detect_provider() silently falls back to "none" (demo mode).

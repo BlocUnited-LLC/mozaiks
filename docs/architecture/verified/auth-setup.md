@@ -139,6 +139,24 @@ If `AUTH_PROVIDER` is not set, the system auto-detects based on environment vari
 | `MOZAIKS_OIDC_AUTHORITY` or `MOZAIKS_OIDC_DISCOVERY_URL` | `jwt` |
 | Nothing | `none` (demo mode) |
 
+Auto-detection fails closed when auth is explicitly enabled:
+
+- `AUTH_ENABLED=true` with no detectable provider is a fatal configuration
+  error in every environment (startup refuses to boot; provider resolution
+  raises). The runtime never silently falls back to the trusted-bypass
+  `none` adapter when auth was explicitly requested.
+- `AUTH_ENABLED=true` combined with `AUTH_PROVIDER=none`, an unknown
+  `AUTH_PROVIDER` value, or a named provider whose configuration is
+  incomplete (for example `AUTH_PROVIDER=jwt` without JWKS/issuer/discovery
+  settings) is fatal for the same reason.
+- An unrecognized `AUTH_ENABLED` value (for example a typo like `tru`) is
+  fatal instead of silently disabling auth.
+- Demo mode (`none` without explicit disablement) applies only when no auth
+  configuration is present at all. Security-sensitive bypasses (such as the
+  billing fulfillment ingress) additionally require *explicit* disablement —
+  `AUTH_ENABLED=false` or `AUTH_PROVIDER=none` — and are not available in
+  implicit demo mode.
+
 ---
 
 ## Custom Adapter

@@ -55,6 +55,21 @@ class _OrdersHandler:
         }
 
 
+# Declared action authority for the test module — mirrors module.yaml
+# actions[].id -> handler_method. Dispatch is fail-closed to this map.
+_ORDERS_ACTIONS = {
+    name: name
+    for name in (
+        "list",
+        "whoami",
+        "scope",
+        "authority",
+        "inspect_app_input",
+        "inspect_payload",
+    )
+}
+
+
 def _client(
     *,
     failed_module_names: list[str] | None = None,
@@ -111,6 +126,7 @@ def test_post_params_envelope_preserves_reserved_action_input(monkeypatch) -> No
     executor.register(
         "orders",
         _OrdersHandler(),
+        action_method_map=_ORDERS_ACTIONS,
         action_schemas={
             "inspect_app_input": {
                 "input": {
@@ -144,7 +160,7 @@ def test_post_params_envelope_preserves_reserved_action_input(monkeypatch) -> No
 
 def test_post_raw_body_keeps_reserved_fields_as_legacy_context_only(monkeypatch) -> None:
     executor = ModuleExecutor()
-    executor.register("orders", _OrdersHandler())
+    executor.register("orders", _OrdersHandler(), action_method_map=_ORDERS_ACTIONS)
     registry = ExecutorRegistry()
     registry.register(executor)
     monkeypatch.setattr(platform_host, "executor_registry", registry)
@@ -218,6 +234,7 @@ def test_auth_disabled_module_dispatch_bypasses_action_permissions_for_local_stu
     executor.register(
         "orders",
         _OrdersHandler(),
+        action_method_map=_ORDERS_ACTIONS,
         action_permissions={"list": ["orders.read"]},
     )
     registry = ExecutorRegistry()
@@ -237,6 +254,7 @@ def test_auth_disabled_module_dispatch_uses_local_development_authority(monkeypa
     executor.register(
         "orders",
         _OrdersHandler(),
+        action_method_map=_ORDERS_ACTIONS,
         action_permissions={"authority": ["orders.read"]},
     )
     registry = ExecutorRegistry()
@@ -259,7 +277,7 @@ def test_auth_disabled_module_dispatch_uses_local_development_authority(monkeypa
 
 def test_auth_enabled_module_dispatch_requires_token_by_default(monkeypatch) -> None:
     executor = ModuleExecutor()
-    executor.register("orders", _OrdersHandler())
+    executor.register("orders", _OrdersHandler(), action_method_map=_ORDERS_ACTIONS)
     registry = ExecutorRegistry()
     registry.register(executor)
     monkeypatch.setattr(platform_host, "executor_registry", registry)
@@ -275,7 +293,7 @@ def test_auth_enabled_module_dispatch_requires_token_by_default(monkeypatch) -> 
 
 def test_auth_enabled_public_module_dispatch_allows_anonymous_call(monkeypatch) -> None:
     executor = ModuleExecutor()
-    executor.register("orders", _OrdersHandler())
+    executor.register("orders", _OrdersHandler(), action_method_map=_ORDERS_ACTIONS)
     registry = ExecutorRegistry()
     registry.register(executor)
     monkeypatch.setattr(platform_host, "executor_registry", registry)
@@ -330,6 +348,7 @@ def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> No
     executor.register(
         "orders",
         _OrdersHandler(),
+        action_method_map=_ORDERS_ACTIONS,
         action_permissions={"scope": ["orders.scope"]},
     )
     registry = ExecutorRegistry()
@@ -390,6 +409,7 @@ def test_authenticated_module_dispatch_uses_authenticated_user_authority(monkeyp
     executor.register(
         "orders",
         _OrdersHandler(),
+        action_method_map=_ORDERS_ACTIONS,
         action_permissions={"authority": ["orders.read"]},
     )
     registry = ExecutorRegistry()
@@ -420,7 +440,7 @@ def test_authenticated_module_dispatch_uses_authenticated_user_authority(monkeyp
 
 def test_unauthenticated_module_dispatch_ignores_user_id_override(monkeypatch) -> None:
     executor = ModuleExecutor()
-    executor.register("orders", _OrdersHandler())
+    executor.register("orders", _OrdersHandler(), action_method_map=_ORDERS_ACTIONS)
     registry = ExecutorRegistry()
     registry.register(executor)
     monkeypatch.setattr(platform_host, "executor_registry", registry)
@@ -573,7 +593,7 @@ def test_internal_surface_block_applies_regardless_of_auth_enabled(monkeypatch) 
 def test_non_internal_surface_action_is_not_blocked_by_internal_guard(monkeypatch) -> None:
     """Actions without an internal surface must not be affected by the guard."""
     executor = ModuleExecutor()
-    executor.register("orders", _OrdersHandler())
+    executor.register("orders", _OrdersHandler(), action_method_map=_ORDERS_ACTIONS)
     registry = ExecutorRegistry()
     registry.register(executor)
     monkeypatch.setattr(platform_host, "executor_registry", registry)
@@ -585,3 +605,72 @@ def test_non_internal_surface_action_is_not_blocked_by_internal_guard(monkeypatc
     resp = client.get("/api/modules/orders/list")
     # Should reach the executor (200 or 4xx from permission/action checks — NOT 404 from guard)
     assert resp.status_code != 404 or "Action not found" not in resp.json().get("detail", "")
+
+
+# ---------------------------------------------------------------------------
+# Declared-action authority boundary over HTTP dispatch
+# ---------------------------------------------------------------------------
+
+
+class _RealisticBillingHandler:
+    """Realistic generated-module shape: public actions plus reaction/internal methods."""
+
+    async def list_invoices(self, ctx, **kwargs):
+        return {"invoices": []}
+
+    async def apply_manual_credit(self, ctx, **kwargs):
+        return {"applied": True}
+
+    async def on_subscription_activated(self, ctx, **kwargs):
+        return {"reacted": True}
+
+    def _rebuild_cache(self, ctx, **kwargs):
+        return {"rebuilt": True}
+
+
+def _billing_executor() -> ExecutorRegistry:
+    executor = ModuleExecutor()
+    executor.register(
+        "billing",
+        _RealisticBillingHandler(),
+        # Only list_invoices is a declared public action.
+        action_method_map={"list_invoices": "list_invoices"},
+    )
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    return registry
+
+
+@pytest.mark.parametrize(
+    "undeclared_action",
+    ["apply_manual_credit", "on_subscription_activated", "_rebuild_cache", "__init__"],
+)
+def test_http_dispatch_rejects_undeclared_handler_methods(monkeypatch, undeclared_action) -> None:
+    """A handler method that exists in Python but is not declared in the module's
+    action authority must 404 through generic HTTP dispatch — even in the
+    auth-disabled local mode whose authority is trusted_bypass."""
+    monkeypatch.setattr(platform_host, "executor_registry", _billing_executor())
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    client = _client(failed_module_names=[])
+    get_resp = client.get(f"/api/modules/billing/{undeclared_action}")
+    post_resp = client.post(f"/api/modules/billing/{undeclared_action}", json={"params": {}})
+
+    for resp in (get_resp, post_resp):
+        if undeclared_action == "__init__":
+            # rejected even earlier by the action-name pattern or the executor
+            assert resp.status_code in (400, 404)
+        else:
+            assert resp.status_code == 404
+            assert resp.json()["detail"]["error_code"] == "ACTION_NOT_FOUND"
+
+
+def test_http_dispatch_declared_action_still_executes(monkeypatch) -> None:
+    monkeypatch.setattr(platform_host, "executor_registry", _billing_executor())
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    client = _client(failed_module_names=[])
+    resp = client.get("/api/modules/billing/list_invoices")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"invoices": []}

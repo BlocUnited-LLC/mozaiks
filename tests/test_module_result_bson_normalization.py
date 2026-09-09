@@ -499,7 +499,7 @@ class _MongoShapedHandler:
 async def test_executor_results_serialize_after_mongo_shaped_actions() -> None:
     ex = ModuleExecutor()
     handler = _MongoShapedHandler()
-    ex.register("records", handler)
+    ex.register("records", handler, action_method_map={name: name for name in ("list_records", "bad_keys", "bad_value", "cyclic", "huge", "create_record", "read_record", "update_record", "delete_record")})
 
     listed = await ex.execute(_request("records", "list_records"))
     assert listed.success is True
@@ -512,7 +512,7 @@ async def test_executor_results_serialize_after_mongo_shaped_actions() -> None:
 @pytest.mark.parametrize("action", ["bad_keys", "bad_value", "cyclic"])
 async def test_invalid_transport_results_return_typed_error(action: str) -> None:
     ex = ModuleExecutor()
-    ex.register("records", _MongoShapedHandler())
+    ex.register("records", _MongoShapedHandler(), action_method_map={name: name for name in ("list_records", "bad_keys", "bad_value", "cyclic", "huge", "create_record", "read_record", "update_record", "delete_record")})
     result = await ex.execute(_request("records", action))
     assert result.success is False
     assert result.error_code == "MODULE_RESULT_NOT_JSON_SAFE"
@@ -524,7 +524,7 @@ async def test_invalid_transport_results_return_typed_error(action: str) -> None
 @pytest.mark.asyncio
 async def test_oversized_normalized_response_is_rejected_by_exact_bytes() -> None:
     ex = ModuleExecutor()
-    ex.register("records", _MongoShapedHandler())
+    ex.register("records", _MongoShapedHandler(), action_method_map={name: name for name in ("list_records", "bad_keys", "bad_value", "cyclic", "huge", "create_record", "read_record", "update_record", "delete_record")})
     result = await ex.execute(_request("records", "huge"))
     assert result.success is False
     assert result.error_code == "RESPONSE_TOO_LARGE"
@@ -557,13 +557,13 @@ async def test_result_at_exact_limit_passes_and_one_byte_over_fails(monkeypatch)
 
     monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", str(limit))
     ex = ModuleExecutor()
-    ex.register("sized", _SizedHandler(payload))
+    ex.register("sized", _SizedHandler(payload), action_method_map={"sized": "sized"})
     at_limit = await ex.execute(_request("sized", "sized"))
     assert at_limit.success is True
 
     monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", str(limit - 1))
     ex2 = ModuleExecutor()
-    ex2.register("sized", _SizedHandler(payload))
+    ex2.register("sized", _SizedHandler(payload), action_method_map={"sized": "sized"})
     over = await ex2.execute(_request("sized", "sized"))
     assert over.success is False
     assert over.error_code == "RESPONSE_TOO_LARGE"
@@ -573,7 +573,7 @@ async def test_result_at_exact_limit_passes_and_one_byte_over_fails(monkeypatch)
 async def test_unsupported_result_is_not_json_safe_never_a_size_outcome(monkeypatch) -> None:
     monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", "1")
     ex = ModuleExecutor()
-    ex.register("sized", _SizedHandler({"handle": object()}))
+    ex.register("sized", _SizedHandler({"handle": object()}), action_method_map={"sized": "sized"})
     result = await ex.execute(_request("sized", "sized"))
     assert result.success is False
     assert result.error_code == "MODULE_RESULT_NOT_JSON_SAFE"

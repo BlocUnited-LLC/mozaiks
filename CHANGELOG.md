@@ -12,6 +12,30 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- **Fail-closed module action dispatch**: `ModuleExecutor` no longer falls
+  back from an undeclared action id to a same-named Python handler method.
+  Only action ids declared in the module's contract
+  (`module.yaml` `actions[].handler_method`, mirrored in the registered
+  `action_method_map`) are dispatchable; unknown or undeclared actions —
+  including event-reaction handlers, private helpers, and arbitrary handler
+  attributes — return `ACTION_NOT_FOUND` before any handler resolution, for
+  trusted and enforce-mode authorities alike.
+- **Fail-closed authentication configuration**: with `AUTH_ENABLED=true`, a
+  missing, misspelled, or incomplete auth provider configuration is now fatal
+  at startup (and at provider resolution) in every environment — the runtime
+  no longer silently falls back to the trusted-bypass `none` adapter. An
+  unrecognized `AUTH_ENABLED` value is also fatal instead of silently
+  disabling auth. Implicit demo mode (no auth configuration at all) still
+  boots for local getting-started use.
+- **Fail-closed billing fulfillment ingress**:
+  `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
+  now requires the internal API key, a billing-admin principal, or
+  *explicitly* disabled authentication (`AUTH_ENABLED=false` /
+  `AUTH_PROVIDER=none`). Auth being merely unconfigured no longer makes the
+  ingress callable without authentication.
+
 ### Fixed
 
 - Generated workflow exports now validate all runtime YAML contracts and tool

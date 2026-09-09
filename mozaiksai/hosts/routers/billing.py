@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from mozaiksai.core.audit import AuditRecord, get_audit_logger
 from mozaiksai.core.audit.audit_logger import AuditEventKind, _hash_inputs
 from mozaiksai.core.auth import UserPrincipal, optional_user
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+from mozaiksai.core.auth.adapters.registry import is_auth_explicitly_disabled
 from mozaiksai.core.auth.dependencies import validate_path_app_id
 from mozaiksai.core.billing import (
     BillingFulfillmentCommand,
@@ -63,12 +63,21 @@ def _authorize_fulfillment(
         ):
             return principal.user_id
 
-    if not is_auth_enabled() and not os.getenv("INTERNAL_API_KEY", "").strip():
+    # Unauthenticated fulfillment is an explicit development contract only:
+    # the operator must have declared no-auth operation (AUTH_ENABLED=false or
+    # AUTH_PROVIDER=none). Implicit demo mode — auth merely unconfigured — and
+    # a missing/misconfigured INTERNAL_API_KEY fail closed instead of turning
+    # this ingress into an unauthenticated endpoint.
+    if is_auth_explicitly_disabled() and not os.getenv("INTERNAL_API_KEY", "").strip():
         return principal.user_id if principal is not None else "local_dev"
 
     raise HTTPException(
         status_code=403,
-        detail="Billing fulfillment requires an internal API key or billing admin scope.",
+        detail=(
+            "Billing fulfillment requires an internal API key, a billing admin "
+            "scope, or explicitly disabled authentication (AUTH_ENABLED=false) "
+            "in local development."
+        ),
     )
 
 

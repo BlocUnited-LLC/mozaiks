@@ -280,3 +280,114 @@ class TestNoAuthAdapter:
         for token in ["", "garbage", "Bearer eyJ...", "123"]:
             claims = await adapter.validate_token(token)
             assert isinstance(claims, UserClaims)
+
+
+# ---------------------------------------------------------------------------
+# Provider detection fail-closed contract
+# ---------------------------------------------------------------------------
+
+
+class TestProviderDetectionFailClosed:
+    """AUTH_ENABLED=true must never silently resolve to the trusted-bypass
+    'none' provider; explicit disablement is the only unauthenticated mode."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+        for var in (
+            "AUTH_ENABLED",
+            "AUTH_PROVIDER",
+            "SUPABASE_URL",
+            "KEYCLOAK_URL",
+            "KEYCLOAK_REALM",
+            "AUTH_JWKS_URL",
+            "AUTH_ISSUER",
+            "MOZAIKS_OIDC_AUTHORITY",
+            "MOZAIKS_OIDC_DISCOVERY_URL",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        reset_auth_adapter()
+        yield
+        reset_auth_adapter()
+
+    def test_auth_enabled_true_without_provider_raises(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import _auto_detect_provider
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        with pytest.raises(AuthError, match="no authentication provider"):
+            _auto_detect_provider()
+
+    def test_is_auth_enabled_fails_closed_when_misconfigured(self, monkeypatch):
+        """is_auth_enabled must raise (fail closed), never return False, when
+        AUTH_ENABLED=true has no resolvable provider."""
+        from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        with pytest.raises(AuthError):
+            is_auth_enabled()
+
+    def test_auth_enabled_true_with_provider_none_conflicts(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import _auto_detect_provider
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "none")
+        with pytest.raises(AuthError, match="conflicts"):
+            _auto_detect_provider()
+
+    def test_unrecognized_auth_enabled_value_raises(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import _auto_detect_provider
+
+        monkeypatch.setenv("AUTH_ENABLED", "tru")
+        with pytest.raises(AuthError, match="Unrecognized AUTH_ENABLED"):
+            _auto_detect_provider()
+
+    def test_auth_enabled_true_with_supabase_url_resolves(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import _auto_detect_provider
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        assert _auto_detect_provider() == "supabase"
+
+    def test_auth_enabled_false_resolves_none(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import _auto_detect_provider
+
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        assert _auto_detect_provider() == "none"
+
+    def test_nothing_configured_resolves_demo_none(self):
+        from mozaiksai.core.auth.adapters.registry import _auto_detect_provider
+
+        assert _auto_detect_provider() == "none"
+
+    def test_explicitly_disabled_only_for_explicit_declarations(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import is_auth_explicitly_disabled
+
+        # Implicit demo mode is NOT explicit disablement.
+        assert is_auth_explicitly_disabled() is False
+
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        assert is_auth_explicitly_disabled() is True
+
+        monkeypatch.delenv("AUTH_ENABLED", raising=False)
+        monkeypatch.setenv("AUTH_PROVIDER", "none")
+        assert is_auth_explicitly_disabled() is True
+
+        # Enabled deployments are never "explicitly disabled".
+        monkeypatch.delenv("AUTH_PROVIDER", raising=False)
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        assert is_auth_explicitly_disabled() is False
+
+    def test_get_adapter_raises_for_enabled_but_unconfigured_provider(self, monkeypatch):
+        from mozaiksai.core.auth.adapters.registry import get_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        clear_auth_config_cache()
+        try:
+            with pytest.raises(AuthError, match="not fully configured"):
+                get_auth_adapter(force_provider="jwt")
+        finally:
+            clear_auth_config_cache()

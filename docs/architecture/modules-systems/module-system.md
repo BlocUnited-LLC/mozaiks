@@ -115,6 +115,12 @@ actions:
     permissions: [my_module.manage]
     emits: [domain.my_module.item_created]
 
+# NOTE: the actions list is the module's complete dispatch authority.
+# Only declared action ids resolve at runtime — a handler method that is not
+# referenced by a declared action's handler_method is never dispatchable via
+# module dispatch (HTTP or executor), and undeclared action ids fail closed
+# with ACTION_NOT_FOUND.
+
 # Optional: expose named capabilities for reaction routing and managed-capability wiring.
 # Omit this section when reactions only target handler_method directly.
 capabilities:

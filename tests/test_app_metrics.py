@@ -272,7 +272,7 @@ async def test_module_executor_injects_module_and_action_into_context() -> None:
             return {"module_id": ctx.module_id, "action_id": ctx.action_id}
 
     executor = ModuleExecutor()
-    executor.register("analytics", Handler())
+    executor.register("analytics", Handler(), action_method_map={"run": "run"})
 
     result = await executor.execute(ModuleRequest(module="analytics", action="run", app_id="app-1", authority=trusted_framework_authority()))
 

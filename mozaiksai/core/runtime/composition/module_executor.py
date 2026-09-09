@@ -262,7 +262,13 @@ class ModuleExecutor:
         Args:
             name:                Module name as declared in module.yaml and ModuleRequest.module
             handler:             Instantiated module handler object
-            action_method_map:   Maps public action id -> handler method name
+            action_method_map:   Maps public action id -> handler method name.
+                                 This map is the sole action dispatch authority:
+                                 action ids absent from it fail closed with
+                                 ACTION_NOT_FOUND, regardless of which Python
+                                 methods exist on the handler. Registering with
+                                 an empty/absent map yields a module with no
+                                 dispatchable actions.
             settings:            Setting definitions from settings.yaml (list of setting dicts).
                                  Injected into ModuleContext.settings on every action call.
             action_permissions:  Maps action id -> list of required permission ids.
@@ -338,9 +344,43 @@ class ModuleExecutor:
                 error_code="MODULE_NOT_FOUND",
             )
 
-        handler_method = self._action_methods.get(request.module, {}).get(request.action, request.action)
+        # Declared-action authority boundary: only action ids explicitly
+        # declared in the module's contract (module.yaml actions[]) resolve to
+        # a handler method. A Python method is never dispatchable merely
+        # because its name matches the requested action — undeclared actions
+        # fail closed here, before any handler attribute is resolved.
+        handler_method = self._action_methods.get(request.module, {}).get(request.action)
+        if handler_method is None:
+            if hasattr(handler, request.action):
+                logger.warning(
+                    "MODULE_ACTION_UNDECLARED: module=%s action=%s matches a handler "
+                    "attribute but is not declared in the module's action contract; "
+                    "refusing dispatch (user=%s)",
+                    request.module,
+                    request.action,
+                    request.user_id,
+                )
+                asyncio.create_task(
+                    self._emit_dispatch_audit(
+                        replace(dispatch_audit, outcome="denied", reason="undeclared action"),
+                        error="ACTION_NOT_FOUND",
+                    )
+                )
+            return ModuleResult(
+                success=False,
+                error=f"Action {request.action!r} not found on module {request.module!r}",
+                error_code="ACTION_NOT_FOUND",
+            )
         action_fn = getattr(handler, handler_method, None)
-        if action_fn is None:
+        if action_fn is None or not callable(action_fn):
+            logger.error(
+                "MODULE_ACTION_HANDLER_MISSING: module=%s action=%s declared "
+                "handler_method=%s is absent or not callable on %s",
+                request.module,
+                request.action,
+                handler_method,
+                type(handler).__name__,
+            )
             return ModuleResult(
                 success=False,
                 error=f"Action {request.action!r} not found on module {request.module!r}",

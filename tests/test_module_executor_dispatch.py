@@ -94,7 +94,7 @@ class TestModuleActionResolution:
     @pytest.mark.asyncio
     async def test_action_not_found_returns_error(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request(action="no_such_action"))
         assert result.success is False
         assert result.error_code == "ACTION_NOT_FOUND"
@@ -103,7 +103,7 @@ class TestModuleActionResolution:
     @pytest.mark.asyncio
     async def test_sync_action_dispatched_and_result_returned(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request(params={"name": "Alice"}))
         assert result.success is True
         assert result.data == {"echo": {"name": "Alice"}}
@@ -111,7 +111,7 @@ class TestModuleActionResolution:
     @pytest.mark.asyncio
     async def test_async_action_dispatched_and_result_returned(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _AsyncEchoHandler())
+        ex.register("contacts", _AsyncEchoHandler(), action_method_map={"echo_async": "echo_async"})
         result = await ex.execute(_request(action="echo_async", params={"x": 1}))
         assert result.success is True
         assert result.data == {"async_echo": {"x": 1}}
@@ -138,7 +138,7 @@ class TestActionErrorHandling:
     @pytest.mark.asyncio
     async def test_exception_in_action_returns_execution_error(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _ErrorHandler())
+        ex.register("contacts", _ErrorHandler(), action_method_map={"blow_up": "blow_up", "bad_params": "bad_params", "restricted": "restricted"})
         result = await ex.execute(_request(action="blow_up"))
         assert result.success is False
         assert result.error_code == "EXECUTION_ERROR"
@@ -150,7 +150,7 @@ class TestActionErrorHandling:
     @pytest.mark.asyncio
     async def test_type_error_from_missing_required_param_returns_invalid_params(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _ErrorHandler())
+        ex.register("contacts", _ErrorHandler(), action_method_map={"blow_up": "blow_up", "bad_params": "bad_params", "restricted": "restricted"})
         # bad_params requires `required_arg` but we pass nothing
         result = await ex.execute(_request(action="bad_params", params={}))
         assert result.success is False
@@ -160,7 +160,7 @@ class TestActionErrorHandling:
     async def test_permission_error_from_service_layer_returns_permission_denied(self):
         """PermissionError raised inside a handler maps to PERMISSION_DENIED (403), not EXECUTION_ERROR (500)."""
         ex = ModuleExecutor()
-        ex.register("contacts", _ErrorHandler())
+        ex.register("contacts", _ErrorHandler(), action_method_map={"blow_up": "blow_up", "bad_params": "bad_params", "restricted": "restricted"})
         result = await ex.execute(_request(action="restricted", authority=enforce_authority("contacts.read")))
         assert result.success is False
         assert result.error_code == "PERMISSION_DENIED"
@@ -179,6 +179,7 @@ class TestPermissionEnforcement:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_permissions={"echo": ["contacts.read"]},
         )
         # authority=trusted_framework_authority() → trusted internal call, no enforcement
@@ -191,6 +192,7 @@ class TestPermissionEnforcement:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_permissions={"echo": ["contacts.read"]},
         )
         result = await ex.execute(_request(authority=enforce_authority("contacts.read", "other.perm")))
@@ -202,6 +204,7 @@ class TestPermissionEnforcement:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_permissions={"echo": ["contacts.read"]},
         )
         result = await ex.execute(_request(authority=enforce_authority("other.perm")))
@@ -214,6 +217,7 @@ class TestPermissionEnforcement:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_permissions={"echo": ["contacts.read"]},
         )
         result = await ex.execute(_request(authority=enforce_authority()))
@@ -226,6 +230,7 @@ class TestPermissionEnforcement:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_permissions={},  # no permissions required
         )
         result = await ex.execute(_request(authority=enforce_authority()))
@@ -245,6 +250,7 @@ class TestEntitlementGate:
         ex.register(
             "wallet",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_entitlements={"echo": "wallet.payout"},
         )
         result = await ex.execute(_request(module="wallet", authority=enforce_authority("wallet.manage")))
@@ -265,6 +271,7 @@ class TestEntitlementGate:
         ex.register(
             "wallet",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_entitlements={"echo": "wallet.payout"},
         )
         result = await ex.execute(
@@ -294,6 +301,7 @@ class TestEntitlementGate:
         ex.register(
             "wallet",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_entitlements={"echo": "wallet.payout"},
         )
         result = await ex.execute(_request(module="wallet", authority=enforce_authority("wallet.manage")))
@@ -309,6 +317,7 @@ class TestEntitlementGate:
         ex.register(
             "wallet",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_entitlements={"echo": "wallet.payout"},
         )
         result = await ex.execute(_request(module="wallet", authority=trusted_framework_authority()))
@@ -323,6 +332,7 @@ class TestEntitlementGate:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_entitlements={},  # no gate on any action
         )
         result = await ex.execute(_request(authority=enforce_authority("any.perm")))
@@ -341,6 +351,7 @@ class TestSchemaValidation:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_schemas={
                 "echo": {
                     "input": {
@@ -361,6 +372,7 @@ class TestSchemaValidation:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_schemas={
                 "echo": {
                     "input": {
@@ -381,6 +393,7 @@ class TestSchemaValidation:
         ex.register(
             "contacts",
             _EchoHandler(),
+            action_method_map={"echo": "echo"},
             action_schemas={
                 "echo": {
                     "output": {
@@ -447,7 +460,7 @@ class TestEventEmitterEnvelope:
                 await ctx.emit("contacts.created", {"name": "Alice"})
                 return {"success": True}
 
-        ex.register("contacts", _EmittingHandler())
+        ex.register("contacts", _EmittingHandler(), action_method_map={"action_with_emit": "action_with_emit"})
         result = await ex.execute(_request(action="action_with_emit"))
         assert result.success is True
         assert len(emitted) == 1
@@ -476,7 +489,7 @@ class TestEventEmitterEnvelope:
                 await ctx.emit("anon.event", {})
                 return {}
 
-        ex.register("contacts", _EmittingHandler())
+        ex.register("contacts", _EmittingHandler(), action_method_map={"do_action": "do_action"})
         req = _request(action="do_action", user_id=None)
         await ex.execute(req)
         assert "actor" not in emitted[0]
@@ -501,7 +514,7 @@ class TestEventEmitterEnvelope:
             "capability_ids": ["tasks.review"],
             "invocation_ids": ["wti-parent"],
         }
-        ex.register("contacts", _EmittingHandler())
+        ex.register("contacts", _EmittingHandler(), action_method_map={"do_action": "do_action"})
         await ex.execute(
             _request(
                 action="do_action",
@@ -522,14 +535,14 @@ class TestEventEmitterEnvelope:
 class TestRegistryQueries:
     def test_registered_modules_returns_module_names(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
-        ex.register("tasks", _AsyncEchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
+        ex.register("tasks", _AsyncEchoHandler(), action_method_map={"echo_async": "echo_async"})
         names = ex.registered_modules()
         assert set(names) == {"contacts", "tasks"}
 
     def test_can_handle_returns_true_for_registered(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         assert ex.can_handle("contacts") is True
 
     def test_can_handle_returns_false_for_unknown(self):
@@ -539,7 +552,7 @@ class TestRegistryQueries:
     @pytest.mark.asyncio
     async def test_health_includes_module_list(self):
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         health = await ex.health()
         assert "contacts" in health["modules"]
         assert health["count"] == 1
@@ -565,7 +578,7 @@ class TestPayloadSizeLimits:
                 return {"echo": kwargs}
 
         ex = ModuleExecutor()
-        ex.register("contacts", _SpyHandler())
+        ex.register("contacts", _SpyHandler(), action_method_map={"echo": "echo"})
         # Build a params dict that serializes to > 10 bytes.
         result = await ex.execute(_request(params={"x": "a" * 100}))
 
@@ -578,7 +591,7 @@ class TestPayloadSizeLimits:
         monkeypatch.setenv("MODULE_PARAMS_MAX_BYTES", "10000")
 
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request(params={"name": "Alice"}))
 
         assert result.success is True
@@ -594,7 +607,7 @@ class TestPayloadSizeLimits:
                 return {"data": "x" * 10000}
 
         ex = ModuleExecutor()
-        ex.register("contacts", _BigResponseHandler())
+        ex.register("contacts", _BigResponseHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request())
 
         assert result.success is False
@@ -610,7 +623,7 @@ class TestPayloadSizeLimits:
                 return None
 
         ex = ModuleExecutor()
-        ex.register("contacts", _NoneHandler())
+        ex.register("contacts", _NoneHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request())
 
         assert result.success is True
@@ -634,7 +647,7 @@ class TestActionTimeout:
                 return {"done": True}
 
         ex = ModuleExecutor()
-        ex.register("contacts", _SlowHandler())
+        ex.register("contacts", _SlowHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request())
 
         assert result.success is False
@@ -647,7 +660,7 @@ class TestActionTimeout:
         monkeypatch.setenv("MODULE_ACTION_TIMEOUT_SECONDS", "30")
 
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request(params={"x": 1}))
 
         assert result.success is True
@@ -658,7 +671,161 @@ class TestActionTimeout:
         monkeypatch.setenv("MODULE_ACTION_TIMEOUT_SECONDS", "0")
 
         ex = ModuleExecutor()
-        ex.register("contacts", _EchoHandler())
+        ex.register("contacts", _EchoHandler(), action_method_map={"echo": "echo"})
         result = await ex.execute(_request(params={"x": 1}))
 
         assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# 10. Declared-action authority boundary (fail closed)
+# ---------------------------------------------------------------------------
+
+
+class _HardenedHandler:
+    """Handler with a mix of public, internal, and non-action attributes."""
+
+    service = object()  # non-callable attribute
+
+    def __init__(self) -> None:
+        self.secrets = {"token": "sk-forbidden"}
+
+    async def list_items(self, ctx, **kwargs) -> dict:
+        return {"items": []}
+
+    async def delete_everything(self, ctx, **kwargs) -> dict:
+        return {"deleted": True}
+
+    async def on_payment_settled(self, ctx, **kwargs) -> dict:
+        """Event-reaction handler method — never a public action."""
+        return {"reacted": True}
+
+    def _internal_helper(self, ctx, **kwargs) -> dict:
+        return {"internal": True}
+
+
+class TestDeclaredActionAuthorityBoundary:
+    """Only contract-declared action ids may resolve to handler methods.
+
+    A handler method must never be HTTP/executor-dispatchable merely because a
+    Python method with the requested name exists.
+    """
+
+    def _executor(self) -> ModuleExecutor:
+        ex = ModuleExecutor()
+        ex.register(
+            "billing",
+            _HardenedHandler(),
+            # 'list' is the only declared public action; note the alias:
+            # public id 'list' maps to method 'list_items'.
+            action_method_map={"list": "list_items"},
+            action_permissions={"list": []},
+        )
+        return ex
+
+    @pytest.mark.asyncio
+    async def test_declared_alias_dispatches(self):
+        ex = self._executor()
+        result = await ex.execute(_request(module="billing", action="list", authority=enforce_authority()))
+        assert result.success is True
+        assert result.data == {"items": []}
+
+    @pytest.mark.asyncio
+    async def test_undeclared_existing_method_rejected(self):
+        """delete_everything exists in Python but is not declared — must fail closed."""
+        ex = self._executor()
+        for authority in (enforce_authority("billing.admin"), trusted_framework_authority()):
+            result = await ex.execute(
+                _request(module="billing", action="delete_everything", authority=authority)
+            )
+            assert result.success is False
+            assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_alias_target_method_name_not_directly_dispatchable(self):
+        """The mapped method name ('list_items') is not itself a public action id."""
+        ex = self._executor()
+        result = await ex.execute(
+            _request(module="billing", action="list_items", authority=trusted_framework_authority())
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_event_reaction_method_not_reachable_as_action(self):
+        ex = self._executor()
+        result = await ex.execute(
+            _request(module="billing", action="on_payment_settled", authority=trusted_framework_authority())
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_private_and_dunder_attributes_not_dispatchable(self):
+        ex = self._executor()
+        for name in ("_internal_helper", "__init__", "__class__", "service", "secrets"):
+            result = await ex.execute(
+                _request(module="billing", action=name, authority=trusted_framework_authority())
+            )
+            assert result.success is False, f"action {name!r} must not dispatch"
+            assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_case_variant_of_declared_action_rejected(self):
+        ex = self._executor()
+        result = await ex.execute(
+            _request(module="billing", action="List", authority=trusted_framework_authority())
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_module_registered_without_map_has_no_dispatchable_actions(self):
+        ex = ModuleExecutor()
+        ex.register("billing", _HardenedHandler())
+        result = await ex.execute(
+            _request(module="billing", action="list_items", authority=trusted_framework_authority())
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_declared_action_with_missing_method_fails_closed(self):
+        """A declared action whose handler_method is absent must not fall back."""
+        ex = ModuleExecutor()
+        ex.register("billing", _HardenedHandler(), action_method_map={"ghost": "not_a_method"})
+        result = await ex.execute(
+            _request(module="billing", action="ghost", authority=trusted_framework_authority())
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_declared_action_mapped_to_non_callable_fails_closed(self):
+        ex = ModuleExecutor()
+        ex.register("billing", _HardenedHandler(), action_method_map={"svc": "service"})
+        result = await ex.execute(
+            _request(module="billing", action="svc", authority=trusted_framework_authority())
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_permission_map_entry_alone_grants_no_dispatch(self):
+        """An action id present only in action_permissions (not the method map) stays closed."""
+        ex = ModuleExecutor()
+        ex.register(
+            "billing",
+            _HardenedHandler(),
+            action_method_map={"list": "list_items"},
+            action_permissions={"delete_everything": ["billing.admin"]},
+        )
+        result = await ex.execute(
+            _request(
+                module="billing",
+                action="delete_everything",
+                authority=enforce_authority("billing.admin"),
+            )
+        )
+        assert result.success is False
+        assert result.error_code == "ACTION_NOT_FOUND"

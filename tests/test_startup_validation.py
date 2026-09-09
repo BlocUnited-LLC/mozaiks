@@ -699,7 +699,18 @@ class TestAuthEnabledCheck:
 
 
 class TestAuthProviderCheck:
-    """run_startup_checks warns when auth is not disabled but no provider is configured."""
+    """run_startup_checks fails closed when explicitly enabled auth cannot resolve its provider."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_auth_caches(self):
+        from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+        from mozaiksai.core.auth.config import clear_auth_config_cache
+
+        clear_auth_config_cache()
+        reset_auth_adapter()
+        yield
+        clear_auth_config_cache()
+        reset_auth_adapter()
 
     def _base_env(self, monkeypatch) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -719,23 +730,59 @@ class TestAuthProviderCheck:
         monkeypatch.delenv("MOZAIKS_OIDC_DISCOVERY_URL", raising=False)
 
     @pytest.mark.asyncio
-    async def test_warns_in_production_when_auth_enabled_but_no_provider(self, monkeypatch):
-        """AUTH_ENABLED=true in production with no provider silently falls back to demo mode."""
+    async def test_fatal_in_production_when_auth_enabled_but_no_provider(self, monkeypatch):
+        """AUTH_ENABLED=true with no provider is fatal — no silent demo-mode fallback."""
         self._base_env(monkeypatch)
 
-        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
-
-        assert any("auth provider" in w.lower() for w in warnings)
-        assert any("production" in w.lower() for w in warnings)
+        with pytest.raises(StartupConfigError, match="no authentication provider"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
     @pytest.mark.asyncio
-    async def test_no_warning_when_explicit_auth_provider_set(self, monkeypatch):
+    async def test_fatal_when_explicit_provider_set_but_unconfigured(self, monkeypatch):
+        """AUTH_PROVIDER=jwt without JWKS/issuer/discovery config cannot validate tokens → fatal."""
         self._base_env(monkeypatch)
         monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+
+        with pytest.raises(StartupConfigError, match="not fully configured"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_explicit_auth_provider_set_and_configured(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_fatal_on_unknown_auth_provider_name(self, monkeypatch):
+        """A typo'd AUTH_PROVIDER value must fail startup, not fall back."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_PROVIDER", "supabsae")
+
+        with pytest.raises(StartupConfigError, match="Unknown auth provider"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_fatal_on_auth_enabled_true_with_provider_none(self, monkeypatch):
+        """AUTH_ENABLED=true + AUTH_PROVIDER=none is a contradiction → fatal."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_PROVIDER", "none")
+
+        with pytest.raises(StartupConfigError, match="conflicts"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_fatal_on_unrecognized_auth_enabled_value(self, monkeypatch):
+        """A typo'd AUTH_ENABLED value must never silently disable auth."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_ENABLED", "tru")
+
+        with pytest.raises(StartupConfigError, match="Unrecognized AUTH_ENABLED"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
     @pytest.mark.asyncio
     async def test_no_warning_when_supabase_url_configured(self, monkeypatch):
@@ -788,14 +835,33 @@ class TestAuthProviderCheck:
         assert not any("auth provider" in w.lower() for w in warnings)
 
     @pytest.mark.asyncio
-    async def test_no_warning_in_development_without_provider(self, monkeypatch):
-        """Missing provider is expected in dev — no warning outside production."""
+    async def test_fatal_in_development_when_auth_enabled_but_no_provider(self, monkeypatch):
+        """Explicit AUTH_ENABLED=true fails closed in EVERY environment, not just production."""
         self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "development")
+
+        with pytest.raises(StartupConfigError, match="no authentication provider"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_fatal_in_staging_when_auth_enabled_but_no_provider(self, monkeypatch):
+        """Staging cannot boot into trusted bypass merely because provider config is missing."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "staging")
+
+        with pytest.raises(StartupConfigError, match="no authentication provider"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_demo_mode_boots_when_auth_enabled_unset_and_nothing_configured(self, monkeypatch):
+        """With AUTH_ENABLED unset and no auth env at all, demo mode still boots (dev contract)."""
+        self._base_env(monkeypatch)
+        monkeypatch.delenv("AUTH_ENABLED", raising=False)
         monkeypatch.setenv("ENV", "development")
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
-        assert not any("auth provider" in w.lower() for w in warnings)
+        assert not any("authentication configuration" in w.lower() for w in warnings)
 
     @pytest.mark.asyncio
     async def test_no_warning_when_auth_explicitly_disabled_and_no_provider(self, monkeypatch):
@@ -810,23 +876,22 @@ class TestAuthProviderCheck:
         assert not any("no auth provider" in w.lower() for w in warnings)
 
     @pytest.mark.asyncio
-    async def test_strict_raises_when_production_auth_enabled_but_no_provider(self, monkeypatch):
+    async def test_strict_mode_also_raises_when_auth_enabled_but_no_provider(self, monkeypatch):
         self._base_env(monkeypatch)
         monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
 
-        with pytest.raises(StartupConfigError, match="auth provider"):
+        with pytest.raises(StartupConfigError, match="no authentication provider"):
             await run_startup_checks(_mongo_client=_MockPingClient())
 
     @pytest.mark.asyncio
-    async def test_no_check_when_env_unset(self, monkeypatch):
-        """Check only fires in production — not when ENV is unset."""
+    async def test_fatal_when_env_unset_but_auth_explicitly_enabled(self, monkeypatch):
+        """Fail-closed auth resolution does not depend on ENV at all."""
         self._base_env(monkeypatch)
         monkeypatch.delenv("ENV", raising=False)
         monkeypatch.delenv("ENVIRONMENT", raising=False)
 
-        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
-
-        assert not any("auth provider" in w.lower() for w in warnings)
+        with pytest.raises(StartupConfigError, match="no authentication provider"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
 
 # ---------------------------------------------------------------------------

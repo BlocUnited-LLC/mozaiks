@@ -593,3 +593,150 @@ def test_fulfillment_apply_route_replays_and_exposes_command_log(monkeypatch) ->
     assert listing.status_code == 200
     assert listing.json()["records"][0]["command_id"] == "cmd_route_topup_1"
     assert len(audit.records) == 2
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment ingress authentication boundary (fail closed)
+# ---------------------------------------------------------------------------
+
+
+def _ingress_client(monkeypatch) -> TestClient:
+    """Build a fulfillment app with a working service and silenced audit sink."""
+    database = _Database()
+    config = _top_up_config()
+    ledger = TokenWalletLedger(database=database)
+    store = BillingFulfillmentCommandStore(database=database)
+    service = BillingFulfillmentService(config=config, ledger=ledger, command_store=store)
+
+    class _Audit:
+        async def log(self, record: Any) -> None:
+            return None
+
+    monkeypatch.setattr("mozaiksai.hosts.routers.billing.get_audit_logger", lambda: _Audit())
+
+    app = FastAPI()
+    app.state.subscriptions_config = config
+    app.state.billing_fulfillment_command_store = store
+    app.state.billing_fulfillment_service_factory = lambda request: service
+    app.include_router(billing_router)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+_INGRESS_PAYLOAD = {
+    "command_id": "cmd_ingress_1",
+    "event_type": "token_top_up_paid",
+    "source": "test",
+    "app_id": "app_1",
+    "user_id": "user_1",
+    "token_amount": 100,
+}
+
+
+def _clear_auth_env(monkeypatch) -> None:
+    for var in (
+        "AUTH_ENABLED",
+        "AUTH_PROVIDER",
+        "INTERNAL_API_KEY",
+        "SUPABASE_URL",
+        "KEYCLOAK_URL",
+        "KEYCLOAK_REALM",
+        "AUTH_JWKS_URL",
+        "AUTH_ISSUER",
+        "MOZAIKS_OIDC_AUTHORITY",
+        "MOZAIKS_OIDC_DISCOVERY_URL",
+        # A developer .env may grant the anonymous principal admin roles;
+        # these tests exercise the un-granted anonymous path.
+        "AUTH_ANON_ROLES",
+        "AUTH_ANON_SCOPES",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_fulfillment_ingress_fails_closed_when_auth_merely_unconfigured(monkeypatch) -> None:
+    """Implicit demo mode (no auth config at all) + no INTERNAL_API_KEY must NOT
+    make the fulfillment ingress callable without authentication."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
+        assert resp.status_code == 403
+        listing = client.get("/api/admin/billing/fulfillment?app_id=app_1")
+        assert listing.status_code == 403
+    finally:
+        reset_auth_adapter()
+
+
+def test_fulfillment_ingress_allows_explicitly_disabled_auth_dev_mode(monkeypatch) -> None:
+    """AUTH_ENABLED=false is the explicit development contract — local dev keeps working."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        resp = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "applied"
+    finally:
+        reset_auth_adapter()
+
+
+def test_fulfillment_ingress_requires_key_when_key_configured_even_if_auth_disabled(monkeypatch) -> None:
+    """Once INTERNAL_API_KEY is configured, the anonymous dev path closes."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("INTERNAL_API_KEY", "configured-key-0123456789abcdef")
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        no_key = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
+        assert no_key.status_code == 403
+        wrong_key = client.post(
+            "/api/billing/fulfillment/apply",
+            json=_INGRESS_PAYLOAD,
+            headers={"x-internal-api-key": "wrong"},
+        )
+        assert wrong_key.status_code == 401
+        right_key = client.post(
+            "/api/billing/fulfillment/apply",
+            json=_INGRESS_PAYLOAD,
+            headers={"x-internal-api-key": "configured-key-0123456789abcdef"},
+        )
+        assert right_key.status_code == 200
+    finally:
+        reset_auth_adapter()
+
+
+def test_fulfillment_ingress_internal_key_works_with_auth_enabled(monkeypatch) -> None:
+    """Auth enabled with a real provider: the internal key path still authorizes."""
+    from mozaiksai.core.auth.adapters.registry import reset_auth_adapter
+
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
+    monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+    monkeypatch.setenv("INTERNAL_API_KEY", "configured-key-0123456789abcdef")
+    from mozaiksai.core.auth.config import clear_auth_config_cache
+
+    clear_auth_config_cache()
+    reset_auth_adapter()
+    try:
+        client = _ingress_client(monkeypatch)
+        anonymous = client.post("/api/billing/fulfillment/apply", json=_INGRESS_PAYLOAD)
+        assert anonymous.status_code in (401, 403)
+        keyed = client.post(
+            "/api/billing/fulfillment/apply",
+            json=_INGRESS_PAYLOAD,
+            headers={"x-internal-api-key": "configured-key-0123456789abcdef"},
+        )
+        assert keyed.status_code == 200
+    finally:
+        clear_auth_config_cache()
+        reset_auth_adapter()
