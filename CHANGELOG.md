@@ -152,6 +152,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Declarative workflow agents no longer receive undeclared AG2 network
+  delegation/discovery tools automatically. Declared tools and AG2 graph
+  execution remain available. Continuation timeouts now return failed results
+  and close live-run clients instead of escaping as an exception or pretending
+  to await human input.
 - Workflow entrypoints, transition choices, and refinement launches now forward
   the configured auth adapter's access token through the shared API helper.
   Authenticated builds no longer fail at these steps with a missing-token error.

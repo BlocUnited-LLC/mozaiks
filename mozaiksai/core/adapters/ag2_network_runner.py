@@ -214,7 +214,6 @@ class AG2NetworkRunnerRequest:
     structured_registry: Mapping[str, Any] = field(default_factory=dict)
     max_turns: int | None = None
     close_timeout_seconds: float = 120.0
-    attach_network_plugin: bool = True
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
     agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None
     context_authority_policy: ContextAuthorityPolicy | None = None
@@ -354,7 +353,9 @@ class AG2NetworkRunner:
                     name,
                     passport=Passport(name=name),
                     resume=Resume(claimed_capabilities=[name]),
-                    attach_plugin=request.attach_network_plugin,
+                    # Workflow tools and topology are contract-owned. AG2's
+                    # optional plugin adds undeclared channel/delegation tools.
+                    attach_plugin=False,
                 )
                 _install_context_update_handler(
                     agent=agent,
@@ -788,16 +789,7 @@ class _AG2LiveWorkflowRun:
             while True:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
-                    result = await self._snapshot_result(
-                        status=RunStatus.PAUSED,
-                        close_reason="awaiting_user_input",
-                        error=(
-                            "workflow channel did not settle within "
-                            f"{self._close_timeout_seconds} seconds"
-                        ),
-                    )
-                    result.live_run = self
-                    return result
+                    break
 
                 event_task = asyncio.create_task(
                     self._initiator.wait_for_channel_event(
@@ -829,6 +821,8 @@ class _AG2LiveWorkflowRun:
 
                 try:
                     event_env = event_task.result()
+                except TimeoutError:
+                    break
                 finally:
                     for task in pending:
                         task.cancel()
@@ -853,6 +847,11 @@ class _AG2LiveWorkflowRun:
         finally:
             failure_task.cancel()
             await asyncio.gather(failure_task, return_exceptions=True)
+
+        return await self._snapshot_result(
+            status=RunStatus.FAILED,
+            error=f"workflow channel did not settle within {self._close_timeout_seconds} seconds",
+        )
 
     def _next_agent_audience_for_user_text(self, message: str) -> list[str] | None:
         state = self._hub.adapter_state(self.channel_id)
