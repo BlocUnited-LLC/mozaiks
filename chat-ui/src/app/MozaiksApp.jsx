@@ -39,7 +39,7 @@ function AppShell({ onAuthRequired }) {
  */
 export default function MozaiksApp({
   appName = 'My App',
-  defaultAppId = 'demo-app',
+  defaultAppId = null,
   apiAdapter,
   authAdapter,
   uiConfig: uiConfigProp,
