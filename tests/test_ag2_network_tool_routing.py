@@ -187,6 +187,8 @@ async def _agents(
                 }
             ],
             "streaming": False,
+            "max_completion_tokens": 128,
+            "max_retries": 0,
         }
 
     original_converter = factory.llm_config_to_ag2_config
@@ -290,6 +292,7 @@ async def test_workflow_agents_receive_only_declared_tools(
         names = {tool["function"]["name"] for tool in payload.get("tools", [])}
         expected = {"complete_intake", "other_tool"} if payload["model"] == "AgentA" else set()
         assert names == expected
+        assert payload["max_completion_tokens"] == 128
 
 
 @pytest.mark.asyncio
