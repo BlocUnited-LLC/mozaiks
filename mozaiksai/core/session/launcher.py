@@ -157,15 +157,13 @@ async def apply_launch_context_provider(
     if not provider_spec:
         return dict(context_variables or {})
     if ":" not in provider_spec:
-        logger.warning("SESSION_LAUNCH_CONTEXT_PROVIDER_INVALID: spec=%s", provider_spec)
-        return dict(context_variables or {})
+        raise ValueError("MOZAIKS_LAUNCH_CONTEXT_PROVIDER must declare module:function")
 
     module_name, function_name = provider_spec.split(":", 1)
     module_name = module_name.strip()
     function_name = function_name.strip()
     if not module_name or not function_name:
-        logger.warning("SESSION_LAUNCH_CONTEXT_PROVIDER_INVALID: spec=%s", provider_spec)
-        return dict(context_variables or {})
+        raise ValueError("MOZAIKS_LAUNCH_CONTEXT_PROVIDER must declare module:function")
 
     try:
         provider = getattr(importlib.import_module(module_name), function_name)
@@ -182,12 +180,10 @@ async def apply_launch_context_provider(
         if inspect.isawaitable(result):
             result = await result
         if not isinstance(result, dict):
-            logger.warning(
-                "SESSION_LAUNCH_CONTEXT_PROVIDER_IGNORED: provider=%s returned=%s",
-                provider_spec,
-                type(result).__name__,
+            raise TypeError(
+                f"Launch context provider {provider_spec} must return a mapping, "
+                f"got {type(result).__name__}"
             )
-            return dict(context_variables or {})
         return dict(result)
     except Exception as exc:
         logger.warning(
@@ -196,7 +192,7 @@ async def apply_launch_context_provider(
             workflow_id,
             exc,
         )
-        return dict(context_variables or {})
+        raise
 
 
 async def create_routed_chat_session(

@@ -26,17 +26,10 @@ from mozaiksai.core.account import account_data_registry
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_user_id_against_principal
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
-from mozaiksai.hosts import runtime as runtime_app
+from mozaiksai.core.runtime.persistence import app_data_from_context
 
 router = APIRouter(tags=["account"])
 logger = logging.getLogger("mozaiks_app.account_router")
-
-persistence_manager = runtime_app.persistence_manager
-
-
-def _get_db() -> Any:
-    return persistence_manager.db if hasattr(persistence_manager, "db") else None
-
 
 # ---------------------------------------------------------------------------
 # DELETE /api/account
@@ -49,7 +42,6 @@ def _get_db() -> Any:
 )
 async def delete_account(
     principal: UserPrincipal = Depends(require_user_scope),
-    _: None = Depends(validate_user_id_against_principal),
 ) -> JSONResponse:
     """Permanently delete the authenticated user's account.
 
@@ -64,11 +56,13 @@ async def delete_account(
     and success/error status per module.
     """
     app_id = str(principal.app_id or "default")
-    user_id = principal.user_id
+    user_id = validate_user_id_against_principal(principal)
 
     logger.info("ACCOUNT_DELETE_STARTED: app_id=%s user_id=%s", app_id, user_id)
 
-    db = _get_db()
+    # Handlers own their collection contracts; this route only resolves the app
+    # database, including apps whose modules use canonical generated names.
+    db = app_data_from_context(None, contract={}).db
     deletion_results = await account_data_registry.delete_all(
         app_id=app_id,
         user_id=user_id,
@@ -116,7 +110,6 @@ async def delete_account(
 )
 async def export_account_data(
     principal: UserPrincipal = Depends(require_user_scope),
-    _: None = Depends(validate_user_id_against_principal),
 ) -> JSONResponse:
     """Return a machine-readable JSON archive of all user-owned data.
 
@@ -126,11 +119,11 @@ async def export_account_data(
     (billing history, subscription snapshots, auth identity) at that point.
     """
     app_id = str(principal.app_id or "default")
-    user_id = principal.user_id
+    user_id = validate_user_id_against_principal(principal)
 
     logger.info("ACCOUNT_EXPORT_STARTED: app_id=%s user_id=%s", app_id, user_id)
 
-    db = _get_db()
+    db = app_data_from_context(None, contract={}).db
     export_payload: dict[str, Any] = {
         "_meta": {
             "app_id": app_id,

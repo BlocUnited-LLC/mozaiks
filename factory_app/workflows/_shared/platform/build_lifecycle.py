@@ -751,6 +751,7 @@ async def emit_build_completed(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    context_variables: Any = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -772,6 +773,14 @@ async def emit_build_completed(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    from factory_app.eval import collect_generation_evidence
+
+    evidence_context = dict(context.get("session_context") or {})
+    if isinstance(context_variables, dict):
+        evidence_context.update(context_variables)
+    elif hasattr(context_variables, "to_dict"):
+        evidence_context.update(context_variables.to_dict())
+    payload["buildEvidence"] = collect_generation_evidence(evidence_context).model_dump(mode="json")
     payload["artifacts"] = await get_build_artifacts(
         app_id=context["app_id"],
         build_id=context["build_id"],
@@ -828,6 +837,7 @@ async def emit_build_failed(
     journey_key: str | None = None,
     journey_position: int | None = None,
     journey_total_steps: int | None = None,
+    context_variables: Any = None,
     **_: Any,
 ) -> str | None:
     context = await _resolve_build_event_context(
@@ -848,6 +858,14 @@ async def emit_build_failed(
         return None
 
     payload = _base_payload(context=context, workflow_name=workflow_name, user_id=user_id)
+    from factory_app.eval import collect_generation_evidence
+
+    evidence_context = dict(context.get("session_context") or {})
+    if isinstance(context_variables, dict):
+        evidence_context.update(context_variables)
+    elif hasattr(context_variables, "to_dict"):
+        evidence_context.update(context_variables.to_dict())
+    payload["buildEvidence"] = collect_generation_evidence(evidence_context).model_dump(mode="json")
     payload["error"] = _normalize_text(error)
     outbox_event_id = await upsert_outbox_event(
         app_id=context["app_id"],

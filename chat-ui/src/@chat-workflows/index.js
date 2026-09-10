@@ -1,29 +1,21 @@
 // ==============================================================================
 // FILE: chat-ui/src/@chat-workflows/index.js
-// DESCRIPTION: Registers workflow UI components from a host-injected root.
+// DESCRIPTION: Registers the effective workflow UI supplied by the host build.
 //
-//   The consuming host owns the active workflow bundle and injects that root as
-//   the @chat-workflows-root alias at build time.
+//   The consuming host resolves its active workflow bundle and any explicitly
+//   inherited default registry at build time.
 //
 //   chat-ui stays workflow-agnostic: it only knows how to read
 //   <workflow>/ui/index.{js,jsx} barrels from the injected root and register
 //   their exports in the component registry.
 // ==============================================================================
 
-const primaryWorkflowModules = import.meta.glob(
-  '@chat-workflows-root/*/ui/index.{js,jsx}'
-);
-const workflowModules = primaryWorkflowModules;
+import workflowModules from 'virtual:mozaiks-workflow-ui';
 
 // Build WORKFLOW_REGISTRY from the injected workflow root.
 // Key   -> workflow folder name
 // Value -> { components } map from the ui/index exports
 const WORKFLOW_REGISTRY = {};
-
-const getWorkflowNameFromPath = (modulePath) => {
-  const match = modulePath.match(/[\\/]([^/\\]+)[\\/]ui[\\/]index(?:\.[^.]+)?$/);
-  return match ? match[1] : null;
-};
 
 const normalizeWorkflowModule = (mod) => {
   const workflowModule = mod.default ?? mod;
@@ -32,9 +24,7 @@ const normalizeWorkflowModule = (mod) => {
     : null;
 };
 
-for (const [modulePath, loadModule] of Object.entries(workflowModules)) {
-  const workflowName = getWorkflowNameFromPath(modulePath);
-  if (!workflowName) continue;
+for (const [workflowName, loadModule] of Object.entries(workflowModules)) {
   WORKFLOW_REGISTRY[workflowName] = {
     loadModule,
     module: null,

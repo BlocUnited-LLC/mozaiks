@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test:workflow-ui": "node --test tests/workflowUi.test.js",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

@@ -214,7 +214,7 @@ task_contracts:
       - Emit integration glue or provider adapter support only.
       - Do not generate a standalone platform or alternate host.
       - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
-      - If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
+      - "If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract validated by mozaiksai.core.secrets.AppSecretContract: version: 1 and secrets entries with env (never string entries), optional azure_key_vault.secret_name, and optional provider policy. Unknown fields and raw values are forbidden. Never emit raw secret values."
       - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the generated app itself directly owns those provider mechanics rather than consuming a hosted platform capability.
       - Do not use service_foundation for Mozaiks-hosted deployment, DNS, domain, billing, payment processing, or platform operations. Hosted platform capabilities are consumed through hosted API clients/facade modules and host-owned records; provider adapters stay in the hosted product.
       - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.

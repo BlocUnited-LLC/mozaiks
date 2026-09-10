@@ -350,14 +350,13 @@ class TestFileContractsIntegrity:
         assert "backend/repo.py" in defaults
         assert "backend/policy.py" in defaults
 
-    def test_no_runtime_code_changed(self):
-        """file_contracts.yaml and agents.yaml are generator guidance — not runtime code."""
-        Path(__file__).parent.parent / "mozaiksai"
-        # Verify we are not accidentally referencing runtime internals from the contracts
-        text = _load_yaml(_FILE_CONTRACTS)
-        contracts_str = str(text)
-        assert "mozaiksai.core" not in contracts_str
-        assert "mozaiksai.hosts" not in contracts_str
+    def test_guidance_references_the_public_secret_contract(self):
+        from mozaiksai.core.secrets import AppSecretContract
+
+        text = str(_load_yaml(_FILE_CONTRACTS))
+        assert "mozaiksai.core.secrets.AppSecretContract" in text
+        assert AppSecretContract.model_validate({"version": 1, "secrets": []})
+        assert "mozaiksai.hosts" not in text
 
 
 # ---------------------------------------------------------------------------

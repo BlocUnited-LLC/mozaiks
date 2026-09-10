@@ -396,7 +396,8 @@ def test_scan_generated_bundle_rejects_raw_secret_fields() -> None:
     )
 
     assert any("names-only" in error for error in errors)
-    assert any("secrets.0.value" in error for error in errors)
+    assert any("extra_forbidden" in error for error in errors)
+    assert all("sk-test-raw" not in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_data_contract_module_id_mismatch() -> None:

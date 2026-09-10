@@ -285,7 +285,7 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert 'rel_path.startswith("ui/")' in converter
     assert '"path": "ui/index.js"' in converter
 
-    assert "@chat-workflows-root/*/ui/index.{js,jsx}" in registry
+    assert "import workflowModules from 'virtual:mozaiks-workflow-ui'" in registry
     assert "@chat-workflows-root-secondary" not in registry
     assert "mozaiks-platform/app/workflows" not in registry
     assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in registry
@@ -293,7 +293,7 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert "'@mozaiks/factory-app-ui': path.resolve(factoryAppRoot, 'app/ui/index.js')" in app_vite
     assert "'@mozaiks/factory-admin': path.resolve(factoryAppRoot, 'app/admin/index.js')" in app_vite
     assert "@chat-workflows-root-secondary" not in app_vite
-    assert "'@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url))" in embed_vite
+    assert "'virtual:mozaiks-workflow-ui': fileURLToPath(new URL('./src/embed/workflowUiModulesStub.js', import.meta.url))" in embed_vite
     assert "../mozaiks-platform/" not in tailwind
     assert "`@chat-workflows/${workflow}/components/index.js`" not in router
     assert "workflow && component ? `${workflow}:${component}` : null" in router
