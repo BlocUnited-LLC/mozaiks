@@ -20,6 +20,9 @@ Example::
     default_plan_id: free
     assignment_store:
       data_alias: billing.subscriptions
+      # Stores the last committed entitlement revision for a subject so an
+      # out-of-order fulfillment command cannot regress it. Null to opt out.
+      revision_field: billing_revision
     plans:
       - plan_id: free
         label: Free
@@ -108,6 +111,36 @@ _METER_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _WALLET_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _DATA_ALIAS_RE = re.compile(r"^[a-z0-9_.-]+$")
 _FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+
+# Every configurable assignment mapping that carries identity or business
+# state. When revision fencing is on, none of them may target the reserved
+# ordering-authority field.
+_SUBJECT_AND_BUSINESS_FIELDS = (
+    "app_id_field",
+    "tenant_id_field",
+    "workspace_id_field",
+    "user_id_field",
+    "plan_id_field",
+    "status_field",
+    "starts_at_field",
+    "expires_at_field",
+    "capabilities_field",
+    "plan_snapshot_field",
+)
+
+
+def _paths_overlap(left: str, right: str) -> bool:
+    """Would writing one of these Mongo paths disturb the other?
+
+    True when the paths are equal or one is an ancestor of the other, since
+    setting `a` replaces `a.b` and setting `a.b` mutates the document `a`.
+    """
+    left, right = left.strip(), right.strip()
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    return left.startswith(f"{right}.") or right.startswith(f"{left}.")
 _CATALOG_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 _CAPABILITY_GROUP_RE = re.compile(r"^[a-z0-9_.-]+$")
 _ROUTE_RE = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*(?:\?[A-Za-z0-9._~!$&'()*+,;=:@/?%-]*)?$")
@@ -729,6 +762,18 @@ class SubscriptionAssignmentStoreDef(BaseModel):
     expires_at_field: str | None = "expires_at"
     capabilities_field: str | None = "granted_capabilities"
     plan_snapshot_field: str | None = "plan_snapshot"
+    # Stores the last committed entitlement revision for a subject. Fulfillment
+    # commands carrying `subject_revision` are applied only when strictly newer
+    # than this value, so an out-of-order command cannot regress the subject.
+    #
+    # Deliberately NOT a free-form field name. This is an authority field that
+    # the fence reads and writes inside the same update as the assignment
+    # itself, so an arbitrary name could shadow identity/plan/status/timestamp
+    # fields, collide with keys written by the same update, or introduce dotted
+    # paths and `$` operators. The only meaningful choice is whether fencing is
+    # on, so the contract offers exactly that: the canonical field name, or
+    # null to opt out.
+    revision_field: Literal["billing_revision"] | None = "billing_revision"
     active_statuses: list[str] = Field(default_factory=lambda: ["active", "pending", "trialing"])
 
     @field_validator("data_alias")
@@ -765,6 +810,30 @@ class SubscriptionAssignmentStoreDef(BaseModel):
                 f"field names must match [A-Za-z_][A-Za-z0-9_.]*, got {value!r}"
             )
         return value
+
+    @model_validator(mode="after")
+    def _reserve_revision_field(self) -> SubscriptionAssignmentStoreDef:
+        """No other mapping may target the ordering-authority field.
+
+        The fence reads and writes `revision_field` inside the same update
+        that writes the assignment, so a business or identity mapping aimed at
+        the same path would let ordinary writes clobber the ordering value —
+        and the collision would only show up as a mysterious lost fence at
+        runtime. Reject it at load time instead.
+        """
+        reserved = self.revision_field
+        if reserved is None:
+            return self
+        for name in _SUBJECT_AND_BUSINESS_FIELDS:
+            value = getattr(self, name, None)
+            if value is None:
+                continue
+            if _paths_overlap(str(value), reserved):
+                raise ValueError(
+                    f"{name} must not target the reserved revision field "
+                    f"{reserved!r}; it is the fence's ordering authority"
+                )
+        return self
 
     @field_validator("active_statuses", mode="before")
     @classmethod

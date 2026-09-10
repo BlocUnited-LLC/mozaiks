@@ -80,6 +80,24 @@ def _contains_proprietary_term(value: Any) -> str | None:
     return None
 
 
+# assignment_store fields whose explicit null is meaning-bearing rather than
+# merely absent. `exclude_none=True` keeps the normalized contract compact,
+# but for these it would turn a deliberate opt-out into a silent opt-in on the
+# next reload, because an absent key falls back to the model default.
+_NULL_MEANING_ASSIGNMENT_FIELDS = ("revision_field",)
+
+
+def _restore_explicit_nulls(validated: Any, normalized: dict[str, Any]) -> None:
+    """Re-add assignment-store nulls the caller set on purpose."""
+    store = getattr(validated, "assignment_store", None)
+    if store is None or not isinstance(normalized.get("assignment_store"), dict):
+        return
+    explicitly_set: set[str] = getattr(store, "model_fields_set", set())
+    for field in _NULL_MEANING_ASSIGNMENT_FIELDS:
+        if field in explicitly_set and getattr(store, field, None) is None:
+            normalized["assignment_store"][field] = None
+
+
 def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("subscription_config_file must be an object when contract_required=true")
@@ -91,6 +109,7 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     config.setdefault("plans", [])
     validated = SubscriptionsConfig.model_validate(config)
     normalized = validated.model_dump(mode="python", exclude_none=True)
+    _restore_explicit_nulls(validated, normalized)
     for key in ("token_wallets", "top_up_products", "add_on_products", "usage_charge_policies"):
         if normalized.get(key) == []:
             normalized.pop(key, None)

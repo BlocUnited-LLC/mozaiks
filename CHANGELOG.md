@@ -93,6 +93,63 @@ This project follows a practical pre-1.0 changelog format:
   environments reject outright). Auth being merely unconfigured no longer
   makes the ingress callable without authentication.
 
+### Added
+
+- **Billing fulfillment revision fencing**: `BillingFulfillmentCommand` accepts
+  an optional `subject_revision` — a provider-neutral, monotonically increasing
+  ordinal that the upstream billing source allocates per entitlement subject
+  when it commits a canonical revision. Subscription effects now commit only
+  when the incoming revision is strictly newer than the one already stored for
+  that subject, compared atomically on the assignment document at write time.
+  An out-of-order command (an older HTTP request that completes after a newer
+  one has already been applied) is suppressed rather than regressing
+  entitlement state: its assignment and plan-allowance effects are `skipped`
+  with reason `stale_revision`, and the result carries the new terminal status
+  `superseded` so the sender can settle it without retrying. The last committed
+  revision is stored in the assignment document under the new
+  `assignment_store.revision_field` (`billing_revision`, or null to opt out —
+  the field is a fixed authority name, not a customization point). Plan token
+  allowances are fenced at their own commit too: the ledger accepts an opaque
+  `subject_key`/`subject_revision` pair and folds the ordering predicate into
+  the same single-document update that changes the balance, so a stale command
+  cannot mint tokens even if it was already mid-flight when a newer revision
+  committed, and the wallet-side ordering head advances for every accepted
+  revision — including cancellations, zero-allowance plans, and revisions that
+  reuse an existing period allocation — so "latest accepted revision" is what
+  fences a delayed older allowance, not "revision that last minted tokens".
+  That ordering authority is claimed on every applicable wallet *before* the
+  assignment commits: a revision only becomes the newly authoritative one once
+  no wallet its subject can reach still admits an older revision, and a wallet
+  that reports a newer revision means the command was overtaken, so nothing
+  applies. A head write that *fails* is not a decline: it propagates, nothing
+  applies, and — because that failure provably precedes every effect — the
+  durable command reservation is released so the identical command can be
+  retried instead of being refused as permanently pending. Wallet heads already
+  claimed are never reversed; the retry finds them equal and proceeds.
+  A wallet balance only ever moves under a reservation the invocation has
+  positively acquired: a pending reservation is taken by compare-and-swap on
+  exactly the reservation fields the stored document actually carries —
+  including their absence, so an entry written before reservations were
+  tracked is still adoptable and a movement that already committed stays
+  recoverable — and a lost swap means re-reading and reacquiring rather than
+  writing anyway. A newer, entitled revision may adopt
+  a reservation a stale attempt left behind, and rollback then only ever
+  deletes a reservation the rolling-back attempt still owns.
+  Fencing is one decision for the whole command: an app that sets
+  `revision_field: null` gets prior behavior from both the assignment and the
+  wallet. Enabling fencing requires one assignment row per entitlement subject,
+  enforced by a unique index over the configured subject paths — a store that
+  already carries an equivalent unique index provides that guarantee under
+  whatever name it uses and is accepted as is; pre-existing duplicate subjects
+  fail closed with an actionable error rather than being silently resolved. `billing_revision` is reserved — no other assignment
+  mapping may target it — and a command whose remaining effects are invalidated
+  by a newer revision reports `superseded` even when an earlier effect applied.
+  A replayed command reports `original_status`, preserving whether it
+  originally applied, was rejected, or was superseded. Commands that
+  omit `subject_revision` are applied unfenced exactly as before and keep their
+  pre-existing durable command identity, so upgrading cannot turn a previously
+  completed command into a content conflict.
+
 ### Fixed
 
 - Live workflow smoke checks now read canonical AG2 run events and wait for
