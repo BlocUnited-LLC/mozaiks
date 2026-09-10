@@ -89,11 +89,13 @@ class TestScanSecuritySecretContract:
     def test_no_secrets_file_returns_empty(self):
         assert _scan_security_secret_contract({"modules/orders/module.yaml": "id: orders"}) == []
 
-    def test_empty_secrets_file_returns_empty(self):
-        assert _scan_security_secret_contract({"security/secrets.yaml": ""}) == []
+    def test_empty_secrets_file_requires_a_contract(self):
+        errors = _scan_security_secret_contract({"security/secrets.yaml": ""})
+        assert len(errors) == 1
+        assert "Invalid names-only secret contract" in errors[0]
 
     def test_valid_names_only_returns_empty(self):
-        content = "secrets:\n  - name: PAYMENT_PROVIDER_KEY\n    backend: env\n"
+        content = "version: 1\nprovider:\n  type: env\nsecrets:\n  - env: PAYMENT_PROVIDER_KEY\n"
         assert _scan_security_secret_contract({"security/secrets.yaml": content}) == []
 
     def test_invalid_yaml_returns_error(self):
@@ -108,25 +110,27 @@ class TestScanSecuritySecretContract:
         assert len(errors) == 1
         assert "raw credential" in errors[0] or "names-only" in errors[0]
 
-    def test_raw_field_with_empty_value_not_flagged(self):
+    def test_raw_field_is_forbidden_even_when_empty(self):
         content = "api_key: \"\"\n"
         errors = _scan_security_secret_contract({"security/secrets.yaml": content})
-        assert errors == []
+        assert len(errors) == 1
+        assert "extra_forbidden" in errors[0]
 
     def test_nested_raw_secret_field_returns_error(self):
         content = "config:\n  password: supersecret\n"
         errors = _scan_security_secret_contract({"security/secrets.yaml": content})
         assert len(errors) == 1
-        assert "config.password" in errors[0]
+        assert "extra_forbidden" in errors[0]
+        assert "supersecret" not in errors[0]
 
     def test_raw_password_with_value_flagged(self):
         content = "secrets:\n  - name: db\n    password: hunter2\n"
         errors = _scan_security_secret_contract({"security/secrets.yaml": content})
         assert len(errors) == 1
 
-    def test_secrets_yaml_path_case_insensitive(self):
+    def test_canonical_secrets_yaml_path_is_validated(self):
         # Files map uses normalized paths; security/secrets.yaml is canonical
-        content = "name: PAYMENT_PROVIDER_KEY\n"
+        content = "version: 1\nsecrets:\n  - env: PAYMENT_PROVIDER_KEY\n"
         result = _scan_security_secret_contract({"security/secrets.yaml": content})
         assert result == []
 

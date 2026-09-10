@@ -143,6 +143,37 @@ class TestProhibitedPaths:
         assert not path_errors
 
 
+class TestPublicReferenceEvaluation:
+    def test_reference_source_files_pass_all_package_checks(self) -> None:
+        members = _minimal_required_members()
+        root = _GUARD_PATH.parents[1]
+        for name in ("__init__.py", "bundle_eval.py", "bundle_scorers.py", "evidence.py"):
+            path = f"factory_app/eval/{name}"
+            members[path] = (root / path).read_bytes()
+        errors, _ = inspect_archive(_make_wheel(members))
+        assert not errors
+
+    @pytest.mark.parametrize("path", [
+        "factory_app/eval/customer_results.json",
+        "factory_app/eval/corpus.jsonl",
+        "factory_app/eval/learned_scorers.py",
+        "factory_app/eval/private/__init__.py",
+        "factory_app/eval/evidence.py/results.json",
+    ])
+    def test_reference_source_approval_does_not_allow_other_eval_content(self, path: str) -> None:
+        members = _minimal_required_members()
+        members[path] = "private data"
+        errors, _ = inspect_archive(_make_wheel(members))
+        assert any(error.code == "prohibited_path" and error.member == path for error in errors)
+
+    def test_approved_reference_source_still_checks_for_secrets(self) -> None:
+        members = _minimal_required_members()
+        live_key = bytes([115, 107, 95, 108, 105, 118, 101, 95]).decode("ascii") + "ABCDEFGHIJ1234567890"
+        members["factory_app/eval/evidence.py"] = f"SECRET = '{live_key}'\n"
+        errors, _ = inspect_archive(_make_wheel(members))
+        assert any(error.code == "prohibited_content:raw_provider_secret" for error in errors)
+
+
 # ---------------------------------------------------------------------------
 # Prohibited content patterns
 # ---------------------------------------------------------------------------

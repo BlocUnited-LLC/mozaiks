@@ -53,6 +53,7 @@ from mozaiksai.core.runtime.app.paths import (
     APP_DATA_CONTRACT_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
+    is_sensitive_app_config_path,
     noncanonical_app_config_paths,
     noncanonical_app_root_paths,
     unsafe_app_paths,
@@ -127,20 +128,7 @@ _SCANNABLE_SUFFIXES = (
     ".ps1", ".sh",
 )
 
-_RAW_SECRET_FIELD_KEYS = frozenset(
-    {
-        "api_key",
-        "client_secret",
-        "connection_string",
-        "password",
-        "private_key",
-        "raw_value",
-        "secret_value",
-        "token",
-        "value",
-        "webhook_secret",
-    }
-)
+
 
 _AUTH_MODES = frozenset(
     {
@@ -340,30 +328,51 @@ def _scan_data_contract_module_alignment(files_map: dict[str, str]) -> list[str]
     return errors
 
 
+def _scan_reserved_app_paths(files_map: dict[str, str]) -> list[str]:
+    """Enforce path boundaries shared by generated and authored apps."""
+    errors: list[str] = []
+    unsafe_paths = unsafe_app_paths(files_map)
+    if unsafe_paths:
+        errors.append(
+            "App bundle contains absolute or traversal paths outside the app root: "
+            f"{unsafe_paths}. Every app path must be app-root-relative."
+        )
+    normalized_paths = sorted(_normalized_files_map(files_map))
+    legacy_paths = disallowed_legacy_app_paths(normalized_paths)
+    if legacy_paths:
+        errors.append(
+            "App bundle contains removed app paths that are no longer canonical: "
+            f"{legacy_paths}. Use {APP_DATA_CONTRACT_PATH}, data/migrations/*.json, "
+            f"and {APP_SECURITY_SECRETS_PATH}."
+        )
+    # Authored hosts may own additional typed declarative policies. Imperative
+    # code in these planes is prohibited for every app, independent of the
+    # generated-output file allowlist applied by the layout validator.
+    code_suffixes = {".py", ".js", ".jsx", ".ts", ".tsx"}
+    misplaced = [path for path in normalized_paths if (
+        (path.startswith(("security/", "data/")) and PurePosixPath(path).suffix in code_suffixes)
+        or is_sensitive_app_config_path(path)
+    ) and path not in legacy_paths]
+    if misplaced:
+        errors.append(
+            "App bundle contains imperative helpers in declarative data/security planes or misplaced secret config: "
+            f"{misplaced}. Keep backend code in modules/services and secret references in "
+            f"{APP_SECURITY_SECRETS_PATH}."
+        )
+    return errors
+
+
 def _scan_canonical_app_paths(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    errors: list[str] = []
-    unsafe_paths = unsafe_app_paths(files_map)
-    if unsafe_paths:
-        errors.append(
-            "Generated app bundle contains absolute or traversal paths outside the app root: "
-            f"{unsafe_paths}. Every generated path must be app-root-relative."
-        )
+    errors = _scan_reserved_app_paths(files_map)
     normalized_paths = sorted(_normalized_files_map(files_map))
     try:
         declared_pack_paths = resolve_declared_pack_output_paths(capability_packs)
     except ManagedCapabilityTemplateError as exc:
-        return [f"Selected CapabilityPack output contract is invalid: {exc}"]
-    legacy_paths = disallowed_legacy_app_paths(normalized_paths)
-    if legacy_paths:
-        errors.append(
-            "Generated app bundle contains removed app paths that are no longer canonical: "
-            f"{legacy_paths}. Use {APP_DATA_CONTRACT_PATH}, data/migrations/*.json, "
-            f"and {APP_SECURITY_SECRETS_PATH}."
-        )
+        return [*errors, f"Selected CapabilityPack output contract is invalid: {exc}"]
 
     invalid_config_paths = sorted(
         set(noncanonical_app_config_paths(normalized_paths)) - declared_pack_paths
@@ -391,38 +400,21 @@ def _scan_canonical_app_paths(
     return errors
 
 
-def _find_raw_secret_fields(value: Any, path: tuple[str, ...] = ()) -> list[str]:
-    findings: list[str] = []
-    if isinstance(value, dict):
-        for raw_key, child in value.items():
-            key = str(raw_key or "").strip()
-            normalized_key = key.lower().replace("-", "_")
-            child_path = (*path, key or "<empty>")
-            if normalized_key in _RAW_SECRET_FIELD_KEYS and str(child or "").strip():
-                findings.append(".".join(child_path))
-            findings.extend(_find_raw_secret_fields(child, child_path))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            findings.extend(_find_raw_secret_fields(child, (*path, str(index))))
-    return findings
-
-
 def _scan_security_secret_contract(files_map: dict[str, str]) -> list[str]:
     raw = _normalized_files_map(files_map).get(APP_SECURITY_SECRETS_PATH)
     if raw is None:
         return []
+    from mozaiksai.core.secrets import SecretContractError, validate_secret_contract
+
     try:
-        parsed = yaml.safe_load(raw) or {}
-    except Exception as exc:
-        return [f"{APP_SECURITY_SECRETS_PATH}: secrets contract must be valid YAML: {exc}"]
-    findings = _find_raw_secret_fields(parsed)
-    if not findings:
-        return []
-    return [
-        f"{APP_SECURITY_SECRETS_PATH}: generated secret contracts are names-only and "
-        f"must not contain raw credential fields: {findings}. Store raw values only "
-        "through the configured secret backend."
-    ]
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        return [f"{APP_SECURITY_SECRETS_PATH}: secrets contract must be valid YAML"]
+    try:
+        validate_secret_contract(parsed)
+    except SecretContractError as exc:
+        return [f"{APP_SECURITY_SECRETS_PATH}: {exc}; raw credential fields are forbidden"]
+    return []
 
 
 def _pack_id_from_descriptor(pack: Any) -> str:
@@ -1414,7 +1406,9 @@ def _is_local_route(value: Any) -> bool:
     return bool(route) and route.startswith("/") and not route.startswith("//")
 
 
-def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
+def _scan_auth_app_contract(
+    files_map: dict[str, str], *, require_generated_adapter: bool = True,
+) -> list[str]:
     """Validate the provider-neutral generated app auth contract."""
     if not _app_manifest_auth_required(files_map):
         return []
@@ -1574,6 +1568,9 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
             f"{APP_AUTH_CONFIG_PATH}: provider URLs must be supplied by env handles, "
             "not committed as literal URLs."
         )
+
+    if not require_generated_adapter:
+        return errors
 
     adapter = normalized_files.get("ui/auth/authAdapter.js", "")
     if not adapter:
@@ -2143,6 +2140,25 @@ def _scan_declared_pack_repo_support_outputs(
     ]
 
 
+def scan_app_contracts(files_map: dict[str, str]) -> list[str]:
+    """Validate shared app declarations, independent of generation output policy."""
+    errors: list[str] = []
+    for scan in (
+        _scan_reserved_app_paths,
+        _scan_security_secret_contract,
+        _scan_route_manifest_consistency,
+        _scan_page_schema_structure,
+        _scan_page_api_endpoint_alignment,
+        _scan_action_api_surface,
+        _scan_event_reaction_closure,
+        _scan_data_contract_module_alignment,
+        _scan_entitlement_gate_capability_alignment,
+    ):
+        errors.extend(scan(files_map))
+    errors.extend(_scan_auth_app_contract(files_map, require_generated_adapter=False))
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -2186,15 +2202,12 @@ def scan_generated_bundle(
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_security_secret_contract(scannable_files_map))
+    errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
+    # Generation also requires the canonical frontend adapter artifact.
+    auth_errors = _scan_auth_app_contract(scannable_files_map)
+    errors.extend(error for error in auth_errors if error not in errors)
     errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
-    errors.extend(_scan_route_manifest_consistency(scannable_files_map))
     errors.extend(_scan_route_manifest_component_files(scannable_files_map))
-    errors.extend(_scan_page_schema_structure(scannable_files_map))
-    errors.extend(_scan_page_api_endpoint_alignment(scannable_files_map))
-    errors.extend(_scan_action_api_surface(scannable_files_map))
-    errors.extend(_scan_event_reaction_closure(scannable_files_map))
-    errors.extend(_scan_data_contract_module_alignment(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
             scannable_files_map,
@@ -2231,8 +2244,6 @@ def scan_generated_bundle(
             capability_packs=capability_packs,
         )
     )
-    errors.extend(_scan_entitlement_gate_capability_alignment(scannable_files_map))
-    errors.extend(_scan_auth_app_contract(scannable_files_map))
     if require_deployment_artifacts:
         errors.extend(_scan_deployment_artifacts_contract(scannable_files_map))
         errors.extend(_scan_auth_deployment_contract(scannable_files_map))

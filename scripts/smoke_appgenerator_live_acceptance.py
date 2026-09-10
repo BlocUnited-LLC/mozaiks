@@ -281,8 +281,7 @@ sections:
         "security/secrets.yaml": """
 version: 1
 secrets:
-  - name: SUPPORT_WEBHOOK_SECRET
-    env: SUPPORT_WEBHOOK_SECRET
+  - env: SUPPORT_WEBHOOK_SECRET
     required: false
 """,
         "modules/support_tickets/module.yaml": f"""

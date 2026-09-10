@@ -7,8 +7,6 @@ render declared catalog slices, and inject them into the agent prompt.
 
 from __future__ import annotations
 
-import logging
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -20,10 +18,10 @@ from mozaiksai.core.session.build_context import (
     discover_build_context_files,
     iter_context_assets,
     load_build_context,
+    resolve_build_context_root,
     resolve_context_asset_path,
 )
-
-logger = logging.getLogger(__name__)
+from mozaiksai.resources import resolve_factory_app_root
 
 
 def _compose_prompt_sections(sections: list[dict[str, Any]]) -> str:
@@ -61,21 +59,18 @@ def _context_data(agent: Any) -> dict[str, Any]:
 def _candidate_build_context_roots(agent: Any) -> list[Path]:
     data = _context_data(agent)
     candidates: list[Path] = []
+    factory_root = resolve_factory_app_root()
+    if factory_root is not None:
+        candidates.append(factory_root / "build_context")
     for key in ("build_context_root", "build_context_path"):
         value = data.get(key)
         if value:
-            candidates.append(Path(str(value)).expanduser())
-    env_value = os.getenv("MOZAIKS_BUILD_CONTEXT_PATH")
-    if env_value:
-        candidates.append(Path(env_value).expanduser())
-
-    cwd = Path.cwd()
-    candidates.extend(
-        [
-            cwd / "build_context",
-            cwd / "factory_app" / "build_context",
-        ]
-    )
+            root = resolve_build_context_root(build_context_root=str(value))
+            if root is not None:
+                candidates.append(root)
+    workspace_root = resolve_build_context_root() or resolve_build_context_root(workspace_path=Path.cwd())
+    if workspace_root is not None:
+        candidates.append(workspace_root)
 
     seen: set[str] = set()
     roots: list[Path] = []
@@ -304,19 +299,16 @@ def _apply_text(agent: Any, marker: str, text: str) -> bool:
 def inject_build_context_projections(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Inject context-declared build-context projections for the current agent."""
 
-    try:
-        rendered: dict[str, list[str]] = {}
-        for catalog_path, projection in _matching_projections(agent):
-            marker = str(projection.get("marker") or "").strip()
-            if not marker:
-                continue
-            catalog = _read_yaml_mapping(catalog_path)
-            rendered.setdefault(marker, []).append(_render_projection(catalog, projection, agent))
+    rendered: dict[str, list[str]] = {}
+    for catalog_path, projection in _matching_projections(agent):
+        marker = str(projection.get("marker") or "").strip()
+        if not marker:
+            continue
+        catalog = _read_yaml_mapping(catalog_path)
+        rendered.setdefault(marker, []).append(_render_projection(catalog, projection, agent))
 
-        for marker, blocks in rendered.items():
-            _apply_text(agent, marker, "\n\n".join(blocks))
-    except Exception as exc:
-        logger.debug("Build-context projection failed for %s: %s", getattr(agent, "name", "unknown"), exc)
+    for marker, blocks in rendered.items():
+        _apply_text(agent, marker, "\n\n".join(blocks))
 
 
 __all__ = ["inject_build_context_projections"]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -122,13 +124,31 @@ def test_existing_context_variables_take_precedence_over_build_context(tmp_path:
     assert context["operator_capabilities"] == ["already_set"]
 
 
-def test_merge_build_context_noop_when_no_build_context_file(tmp_path: Path) -> None:
+def test_merge_build_context_rejects_missing_explicit_root(tmp_path: Path) -> None:
+    with pytest.raises(BuildContextError, match="existing directory"):
+        merge_build_context(
+            build_context_root=tmp_path / "missing_build_context", workflow_id="AppGenerator",
+        )
+
+
+def test_merge_build_context_noop_when_workspace_has_no_build_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
     context = merge_build_context(
-        build_context_root=tmp_path / "missing_build_context",
+        workspace_path=tmp_path,
         workflow_id="AppGenerator",
         context_variables={"screen": "studio-create"},
     )
     assert context == {"screen": "studio-create"}
+
+
+@pytest.mark.asyncio
+async def test_launch_context_provider_must_return_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "invalid_launch_provider", SimpleNamespace(provide=lambda **kwargs: []))
+    monkeypatch.setenv("MOZAIKS_LAUNCH_CONTEXT_PROVIDER", "invalid_launch_provider:provide")
+    with pytest.raises(TypeError, match="must return a mapping"):
+        await apply_launch_context_provider(
+            workflow_id="AppGenerator", context_variables={}, app_id="app", user_id="user", trigger_source="chat",
+        )
 
 
 def test_merge_build_context_noop_when_no_context_path_provided(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,7 +247,8 @@ def test_malformed_assets_do_not_reach_agent_projection(tmp_path: Path) -> None:
         context_variables = {"build_context_root": str(root)}
 
     agent = _Agent()
-    inject_build_context_projections(agent, [])
+    with pytest.raises(BuildContextError, match="unexpected"):
+        inject_build_context_projections(agent, [])
 
     assert agent._system_message == "base prompt"
 
@@ -280,6 +301,58 @@ async def test_launch_context_provider_reads_build_context_via_env(
 
     assert context["screen"] == "studio-create"
     assert context["operator_capabilities"] == ["enterprise_sso", "audit_export"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_launch_context_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root = _build_context_root(tmp_path)
+    _write_yaml(root / "AcmeEnterprise" / "context.yaml", {"context_id": "invalid", "unexpected": True})
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
+    monkeypatch.setenv("MOZAIKS_LAUNCH_CONTEXT_PROVIDER", "mozaiksai.core.session.build_context:merge_build_context")
+
+    with pytest.raises(BuildContextError, match="unexpected"):
+        await apply_launch_context_provider(
+            workflow_id="AppGenerator", context_variables={}, app_id="app", user_id="user", trigger_source="chat",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["missing_separator", ":function", "module:"])
+async def test_invalid_launch_context_provider_spec_is_rejected(monkeypatch: pytest.MonkeyPatch, provider: str) -> None:
+    monkeypatch.setenv("MOZAIKS_LAUNCH_CONTEXT_PROVIDER", provider)
+    with pytest.raises(ValueError, match="module:function"):
+        await apply_launch_context_provider(
+            workflow_id="AppGenerator", context_variables={}, app_id="app", user_id="user", trigger_source="chat",
+        )
+
+
+def test_packaged_catalog_and_workspace_catalog_compose_outside_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    context_root = workspace / "build_context" / "AppGenerator"
+    _write_yaml(context_root / "context.yaml", {
+        "context_id": "operator_catalog", "applies_to_workflows": ["AppGenerator"],
+        "assets": [{"path": "catalog.yaml", "kind": "catalog", "projections": [{
+            "id": "operator_catalog", "records": "capabilities", "recipients": ["AppPlanAgent"],
+            "render": "summary", "marker": "CAPABILITY_DIRECTORY_CONTEXT", "heading": "Operator Catalog",
+        }]}],
+    })
+    _write_yaml(context_root / "catalog.yaml", {"capabilities": [{"id": "operator_example", "label": "Operator Example"}]})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace))
+
+    class Agent:
+        name = "AppPlanAgent"
+        _system_message = "Choose capabilities: {{CAPABILITY_DIRECTORY_CONTEXT}}"
+
+    agent = Agent()
+    inject_build_context_projections(agent, [])
+    assert "CAPABILITY DIRECTORY" in agent._system_message
+    assert "mozaikspay" in agent._system_message
+    assert "Operator Example" in agent._system_message
+    assert "{{CAPABILITY_DIRECTORY_CONTEXT}}" not in agent._system_message
 
 
 def test_factory_workflow_catalog_yamls_exist() -> None:

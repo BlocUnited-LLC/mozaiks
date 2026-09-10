@@ -123,4 +123,10 @@ def test_assignment_and_artifact_migration_preserves_all_non_identity_content():
     result["plan_unit_ref"] = _restore_unit_locator(result["plan_unit_ref"], original_result["plan_unit_ref"])
     result["result_digest"] = stable_digest({key: value for key, value in result.items() if key != "result_digest"})
     assert result == original_result
-    assert [{"path": path, "content_hex": content.hex()} for path, content in sorted(current["materialized"].files().items())] == baseline["materialized_files"]
+    # Keep the exact historical capture intact. The only later output-contract
+    # change is the names-only secret manifest's string-to-env-reference migration.
+    expected_files = copy.deepcopy(baseline["materialized_files"])
+    secret_file = next(entry for entry in expected_files if entry["path"] == "security/secrets.yaml")
+    assert bytes.fromhex(secret_file["content_hex"]) == b"version: 1\nsecrets:\n- EMAIL_API_KEY\n"
+    secret_file["content_hex"] = b"version: 1\nsecrets:\n- env: EMAIL_API_KEY\n".hex()
+    assert [{"path": path, "content_hex": content.hex()} for path, content in sorted(current["materialized"].files().items())] == expected_files

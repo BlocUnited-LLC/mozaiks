@@ -15,7 +15,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url)),
+      'virtual:mozaiks-workflow-ui': fileURLToPath(new URL('./src/embed/workflowUiModulesStub.js', import.meta.url)),
       // Vite 8 stubs optional peer deps; resolve to local devDep copies so they
       // are bundled into the self-contained embed output (host does not need React).
       'react': fileURLToPath(new URL('./node_modules/react', import.meta.url)),

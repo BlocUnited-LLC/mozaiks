@@ -235,6 +235,16 @@ App business data database names are resolved from an injected adapter value,
 then `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then
 `mozaiks_apps`.
 
+Account export and deletion dispatch registered module `AccountDataHandler`
+implementations through the platform's `/api/account/export` and `/api/account`
+routes. The routes use the authenticated principal's app and user identity and
+the existing app-data database accessor; they do not read the workflow runtime's
+persistence manager. App-data alias consumers additionally honor
+`MOZAIKS_APP_DATA_DATABASE_NAME` before the app database settings above. Handlers
+resolve their own collection contracts and enforce app/user ownership. Factory's
+onboarding module exercises this path with canonical generated collection names;
+an alias manifest is not required merely to resolve the account database.
+
 Migration history records use `in_progress`, `applied`, and `failed`. The
 `mozaiksai.AppDatabaseMigrations` collection also acts as the migration lock:
 the runtime atomically claims a migration by inserting an `in_progress` record

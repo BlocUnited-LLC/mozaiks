@@ -297,6 +297,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Workflow UI inheritance contract
+        run: npm run test:workflow-ui
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
         env:
@@ -394,6 +397,9 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel
 
+      - name: Check wheel publication boundaries
+        run: python scripts/package_content_guard.py dist/*.whl
+
       - name: Install wheel in clean venv
         run: |
           python -m venv .pkg-venv
@@ -439,6 +445,13 @@ jobs:
 
           print("Packaged resources resolved from site-packages")
           PY
+
+      - name: Verify standalone workspace composition
+        run: |
+          . .pkg-venv/bin/activate
+          python scripts/verify_installed_workspace.py \
+            --installed-root "$VIRTUAL_ENV" \
+            --workspace /tmp/mozaiks-workspace-composition
 
       - name: Smoke packaged scaffold init
         run: |

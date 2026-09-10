@@ -34,7 +34,10 @@ def resolve_build_context_root(
 
     raw = build_context_root or os.getenv("MOZAIKS_BUILD_CONTEXT_PATH")
     if raw:
-        return Path(raw).expanduser().resolve()
+        root = Path(raw).expanduser().resolve()
+        if not root.is_dir():
+            raise BuildContextError(f"Configured build context root must be an existing directory: {root}")
+        return root
 
     workspace_raw = workspace_path or os.getenv("MOZAIKS_APP_WORKSPACE_PATH")
     if workspace_raw:

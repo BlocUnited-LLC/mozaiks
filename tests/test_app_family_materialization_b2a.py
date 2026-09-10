@@ -533,7 +533,7 @@ def test_integration_and_secret_bytes() -> None:
         for requirement in entry["required_fields"]
         if requirement["type"] == "secret"
     }
-    assert set(secrets["secrets"]) == secret_names
+    assert {entry["env"] for entry in secrets["secrets"]} == secret_names
     # names only — nothing that looks like a value or token
     blob = files["security/secrets.yaml"].decode("utf-8").lower()
     for forbidden in ("sk_", "token:", "-----begin", "password:"):

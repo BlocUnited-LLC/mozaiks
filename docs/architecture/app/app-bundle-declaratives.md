@@ -25,6 +25,22 @@ admin config, and theme config. When an app needs durable runtime secrets,
 `app/security/secrets.yaml` declares the secret provider/vault policy, env
 handles, and secret names only. It must never contain raw credential values.
 
+Generation, validation, and runtime share `mozaiksai.core.secrets.AppSecretContract`.
+The minimal contract works with environment variables and needs no cloud service:
+
+```yaml
+version: 1
+secrets:
+  - env: EMAIL_API_KEY
+```
+
+Optional `provider.type: azure_key_vault` declares vault policy and each entry's
+`azure_key_vault.secret_name` names a stored secret. Direct environment values
+have precedence. Unknown fields, string entries, duplicate env names, and malformed
+manifests fail validation without echoing submitted values. A selected app never
+inherits another workspace's secret manifest. Omit the file when no app-owned
+policy is needed; a configured file that is missing is an error.
+
 `app/config/integrations.yaml` is the canonical generated-app integration
 requirement contract. AppGenerator materializes it during assembly from
 `AppBuildPlan.external_integrations`, capability-pack `required_integrations`,

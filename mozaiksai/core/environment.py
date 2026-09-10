@@ -33,6 +33,7 @@ comparison.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -115,7 +116,7 @@ class ResolvedEnvironment:
         return self.name or "unset"
 
 
-def resolve_environment() -> ResolvedEnvironment:
+def resolve_environment(*, environ: Mapping[str, str] | None = None) -> ResolvedEnvironment:
     """Resolve ``ENV``/``ENVIRONMENT`` into one canonical environment.
 
     Resolution rules:
@@ -134,8 +135,11 @@ def resolve_environment() -> ResolvedEnvironment:
        are accepted, with ``ENV`` taking precedence for the resolved name.
     6. Completely absent keeps the documented implicit local default.
     """
-    raw_env = os.getenv("ENV") or ""
-    raw_environment = os.getenv("ENVIRONMENT") or ""
+    # Callers evaluating prospective configuration use the same parser without
+    # mutating the process environment. An explicit empty mapping stays empty.
+    settings = os.environ if environ is None else environ
+    raw_env = settings.get("ENV") or ""
+    raw_environment = settings.get("ENVIRONMENT") or ""
     primary = _normalize(raw_env)
     fallback = _normalize(raw_environment)
 

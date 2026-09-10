@@ -12,7 +12,32 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### App workspace alignment
+
+- Expose the existing reference bundle evaluator through `factory_app.eval` so
+  hosted apps can consume it without copying the implementation. Factory build
+  events carry bounded generation evidence through the existing authenticated
+  outbox; removed proprietary Build Intelligence HTTP hooks from OSS workflows.
+- Resolve packaged Factory prompt catalogs outside source checkouts and combine
+  explicitly declared workspace projections. Configured launch-provider failures
+  propagate instead of silently discarding enrichment.
+- Resolve workflow UI using the backend's explicit default-registry inheritance
+  and workspace folder overrides. Added installed-workspace composition proof to
+  wheel CI.
+- Add `validate_app_workspace` for shared declarations and static action/route
+  closure with explicit inherited UI; generated bundles retain stricter output
+  and placeholder checks.
+
 ### Security
+
+- App secret declarations now use one typed names-only contract in generation,
+  validation, and runtime. Invalid or explicitly missing policies fail closed;
+  selecting an app never borrows another workspace's manifest. Environment-only
+  apps need no vault service. Generated secret entries now use the runtime's
+  canonical `env` object shape.
+- Account export and deletion now bind the authenticated principal and the
+  canonical app-data database before invoking module lifecycle handlers.
+  Signed-token Mongo tests cover ownership, app isolation, and repeated deletion.
 
 - **Fail-closed module action dispatch**: `ModuleExecutor` no longer falls
   back from an undeclared action id to a same-named Python handler method.
