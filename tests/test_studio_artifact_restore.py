@@ -148,7 +148,8 @@ class _AppRegistryServiceDouble:
         }
         self.promote_calls: list[dict[str, str | None]] = []
 
-    async def get_app_record(self, *, app_id: str | None = None, build_registry_id: str | None = None):
+    async def get_app_record(self, *, owner_user_id: str, app_id: str | None = None, build_registry_id: str | None = None):
+        assert owner_user_id == "demo-user"
         if build_registry_id == self.app["build_registry_id"] or app_id == self.app["app_id"]:
             return {"app": dict(self.app)}
         return {"app": None}
