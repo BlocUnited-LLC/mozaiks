@@ -271,22 +271,24 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         return GeminiConfig(**kwargs)
     if api_type == "anthropic":
         from ag2.config import AnthropicConfig  # type: ignore[attr-defined]
-        return AnthropicConfig(
-            model=model,
-            api_key=api_key,
-            temperature=temperature,
-            streaming=streaming,
+        kwargs = {
+            "model": model,
+            "api_key": api_key,
+            "temperature": temperature,
+            "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens", "max_retries")),
-        )
+        }
+        return AnthropicConfig(**kwargs)
     if api_type == "ollama":
         from ag2.config import OllamaConfig  # type: ignore[attr-defined]
-        return OllamaConfig(
-            model=model,
-            host=base_url or "http://localhost:11434",
-            temperature=temperature,
-            streaming=streaming,
+        kwargs = {
+            "model": model,
+            "host": base_url or "http://localhost:11434",
+            "temperature": temperature,
+            "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens",)),
-        )
+        }
+        return OllamaConfig(**kwargs)
     # openai / azure / default
     if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
         from ag2.config import OpenAIResponsesConfig
