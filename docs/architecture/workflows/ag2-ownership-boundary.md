@@ -106,6 +106,15 @@ If AG2 does not provide a required capability:
 
 ## Task Decomposition
 
+Workflow operation outcomes remain Mozaiks contracts in `tools.yaml`. Their
+finite return values, context ownership, and per-execution invocation budgets
+are validated before loading. Mozaiks dispatches validated output and auto-tools
+before committing the AG2 packet; AG2 then folds the resulting context and
+executes the declared graph. The tool outcome wrapper performs no scheduling,
+backoff loop, or autonomous repair. This adapter boundary is needed because
+AG2 does not own Mozaiks tool-result schemas or generated artifact acceptance.
+It does not make external side effects atomic with AG2's packet commit.
+
 Mozaiks decomposition should stay contract-first:
 
 ```text

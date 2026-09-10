@@ -251,15 +251,9 @@ async def test_ag2_structured_outputs_emit_runtime_event_and_update_context(
     dispatcher = _StructuredOutputDispatcher()
     context_dict = {"workflow_name": "ValueEngine", "app_id": "app-1", "chat_id": "chat-1"}
     context_bridge = ContextVariablesBridge(dict(context_dict))
-    runner_result = SimpleNamespace(
-        structured_outputs=[
-            {
-                "agent": "GapAnalysisAgent",
-                "model_name": "_ConceptBlueprintLite",
-                "structured_data": {"app_name": "ContractorFlow CRM"},
-            }
-        ],
-    )
+    packet = SimpleNamespace(causation_id="input-4", channel_id="channel-1", event_data={
+        "body": {"app_name": "ContractorFlow CRM"},
+    })
 
     monkeypatch.setattr(
         "mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher",
@@ -271,16 +265,16 @@ async def test_ag2_structured_outputs_emit_runtime_event_and_update_context(
         lambda workflow_name: {"GapAnalysisAgent"},
     )
 
-    await orchestration_patterns_module._emit_validated_structured_outputs_from_runner_result(
-        runner_result=runner_result,
+    await orchestration_patterns_module._dispatch_agent_packet_output(
+        agent_name="GapAnalysisAgent",
+        packet=packet,
         workflow_name="ValueEngine",
         chat_id="chat-1",
         app_id="app-1",
         user_id="user-1",
-        turn_sequence_start=4,
-        context_vars_dict=context_dict,
         context_bridge=context_bridge,
         structured_registry={"GapAnalysisAgent": _ConceptBlueprintLite},
+        auto_tool_agents={"GapAnalysisAgent"},
         wf_logger=SimpleNamespace(debug=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None),
     )
 

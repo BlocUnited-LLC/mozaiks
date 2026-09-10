@@ -720,6 +720,9 @@ models:
     - context_equals
     - context_expression
     - tool_called
+  WorkflowTerminationReason:
+    type: literal
+    values: [workflow_complete, workflow_failed]
   TransitionRule:
     type: model
     fields:
@@ -781,6 +784,10 @@ models:
         - RevertToUserTarget
         - TerminateTarget
         description: Type of transition target
+      termination_reason:
+        type: union
+        variants: [WorkflowTerminationReason, 'null']
+        description: Only for target_agent=terminate. workflow_failed records failure; null defaults to workflow_complete.
   StructuredModelField:
     type: model
     fields:
@@ -2269,6 +2276,53 @@ models:
         type: str
         description: UTF-8 JSX source for the single compiler-owned UI path.
 
+  WorkflowOutcomeRoute:
+    type: model
+    fields:
+      value:
+        type: str
+        description: Exact result string returned by the operation.
+      target_agent:
+        type: str
+        description: Declared next agent, user, or terminate. error_value must route to user or terminate with workflow_failed.
+      termination_reason:
+        type: union
+        variants: [WorkflowTerminationReason, 'null']
+        description: Set workflow_failed for a failed terminal route; null for other destinations.
+
+  WorkflowOutcomePlan:
+    type: model
+    fields:
+      agent:
+        type: str
+        description: Agent with a registered structured output model and one auto-invoked operation.
+      function:
+        type: str
+        description: Exact function in the agent's tools.yaml binding.
+      context_key:
+        type: str
+        description: Operation-specific result state, materialized by the factory.
+      attempts_key:
+        type: str
+        description: Operation-specific invocation counter, materialized by the factory.
+      result_field:
+        type: str
+        description: Top-level field in the tool's returned mapping containing the outcome string.
+      error_value:
+        type: str
+        description: A route value targeting user or failed termination for exceptions, unknown results, and exhausted attempts.
+      max_attempts:
+        type: int
+        description: Total invocations per workflow execution, including the first; 1 to 100.
+      retry_on:
+        type: list
+        items: str
+        description: Known recoverable route values permitting another invocation. Empty with max_attempts=1. Never include error_value.
+      routes:
+        type: list
+        items: WorkflowOutcomeRoute
+        description: Unique exhaustive operation results and their next agents.
+
   WorkflowBundleBuilderOutput:
     type: model
     description: >
@@ -2288,6 +2342,13 @@ models:
       pattern_name:
         type: str
         description: Human-readable patternbook label for this workflow.
+      outcome_plans:
+        type: list
+        items: WorkflowOutcomePlan
+        description: >
+          Typed failure-handling plans for workflow operations. The factory materializes
+          their tool outcome bindings, protected context definitions, and graph routes.
+          Use [] only for workflows with no outcome-dependent operations.
       files:
         type: list
         items: CodeFile

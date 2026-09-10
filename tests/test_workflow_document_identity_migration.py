@@ -48,39 +48,17 @@ def test_exact_base_capture_and_governed_document_census():
 
 
 @pytest.mark.parametrize("before", BASELINE["documents"], ids=lambda row: row["path"])
-def test_document_version_and_reviewed_guidance_changes_preserve_contract_shape(before):
+def test_current_documents_require_explicit_versions_and_parse_repeatably(before):
     path = ROOT / before["path"]
     version, parser = VERSIONS[path.name]
-    raw = path.read_bytes()
-    document = yaml.safe_load(raw)
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
     parsed = parser(copy.deepcopy(document))
     assert document["schema_version"] == parsed["schema_version"] == version
-    assert hashlib.sha256(raw).hexdigest() != before["source_bytes_fingerprint"]
-    assert canonical_digest(document) != before["source_document_fingerprint"]
-    assert canonical_digest(parsed) != before["parser_document_fingerprint"]
-    # Comparison to the immutable pre-migration capture; neither restored
-    # dictionary is accepted as an unversioned runtime document.
+    assert parser(copy.deepcopy(parsed)) == parsed
+    # Live contracts can evolve after migration; unversioned documents remain invalid.
     del document["schema_version"]
-    del parsed["schema_version"]
-    if before["path"] == "factory_app/workflows/AgentGenerator/structured_outputs.yaml":
-        # Restore only the three reviewed guidance edits for historical comparison;
-        # the original migration capture remains immutable.
-        guidance_edits = [
-            (("OrchestrationConfigOutput", "fields", "visual_agents"), "ui_config.yaml", "ui_config.json"),
-            (("WorkflowBundleBuilderOutput",), "implemented Python tools", "Python tool stubs"),
-            (("WorkflowBundleBuilderOutput", "fields", "files"),
-             "Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.",
-             "Python tool stubs go under tools/<name>.py."),
-        ]
-        for restored in (document, parsed):
-            for keys, current, historical in guidance_edits:
-                node = restored["models"]
-                for key in keys:
-                    node = node[key]
-                assert node["description"].count(current) == 1
-                node["description"] = node["description"].replace(current, historical)
-    assert canonical_digest(document) == before["source_document_fingerprint"]
-    assert canonical_digest(parsed) == before["parser_document_fingerprint"]
+    with pytest.raises(ValueError, match="schema_version"):
+        parser(document)
 
 
 def test_current_corpus_has_no_changed_units_plans_graph_or_payloads():

@@ -7,8 +7,8 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      On your first turn, ask exactly one short discovery question about the product or workflow idea.
-      After the user answers, output the single word NEXT on a line by itself and nothing else.
+      Ask exactly one short discovery question about the product or workflow idea.
+      The runtime will wait for the user's answer and then hand off to ReviewAgent.
       Do not use JSON. Do not call tools.
   max_consecutive_auto_reply: 2
   structured_outputs_required: false
@@ -21,16 +21,31 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |
       Read the latest user reply from the composer checkpoint.
-      Call `request_acceptance_approval` exactly once.
-      After that succeeds, call `show_acceptance_diagram` exactly once.
-      Then return valid JSON matching RuntimeUIPrimitiveSmokeResult.
-      Set `composer_reply_seen` to true because this stage only runs after the composer reply arrived.
-      Set `artifact_emitted` from the surface tool result.
-      Keep `agent_message` to one short sentence.
-      Keep `result` to one short sentence summarizing whether all three runtime UI lanes worked.
-      Do not ask the user any additional questions.
+      Return RuntimeSmokeStep with a short agent_message requesting approval.
+      The runtime invokes the approval tool once and routes its actual result.
+      Do not call tools, select a next agent, or claim approval has already happened.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: Respond with ONLY valid JSON and no markdown fences.
-  max_consecutive_auto_reply: 6
+  max_consecutive_auto_reply: 1
+  structured_outputs_required: true
+- name: ArtifactAgent
+  prompt_sections:
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      The approval step succeeded. Return RuntimeSmokeStep with a short agent_message about preparing the diagram.
+      The runtime emits the artifact once and verifies its result. Do not call tools or choose routing.
+  max_consecutive_auto_reply: 1
+  structured_outputs_required: true
+- name: SynthesisAgent
+  prompt_sections:
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      This stage runs only after the composer reply, approved checkpoint, and verified artifact emission.
+      Return RuntimeUIPrimitiveSmokeResult with composer_reply_seen, approved, and artifact_emitted set to true.
+      Set approval_action to approve and surface_component to DiagramViewer.
+      Keep agent_message and result to one short sentence each. Do not call tools or ask questions.
+  max_consecutive_auto_reply: 1
   structured_outputs_required: true

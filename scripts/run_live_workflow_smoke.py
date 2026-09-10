@@ -147,10 +147,8 @@ async def _verify_mongo_available() -> None:
     client = get_mongo_client()
     try:
         await client.admin.command("ping")
-    except Exception as exc:
-        raise RuntimeError(
-            f"MongoDB is configured but unreachable via MONGO_URI={os.getenv('MONGO_URI')!r}: {exc}"
-        ) from exc
+    except Exception:
+        raise RuntimeError("MongoDB is configured but unreachable") from None
 
 
 async def _wait_for_server(server: uvicorn.Server, timeout_seconds: float = 20.0) -> None:
@@ -179,19 +177,14 @@ def _extract_json_object_from_text(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _extract_latest_structured_output(doc: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(doc, dict):
-        return {}
-    messages = doc.get("messages")
-    if not isinstance(messages, list):
-        return {}
-    for message in reversed(messages):
-        if not isinstance(message, dict):
+def _extract_latest_structured_output(run_events: list[Any]) -> dict[str, Any]:
+    from ag2.events import ModelResponse
+
+    # Structured packets are intentionally hidden from UI replay history.
+    for event in reversed(run_events):
+        if not isinstance(event, ModelResponse):
             continue
-        structured = message.get("structured_output")
-        if isinstance(structured, dict) and structured:
-            return structured
-        parsed = _extract_json_object_from_text(message.get("content"))
+        parsed = _extract_json_object_from_text(event.content)
         if parsed:
             return parsed
     return {}
@@ -552,6 +545,7 @@ async def _collect_events(
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     completion_grace_deadline: float | None = None
+    answered_pause = False
 
     while True:
         now = asyncio.get_running_loop().time()
@@ -627,6 +621,8 @@ async def _collect_events(
         if event_type == "chat.tool_call" and isinstance(data, dict):
             tool_call_id = str(data.get("tool_call_id") or "").strip()
             awaiting_response = bool(data.get("awaiting_response"))
+            if not awaiting_response:
+                continue
             response_payload: dict[str, Any] | None = None
             used_queue = False
             if _is_input_request_tool_call(data):
@@ -672,6 +668,7 @@ async def _collect_events(
                 await websocket.send(
                     json.dumps(_build_workflow_user_reply_message(chat_id, reply_text))
                 )
+                answered_pause = True
                 completion_grace_deadline = None
                 continue
 
@@ -681,10 +678,16 @@ async def _collect_events(
             awaiting_user_input = bool(data.get("awaiting_user_input")) if isinstance(data, dict) else False
             is_paused = (
                 awaiting_user_input
-                or str(status_value).strip() == "0"
+                or str(status_value).strip() in {"0", "paused"}
                 or reason_value in {"awaiting_user_input", "paused"}
             )
             if is_paused:
+                # awaiting_reply and run_complete describe the same pause.
+                # A submitted reply starts another live AG2 turn, not a one-second shutdown.
+                if answered_pause:
+                    answered_pause = False
+                    completion_grace_deadline = None
+                    continue
                 reply_text, used_queue = _peek_input_reply(
                     events=events,
                     reply_rules=contextual_reply_rules,
@@ -845,14 +848,15 @@ async def run_live_workflow_smoke(
                 coll = await pm._coll()
                 doc = await coll.find_one(
                     {"_id": chat_id, "app_id": app_id},
-                    {"pending_input_request": 1, "messages": 1},
+                    {"pending_input_request": 1},
                 )
                 pending_input = (doc or {}).get("pending_input_request")
                 if not isinstance(pending_input, dict):
                     return None
 
                 assistant_message = None
-                for message in reversed((doc or {}).get("messages") or []):
+                history = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
+                for message in reversed(history):
                     if not isinstance(message, dict):
                         continue
                     role = str(message.get("role") or "").strip().lower()
@@ -945,7 +949,8 @@ async def run_live_workflow_smoke(
                     app_id=app_id,
                     timeout_seconds=15.0,
                 )
-            structured_output = _extract_latest_structured_output(final_doc)
+            run_events = await pm.load_run_events(chat_id=chat_id, app_id=app_id)
+            structured_output = _extract_latest_structured_output(run_events)
             final_context = _extract_final_context(final_doc)
             try:
                 from mozaiksai.core.data.persistence.connector_store import ConnectorStore

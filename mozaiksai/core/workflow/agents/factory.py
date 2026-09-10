@@ -567,6 +567,13 @@ async def create_agents(
         agent_tool_functions = {}
 
     auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
+    from ..declarative.contracts import ToolOutcomeSpec
+
+    tool_outcomes = {
+        tool["agent"]: ToolOutcomeSpec.model_validate(tool["outcome"])
+        for tool in workflow_config.get("tools", [])
+        if tool.get("outcome") is not None and isinstance(tool.get("agent"), str)
+    }
 
     required_structured_agents = _required_structured_agent_names(
         agent_configs,
@@ -932,6 +939,7 @@ async def create_agents(
         agent._mozaiks_ag2_token_watchdog_enabled = bool(observers)
         agent._mozaiks_agent_kind = "local"
         agent._mozaiks_context_bridge = context_bridge
+        agent._mozaiks_tool_outcome = tool_outcomes.get(agent_name)
 
         if structured_model_cls is not None:
             model_name = getattr(structured_model_cls, "__name__", None)

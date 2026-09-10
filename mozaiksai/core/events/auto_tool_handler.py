@@ -11,7 +11,8 @@ import asyncio
 import hashlib
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -686,10 +687,22 @@ class AutoToolEventHandler:
     async def _invoke_tool(
         self, binding: AutoToolBinding, kwargs: dict[str, Any]
     ) -> tuple[Any, str]:
+        from mozaiksai.core.workflow.agents.factory import (
+            ContextVariablesBridge,
+            _workflow_tool_invocation,
+        )
+
+        context = kwargs.get("context_variables")
+        base = context._base if isinstance(context, StructuredOutputOverlay) else context
+        scope = _workflow_tool_invocation(base) if isinstance(base, ContextVariablesBridge) else nullcontext()
         try:
-            result = binding.function(**kwargs)
-            if inspect.isawaitable(result):
-                result = await result  # type: ignore[assignment]
+            with scope:
+                result = binding.function(**kwargs)
+                if inspect.isawaitable(result):
+                    result = await result  # type: ignore[assignment]
+            outcome = getattr(binding.function, "_mozaiks_tool_outcome", None)
+            if outcome is not None and isinstance(result, Mapping) and result.get(outcome.result_field) == outcome.error_value:
+                return result, "error"
             return result, "ok"
         except Exception:
             logger.exception(

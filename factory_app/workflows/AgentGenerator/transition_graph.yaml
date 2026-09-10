@@ -68,7 +68,28 @@ transition_rules:
   target_agent: PackBuildCoordinator
   transition_type: condition
   condition_type: context_equals
-  condition_key: workflow_bundle_repair_status
+  condition_key: workflow_bundle_export_outcome
   condition_value: needs_revision
   transition_target: AgentTarget
+
+- source_agent: DownloadAgent
+  target_agent: user
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_export_outcome
+  condition_value: ready
+
+- source_agent: DownloadAgent
+  target_agent: user
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_export_outcome
+  condition_value: cancelled
+
+- source_agent: DownloadAgent
+  target_agent: user
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_export_outcome
+  condition_value: blocked
 

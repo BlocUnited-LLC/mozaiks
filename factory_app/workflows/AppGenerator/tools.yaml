@@ -189,6 +189,14 @@ tools:
   tool_type: UI_Tool
   auto_tool_call: true
   bind_to_agent: false
+  outcome:
+    context_key: app_bundle_export_outcome
+    attempts_key: app_bundle_export_attempts
+    result_field: outcome
+    values: [ready, repair_schema, repair_integration, repair_service, repair_frontend, cancelled, blocked]
+    error_value: blocked
+    max_attempts: 3
+    retry_on: [repair_schema, repair_integration, repair_service, repair_frontend]
   ui:
     component: AppWorkbench
     mode: artifact

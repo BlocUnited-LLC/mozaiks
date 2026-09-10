@@ -1,4 +1,20 @@
 definitions:
+  app_bundle_export_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: blocked
+  app_bundle_export_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: 0
   build_timestamp:
     type: string
     description: >

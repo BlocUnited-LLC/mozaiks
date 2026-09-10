@@ -459,6 +459,7 @@ async def generate_and_download(
         )
         return {
             "status": "blocked",
+            "outcome": "needs_revision" if repair_result.get("status") == "needs_revision" else "blocked",
             "message": (
                 "Workflow bundle quality gate failed; repair has been scheduled."
                 if repair_result.get("status") == "needs_revision"
@@ -468,6 +469,15 @@ async def generate_and_download(
             "workflow_bundle_repair": repair_result,
             "validation_errors": quality_gate.get("errors") or [],
         }
+    from .outcome_materialization import materialize_workflow_outcomes
+
+    bundle_entries = [materialize_workflow_outcomes(entry) for entry in bundle_entries]
+    if context_variables is not None and hasattr(context_variables, "set"):
+        by_name = {entry["workflow_name"]: entry for entry in bundle_entries}
+        context_variables.set("workflow_bundle_results", {
+            key: by_name.get(value.get("workflow_name"), value) if isinstance(value, dict) else value
+            for key, value in workflow_bundle_results.items()
+        })
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("workflow_bundle_repair_status", "passed")
@@ -597,6 +607,7 @@ async def generate_and_download(
         wf_logger.info("❌ User declined download")
         return {
             "status": "cancelled",
+            "outcome": "cancelled",
             "ui_response": response,
             "agent_message_id": agent_message_id,
             "ui_files": [],
@@ -709,9 +720,14 @@ async def generate_and_download(
                         pass
     except Exception as deploy_err:
         wf_logger.warning("⚠️ GitHub export flow failed: %s", deploy_err)
+        deployment_result = {"success": False, "error": "GitHub export failed; inspect export status before retrying."}
 
+    export_failed = action == "export_to_github" and (
+        not isinstance(deployment_result, dict) or deployment_result.get("success") is not True
+    )
     return {
-        "status": "success",
+        "status": "error" if export_failed else "success",
+        "outcome": "blocked" if export_failed else "ready",
         "ui_response": response,
         "agent_message_id": agent_message_id,
         "ui_files": ui_files,

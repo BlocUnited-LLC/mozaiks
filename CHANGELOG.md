@@ -95,10 +95,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Live workflow smoke checks now read canonical AG2 run events and wait for
+  resumed user turns. Reconnect replay emits versioned event envelopes, and
+  runtime-seeded chat/user identity remains available to usage accounting even
+  when workflows declare no application context variables.
+- Workflow composer continuations no longer block the WebSocket receiver while
+  awaiting UI tool responses. Task-batch continuations receive current declared
+  worker results; the UI smoke dogfoods single-attempt approval and artifact
+  outcomes instead of model-controlled tool repetition.
 - Generated workflow exports now validate all runtime YAML contracts and tool
   implementations before packaging or repair. Capability-pack templates reject
   missing inputs and invalid rendered YAML/JSON; readiness configuration preserves
   string values containing YAML punctuation.
+- Workflow operations can declare validated outcomes and enforced attempt budgets.
+  AgentGenerator materializes their context and transition rules from typed plans;
+  factory export failures now route to bounded repair or user attention instead of
+  completing as successful downloads.
 
 - **Exact structured-output auto-tool contracts**: declared workflow
   structured outputs are now exact at runtime — an agent output carrying an

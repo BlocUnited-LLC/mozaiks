@@ -2631,6 +2631,9 @@ agents:
 
       **Runtime**:
       - Your structured output will auto-invoke the generate_and_download UI tool.
+      - The final tool result controls routing: ready completes, declared repair
+        outcomes return to the owning generator, and blocked/cancelled return to
+        the user. Never announce successful export before the tool confirms it.
       - Deployment artifacts are optional scaffold outputs for preview/export flows.
       - Deployment scaffold outputs are pre-deploy validation/preview only.
       - When enabled, includeDockerfiles/includeWorkflow/includeCompose produce deterministic provider-neutral outputs from the deployment contract.
@@ -2697,6 +2700,11 @@ agents:
       - Reference model details directly from the Code Context.
       - Use `backend/repo.py` and the runtime `ctx.persistence` adapter for all generated module persistence operations.
       - Keep generated module runtime logic production-honest: no fake/sample/demo records, no hardcoded live metrics, and no placeholder percentage changes.
+      - For actions consumed by workflows, implement the declared result schema
+        and explicit business failure outcomes. Workflow tools translate those
+        results into their outcome_plans contracts; module code must not write
+        workflow context or choose AG2 agents. Preserve idempotency for actions
+        that may be repeated and reconcile uncertain external results before retry.
   - id: context
     heading: '[CONTEXT]'
     content: |-

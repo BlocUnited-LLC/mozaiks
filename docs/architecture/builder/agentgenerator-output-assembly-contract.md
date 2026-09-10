@@ -85,6 +85,7 @@ The worker emits a single `WorkflowBundleBuilderOutput` structured output:
 
 ```yaml
 workflow_name: str
+outcome_plans: []
 files:
   - filename: orchestrator.yaml
     content: "..."
@@ -125,6 +126,22 @@ must implement the tool behavior; there is no later tool-implementation stage.
 These static checks do not prove arbitrary business logic or external integrations
 work. Functional execution tests remain necessary for those behaviors.
 
+`outcome_plans` is a typed list of operation plans. Each plan names `agent`,
+`function`, `context_key`, `attempts_key`, `result_field`, `error_value`,
+`max_attempts`, `retry_on`, and `routes: [{value, target_agent}]`. Use an empty
+list only when no operation needs outcome-dependent routing. Business-specific
+outcomes are allowed; every outcome must have one known destination.
+
+`outcome_materialization.py` deterministically generates the matching tool
+outcome binding, protected context definitions, and ordinary graph transitions.
+Workers omit these owned context definitions and source-agent transitions from
+their raw files. They still generate the operation's implementation, tool binding,
+agent definition, and structured input model. Quality gates validate the
+materialized files; downloads contain those files, not a runtime dependency on
+Factory or its build-time plans. Hand-authored workflows use the same runtime
+`tools[].outcome` contract documented in
+[Workflow Authoring Contracts](../workflows/workflow-authoring-contracts.md#operation-outcomes).
+
 ---
 
 ## workflow_bundle_results Structure
@@ -156,9 +173,11 @@ Keys starting with `_` are internal meta entries and are skipped during assembly
 
 Reads `workflow_bundle_results` directly from context. For each bundle entry:
 
-1. `_write_bundle_to_disk(wf_name, files, base_dir)` — writes all `CodeFile` entries under `base_dir/{wf_name}/`
-2. `_build_pack_zip(bundle_dirs, output_path)` — zips all workflow directories into a single archive
-3. `use_ui_tool("DownloadCenter", ...)` — presents the download UI to the user
+1. Materialize operation plans and validate the resulting workflow contracts.
+2. On failure, schedule bounded workflow repair or return to user attention.
+3. `_write_bundle_to_disk(wf_name, files, base_dir)` writes accepted files under `base_dir/{wf_name}/`.
+4. `_build_pack_zip(bundle_dirs, output_path)` zips the workflow directories.
+5. `use_ui_tool("DownloadCenter", ...)` presents the download UI.
 
 Assembly reads task-batch structured outputs directly from runtime context.
 

@@ -486,6 +486,11 @@ def load_agent_tool_functions(
                 func=func,
                 enforce_schema=enforce_schema,
             )
+            if tool.get("outcome") is not None:
+                from ..declarative.contracts import ToolOutcomeSpec
+                from ..validation.tool_outcomes import wrap_tool_outcome
+
+                wrapped_func = wrap_tool_outcome(wrapped_func, ToolOutcomeSpec.model_validate(tool["outcome"]))
             mapping.setdefault(ag, []).append(wrapped_func)
             logger.debug(
                 "[TOOLS][TRACE] Bound function to agent -> workflow=%s agent=%s func=%s id=%s enforced=%s",

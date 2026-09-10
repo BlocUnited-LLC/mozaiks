@@ -62,23 +62,22 @@ def test_resolve_assistant_message_falls_back_to_structured_output() -> None:
     assert message == "The runtime smoke path was successfully summarized."
 
 
-def test_extract_latest_structured_output_falls_back_to_json_content() -> None:
-    doc = {
-        "messages": [
-            {
-                "role": "assistant",
-                "content": json.dumps(
-                    {
-                        "agent_message": "Parallel execution completed.",
-                        "parallel_execution_used": True,
-                        "work_unit_count": 4,
-                    }
-                ),
-            }
-        ]
-    }
+def test_extract_latest_structured_output_reads_hidden_canonical_run_event() -> None:
+    from ag2.events import ModelResponse
+    from ag2.events.input_events import TextInput
+    from ag2.events.types import ModelMessage
 
-    structured_output = _extract_latest_structured_output(doc)
+    output = {
+        "agent_message": "Parallel execution completed.",
+        "parallel_execution_used": True,
+        "work_unit_count": 4,
+    }
+    events = [
+        ModelResponse(ModelMessage(json.dumps(output), metadata={"ui_visibility": "hidden"})),
+        TextInput('{"must_not_read_user_output": true}'),
+        ModelResponse(ModelMessage("Done.")),
+    ]
+    structured_output = _extract_latest_structured_output(events)
 
     assert structured_output == {
         "agent_message": "Parallel execution completed.",
@@ -284,6 +283,46 @@ class _FakeTransport:
     async def submit_tool_call_response(self, request_id: str, response: dict) -> bool:
         self.responses.append((request_id, response))
         return True
+
+
+@pytest.mark.asyncio
+async def test_paired_pause_events_send_one_reply_and_wait_for_next_turn() -> None:
+    class DelayedWebSocket(_FakeWebSocket):
+        async def recv(self):
+            if len(self._events) == 1:
+                await asyncio.sleep(1.2)
+            return await super().recv()
+
+    websocket = DelayedWebSocket([
+        {"type": "chat.awaiting_reply", "data": {}},
+        {"type": "chat.run_complete", "data": {"status": "paused", "awaiting_user_input": True}},
+        {"type": "chat.run_complete", "data": {"status": "completed"}},
+    ])
+    events = await _collect_events(
+        websocket, chat_id="chat-pause", timeout_seconds=3,
+        user_replies=["First reply", "Keep for the next pause"],
+    )
+    assert events[-1]["data"]["status"] == "completed"
+    assert len(websocket.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_announcement_does_not_consume_scripted_ui_response() -> None:
+    websocket = _FakeWebSocket([
+        {"type": "chat.tool_call", "data": {
+            "tool_call_id": "announcement", "component_type": "ApprovalCard", "awaiting_response": False,
+        }},
+        {"type": "chat.tool_call", "data": {
+            "tool_call_id": "approval", "component_type": "ApprovalCard", "awaiting_response": True,
+        }},
+    ])
+    await _collect_events(
+        websocket, chat_id="chat-test", timeout_seconds=0.1,
+        tool_response_payloads={"ApprovalCard": {"action": "approve", "approved": True}},
+    )
+    assert len(websocket.sent) == 1
+    assert websocket.sent[0]["tool_call_id"] == "approval"
+    assert websocket.sent[0]["response"]["approved"] is True
 
 
 @pytest.mark.asyncio

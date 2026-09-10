@@ -413,6 +413,11 @@ def build_context_authority_policy(
         )
         _validate_replay_contract(workflow_name=str(workflow_name or ""), authority=authority)
         variables[key] = authority
+    # Run identity exists even when a workflow declares no application state.
+    for key in ("app_id", "chat_id", "user_id", "workflow_name"):
+        variables.setdefault(key, infer_context_authority(
+            key, definition={"type": "string"}, routing_keys=frozenset(),
+        ))
     return ContextAuthorityPolicy(
         workflow_name=str(workflow_name or ""),
         variables=variables,
