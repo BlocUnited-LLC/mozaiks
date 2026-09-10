@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from time import perf_counter
@@ -696,6 +697,58 @@ async def test_ag2_network_runner_continues_paused_channel_with_user_message() -
     assert EV_TEXT in continued_event_types
     assert EV_CHANNEL_CLOSED in continued_event_types
     assert EV_PACKET not in continued_event_types
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("timeout", [0.0, 0.05])
+async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) -> None:
+    waiting = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class WaitingAgent(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            if self.ask_calls:
+                waiting.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+            return await super().ask(*msg, **kwargs)
+
+    agent = WaitingAgent("Interviewer", "What should I build?")
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="ContinuationTimeout",
+            chat_id="timeout-chat",
+            app_id="timeout-app",
+            agents={"Interviewer": agent},
+            transition_rules=[
+                {"source_agent": "Interviewer", "target_agent": "user", "transition_type": "after_turn"},
+                {"source_agent": "user", "target_agent": "Interviewer", "transition_type": "after_turn"},
+            ],
+            initial_agent_name="Interviewer",
+            initial_message="Begin.",
+            close_timeout_seconds=2.0,
+        )
+    )
+    assert result.status is RunStatus.PAUSED
+    live_run = result.live_run
+    assert live_run is not None
+    live_run._close_timeout_seconds = timeout
+    try:
+        continued = await asyncio.wait_for(live_run.continue_with_user_message("A tracker."), timeout=3.0)
+        assert continued.status is RunStatus.FAILED
+        assert "did not settle" in continued.error
+        assert continued.close_reason != "awaiting_user_input"
+        assert continued.live_run is None
+        assert live_run._closed
+        if timeout:
+            assert waiting.is_set()
+            await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+        rejected = await live_run.continue_with_user_message("Try again.")
+        assert rejected.error == "live_ag2_channel_closed"
+    finally:
+        await live_run.close()
 
 
 @pytest.mark.anyio
