@@ -26,6 +26,7 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
+import { authFetch } from '../adapters/api';
 
 const CHAT_TRIGGER_SOURCE = 'chat';
 
@@ -66,7 +67,7 @@ const resolveWorkflowUserId = (user, overrideUserId) => {
 
 export function useWorkflowStart() {
   const navigate = useNavigate();
-  const { user, config } = useChatUI();
+  const { user, config, auth } = useChatUI();
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -108,11 +109,11 @@ export function useWorkflowStart() {
           ...(trigger_payload && Object.keys(trigger_payload).length > 0 ? { trigger_payload } : {}),
         };
 
-        const res = await fetch('/api/workflows/trigger', {
+        const res = await authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        });
+        }, { auth });
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -133,7 +134,7 @@ export function useWorkflowStart() {
         setStarting(false);
       }
     },
-    [config, navigate, user]
+    [auth, config, navigate, user]
   );
 
   return { startWorkflow, starting, error };

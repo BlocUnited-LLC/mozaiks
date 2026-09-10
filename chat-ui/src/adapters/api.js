@@ -57,7 +57,7 @@ function buildAuthHeaders(contentType = 'application/json', adapterConfig = null
 /**
  * Wrapper for fetch with automatic auth header injection.
  */
-async function authFetch(url, options = {}, adapterConfig = null) {
+export async function authFetch(url, options = {}, adapterConfig = null) {
   const token = getAccessToken(adapterConfig);
   
   const headers = {

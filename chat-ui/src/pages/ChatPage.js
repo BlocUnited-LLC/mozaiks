@@ -16,6 +16,7 @@ import { getWorkflow } from '../@chat-workflows/index.js';
 import resolveWorkflow from '../utils/resolveWorkflow';
 import { dynamicUIHandler } from '../core/dynamicUIHandler';
 import platform from '../platform/index.js';
+import { authFetch } from '../adapters/api';
 import LoadingSpinner from '../utils/AgentChatLoadingSpinner';
 import useTheme from "../styles/useTheme";
 import {
@@ -3531,7 +3532,7 @@ const ChatPage = () => {
         const triggerPayload = {
           refinement_request: refinementRequest,
         };
-        fetch('/api/workflows/trigger', {
+        authFetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3540,7 +3541,7 @@ const ChatPage = () => {
             user_id: resolvedUserId,
             trigger_payload: triggerPayload,
           }),
-        })
+        }, { auth })
           .then(async (res) => {
             if (!res.ok) {
               console.error('❌ [ChatPage] revision trigger failed:', res.status);
@@ -3623,7 +3624,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [activeChatId, activeWorkflowName, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName]);
+  }, [activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -5863,7 +5864,7 @@ const ChatPage = () => {
       const resolvedUserId = user?.id || user?.user_id || user?.email || null;
 
       try {
-        const res = await fetch('/api/transitions/resolve', {
+        const res = await authFetch('/api/transitions/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -5873,7 +5874,7 @@ const ChatPage = () => {
             app_id: resolvedAppId,
             user_id: resolvedUserId,
           }),
-        });
+        }, { auth });
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -5960,6 +5961,7 @@ const ChatPage = () => {
     },
     [
       appId,
+      auth,
       config,
       navigate,
       pendingTransitionContext,
