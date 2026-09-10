@@ -39,6 +39,15 @@ The OSS loader then builds one effective registry:
 Do not copy default factory workflow registry entries into an app repo just to
 make hosted routes work.
 
+## Authenticated Launches
+
+Shell entrypoints, in-chat transitions, and refinement requests use the shared
+API adapter's `authFetch` with the current ChatUI auth adapter. Supplying
+`app_id` and `user_id` in a launch payload does not authenticate the request;
+the runtime validates the bearer token and checks that the requested scope
+matches the authenticated principal. Local no-auth operation remains governed
+by runtime configuration, not by a browser-side bypass.
+
 ## Contract
 
 `extension_registry.json` has three concerns:

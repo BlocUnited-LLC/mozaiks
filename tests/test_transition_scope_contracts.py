@@ -91,7 +91,7 @@ def test_route_renderer_posts_app_and_user_scope_for_transition_resolution() -> 
     assert "option_id" in source
     assert "route_to" not in source
     assert "setAccumulatedContext(data.context_variables ?? mergedContext)" in source
-    assert "const { user, config } = useChatUI();" in source
+    assert "const { user, config, auth } = useChatUI();" in source
 
 
 @pytest.mark.asyncio
@@ -163,7 +163,7 @@ def test_workflow_start_posts_app_and_user_scope_for_triggered_workflows() -> No
 
     assert "app_id: resolvedAppId" in source
     assert "user_id: resolvedUserId" in source
-    assert "const { user, config } = useChatUI();" in source
+    assert "const { user, config, auth } = useChatUI();" in source
 
 
 def test_chat_page_transition_handoff_persists_workflow_before_reconnect() -> None:

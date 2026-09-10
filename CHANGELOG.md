@@ -152,6 +152,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Workflow entrypoints, transition choices, and refinement launches now forward
+  the configured auth adapter's access token through the shared API helper.
+  Authenticated builds no longer fail at these steps with a missing-token error.
 - Live workflow smoke checks now read canonical AG2 run events and wait for
   resumed user turns. Reconnect replay emits versioned event envelopes, and
   runtime-seeded chat/user identity remains available to usage accounting even
