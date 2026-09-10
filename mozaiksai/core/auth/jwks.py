@@ -8,14 +8,24 @@ Supports OIDC discovery-driven jwks_uri or explicit URL override.
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.cache_ttl import (
+    DEFAULT_JWKS_CACHE_TTL_SECONDS,
+    cache_entry_is_expired,
+)
 from mozaiksai.core.auth.config import get_auth_config
 
+if TYPE_CHECKING:
+    from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
+
 logger = get_core_logger("auth.jwks")
+
+# Canonical default lives in cache_ttl.py; aliased for local readability.
+_DEFAULT_JWKS_CACHE_TTL = DEFAULT_JWKS_CACHE_TTL_SECONDS
 
 
 @dataclass
@@ -28,7 +38,7 @@ class CachedJWKS:
     source_url: str  # Track which URL was used
 
     def is_expired(self) -> bool:
-        return time.time() > (self.fetched_at + self.ttl_seconds)
+        return cache_entry_is_expired(self.fetched_at, self.ttl_seconds, now=time.time())
 
 
 class JWKSClient:
@@ -47,23 +57,57 @@ class JWKSClient:
         jwks_url: str | None = None,
         cache_ttl: int | None = None,
         use_discovery: bool = True,
+        *,
+        consult_environment: bool = True,
+        discovery_client: "OIDCDiscoveryClient | None" = None,
     ):
         """
         Initialize JWKS client.
 
+        Authority contract: **explicit constructor input always wins.** A
+        client built with a caller-owned JWKS URL and TTL keeps them for its
+        whole lifetime; later environment or global ``AuthConfig`` changes
+        never alter its behaviour. Global configuration is consulted only to
+        fill in values the caller did not supply, and only when
+        ``consult_environment`` is True.
+
         Args:
-            jwks_url: Explicit JWKS URL (skips discovery if set)
-            cache_ttl: Cache TTL in seconds
-            use_discovery: If True and jwks_url not set, fetch from OIDC discovery
+            jwks_url: Explicit JWKS URL (skips discovery if set). Authoritative.
+            cache_ttl: Cache TTL in seconds. Authoritative when supplied.
+            use_discovery: If True and jwks_url not set, fetch from OIDC discovery.
+            consult_environment: When False, global ``AuthConfig`` is never
+                                 read — the client is fully bound to the values
+                                 passed in. Auth adapters pass False so their
+                                 lazily created clients stay bound to the same
+                                 immutable snapshot that identifies the adapter.
+            discovery_client: Discovery client to resolve ``jwks_uri`` through.
+                              Adapters inject their own snapshot-bound client
+                              instead of the process-wide singleton.
         """
-        config = get_auth_config()
-        self._explicit_jwks_url = jwks_url or config.jwks_url_override
-        self._cache_ttl = cache_ttl or config.jwks_cache_ttl_seconds
+        if jwks_url or not consult_environment:
+            self._explicit_jwks_url = jwks_url
+            self._cache_ttl = (
+                cache_ttl if cache_ttl is not None else _DEFAULT_JWKS_CACHE_TTL
+            )
+            if cache_ttl is None and consult_environment:
+                self._cache_ttl = get_auth_config().jwks_cache_ttl_seconds
+        else:
+            config = get_auth_config()
+            self._explicit_jwks_url = config.jwks_url_override
+            self._cache_ttl = (
+                cache_ttl if cache_ttl is not None else config.jwks_cache_ttl_seconds
+            )
         self._use_discovery = use_discovery and not self._explicit_jwks_url
+        self._discovery_client = discovery_client
         self._cache: CachedJWKS | None = None
         self._lock = asyncio.Lock()
         self._keys_by_kid: dict[str, dict[str, Any]] = {}
         self._resolved_jwks_url: str | None = None
+
+    @property
+    def cache_ttl_seconds(self) -> int:
+        """The TTL this client was bound to at construction."""
+        return self._cache_ttl
 
     async def _get_jwks_url(self) -> str:
         """
@@ -79,9 +123,15 @@ class JWKSClient:
             return self._explicit_jwks_url
 
         if self._use_discovery:
+            # An injected discovery client is authoritative — adapters supply
+            # their own snapshot-bound client so key resolution can never fall
+            # through to process-wide state built from a different config.
+            if self._discovery_client is not None:
+                return await self._discovery_client.get_jwks_uri()
+
             from mozaiksai.core.auth.discovery import get_discovery_client
-            discovery_client = get_discovery_client()
-            return await discovery_client.get_jwks_uri()
+
+            return await get_discovery_client().get_jwks_uri()
 
         raise RuntimeError(
             "No JWKS URL configured. Set AUTH_JWKS_URL or enable OIDC discovery."

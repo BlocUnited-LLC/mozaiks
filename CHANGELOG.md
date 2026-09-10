@@ -12,6 +12,87 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- **Fail-closed module action dispatch**: `ModuleExecutor` no longer falls
+  back from an undeclared action id to a same-named Python handler method.
+  Only action ids declared in the module's contract
+  (`module.yaml` `actions[].handler_method`, mirrored in the registered
+  `action_method_map`) are dispatchable; unknown or undeclared actions —
+  including event-reaction handlers, private helpers, and arbitrary handler
+  attributes — return `ACTION_NOT_FOUND` before any handler resolution, for
+  trusted and enforce-mode authorities alike. The rejection path never
+  touches the handler object (no `getattr`/`hasattr`, so hostile
+  properties/descriptors/`__getattr__` cannot execute), and denied audits
+  carry only a bounded, sanitized action string.
+- **Fail-closed authentication configuration**: auth-mode environment
+  variables are interpreted by one canonical resolver
+  (`resolve_auth_config`) consumed by every predicate, adapter resolution,
+  and startup validation. With `AUTH_ENABLED=true`, a missing, misspelled,
+  or incomplete auth provider configuration is fatal at startup (runtime and
+  platform/Studio hosts) and at provider resolution, in every environment.
+  Contradictory explicit declarations (`AUTH_ENABLED=true` +
+  `AUTH_PROVIDER=none`; `AUTH_ENABLED=false` + a real explicit
+  `AUTH_PROVIDER`) and unrecognized `AUTH_ENABLED` values are fatal instead
+  of silently resolving. **Unauthenticated operation is now allowlisted:** it
+  is permitted only in the recognized local environments `development`,
+  `local`, `test` (`dev` normalizes to `development`) or with no environment
+  configured. Every other explicit `ENV`/`ENVIRONMENT` value — `production`,
+  `staging`, and unknown or regional names such as `prod-us`,
+  `production-east`, `preview`, or `qa` — refuses no-auth operation
+  (explicit disable or implicit demo) independent of
+  `MOZAIKS_STARTUP_CHECKS` mode, while still booting normally with
+  authentication configured. `ENV` and `ENVIRONMENT` are resolved
+  canonically: blank values are absence (a blank `ENV` cannot mask a
+  deployed `ENVIRONMENT`), aliases normalize before comparison, and two
+  non-blank values that disagree are a fatal configuration error rather than
+  a silent pick. The cached auth adapter is keyed by the complete
+  provider-specific configuration snapshot it is built from — issuer, JWKS
+  and discovery URLs, audience, every claim mapping, scope format, clock
+  skew, algorithms, cache TTLs, Keycloak claim mappings, Supabase secret,
+  and anonymous-persona settings — so changing any of them rebuilds the
+  adapter and no stale adapter can serve requests under newer configuration.
+  Custom adapters declare a `config_identity` at registration to participate
+  in that cache identity, and are never cached without one; malformed
+  identities (non-string, empty, whitespace-only, or a raising callable) are
+  rejected rather than coerced into a cache key. The adapter constructor
+  contract is established *positively* at registration by binding the
+  runtime's exact invocation against the complete signature: `settings` as a
+  keyword (or `**kwargs`) receives the snapshot, a constructor whose other
+  parameters are all optional is built with no arguments, and anything the
+  runtime cannot actually invoke — `(settings, required)`,
+  `(required, **kwargs)`, a positional-only `settings`, any required parameter
+  it cannot supply, or a signature it cannot inspect — is rejected instead of
+  being assumed to take no configuration
+  (`register_adapter(..., constructor_mode=...)` declares the contract
+  explicitly for uninspectable constructors). An exception raised inside a
+  constructor body — including `TypeError` — fails closed instead of
+  triggering a retry that would discard the canonical configuration. An adapter's lazily created OIDC discovery and
+  JWKS clients now inherit its snapshot (URLs and cache TTLs) and never
+  consult live environment or global `AuthConfig`, so an adapter built under
+  one configuration cannot begin validating tokens against another; explicit
+  constructor input to those clients is authoritative. `AUTH_JWKS_CACHE_TTL`
+  (default 3600) and `AUTH_DISCOVERY_CACHE_TTL` (default 86400) are validated
+  (integer seconds, zero or greater; `0` means always refetch and is never
+  treated as unset) during configuration resolution, so malformed values fail
+  startup instead of surfacing during lazy client creation on a request path.
+  Absent, empty, and whitespace-only values normalize identically through one
+  canonical resolver shared by configuration resolution, the adapter config,
+  and `AuthConfig`, and cache expiry compares elapsed time against the TTL so
+  every accepted value — including very large ones — stays usable at request
+  time.
+  Implicit demo mode (no auth configuration at all, in an environment that
+  permits it) still boots for local getting-started use.
+- **Fail-closed billing fulfillment ingress**:
+  `POST /api/billing/fulfillment/apply` (and the fulfillment admin listing)
+  now requires the internal API key, an *authenticated* billing-admin
+  principal (`UserPrincipal.is_authenticated` — real bearer-token
+  provenance, not role/scope strings, which anonymous and dev-persona
+  principals can carry), or explicitly disabled authentication
+  (`AUTH_ENABLED=false` / `AUTH_PROVIDER=none`, which protected
+  environments reject outright). Auth being merely unconfigured no longer
+  makes the ingress callable without authentication.
+
 ### Fixed
 
 - Generated workflow exports now validate all runtime YAML contracts and tool

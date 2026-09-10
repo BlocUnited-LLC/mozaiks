@@ -18,10 +18,13 @@ Checks performed:
                          and MongoDB must respond to a ping within the driver timeout.
   Workflows path       — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
   Upload dir           — ``UPLOAD_STORAGE_DIR``, if set, must be writable when it exists.
-  AUTH_ENABLED         — warns when ``ENV=production`` and ``AUTH_ENABLED=false``.
-  Auth provider        — warns when ``ENV=production``, auth is not explicitly disabled,
-                         and no auth provider env vars are configured (silently falls
-                         back to demo mode without this check).
+  Auth configuration   — mode-INDEPENDENT hard gate: the canonical auth
+                         resolution must succeed. Enabled auth without a usable
+                         provider, contradictory declarations, unrecognized
+                         AUTH_ENABLED values, conflicting ENV/ENVIRONMENT
+                         declarations, and any no-auth operation outside a
+                         recognized local/development/test environment abort
+                         startup regardless of ``MOZAIKS_STARTUP_CHECKS``.
   INTERNAL_API_KEY     — warns when the key is absent or shorter than 32 chars
                          (defense-in-depth; not a hard gate).
   RATE_LIMIT_ENABLED   — warns when ``ENV=production`` and ``RATE_LIMIT_ENABLED=false``.
@@ -43,6 +46,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from mozaiksai.core.core_config import get_mongo_client, get_secret
+from mozaiksai.core.environment import EnvironmentConfigError, deployment_environment
 
 logger = logging.getLogger("mozaiksai.startup.validation")
 
@@ -223,77 +227,34 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
                 extra={"check": "upload_storage_dir", "mode": mode},
             )
 
-    # ── AUTH_ENABLED in production ───────────────────────────────────────────
-    # AUTH_ENABLED=false is intentional in dev but a critical gap in production.
-    # Warn when the runtime environment is production and auth is disabled.
-    env_name = os.getenv("ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
-    auth_enabled = os.getenv("AUTH_ENABLED", "true").strip().lower()
-    if env_name == "production" and auth_enabled in {"false", "0", "no", "off"}:
-        msg = (
-            "AUTH_ENABLED=false in a production environment. "
-            "All endpoints are exposed to unauthenticated access. "
-            "Set AUTH_ENABLED=true and configure an auth provider before serving production traffic."
+    # ── Auth configuration resolution (fail closed, mode-independent) ────────
+    # The canonical auth resolution (mozaiksai.core.auth.adapters.registry)
+    # is fatal — never a warning — for: explicitly enabled auth whose provider
+    # is missing/unknown/incomplete, contradictory explicit declarations,
+    # unrecognized AUTH_ENABLED values, conflicting ENV/ENVIRONMENT
+    # declarations, and ANY no-auth operation (explicit disable or implicit
+    # demo mode) outside a recognized local/development/test environment.
+    # MOZAIKS_STARTUP_CHECKS mode does not weaken this.
+    from mozaiksai.core.auth.adapters.base import AuthError
+    from mozaiksai.core.auth.adapters.registry import validate_auth_provider_configuration
+
+    try:
+        env_name = deployment_environment()
+        resolved_provider = validate_auth_provider_configuration()
+        logger.info(
+            "STARTUP_CHECK_OK: auth provider resolved (%s, env=%s)",
+            resolved_provider,
+            env_name or "unset",
+            extra={"check": "auth_provider_resolution", "mode": mode},
         )
-        warnings.append(msg)
-        logger.warning(
+    except (AuthError, EnvironmentConfigError) as auth_exc:
+        msg = f"Authentication configuration is invalid: {auth_exc}"
+        logger.error(
             "STARTUP_CHECK_FAILED: %s",
             msg,
-            extra={"check": "auth_enabled", "mode": mode},
+            extra={"check": "auth_provider_resolution", "mode": mode},
         )
-        if mode == "strict":
-            raise StartupConfigError(msg)
-    else:
-        logger.info(
-            "STARTUP_CHECK_OK: AUTH_ENABLED=%s (env=%s)",
-            auth_enabled,
-            env_name or "unset",
-            extra={"check": "auth_enabled", "mode": mode},
-        )
-
-    # ── Auth provider configured in production ───────────────────────────────
-    # When auth is not explicitly disabled but no provider env vars are set,
-    # _auto_detect_provider() silently falls back to "none" (demo mode).
-    # Catch this at startup so operators are not surprised in production.
-    if env_name == "production" and auth_enabled not in {"false", "0", "no", "off"}:
-        explicit_provider = os.getenv("AUTH_PROVIDER", "").strip()
-        has_supabase = bool(os.getenv("SUPABASE_URL", "").strip())
-        has_keycloak = bool(
-            os.getenv("KEYCLOAK_URL", "").strip() and os.getenv("KEYCLOAK_REALM", "").strip()
-        )
-        has_jwt_overrides = bool(
-            os.getenv("AUTH_JWKS_URL", "").strip() and os.getenv("AUTH_ISSUER", "").strip()
-        )
-        has_oidc_discovery = bool(
-            os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
-            or os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip()
-        )
-        has_jwt = has_jwt_overrides or has_oidc_discovery
-        has_provider = bool(explicit_provider) or has_supabase or has_keycloak or has_jwt
-        if not has_provider:
-            msg = (
-                "AUTH_ENABLED is not false but no auth provider is configured in production. "
-                "The runtime will silently fall back to demo mode (no authentication). "
-                "Set AUTH_PROVIDER or configure SUPABASE_URL, KEYCLOAK_URL, "
-                "AUTH_JWKS_URL + AUTH_ISSUER, or MOZAIKS_OIDC_AUTHORITY."
-            )
-            warnings.append(msg)
-            logger.warning(
-                "STARTUP_CHECK_FAILED: %s",
-                msg,
-                extra={"check": "auth_provider", "mode": mode},
-            )
-            if mode == "strict":
-                raise StartupConfigError(msg)
-        else:
-            detected = (
-                explicit_provider
-                or ("supabase" if has_supabase else ("keycloak" if has_keycloak else "jwt"))
-            )
-            logger.info(
-                "STARTUP_CHECK_OK: auth provider configured (%s)",
-                detected,
-                extra={"check": "auth_provider", "mode": mode},
-            )
+        raise StartupConfigError(msg) from auth_exc
 
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).

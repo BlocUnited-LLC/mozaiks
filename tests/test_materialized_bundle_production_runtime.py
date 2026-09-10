@@ -42,7 +42,7 @@ def _restore_global_runtime_state() -> Any:
     from mozaiksai.core.workflow.outputs import structured
 
     adapter_registry = dict(auth_registry._adapter_registry)
-    adapter_instance = auth_registry._adapter_instance
+    adapter_cache = auth_registry._adapter_cache
     workflow_instance = workflow_manager.UnifiedWorkflowManager._instance
     workflow_models = dict(structured._workflow_models)
     workflow_registries = dict(structured._workflow_registries)
@@ -60,7 +60,7 @@ def _restore_global_runtime_state() -> Any:
     finally:
         auth_registry._adapter_registry.clear()
         auth_registry._adapter_registry.update(adapter_registry)
-        auth_registry._adapter_instance = adapter_instance
+        auth_registry._adapter_cache = adapter_cache
         workflow_manager.UnifiedWorkflowManager._instance = workflow_instance
         structured._workflow_models.clear()
         structured._workflow_models.update(workflow_models)

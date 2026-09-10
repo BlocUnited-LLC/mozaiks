@@ -29,6 +29,7 @@ import asyncio
 import inspect
 import json
 import os
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -153,6 +154,24 @@ class ModuleResult:
 # Schema validation helper
 # ---------------------------------------------------------------------------
 
+_AUDIT_ACTION_MAX_LENGTH = 64
+_AUDIT_ACTION_SAFE_RE = re.compile(r"[^A-Za-z0-9_.\-]")
+
+
+def _bounded_action_for_audit(action: Any) -> str:
+    """Bound and sanitize a caller-supplied action id for logs and audit.
+
+    Undeclared action ids are attacker-influenced strings; they are reduced to
+    a bounded, safe character set before entering log lines, audit records, or
+    error messages.
+    """
+    text = str(action or "")
+    sanitized = _AUDIT_ACTION_SAFE_RE.sub("?", text)
+    if len(sanitized) > _AUDIT_ACTION_MAX_LENGTH:
+        return sanitized[:_AUDIT_ACTION_MAX_LENGTH] + "..."
+    return sanitized
+
+
 def _normalize_nullable_schema(schema: Any) -> Any:
     """Translate OpenAPI-style nullable fields into JSON Schema."""
     return normalize_nullable_schema(schema)
@@ -262,7 +281,13 @@ class ModuleExecutor:
         Args:
             name:                Module name as declared in module.yaml and ModuleRequest.module
             handler:             Instantiated module handler object
-            action_method_map:   Maps public action id -> handler method name
+            action_method_map:   Maps public action id -> handler method name.
+                                 This map is the sole action dispatch authority:
+                                 action ids absent from it fail closed with
+                                 ACTION_NOT_FOUND, regardless of which Python
+                                 methods exist on the handler. Registering with
+                                 an empty/absent map yields a module with no
+                                 dispatchable actions.
             settings:            Setting definitions from settings.yaml (list of setting dicts).
                                  Injected into ModuleContext.settings on every action call.
             action_permissions:  Maps action id -> list of required permission ids.
@@ -338,9 +363,50 @@ class ModuleExecutor:
                 error_code="MODULE_NOT_FOUND",
             )
 
-        handler_method = self._action_methods.get(request.module, {}).get(request.action, request.action)
+        # Declared-action authority boundary: only action ids explicitly
+        # declared in the module's contract (module.yaml actions[]) resolve to
+        # a handler method. An undeclared action id fails closed WITHOUT
+        # touching the handler object at all — no getattr/hasattr, because
+        # Python attribute lookup can execute properties, descriptors, and
+        # custom __getattr__ before the request is denied. The denial is
+        # identical whether or not a same-named Python attribute exists, and
+        # the denied audit is built only from safe, already-known facts.
+        handler_method = self._action_methods.get(request.module, {}).get(request.action)
+        if handler_method is None:
+            safe_action = _bounded_action_for_audit(request.action)
+            logger.warning(
+                "MODULE_ACTION_UNDECLARED: module=%s action=%s is not declared in "
+                "the module's action contract; refusing dispatch (user=%s)",
+                request.module,
+                safe_action,
+                request.user_id,
+            )
+            asyncio.create_task(
+                self._emit_dispatch_audit(
+                    replace(
+                        dispatch_audit,
+                        action=safe_action,
+                        outcome="denied",
+                        reason="undeclared action",
+                    ),
+                    error="ACTION_NOT_FOUND",
+                )
+            )
+            return ModuleResult(
+                success=False,
+                error=f"Action {safe_action!r} not found on module {request.module!r}",
+                error_code="ACTION_NOT_FOUND",
+            )
         action_fn = getattr(handler, handler_method, None)
-        if action_fn is None:
+        if action_fn is None or not callable(action_fn):
+            logger.error(
+                "MODULE_ACTION_HANDLER_MISSING: module=%s action=%s declared "
+                "handler_method=%s is absent or not callable on %s",
+                request.module,
+                request.action,
+                handler_method,
+                type(handler).__name__,
+            )
             return ModuleResult(
                 success=False,
                 error=f"Action {request.action!r} not found on module {request.module!r}",

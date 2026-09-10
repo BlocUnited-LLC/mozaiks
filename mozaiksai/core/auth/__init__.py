@@ -85,7 +85,9 @@ from mozaiksai.core.auth.adapters import (
 )
 from mozaiksai.core.auth.adapters.registry import (
     is_auth_enabled,
+    is_auth_explicitly_disabled,
     reset_auth_adapter,
+    resolve_auth_config,
 )
 from mozaiksai.core.auth.config import (
     AuthConfig,
@@ -131,6 +133,9 @@ __all__ = [
     "register_adapter",
     "list_adapters",
     "is_auth_enabled",
+    "is_auth_explicitly_disabled",
+    "resolve_auth_config",
+    "validate_auth_provider_configuration",
     "reset_auth_adapter",
     # HTTP Dependencies
     "UserPrincipal",

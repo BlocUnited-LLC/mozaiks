@@ -4,6 +4,8 @@ Base auth adapter protocol and types.
 All auth adapters must implement the AuthAdapter protocol.
 """
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -121,12 +123,43 @@ class BaseAuthAdapter:
     Base class for auth adapters with common functionality.
 
     Adapters can extend this class for shared utilities.
+
+    Configuration snapshot
+    ----------------------
+    Adapters are constructed from an immutable configuration snapshot supplied
+    by the auth registry (``settings``). The registry derives the adapter cache
+    identity from that same snapshot, so the adapter a request uses is always
+    built from exactly the configuration that identity describes. Reading live
+    ``os.environ`` inside an adapter would break that guarantee: use
+    :meth:`_setting` instead of ``os.getenv``.
+
+    ``settings=None`` falls back to the live environment, preserving direct
+    construction in tests and custom embedding code.
     """
 
     name: str = "base"
 
-    def __init__(self):
-        pass
+    def __init__(self, settings: Mapping[str, str] | None = None):
+        self._settings: Mapping[str, str] | None = settings
+
+    def _setting(self, name: str, default: str = "") -> str:
+        """Read one configuration value from the snapshot, else the environment.
+
+        An absent value and an empty value are equivalent (both yield the
+        default), matching how the rest of the auth configuration treats blank
+        environment variables.
+        """
+        if self._settings is not None:
+            value = self._settings.get(name)
+        else:
+            value = os.getenv(name)
+        return default if not value else value
+
+    def _optional_setting(self, name: str) -> str | None:
+        """Read a value whose absence is meaningfully different from empty."""
+        if self._settings is not None:
+            return self._settings.get(name) or None
+        return os.getenv(name) or None
 
     async def validate_token(self, token: str) -> UserClaims:
         """Override in subclass."""
