@@ -326,15 +326,44 @@ MY_AUTH_SECRET=...
 
 ## WebSocket Auth
 
-WebSocket connections extract tokens from query params by default:
+Browsers cannot set request headers on a WebSocket handshake, so the access token is
+carried in the `Sec-WebSocket-Protocol` header — the one handshake header the browser
+WebSocket API exposes. This is the normal production path and requires no opt-in.
 
-```
-ws://localhost:8000/ai/ws/workflow?access_token=eyJ...
+Clients offer two subprotocol values, the marker followed by the base64url-encoded
+(unpadded) token:
+
+```js
+new WebSocket(url, ['mozaiks.bearer.v1', base64url(accessToken)]);
 ```
 
-To disable (in production behind reverse proxy):
+The shared browser adapter does this for you:
+
+```js
+import { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/adapters/websocketAuth.js';
+
+const socket = openAuthenticatedWebSocket(wsUrl, accessToken);
+```
+
+The runtime decodes the token, validates it through the configured auth adapter — the
+same adapter and the same validation as HTTP routes — binds the resulting
+`WebSocketUser`, and selects only `mozaiks.bearer.v1` on accept. The credential is never
+echoed back and never appears in the URL.
+
+Missing or invalid credentials close the connection with code 1008 before accept.
+
+### Query-param tokens (local development only)
+
+A query-string token (`?access_token=...`) is rejected by default. Tokens in URLs land in
+server access logs, browser history, `Referer` headers, and shared links. It remains
+available as an explicit opt-in for local development and for non-browser clients that
+cannot use the subprotocol path:
+
 ```bash
-MOZAIKS_WS_ALLOW_QUERY_TOKEN=false
+MOZAIKS_WS_ALLOW_QUERY_TOKEN=true   # never set this in production or staging
 ```
+
+Leave it `false` (the default) everywhere else. Production browser clients do not need
+it.
 
 ---

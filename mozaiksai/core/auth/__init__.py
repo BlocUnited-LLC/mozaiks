@@ -22,7 +22,7 @@ Quick Start:
         return {"user_id": user.user_id, "email": user.email}
 
     # WebSocket authentication
-    from mozaiksai.core.auth import authenticate_websocket
+    from mozaiksai.core.auth import accept_websocket, authenticate_websocket
 
     @app.websocket("/ws/chat")
     async def chat_ws(websocket: WebSocket):
@@ -30,7 +30,7 @@ Quick Start:
         if not user:
             return  # Connection closed
 
-        await websocket.accept()
+        await accept_websocket(websocket)
         # websocket.state.user_id is now set
 
 Configuration (environment variables):
@@ -112,14 +112,18 @@ from mozaiksai.core.auth.dependencies import (
 
 # WebSocket authentication
 from mozaiksai.core.auth.websocket_auth import (
+    WS_BEARER_SUBPROTOCOL,
     WS_CLOSE_ACCESS_DENIED,
     WS_CLOSE_AUTH_INVALID,
     WS_CLOSE_AUTH_REQUIRED,
     WS_CLOSE_POLICY_VIOLATION,
     WebSocketUser,
+    accept_websocket,
     authenticate_websocket,
     authenticate_websocket_with_path_binding,
     authenticate_websocket_with_path_user,
+    extract_subprotocol_bearer_token,
+    negotiated_subprotocol,
     require_resource_ownership,
     verify_user_owns_resource,
 )
@@ -151,6 +155,7 @@ __all__ = [
     "validate_user_id_against_principal",
     # WebSocket
     "WebSocketUser",
+    "accept_websocket",
     "authenticate_websocket",
     "authenticate_websocket_with_path_user",
     "authenticate_websocket_with_path_binding",
@@ -160,6 +165,9 @@ __all__ = [
     "WS_CLOSE_AUTH_REQUIRED",
     "WS_CLOSE_AUTH_INVALID",
     "WS_CLOSE_ACCESS_DENIED",
+    "WS_BEARER_SUBPROTOCOL",
+    "extract_subprotocol_bearer_token",
+    "negotiated_subprotocol",
     # Auth config exports
     "AuthConfig",
     "get_auth_config",

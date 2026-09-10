@@ -25,6 +25,7 @@ from mozaiksai.core.admin.registry import build_admin_shell_routes, load_admin_r
 from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
     UserPrincipal,
+    accept_websocket,
     authenticate_websocket_with_path_binding,
     require_any_auth,
     require_user_scope,
@@ -3512,7 +3513,7 @@ async def websocket_endpoint(
         )
         if not is_valid:
             try:
-                await websocket.accept()
+                await accept_websocket(websocket)
                 await send_event_envelope(websocket, {
                     "schema_version": "mozaiks.ui.event.v1",
                     "type": "chat.error",
@@ -3531,7 +3532,7 @@ async def websocket_endpoint(
     except Exception as dep_err:
         logger.error("WS_PREREQ_VALIDATION_FAILED: %s", dep_err, exc_info=True)
         try:
-            await websocket.accept()
+            await accept_websocket(websocket)
             await send_event_envelope(websocket, {
                 "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",

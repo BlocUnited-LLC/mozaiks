@@ -22,10 +22,12 @@ Usage:
             await websocket.close(code=1008, reason="Access denied")
             return
 
-        await websocket.accept()
+        await accept_websocket(websocket)
         ...
 """
 
+import base64
+import binascii
 import os
 from dataclasses import dataclass
 
@@ -46,6 +48,86 @@ WS_CLOSE_POLICY_VIOLATION = 1008
 WS_CLOSE_AUTH_REQUIRED = 1008
 WS_CLOSE_AUTH_INVALID = 1008
 WS_CLOSE_ACCESS_DENIED = 1008
+
+
+# The browser WebSocket API cannot set request headers, so a browser client cannot
+# send `Authorization: Bearer ...` on the handshake. The only header a browser can
+# influence is `Sec-WebSocket-Protocol`, via `new WebSocket(url, protocols)`.
+#
+# Clients therefore offer two subprotocol values:
+#
+#     [WS_BEARER_SUBPROTOCOL, base64url(access_token)]
+#
+# The credential travels in a handshake header rather than the URL, so it stays out
+# of access logs, browser history, `Referer`, and bookmark/share surfaces — the
+# reasons query-param tokens are rejected by default. The token is base64url-encoded
+# (no padding) so that any credential shape remains a legal RFC 7230 header token.
+#
+# The server selects only WS_BEARER_SUBPROTOCOL on accept; the encoded credential is
+# never echoed back in the handshake response.
+WS_BEARER_SUBPROTOCOL = "mozaiks.bearer.v1"
+
+
+def _offered_subprotocols(websocket: WebSocket) -> list[str]:
+    """Return the subprotocols the client offered on the handshake."""
+    scope = getattr(websocket, "scope", None) or {}
+    offered = scope.get("subprotocols") or []
+    return [str(value).strip() for value in offered if str(value).strip()]
+
+
+def _decode_bearer_subprotocol(value: str) -> str | None:
+    """Decode a base64url (unpadded) subprotocol credential, or None if malformed."""
+    padding = "=" * (-len(value) % 4)
+    try:
+        return base64.urlsafe_b64decode(value + padding).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+
+
+def extract_subprotocol_bearer_token(websocket: WebSocket) -> str | None:
+    """
+    Extract the bearer token a browser client carried in `Sec-WebSocket-Protocol`.
+
+    Returns None when the client did not offer the Mozaiks bearer subprotocol or the
+    credential value is missing/malformed. Never logs the credential.
+    """
+    offered = _offered_subprotocols(websocket)
+    try:
+        marker_index = offered.index(WS_BEARER_SUBPROTOCOL)
+    except ValueError:
+        return None
+
+    credential_index = marker_index + 1
+    if credential_index >= len(offered):
+        logger.warning("WebSocket bearer subprotocol offered without a credential value")
+        return None
+
+    token = _decode_bearer_subprotocol(offered[credential_index])
+    if not token:
+        logger.warning("WebSocket bearer subprotocol credential was not valid base64url")
+        return None
+    return token
+
+
+def negotiated_subprotocol(websocket: WebSocket) -> str | None:
+    """Return the subprotocol to echo on accept, or None when the client offered none."""
+    if WS_BEARER_SUBPROTOCOL in _offered_subprotocols(websocket):
+        return WS_BEARER_SUBPROTOCOL
+    return None
+
+
+async def accept_websocket(websocket: WebSocket) -> None:
+    """
+    Accept a WebSocket, completing subprotocol negotiation when the client used one.
+
+    RFC 6455 requires the server to select a subprotocol the client offered, so only
+    the marker is echoed — never the credential value beside it.
+    """
+    subprotocol = negotiated_subprotocol(websocket)
+    if subprotocol:
+        await websocket.accept(subprotocol=subprotocol)
+        return
+    await websocket.accept()
 
 
 @dataclass
@@ -122,7 +204,8 @@ async def authenticate_websocket(
 
     Token is extracted from:
     1. `access_token` parameter passed directly
-    2. `access_token` query parameter (if MOZAIKS_WS_ALLOW_QUERY_TOKEN=true)
+    2. the `Sec-WebSocket-Protocol` bearer subprotocol (the browser path)
+    3. `access_token` query parameter (if MOZAIKS_WS_ALLOW_QUERY_TOKEN=true)
 
     Args:
         websocket: The WebSocket connection to authenticate
@@ -143,7 +226,7 @@ async def authenticate_websocket(
             if user is None:
                 return  # Already closed
 
-            await websocket.accept()
+            await accept_websocket(websocket)
             # Use websocket.state.user_id
     """
     # Get the configured auth adapter
@@ -174,6 +257,11 @@ async def authenticate_websocket(
 
     # Extract token
     token = access_token
+
+    # Browser clients carry the credential in the `Sec-WebSocket-Protocol` handshake
+    # header. This is the normal production browser path and needs no opt-in.
+    if not token:
+        token = extract_subprotocol_bearer_token(websocket)
 
     # Query-param token extraction is disabled by default.
     # Tokens in query params appear in server logs, browser history, and proxy logs.
@@ -268,7 +356,7 @@ async def require_resource_ownership(
         if not await require_resource_ownership(websocket, chat.user_id):
             return  # Already closed with 1008
 
-        await websocket.accept()
+        await accept_websocket(websocket)
     """
     token_user_id = getattr(websocket.state, "user_id", None)
 

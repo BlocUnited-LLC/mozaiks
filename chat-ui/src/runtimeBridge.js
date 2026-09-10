@@ -9,25 +9,28 @@
  */
 
 import platform from './platform/index.js';
+import { buildWebSocketAuthProtocols } from './adapters/websocketAuth.js';
 
 /**
  * Build WebSocket URL for AI runtime chat
- * 
+ *
+ * The URL carries no credential. Pass the access token to
+ * `buildWebSocketAuthProtocols` and hand the result to `new WebSocket(url, protocols)`,
+ * or use `openAuthenticatedWebSocket` — see adapters/websocketAuth.js.
+ *
  * @param {Object} config - Configuration object
  * @param {string} config.workflowName - The workflow to connect to
  * @param {string} config.appId - The app context
  * @param {string} config.chatId - The chat session ID
  * @param {string} config.userId - The authenticated user ID
- * @param {string} config.token - JWT access token
  * @param {string} [config.runtimeUrl] - Optional runtime base URL
- * @returns {string} WebSocket URL with auth
+ * @returns {string} Credential-free WebSocket URL
  */
 export function buildRuntimeWebSocketUrl({
   workflowName,
   appId,
   chatId,
   userId,
-  token,
   runtimeUrl = null,
 }) {
   // Determine base URL
@@ -48,14 +51,8 @@ export function buildRuntimeWebSocketUrl({
   // Build the runtime WebSocket path
   // Format: /ws/{workflow_name}/{app_id}/{chat_id}/{user_id}
   const path = `/ws/${workflowName}/${appId}/${chatId}/${userId}`;
-  
-  // Add token as query param
-  const url = new URL(path, baseWsUrl);
-  if (token) {
-    url.searchParams.set('access_token', token);
-  }
-  
-  return url.toString();
+
+  return new URL(path, baseWsUrl).toString();
 }
 
 /**
@@ -135,8 +132,11 @@ export class CoreAuthAdapter {
   }
 }
 
+export { buildWebSocketAuthProtocols };
+
 export default {
   buildRuntimeWebSocketUrl,
+  buildWebSocketAuthProtocols,
   buildRuntimeApiUrl,
   isAIEnabled,
   getRuntimeAuthHeaders,

@@ -33,6 +33,7 @@ from logs.logging_config import (
 from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
     UserPrincipal,
+    accept_websocket,
     authenticate_websocket_with_path_binding,
     require_any_auth,
     require_user_scope,
@@ -945,7 +946,7 @@ async def websocket_endpoint(
             )
         except Exception as prereq_exc:
             logger.error("WS_PREREQ_VALIDATION_FAILED workflow=%s chat=%s: %s", resolved_workflow_name, chat_id, prereq_exc, exc_info=True)
-            await websocket.accept()
+            await accept_websocket(websocket)
             await send_event_envelope(websocket,
                 {
                     "schema_version": "mozaiks.ui.event.v1",
@@ -963,7 +964,7 @@ async def websocket_endpoint(
             return
 
         if not prereqs_ok:
-            await websocket.accept()
+            await accept_websocket(websocket)
             await send_event_envelope(websocket,
                 {
                     "schema_version": "mozaiks.ui.event.v1",
