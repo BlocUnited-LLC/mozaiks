@@ -612,11 +612,14 @@ async def _materialize_local_app_registry_event(
         build_registry_id = _normalize_text(context.get("build_registry_id"))
         existing = None
         if build_registry_id and context.get("build_registry_id_source") != "build_id_fallback":
-            existing_response = await service.get_app_record(build_registry_id=build_registry_id)
+            existing_response = await service.get_app_record(
+                build_registry_id=build_registry_id, owner_user_id=registry_payload["owner_user_id"],
+            )
             existing = existing_response.get("app") if isinstance(existing_response, dict) else None
 
         if isinstance(existing, dict) and existing.get("build_registry_id"):
             await service.update_build_status(
+                owner_user_id=registry_payload["owner_user_id"],
                 build_registry_id=str(existing["build_registry_id"]),
                 status=lifecycle_state,
                 workflow_sequence=registry_payload["current_build_run"].get("workflow_sequence"),

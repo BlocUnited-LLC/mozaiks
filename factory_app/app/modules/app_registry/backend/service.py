@@ -76,6 +76,7 @@ class AppRegistryService:
         self,
         *,
         build_registry_id: str,
+        owner_user_id: str,
         status: str,
         bundle_path: str | None = None,
         artifact_version_id: str | None = None,
@@ -95,6 +96,7 @@ class AppRegistryService:
             current_build_run=current_build_run,
         )
         app = await self.repo.update_lifecycle_state(
+            owner_user_id=owner_user_id,
             build_registry_id=payload["build_registry_id"],
             lifecycle_state=payload["status"],
             bundle_path=payload["bundle_path"],
@@ -113,6 +115,7 @@ class AppRegistryService:
     async def get_app_record(
         self,
         *,
+        owner_user_id: str,
         app_id: str | None = None,
         build_registry_id: str | None = None,
     ) -> dict[str, Any]:
@@ -120,9 +123,9 @@ class AppRegistryService:
         normalized_record_id = normalize_optional_text(build_registry_id)
         app = None
         if normalized_record_id:
-            app = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id)
+            app = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id, owner_user_id=owner_user_id)
         elif normalized_app_id:
-            app = await self.repo.get_by_app_id(app_id=normalized_app_id)
+            app = await self.repo.get_by_app_id(app_id=normalized_app_id, owner_user_id=owner_user_id)
         return {"app": app}
 
     async def promote_build(
@@ -134,7 +137,7 @@ class AppRegistryService:
         normalized_record_id = normalize_optional_text(build_registry_id)
         if not normalized_record_id:
             raise ValueError("build_registry_id is required")
-        record = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id)
+        record = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id, owner_user_id=promoted_by)
         if not record:
             raise ValueError(f"App record not found: {normalized_record_id}")
         current_state = record.get("lifecycle_state", "")
@@ -143,27 +146,19 @@ class AppRegistryService:
                 f"Cannot promote app from '{current_state}' state. App must be in 'review' to promote."
             )
         app = await self.repo.update_lifecycle_state(
+            owner_user_id=promoted_by,
             build_registry_id=normalized_record_id,
             lifecycle_state="active",
             bundle_path=record.get("bundle_path"),
         )
         return {"success": app is not None, "app": app}
 
-    async def delete_app(self, *, build_registry_id: str) -> dict[str, Any]:
+    async def delete_app(self, *, build_registry_id: str, owner_user_id: str) -> dict[str, Any]:
         normalized_record_id = normalize_optional_text(build_registry_id)
         if not normalized_record_id:
             raise ValueError("build_registry_id is required")
-        # Resolve app_id before deleting so we can cascade-purge usage events
-        existing = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id)
-        deleted = await self.repo.delete_app(build_registry_id=normalized_record_id)
-        if deleted and existing:
-            app_id = existing.get("app_id")
-            if app_id:
-                try:
-                    from mozaiksai.core.usage import get_runtime_usage_ledger
-                    await get_runtime_usage_ledger().purge_usage_for_app(app_id=app_id)
-                except Exception:
-                    pass  # usage purge is best-effort; don't fail the delete
+        # A directory record does not authorize deleting app-wide usage facts.
+        deleted = await self.repo.delete_app(build_registry_id=normalized_record_id, owner_user_id=owner_user_id)
         return {"success": deleted}
 
     async def ensure_status_for_app(
@@ -174,10 +169,11 @@ class AppRegistryService:
         status: str,
         default_name: str | None = None,
     ) -> dict[str, Any]:
-        existing = await self.repo.get_by_app_id(app_id=app_id)
+        existing = await self.repo.get_by_app_id(app_id=app_id, owner_user_id=owner_user_id)
         validated_status = validate_lifecycle_state(status)
         if existing:
             app = await self.repo.update_lifecycle_state(
+                owner_user_id=owner_user_id,
                 build_registry_id=existing["build_registry_id"],
                 lifecycle_state=validated_status,
             )

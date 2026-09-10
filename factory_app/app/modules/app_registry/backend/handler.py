@@ -25,11 +25,11 @@ class AppRegistryModule:
         current_build_run: dict[str, object] | None = None,
     ) -> dict:
         result = await self.service.create_app_record(
-            owner_user_id=ctx.user_id or "anonymous",
+            owner_user_id=ctx.user_id or "",
             name=name,
             description=description,
             status=status,
-            app_id=app_id or ctx.app_id,
+            app_id=app_id,
             chat_app_id=chat_app_id,
             active_chat_id=active_chat_id,
             active_workflow_id=active_workflow_id,
@@ -64,6 +64,7 @@ class AppRegistryModule:
         current_build_run: dict[str, object] | None = None,
     ) -> dict:
         result = await self.service.update_build_status(
+            owner_user_id=ctx.user_id or "",
             build_registry_id=build_registry_id,
             status=status,
             bundle_path=bundle_path,
@@ -87,7 +88,7 @@ class AppRegistryModule:
         return result
 
     async def list_apps(self, ctx: ModuleContext) -> dict:
-        return await self.service.list_apps(owner_user_id=ctx.user_id or "anonymous")
+        return await self.service.list_apps(owner_user_id=ctx.user_id or "")
 
     async def get_app_record(
         self,
@@ -97,6 +98,7 @@ class AppRegistryModule:
         build_registry_id: str | None = None,
     ) -> dict:
         return await self.service.get_app_record(
+            owner_user_id=ctx.user_id or "",
             app_id=app_id or ctx.app_id,
             build_registry_id=build_registry_id,
         )
@@ -107,7 +109,7 @@ class AppRegistryModule:
         *,
         build_registry_id: str,
     ) -> dict:
-        result = await self.service.delete_app(build_registry_id=build_registry_id)
+        result = await self.service.delete_app(build_registry_id=build_registry_id, owner_user_id=ctx.user_id or "")
         if result.get("success"):
             await ctx.emit(
                 "domain.app_registry.app_deleted",
@@ -123,7 +125,7 @@ class AppRegistryModule:
     ) -> dict:
         result = await self.service.promote_build(
             build_registry_id=build_registry_id,
-            promoted_by=ctx.user_id or "anonymous",
+            promoted_by=ctx.user_id or "",
         )
         app = result.get("app") or {}
         if app:

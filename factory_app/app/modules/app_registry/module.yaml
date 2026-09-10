@@ -14,7 +14,7 @@ permissions:
     description: Create app records and update lifecycle state.
 actions:
   - id: create_app_record
-    description: Create or reopen an app lifecycle record.
+    description: Create or reopen an app lifecycle record owned by the current user. Omitted app_id allocates a new app.
     handler_method: create_app_record
     input_schema:
       type: object
@@ -80,7 +80,7 @@ actions:
     emits:
       - domain.app_registry.app_created
   - id: update_build_status
-    description: Update the lifecycle state for an existing app record.
+    description: Update the lifecycle state for an existing app record owned by the current user.
     handler_method: update_build_status
     input_schema:
       type: object
@@ -139,7 +139,7 @@ actions:
     permissions:
       - app_registry.read
   - id: get_app_record
-    description: Fetch one app lifecycle record by app id or build registry id.
+    description: Fetch an owned app lifecycle record by app id or build registry id.
     handler_method: get_app_record
     input_schema:
       type: object

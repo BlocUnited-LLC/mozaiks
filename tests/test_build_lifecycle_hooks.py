@@ -375,6 +375,7 @@ async def test_emit_build_completed_updates_existing_local_registry_record(monke
     assert registry.create_calls == []
     assert registry.update_calls == [
         {
+            "owner_user_id": "user_1",
             "build_registry_id": "build_reg_1",
             "status": "review",
             "workflow_sequence": "build",
