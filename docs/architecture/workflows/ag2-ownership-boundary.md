@@ -43,8 +43,9 @@ must not assume an implicit network-tool grant.
 This uses AG2's supported
 [network-tool opt-out](https://docs.ag2.ai/docs/user-guide/network/network_assigned_tools/),
 not a replacement scheduler or network implementation. The installed AG2
-1.0.3 source and real-provider-request tests verify that the default handler
-still runs without the plugin. Recheck this boundary when upgrading AG2.
+1.0.3 source and real AG2 tests with provider HTTP replaced verify that the
+default handler still runs without the plugin. Recheck this boundary when
+upgrading AG2.
 
 A continuation settlement timeout is a failed run, not a human-input pause.
 The adapter returns a failed result and closes its live clients; transport
