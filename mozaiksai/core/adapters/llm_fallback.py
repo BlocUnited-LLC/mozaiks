@@ -203,6 +203,28 @@ def build_fallback_llm_config(
 # AG2 typed config factory
 # ---------------------------------------------------------------------------
 
+def _model_call_limits(
+    llm_config: dict[str, Any],
+    entry: dict[str, Any],
+    supported: tuple[str, ...],
+) -> dict[str, int]:
+    """Keep explicit safety controls; never silently ignore an unsupported one."""
+    limits: dict[str, int] = {}
+    for key in ("max_tokens", "max_completion_tokens", "max_output_tokens", "max_retries"):
+        if key not in entry and key not in llm_config:
+            continue
+        if key not in supported:
+            raise ValueError(f"{key} is not supported by the selected AG2 model configuration")
+        value = entry[key] if key in entry else llm_config[key]
+        minimum = 0 if key == "max_retries" else 1
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{key} must be an integer >= {minimum}; omit it to use the provider default")
+        limits[key] = value
+    if len(limits.keys() - {"max_retries"}) > 1:
+        raise ValueError("Configure only one output token limit for the selected provider")
+    return limits
+
+
 def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     """Convert an AG2 ``llm_config`` dict to a typed AG2 ``ModelConfig`` instance.
 
@@ -215,6 +237,10 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     - ``"ollama"``           → ``OllamaConfig``  (local inference)
 
     Any unrecognised api_type falls through to ``OpenAIConfig``.
+
+    Explicit output/retry limits use the provider's native AG2 field names.
+    Provider-entry values override shared defaults. Unsupported, ambiguous,
+    or invalid limit declarations fail before constructing a provider client.
     """
     config_list = llm_config.get("config_list") or []
     if not config_list:
@@ -236,6 +262,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "api_key": api_key,
             "temperature": temperature,
             "streaming": streaming,
+            **_model_call_limits(llm_config, entry, ("max_output_tokens",)),
         }
         if llm_config.get("response_modalities"):
             kwargs["response_modalities"] = llm_config["response_modalities"]
@@ -244,7 +271,13 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         return GeminiConfig(**kwargs)
     if api_type == "anthropic":
         from ag2.config import AnthropicConfig  # type: ignore[attr-defined]
-        return AnthropicConfig(model=model, api_key=api_key, temperature=temperature, streaming=streaming)
+        return AnthropicConfig(
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            streaming=streaming,
+            **_model_call_limits(llm_config, entry, ("max_tokens", "max_retries")),
+        )
     if api_type == "ollama":
         from ag2.config import OllamaConfig  # type: ignore[attr-defined]
         return OllamaConfig(
@@ -252,6 +285,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             host=base_url or "http://localhost:11434",
             temperature=temperature,
             streaming=streaming,
+            **_model_call_limits(llm_config, entry, ("max_tokens",)),
         )
     # openai / azure / default
     if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
@@ -263,10 +297,11 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "base_url": base_url,
             "temperature": temperature,
             "streaming": streaming,
+            **_model_call_limits(llm_config, entry, ("max_output_tokens", "max_retries")),
         }
         if timeout is not None:
             response_kwargs["timeout"] = timeout
-        for key in ("max_output_tokens", "max_tool_calls", "parallel_tool_calls", "store"):
+        for key in ("max_tool_calls", "parallel_tool_calls", "store"):
             if key in llm_config:
                 response_kwargs[key] = llm_config[key]
         return OpenAIResponsesConfig(**response_kwargs)
@@ -278,6 +313,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         "base_url": base_url,
         "temperature": temperature,
         "streaming": streaming,
+        **_model_call_limits(llm_config, entry, ("max_tokens", "max_completion_tokens", "max_retries")),
     }
     if timeout is not None:
         kwargs["timeout"] = timeout

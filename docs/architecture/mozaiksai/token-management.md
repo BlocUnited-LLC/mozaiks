@@ -76,6 +76,42 @@ workflows can tighten this by setting one of these context variables:
 
 The process-wide fallback is `MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS`.
 
+### Provider Request Limits
+
+`mozaiksai.core.adapters.llm_fallback.llm_config_to_ag2_config` forwards explicit
+limits into AG2's native model configuration. These are runtime LLM options,
+not new fields in generated workflow or subscription YAML.
+
+| Selected AG2 configuration | Output limit | SDK retry control |
+| --- | --- | --- |
+| OpenAI Chat Completions | `max_completion_tokens` or `max_tokens`, never both | `max_retries` |
+| OpenAI Responses | `max_output_tokens` | `max_retries` |
+| Anthropic | `max_tokens` | `max_retries` |
+| Gemini | `max_output_tokens` | Not exposed by the AG2 config |
+| Ollama | `max_tokens` | Not exposed by the AG2 config |
+
+The selected `config_list` entry overrides the same option at the shared
+`llm_config` level. Explicit output limits must be positive integers; retry
+counts must be nonnegative integers, including zero to disable SDK retries.
+Omit a field to keep AG2's default. Unsupported fields, nulls, booleans,
+non-integer values, and multiple output limit fields are rejected before client
+creation. Provider-native field names are not interchangeable aliases.
+
+For OpenAI, prefer `max_completion_tokens` for Chat Completions; it includes
+reasoning tokens. Responses uses `max_output_tokens` for visible and reasoning
+output. See the official [Chat Completions API](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create)
+and [Responses API](https://developers.openai.com/api/reference/python/resources/responses/methods/create).
+
+**These controls are not a hard spending cap.** They bound configured request
+output or SDK retry behavior, not cumulative input, workflow turns, AG2 retry
+middleware, parallel calls, provider tool charges, or USD spending. The current
+wallet preflight is a balance check, not an atomic reservation. Post-response
+debit rejection cannot undo a provider call. Sponsored builds must not be opened
+to unsupervised public use on the assumption that the existing balance check or
+watchdog prevents overspend. Durable pre-call reservation and settlement remain
+required for that guarantee; measurement stays in `TokenManager`, not billing
+or admission policy.
+
 ### AG2 Token Watchdog
 
 `mozaiksai/core/usage/watchdog.py` attaches AG2's built-in `TokenMonitor` to

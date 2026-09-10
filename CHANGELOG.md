@@ -12,6 +12,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Preserve explicit provider-native output token limits and SDK retry counts
+  when converting runtime LLM configuration to AG2. Invalid, conflicting, or
+  unsupported limits now fail before a provider request instead of disappearing.
+  This does not introduce a wallet reservation or a total-spend guarantee.
+
 ### App workspace alignment
 
 - Expose the existing reference bundle evaluator through `factory_app.eval` so
