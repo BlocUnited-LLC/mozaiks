@@ -702,10 +702,17 @@ async def test_ag2_network_runner_continues_paused_channel_with_user_message() -
 @pytest.mark.anyio
 @pytest.mark.parametrize("timeout", [0.0, 0.05])
 async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) -> None:
+    waiting = asyncio.Event()
+    cancelled = asyncio.Event()
+
     class WaitingAgent(_DeterministicAgent):
         async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
             if self.ask_calls:
-                await asyncio.Event().wait()
+                waiting.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
             return await super().ask(*msg, **kwargs)
 
     agent = WaitingAgent("Interviewer", "What should I build?")
@@ -735,6 +742,9 @@ async def test_continuation_timeout_fails_and_closes_live_run(timeout: float) ->
         assert continued.close_reason != "awaiting_user_input"
         assert continued.live_run is None
         assert live_run._closed
+        if timeout:
+            assert waiting.is_set()
+            await asyncio.wait_for(cancelled.wait(), timeout=1.0)
         rejected = await live_run.continue_with_user_message("Try again.")
         assert rejected.error == "live_ag2_channel_closed"
     finally:
