@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import uuid
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,6 +101,124 @@ def _contract():
 
 def _context(**updates):
     return ContextVariablesBridge({"document_outcome": "blocked", "document_attempts": 0, **updates})
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_LIVE_TOOL_OUTCOME_SMOKE") != "1",
+    reason="Manual only: requires local MongoDB and a real configured LLM API key",
+)
+@pytest.mark.asyncio
+async def test_live_materialized_outcomes_through_mozaiks_runtime(tmp_path, monkeypatch):
+    from urllib.parse import urlsplit
+
+    from mozaiksai.core.core_config import close_mongo_client
+    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+    from mozaiksai.core.tokens.manager import get_usage_emission_stats
+    from mozaiksai.core.usage import get_runtime_usage_ledger
+    from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
+    from mozaiksai.core.workflow.workflow_manager import initialize_workflows
+    from mozaiksai.factory import create_mozaiks_app
+
+    assert urlsplit(os.environ["MONGO_URI"]).hostname in {"localhost", "127.0.0.1"}
+    entry = _entry()
+    entry["outcome_plans"][0]["routes"][-1].update(
+        target_agent="terminate", termination_reason="workflow_failed",
+    )
+    for file in entry["files"]:
+        if file["filename"] == "agents.yaml":
+            agents = yaml.safe_load(file["content"])
+            for agent in agents["agents"]:
+                agent["system_message"] = (
+                    "Return only JSON with a result field containing a short nonempty confirmation."
+                    if agent["name"] == "CheckAgent" else "Return one short sentence confirming your step is complete."
+                ) + " Do not call tools or choose the next agent; the runtime owns routing."
+            file["content"] = yaml.safe_dump(agents)
+        elif file["filename"] == "context_variables.yaml":
+            file["content"] = yaml.safe_dump({"definitions": {
+                "smoke_case": {"type": "string", "source": {"type": "state", "default": "ready"}},
+                "check_invocations": {
+                    "type": "integer", "source": {"type": "state", "default": 0},
+                    "authority_class": "closed_writer_quality_state",
+                    "writer_ids": ["deterministic_tool"], "persisted": True,
+                },
+            }})
+        elif file["filename"] == "tools/check_document.py":
+            # Controlled tool faults, not mocked agents, provider calls, transport, or persistence.
+            file["content"] = (
+                "async def check_document(result: str, context_variables=None):\n"
+                "    ctx = context_variables\n"
+                "    ctx.set('check_invocations', ctx.get('check_invocations') + 1)\n"
+                "    case = ctx.get('smoke_case')\n"
+                "    if case == 'exception':\n"
+                "        raise TimeoutError('controlled smoke failure')\n"
+                "    if case == 'unknown':\n"
+                "        return {'status': 'not_a_declared_outcome'}\n"
+                "    if case == 'exhausted' or (case == 'repair' and ctx.get('document_attempts') == 1):\n"
+                "        return {'status': 'needs_revision'}\n"
+                "    return {'status': 'ready' if result.strip() else 'blocked'}\n"
+            )
+    emitted = materialize_workflow_outcomes(entry)
+    for file in emitted["files"]:
+        path = tmp_path / "DocumentCheck" / file["filename"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(file["content"], encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
+    initialize_workflows(base_path=str(tmp_path))
+    create_mozaiks_app(workflow_dir=str(tmp_path), debug=False)
+    pm = AG2PersistenceManager()
+    usage = []
+    get_event_dispatcher().register_handler("chat.usage_delta", usage.append)
+    before_usage = get_usage_emission_stats()
+    reports = []
+    try:
+        for case, expected, attempts in (
+            ("ready", "ready", 1), ("repair", "ready", 2),
+            ("exception", "blocked", 1), ("unknown", "blocked", 1),
+            ("exhausted", "blocked", 2),
+        ):
+            app_id = f"live-outcome-{uuid.uuid4().hex[:8]}"
+            chat_id = f"live-outcome-{case}-{uuid.uuid4().hex[:8]}"
+            await pm.create_chat_session(
+                chat_id=chat_id, app_id=app_id, workflow_name="DocumentCheck",
+                user_id="smoke-user", extra_fields={"smoke_case": case},
+            )
+            result = await asyncio.wait_for(run_workflow_orchestration(
+                workflow_name="DocumentCheck", app_id=app_id, chat_id=chat_id,
+                user_id="smoke-user", initial_message="Check this document. Set result to a short nonempty confirmation.",
+            ), timeout=120)
+            coll = await pm._coll()
+            doc = await coll.find_one({"_id": chat_id, "app_id": app_id})
+            assert result is not None and doc is not None
+            assert result["failed"] is (expected == "blocked"), result
+            assert result["run_completed"] is (expected == "ready"), result
+            assert result["error"] == ("workflow_failed" if expected == "blocked" else None), result
+            assert doc["document_outcome"] == expected, doc
+            assert doc["document_attempts"] == attempts
+            assert doc["check_invocations"] == attempts
+            events = await pm.load_run_events(chat_id=chat_id, app_id=app_id)
+            agents = [
+                event.metadata["agent_name"] for event in events
+                if isinstance(getattr(event, "metadata", None), dict) and "agent_name" in event.metadata
+            ]
+            assert ("DoneAgent" in agents) is (expected == "ready"), agents
+            assert ("RepairAgent" in agents) is (case in {"repair", "exhausted"}), agents
+            calls = [item for item in usage if item["chat_id"] == chat_id]
+            assert calls and all(item["total_tokens"] > 0 for item in calls)
+            ledger = await get_runtime_usage_ledger().query_usage(app_id=app_id, user_id="smoke-user")
+            assert len(ledger["events"]) == len(calls)
+            reports.append({
+                "case": case, "chat_id": chat_id, "outcome": expected,
+                "run_status": result["run_status"], "attempts": attempts,
+                "tool_invocations": doc["check_invocations"], "agents": agents,
+                "llm_calls": len(calls), "tokens": sum(item["total_tokens"] for item in calls),
+            })
+            print(json.dumps(reports[-1]), flush=True)
+        after_usage = get_usage_emission_stats()
+        assert after_usage["dropped_missing_context"] == before_usage["dropped_missing_context"]
+        assert after_usage["failed"] == before_usage["failed"]
+    finally:
+        close_mongo_client()
 
 
 @pytest.mark.parametrize("change", [

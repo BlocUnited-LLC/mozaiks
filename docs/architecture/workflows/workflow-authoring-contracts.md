@@ -256,6 +256,9 @@ Rules:
 - `agents` must be a mapping (`agent_name -> {variables: [...]}`), not a list.
 - `context_variables.yaml` is the declaration layer for workflow state. At
   runtime, AG2 `WorkflowState.context_vars` is the live state used for routing.
+- The runtime supplies `app_id`, `chat_id`, `user_id`, and `workflow_name` even
+  without workflow declarations. They remain runtime-only writable identity,
+  not caller/tool-controlled state or replayable workflow data.
 - Agent prompts and structured outputs own semantic reasoning. Context
   variables declare the typed state and artifact values that reasoning produces.
 - Every `agents.<Agent>.variables[]` entry must reference a declared
@@ -433,6 +436,31 @@ or workers. Task batches retain their existing `failure_policy` and
 `retry_limit`; put an outcome-dependent check in a separate network agent
 after the batch. Invalid combinations fail validation rather than bypassing
 the declared outcome routes.
+
+#### Live Outcome Verification
+
+With a local MongoDB instance and model credentials configured in the process,
+set `RUN_LIVE_TOOL_OUTCOME_SMOKE=1` and run:
+
+```bash
+python -m pytest tests/test_workflow_tool_outcomes.py::test_live_materialized_outcomes_through_mozaiks_runtime -q -s --no-cov --reruns 0
+```
+
+This opt-in test spends real model tokens. It materializes a temporary workflow,
+loads it through Mozaiks, and executes real AG2 agents for success, repair,
+exception, unknown-result, and exhausted-budget cases. Assertions check persisted
+state, tool invocation counts, agent routes, failed-versus-completed status, and
+usage events. Only the tool faults are injected; model calls and persistence are
+not mocked. Generated fixtures and unique smoke run IDs do not modify active
+app bundles. This does not test external provider idempotency or a full app build.
+
+`RuntimeUIPrimitiveSmoke` dogfoods outcome-controlled approval and artifact
+steps after a composer reply. With `RUN_LIVE_AG2_SMOKE=1`,
+`tests/test_workflow_live_smoke.py::test_live_ui_primitive_smoke_workflow` checks
+that each tool ran once and its persisted UI state matches the reported result.
+The live task-batch test in that file compares the synthesis output with actual
+executor metadata, rather than trusting the model's success claim. Continuations
+receive current values through the existing agent-declared context projection.
 
 ### `extended_orchestration/task_batches.yaml`
 

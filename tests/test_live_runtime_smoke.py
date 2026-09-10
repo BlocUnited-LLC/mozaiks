@@ -75,20 +75,42 @@ class TestRuntimeToolCallSmokeStructure:
 
 
 class TestRuntimeUIPrimitiveSmokeStructure:
+    def test_runtime_parses_all_declarations_and_outcome_routes(self):
+        from mozaiksai.core.workflow.contract_validation import validate_workflow_tool_outcomes
+        from mozaiksai.core.workflow.declarative.contracts import (
+            parse_agents_config,
+            parse_orchestrator_config,
+            parse_tools_config,
+            parse_transition_graph_config,
+        )
+
+        root = WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke"
+        config = {
+            **parse_orchestrator_config(_read_yaml(root / "orchestrator.yaml")),
+            "agents": parse_agents_config(_read_yaml(root / "agents.yaml")),
+            "tools": parse_tools_config(_read_yaml(root / "tools.yaml"))["tools"],
+            "transition_graph": parse_transition_graph_config(_read_yaml(root / "transition_graph.yaml")),
+            "structured_outputs": _read_yaml(root / "structured_outputs.yaml"),
+            "context_variables": _read_yaml(root / "context_variables.yaml"),
+        }
+        validate_workflow_tool_outcomes(config)
+
     def test_orchestrator_is_hitl(self) -> None:
         data = _read_yaml(WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke" / "orchestrator.yaml")
         assert data["human_in_the_loop"] is True
         assert data["initial_agent"] == "IntakeAgent"
 
-    def test_context_variable_trigger_uses_contains(self) -> None:
-        data = _read_yaml(WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke" / "context_variables.yaml")
-        trigger = data["definitions"]["intake_complete"]["source"]["triggers"][0]
-        # Must use 'contains' not 'equals' — LLMs pad output around the NEXT token.
-        assert "contains" in trigger["match"], (
-            "intake_complete trigger must use 'contains: NEXT', not 'equals: NEXT'. "
-            "LLMs rarely emit bare tokens without surrounding text."
-        )
-        assert trigger["match"]["contains"] == "NEXT"
+    def test_user_reply_routes_directly_to_review_without_text_sentinels(self) -> None:
+        data = _read_yaml(WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke" / "transition_graph.yaml")
+        assert [(rule["source_agent"], rule["target_agent"], rule["transition_type"]) for rule in data["transition_rules"][:2]] == [
+            ("user", "ReviewAgent", "after_turn"),
+            ("IntakeAgent", "user", "after_turn"),
+        ]
+        context = _read_yaml(WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke" / "context_variables.yaml")
+        assert "intake_complete" not in context["definitions"]
+        tools = _read_yaml(WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke" / "tools.yaml")["tools"]
+        assert all(tool["auto_tool_call"] and not tool["bind_to_agent"] for tool in tools)
+        assert {tool["outcome"]["context_key"] for tool in tools} == {"approval_outcome", "artifact_outcome"}
 
     def test_structured_output_defines_smoke_result(self) -> None:
         data = _read_yaml(WORKFLOWS_ROOT / "RuntimeUIPrimitiveSmoke" / "structured_outputs.yaml")
@@ -213,11 +235,11 @@ class TestLiveRuntimeUIPrimitiveSmoke:
         """
         Tests the three runtime UI lanes in sequence:
           1. ComposerReply   — IntakeAgent asks a question; user answers via composer.
-          2. ApprovalCard    — ReviewAgent calls request_acceptance_approval; smoke approves.
-          3. ArtifactViewer  — ReviewAgent calls show_acceptance_diagram; artifact is emitted.
+          2. ApprovalCard    — ReviewAgent's auto tool requests approval; smoke approves.
+          3. ArtifactViewer  — ArtifactAgent's auto tool emits the artifact after approval.
 
-        The intake_complete context variable must fire (contains: NEXT trigger) to route
-        IntakeAgent → ReviewAgent.  If this test hangs, the trigger mechanism is broken.
+        The graph routes the composer reply directly to ReviewAgent without
+        asking the model to emit a routing sentinel.
         """
         from scripts.run_live_workflow_smoke import run_live_workflow_smoke
 
@@ -240,7 +262,7 @@ class TestLiveRuntimeUIPrimitiveSmoke:
         output = result.structured_output or {}
         assert output.get("composer_reply_seen") is True, (
             "ReviewAgent must see the composer reply. "
-            "If False, intake_complete trigger did not fire and routing to ReviewAgent failed."
+            "If False, the user-to-review handoff lost the composer reply."
         )
         assert output.get("artifact_emitted") is True, (
             "show_acceptance_diagram must emit the artifact. "

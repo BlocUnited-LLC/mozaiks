@@ -6,7 +6,7 @@ import inspect
 import logging
 from collections.abc import Callable, Mapping
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -53,7 +53,7 @@ def wrap_tool_outcome(func: Callable, contract: ToolOutcomeSpec) -> Callable:
             value = contract.error_value
         context.set(contract.attempts_key, attempts)
         context.set(contract.context_key, value)
-        return result
+        return cast(Mapping, result)
 
     if inspect.iscoroutinefunction(func):
         @wraps(func)
@@ -86,5 +86,5 @@ def wrap_tool_outcome(func: Callable, contract: ToolOutcomeSpec) -> Callable:
                 raise
             return finish(context, attempts, result)
 
-    wrapped._mozaiks_tool_outcome = contract
+    wrapped._mozaiks_tool_outcome = contract  # type: ignore[attr-defined]
     return wrapped

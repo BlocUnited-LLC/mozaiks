@@ -559,6 +559,20 @@ async def _project_ag2_wal_to_mozaiks_transport(
     return sequence
 
 
+def _task_batch_continuation_prompt(
+    config: dict[str, Any], agent_name: str, context_variables: dict[str, Any],
+) -> str:
+    from .context.context_utils import apply_context_exposures
+
+    agent_plan = ((config.get("context_variables") or {}).get("agents") or {}).get(agent_name) or {}
+    variables = list(agent_plan.get("variables") or [])
+    return apply_context_exposures(
+        "Continue with the completed deterministic task batch outputs. "
+        "These current values replace the pre-execution context snapshot.",
+        [], context_variables, variables,
+    )
+
+
 async def _run_ag2_network_phase(
     *,
     workflow_name: str,
@@ -805,11 +819,12 @@ async def run_workflow_orchestration(
         else:
             ctx_dict = {}
 
-        ctx_dict.setdefault("workflow_name", workflow_name)
-        ctx_dict.setdefault("app_id", app_id)
-        ctx_dict.setdefault("chat_id", chat_id)
-        if user_id:
-            ctx_dict.setdefault("user_id", user_id)
+        ctx_dict.update({
+            "workflow_name": workflow_name,
+            "app_id": app_id,
+            "chat_id": chat_id,
+            "user_id": user_id or "anonymous",
+        })
         if context is not None:
             for key in ("workflow_name", "app_id", "chat_id", "user_id"):
                 if key not in ctx_dict:
@@ -1131,7 +1146,7 @@ async def run_workflow_orchestration(
                         agents=agents,
                         transition_rules=transition_rules,
                         initial_agent_name=continuation_agent,
-                        initial_message="Continue with the completed deterministic task batch outputs.",
+                        initial_message=_task_batch_continuation_prompt(config, continuation_agent, ctx_dict),
                         agent_output_handler=_before_agent_packet,
                         close_timeout_seconds=close_timeout_seconds,
                         context_variables=ctx_dict,

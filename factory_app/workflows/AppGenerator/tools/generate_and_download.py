@@ -504,7 +504,7 @@ def _export_repair_outcome(acceptance: dict[str, Any]) -> str:
             "ConfigMiddlewareAgent": "repair_integration",
             "ServiceAgent": "repair_service",
             "FrontendStubAgent": "repair_frontend",
-        }.get(bundle.get("target_agent"), "blocked")
+        }.get(str(bundle.get("target_agent") or ""), "blocked")
     return "blocked"
 
 

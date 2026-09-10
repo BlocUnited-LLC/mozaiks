@@ -14,6 +14,7 @@ from mozaiksai.core.workflow.context.authority import (
     CONTEXT_BRIDGE_WRITER,
     DETERMINISTIC_TOOL_WRITER,
     PERSISTED_REPLAY_WRITER,
+    RUNTIME_SYSTEM_WRITER,
     UI_RESPONSE_TRIGGER_WRITER,
     USER_TEXT_TRIGGER_WRITER,
     ContextAuthorityError,
@@ -135,6 +136,19 @@ def test_caller_cannot_set_authority_or_routing_keys(key: str) -> None:
 
     with pytest.raises(ContextAuthorityError):
         policy.require_can_write(key, writer_id=CALLER_INPUT_WRITER)
+
+
+@pytest.mark.parametrize("key", ["app_id", "chat_id", "user_id", "workflow_name"])
+def test_runtime_can_seed_builtin_identity_without_workflow_declarations(key: str) -> None:
+    policy = build_context_authority_policy(workflow_name="Smoke", definitions={})
+    policy.require_can_write(key, writer_id=RUNTIME_SYSTEM_WRITER)
+    for writer in (CALLER_INPUT_WRITER, CONTEXT_BRIDGE_WRITER, DETERMINISTIC_TOOL_WRITER):
+        with pytest.raises(ContextAuthorityError):
+            policy.require_can_write(key, writer_id=writer)
+    assert policy.variables[key].persisted is False
+    assert policy.variables[key].model_visible is False
+    with pytest.raises(ContextAuthorityError, match="unknown_key"):
+        policy.require_can_write("undeclared_state", writer_id=RUNTIME_SYSTEM_WRITER)
 
 
 def test_context_bridge_rejects_authority_key_write() -> None:
@@ -465,7 +479,7 @@ def test_factory_context_inventory_classifies_authority_like_keys() -> None:
             definitions=plan.definitions,
             transition_rules=transition_rules,
         )
-        assert set(policy.variables) == set(plan.definitions)
+        assert set(policy.variables) == set(plan.definitions) | {"app_id", "chat_id", "user_id", "workflow_name"}
         for key, authority in policy.variables.items():
             if any(part in key.lower() for part in authority_like_parts):
                 assert authority.authority_class.value != "mutable_workflow_state", key
