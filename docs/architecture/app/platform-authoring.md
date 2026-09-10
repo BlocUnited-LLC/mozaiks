@@ -123,6 +123,15 @@ The generator should not author low-level runtime plumbing here unless the user 
 
 `app/app.json` is for app identity, startup route, and product auth intent.
 
+The shared shell takes its default app scope from the active host's
+`/api/shell-config` response through `NavigationProvider`. `ChatUIProvider`
+waits for that response and uses its `appId` for chat, workflow launches, and
+usage scope. It must not invent a `demo-app` identity. Standalone embedders
+without a navigation provider may supply their own `uiConfig`; a missing
+identity in the app shell is a configuration error, not permission to launch
+under a placeholder. Server-side authentication and scope checks remain
+authoritative.
+
 It is not the place for shell colors, login theme files, footer links, or header chrome.
 
 It is also not the place for local development shortcuts such as auto-login.

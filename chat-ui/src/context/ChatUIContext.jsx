@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createInitialSurfaceState, mapSurfaceEventToAction, uiSurfaceReducer } from '../state/uiSurfaceReducer';
 import platform from '../platform/index.js';
+import { NavigationContext } from '../providers/NavigationProvider';
 import { logChatPersistence } from '../session/chatSessionStorage';
 import {
   getStoredActiveChatId,
@@ -33,6 +34,7 @@ export const ChatUIProvider = ({
   onReady = () => {},
   agents = []
 }) => {
+  const navigation = useContext(NavigationContext);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
@@ -264,9 +266,15 @@ export const ChatUIProvider = ({
   }, [agents]);
 
   const resolvedConfig = useMemo(() => {
-    if (uiConfig && typeof uiConfig === 'object') return uiConfig;
-    return {};
-  }, [uiConfig]);
+    const base = uiConfig && typeof uiConfig === 'object' ? uiConfig : {};
+    if (!navigation?.appId) return base;
+    // The active host owns the default app scope, not a shell/demo placeholder.
+    return {
+      ...base,
+      appName: navigation.appName || base.appName,
+      chat: { ...base.chat, defaultAppId: navigation.appId },
+    };
+  }, [uiConfig, navigation?.appId, navigation?.appName]);
 
   const contextValue = {
     // User state
@@ -352,7 +360,7 @@ export const ChatUIProvider = ({
     },
   };
 
-  if (loading) {
+  if (loading || navigation?.loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-blue-900">
         <div className="text-white text-center">
@@ -361,6 +369,10 @@ export const ChatUIProvider = ({
         </div>
       </div>
     );
+  }
+
+  if (navigation && !resolvedConfig.chat?.defaultAppId) {
+    return <div role="alert">App configuration could not be loaded.</div>;
   }
 
   return (

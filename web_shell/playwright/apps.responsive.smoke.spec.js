@@ -6,6 +6,9 @@ import { expect, test } from '@playwright/test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
+const appConfig = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'app.json'), 'utf8'),
+);
 const themeConfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'brand', 'theme_config.json'), 'utf8'),
 );
@@ -33,6 +36,8 @@ const transitionRoutes = (extensionRegistry.entrypoints || []).map((entrypoint) 
 }));
 const composedShellConfig = {
   ...shellConfig,
+  appId: appConfig.appId,
+  appName: appConfig.appName,
   pages: [...(routeManifest.pages || []), ...transitionRoutes],
 };
 const dashboardPayload = {
