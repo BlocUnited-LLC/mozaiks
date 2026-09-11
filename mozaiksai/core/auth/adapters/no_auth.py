@@ -44,6 +44,8 @@ class NoAuthAdapter(BaseAuthAdapter):
         "workspace_integrations.manage",
         "app_registry.read",
         "app_registry.manage",
+        "security_readiness.read",
+        "security_readiness.manage",
     ]
 
     def __init__(
@@ -60,7 +62,9 @@ class NoAuthAdapter(BaseAuthAdapter):
         # AUTH_ANON_ROLES: comma-separated list of roles for the anonymous dev user
         # e.g. AUTH_ANON_ROLES=admin,user  — enables admin portal in no-auth dev mode
         env_roles_raw = self._setting("AUTH_ANON_ROLES")
-        env_roles = [r.strip() for r in env_roles_raw.split(",") if r.strip()] if env_roles_raw else []
+        env_roles = (
+            [r.strip() for r in env_roles_raw.split(",") if r.strip()] if env_roles_raw else []
+        )
         self._default_roles = default_roles or env_roles
         # AUTH_ANON_SCOPES: comma-separated override for module permission scopes.
         # Defaults to _DEV_DEFAULT_SCOPES which grants all first-party module

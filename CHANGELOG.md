@@ -30,6 +30,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### App workspace alignment
 
+- Add a first-party Factory `security_readiness` module for app/build security
+  findings, summaries, and review status without introducing hosted-only
+  compliance logic into OSS.
 - Expose the existing reference bundle evaluator through `factory_app.eval` so
   hosted apps can consume it without copying the implementation. Factory build
   events carry bounded generation evidence through the existing authenticated

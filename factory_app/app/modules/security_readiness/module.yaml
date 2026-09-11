@@ -1,0 +1,205 @@
+schema_version: mozaiks.module.v1
+module:
+  id: security_readiness
+  display_name: Security Readiness
+  version: 1.0.0
+  description: Tracks security-readiness findings and review state for Factory app builds without claiming compliance certification.
+  owner: app
+  visibility: private
+  handler: backend.handler:SecurityReadinessModule
+permissions:
+  - id: security_readiness.read
+    description: View security-readiness findings and summaries.
+  - id: security_readiness.manage
+    description: Record and update security-readiness findings.
+actions:
+  - id: record_assessment
+    description: Save the security-readiness findings produced for one app build or artifact.
+    handler_method: record_assessment
+    input_schema:
+      type: object
+      additionalProperties: false
+      required:
+        - app_id
+        - findings
+      properties:
+        app_id:
+          type: string
+        build_id:
+          type: string
+        build_registry_id:
+          type: string
+        artifact_version_id:
+          type: string
+        source:
+          type: string
+          enum: [manual, validation, eval, import]
+        assessed_at:
+          type: string
+        findings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - title
+              - severity
+              - control_area
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              severity:
+                type: string
+                enum: [low, medium, high, critical]
+              status:
+                type: string
+                enum: [open, accepted, resolved]
+              control_area:
+                type: string
+                enum:
+                  - auth
+                  - secrets
+                  - permissions
+                  - tenant_isolation
+                  - managed_capability_boundary
+                  - deployment
+                  - data_persistence
+                  - evals
+                  - compliance_readiness
+              evidence_ref:
+                type: string
+              remediation:
+                type: string
+    output_schema:
+      type: object
+      required: [success, saved, app_id, summary]
+      properties:
+        success:
+          type: boolean
+        saved:
+          type: integer
+        app_id:
+          type: string
+        summary:
+          type: object
+    permissions:
+      - security_readiness.manage
+    emits:
+      - domain.security_readiness.assessment_recorded
+
+  - id: list_findings
+    description: List security-readiness findings for one app, optionally filtered by status, severity, or control area.
+    handler_method: list_findings
+    input_schema:
+      type: object
+      additionalProperties: false
+      required:
+        - app_id
+      properties:
+        app_id:
+          type: string
+        status:
+          type: string
+          enum: [open, accepted, resolved]
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        control_area:
+          type: string
+          enum:
+            - auth
+            - secrets
+            - permissions
+            - tenant_isolation
+            - managed_capability_boundary
+            - deployment
+            - data_persistence
+            - evals
+            - compliance_readiness
+        limit:
+          type: integer
+    output_schema:
+      type: object
+      required: [app_id, findings, count]
+      properties:
+        app_id:
+          type: string
+        findings:
+          type: array
+          items:
+            type: object
+        count:
+          type: integer
+    permissions:
+      - security_readiness.read
+
+  - id: get_summary
+    description: Return a grouped readiness summary for one app without exposing secrets or proprietary evidence.
+    handler_method: get_summary
+    input_schema:
+      type: object
+      additionalProperties: false
+      required:
+        - app_id
+      properties:
+        app_id:
+          type: string
+    output_schema:
+      type: object
+      required: [app_id, summary]
+      properties:
+        app_id:
+          type: string
+        summary:
+          type: object
+    permissions:
+      - security_readiness.read
+
+  - id: update_finding_status
+    description: Update review state for a security-readiness finding.
+    handler_method: update_finding_status
+    input_schema:
+      type: object
+      additionalProperties: false
+      required:
+        - finding_id
+        - status
+      properties:
+        finding_id:
+          type: string
+        status:
+          type: string
+          enum: [open, accepted, resolved]
+        note:
+          type: string
+    output_schema:
+      type: object
+      required: [success, finding]
+      properties:
+        success:
+          type: boolean
+        finding:
+          type: object
+    permissions:
+      - security_readiness.manage
+    emits:
+      - domain.security_readiness.finding_status_updated
+capabilities:
+  - capability_id: security_readiness.findings.list
+    kind: action
+    target: list_findings
+    title: List Security Readiness Findings
+    permissions:
+      - security_readiness.read
+    input_schema:
+      type: object
+  - capability_id: security_readiness.summary.get
+    kind: action
+    target: get_summary
+    title: Get Security Readiness Summary
+    permissions:
+      - security_readiness.read
+    input_schema:
+      type: object
