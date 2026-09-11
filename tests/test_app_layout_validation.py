@@ -97,6 +97,39 @@ def test_report_serialization_round_trip_is_strict() -> None:
         type(report).model_validate(payload)
 
 
+@pytest.mark.parametrize("path", [
+    "services/__init__.py",
+    "services/integrations/__init__.py",
+    "services/routes/__init__.py",
+    "services/adapters/__init__.py",
+    "services/adapters/auth/__init__.py",
+])
+def test_optional_service_package_markers_classify_as_app_support(path: str) -> None:
+    report = validate_file_map_layout({path: ""})
+
+    assert report.passed
+    classification = report.classifications[0]
+    assert classification.artifact_kind == ArtifactKind.APP_SERVICE_SUPPORT.value
+    assert classification.owner == LayoutOwner.APP_WORKSPACE.value
+    assert classification.requirement == Requirement.OPTIONAL.value
+
+
+@pytest.mark.parametrize("path", [
+    "services/data/__init__.py",
+    "services/security/__init__.py",
+    "services/other/__init__.py",
+    "services/adapters/auth/nested/__init__.py",
+])
+def test_service_package_markers_do_not_authorize_other_service_directories(path: str) -> None:
+    report = validate_file_map_layout({path: ""})
+
+    assert not report.passed
+    assert report.diagnostics[0].code in {
+        LayoutDiagnosticCode.PROHIBITED_PATH,
+        LayoutDiagnosticCode.UNKNOWN_PATH,
+    }
+
+
 def test_prohibited_control_plane_and_credential_paths_fail() -> None:
     report = validate_file_map_layout(
         {

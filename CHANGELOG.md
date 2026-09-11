@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Preserve explicitly empty generated files, including Python package markers,
+  so app service imports resolve from the generated bundle.
+
 - ValueEngine concept review now waits for a structured approve, request-changes,
   or cancel action tied to the displayed draft. Stale reviews, failed saves, and
   invalid responses cannot complete the workflow. The declared review budget is
