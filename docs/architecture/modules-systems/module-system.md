@@ -16,6 +16,29 @@ A module is a self-contained unit of **deterministic business logic** declared i
 Modules are **not** AI workflows. They run without AI. Workflows call modules; modules do not
 contain orchestration or reasoning logic.
 
+### Workflow tool dispatch
+
+Tools running in a live authenticated workflow may call
+`mozaiksai.core.workflow.module_tools.dispatch_workflow_module_action(module, action, params)`.
+The helper obtains the workflow/app/chat identity from the active AG2 tool invocation
+and the principal from that run's server-owned WebSocket connection. Host scope hooks
+resolve membership before the existing module executor enforces action permissions
+and entitlements. Identity, permissions, and bearer tokens are never taken from model
+arguments. Expired, disconnected, mismatched, or revoked invocations fail closed.
+Headless runs without a live principal must use their own explicit server-owned
+dispatch contract; this helper does not grant a background bypass.
+
+The Factory `SecurityReadiness` workflow uses this path to record findings in the
+first-party `security_readiness` module. `app_id` retains the runtime host scope;
+`build_registry_id` identifies the reviewed project, while `build_id` and
+`artifact_version_id` retain assessment lineage. List and summary actions accept
+an optional `build_registry_id` filter applied before the result limit. Source-local
+scanner keys become opaque persisted ids scoped to owner, app, project, and artifact.
+The workflow converts scanner evidence paths and recommendations into the module's
+`evidence_ref` and `remediation` fields. Missing persistence stays visible in the
+advisory review, and zero inspected files yields `not_assessed`. An empty findings
+collection does not prove a saved passing assessment; this module stores findings.
+
 ---
 
 ## Canonical Module Shape

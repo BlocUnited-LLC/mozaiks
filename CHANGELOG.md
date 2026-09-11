@@ -14,6 +14,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Security Readiness now saves findings through permissioned workflow module
+  dispatch using the live session principal. Findings retain project/build
+  association and cannot overwrite another project's matching scanner rule.
+  Unavailable persistence and uninspected bundles remain explicit in review.
+- Studio workspaces inherit packaged first-party modules through the standard
+  app loader. App-local modules override defaults by id, so hosted workspaces
+  can reuse Security Readiness without copying its implementation.
+
 - Bind app service imports to the selected workspace on reload and reset
   platform health state for each startup attempt.
 

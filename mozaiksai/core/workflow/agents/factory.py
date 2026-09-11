@@ -166,6 +166,21 @@ _WORKFLOW_TOOL_INVOCATION: ContextVar[_WorkflowToolInvocation | None] = ContextV
 )
 
 
+def active_workflow_tool_run() -> tuple[str, str, str]:
+    """Return server-bound workflow/app/chat identity during a live tool call."""
+    invocation = _WORKFLOW_TOOL_INVOCATION.get()
+    if (
+        invocation is None
+        or not invocation.active
+        or invocation.run_identity is None
+        or invocation.policy is None
+        or invocation.bridge._authority_policy is not invocation.policy
+        or invocation.bridge._run_identity != invocation.run_identity
+    ):
+        raise PermissionError("workflow_tool_invocation_unavailable")
+    return invocation.run_identity
+
+
 @contextmanager
 def _workflow_tool_invocation(bridge: ContextVariablesBridge):
     invocation = _WorkflowToolInvocation(bridge, bridge._authority_policy, bridge._run_identity)

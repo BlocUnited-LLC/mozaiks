@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any, TypedDict
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 SEVERITIES = ("low", "medium", "high", "critical")
 STATUSES = ("open", "accepted", "resolved")
@@ -87,8 +88,16 @@ def build_finding_document(
         raise ValueError("app_id is required")
     if not title:
         raise ValueError("finding.title is required")
+    source_key = normalize_optional_text(finding.get("finding_id"))
+    # Scanner rule ids repeat between apps. Persist an opaque id scoped to the
+    # owner, project, and assessed artifact so replay cannot overwrite another app.
+    identity = json.dumps(
+        [owner_user_id, app_id, build_registry_id, build_id, artifact_version_id, source, source_key],
+        separators=(",", ":"),
+    )
+    finding_id = f"sr_{uuid5(NAMESPACE_URL, identity).hex}" if source_key else f"sr_{uuid4().hex}"
     return {
-        "finding_id": str(finding.get("finding_id") or f"sr_{uuid4().hex}"),
+        "finding_id": finding_id,
         "app_id": app_id,
         "build_id": normalize_optional_text(build_id),
         "build_registry_id": normalize_optional_text(build_registry_id),

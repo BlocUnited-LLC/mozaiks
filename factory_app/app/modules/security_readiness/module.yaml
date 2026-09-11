@@ -46,6 +46,9 @@ actions:
               - severity
               - control_area
             properties:
+              finding_id:
+                type: string
+                description: Source-local finding key; storage scopes it to owner, app, project, and artifact.
               title:
                 type: string
               description:
@@ -100,6 +103,8 @@ actions:
       properties:
         app_id:
           type: string
+        build_registry_id:
+          type: string
         status:
           type: string
           enum: [open, accepted, resolved]
@@ -145,6 +150,8 @@ actions:
         - app_id
       properties:
         app_id:
+          type: string
+        build_registry_id:
           type: string
     output_schema:
       type: object

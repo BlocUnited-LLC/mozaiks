@@ -273,7 +273,9 @@ async def _platform_startup() -> None:
     database_startup_policy = get_database_startup_policy()
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
     try:
-        load_result = await AppLoader.load(str(app_root))
+        module_defaults_path = getattr(app.state, "module_defaults_path", None)
+        load_options = {"module_defaults_path": module_defaults_path} if module_defaults_path else {}
+        load_result = await AppLoader.load(str(app_root), **load_options)
         app.state.subscriptions_config = load_result.subscriptions_config
         app.state.page_schemas = {
             name: schema.model_dump(mode="json", exclude_none=True)

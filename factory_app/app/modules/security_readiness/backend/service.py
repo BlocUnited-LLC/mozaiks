@@ -65,7 +65,10 @@ class SecurityReadinessService:
         saved = await self.repo.insert_findings(ctx, documents)
         all_findings = await self.repo.list_findings(
             ctx,
-            query=app_findings_query(ctx, app_id=normalized_app_id),
+            query=app_findings_query(
+                ctx, app_id=normalized_app_id,
+                build_registry_id=normalize_optional_text(build_registry_id),
+            ),
             limit=250,
         )
         summary = summarize_findings(all_findings)
@@ -73,8 +76,8 @@ class SecurityReadinessService:
             "domain.security_readiness.assessment_recorded",
             {
                 "app_id": normalized_app_id,
-                "build_id": build_id,
-                "artifact_version_id": artifact_version_id,
+                **({"build_id": build_id} if build_id else {}),
+                **({"artifact_version_id": artifact_version_id} if artifact_version_id else {}),
                 "saved": len(saved),
             },
         )
@@ -85,6 +88,7 @@ class SecurityReadinessService:
         ctx: ModuleContext,
         *,
         app_id: str,
+        build_registry_id: str | None = None,
         status: str | None = None,
         severity: str | None = None,
         control_area: str | None = None,
@@ -96,6 +100,7 @@ class SecurityReadinessService:
         query = app_findings_query(
             ctx,
             app_id=normalized_app_id,
+            build_registry_id=normalize_optional_text(build_registry_id),
             status=normalize_enum(status, STATUSES, default="open", field_name="status") if status else None,
             severity=normalize_enum(severity, SEVERITIES, default="medium", field_name="severity") if severity else None,
             control_area=normalize_enum(
@@ -109,13 +114,18 @@ class SecurityReadinessService:
         public = [public_finding(item) for item in findings]
         return {"app_id": normalized_app_id, "findings": public, "count": len(public)}
 
-    async def get_summary(self, ctx: ModuleContext, *, app_id: str) -> dict[str, Any]:
+    async def get_summary(
+        self, ctx: ModuleContext, *, app_id: str, build_registry_id: str | None = None,
+    ) -> dict[str, Any]:
         normalized_app_id = normalize_optional_text(app_id)
         if not normalized_app_id:
             raise ValueError("app_id is required")
         findings = await self.repo.list_findings(
             ctx,
-            query=app_findings_query(ctx, app_id=normalized_app_id),
+            query=app_findings_query(
+                ctx, app_id=normalized_app_id,
+                build_registry_id=normalize_optional_text(build_registry_id),
+            ),
             limit=250,
         )
         return {"app_id": normalized_app_id, "summary": summarize_findings(findings)}

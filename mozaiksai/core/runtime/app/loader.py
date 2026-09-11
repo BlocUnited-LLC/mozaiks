@@ -102,11 +102,14 @@ class AppLoader:
     APP_JSON_NAME = "app.json"
 
     @classmethod
-    async def load(cls, path: str = ".") -> AppLoadResult:
+    async def load(cls, path: str = ".", *, module_defaults_path: str | None = None) -> AppLoadResult:
         """Load app metadata and any discovered modules from a bundle directory.
 
         Args:
             path: Root directory of the platform bundle.
+            module_defaults_path: Optional host-owned app bundle supplying default modules.
+                Active app module folders override defaults by id. Other app families
+                (config, data, services, pages) remain owned by the active app root.
 
         Returns:
             AppLoadResult with parsed definition and loaded modules.
@@ -129,7 +132,7 @@ class AppLoader:
             raise AppLoadError("app.json must be a JSON object")
 
         raw = cls._resolve_env_vars(raw)
-        module_loader = ModuleLoader(base_path=str(base_path))
+        module_loader = ModuleLoader(base_path=str(base_path), module_defaults_path=module_defaults_path)
         module_names = module_loader.discover_module_names()
         workflow_names = cls._discover_workflow_names(base_path)
         page_names = cls._discover_page_names(base_path)
