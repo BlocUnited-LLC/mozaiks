@@ -63,7 +63,7 @@ def live_runtime(monkeypatch):
         action_emits={action["id"]: action.get("emits", []) for action in manifest["actions"]},
         event_payload_schemas={event["type"]: event["payload_schema"] for event in event_contract["events"]},
     )
-    persistence = _WrapperStylePersistence()
+    persistence = _WrapperStylePersistence(RUN[1])
     scopes = []
 
     def storage(request):

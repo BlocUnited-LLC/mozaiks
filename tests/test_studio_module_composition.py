@@ -127,6 +127,8 @@ async def test_packaged_security_module_and_product_module_dispatch_together(tmp
             return [row for row in documents if all(row.get(key) == value for key, value in query.items())][:limit]
 
     class Persistence:
+        app_id = "host-app"
+
         def collection(self, module_id, entity_name):
             assert (module_id, entity_name) == ("security_readiness", "findings")
             return Collection()

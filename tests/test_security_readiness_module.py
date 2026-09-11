@@ -107,7 +107,8 @@ class _WrapperStyleCollection:
 
 
 class _WrapperStylePersistence:
-    def __init__(self) -> None:
+    def __init__(self, app_id: str = "app_1") -> None:
+        self.app_id = app_id
         self.collection_handle = _WrapperStyleCollection()
         self.collection_calls: list[tuple[str, str]] = []
 
@@ -344,6 +345,7 @@ async def test_repo_uses_canonical_module_persistence_wrapper() -> None:
     )
 
     assert listed[0]["finding_id"] == "sr_1"
+    assert ctx.persistence.collection_handle.find_many_calls[0]["query"] == {"owner_user_id": "user_1"}
     assert ctx.persistence.collection_calls == [
         ("security_readiness", "findings"),
         ("security_readiness", "findings"),
@@ -351,9 +353,24 @@ async def test_repo_uses_canonical_module_persistence_wrapper() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repo_rejects_app_scope_override_before_read_or_write() -> None:
+    ctx = _WrapperStyleCtx()
+    repo = SecurityReadinessRepo()
+    finding = {"finding_id": "sr_1", "app_id": "foreign-app", "owner_user_id": "user_1"}
+
+    with pytest.raises(ValueError, match="persistence context app_id"):
+        await repo.insert_findings(ctx, [finding])
+    with pytest.raises(ValueError, match="persistence context app_id"):
+        await repo.list_findings(ctx, query={"app_id": "foreign-app", "owner_user_id": "user_1"}, limit=10)
+
+    assert ctx.persistence.collection_handle.update_calls == []
+    assert ctx.persistence.collection_handle.find_many_calls == []
+
+
+@pytest.mark.asyncio
 async def test_same_scanner_rule_cannot_overwrite_another_project_or_owner() -> None:
     ctx = _FakeCtx()
-    ctx.persistence = _WrapperStylePersistence()
+    ctx.persistence = _WrapperStylePersistence("factory-host")
     service = SecurityReadinessService()
     finding = {"finding_id": "auth:missing", "title": "Auth missing", "severity": "high", "control_area": "auth"}
     for project in ("project_a", "project_b", "project_a"):
