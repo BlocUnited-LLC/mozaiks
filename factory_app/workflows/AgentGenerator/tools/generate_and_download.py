@@ -22,6 +22,7 @@ from factory_app.workflows._shared.workflow_integration import (
     extract_workflow_integration_metadata_from_bundle_entries,
 )
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
@@ -218,6 +219,7 @@ async def _register_workflow_bundle_artifact_version(
                 "artifact_path": str(zip_path) if zip_path else None,
                 "workflow_name": bundle_name,
                 "workflow_integration_metadata": workflow_integration_metadata,
+                "workflow_plan_review": detach(context_variables.get("workflow_plan_review")),
             },
         },
     )
@@ -255,17 +257,17 @@ async def _record_context_and_artifacts(
         else None
     )
 
-    websocket_url = resolve_agent_websocket_url(str(app_id))
-    api_url = resolve_agent_api_url(str(app_id))
+    websocket_url = resolve_agent_websocket_url(str(app_id)) if workflow_names else None
+    api_url = resolve_agent_api_url(str(app_id)) if workflow_names else None
     capability_id = (
         str(primary_workflow.get("capability_id"))
         if isinstance(primary_workflow, dict) and primary_workflow.get("capability_id")
-        else (pack_name.lower().replace("_", "-").replace(" ", "-") if pack_name else None)
+        else None
     )
     generated_workflow_name = (
         str(primary_workflow.get("workflow_name"))
         if isinstance(primary_workflow, dict) and primary_workflow.get("workflow_name")
-        else pack_name
+        else None
     )
     generated_workflow_startup_mode = (
         primary_workflow.get("startup_mode")
@@ -339,15 +341,6 @@ async def _record_context_and_artifacts(
     except Exception as exc:
         _logger.warning("Optional workflow artifact projection failed: %s", exc)
 
-    if context_variables and hasattr(context_variables, "set"):
-        context_variables.set("agent_websocket_url", websocket_url)
-        context_variables.set("agent_api_url", api_url)
-        context_variables.set("generated_workflow_name", generated_workflow_name)
-        context_variables.set("generated_workflow_capability_id", capability_id)
-        context_variables.set("generated_workflow_startup_mode", generated_workflow_startup_mode)
-        context_variables.set("generated_workflow_trigger_events", generated_workflow_trigger_events)
-
-
 # ---------------------------------------------------------------------------
 # Main tool
 # ---------------------------------------------------------------------------
@@ -410,7 +403,7 @@ async def generate_and_download(
     pack_name: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
-        workflow_bundle_results = context_variables.get("workflow_bundle_results")
+        workflow_bundle_results = detach(context_variables.get("workflow_bundle_results"))
         pack_name = context_variables.get("pack_name")
 
     if not isinstance(workflow_bundle_results, dict) or not workflow_bundle_results:

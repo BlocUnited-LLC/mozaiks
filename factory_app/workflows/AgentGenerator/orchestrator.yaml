@@ -4,9 +4,9 @@ max_turns: 25
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
-initial_message: You are part of a collaborative effort to generate a multi-agent
-  workflow per AG2. InterviewAgent, start from the current
-  context, guide the user with assumptions or suggestions, and ask only the most
-  important missing clarifying question.
+initial_message: InterviewAgent, check the approved app context for actual AI
+  requirements. Ordinary deterministic modules and pages do not require an AI
+  workflow. If no AI work is requested, emit NEXT immediately. Otherwise ask
+  only a missing question that changes the required AI workflow design.
 initial_agent: InterviewAgent
 

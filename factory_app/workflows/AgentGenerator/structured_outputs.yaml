@@ -127,8 +127,8 @@ models:
         description: Workflow name this diagram represents
       diagram:
         type: str
-        description: Complete Mermaid sequence diagram text, beginning with 'sequenceDiagram'.
-          Must include required blank line after participant declarations.
+        description: Mermaid sequence diagram beginning with sequenceDiagram, with a blank
+          line after participant declarations. Empty string when workflows_spec is empty.
       legend:
         type: list
         items: str
@@ -1332,15 +1332,13 @@ models:
     fields:
       is_multi_workflow:
         type: bool
-        description: Whether this request requires multiple workflows (pack) or
-          a single workflow
+        description: True exactly when workflows contains more than one item. False for zero or one.
       pack_partition_reason:
         type: union
         variants:
         - str
         - 'null'
-        description: If is_multi_workflow is true, explains why distinct workflows
-          are needed. Null for single workflows.
+        description: Required non-empty rationale for zero or multiple workflows; may be null for one.
       pack_name:
         type: str
         description: Name for the workflow pack (Title Case, 2-4 words). Used as
@@ -1348,8 +1346,8 @@ models:
       workflows:
         type: list
         items: WorkflowInPack
-        description: List of workflows in this pack. Single-workflow packs have
-          exactly one item with role='primary'.
+        description: Only required AI workflows. Use [] for deterministic apps with no workflow
+          surfaces. Single-workflow packs have one item with role='primary'.
   PatternSelectionOutput:
     type: model
     fields:

@@ -259,6 +259,7 @@ def test_factory_app_react_files_are_classified() -> None:
         and page["component"] not in _non_admin_page_components
     }
     support_files = {
+        "factory_app/workflows/AgentGenerator/ui/WorkflowPlanReview.jsx",
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",

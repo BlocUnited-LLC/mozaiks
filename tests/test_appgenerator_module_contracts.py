@@ -127,8 +127,13 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert "output_contract" not in checkpoint_fields
 
     contract_fields = models["ModuleContractBundle"]["fields"]
-    assert contract_fields["reactions_yaml"]["type"] == "ModuleReactionsManifest"
-    assert contract_fields["admin_yaml"]["type"] == "ModuleAdminManifest"
+    for name, model in {
+        "events_yaml": "ModuleEventsManifest", "reactions_yaml": "ModuleReactionsManifest",
+        "notifications_yaml": "ModuleNotificationsManifest", "settings_yaml": "ModuleSettingsManifest",
+        "admin_yaml": "ModuleAdminManifest",
+    }.items():
+        assert contract_fields[name]["type"] == "union"
+        assert contract_fields[name]["variants"] == [model, "null"]
     assert contract_fields["python_stubs"]["items"] == "ModulePythonStub"
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
     assert "profile_yaml" in contract_fields
@@ -294,8 +299,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "self-contained FastAPI" in source
     assert "`app/app.json` `admins`" in source
     assert "`platform/config/admin.json`" not in source
-    assert "panels: []" in source  # emitted when module has no list actions
-    assert "Derive admin panels from the module" in source
+    assert "Otherwise set `admin_yaml: null`" in source
+    assert "derive panels from the module's declared actions" in source
     assert "structured-output-first contract" in source
     assert "app_validation_strategy" in source
     assert "validation_status" in source

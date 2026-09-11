@@ -23,6 +23,33 @@ This project follows a practical pre-1.0 changelog format:
 - Studio workspaces inherit packaged first-party modules through the standard
   app loader. App-local modules override defaults by id, so hosted workspaces
   can reuse Security Readiness without copying its implementation.
+- Clear stale AppGenerator plans before validation and terminate failed/empty
+  plans instead of falling through to page generation without backend tasks.
+- Make optional generated module manifests nullable and remove automatic admin
+  panel generation outside the approved task's file ownership.
+  Reject raw files that contradict an explicitly null typed manifest.
+- Include generated-file and task-identity validation in the existing task retry
+  budget, with corrective feedback on the next attempt. Exhausted failures stop
+  assembly and retain authorized diagnostics through AG2 context events.
+- Compile typed module action/capability and event schemas into runtime JSON
+  Schema instead of emitting generator-only property lists. Request schemas
+  obey the canonical closed profile; conflicting required fields fail early.
+
+- Execute declared task batches at their actual trigger inside the AG2 graph,
+  including interview-first builds, instead of checking only the first agent.
+- Detach protected runtime state before AppGenerator schema persistence and UI
+  quality checks so valid upstream data contracts are not rejected as non-objects.
+
+- Refresh each agent's declared context in the existing AG2 prompt middleware
+  before every model call, so later steps and revision attempts see current
+  tool results and user feedback instead of launch-time values.
+- Workflow tool loading registers Python module globals before execution so
+  typed models, dataclasses, and postponed annotations work in generated tools.
+  Reloads still refresh workflow-owned code; failed imports leave no partial module.
+- AgentGenerator supports approved apps with no AI workflows, records an explicit
+  empty workflow bundle, and clears stale workflow hints. Draft-correlated review
+  actions replace approval keywords; invalid plans receive bounded correction
+  attempts and cannot contradict the canonical design surface map.
 - Preserve workflow UI registrations across reloads and carry only declared,
   writable launch inputs between journey steps. Handoff errors are visible in
   chat; completing one workflow no longer claims the whole build is complete.

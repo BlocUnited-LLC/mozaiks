@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
 
 
@@ -1107,7 +1108,7 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
 
 def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context({"data_contract": _data_contract()})
+    context = ContextVariablesBridge(factory_context({"data_contract": _data_contract()}))
 
     result = save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -1117,7 +1118,7 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
 
     data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert data_contract["surfaces"][0]["surface_id"] == "users"
-    assert context.data["app_data_contract"]["policies"]["default_scope_field"] == "app_id"
+    assert context.get("app_data_contract")["policies"]["default_scope_field"] == "app_id"
     assert "data/contract.json" in result
 
 

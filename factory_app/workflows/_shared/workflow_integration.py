@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.workflow.context.frozen import detach
+
 CONTRACT_VERSION = "1.0"
 EVENT_PREFIXES = ("domain.", "platform.", "hosted.")
 
@@ -157,6 +159,7 @@ def normalize_workflow_integration_metadata(
 ) -> dict[str, Any] | None:
     if not isinstance(raw, Mapping):
         return None
+    raw = detach(raw)
     nested = raw.get("workflow_integration_metadata")
     if isinstance(nested, Mapping):
         raw = nested
@@ -168,11 +171,13 @@ def normalize_workflow_integration_metadata(
             for workflow in (_normalize_workflow_item(item) for item in workflows_raw if isinstance(item, Mapping))
             if workflow is not None
         ]
+        if len(workflows) != len(workflows_raw):
+            return None
     else:
         single = _normalize_workflow_item(raw)
         workflows = [single] if single else []
 
-    if not workflows:
+    if not workflows and workflows_raw != []:
         return None
 
     primary = _primary_workflow(workflows)
@@ -221,6 +226,8 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             }
         )
 
+    if bundle_entries and len(workflows) != len(bundle_entries):
+        return None
     return normalize_workflow_integration_metadata(
         {
             "contract_version": CONTRACT_VERSION,
@@ -269,7 +276,7 @@ def apply_workflow_integration_context(
         return None
     primary = normalized.get("primary_workflow")
     if not isinstance(primary, dict):
-        return None
+        primary = {}
 
     _context_set(context_variables, "workflow_integration_metadata", normalized)
     _context_set(context_variables, "generated_workflow_integrations", normalized["workflows"])

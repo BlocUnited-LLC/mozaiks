@@ -21,6 +21,7 @@ from ag2 import Context
 from ag2.events import BaseEvent, ModelResponse
 from ag2.middleware import BaseMiddleware, LLMCall, Middleware
 
+from ..context.context_utils import apply_context_exposures, context_to_dict
 from ..declarative import parse_middleware_config
 
 logger = logging.getLogger("middleware_loader")
@@ -38,12 +39,16 @@ class MozaiksPromptMiddleware(BaseMiddleware):
         agent_name: str,
         base_system_message: str,
         context_bridge: Any,
+        context_exposures: Sequence[dict[str, Any]] = (),
+        context_variables: Sequence[str] = (),
     ) -> None:
         super().__init__(event, context)
         self._middleware_functions = list(middleware_functions)
         self._agent_name = agent_name
         self._base_system_message = base_system_message
         self._context_bridge = context_bridge
+        self._context_exposures = list(context_exposures)
+        self._context_variables = list(context_variables)
 
     async def on_llm_call(
         self,
@@ -51,11 +56,11 @@ class MozaiksPromptMiddleware(BaseMiddleware):
         events: Sequence[BaseEvent],
         context: Context,
     ) -> ModelResponse:
-        if not self._middleware_functions:
+        if not (self._middleware_functions or self._context_exposures or self._context_variables):
             return await call_next(events, context)
 
         captured_prompt = await self._run_prompt_middleware(context)
-        if captured_prompt and captured_prompt != self._base_system_message:
+        if captured_prompt is not None:
             context.prompt[:] = [captured_prompt]
 
         return await call_next(events, context)
@@ -75,10 +80,16 @@ class MozaiksPromptMiddleware(BaseMiddleware):
                 self._captured = message
 
         history = context.variables.get("_mozaiks_history", [])
+        projected_message = apply_context_exposures(
+            self._base_system_message,
+            self._context_exposures,
+            context_to_dict(self._context_bridge),
+            self._context_variables,
+        )
         capture = _PromptCapture(
             self._agent_name,
             self._context_bridge,
-            self._base_system_message,
+            projected_message,
         )
 
         for middleware_fn in self._middleware_functions:
@@ -93,7 +104,7 @@ class MozaiksPromptMiddleware(BaseMiddleware):
                     exc,
                 )
 
-        return capture._captured
+        return capture._captured if capture._captured is not None else projected_message
 
 
 def _ensure_workflow_import_paths(workflow_path: Path) -> None:
@@ -251,6 +262,8 @@ def build_prompt_middleware(
     agent_name: str,
     base_system_message: str,
     context_bridge: Any,
+    context_exposures: Sequence[dict[str, Any]] = (),
+    context_variables: Sequence[str] = (),
 ) -> Middleware:
     """Build the AG2 1.0 middleware factory for Mozaiks prompt middleware."""
 
@@ -260,6 +273,8 @@ def build_prompt_middleware(
         agent_name=agent_name,
         base_system_message=base_system_message,
         context_bridge=context_bridge,
+        context_exposures=context_exposures,
+        context_variables=context_variables,
     )
 
 

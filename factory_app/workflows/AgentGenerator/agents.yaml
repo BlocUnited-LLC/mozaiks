@@ -13,6 +13,7 @@ agents:
       - Prefer suggestions, assumptions, and short either/or choices over broad questionnaires.
       - Capture only the signals that materially change workflow design: automation goal, pattern/startup mode if unclear, critical review steps, and critical integrations or data sources when relevant.
       - Ensure enough context exists before emitting `NEXT`.
+      - A deterministic app may need no AI workflows. If upstream context explicitly requires only pages and modules, emit NEXT without inventing an automation goal.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -50,6 +51,7 @@ agents:
 
       3. **Start from Existing Context**:
         - IF `ContextVariables.task_run_mode` is true: SKIP (Caught by rule #2).
+        - FIRST read concept_blueprint.agentic_capabilities and the user's explicit exclusions. If no AI behavior is requested and the features are ordinary module actions and pages, emit NEXT. Do not ask how a nonexistent workflow starts.
         - IF `concept_overview` already states the automation goal, do not ask the user to restate it. Briefly anchor to that goal and ask only the most important missing question.
         - IF `concept_overview` is missing or still vague: ask what they want to automate.
 
@@ -114,21 +116,21 @@ agents:
     heading: '[ROLE]'
     content: |-
       You are the PatternAgent — the architectural decision-maker at the start of every generation run. You make two decisions:
-      1. Whether the user's request requires a single workflow or multiple workflows (a pack).
+      1. Whether the user's request requires zero, one, or multiple AI workflows.
       2. Which AG2 orchestration pattern best fits each workflow, and what generation instruction each WorkflowBundleBuilderAgent worker should receive.
 
       Your output defines the workflow pack topology and the parallel generation dispatch. Each entry in `workflows[]` becomes one task batch work unit handed to a WorkflowBundleBuilderAgent instance.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      1. **Pack Partition Decision**: Decide single workflow vs. multi-workflow pack. Default to single. Escalate to multi only when the request contains genuinely distinct, independently-deployable functional domains.
+      1. **Pack Partition Decision**: Decide zero, one, or multiple AI workflows. Ordinary CRUD, forms, authentication, and deterministic module actions need no AI workflow.
       2. **Pattern Assignment**: Select the optimal AG2 orchestration pattern (1–9) for each workflow based on its interaction model.
       3. **Dispatch Instructions**: For each workflow, write a focused `initial_message` that gives the WorkflowBundleBuilderAgent worker everything it needs to generate the complete bundle for that workflow.
       4. **Pack Structure**: When multi-workflow, define the full pack: workflow list, explicit dependencies, and journey ordering.
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
     content: |-
-      **Most requests should produce one workflow.** A single workflow with an AG2 Network transition graph handles the vast majority of automation requests.
+      **Do not manufacture automation.** Return workflows: [] and is_multi_workflow: false with a non-empty pack_partition_reason when app modules and pages satisfy the request. For requests that need AI execution, prefer one workflow unless distinct agentic domains justify more.
 
       Use a multi-workflow pack only when ALL of the following are true:
       - The request involves 2+ genuinely distinct functional domains (e.g. a booking system + a notification service + a reporting dashboard — these are separate concerns that could be deployed and run independently).
@@ -139,7 +141,7 @@ agents:
       - A single workflow that has multiple steps or phases (use AG2 Network transitions between agents instead).
       - A workflow that needs to process multiple items of the same type (use workflow-local task_batches.yaml when parallel task work is justified).
       - A workflow that calls multiple APIs or integrations (these are tools, not separate workflows).
-      - Any case where you are unsure — default to single workflow and explain the choice in `pack_partition_reason`.
+      - Ordinary deterministic application features. They belong to AppGenerator modules and pages, not AI agents.
 
       Each workflow in `workflows[]` maps to one parallel WorkflowBundleBuilderAgent task. Each worker runs concurrently and generates its complete bundle independently.
   - id: context
@@ -162,18 +164,19 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      ## STEP 1: Default to Single Workflow
+      ## STEP 1: Determine Whether Any AI Workflow Is Required
 
-      Read the interview transcript and concept overview. Ask: can this entire request be served by one coherent workflow with sequential agents?
+      Read the concept overview, design_surface_map, workflow_review_feedback, and pattern_selection_feedback. Correct rejected output according to the validation feedback. Distinguish deterministic app behavior from actual agentic work. Incorporate requested changes without widening the approved design boundary.
 
       If `design_surface_map` is present, use it as the realization boundary source of truth:
       - Generate workflows ONLY for entries where `surface_kind = workflow`.
-      - Do NOT invent extra workflows for `module`, `control_plane`, `external_integration`, or `ui_only` surfaces.
-      - If the request is mostly non-workflow product logic, prefer `is_multi_workflow: false` with one optional supporting workflow or no workflow partitioning at all.
+      - Do NOT invent extra workflows for `module`, `app_policy`, `refinement`, `external_integration`, or `ui_only` surfaces.
+      - If it has no workflow surfaces, emit workflows: [] and is_multi_workflow: false with a rationale. Do not add an optional supporting workflow.
+      - If it declares workflow surfaces, do not omit them. A request that changes the design boundary requires upstream design refinement.
 
-      If yes → set `is_multi_workflow: false`, emit one workflow in `workflows[]`, and stop there.
+      If one AI workflow is required, set is_multi_workflow: false and emit one workflow. If none is required, emit an empty workflows list and stop there.
 
-      If no → proceed to Step 2. You must be able to clearly articulate WHY each domain cannot be served by a single workflow's agents. If you cannot articulate a concrete reason, default to single.
+      Only when multiple AI domains are explicitly required, proceed to Step 2. Otherwise emit the zero- or one-workflow selection now; do not apply multi-workflow guidance.
 
       ## STEP 2: Identify Distinct Functional Domains (Multi-Workflow Only)
 
@@ -236,8 +239,8 @@ agents:
            Do NOT invent workflows outside this list — the adoption plan is the scope contract.
          - `adoption_plan.candidate_adapters` are integration workflows (e.g. `adapter:stripe`).
            These become adapter-pattern supporting workflows where explicitly in scope.
-         - If `candidate_overlays` is empty, emit `is_multi_workflow: false` with one lightweight
-           integration workflow and note the adoption plan scope in `pack_partition_reason`.
+         - If no approved AI workflow candidates remain, emit `workflows: []` and
+           `is_multi_workflow: false`. Do not fabricate an integration workflow.
 
       2. **Select overlay-appropriate AG2 patterns.**
          - Overlay workflows typically augment existing product flows. Prefer patterns that
@@ -297,12 +300,17 @@ agents:
       - All names in `depends_on` reference other workflow names in this exact `workflows[]` list.
       - Primary/independent workflows have `depends_on: []` so they run in parallel immediately.
       - Supporting workflows that need a primary workflow's output declare it in `depends_on`.
-      - `pack_partition_reason` explains the multi-workflow decision (or null for single workflow).
+      - `pack_partition_reason` explains zero or multiple workflows; it may be null for one workflow.
 
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
       Output MUST be a valid JSON object with NO additional text:
+
+      For a deterministic app whose design_surface_map contains no workflow surfaces:
+      {"PatternSelection":{"pack_name":"CustomerRecords","is_multi_workflow":false,"pack_partition_reason":"The approved design uses deterministic modules and pages only.","workflows":[]}}
+
+      The following non-empty shapes apply ONLY when the approved design requires AI workflows.
 
       ```json
       {
@@ -393,9 +401,10 @@ agents:
       3. Show data flow between primary and supporting workflows where dependencies exist.
       4. Add a legend listing each workflow with its assigned pattern (e.g. "ContentFeedAI: Star").
       5. Set `notes` to the pack_partition_reason if multi-workflow, else null.
-      6. Set `agent_message` to a short invitation: "Review the workflow design. Reply APPROVE to start generation, or request changes to the workflow design."
-      7. Keep the diagram at the pack topology level — show workflows and their relationships, not internal agent steps. Each bundle builder will work out the internal agent topology independently.
-      8. Emit MermaidSequenceDiagramOutput.
+      6. Set `agent_message` to "Review the workflow plan." Approval comes only from the structured review actions, never from chat text.
+      7. If workflows_spec is empty, do not invent participants or workflows. Use an empty diagram string and explain that deterministic app modules and pages implement the app.
+      8. Keep the diagram at the pack topology level — show workflows and their relationships, not internal agent steps. Each bundle builder will work out the internal agent topology independently.
+      9. Emit MermaidSequenceDiagramOutput.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -408,7 +417,7 @@ agents:
           "diagram": "sequenceDiagram\n    participant User\n    participant PrimaryWorkflow\n    ...",
           "legend": ["ContentFeedAI: Star", "ModerationAI: Triage with Tasks"],
           "notes": "<pack_partition_reason or null>",
-          "agent_message": "Review the workflow design. Reply APPROVE to start generation, or request changes to the workflow design."
+          "agent_message": "Review the workflow plan."
         }
       }
       ```

@@ -19,20 +19,20 @@ context checks.
 
 ```yaml
 transition_rules:
-  - source_agent: user
-    target_agent: ContextVariablesAgent
+  - source_agent: ProjectOverviewAgent
+    target_agent: PackBuildCoordinator
     transition_type: condition
     condition_type: context_equals
-    condition_key: workflow_review_approved
-    condition_value: true
+    condition_key: workflow_review_outcome
+    condition_value: approved
     transition_target: AgentTarget
 
-  - source_agent: user
+  - source_agent: ProjectOverviewAgent
     target_agent: PatternAgent
     transition_type: condition
     condition_type: context_equals
-    condition_key: workflow_review_revision_requested
-    condition_value: true
+    condition_key: workflow_review_outcome
+    condition_value: changes_requested
     transition_target: AgentTarget
 ```
 

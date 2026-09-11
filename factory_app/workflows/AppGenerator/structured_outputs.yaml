@@ -2224,7 +2224,7 @@ models:
       required:
         type: optional_list
         items: str
-        description: Required property names for object contracts.
+        description: Required property names for object contracts; must match the properties whose required flag is true.
       properties:
         type: optional_list
         items: JsonSchemaProperty
@@ -3065,20 +3065,35 @@ models:
         type: ModuleManifest
         description: module.yaml contract object.
       events_yaml:
-        type: ModuleEventsManifest
-        description: events.yaml contract object.
+        type: union
+        variants:
+          - ModuleEventsManifest
+          - 'null'
+        description: Optional contracts/events.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       reactions_yaml:
-        type: ModuleReactionsManifest
-        description: reactions.yaml contract object.
+        type: union
+        variants:
+          - ModuleReactionsManifest
+          - 'null'
+        description: Optional contracts/reactions.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       notifications_yaml:
-        type: ModuleNotificationsManifest
-        description: notifications.yaml contract object.
+        type: union
+        variants:
+          - ModuleNotificationsManifest
+          - 'null'
+        description: Optional contracts/notifications.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       settings_yaml:
-        type: ModuleSettingsManifest
-        description: settings.yaml contract object.
+        type: union
+        variants:
+          - ModuleSettingsManifest
+          - 'null'
+        description: Optional contracts/settings.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       admin_yaml:
-        type: ModuleAdminManifest
-        description: admin.yaml contract object for feature panels mounted inside semantic /admin sections.
+        type: union
+        variants:
+          - ModuleAdminManifest
+          - 'null'
+        description: Optional contracts/admin.yaml. Use null unless the current task owns this manifest and the approved feature requires it.
       profile_yaml:
         type: union
         variants:

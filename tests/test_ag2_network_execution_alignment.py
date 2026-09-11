@@ -1449,8 +1449,12 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
 
 
 @pytest.mark.anyio
-async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phases(
+@pytest.mark.parametrize("interview_first", [False, True])
+@pytest.mark.parametrize("batch_fails", [False, True])
+async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigger(
     monkeypatch: pytest.MonkeyPatch,
+    interview_first: bool,
+    batch_fails: bool,
 ) -> None:
     class _Persistence:
         def __init__(self) -> None:
@@ -1509,6 +1513,9 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         def unregister_derived_context_manager(self, chat_id: str) -> None:
             return None
 
+        async def send_tool_call_event(self, **kwargs: Any) -> None:
+            self.events.append((kwargs["chat_id"], dict(kwargs["payload"])))
+
     class _ContextAwareAgent(Agent):
         def __init__(self, name: str, body_factory) -> None:
             super().__init__(name, prompt=f"{name} deterministic test agent")
@@ -1539,14 +1546,19 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             }
         },
     )
-    worker_agent = _ContextAwareAgent(
-        "WorkerAgent",
-        lambda context: {
+    def _worker_reply(context):
+        if batch_fails:
+            raise ValueError("required worker failed")
+        return {
             "task_id": context["current_task_id"],
             "summary": "Worker used AG2 task lifecycle context.",
             "owned_paths": context["current_task"]["owned_paths"],
             "agent_message": "Worker done.",
-        },
+        }
+
+    worker_agent = _ContextAwareAgent(
+        "WorkerAgent",
+        _worker_reply,
     )
     synthesis_agent = _ContextAwareAgent(
         "SynthesisAgent",
@@ -1560,11 +1572,18 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         return transport
 
     async def _agents_factory(workflow_name: str, context: Any, cache_seed: int) -> dict[str, Agent]:
-        return {
+        agents = {
             "PlannerAgent": planner_agent,
             "WorkerAgent": worker_agent,
             "SynthesisAgent": synthesis_agent,
         }
+        if interview_first:
+            agents["InterviewAgent"] = _DeterministicAgent("InterviewAgent", "Confirmed scope.")
+        bridge = ContextVariablesBridge({})
+        for agent in agents.values():
+            if not hasattr(agent, "_mozaiks_context_bridge"):
+                agent._mozaiks_context_bridge = bridge
+        return agents
 
     monkeypatch.setattr(orchestration_patterns_module, "AG2PersistenceManager", lambda: persistence)
     monkeypatch.setattr(simple_transport_module.SimpleTransport, "get_instance", staticmethod(_get_transport))
@@ -1575,9 +1594,14 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             "config": {
                 "max_turns": 4,
                 "workflow_startup_mode": "AgentDriven",
-                "initial_agent": "PlannerAgent",
+                "initial_agent": "InterviewAgent" if interview_first else "PlannerAgent",
                 "transition_graph": {
                     "transition_rules": [
+                        {
+                            "source_agent": "InterviewAgent",
+                            "target_agent": "PlannerAgent",
+                            "transition_type": "after_turn",
+                        },
                         {
                             "source_agent": "PlannerAgent",
                             "target_agent": "SynthesisAgent",
@@ -1593,7 +1617,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             },
             "max_turns": 4,
             "workflow_startup_mode": "AgentDriven",
-            "initial_agent_name": "PlannerAgent",
+            "initial_agent_name": "InterviewAgent" if interview_first else "PlannerAgent",
         },
     )
     monkeypatch.setattr(
@@ -1625,13 +1649,23 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
     )
 
     assert result is not None
+    if batch_fails:
+        assert result["run_completed"] is False
+        assert result["failed"] is True
+        assert not synthesis_agent.context_seen
+        assert not persistence.completed
+        assert persistence.persisted_context["runtime_tasks_status"] == "failed"
+        failure = persistence.persisted_context["runtime_tasks_results"]["_failed"]["module_contract"]
+        assert "AG2 task lifecycle failed for task 'module_contract'" in failure["error"]
+        assert any(event.get("phase") == "failed" for _, event in transport.events)
+        return
     assert result["run_completed"] is True
     assert worker_agent.context_seen[0]["current_task_id"] == "module_contract"
     assert synthesis_agent.context_seen[0]["runtime_tasks_status"] == "completed"
     assert synthesis_agent.context_seen[0]["runtime_tasks_results"]["module_contract"]["summary"] == (
         "Worker used AG2 task lifecycle context."
     )
-    assert [message["agent_name"] for message in persistence.assistant_messages] == [
+    assert [message["agent_name"] for message in persistence.assistant_messages] == (["InterviewAgent"] if interview_first else []) + [
         "PlannerAgent",
         "SynthesisAgent",
     ]
@@ -1639,7 +1673,7 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
 
 
 @pytest.mark.anyio
-async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phase(
+async def test_task_batch_interview_retains_the_declared_ag2_pause_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _Persistence:
@@ -1713,14 +1747,14 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
     async def _network_phase(**kwargs: Any) -> SimpleNamespace:
         network_calls.append(dict(kwargs))
         return SimpleNamespace(
-            status=RunStatus.COMPLETED,
+            status=RunStatus.PAUSED,
             error=None,
             context_variables=kwargs["context_variables"],
             structured_outputs=[],
             wal=[],
             agent_name_by_id={},
             channel_id="channel-preface",
-            close_reason="workflow_complete",
+            close_reason="awaiting_user_input",
             live_run=None,
         )
 
@@ -1810,5 +1844,4 @@ async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phas
     assert result["run_completed"] is False
     assert len(network_calls) == 1
     assert network_calls[0]["initial_agent_name"] == "InterviewAgent"
-    assert transport.events[-2][1]["kind"] == "awaiting_reply"
-    assert transport.events[-2][1]["source_agent"] == "InterviewAgent"
+    assert network_calls[0]["transition_rules"][0]["target_agent"] == "user"

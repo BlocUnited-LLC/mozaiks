@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assemble_module
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
 
 hook_quality_module = import_module(
@@ -55,7 +56,8 @@ class _Context:
         return self.data.get(key, default)
 
 
-def test_review_ui_quality_passes_without_warnings() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+def test_review_ui_quality_passes_without_warnings(frozen: bool) -> None:
     context = _Context(
         {
             "app_ui_quality_warnings": [],
@@ -81,11 +83,13 @@ def test_review_ui_quality_passes_without_warnings() -> None:
         }
     )
 
+    if frozen:
+        context = ContextVariablesBridge(context.data)
     result = ui_quality_module.review_ui_quality(context_variables=context)
 
     assert result["status"] == "passed"
-    assert context.data["app_ui_quality_status"] == "passed"
-    assert context.data["app_ui_quality_revision_request"] is None
+    assert context.get("app_ui_quality_status") == "passed"
+    assert context.get("app_ui_quality_revision_request") is None
 
 
 def test_review_ui_quality_requires_persisted_schema_before_passing() -> None:

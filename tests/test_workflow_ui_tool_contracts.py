@@ -377,7 +377,6 @@ def test_shared_workflow_ui_contract_is_documented() -> None:
 
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
-        "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 
@@ -493,42 +492,34 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert response_fixture["tool_responses"]["DownloadCenter"]["action"] == "download_complete"
     assert "ActionPlan" not in response_fixture["tool_responses"]
     assert any(rule["contains"] == "final tweaks" for rule in assistant_reply_rules)
-    assert any(rule["reply"] == "APPROVE" for rule in assistant_reply_rules)
+    assert response_fixture["tool_responses"]["WorkflowPlanReview"]["action"] == "approve"
     assert "internal helpdesk lead" in smoke_prompt
     assert "classify urgency" in smoke_prompt
     assert "ask for human approval before closing" in smoke_prompt
     assert "Do not use external APIs or third-party integrations." in smoke_prompt
-    assert {"DownloadCenter", "DiagramViewer"} <= manifest_components
+    assert {"DownloadCenter", "WorkflowPlanReview"} <= manifest_components
     assert manifest_realizations["DownloadCenter"] == "shipped_component"
-    assert manifest_realizations["DiagramViewer"] == "shipped_component"
+    assert manifest_realizations["WorkflowPlanReview"] == "workflow_wrapper"
     assert (scripted_components - manifest_components) <= exported_names
 
 
-def test_agent_generator_review_handoff_uses_user_text_state_triggers() -> None:
+def test_agent_generator_review_handoff_uses_structured_outcomes() -> None:
     handoffs = _read_yaml("factory_app/workflows/AgentGenerator/transition_graph.yaml")
     context_vars = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
 
     review_handoffs = {
         (rule["source_agent"], rule["target_agent"]): rule
         for rule in handoffs["transition_rules"]
-        if rule["source_agent"] == "user" and rule["target_agent"] in {"PackBuildCoordinator", "PatternAgent"}
+        if rule["source_agent"] == "ProjectOverviewAgent" and rule["target_agent"] in {"PackBuildCoordinator", "PatternAgent"}
     }
     review_defs = context_vars["definitions"]
 
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_type"] == "context_equals"
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_key"] == "workflow_review_approved"
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_value"] is True
-    assert review_handoffs[("user", "PatternAgent")]["condition_type"] == "context_equals"
-    assert review_handoffs[("user", "PatternAgent")]["condition_key"] == "workflow_review_revision_requested"
-    assert review_handoffs[("user", "PatternAgent")]["condition_value"] is True
-
-    approved_trigger = review_defs["workflow_review_approved"]["source"]["triggers"][0]
-    revision_trigger = review_defs["workflow_review_revision_requested"]["source"]["triggers"][0]
-
-    assert approved_trigger["type"] == "user_text"
-    assert approved_trigger["match"] == {"equals": "APPROVE"}
-    assert revision_trigger["type"] == "user_text"
-    assert "regex" in revision_trigger["match"]
+    assert review_handoffs[("ProjectOverviewAgent", "PackBuildCoordinator")]["condition_key"] == "workflow_review_outcome"
+    assert review_handoffs[("ProjectOverviewAgent", "PackBuildCoordinator")]["condition_value"] == "approved"
+    assert review_handoffs[("ProjectOverviewAgent", "PatternAgent")]["condition_value"] == "changes_requested"
+    assert "workflow_review_approved" not in review_defs
+    assert "workflow_review_revision_requested" not in review_defs
+    assert "triggers" not in review_defs["workflow_review_outcome"]["source"]
 
 
 def test_agent_generator_interview_next_trigger_requires_exact_sentinel() -> None:
@@ -539,22 +530,6 @@ def test_agent_generator_interview_next_trigger_requires_exact_sentinel() -> Non
     assert trigger["type"] == "agent_text"
     assert trigger["agent"] == "InterviewAgent"
     assert trigger["match"] == {"equals": "NEXT"}
-
-
-@pytest.mark.parametrize(
-    ("text", "approved"),
-    [("APPROVE", True), (" approve ", True), ("Do not approve", False),
-     ("Not approved", False), ("Request changes. Do not approve this workflow design.", False),
-     ("The user has not approved this", False), ("looks good but change the design", False)],
-)
-def test_agent_generator_rejection_text_cannot_approve(text, approved) -> None:
-    from mozaiksai.core.workflow.context.derived import _matches_text_conditions
-
-    config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
-    match = config["definitions"]["workflow_review_approved"]["source"]["triggers"][0]["match"]
-    assert _matches_text_conditions(
-        text=text, equals=match.get("equals"), contains=match.get("contains"), compiled=None,
-    ) is approved
 
 
 def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() -> None:

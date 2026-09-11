@@ -14,6 +14,7 @@ from factory_app.workflows.SecurityReadiness.tools.record_security_findings impo
     record_security_findings,
 )
 from mozaiksai.core.workflow.pack.config import load_global_pack_graph
+from tests.factory_context import factory_context
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -106,7 +107,7 @@ def test_security_readiness_is_between_app_generator_and_review(monkeypatch) -> 
 
 def test_app_review_payload_carries_security_readiness_summary() -> None:
     payload = build_review_summary_payload(
-        {
+        factory_context({
             "build_registry_id": "reg_1",
             "artifact_version_id": "art_1",
             "lifecycle_state": "review",
@@ -114,7 +115,7 @@ def test_app_review_payload_carries_security_readiness_summary() -> None:
             "app_bundle_acceptance_status": "passed",
             "integration_tests_passed": True,
             "security_readiness_summary": {"status": "attention_required", "finding_count": 1},
-        }
+        })
     )
 
     assert payload["can_promote"] is True

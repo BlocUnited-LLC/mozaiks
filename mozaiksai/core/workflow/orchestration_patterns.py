@@ -38,7 +38,7 @@ from mozaiksai.core.workflow.execution.network_graph import (
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from .context import DerivedContextManager
-from .context.authority import require_unchanged_runtime_authority
+from .context.authority import TASK_BATCH_WRITER, require_unchanged_runtime_authority
 from .context.frozen import detach
 from .execution.run_bootstrap import merge_persisted_extra_context, prepare_network_trigger
 from .orchestration_utils import _load_workflow_config
@@ -99,44 +99,6 @@ async def _persist_context_variables(
     )
 
 
-def _first_agent_payload_from_runner_result(runner_result: Any, agent_name: str) -> dict[str, Any] | None:
-    for entry in runner_result.structured_outputs:
-        if entry.get("agent") == agent_name and isinstance(entry.get("structured_data"), dict):
-            return dict(entry["structured_data"])
-
-    for envelope in runner_result.wal:
-        if not isinstance(envelope, dict) or envelope.get("event_type") != "ag2.packet":
-            continue
-        sender_id = str(envelope.get("sender_id") or "")
-        if runner_result.agent_name_by_id.get(sender_id) != agent_name:
-            continue
-        event_data = envelope.get("event_data")
-        if not isinstance(event_data, dict):
-            continue
-        body = event_data.get("body")
-        if isinstance(body, dict):
-            return dict(body)
-        if isinstance(body, str):
-            try:
-                parsed = json.loads(normalize_json_candidate_text(body))
-            except json.JSONDecodeError:
-                return None
-            return dict(parsed) if isinstance(parsed, dict) else None
-    return None
-
-
-def _next_agent_after_trigger(
-    *,
-    transition_rules: list[dict[str, Any]],
-    trigger_agent: str,
-) -> str | None:
-    for rule in transition_rules:
-        if str(rule.get("source_agent") or "").strip() != trigger_agent:
-            continue
-        target = str(rule.get("target_agent") or "").strip()
-        if target and target != "terminate":
-            return target
-    return None
 
 
 def _resolve_executable_initial_agent(
@@ -197,42 +159,6 @@ def _resolve_executable_initial_agent(
     return normalized_initial
 
 
-def _resolve_continuation_agent_after_trigger(
-    *,
-    transition_rules: list[dict[str, Any]],
-    trigger_agent: str,
-    agents: dict[str, Any],
-    context_variables: dict[str, Any],
-    wf_logger: Any,
-    workflow_name_upper: str,
-) -> str | None:
-    agent_id_by_name = {str(name): str(name) for name in agents}
-    agent_id_by_name["user"] = "user"
-    agent_name_by_id = {agent_id: name for name, agent_id in agent_id_by_name.items()}
-    try:
-        graph = compile_transition_rules_to_graph(
-            transition_rules,
-            initial_agent_name=trigger_agent,
-            agent_id_by_name=agent_id_by_name,
-        )
-        return resolve_next_agent(
-            graph,
-            current_agent_name=trigger_agent,
-            context_variables=context_variables,
-            agent_name_by_id=agent_name_by_id,
-            participant_order=["user", *agents.keys()],
-        )
-    except WorkflowGraphCompileError as err:
-        wf_logger.warning(
-            "[%s] CONTINUATION_RESOLUTION_FAILED trigger_agent=%s: %s",
-            workflow_name_upper,
-            trigger_agent,
-            err,
-        )
-        return _next_agent_after_trigger(
-            transition_rules=transition_rules,
-            trigger_agent=trigger_agent,
-        )
 
 
 def _apply_derived_agent_text_from_runner_result(
@@ -567,18 +493,6 @@ async def _project_ag2_wal_to_mozaiks_transport(
     return sequence
 
 
-def _task_batch_continuation_prompt(
-    config: dict[str, Any], agent_name: str, context_variables: dict[str, Any],
-) -> str:
-    from .context.context_utils import apply_context_exposures
-
-    agent_plan = ((config.get("context_variables") or {}).get("agents") or {}).get(agent_name) or {}
-    variables = list(agent_plan.get("variables") or [])
-    return apply_context_exposures(
-        "Continue with the completed deterministic task batch outputs. "
-        "These current values replace the pre-execution context snapshot.",
-        [], context_variables, variables,
-    )
 
 
 async def _run_ag2_network_phase(
@@ -1083,77 +997,30 @@ async def run_workflow_orchestration(
                 auto_tool_agents=auto_tool_agents,
                 wf_logger=wf_logger,
             )
+            matching_batches = [
+                batch for batch in task_batches_config.batches if batch.trigger_agent == agent_name
+            ] if task_batches_config is not None else []
+            if not matching_batches:
+                return
 
-        # 10) Execute AG2 Network workflow channel
-        network_prompt = network_trigger
-        agent_text_context_deriver = (
-            getattr(derived_context_manager, "preview_agent_text_updates", None)
-            if derived_context_manager is not None
-            else None
-        )
-        if not callable(agent_text_context_deriver):
-            agent_text_context_deriver = None
-        projected_sequence = 0
-        project_final_runner_result = True
-        if task_batches_config is not None:
-            trigger_agent_name = initial_agent_name
-            first_phase_result = await _run_ag2_network_phase(
-                workflow_name=workflow_name,
-                chat_id=chat_id,
-                app_id=app_id,
-                agents=agents,
-                transition_rules=[
-                    {
-                        "source_agent": trigger_agent_name,
-                        "target_agent": "terminate",
-                        "transition_type": "after_turn",
-                    }
-                ],
-                initial_agent_name=trigger_agent_name,
-                initial_message=network_prompt,
-                context_variables=dict(ctx_dict),
-                agent_output_handler=_before_agent_packet,
-                close_timeout_seconds=close_timeout_seconds,
-                structured_registry=structured_registry,
-                max_turns=max_turns,
-                agent_text_context_deriver=agent_text_context_deriver,
-                knowledge_store=knowledge_store,
-                context_authority_policy=context_authority_policy,
-                resume_existing_only=resume_existing_only,
-                resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
-            )
-            if first_phase_result.status is not RunStatus.COMPLETED:
-                runner_result = first_phase_result
-            else:
-                projected_sequence = await _project_ag2_wal_to_mozaiks_transport(
-                    runner_result=first_phase_result,
-                    transport=transport,
-                    persistence_manager=persistence_manager,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    agent_name_by_id=first_phase_result.agent_name_by_id,
-                    initial_sequence=projected_sequence,
-                    derived_context_manager=derived_context_manager,
-                    structured_registry=structured_registry,
-                )
-                _apply_derived_agent_text_from_runner_result(
-                    runner_result=first_phase_result,
-                    derived_context_manager=derived_context_manager,
-                    context_variables=ctx_dict,
-                )
-                structured_payload = _first_agent_payload_from_runner_result(
-                    first_phase_result,
-                    trigger_agent_name,
-                )
-                from .task_batches import execute_task_batches_for_trigger
+            from .agents.factory import _workflow_tool_invocation
+            from .task_batches import execute_task_batches_for_trigger
 
+            body = (getattr(packet, "event_data", {}) or {}).get("body")
+            if isinstance(body, str):
+                try:
+                    body = json.loads(normalize_json_candidate_text(body))
+                except json.JSONDecodeError:
+                    body = None
+            batch_context = context_bridge.snapshot()
+            try:
                 await execute_task_batches_for_trigger(
                     workflow_name=workflow_name,
-                    trigger_agent=trigger_agent_name,
+                    trigger_agent=agent_name,
                     batches_config=task_batches_config,
                     agents=agents,
-                    context_variables=ctx_dict,
-                    structured_output=structured_payload,
+                    context_variables=batch_context,
+                    structured_output=body if isinstance(body, dict) else None,
                     chat_id=chat_id,
                     app_id=app_id,
                     user_id=user_id,
@@ -1163,66 +1030,44 @@ async def run_workflow_orchestration(
                     agents_factory=agents_factory,
                     context_authority_policy=context_authority_policy,
                 )
-                continuation_agent = _resolve_continuation_agent_after_trigger(
-                    transition_rules=transition_rules,
-                    trigger_agent=trigger_agent_name,
-                    agents=agents,
-                    context_variables=ctx_dict,
-                    wf_logger=wf_logger,
-                    workflow_name_upper=workflow_name_upper,
-                )
-                if continuation_agent and continuation_agent.lower() in _SPECIAL_USER_AGENT_NAMES:
-                    first_phase_result.status = RunStatus.PAUSED
-                    first_phase_result.close_reason = "awaiting_user_input"
-                    runner_result = first_phase_result
-                    project_final_runner_result = False
-                elif continuation_agent:
-                    runner_result = await _run_ag2_network_phase(
-                        workflow_name=workflow_name,
-                        chat_id=chat_id,
-                        app_id=app_id,
-                        agents=agents,
-                        transition_rules=transition_rules,
-                        initial_agent_name=continuation_agent,
-                        initial_message=_task_batch_continuation_prompt(config, continuation_agent, ctx_dict),
-                        agent_output_handler=_before_agent_packet,
-                        close_timeout_seconds=close_timeout_seconds,
-                        context_variables=ctx_dict,
-                        structured_registry=structured_registry,
-                        max_turns=max_turns,
-                        agent_text_context_deriver=agent_text_context_deriver,
-                        knowledge_store=knowledge_store,
-                        context_authority_policy=context_authority_policy,
-                        resume_existing_only=resume_existing_only,
-                        resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
-                    )
-                else:
-                    runner_result = first_phase_result
-                    project_final_runner_result = False
-        else:
-            runner_result = await _run_ag2_network_phase(
-                workflow_name=workflow_name,
-                chat_id=chat_id,
-                app_id=app_id,
-                agents=agents,
-                transition_rules=transition_rules,
-                initial_agent_name=initial_agent_name,
-                initial_message=network_prompt,
-                context_variables=ctx_dict,
-                agent_output_handler=_before_agent_packet,
-                close_timeout_seconds=close_timeout_seconds,
-                structured_registry=structured_registry,
-                max_turns=max_turns,
-                agent_text_context_deriver=agent_text_context_deriver,
-                knowledge_store=knowledge_store,
-                context_authority_policy=context_authority_policy,
-                resume_existing_only=resume_existing_only,
-                resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
-            )
+            finally:
+                # Only the declared batch results may enter the parent workflow.
+                with _workflow_tool_invocation(context_bridge, writer_id=TASK_BATCH_WRITER):
+                    for batch in matching_batches:
+                        for key in (batch.result.context_key, batch.result.status_key):
+                            if key in batch_context:
+                                context_bridge.set(key, batch_context[key])
+
+        # AG2 owns the declared graph, including user pauses and later batch triggers.
+        agent_text_context_deriver = (
+            getattr(derived_context_manager, "preview_agent_text_updates", None)
+            if derived_context_manager is not None else None
+        )
+        if not callable(agent_text_context_deriver):
+            agent_text_context_deriver = None
+        runner_result = await _run_ag2_network_phase(
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+            agents=agents,
+            transition_rules=transition_rules,
+            initial_agent_name=initial_agent_name,
+            initial_message=network_trigger,
+            context_variables=ctx_dict,
+            agent_output_handler=_before_agent_packet,
+            close_timeout_seconds=close_timeout_seconds,
+            structured_registry=structured_registry,
+            max_turns=max_turns,
+            agent_text_context_deriver=agent_text_context_deriver,
+            knowledge_store=knowledge_store,
+            context_authority_policy=context_authority_policy,
+            resume_existing_only=resume_existing_only,
+            resume_context_updates=persisted_extra_ctx if resume_existing_only else None,
+        )
 
         structured_validation_failed = _structured_output_validation_failed(runner_result)
 
-        if project_final_runner_result and not structured_validation_failed:
+        if not structured_validation_failed:
             sequence_counter = await _project_ag2_wal_to_mozaiks_transport(
                 runner_result=runner_result,
                 transport=transport,
@@ -1230,7 +1075,7 @@ async def run_workflow_orchestration(
                 chat_id=chat_id,
                 app_id=app_id,
                 agent_name_by_id=runner_result.agent_name_by_id,
-                initial_sequence=projected_sequence,
+                initial_sequence=0,
                 derived_context_manager=derived_context_manager,
                 structured_registry=structured_registry,
             )
@@ -1240,7 +1085,7 @@ async def run_workflow_orchestration(
                 context_variables=ctx_dict,
             )
         else:
-            sequence_counter = projected_sequence
+            sequence_counter = 0
 
         ctx_dict.update(dict(runner_result.context_variables or {}))
         run_failed = runner_result.status is RunStatus.FAILED

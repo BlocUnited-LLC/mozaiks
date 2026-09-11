@@ -71,6 +71,8 @@ export * from './context/ChatUIContext';
 
 // UI tool rendering
 export { default as UIToolRenderer } from './core/ui/UIToolRenderer';
+export { default as ApprovalCard } from './core/ui/ApprovalCard';
+export { default as DiagramViewer } from './core/ui/DiagramViewer';
 export { dynamicUIHandler } from './core/dynamicUIHandler';
 
 // Component registry

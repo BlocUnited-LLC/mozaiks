@@ -30,6 +30,7 @@ from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.ui_primitives import (
     get_page_ui_primitive_names,
     validate_page_ui_primitives,
@@ -123,17 +124,8 @@ def _normalize_list(value: Any) -> list[Any]:
 
 
 def _to_plain(value: Any) -> Any:
-    """Convert Pydantic-style structured output objects to plain containers."""
-    if hasattr(value, "model_dump"):
-        try:
-            return value.model_dump()
-        except Exception:
-            pass
-    if isinstance(value, dict):
-        return {key: _to_plain(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_to_plain(item) for item in value]
-    return value
+    """Detach structured output and immutable runtime views for serialization."""
+    return detach(value)
 
 
 def _strip_none(value: Any) -> Any:
@@ -1781,7 +1773,7 @@ def save_app_schema(
     _validate_asset_manifest(asset_manifest)
     resolved_data_contract = data_contract
     if resolved_data_contract is None:
-        resolved_data_contract = _context_get(context_variables, "data_contract")
+        resolved_data_contract = detach(_context_get(context_variables, "data_contract"))
     _validate_data_contract(resolved_data_contract)
     app_ui_quality_warnings = dedupe(
         audit_page_schemas(page_list)

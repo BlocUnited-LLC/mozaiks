@@ -343,9 +343,10 @@ def test_factory_export_dogfoods_outcome_contract(workflow):
         config["transition_graph"]["transition_rules"], initial_agent_name="DownloadAgent",
         agent_id_by_name={agent["name"]: agent["name"] for agent in config["agents"]["agents"]},
     )
-    tool = next(tool for tool in config["tools"] if tool.get("outcome"))
+    tool = next(tool for tool in config["tools"] if tool.get("agent") == "DownloadAgent" and tool.get("outcome"))
     key = tool["outcome"]["context_key"]
-    assert resolve_next_agent(graph, current_agent_name="DownloadAgent", context_variables={key: "blocked"}) == "user"
+    blocked_target = "terminate" if workflow == "AgentGenerator" else "user"
+    assert resolve_next_agent(graph, current_agent_name="DownloadAgent", context_variables={key: "blocked"}) == blocked_target
     repair = "needs_revision" if workflow == "AgentGenerator" else "repair_service"
     target = "PackBuildCoordinator" if workflow == "AgentGenerator" else "ServiceAgent"
     assert resolve_next_agent(graph, current_agent_name="DownloadAgent", context_variables={key: repair}) == target

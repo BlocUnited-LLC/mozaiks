@@ -44,6 +44,27 @@ class _Context:
         return self.data.get(key, default)
 
 
+@pytest.mark.parametrize("invalid_plan", [None, {"agent_message": "reuse the previous plan"}, {"app_kind": "app", "pages": []}])
+def test_rejected_plan_cannot_reuse_stale_tasks_or_advance(invalid_plan):
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+
+    context = _Context()
+    context.set("app_build_plan", _base_plan())
+    context.set("app_plan_ready", True)
+    context.set("app_task_batch_items", _build_tasks())
+    context.set("app_task_batch_status", "completed")
+    with pytest.raises(ValueError):
+        app_build_plan(AppBuildPlan=invalid_plan, context_variables=context)
+    assert context.get("app_build_plan") is None
+    assert context.get("app_plan_ready") is False
+    assert context.get("app_task_batch_items") == []
+    assert context.get("app_task_batch_status") is None
+    rules = _read_yaml("factory_app/workflows/AppGenerator/transition_graph.yaml")["transition_rules"]
+    fallback = next(rule for rule in rules if rule["source_agent"] == "AppPlanAgent" and rule["transition_type"] == "after_turn")
+    assert fallback["target_agent"] == "terminate"
+    assert fallback["termination_reason"] == "workflow_failed"
+
+
 def _build_tasks() -> list[dict]:
     return [
         {
@@ -335,11 +356,15 @@ def test_appgenerator_task_batch_contract_uses_normalized_items() -> None:
     assert batch["result"]["require_owned_paths"] is True
 
 
-def test_appgenerator_handoffs_start_from_agents_not_pseudo_user() -> None:
+def test_appgenerator_interview_has_an_explicit_human_reply_route() -> None:
     handoffs = _read_yaml("factory_app/workflows/AppGenerator/transition_graph.yaml")
     rules = handoffs["transition_rules"]
 
-    assert all(rule["source_agent"] != "user" for rule in rules)
+    user_rules = [rule for rule in rules if rule["source_agent"] == "user"]
+    assert user_rules[0]["target_agent"] == "InterviewAgent"
+    assert user_rules[0]["condition_key"] == "interview_complete"
+    assert user_rules[0]["condition_value"] is False
+    assert user_rules[1]["termination_reason"] == "workflow_failed"
     interview_rules = [rule for rule in rules if rule["source_agent"] == "InterviewAgent"]
     assert [rule["target_agent"] for rule in interview_rules[:2]] == [
         "AppPlanAgent",

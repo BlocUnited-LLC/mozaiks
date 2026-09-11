@@ -151,6 +151,53 @@ def test_record_context_and_artifacts_propagates_artifact_registration_failure(
     artifact_projection.assert_not_awaited()
 
 
+def test_empty_workflow_partition_is_recorded_without_fake_endpoints(monkeypatch):
+    import yaml
+
+    from mozaiksai.core.workflow.agents.factory import (
+        ContextVariablesBridge,
+        _wrap_tool_with_context,
+    )
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+
+    store = _FakeArtifactStore()
+    artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
+    monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(artifacts_mod, "resolve_latest_artifact_version_refs", AsyncMock(return_value={}))
+    export_write = AsyncMock()
+    monkeypatch.setattr(generate_and_download_module, "record_workflow_export", export_write)
+    monkeypatch.setattr(generate_and_download_module, "record_workflow_artifacts", AsyncMock())
+    data = {
+        "run_build_binding": {"build_registry_id": "reg-1", "target_app_id": "app_123",
+                              "build_id": "build-1", "phase": "genesis"},
+        "workflow_plan_review": {"review_id": "review-1", "selection_hash": "hash", "status": "approved"},
+        "generated_workflow_name": "StaleWorkflow",
+    }
+    config_path = Path(__file__).resolve().parents[1] / "factory_app/workflows/AgentGenerator/context_variables.yaml"
+    definitions = yaml.safe_load(config_path.read_text(encoding="utf-8"))["definitions"]
+    policy = build_context_authority_policy(workflow_name="AgentGenerator", definitions=definitions)
+    context = ContextVariablesBridge(data, authority_policy=policy)
+    context._bind_run(("AgentGenerator", "factory-test", "chat_123"), policy)
+    record = _wrap_tool_with_context(generate_and_download_module._record_context_and_artifacts, context)
+    asyncio.run(record(
+        app_id="app_123", user_id="user_123", chat_id="chat_123", pack_name="Records",
+        bundle_entries=[], zip_path=None,
+    ))
+    saved = store.calls[0]
+    assert saved["files_manifest"] == []
+    assert saved["app_id"] == "app_123"
+    metadata = saved["commit_metadata"]["metadata"]
+    assert metadata["workflow_plan_review"]["status"] == "approved"
+    assert metadata["workflow_integration_metadata"]["workflows"] == []
+    assert metadata["workflow_integration_metadata"]["primary_workflow"] is None
+    assert metadata["artifact_path"] is None
+    assert context.get("generated_workflow_name") is None
+    assert context.get("artifact_version_id") == "av_workflow_bundle_1"
+    extra = export_write.call_args.kwargs["extra_fields"]
+    assert extra["agent_websocket_url"] is None
+    assert extra["agent_api_url"] is None
+
+
 @pytest.mark.parametrize(
     "optional_writer",
     ["record_workflow_export", "record_workflow_artifacts"],

@@ -39,6 +39,13 @@ Rules:
 
 ## Runtime Resolution Semantics
 
+An agent's declared variables and exposure templates are re-rendered from its
+live context bridge before every AG2 model call, including later steps and
+correction attempts. The existing prompt middleware starts from the unprojected
+base prompt, applies current exposures, then runs workflow middleware. It does
+not accumulate old snapshots or expose undeclared variables by default. This
+refresh reads runtime state; it does not re-query data references on every turn.
+
 Before agents are created, the runtime checks that `before_chat` hooks have not
 changed immutable runtime authority. This includes app/user/chat/workflow identity,
 tenant and workspace scope, permissions, secret handles, and variables explicitly
@@ -249,8 +256,8 @@ Source file analyzed:
 | `context_include_schema` | `boolean` | `config` | `os.getenv("CONTEXT_INCLUDE_SCHEMA")`, fallback `false`, boolean coercion |
 | `context_schema_db` | `string` | `config` | `os.getenv("CONTEXT_SCHEMA_DB")`, fallback `null` |
 | `interview_complete` | `boolean` | `state` | Initialized to `false`; set through state trigger (`agent_text`, `InterviewAgent`, `match.equals=NEXT`, `ui_hidden=true`) |
-| `workflow_review_approved` | `boolean` | `state` | Initialized to `false`; set only when the main composer reply exactly matches `APPROVE` (case-insensitive), never by finding an approval word inside prose |
-| `workflow_review_revision_requested` | `boolean` | `state` | Initialized to `false`; set through a `user_text` regex when the user asks for revisions in the main chat composer |
+| `workflow_review_outcome` | `string` | `state` | Runtime tool outcome: approved, no_workflows, changes_requested, cancelled, or blocked. Never set by chat text. |
+| `workflow_plan_review` | `object` | `computed` | Draft-specific review id, selection hash, decision, and human feedback. |
 | `action_plan` | `object` | `computed` | Starts `None`; set by workflow tools (for example action plan generation tool chain) |
 | `workflow_strategy` | `object` | `computed` | Starts `None`; populated by strategy generation tool path |
 | `technical_blueprint` | `object` | `computed` | Starts `None`; populated by technical blueprint tool path |

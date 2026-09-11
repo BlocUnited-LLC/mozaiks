@@ -1883,6 +1883,7 @@ agents:
       **Mode A contract boundary**:
       - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
       - Emit only the YAML files required by `current_build_task.owned_paths` and the feature intent. `module.yaml` is always required; optional families stay omitted when empty.
+      - Set every unneeded or unowned companion manifest to null, not an empty placeholder object. This includes events_yaml, reactions_yaml, notifications_yaml, settings_yaml, admin_yaml, profile_yaml, relationships_yaml, and policy_hooks_yaml. Do not mirror null manifests into code_files.
       - Use the structured output models as the source of truth for exact field shapes instead of recreating ad hoc YAML examples in the prompt.
       - Keep customization bounded to explicit contract fields and declared `python_stubs` / `js_stubs` entries.
 
@@ -1920,7 +1921,7 @@ agents:
       2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, reactions, and Python hook needs.
          - Treat the action list in `current_build_task.initial_message` as a closed contract. Emit every named action exactly once and do not replace it with a smaller, renamed, or reinterpreted action set.
          - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
-         - Treat event declarations as explicit only. Do not invent events from action verbs. If `current_build_task.initial_message` does not name event types, set `actions[].emits: []` and `events_yaml.events: []`.
+         - Treat event declarations as explicit only. Do not invent events from action verbs. If `current_build_task.initial_message` does not name event types, set `actions[].emits: []` and `events_yaml: null`.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
          - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `policy_hooks_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
@@ -1934,8 +1935,9 @@ agents:
            - `capabilities`: list of `{capability_id, kind, target, title, permissions, input_schema}` objects
          - `input_schema` and `output_schema` must be typed `JsonSchemaContract` objects, not raw JSON Schema maps. Include `type`, `description`, `required`, `properties`, and `items_type`. `properties` is a list of `{name, type, description, required, enum_values, items_type}` objects, not a dictionary keyed by property name.
          - Every `JsonSchemaProperty` must include all six fields: `name`, `type`, `description`, `required`, `enum_values`, and `items_type`. Use `enum_values: []` when there is no enum and `items_type: null` when the property is not an array.
+         - The deterministic renderer converts typed schema lists into runtime JSON Schema maps, enum values, and array items. The top-level required list must match the property required flags. Request schemas are compiled into the canonical closed profile; keep this shallow generator contract to named scalar fields and scalar arrays, not nested open objects. Do not invent raw schema fields to bypass the typed contract.
          - Never set an action's `input_schema` or `output_schema` to null. For no-input actions, use `{type: "object", description: "...", required: [], properties: [], items_type: null}`.
-         - Action request contracts are closed. When rendering `actions[].input_schema` into module.yaml, every object level (the root and every nested object, including array item objects) must declare `additionalProperties: false`, and every accepted request key must be an explicitly declared property. Never emit an open map/dictionary property such as `metadata: {type: object}` in an action input schema — represent finite context as a closed nested object with declared keys, or as an array of closed `{key, value}` string entries when callers attach app-defined annotations. Keep rendered input schemas to closed-profile keywords (`type`, `enum`, `items`, `properties`, `required`, `additionalProperties`); express defaults and length limits in handler/service code, not in the input schema.
+         - Action request contracts are closed. The deterministic renderer declares `additionalProperties: false` and only closed-profile keywords (`type`, `enum`, `items`, `properties`, `required`, `additionalProperties`) in runtime request schemas. Every accepted request key must be a declared property. This shallow generator schema cannot represent nested object fields or object-array items; flatten requests into named scalar fields and scalar arrays. Never emit an open map such as metadata or use raw code_files to bypass this limit. Express defaults and length limits in handler/service code, not in the input schema.
          - `permissions`, `actions`, and `capabilities` are top-level siblings of `module` inside `module_yaml`; never nest them under `module`.
          - Capabilities do not use `id` or `grants`. For an action capability, set `capability_id` to the public capability id, `kind: "action"`, and `target` to the action id.
          - `actions[].handler_method` is the Python method name only, not an import path. Use `generate_report`, not `backend.handler:generate_report`. For generated durable modules, the handler method must equal the action id unless `current_build_task.initial_message` explicitly names a different method.
@@ -1978,12 +1980,12 @@ agents:
          - **Provider binding**: each hook provider's `action` field must reference an action id declared in `module.yaml`. Use `hook_type: access`, `classification`, `decision_input`, or `custom`.
          - **Provider output**: actions must return allowlisted DTOs only, such as `eligible`, `resource_type`, `resource_id`, `user_id`, `class_ids`, `capabilities`, `decision_inputs`, and policy version/source metadata. Never return raw membership records, secrets, payment fields, ledger rows, or hosted-provider details.
          - **Boundaries**: policy hooks do not execute payments, grant equity, mutate subscription state, run hosted-product provider logic, or define Mozaiks App governance/revenue/campaign behavior.
-      10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. **Derive admin panels from the module's declared actions** — do not leave `panels[]` empty for durable module surfaces. Apply this derivation:
+      10. **admin.yaml**: emit only when the approved task owns `contracts/admin.yaml` and requires module admin panels. Otherwise set `admin_yaml: null`. For an authorized admin manifest, use `schema_version: mozaiks.admin.v2` and derive panels from the module's declared actions:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
          - **Row/toolbar actions for mutations**: approval, write, and status-change actions (`approve_*`, `reject_*`, `publish_*`, `archive_*`, `update_*`) are surfaced as `config.actions[]` entries on the primary record panel — not as separate panels.
          - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: access`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
-         - **Only emit empty `panels: []` when**: (a) the module has no list or query actions, (b) the `initial_message` explicitly says "no admin panels needed", or (c) this is not a `module_contract` task.
+         - Do not invent admin panels for every durable module. If no admin panels are needed, use null and omit the file.
          - Every panel must set `page` (not `section`) to a page id from `admin/admin_registry.yaml`. Use `renderer: schema` unless a custom component was explicitly requested. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_metrics`); every hook must be module-local and mirrored in `python_stubs`.
          - `renderer: schema` panels must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`. Bind data through section-level `config.api_endpoint` values calling `/api/modules/{module_id}/{action_id}`.
          - Put panel actions inside section configs (e.g. `DataTable` toolbar actions, `Form` submit actions), not as ad hoc top-level panel fields.
@@ -2129,11 +2131,11 @@ agents:
               }
             ]
           },
-          "events_yaml": { "schema_version": "mozaiks.events.v1", "events": [] },
-          "reactions_yaml": { "schema_version": "mozaiks.reactions.v1", "reactions": [] },
-          "notifications_yaml": { "schema_version": "mozaiks.notifications.v1", "notifications": [] },
-          "settings_yaml": { "schema_version": "mozaiks.settings.v1", "settings": [], "features": [] },
-          "admin_yaml": { "schema_version": "mozaiks.admin.v2", "panels": [], "hooks": [] },
+          "events_yaml": null,
+          "reactions_yaml": null,
+          "notifications_yaml": null,
+          "settings_yaml": null,
+          "admin_yaml": null,
           "profile_yaml": null,
           "relationships_yaml": null,
           "policy_hooks_yaml": null,

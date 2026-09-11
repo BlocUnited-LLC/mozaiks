@@ -965,7 +965,24 @@ def _install_context_update_handler(
                 if tool_outcome is not None and (event_data.get("routing") or {}).get("kind") in {"handoff", "finish"}:
                     raise ValueError(f"tool_outcome.requires_declared_graph:{agent_name}")
                 if agent_output_handler is not None:
-                    await agent_output_handler(agent_name, out_envelope)
+                    try:
+                        await agent_output_handler(agent_name, out_envelope)
+                    except Exception:
+                        # Preserve tool/batch facts without committing a reply that
+                        # would advance the graph after a failed required task.
+                        if bridge is not None:
+                            updates = bridge.consume_authorized_context_updates(
+                                policy=context_authority_policy, run_identity=run_identity,
+                            )
+                            if updates.get("set") or updates.get("delete"):
+                                await original_send_envelope(Envelope(
+                                    channel_id=out_envelope.channel_id,
+                                    sender_id=client.agent_id,
+                                    audience=[],
+                                    event_type=EV_CONTEXT_SET,
+                                    event_data=_json_safe_dict(updates),
+                                ))
+                        raise
                 existing = dict(event_data.get("context_updates") or {})
                 existing_set = _authorized_context_updates(
                     existing.get("set") or {},

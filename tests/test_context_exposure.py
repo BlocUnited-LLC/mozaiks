@@ -29,6 +29,48 @@ def test_apply_context_exposures_uses_agent_variable_fallback() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_hook", [False, True])
+async def test_prompt_middleware_refreshes_declared_values_without_accumulation(with_hook):
+    from ag2 import Context, MemoryStream
+    from ag2.events import ModelRequest, ModelResponse
+
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.execution.middleware import build_prompt_middleware
+
+    bridge = ContextVariablesBridge({"feedback": "first draft", "private_value": "not exposed"})
+    context = Context(MemoryStream(), prompt=["initial"], variables={})
+
+    def hook(agent, _messages):
+        agent.update_system_message(agent.system_message + "\nHOOK")
+
+    build = build_prompt_middleware(
+        middleware_functions=[hook] if with_hook else [], agent_name="Planner",
+        base_system_message="Review the plan.", context_bridge=bridge,
+        context_variables=["feedback"],
+    )
+    prompts = []
+
+    async def call_next(_events, call_context):
+        prompts.append("\n".join(call_context.prompt))
+        return ModelResponse()
+
+    for value in ("first draft", "requested correction", None):
+        bridge.set("feedback", value)
+        middleware = build(ModelRequest("continue"), context)
+        await middleware.on_llm_call(call_next, [], context)
+
+    assert "FEEDBACK: first draft" in prompts[0]
+    assert "FEEDBACK: requested correction" in prompts[1]
+    assert "first draft" not in prompts[1]
+    assert "FEEDBACK: None" in prompts[2]
+    assert "requested correction" not in prompts[2]
+    for prompt in prompts:
+        assert "not exposed" not in prompt
+        assert prompt.count("FEEDBACK:") == 1
+        assert prompt.count("HOOK") == int(with_hook)
+
+
+@pytest.mark.asyncio
 async def test_create_agents_exposes_declared_context_variables_without_explicit_exposures(monkeypatch) -> None:
     from mozaiksai.core.workflow import llm_config
     from mozaiksai.core.workflow.agents import factory

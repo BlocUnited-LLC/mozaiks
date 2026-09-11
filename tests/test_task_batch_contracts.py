@@ -1081,3 +1081,58 @@ async def test_execute_task_batches_rejects_worker_output_outside_owned_paths() 
             context_variables=context,
             fresh_agents_per_task=False,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repair", [False, True])
+@pytest.mark.parametrize("failure_kind", ["ownership", "null_manifest", "task_identity"])
+async def test_task_output_validation_uses_the_declared_retry_budget(repair: bool, failure_kind: str) -> None:
+    payload = _valid_payload()
+    batch = payload["batches"][0]
+    batch["execution"]["retry_limit"] = 1
+    batch["result"]["require_owned_paths"] = True
+    config = parse_task_batches_config(payload)
+    valid = {"code_files": [{"filename": "modules/profiles/module.yaml", "content": "id: profiles"}]}
+    if failure_kind == "ownership":
+        invalid = {"code_files": [{"filename": "modules/other/module.yaml", "content": "id: other"}]}
+        error = "outside owned_paths"
+    elif failure_kind == "null_manifest":
+        invalid = {
+            "module_contract": {"module_id": "profiles", "events_yaml": None},
+            "code_files": [{"filename": "modules/profiles/contracts/events.yaml", "content": "events: []"}],
+        }
+        error = "events_yaml is null"
+    else:
+        invalid = {**valid, "task_id": "another_task"}
+        error = "mismatched task_id"
+
+    class RepairAgent(_RunnerAgent):
+        async def ask(self, message, **kwargs):
+            self.ask_calls.append({"message": message, "kwargs": kwargs})
+            return _Reply(json.dumps(valid if repair and len(self.ask_calls) == 2 else invalid))
+
+    agent = RepairAgent("")
+    context = {"review_plan": {"tasks": [{
+        "task_id": "profiles", "initial_agent": "WorkerAgent", "initial_message": "Build profiles.",
+        "owned_paths": ["modules/profiles/module.yaml"],
+    }]}}
+
+    async def execute():
+        return await execute_task_batches_for_trigger(
+            workflow_name="TaskBatchWorkflow", trigger_agent="TriageAgent", batches_config=config,
+            agents={"WorkerAgent": agent}, context_variables=context, fresh_agents_per_task=False,
+        )
+
+    if repair:
+        await execute()
+        assert context["document_review_status"] == "completed"
+        assert context["document_review_results"]["profiles"]["code_files"] == valid["code_files"]
+    else:
+        with pytest.raises(RuntimeError, match=error):
+            await execute()
+        assert context["document_review_status"] == "failed"
+        assert "profiles" not in context["document_review_results"]
+    assert len(agent.ask_calls) == 2
+    assert "[TASK VALIDATION FEEDBACK]" not in agent.ask_calls[0]["message"]
+    assert "[TASK VALIDATION FEEDBACK]" in agent.ask_calls[1]["message"]
+    assert error in agent.ask_calls[1]["message"]

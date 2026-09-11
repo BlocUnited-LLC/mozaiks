@@ -49,4 +49,5 @@ def test_interview_orchestrators_use_guidance_language() -> None:
 
     assert 'guide the user to a concrete app direction' in value_orchestrator
     assert 'guide the user through only the missing deterministic' in app_orchestrator
-    assert 'guide the user with assumptions or suggestions' in agent_orchestrator
+    assert 'only a missing question that changes the required AI workflow design' in agent_orchestrator
+    assert 'NEXT' in agent_orchestrator

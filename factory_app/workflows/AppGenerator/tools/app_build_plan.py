@@ -1873,13 +1873,14 @@ def app_build_plan(
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> str:
+    if context_variables is not None and hasattr(context_variables, "set"):
+        context_variables.set("app_plan_ready", False)
+        context_variables.set("app_build_plan", None)
+        context_variables.set("app_task_batch_items", [])
+        context_variables.set("app_task_batch_status", None)
     if not AppBuildPlan or not isinstance(AppBuildPlan, dict):
         raise ValueError("AppBuildPlan payload is required and must be a dictionary")
     AppBuildPlan = _unwrap_app_build_plan_payload(AppBuildPlan)
-    if "app_kind" not in AppBuildPlan and context_variables and hasattr(context_variables, "get"):
-        existing_plan = context_variables.get("app_build_plan")
-        if isinstance(existing_plan, dict):
-            AppBuildPlan = _unwrap_app_build_plan_payload(existing_plan)
 
     agent_message = str(AppBuildPlan.get("agent_message") or "").strip()
     app_kind = str(AppBuildPlan.get("app_kind") or "").strip()
@@ -2060,7 +2061,7 @@ def app_build_plan(
         "demo_fixture_sets": demo_fixture_sets,
     }
 
-    if context_variables and hasattr(context_variables, "set"):
+    if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("app_build_plan", normalized_plan)
             context_variables.set("app_plan_ready", True)

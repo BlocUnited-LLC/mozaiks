@@ -159,6 +159,7 @@ class _WorkflowToolInvocation:
     policy: ContextAuthorityPolicy | None
     run_identity: tuple[str, str, str] | None
     user_id: str | None
+    writer_id: ContextWriterId = DETERMINISTIC_TOOL_WRITER
     active: bool = True
 
 
@@ -185,11 +186,14 @@ def active_workflow_tool_run() -> tuple[str, str, str, str]:
 
 
 @contextmanager
-def _workflow_tool_invocation(bridge: ContextVariablesBridge):
+def _workflow_tool_invocation(
+    bridge: ContextVariablesBridge, *, writer_id: ContextWriterId = DETERMINISTIC_TOOL_WRITER,
+):
     actor = bridge.get("user_id")
     invocation = _WorkflowToolInvocation(
         bridge, bridge._authority_policy, bridge._run_identity,
         actor if isinstance(actor, str) and actor.strip() else None,
+        writer_id,
     )
     token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
     try:
@@ -256,7 +260,7 @@ class ContextVariablesBridge:
         ):
             return resolve_declared_context_writer(
                 key, base_writer=CONTEXT_BRIDGE_WRITER,
-                declared_writer=DETERMINISTIC_TOOL_WRITER, policy=self._authority_policy,
+                declared_writer=invocation.writer_id, policy=self._authority_policy,
             )
         return CONTEXT_BRIDGE_WRITER
 
@@ -664,6 +668,7 @@ async def create_agents(
             system_message = agent_config.get("system_message", "You are a helpful AI assistant.")
 
         # Apply context exposures to the base prompt
+        unprojected_system_message = system_message
         agent_exposures = (exposures_map or {}).get(agent_name, []) or []
         agent_plan = (agent_plan_map or {}).get(agent_name)
         agent_variables = list(getattr(agent_plan, "variables", []) or [])
@@ -923,15 +928,17 @@ async def create_agents(
         except Exception as watchdog_err:
             logger.debug("[AGENTS] AG2 token watchdog observers skipped for '%s': %s", agent_name, watchdog_err)
 
-        if prompt_middleware_functions:
+        if prompt_middleware_functions or agent_exposures or agent_variables:
             from ..execution.middleware import build_prompt_middleware
 
             middleware.append(
                 build_prompt_middleware(
                     middleware_functions=prompt_middleware_functions,
                     agent_name=agent_name,
-                    base_system_message=system_message,
+                    base_system_message=unprojected_system_message,
                     context_bridge=context_bridge,
+                    context_exposures=agent_exposures,
+                    context_variables=agent_variables,
                 )
             )
 

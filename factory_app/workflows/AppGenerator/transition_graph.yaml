@@ -1,4 +1,16 @@
 transition_rules:
+- source_agent: user
+  target_agent: InterviewAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: false
+  transition_target: AgentTarget
+- source_agent: user
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: InterviewAgent
   target_agent: AppPlanAgent
   transition_type: condition
@@ -11,9 +23,10 @@ transition_rules:
   transition_type: after_turn
   transition_target: RevertToUserTarget
 - source_agent: AppPlanAgent
-  target_agent: AppSchemaAgent
+  target_agent: terminate
   transition_type: after_turn
-  transition_target: AgentTarget
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
 - source_agent: AppPlanAgent
   target_agent: AssemblyAgent
   transition_type: condition

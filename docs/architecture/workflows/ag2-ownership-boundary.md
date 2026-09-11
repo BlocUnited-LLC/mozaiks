@@ -31,6 +31,25 @@ Mozaiks owns deterministic product and runtime contracts around AG2:
 
 ## Runtime Handoff
 
+Declared task batches execute after their trigger agent's validated output and
+auto tools, before AG2 folds that agent's outgoing packet. This applies at any
+point in the graph, including after an interview, human approval, or resume.
+The existing task-batch executor and AG2 Task adapter own worker execution;
+only declared result/status keys are committed with task-batch writer authority.
+AG2 then evaluates the original transition graph. Mozaiks must not replace the
+first turn with an artificial termination and a separately selected continuation.
+A failed required batch fails the run rather than advancing to assembly.
+The declared task retry budget covers response validation, deterministic file
+materialization, task identity, and file ownership. A rejected response supplies
+bounded validation feedback to the next attempt at the same task; it does not
+change the task's ownership or create an unlimited repair loop.
+If an output hook fails after authorized tool or batch writes, the adapter
+commits those writes using AG2 `EV_CONTEXT_SET` without sending the failed
+reply packet. Failure evidence therefore survives WAL replay without advancing
+the graph. This uses AG2's existing
+[channel context primitive](https://docs.ag2.ai/docs/user-guide/network/context_variables/),
+not a second persistence or routing authority.
+
 Declarative workflow participants attach through AG2's public
 `attach_plugin=False` option. They keep AG2's default envelope handler,
 channel adapter, graph execution, and declared workflow tools, but do not

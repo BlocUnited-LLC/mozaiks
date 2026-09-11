@@ -11,13 +11,13 @@
     {
       "contains": "final tweaks",
       "reply": "No final tweaks. Proceed to workflow planning."
-    },
-    {
-      "contains": "Review the workflow design",
-      "reply": "APPROVE"
     }
   ],
   "tool_responses": {
+    "WorkflowPlanReview": {
+      "action": "approve",
+      "approved": true
+    },
     "DownloadCenter": {
       "status": "submitted",
       "action": "download_complete",

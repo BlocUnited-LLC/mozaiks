@@ -375,7 +375,9 @@ def load_agent_tool_functions(
             reg_err,
         )
 
-    # Disable per-process tool module caching to always load fresh tool code
+    # Refresh once per load, retaining module globals for annotations and sibling imports.
+    _reset_workflow_package_namespace(base_dir=base_dir, workflow_name=workflow_name)
+    loaded_modules: dict[str, types.ModuleType] = {}
     logger.debug("[TOOLS][TRACE] Starting tool load for workflow '%s' (entries=%s)", workflow_name, len(entries))
     for idx, tool in enumerate(entries, start=1):
         if not isinstance(tool, dict):
@@ -410,20 +412,28 @@ def load_agent_tool_functions(
         if not file_path:
             logger.warning("[TOOLS][TRACE] File not found for entry #%s: %s (searched: %s)", idx, file_name, candidate_paths)
             continue
-        # Always load a fresh module instance under an ephemeral name (no sys.modules caching)
+        # Register before execution, as normal Python imports do. Typed models and
+        # dataclasses resolve postponed annotations through sys.modules.
         module = None
         try:
             _ensure_workflow_import_paths(base_dir=base_dir, file_path=file_path)
-            _reset_workflow_package_namespace(base_dir=base_dir, workflow_name=workflow_name)
             module_name = f"workflows.{workflow_name}.tools.{file_path.stem}"
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            if spec and spec.loader:
+            module = loaded_modules.get(module_name)
+            if module is None:
+                spec = importlib.util.spec_from_file_location(module_name, file_path)
+                if not spec or not spec.loader:
+                    logger.warning("[TOOLS] Could not load spec for %s", file_path)
+                    continue
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)  # type: ignore[attr-defined]
-                logger.debug("[TOOLS] Loaded module fresh (no cache): %s", file_path.name)
-            else:
-                logger.warning("[TOOLS] Could not load spec for %s", file_path)
-                continue
+                sys.modules[module_name] = module
+                try:
+                    spec.loader.exec_module(module)
+                except BaseException:
+                    if sys.modules.get(module_name) is module:
+                        sys.modules.pop(module_name, None)
+                    raise
+                loaded_modules[module_name] = module
+                logger.debug("[TOOLS] Loaded module fresh: %s", file_path.name)
         except Exception as imp_err:
             logger.warning("[TOOLS][TRACE] Import failed for %s: %s", file_path, imp_err)
             continue

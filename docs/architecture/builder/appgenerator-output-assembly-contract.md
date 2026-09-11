@@ -13,6 +13,21 @@ feed the existing deterministic materializers; bounded implementation tasks
 provide Python/React source through `CodeFile` entries. Assembly combines those
 outputs with explicitly declared capability-pack templates.
 
+The existing task-batch retry budget includes deterministic materialization and
+file-ownership validation. Invalid worker output is not merged. A remaining
+attempt receives the validation error and must satisfy the original task;
+exhaustion stops the build and persists failure diagnostics.
+AppPlanAgent clears stale plan/task state before validating a replacement.
+Only a completed declared task batch may advance it to assembly; a rejected
+or empty plan cannot fall through to standalone page generation.
+
+Module action/capability schemas and event payload schemas are compiled from
+`JsonSchemaContract` lists into runtime JSON Schema maps. Null annotations are
+omitted; enums and array item types are rendered under their JSON Schema keys.
+Required-name lists must agree with property flags. Action/capability requests
+use the existing closed-contract importer: unknown keys are rejected, and
+unrepresentable nested/open request objects fail instead of being weakened.
+
 Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,
 data contracts, migrations, and tooling manifests retain their canonical `.json`
 paths. Jinja templates are build inputs: `name.yaml.j2` renders to `name.yaml`,
@@ -561,6 +576,11 @@ Rules:
   integration readiness and wiring checks to pass.
 
 Materialization rule:
+
+- `ModuleContractBundle` keeps `module_yaml` required. Companion manifests are
+  nullable: null means no file. Tasks must explicitly own any companion they
+  generate; ordinary CRUD does not automatically create admin/settings/events
+  manifests. Do not serialize null manifests as empty YAML or raw file mirrors.
 
 - typed agent outputs such as `app_backend_admin_config`, `python_files`, and
   `js_files` are the source of truth for their owned lanes

@@ -44,6 +44,9 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+from pydantic import BaseModel
+
 from factory_app.workflows.AppGenerator.tools.save_app_schema import (
     _key_value_entries_to_dict,
     _normalize_list,
@@ -174,22 +177,20 @@ class TestToPlain:
         assert result == [{"key": "value"}, "scalar"]
 
     def test_pydantic_model_converted(self):
-        class FakePydantic:
-            def model_dump(self):
-                return {"id": "test", "value": 42}
+        class Model(BaseModel):
+            id: str = "test"
+            value: int = 42
 
-        result = _to_plain(FakePydantic())
+        result = _to_plain(Model())
         assert result == {"id": "test", "value": 42}
 
-    def test_model_dump_exception_falls_through(self):
+    def test_unsupported_mutable_object_is_rejected(self):
         class BadModel:
             def model_dump(self):
                 raise RuntimeError("boom")
 
-        # Falls through to isinstance checks — it has model_dump but not dict/list
-        result = _to_plain(BadModel())
-        # Returns the object itself (no dict/list match)
-        assert isinstance(result, BadModel)
+        with pytest.raises(TypeError, match="unsupported mutable type"):
+            _to_plain(BadModel())
 
     def test_nested_dict_processed(self):
         data = {"outer": {"inner": "value"}}

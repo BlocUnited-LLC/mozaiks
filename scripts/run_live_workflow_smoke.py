@@ -411,7 +411,7 @@ def _pop_tool_response_payload(
         if not queue:
             continue
         response = _normalize_tool_response_payload(queue.popleft())
-        if data.get("tool_name") == "save_value_manifest" and "review_id" not in response:
+        if (data.get("payload") or {}).get("review_id") and "review_id" not in response:
             response["review_id"] = (data.get("payload") or {}).get("review_id")
         return response
     return None
