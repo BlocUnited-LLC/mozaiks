@@ -616,6 +616,12 @@ async def _materialize_plan_bundle(*, tmp_path: Path) -> tuple[dict[str, str], P
     )
     files.update(_file_map(scaffold))
 
+    # This fixture stops before export; apply the same final route composition
+    # that generate_and_download performs before its acceptance gate.
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes
+
+    compose_bundle_auth_routes(files)
+
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(
             files=files,
