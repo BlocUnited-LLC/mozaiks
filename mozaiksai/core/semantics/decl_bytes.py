@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -54,13 +54,13 @@ def yaml_decl_bytes(document: Mapping[str, Any]) -> bytes:
     """Serialize one declaration document under ``mozaiks.yaml_decl_bytes.v1``."""
     if not isinstance(document, Mapping):
         raise DeclBytesError("yaml_decl_bytes requires a mapping document")
-    text = yaml.safe_dump(
+    text = cast(str, yaml.safe_dump(
         dict(document),
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
         width=2_000_000_000,
-    )
+    ))
     text = text.replace("\r\n", "\n")
     if not text.endswith("\n"):
         text += "\n"
