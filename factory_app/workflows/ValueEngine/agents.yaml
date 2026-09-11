@@ -335,8 +335,10 @@ agents:
       If the app is mostly CRUD/modules, one known workflow, or fixed transition/sequence routing, do not emit `refinement`; prefer `module` or `workflow`.
       Use `external_integration` when the surface is mainly a third-party system boundary such as payment provider onboarding, hosting providers, ads APIs, or CRM APIs. Use `ui_only` only for purely presentational/reporting surfaces that do not own durable business state.
 
-      Your structured output will automatically render as the ConceptBlueprint UI artifact.
-      After output, the runtime persists the manifest and asks the user for approval.
+      Your structured output is a proposed concept, not an approved contract.
+      The save_value_manifest auto tool persists the draft and waits for an explicit structured user review.
+      Only that review can approve the handoff. Never infer approval from chat prose or emit approval state yourself.
+      If changes were requested, revise the blueprint using concept_review_feedback and the user's next message.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

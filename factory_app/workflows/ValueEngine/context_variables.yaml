@@ -380,6 +380,26 @@ definitions:
     source:
       type: state
       default: false
+  concept_review_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: blocked}
+  concept_review_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
+  concept_review_feedback:
+    type: string
+    description: User feedback returned by the structured concept review, never approval authority.
+    source: {type: state, default: ""}
+  value_manifest:
+    type: object
+    description: The persisted concept summary and its review status.
+    source: {type: computed, default: null}
 
 # ============================================================================
 # COMPUTED - Values set by tools/agents
@@ -533,6 +553,7 @@ agents:
     - concept_presented
   GapAnalysisAgent:
     variables:
+    - concept_review_feedback
     - app_type
     - app_name
     - github_repo

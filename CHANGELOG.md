@@ -14,6 +14,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- ValueEngine concept review now waits for a structured approve, request-changes,
+  or cancel action tied to the displayed draft. Stale reviews, failed saves, and
+  invalid responses cannot complete the workflow. The declared review budget is
+  three proposals per run, with retries only after an explicit request for changes;
+  this is an execution guard, not a subscription allowance.
+
 - Preserve explicit provider-native output token limits and SDK retry counts
   when converting runtime LLM configuration to AG2. Invalid, conflicting, or
   unsupported limits now fail before a provider request instead of disappearing.
