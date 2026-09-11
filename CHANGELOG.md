@@ -57,7 +57,24 @@ This project follows a practical pre-1.0 changelog format:
 - Account export and deletion now bind the authenticated principal and the
   canonical app-data database before invoking module lifecycle handlers.
   Signed-token Mongo tests cover ownership, app isolation, and repeated deletion.
-
+- **Production-safe browser WebSocket authentication**: the shared browser client
+  no longer puts the access token in the WebSocket URL
+  (`?access_token=<jwt>`), where it leaked into server access logs, browser
+  history, `Referer` headers, and shared links. The credential now travels in
+  the `Sec-WebSocket-Protocol` handshake header — the one request header the
+  browser WebSocket API lets a client set — as
+  `["mozaiks.bearer.v1", base64url(token)]`. The runtime decodes it, validates
+  it through the same configured auth adapter as HTTP routes, binds the same
+  `WebSocketUser`, and echoes back only the marker, never the credential.
+  Authenticated browser connections therefore work in production and staging
+  **without** setting `MOZAIKS_WS_ALLOW_QUERY_TOKEN=true`. Query-string tokens
+  remain rejected by default and stay available only as an explicit
+  local-development opt-in for non-browser clients. Auth-disabled local
+  development is unchanged. The credential component must be canonical unpadded
+  base64url: illegal characters, whitespace, padding, trailing garbage,
+  impossible lengths, invalid UTF-8, and non-canonical encodings are refused
+  before the auth adapter runs, with their own bounded close reason, and are
+  never sanitized into a usable credential.
 - **Fail-closed module action dispatch**: `ModuleExecutor` no longer falls
   back from an undeclared action id to a same-named Python handler method.
   Only action ids declared in the module's contract

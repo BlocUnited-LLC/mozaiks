@@ -8,6 +8,7 @@
 // ==============================================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/adapters/websocketAuth.js';
 import { getStudioAccessToken, studioFetch } from '../../../app/admin/pages/studioApi.js';
 
 export function useSandbox(artifactId) {
@@ -24,9 +25,7 @@ export function useSandbox(artifactId) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = new URL(`${protocol}//${window.location.host}/ws/sandbox/${encodeURIComponent(sandboxId)}`);
-    const token = getStudioAccessToken();
-    if (token) wsUrl.searchParams.set('access_token', token);
-    const ws = new WebSocket(wsUrl.toString());
+    const ws = openAuthenticatedWebSocket(wsUrl.toString(), getStudioAccessToken());
     wsRef.current = ws;
 
     ws.onmessage = (event) => {

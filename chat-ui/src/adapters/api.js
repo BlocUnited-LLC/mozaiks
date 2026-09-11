@@ -3,6 +3,7 @@ import workflowConfig from '../config/workflowConfig';
 import resolveWorkflow from '../utils/resolveWorkflow';
 import config from '../config';
 import platform from '../platform/index.js';
+import { openAuthenticatedWebSocket } from './websocketAuth.js';
 
 function _firstString(...values) {
   for (const value of values) {
@@ -440,17 +441,14 @@ export class WebSocketApiAdapter extends ApiAdapter {
       } catch (_) {}
     }
     
-    // Build WebSocket URL with access_token query param for authentication
+    // Build the WebSocket URL. The credential never goes in the URL — it travels in
+    // the handshake subprotocol header. See adapters/websocketAuth.js.
     const wsUrl = new URL(`/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`, wsBase);
-    const token = getAccessToken(this.config);
-    if (token) {
-      wsUrl.searchParams.set('access_token', token);
-    }
     if (options?.suppressHistoryReplay) {
       wsUrl.searchParams.set('suppress_history_replay', '1');
     }
-    
-    const socket = new WebSocket(wsUrl.toString());
+
+    const socket = openAuthenticatedWebSocket(wsUrl.toString(), getAccessToken(this.config));
     let closedByClient = false;
     let hasOpened = false;
     

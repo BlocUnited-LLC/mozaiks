@@ -20,6 +20,7 @@ from websockets.exceptions import ConnectionClosed
 
 # Enhanced logging setup
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.websocket_auth import accept_websocket
 from mozaiksai.core.events.runtime_events import RUNTIME_PROCESS_COMPLETED
 
 # Extracted mixins for separation of concerns
@@ -1591,7 +1592,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 await websocket.close(code=1008, reason="User connection limit reached")
                 return
 
-        await websocket.accept()
+        await accept_websocket(websocket)
 
         # Store ws_id for session registry lookups
         if ws_id is None:
