@@ -80,6 +80,14 @@ Framework-owned pipeline artifacts produced and consumed by `factory_app`:
 These collections hold the durable handoff between workflow stages such as
 `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator`.
 
+Versioned `BuildRecord` documents in `ArtifactVersions` use the unique key
+`(app_id, build_family, build_key, version_number)`. Counters in
+`ArtifactVersionCounters` use `(app_id, build_family, build_key)`. Store
+initialization installs these indexes for canonical records and removes only
+the known obsolete unique indexes over `artifact_kind` and `artifact_key`.
+Existing documents are not deleted or rewritten. An unexpected index definition
+or conflicting canonical data fails initialization and requires operator review.
+
 ### 2b. Platform Connector Metadata
 
 Platform-owned, app-scoped connector metadata used by the visible
