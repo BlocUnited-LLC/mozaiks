@@ -13,7 +13,8 @@ tools:
     function: record_security_findings
     description: >
       Persist the latest security_readiness_findings into the first-party
-      security_readiness module when a ModuleContext is available, and always
-      keep the review summary in context_variables for AppReview.
+      security_readiness module through the live session's permissioned action
+      dispatch. Keep the review summary and explicit persistence failures in
+      context_variables for AppReview.
     tool_type: Agent_Tool
     auto_tool_call: false

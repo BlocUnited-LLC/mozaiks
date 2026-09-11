@@ -37,6 +37,16 @@ Module loading binds the Python `services` package to the active app root.
 Reloading a workspace must not resolve service clients from another app left
 on the process import path. Python package markers remain optional.
 
+Studio composes the packaged `factory_app/app/modules/` as module defaults
+through the same `AppLoader` and `ModuleLoader` used for app modules. Active
+workspace module folders override defaults by id; a broken override fails
+validation rather than silently using the default. This makes shared Studio
+modules such as `security_readiness` callable through the normal authenticated
+module executor without copying their implementation into each workspace.
+The platform-only host loads only its active app modules. Config, services,
+data contracts, and app identity continue to come from the active workspace;
+module defaults do not replace those app families or grant permissions.
+
 | Family | Purpose | Path |
 | --- | --- | --- |
 | App manifest | Small app identity and target manifest | `app/app.json` |

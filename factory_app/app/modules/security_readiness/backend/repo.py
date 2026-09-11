@@ -21,6 +21,16 @@ def _document(value: Any) -> dict[str, Any] | None:
     return dict(value) if isinstance(value, Mapping) else None
 
 
+def _collection_query(ctx: ModuleContext, query: dict[str, Any]) -> dict[str, Any]:
+    """Verify the requested app scope; the persistence adapter supplies it."""
+    scoped = dict(query)
+    if "app_id" in scoped and (
+        ctx.persistence is None or scoped.pop("app_id") != ctx.persistence.app_id
+    ):
+        raise ValueError("Security findings must use the persistence context app_id.")
+    return scoped
+
+
 class SecurityReadinessRepo:
     async def insert_findings(self, ctx: ModuleContext, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not findings:
@@ -28,7 +38,11 @@ class SecurityReadinessRepo:
         collection = _collection(ctx)
         for finding in findings:
             await collection.update_one(
-                {"finding_id": finding["finding_id"], "owner_user_id": finding["owner_user_id"]},
+                _collection_query(ctx, {
+                    "app_id": finding["app_id"],
+                    "finding_id": finding["finding_id"],
+                    "owner_user_id": finding["owner_user_id"],
+                }),
                 {"$set": finding},
                 upsert=True,
             )
@@ -42,7 +56,7 @@ class SecurityReadinessRepo:
         limit: int,
     ) -> list[dict[str, Any]]:
         collection = _collection(ctx)
-        rows = await collection.find_many(query, limit=limit, sort=[("updated_at", -1)])
+        rows = await collection.find_many(_collection_query(ctx, query), limit=limit, sort=[("updated_at", -1)])
         return [public for row in rows if (public := _document(row)) is not None]
 
     async def update_status(
@@ -56,6 +70,7 @@ class SecurityReadinessRepo:
         updated_at: str,
     ) -> dict[str, Any] | None:
         collection = _collection(ctx)
+        query = _collection_query(ctx, query)
         update = {
             "status": status,
             "status_note": note,

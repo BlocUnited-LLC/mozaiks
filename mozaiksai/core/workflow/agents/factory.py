@@ -158,6 +158,7 @@ class _WorkflowToolInvocation:
     bridge: ContextVariablesBridge
     policy: ContextAuthorityPolicy | None
     run_identity: tuple[str, str, str] | None
+    user_id: str | None
     active: bool = True
 
 
@@ -166,9 +167,30 @@ _WORKFLOW_TOOL_INVOCATION: ContextVar[_WorkflowToolInvocation | None] = ContextV
 )
 
 
+def active_workflow_tool_run() -> tuple[str, str, str, str]:
+    """Return runtime-owned workflow/app/chat/actor identity for this invocation."""
+    invocation = _WORKFLOW_TOOL_INVOCATION.get()
+    if (
+        invocation is None
+        or not invocation.active
+        or invocation.run_identity is None
+        or invocation.policy is None
+        or invocation.user_id is None
+        or invocation.bridge._authority_policy is not invocation.policy
+        or invocation.bridge._run_identity != invocation.run_identity
+        or invocation.bridge.get("user_id") != invocation.user_id
+    ):
+        raise PermissionError("workflow_tool_invocation_unavailable")
+    return (*invocation.run_identity, invocation.user_id)
+
+
 @contextmanager
 def _workflow_tool_invocation(bridge: ContextVariablesBridge):
-    invocation = _WorkflowToolInvocation(bridge, bridge._authority_policy, bridge._run_identity)
+    actor = bridge.get("user_id")
+    invocation = _WorkflowToolInvocation(
+        bridge, bridge._authority_policy, bridge._run_identity,
+        actor if isinstance(actor, str) and actor.strip() else None,
+    )
     token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
     try:
         yield

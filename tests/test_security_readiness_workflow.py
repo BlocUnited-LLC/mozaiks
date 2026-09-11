@@ -47,8 +47,9 @@ async def test_record_security_findings_updates_context_without_persistence() ->
 
     result = await record_security_findings(context_variables=ctx)
 
-    assert result["success"] is True
+    assert result["success"] is False
     assert result["persisted"] is False
+    assert result["persistence_error"] == "workflow_tool_invocation_unavailable"
     assert ctx["security_readiness_recorded"] is True
     assert ctx["security_readiness_summary"]["finding_count"] == 1
 
@@ -65,6 +66,20 @@ def test_security_readiness_build_context_declares_workflow_assets() -> None:
         "app_security_file_contracts.yaml",
         "finding_taxonomy.yaml",
     } <= asset_paths
+
+
+@pytest.mark.asyncio
+async def test_no_files_is_not_assessed_and_checked_count_survives_recording() -> None:
+    empty = {"app_id": "app_1"}
+    assert (await inspect_generated_app_security(context_variables=empty))["status"] == "not_assessed"
+    await record_security_findings(context_variables=empty)
+    assert empty["security_readiness_summary"]["status"] == "not_assessed"
+    clean = {"app_id": "app_1", "generated_files": {"app/app.json": '{"authRequired": false}'}}
+    await inspect_generated_app_security(context_variables=clean)
+    await record_security_findings(context_variables=clean)
+    assert clean["security_readiness_summary"]["checked_file_count"] == 1
+    assert clean["security_readiness_summary"]["status"] == "passed"
+    assert clean["security_readiness_summary"]["persisted"] is False
 
 
 def test_security_readiness_is_between_app_generator_and_review(monkeypatch) -> None:

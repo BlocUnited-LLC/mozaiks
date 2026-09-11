@@ -107,7 +107,8 @@ class _WrapperStyleCollection:
 
 
 class _WrapperStylePersistence:
-    def __init__(self) -> None:
+    def __init__(self, app_id: str = "app_1") -> None:
+        self.app_id = app_id
         self.collection_handle = _WrapperStyleCollection()
         self.collection_calls: list[tuple[str, str]] = []
 
@@ -223,7 +224,6 @@ async def test_record_assessment_persists_findings_and_emits_event() -> None:
             {
                 "app_id": "app_1",
                 "build_id": "build_1",
-                "artifact_version_id": None,
                 "saved": 1,
             },
         )
@@ -345,7 +345,64 @@ async def test_repo_uses_canonical_module_persistence_wrapper() -> None:
     )
 
     assert listed[0]["finding_id"] == "sr_1"
+    assert ctx.persistence.collection_handle.find_many_calls[0]["query"] == {"owner_user_id": "user_1"}
     assert ctx.persistence.collection_calls == [
         ("security_readiness", "findings"),
         ("security_readiness", "findings"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_repo_rejects_app_scope_override_before_read_or_write() -> None:
+    ctx = _WrapperStyleCtx()
+    repo = SecurityReadinessRepo()
+    finding = {"finding_id": "sr_1", "app_id": "foreign-app", "owner_user_id": "user_1"}
+
+    with pytest.raises(ValueError, match="persistence context app_id"):
+        await repo.insert_findings(ctx, [finding])
+    with pytest.raises(ValueError, match="persistence context app_id"):
+        await repo.list_findings(ctx, query={"app_id": "foreign-app", "owner_user_id": "user_1"}, limit=10)
+
+    assert ctx.persistence.collection_handle.update_calls == []
+    assert ctx.persistence.collection_handle.find_many_calls == []
+
+
+@pytest.mark.asyncio
+async def test_same_scanner_rule_cannot_overwrite_another_project_or_owner() -> None:
+    ctx = _FakeCtx()
+    ctx.persistence = _WrapperStylePersistence("factory-host")
+    service = SecurityReadinessService()
+    finding = {"finding_id": "auth:missing", "title": "Auth missing", "severity": "high", "control_area": "auth"}
+    for project in ("project_a", "project_b", "project_a"):
+        await service.record_assessment(
+            ctx, app_id="factory-host", build_registry_id=project,
+            build_id="build_1", artifact_version_id="artifact_1", findings=[finding],
+        )
+    ctx.user_id = "other_user"
+    await service.record_assessment(
+        ctx, app_id="factory-host", build_registry_id="project_a",
+        build_id="build_1", artifact_version_id="artifact_1", findings=[finding],
+    )
+    rows = ctx.persistence.collection_handle.rows
+    assert len(rows) == 3
+    assert len({row["finding_id"] for row in rows}) == 3
+    ctx.user_id = "user_1"
+    a = await service.list_findings(ctx, app_id="factory-host", build_registry_id="project_a")
+    b = await service.list_findings(ctx, app_id="factory-host", build_registry_id="project_b")
+    assert a["count"] == b["count"] == 1
+    assert a["findings"][0]["finding_id"] != b["findings"][0]["finding_id"]
+    assert a["findings"][0]["owner_user_id"] == "user_1"
+
+
+@pytest.mark.asyncio
+async def test_registry_filter_applies_before_limit_and_scopes_summary() -> None:
+    common = {"app_id": "factory-host", "owner_user_id": "user_1", "severity": "high", "status": "open"}
+    repo = _FakeRepo(stored=[
+        {**common, "build_registry_id": "other_project"} for _ in range(251)
+    ] + [{**common, "build_registry_id": "project_a"}, common])
+    module = SecurityReadinessModule(SecurityReadinessService(repo=repo))
+    listed = await module.list_findings(_FakeCtx(), app_id="factory-host", build_registry_id="project_a", limit=1)
+    summary = await module.get_summary(_FakeCtx(), app_id="factory-host", build_registry_id="project_a")
+    assert listed["count"] == summary["summary"]["total"] == 1
+    assert listed["findings"][0]["build_registry_id"] == "project_a"
+    assert repo.last_query == {"app_id": "factory-host", "owner_user_id": "user_1", "build_registry_id": "project_a"}

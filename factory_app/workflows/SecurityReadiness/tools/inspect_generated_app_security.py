@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from factory_app.app.modules.security_readiness.backend.schemas import summarize_findings
+from mozaiksai.core.workflow.context.frozen import detach
 
 _TEXT_FILE_SUFFIXES = {
     ".css",
@@ -39,10 +40,10 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
         return context_variables.get(key, default)
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key, default)
+            return detach(context_variables.get(key, default))
         except TypeError:
             try:
-                return context_variables.get(key)
+                return detach(context_variables.get(key))
             except Exception:
                 return default
         except Exception:
@@ -374,7 +375,7 @@ async def inspect_generated_app_security(context_variables: Any | None = None) -
 
     summary = summarize_findings(findings)
     result = {
-        "status": "passed" if summary["open"] == 0 else "attention_required",
+        "status": "not_assessed" if not files else "passed" if summary["open"] == 0 else "attention_required",
         "mode": str(
             _context_get(context_variables, "security_readiness_mode", "advisory") or "advisory"
         ),

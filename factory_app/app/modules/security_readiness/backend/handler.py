@@ -40,6 +40,7 @@ class SecurityReadinessModule:
         ctx: ModuleContext,
         *,
         app_id: str,
+        build_registry_id: str | None = None,
         status: str | None = None,
         severity: str | None = None,
         control_area: str | None = None,
@@ -49,6 +50,7 @@ class SecurityReadinessModule:
         return await self.service.list_findings(
             ctx,
             app_id=app_id,
+            build_registry_id=build_registry_id,
             status=status,
             severity=severity,
             control_area=control_area,
@@ -60,9 +62,12 @@ class SecurityReadinessModule:
         ctx: ModuleContext,
         *,
         app_id: str,
+        build_registry_id: str | None = None,
         **_: object,
     ) -> dict[str, Any]:
-        return await self.service.get_summary(ctx, app_id=app_id)
+        return await self.service.get_summary(
+            ctx, app_id=app_id, build_registry_id=build_registry_id,
+        )
 
     async def update_finding_status(
         self,

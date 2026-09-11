@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from factory_app.app.modules.security_readiness.backend.service import SecurityReadinessService
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.module_tools import dispatch_workflow_module_action
 
 
 def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
@@ -12,10 +13,10 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
         return context_variables.get(key, default)
     if hasattr(context_variables, "get"):
         try:
-            return context_variables.get(key, default)
+            return detach(context_variables.get(key, default))
         except TypeError:
             try:
-                return context_variables.get(key)
+                return detach(context_variables.get(key))
             except Exception:
                 return default
         except Exception:
@@ -45,9 +46,8 @@ def _normalize_findings(value: Any) -> list[dict[str, Any]]:
 async def record_security_findings(
     findings: list[dict[str, Any]] | None = None,
     context_variables: Any | None = None,
-    module_context: Any | None = None,
 ) -> dict[str, Any]:
-    """Record SecurityReadiness findings when module persistence is available."""
+    """Record findings through the live run's permissioned module dispatch."""
 
     resolved_findings = _normalize_findings(
         findings
@@ -60,30 +60,57 @@ async def record_security_findings(
         str(_context_get(context_variables, "artifact_version_id", "") or "").strip() or None
     )
 
+    build_registry_id = str(_context_get(context_variables, "build_registry_id", "") or "").strip() or None
     persisted = False
     result: dict[str, Any] = {"success": True, "persisted": False, "findings": resolved_findings}
-    if module_context is not None and app_id and resolved_findings:
-        service_result = await SecurityReadinessService().record_assessment(
-            module_context,
-            app_id=app_id,
-            build_id=build_id,
-            artifact_version_id=artifact_version_id,
-            source="validation",
-            findings=resolved_findings,
-        )
-        result.update(service_result)
-        persisted = True
+    if app_id and resolved_findings:
+        params = {
+            "app_id": app_id,
+            "source": "validation",
+            "findings": [
+                {
+                    **{key: item[key] for key in (
+                        "finding_id", "title", "description", "severity", "status", "control_area",
+                    ) if key in item},
+                    **({"evidence_ref": item["evidence"]["path"]} if isinstance(item.get("evidence"), dict) and item["evidence"].get("path") else {}),
+                    **({"remediation": item["recommendation"]} if item.get("recommendation") else {}),
+                }
+                for item in resolved_findings
+            ],
+        }
+        params.update({key: value for key, value in {
+            "build_id": build_id, "build_registry_id": build_registry_id,
+            "artifact_version_id": artifact_version_id,
+        }.items() if value})
+        try:
+            dispatched = await dispatch_workflow_module_action("security_readiness", "record_assessment", params)
+            persisted = dispatched.success and bool((dispatched.data or {}).get("success"))
+            if persisted:
+                result.update(dispatched.data)
+            else:
+                result.update(success=False, persistence_error=dispatched.error_code or "security_findings_record_failed")
+        except PermissionError as exc:
+            result.update(success=False, persistence_error=str(exc))
+        except Exception:
+            result.update(success=False, persistence_error="security_findings_record_failed")
+    elif not app_id and resolved_findings:
+        result.update(success=False, persistence_error="security_findings_app_id_missing")
     result["persisted"] = persisted
 
+    inspected = _context_get(context_variables, "security_readiness_summary", {})
+    checked_file_count = inspected.get("checked_file_count", 0) if isinstance(inspected, dict) else 0
     summary = {
-        "status": "passed" if not resolved_findings else "attention_required",
+        "status": "attention_required" if resolved_findings else "passed" if checked_file_count else "not_assessed",
         "mode": str(
             _context_get(context_variables, "security_readiness_mode", "advisory") or "advisory"
         ),
         "persisted": persisted,
         "finding_count": len(resolved_findings),
+        "checked_file_count": checked_file_count,
         "findings": resolved_findings,
     }
+    if result.get("persistence_error"):
+        summary["persistence_error"] = result["persistence_error"]
     _context_set(context_variables, "security_readiness_summary", summary)
     _context_set(context_variables, "security_readiness_recorded", True)
     return result

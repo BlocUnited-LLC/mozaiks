@@ -21,3 +21,6 @@ agents:
       - app/modules/*/backend/policy.py owns module-local scoping policy.
 
       When the tools complete, summarize the readiness status briefly and stop.
+      If no files were inspected, say the bundle was not assessed. If recording
+      failed, say findings are available in this review but were not saved;
+      never claim persistence succeeded after a denied or unavailable dispatch.
