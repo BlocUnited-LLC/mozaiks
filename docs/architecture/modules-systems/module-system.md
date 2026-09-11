@@ -20,11 +20,15 @@ contain orchestration or reasoning logic.
 
 Tools running in a live authenticated workflow may call
 `mozaiksai.core.workflow.module_tools.dispatch_workflow_module_action(module, action, params)`.
-The helper obtains the workflow/app/chat identity from the active AG2 tool invocation
+The helper obtains workflow/app/chat/actor identity from the active AG2 tool invocation
 and the principal from that run's server-owned WebSocket connection. Host scope hooks
 resolve membership before the existing module executor enforces action permissions
 and entitlements. Identity, permissions, and bearer tokens are never taken from model
-arguments. Expired, disconnected, mismatched, or revoked invocations fail closed.
+arguments. During a workflow handoff it allows up to two seconds for a missing or
+replaced socket to reconnect, resolving the live principal and permissions again
+on every attempt. The actor remains bound to the original immutable runtime
+identity. Expired or mismatched principals, permission denials, and revoked
+invocations fail closed. An action is never retried after execution starts.
 Headless runs without a live principal must use their own explicit server-owned
 dispatch contract; this helper does not grant a background bypass.
 

@@ -1,6 +1,7 @@
 """Permissioned module dispatch for tools attached to a live workflow session."""
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from typing import Any
@@ -23,19 +24,25 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleResult
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 
+_RECONNECT_TIMEOUT_SECONDS = 2.0
+_RECONNECT_POLL_SECONDS = 0.05
 
-def _live_session(transport: Any, *, app_id: str, chat_id: str) -> tuple[Any, Any, WebSocketUser]:
+
+class _ConnectionUnavailable(PermissionError):
+    """A connection changed before dispatch; no action has executed yet."""
+
+
+def _live_session(transport: Any, *, app_id: str, chat_id: str, user_id: str) -> tuple[Any, Any, WebSocketUser]:
     connection = (getattr(transport, "connections", {}) or {}).get(chat_id) or {}
     websocket = connection.get("websocket")
     principal = getattr(getattr(websocket, "state", None), "user", None)
-    if (
-        not connection.get("active") or not isinstance(principal, WebSocketUser)
-        or getattr(websocket, "client_state", None) != WebSocketState.CONNECTED
-        or getattr(websocket, "application_state", None) != WebSocketState.CONNECTED
-    ):
+    if websocket is None:
+        raise _ConnectionUnavailable("workflow_session_connection_unavailable")
+    if not isinstance(principal, WebSocketUser):
         raise PermissionError("workflow_session_principal_unavailable")
     if (
         connection.get("app_id") != app_id
+        or principal.user_id != user_id
         or connection.get("user_id") != principal.user_id
         or not principal.validate_app_id(app_id)
     ):
@@ -54,6 +61,12 @@ def _live_session(transport: Any, *, app_id: str, chat_id: str) -> tuple[Any, An
                 expired = True
             if expired:
                 raise PermissionError("workflow_session_principal_expired")
+    if (
+        not connection.get("active")
+        or getattr(websocket, "client_state", None) != WebSocketState.CONNECTED
+        or getattr(websocket, "application_state", None) != WebSocketState.CONNECTED
+    ):
+        raise _ConnectionUnavailable("workflow_session_connection_unavailable")
     return connection, websocket, principal
 
 
@@ -75,9 +88,34 @@ async def dispatch_workflow_module_action(
     """
     from mozaiksai.core.transport.simple_transport import SimpleTransport
 
-    workflow_name, app_id, chat_id = active_workflow_tool_run()
+    run_identity = active_workflow_tool_run()
     transport = await SimpleTransport.get_instance()
-    connection, websocket, principal = _live_session(transport, app_id=app_id, chat_id=chat_id)
+    deadline = time.monotonic() + _RECONNECT_TIMEOUT_SECONDS
+    while True:
+        if active_workflow_tool_run() != run_identity:
+            raise PermissionError("workflow_session_scope_mismatch")
+        try:
+            request, app = await _prepare_live_dispatch(
+                module, action, params, transport=transport, run_identity=run_identity,
+            )
+            break
+        except _ConnectionUnavailable:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            await asyncio.sleep(min(_RECONNECT_POLL_SECONDS, remaining))
+    # Execution is outside the retry boundary: a started action is never replayed.
+    return await dispatch_module_action(request, app=app)
+
+
+async def _prepare_live_dispatch(
+    module: str, action: str, params: dict[str, Any], *,
+    transport: Any, run_identity: tuple[str, str, str, str],
+) -> tuple[ModuleActionDispatchRequest, Any]:
+    workflow_name, app_id, chat_id, user_id = run_identity
+    connection, websocket, principal = _live_session(
+        transport, app_id=app_id, chat_id=chat_id, user_id=user_id,
+    )
     principal_scope = _principal_scope(principal)
     surfaces = getattr(websocket.app.state, "module_action_surfaces", {})
     module_surfaces = surfaces.get(module, {})
@@ -105,17 +143,18 @@ async def dispatch_workflow_module_action(
     if scope.get("app_id") != app_id or scope.get("user_id") != principal.user_id:
         raise PermissionError("workflow_session_scope_mismatch")
     # Recheck revocation after awaited provider hooks before dispatching.
-    if active_workflow_tool_run() != (workflow_name, app_id, chat_id):
+    if active_workflow_tool_run() != run_identity:
         raise PermissionError("workflow_session_scope_mismatch")
     current_connection, current_websocket, current_principal = _live_session(
-        transport, app_id=app_id, chat_id=chat_id,
+        transport, app_id=app_id, chat_id=chat_id, user_id=user_id,
     )
-    if (
-        current_connection is not connection or current_websocket is not websocket
-        or current_principal is not principal or _principal_scope(principal) != principal_scope
-    ):
+    if _principal_scope(principal) != principal_scope:
         raise PermissionError("workflow_session_principal_changed")
-    return await dispatch_module_action(
+    if current_connection is not connection or current_websocket is not websocket:
+        raise _ConnectionUnavailable("workflow_session_connection_changed")
+    if current_principal is not principal:
+        raise PermissionError("workflow_session_principal_changed")
+    return (
         ModuleActionDispatchRequest(
             module=module, action=action, params=params,
             scope=ModuleDispatchScope(
@@ -130,5 +169,5 @@ async def dispatch_workflow_module_action(
                 surface="workflow_tool", workflow_name=workflow_name, workflow_run_id=chat_id,
             ),
         ),
-        app=websocket.app,
+        websocket.app,
     )
