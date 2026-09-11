@@ -93,5 +93,15 @@ the test did not bypass auth or manually insert generated artifacts.
 The test exposed and repaired false completion after failed saves or missing
 transitions, read-only structured-output handling, strict index-key schemas,
 workflow UI reload registration, and browser handoff/connection races.
-AgentGenerator and the complete generated-app CRUD/refinement/export acceptance
-remain unverified. Passing the preceding stages is not a completed app build.
+AgentGenerator subsequently completed the explicit no-workflows path through a
+draft-correlated browser approval and saved the empty bundle. AppGenerator
+reached real task execution, exposing optional-manifest and planning failures.
+The latest run confirmed a rejected plan closes with `workflow_failed` and
+clears pending tasks instead of falling through into page generation.
+
+Canonical capability classification, complete module/page planning, bounded
+plan repair, and terminal lifecycle recording remain unresolved. SecurityReadiness
+also still needs alignment with the immutable build binding and owned artifacts.
+The complete generated-app CRUD/refinement/export acceptance and App Zero
+integration remain unverified. Passing earlier stages or stopping on invalid
+output is not a completed app build.
