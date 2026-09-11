@@ -736,6 +736,12 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
         files.update(_file_map(auth_scaffold))
     files.update(spec.extra_files)
 
+    # This fixture stops before export; apply the same final route composition
+    # that generate_and_download performs before its acceptance gate.
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import compose_bundle_auth_routes
+
+    compose_bundle_auth_routes(files)
+
     validation = validate_generated_app_bundle(
         GeneratedAppValidationRequest(
             files=files,
