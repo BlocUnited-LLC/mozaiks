@@ -54,6 +54,10 @@ class BuilderArtifactStore:
         concept_record: dict[str, Any],
         created_at: str | None = None,
     ) -> None:
+        await self._ensure_indexes(
+            BuilderCollections.CONCEPTS,
+            [((("app_id", 1),), {"unique": True, "name": "concept_app"})],
+        )
         coll = await self._collection(BuilderCollections.CONCEPTS)
         await coll.update_one(
             {"app_id": str(app_id)},
@@ -68,6 +72,22 @@ class BuilderArtifactStore:
             return None
         doc.pop("_id", None)
         return doc
+
+    async def finish_concept_review(
+        self, *, app_id: str, review_id: str, status: str, reviewed_by: str, feedback: str,
+    ) -> bool:
+        """Only the current pending concept proposal can receive this review."""
+        if status not in {"approved", "changes_requested", "cancelled"}:
+            raise ValueError("Invalid concept review status")
+        if not all(isinstance(value, str) and value.strip() for value in (app_id, review_id, reviewed_by)):
+            raise ValueError("App, review, and reviewer identities are required")
+        coll = await self._collection(BuilderCollections.CONCEPTS)
+        result = await coll.update_one(
+            {"app_id": app_id, "review_id": review_id, "review_owner_user_id": reviewed_by, "status": "draft"},
+            {"$set": {"status": status, "review_feedback": feedback, "reviewed_by": reviewed_by,
+                      "reviewed_at": datetime.now(UTC).isoformat()}},
+        )
+        return bool(result.matched_count == 1)
 
     async def save_build_plan(self, *, app_id: str, build_plan: dict[str, Any]) -> None:
         coll = await self._collection(BuilderCollections.BUILD_PLANS)

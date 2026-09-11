@@ -305,6 +305,9 @@ jobs:
         env:
           PLAYWRIGHT_SKIP_BROWSER_GC: "1"
 
+      - name: Concept review interactions
+        run: npm run test:concept-review
+
       - name: Responsive smoke
         run: npm run test:responsive-smoke
         env:

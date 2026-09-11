@@ -378,7 +378,6 @@ def test_shared_workflow_ui_contract_is_documented() -> None:
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
         "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
-        "factory_app/workflows/ValueEngine/tools/manifest.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 
@@ -386,6 +385,18 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
         content = _read(relative_path)
         assert "from mozaiksai.core.workflow.ui_tools import emit_ui_surface" in content
         assert "send_ui_tool_event(" not in content
+
+
+def test_value_engine_review_uses_response_bearing_ui_tool() -> None:
+    content = _read("factory_app/workflows/ValueEngine/tools/manifest.py")
+    assert "from mozaiksai.core.workflow.ui_tools import use_ui_tool" in content
+    assert "emit_ui_surface" not in content
+    tools = _read_yaml("factory_app/workflows/ValueEngine/tools.yaml")["tools"]
+    review = next(tool for tool in tools if tool["function"] == "save_value_manifest")
+    assert review["tool_type"] == "UI_Tool"
+    assert review["auto_tool_call"] is True
+    assert review["bind_to_agent"] is False
+    assert review["outcome"]["values"] == ["approved", "changes_requested", "cancelled", "blocked"]
 
 
 def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() -> None:
