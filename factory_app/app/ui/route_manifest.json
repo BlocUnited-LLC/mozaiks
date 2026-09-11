@@ -1,6 +1,18 @@
 {
   "pages": [
     {
+      "path": "/login",
+      "component": "LoginPage",
+      "label": "Sign in",
+      "meta": { "requiresAuth": false, "appShell": false, "title": "Sign in" }
+    },
+    {
+      "path": "/auth/callback",
+      "component": "AuthCallbackPage",
+      "label": "Completing sign in",
+      "meta": { "requiresAuth": false, "appShell": false, "title": "Completing sign in" }
+    },
+    {
       "path": "/apps/new",
       "component": "CreateAppRedirectPage",
       "label": "Create App",

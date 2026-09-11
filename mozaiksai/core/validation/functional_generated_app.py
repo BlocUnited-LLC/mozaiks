@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 
 @dataclass(frozen=True)
 class FunctionalGeneratedAppDiagnostic:
@@ -37,7 +39,7 @@ _BUILT_IN_ROUTE_COMPONENTS = {
     "DashboardPortalPage",
     "AdminPortal",
     "ProfilePage",
-}
+} | APP_AUTH_COMPONENTS
 
 
 def _javascript_lexical_view(source: str) -> tuple[str, frozenset[int]]:

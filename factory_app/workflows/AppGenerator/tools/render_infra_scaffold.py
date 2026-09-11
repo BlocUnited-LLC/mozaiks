@@ -13,6 +13,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
+
 logger = logging.getLogger(__name__)
 
 # Locate the factory_app build_context root relative to this file.
@@ -55,10 +59,6 @@ def _build_variables(context_variables: dict[str, Any]) -> dict[str, str]:
         or "myapp"
     ).lower().replace(" ", "-")
 
-    oidc_client_id = str(
-        context_variables.get("oidc_client_id")
-        or app_slug
-    )
     auth_default_route = _safe_route(
         context_variables.get("default_route")
         or context_variables.get("app_default_route")
@@ -71,9 +71,6 @@ def _build_variables(context_variables: dict[str, Any]) -> dict[str, str]:
 
     return {
         "APP_NAME": app_slug,
-        "APP_SLUG": app_slug,
-        "TOKEN_KEY_PREFIX": app_slug,
-        "OIDC_CLIENT_ID": oidc_client_id,
         "AUTH_DEFAULT_ROUTE": auth_default_route,
         "MOZAIKS_VERSION": mozaiks_version,
         "REGISTRY": str(context_variables.get("container_registry") or "ghcr.io/your-org"),
@@ -83,7 +80,7 @@ def _build_variables(context_variables: dict[str, Any]) -> dict[str, str]:
 
 def _safe_route(value: Any) -> str:
     route = str(value or "/").strip()
-    if not route.startswith("/") or route.startswith("//"):
+    if not route.startswith("/") or route.startswith("//") or "\\" in route:
         return "/"
     if any(char.isspace() for char in route):
         return "/"
@@ -122,7 +119,7 @@ async def save_infra_scaffold(
     Args:
         emit_infra: When True, render Dockerfile, readiness.yml, deploy.yml, provision.sh.
         emit_auth_adapter: When True, render config/auth.yaml and ui/auth/authAdapter.js.
-        context_variables: Workflow session state with app_slug, oidc_client_id, etc.
+        context_variables: Workflow session state with app_slug and default_route.
     """
     cv = context_variables or {}
     variables = _build_variables(cv)
@@ -144,6 +141,7 @@ async def save_infra_scaffold(
             skipped.append(_AUTH_CONFIG_OUTPUT)
         else:
             rendered = _substitute(raw, variables)
+            validate_app_auth_contract(yaml.safe_load(rendered))
             code_files.append({"filename": _AUTH_CONFIG_OUTPUT, "content": rendered})
 
         raw = _read_template(_AUTH_ADAPTER_TEMPLATE)

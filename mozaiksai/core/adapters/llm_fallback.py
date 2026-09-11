@@ -57,17 +57,40 @@ def _env_list(key: str) -> list[str]:
 # Fallback config builder
 # ---------------------------------------------------------------------------
 
-def _resolve_api_key(api_type: str, explicit_key: str | None = None) -> str:
-    """Resolve API key for ``api_type``, preferring an explicit value then
-    provider-specific env vars then the generic ``LLM_PRIMARY_API_KEY``."""
+MODEL_API_KEY_ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY", "LLM_PRIMARY_API_KEY"),
+    "openai": ("LLM_PRIMARY_API_KEY", "OPENAI_API_KEY"),
+    "ollama": (),
+}
+
+
+def _optional_secret(env_name: str) -> str:
+    from mozaiksai.core.secrets import SecretResolutionError, resolve_secret
+
+    try:
+        return resolve_secret(env_name)
+    except SecretResolutionError as exc:
+        if exc.source != "missing":
+            raise
+        return ""
+
+
+def resolve_model_api_key(api_type: str, explicit_key: str | None = None) -> str:
+    """Resolve the selected provider's key through the app's secret policy.
+
+    Explicit per-call keys take precedence. A missing optional reference permits
+    the next supported handle; invalid policy and configured vault failures do
+    not silently fall through to a different credential. Ollama needs no key.
+    """
     if explicit_key:
         return explicit_key
-    if api_type == "google":
-        return _env("GEMINI_API_KEY") or _env("GOOGLE_API_KEY") or _env("LLM_PRIMARY_API_KEY")
-    if api_type == "anthropic":
-        return _env("ANTHROPIC_API_KEY") or _env("LLM_PRIMARY_API_KEY")
-    # openai / azure / default
-    return _env("LLM_PRIMARY_API_KEY") or _env("OPENAI_API_KEY")
+    names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
+    for env_name in names:
+        value = _optional_secret(env_name)
+        if value:
+            return value
+    return ""
 
 
 def build_fallback_config_list(
@@ -107,7 +130,7 @@ def build_fallback_config_list(
     # ---- Primary ----
     resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
     resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
-    resolved_api_key = _resolve_api_key(resolved_api_type, primary_api_key or None)
+    resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
 
     primary_entry: dict[str, Any] = {"model": resolved_primary, "api_type": resolved_api_type}
@@ -123,7 +146,10 @@ def build_fallback_config_list(
 
     # ---- Fallbacks ----
     resolved_fallback_models = fallback_models if fallback_models is not None else _env_list("LLM_FALLBACK_MODELS")
-    resolved_fallback_keys = fallback_api_keys if fallback_api_keys is not None else _env_list("LLM_FALLBACK_API_KEYS")
+    resolved_fallback_keys = (
+        fallback_api_keys if fallback_api_keys is not None
+        else [key.strip() for key in _optional_secret("LLM_FALLBACK_API_KEYS").split(",") if key.strip()]
+    )
     resolved_fallback_urls = fallback_base_urls if fallback_base_urls is not None else _env_list("LLM_FALLBACK_BASE_URLS")
 
     for idx, model in enumerate(resolved_fallback_models):
@@ -360,6 +386,8 @@ def get_healthy_config_list(
 
 
 __all__ = [
+    "MODEL_API_KEY_ENV_NAMES",
+    "resolve_model_api_key",
     "build_fallback_config_list",
     "build_fallback_llm_config",
     "get_healthy_config_list",

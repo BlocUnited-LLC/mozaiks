@@ -97,6 +97,19 @@ class TestRequiredFamilies:
 
 
 class TestProhibitedPaths:
+    def test_authored_frontend_ships_but_generated_overlay_mirror_is_rejected(self, tmp_path) -> None:
+        members = _minimal_required_members()
+        authored = "web_shell/App.jsx"
+        staged = "web_shell/.mozaiks-tailwind-sources/platform-workflows/PrivateWorkflow/ui/Result.jsx"
+        wheel = tmp_path / "frontend.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            for name, content in members.items():
+                archive.writestr(name, content)
+            archive.writestr(authored, "export default function App() { return null; }")
+            archive.writestr(staged, "export default function Result() { return null; }")
+        errors, _ = inspect_archive(wheel)
+        assert [(error.code, error.member) for error in errors] == [("prohibited_path", staged)]
+
     @pytest.mark.parametrize(
         "path",
         [

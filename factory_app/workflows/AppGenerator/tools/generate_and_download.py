@@ -24,6 +24,7 @@ from pydantic import Field
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     collect_generated_app_file_map,
+    compose_bundle_auth_routes,
     extract_code_file_map_from_payload,
     extract_deleted_file_paths_from_payload,
 )
@@ -994,6 +995,10 @@ async def generate_and_download(
             except Exception:
                 pass
         await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
+
+    # Auth scaffold and app-schema routes have independent owners; compose their
+    # normal declarations before final validation, without runtime route fallbacks.
+    compose_bundle_auth_routes(files_map)
 
     acceptance_result = await run_app_bundle_acceptance_gate(
         files=files_map,

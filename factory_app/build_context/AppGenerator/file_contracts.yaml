@@ -14,6 +14,12 @@ description: >
   Runtime truth remains the structured outputs, build_tasks, owned_paths, and
   runtime loaders — not this catalog.
 
+  Authenticated app scaffolds are emitted by InfraScaffoldAgent through
+  save_infra_scaffold outside AppBuildPlan build_tasks. config/auth.yaml
+  validates against the shared mozaiks.auth.v1 model; ui/auth/authAdapter.js
+  delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
+  local demo identity implementations. Backend configuration selects auth mode.
+
 task_contracts:
   page_bundle:
     owner_agent: AppSchemaAgent

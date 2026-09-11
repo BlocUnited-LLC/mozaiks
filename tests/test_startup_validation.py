@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mozaiksai.core.secrets import SecretResolutionError
 from mozaiksai.core.startup.validation import (
     StartupConfigError,
     _can_resolve_api_key,
@@ -22,15 +23,16 @@ from mozaiksai.core.startup.validation import (
 
 
 @pytest.fixture(autouse=True)
-def _clear_llm_provider_env(monkeypatch):
-    """Clear LLM_PRIMARY_API_TYPE before each test.
-
-    core_config.load_dotenv() runs at import time and may load a .env that sets
-    LLM_PRIMARY_API_TYPE=google. Tests that verify OPENAI_API_KEY resolution
-    must start with an unset provider type so the default (openai) applies.
-    Tests that need a specific provider set it explicitly via monkeypatch.setenv.
-    """
-    monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+def _clear_llm_provider_env(monkeypatch, tmp_path):
+    """Keep readiness checks independent of developer credentials and cloud policy."""
+    for name in (
+        "LLM_PRIMARY_API_TYPE", "LLM_PRIMARY_API_KEY", "LLM_FALLBACK_API_KEYS",
+        "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    policy = tmp_path / "secrets.yaml"
+    policy.write_text("version: 1\nprovider: {type: env}\nsecrets: []\n")
+    monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ class TestCanResolveApiKey:
         monkeypatch.setenv("OPENAI_API_KEY", "")
         monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch(
-            "mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")
+            "mozaiksai.core.secrets.resolve_secret", side_effect=SecretResolutionError("not found", env_name="TEST_KEY")
         ):
             resolvable, _ = _can_resolve_api_key()
             assert resolvable is False
@@ -78,7 +80,7 @@ class TestCanResolveApiKey:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch(
-            "mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")
+            "mozaiksai.core.secrets.resolve_secret", side_effect=SecretResolutionError("not found", env_name="TEST_KEY")
         ):
             resolvable, _ = _can_resolve_api_key()
             assert resolvable is False
@@ -88,7 +90,7 @@ class TestCanResolveApiKey:
         monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         # Patch the name in validation's namespace (imported by reference at module load)
         with patch(
-            "mozaiksai.core.startup.validation.get_secret", return_value="sk-from-kv"
+            "mozaiksai.core.secrets.resolve_secret", return_value="sk-from-kv"
         ):
             resolvable, _ = _can_resolve_api_key()
             assert resolvable is True
@@ -96,7 +98,7 @@ class TestCanResolveApiKey:
     def test_returns_false_when_key_vault_returns_empty(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
-        with patch("mozaiksai.core.startup.validation.get_secret", return_value=""):
+        with patch("mozaiksai.core.secrets.resolve_secret", return_value=""):
             resolvable, _ = _can_resolve_api_key()
             assert resolvable is False
 
@@ -104,7 +106,7 @@ class TestCanResolveApiKey:
         monkeypatch.setenv("OPENAI_API_KEY", "   ")
         monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
         with patch(
-            "mozaiksai.core.core_config.get_secret", side_effect=ValueError("not found")
+            "mozaiksai.core.secrets.resolve_secret", side_effect=SecretResolutionError("not found", env_name="TEST_KEY")
         ):
             resolvable, _ = _can_resolve_api_key()
             assert resolvable is False
@@ -166,8 +168,8 @@ class TestRunStartupChecksWarnMode:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",
@@ -194,8 +196,8 @@ class TestRunStartupChecksWarnMode:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",
@@ -255,8 +257,8 @@ class TestRunStartupChecksWarnMode:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",
@@ -278,8 +280,8 @@ class TestRunStartupChecksWarnMode:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",
@@ -300,6 +302,22 @@ class TestRunStartupChecksWarnMode:
 
 class TestRunStartupChecksMongoCheck:
     @pytest.mark.asyncio
+    async def test_pings_mongo_when_uri_resolves_without_environment(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("MONGO_URI", raising=False)
+        monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+        with (
+            patch("mozaiksai.core.startup.validation.resolve_secret", return_value="mongodb://selected-app") as resolver,
+            patch("mozaiksai.core.startup.validation._ping_mongo", new_callable=AsyncMock) as ping,
+        ):
+            client = _MockPingClient()
+            assert await run_startup_checks(_mongo_client=client) == []
+        resolver.assert_called_once_with("MONGO_URI")
+        ping.assert_awaited_once_with(client)
+
+    @pytest.mark.asyncio
     async def test_warns_when_mongo_uri_not_set(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
@@ -310,8 +328,8 @@ class TestRunStartupChecksMongoCheck:
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
         with patch(
-            "mozaiksai.core.startup.validation.get_secret",
-            side_effect=ValueError("not found"),
+            "mozaiksai.core.startup.validation.resolve_secret",
+            side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
         ):
             warnings = await run_startup_checks()
 
@@ -354,8 +372,8 @@ class TestRunStartupChecksMongoCheck:
 
         with (
             patch(
-                "mozaiksai.core.startup.validation.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.startup.validation.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             pytest.raises(StartupConfigError) as exc_info,
         ):
@@ -383,6 +401,31 @@ class TestRunStartupChecksMongoCheck:
 
 class TestRunStartupChecksStrictMode:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["warn", "strict"])
+    @pytest.mark.parametrize("invalid", ["missing", "malformed", "wrong_shape"])
+    async def test_invalid_selected_secret_contract_is_fatal(self, mode, invalid, monkeypatch, tmp_path):
+        policy = tmp_path / "invalid-secrets.yaml"
+        if invalid == "malformed":
+            policy.write_text("secrets: [private-test-value")
+        elif invalid == "wrong_shape":
+            policy.write_text("version: 1\nsecrets: [private-test-value]\n")
+        monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", mode)
+        monkeypatch.setenv("OPENAI_API_KEY", "available-key")
+        with pytest.raises(StartupConfigError, match="Secret configuration is invalid") as error:
+            await run_startup_checks(_mongo_client=_MockPingClient())
+        assert "private-test-value" not in str(error.value)
+
+    @pytest.mark.asyncio
+    async def test_keyless_ollama_does_not_require_other_provider_keys(self, monkeypatch):
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "ollama")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+        assert await run_startup_checks(_mongo_client=_MockPingClient()) == []
+
+    @pytest.mark.asyncio
     async def test_raises_in_strict_mode_when_api_key_missing(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
@@ -390,8 +433,8 @@ class TestRunStartupChecksStrictMode:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",
@@ -422,8 +465,8 @@ class TestRunStartupChecksStrictMode:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",
@@ -458,7 +501,7 @@ class TestStartupValidationLogFields:
             r for r in caplog.records if r.__dict__.get("check") == "llm_api_key"
         ]
         assert ok_records
-        assert ok_records[0].__dict__.get("source") == "env"
+        assert ok_records[0].__dict__.get("source") == "selected_provider"
 
     @pytest.mark.asyncio
     async def test_fail_record_has_check_field(self, monkeypatch, caplog):
@@ -470,8 +513,8 @@ class TestStartupValidationLogFields:
 
         with (
             patch(
-                "mozaiksai.core.core_config.get_secret",
-                side_effect=ValueError("not found"),
+                "mozaiksai.core.secrets.resolve_secret",
+                side_effect=SecretResolutionError("not found", env_name="TEST_KEY"),
             ),
             patch(
                 "mozaiksai.core.startup.validation._has_mongo_llm_config",

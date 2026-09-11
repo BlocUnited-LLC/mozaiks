@@ -10,8 +10,11 @@ needs full payload materialization including admin surface codegen.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
@@ -19,12 +22,37 @@ from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
 from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
     build_refinement_harness_code_files,
 )
+from mozaiksai.core.runtime.app.auth_contract import (
+    AppAuthContractError,
+    compose_app_auth_routes,
+    validate_app_auth_contract,
+)
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
 from mozaiksai.core.workflow.generator_support.code_files import (
     safe_relpath,
 )
+
+
+def compose_bundle_auth_routes(files_map: dict[str, str]) -> None:
+    """Materialize auth routes after app-schema and auth-scaffold outputs merge."""
+    raw_contract = files_map.get("config/auth.yaml")
+    if raw_contract is None:
+        return  # Missing required declarations remain validation errors.
+    try:
+        contract_document = yaml.safe_load(raw_contract)
+        app_manifest = json.loads(files_map.get("app.json", "{}"))
+        manifest = json.loads(files_map.get("ui/route_manifest.json", '{"pages": []}'))
+    except (yaml.YAMLError, json.JSONDecodeError, TypeError):
+        raise AppAuthContractError("Auth route composition requires valid auth YAML and app/route JSON") from None
+    contract = validate_app_auth_contract(contract_document)
+    if not isinstance(app_manifest, dict) or app_manifest.get("authRequired") is not True:
+        raise AppAuthContractError("config/auth.yaml requires app.json.authRequired=true")
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("pages"), list):
+        raise AppAuthContractError("ui/route_manifest.json must declare pages")
+    manifest["pages"] = compose_app_auth_routes(contract, manifest["pages"])
+    files_map["ui/route_manifest.json"] = json.dumps(manifest, indent=2, ensure_ascii=False)
 
 
 def extract_code_file_map_from_payload(
@@ -154,6 +182,7 @@ def collect_generated_app_file_entries(generated_app_dir: Any) -> list[dict[str,
 
 
 __all__ = [
+    "compose_bundle_auth_routes",
     "collect_generated_app_file_entries",
     "collect_generated_app_file_map",
     "extract_code_file_entries_from_payload",

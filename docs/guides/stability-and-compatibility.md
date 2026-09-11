@@ -120,3 +120,12 @@ Studio surfaces. It does not apply generated-file layout or placeholder policy
 and is not provider/deployment readiness. Generated output continues to use
 `validate_generated_app_bundle`. Both paths consume the same secret contract
 and declaration checks.
+
+Factory now explicitly declares `config/auth.yaml` and `security/secrets.yaml`.
+Authenticated authored apps must supply a valid auth contract matching
+`app.json.authRequired`. The shell's implicit demo fallback and copied generated
+OIDC implementation are replaced by shared browser auth selected from backend
+configuration. Regenerate older auth scaffolds to consume that shared adapter.
+Runtime secret consumers use canonical environment handles instead of the retired
+`OpenAIApiKey` and `MongoURI` lookup names; an operator vault maps its existing
+secret names explicitly. See [Factory security](factory-security.md).

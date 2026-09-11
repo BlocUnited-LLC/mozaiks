@@ -13,6 +13,7 @@
     "./workspace": "./src/workspace/index.js",
     "./ui": "./src/ui/index.js",
     "./embed": "./src/embed/index.js",
+    "./auth": "./src/auth/index.js",
     "./coreBridge": "./src/coreBridge.js",
     "./adminPortalRegistry": "./src/adminPortalRegistry.js"
   },

@@ -19,7 +19,7 @@ def main() -> None:
     import factory_app.eval
     import mozaiksai
     from factory_app.eval import score_bundle
-    from mozaiksai.core.secrets import inspect_secret_config, resolve_secret
+    from mozaiksai.core.secrets import inspect_secret_config, load_secret_contract, resolve_secret
     from mozaiksai.core.validation import validate_app_workspace
     from mozaiksai.core.workflow.context.projection import inject_build_context_projections
     from mozaiksai.resources import (
@@ -63,6 +63,17 @@ def main() -> None:
     })
     os.chdir(workspace)
 
+    factory_root = resolve_factory_app_root()
+    assert factory_root is not None
+    factory_app_root = factory_root / "app"
+    factory_policy = factory_app_root / "security" / "secrets.yaml"
+    assert factory_policy.is_file() and factory_policy.resolve().is_relative_to(installed)
+    factory_secrets = load_secret_contract(app_root=factory_app_root)
+    assert factory_secrets["provider"]["type"] == "env"
+    assert inspect_secret_config("MONGO_URI", app_root=factory_app_root).declared
+    assert inspect_secret_config("GEMINI_API_KEY", app_root=factory_app_root).declared
+    assert not inspect_secret_config("MONGO_URI", app_root=app).declared
+
     class Agent:
         name = "AppPlanAgent"
         _system_message = "{{CAPABILITY_DIRECTORY_CONTEXT}}"
@@ -77,7 +88,7 @@ def main() -> None:
     assert resolve_secret("PACKAGE_ACCEPTANCE_KEY", app_root=app) == "local-acceptance-value"
     scores = score_bundle(app)
     assert scores and all(item.comment is None or "scorer raised:" not in item.comment for item in scores)
-    print("Installed package: Factory + workspace catalogs, app contracts, env secrets, and reference eval passed")
+    print("Installed package: Factory + workspace catalogs, app contracts, scoped secret policy, and reference eval passed")
 
 
 if __name__ == "__main__":

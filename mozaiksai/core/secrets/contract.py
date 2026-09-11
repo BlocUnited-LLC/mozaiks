@@ -53,7 +53,13 @@ class AppSecretReference(_ContractModel):
     env: EnvName
     id: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")] | None = None
     sensitivity: Literal["secret", "confidential_config"] = "secret"
-    required: bool = False
+    required: bool = Field(
+        default=False,
+        description=(
+            "Documents a deployment requirement; it does not eagerly resolve the secret. "
+            "The consuming feature enforces availability when selected."
+        ),
+    )
     purpose: str | None = None
     azure_key_vault: AzureSecretReference | None = None
 

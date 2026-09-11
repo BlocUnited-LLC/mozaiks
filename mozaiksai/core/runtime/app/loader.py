@@ -27,6 +27,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.app.auth_contract import (
+    AppAuthContract,
+    AppAuthContractError,
+    load_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.app.page_schema import (
@@ -71,6 +76,7 @@ class AppLoadResult:
         data_contract:        Parsed data contract, or None
         data_entities_by_key: Data entities indexed by (module_id, entity_name)
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
+        auth_contract:        Validated app auth behavior, or None for public apps
         provenance:           Parsed app provenance, or None when not declared
         page_schemas:         Validated declarative page schemas indexed by page name
         failed_module_names:  Names of modules that failed to load — empty on full success
@@ -80,6 +86,7 @@ class AppLoadResult:
     data_contract: dict[str, Any] | None = None
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
+    auth_contract: AppAuthContract | None = None
     provenance: AppProvenance | None = None
     page_schemas: dict[str, AppPageSchema] = field(default_factory=dict)
     failed_module_names: list[str] = field(default_factory=list)
@@ -141,6 +148,11 @@ class AppLoader:
             app_def = AppDefinition.model_validate(app_def_raw)
         except ValidationError as exc:
             raise AppLoadError(f"Invalid app.json/discovered bundle: {exc}") from exc
+
+        try:
+            auth_contract = load_app_auth_contract(base_path, auth_required=raw.get("authRequired", False))
+        except AppAuthContractError as exc:
+            raise AppLoadError(str(exc)) from exc
 
         try:
             data_contract = load_data_contract(base_path)
@@ -215,6 +227,7 @@ class AppLoader:
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
             subscriptions_config=subscriptions_config,
+            auth_contract=auth_contract,
             provenance=provenance,
             page_schemas=page_schemas,
             failed_module_names=failed_module_names,

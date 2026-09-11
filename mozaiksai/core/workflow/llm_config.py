@@ -31,7 +31,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from mozaiksai.core.core_config import get_mongo_client, get_secret
+from mozaiksai.core.adapters.llm_fallback import resolve_model_api_key
+from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections
 
 logger = logging.getLogger(__name__)
@@ -160,12 +161,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                     "[LLM_CONFIG] Model extraction for provider %s: ", i)
                 # First check if API key is in the DB document
                 api_key = p.get("api_key") or p.get("ApiKey") or p.get("OPENAI_API_KEY")
-                if not api_key:
-                    # Fallback to secret/env
-                    try:
-                        api_key = get_secret("OpenAIApiKey")
-                    except Exception:
-                        api_key = os.getenv("OPENAI_API_KEY", "")
+                api_key = resolve_model_api_key("openai", api_key)
                 entry = {"model": model_name, "api_key": api_key}
                 if "price" in p:
                     entry["price"] = p["price"]
@@ -178,10 +174,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
 
         # Fallback if empty
         if not config_list:
-            try:
-                api_key = get_secret("OpenAIApiKey")
-            except Exception:
-                api_key = os.getenv("OPENAI_API_KEY", "")
+            api_key = resolve_model_api_key("openai")
             fallback_models: list[str] = []
             if os.getenv("OPENAI_MODEL_FALLBACK"):
                 fallback_models = [m.strip() for m in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if m.strip()]
