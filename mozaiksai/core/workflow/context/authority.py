@@ -372,6 +372,26 @@ class ScopedContextWriter:
             raise ContextAuthorityError("context_authority.unsupported_target")
 
 
+def require_unchanged_runtime_authority(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    policy: ContextAuthorityPolicy | None = None,
+) -> None:
+    """Reject lifecycle changes to runtime authority before agent execution."""
+    missing = object()
+    for key in sorted(before.keys() | after.keys()):
+        authority = policy.variables.get(key) if policy is not None else None
+        immutable = _is_immutable_key(key) or (
+            authority is not None
+            and authority.authority_class is ContextAuthorityClass.IMMUTABLE_RUNTIME_AUTHORITY
+        )
+        if immutable and before.get(key, missing) != after.get(key, missing):
+            raise ContextAuthorityError(
+                f"context_authority.lifecycle_changed_runtime_authority key={key}"
+            )
+
+
 def resolve_declared_context_writer(
     key: str,
     *,
@@ -724,6 +744,7 @@ __all__ = [
     "ContextVariableAuthority",
     "ContextWriterId",
     "ScopedContextWriter",
+    "require_unchanged_runtime_authority",
     "build_context_authority_policy",
     "validate_transition_context_authority",
 ]

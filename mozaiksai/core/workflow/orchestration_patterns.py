@@ -34,6 +34,8 @@ from mozaiksai.core.workflow.execution.network_graph import (
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from .context import DerivedContextManager
+from .context.authority import require_unchanged_runtime_authority
+from .context.frozen import detach
 from .execution.run_bootstrap import merge_persisted_extra_context, prepare_network_trigger
 from .orchestration_utils import _load_workflow_config
 
@@ -846,6 +848,7 @@ async def run_workflow_orchestration(
             )
 
         # 6) Preload deterministic context before agent prompts are composed.
+        pre_lifecycle_context = detach(ctx_dict)
         try:
             from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
 
@@ -864,11 +867,19 @@ async def run_workflow_orchestration(
         # bridge source before agent prompts and AG2 channel state are created.
         if context is not None:
             if hasattr(context, "to_dict"):
-                ctx_dict.update(context.to_dict())
+                ctx_dict = context.to_dict()
             elif hasattr(context, "snapshot") and callable(getattr(context, "snapshot", None)):
-                ctx_dict.update(context.snapshot())
+                ctx_dict = context.snapshot()
             elif isinstance(context, dict):
-                ctx_dict.update(context)
+                ctx_dict = dict(context)
+
+        # Hooks can catch their own errors; validate the resulting snapshot
+        # outside the best-effort hook block before agent creation and AG2 dispatch.
+        require_unchanged_runtime_authority(
+            pre_lifecycle_context,
+            ctx_dict,
+            policy=getattr(context, "_mozaiks_context_authority_policy", None),
+        )
 
         _conv_logger.info(
             "[%s] PRE_AGENT_CONTEXT_READY keys=%s key_count=%s",

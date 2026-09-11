@@ -37,6 +37,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Reject startup hooks that change immutable runtime identity or authorization
+  context before agent creation and model dispatch, including hooks that swallow
+  their own errors. This is a runtime invariant, not a generated-app target resolver.
 - Studio App Registry reads, updates, promotions, and deletes now carry the
   caller's owner scope into Mongo filters. Reopening an app ID cannot transfer
   ownership; concurrent same-owner creation is idempotent. Directory deletion
