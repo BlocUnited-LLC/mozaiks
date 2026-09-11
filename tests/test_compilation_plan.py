@@ -79,7 +79,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # EXPECTED_SEMANTIC_MIGRATION: the graph digest changes with action request
 # authority. All 61 unit bodies remain identical; the migration proof restores
 # only the original graph digest to recover the exact pre-migration plan hash.
-_GOLDEN_PLAN_DIGEST = "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
+# Optional service package markers add five registry rows and five explicit
+# input gaps in this incomplete corpus. The proof below recovers the previous
+# hash and proves all 61 unit bodies and all earlier gaps remain identical.
+_GOLDEN_PLAN_DIGEST = "ef4e2418c02c6a3bf9be7fd64f975b0717eb14532c023208d86fb75d7833aa1a"
 
 
 def _registry():
@@ -151,6 +154,43 @@ def test_cross_process_canonical_equality() -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == _GOLDEN_PLAN_DIGEST
+
+
+def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
+    from tests.service_package_marker_migration_helpers import (
+        SERVICE_PACKAGE_MARKER_PATHS,
+        corpus_plan_before_service_package_markers,
+        registry_before_service_package_markers,
+    )
+
+    previous = corpus_plan_before_service_package_markers()
+    current = _plan()
+    assert previous.plan_digest == "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
+    assert len(previous.units) == len(current.units) == 61
+    assert [unit.model_dump(mode="json") for unit in current.units] == [
+        unit.model_dump(mode="json") for unit in previous.units
+    ]
+    restored = current.canonical_payload(include_digest=False)
+    restored["registry_digest"] = previous.registry_digest
+    added_gaps = [gap for gap in current.gaps if gap not in previous.gaps]
+    assert len(added_gaps) == 5
+    assert {gap.path_template for gap in added_gaps} == SERVICE_PACKAGE_MARKER_PATHS
+    assert all(gap.family_kind == "app_service_support" for gap in added_gaps)
+    assert {gap.code.value for gap in added_gaps} == {
+        "renderer_input_incomplete", "placeholder_underivable",
+    }
+    restored["gaps"] = [
+        gap for gap in restored["gaps"]
+        if gap["path_template"] not in SERVICE_PACKAGE_MARKER_PATHS
+    ]
+    assert restored == previous.canonical_payload(include_digest=False)
+    assert canonical_digest(restored) == previous.plan_digest
+
+    before_paths = {row.path_template for row in registry_before_service_package_markers().families}
+    added = [row for row in _registry().families if row.path_template not in before_paths]
+    assert {row.path_template for row in added} == SERVICE_PACKAGE_MARKER_PATHS
+    assert len(added) == 5
+    assert all(row.kind.value == "app_service_support" and row.requirement.value == "optional" for row in added)
 
 
 def test_inputs_are_never_mutated() -> None:
