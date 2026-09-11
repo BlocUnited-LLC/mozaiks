@@ -35,6 +35,7 @@ from .paths import (
     resolve_workflow_path,
     resolve_workflows_root,
 )
+from .workflow_identity import workflow_identity_names_equal
 
 logger = get_workflow_logger(workflow_name="unified_workflow_manager")
 
@@ -922,7 +923,9 @@ class UnifiedWorkflowManager:
             ((self._ai_config or {}).get("workflows") or {}).get("entry_point")
         )
         if isinstance(configured_entry_point, str) and configured_entry_point.strip():
-            config["entry_point"] = workflow_path.name.lower() == configured_entry_point.strip().lower()
+            config["entry_point"] = workflow_identity_names_equal(
+                workflow_path.name, configured_entry_point
+            )
         else:
             config.pop("entry_point", None)
         
@@ -934,7 +937,7 @@ class UnifiedWorkflowManager:
         if not declared_name:
             raise ValueError(f"Workflow '{workflow_name}' is missing required field: workflow_name")
 
-        if declared_name.lower() != workflow_name.lower():
+        if not workflow_identity_names_equal(declared_name, workflow_name):
             raise ValueError(
                 f"Workflow '{workflow_name}' has mismatched workflow_name '{declared_name}' in orchestrator.yaml"
             )

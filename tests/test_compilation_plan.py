@@ -79,7 +79,11 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # EXPECTED_SEMANTIC_MIGRATION: the graph digest changes with action request
 # authority. All 61 unit bodies remain identical; the migration proof restores
 # only the original graph digest to recover the exact pre-migration plan hash.
-_GOLDEN_PLAN_DIGEST = "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
+# Re-pinned for the typed ActionPayload.action_id (#494 correction): the
+# corpus action payload digest moves the graph digest, which flows through
+# plan identity. Recomputed via the canonical _plan() builder; all 61 unit
+# bodies remain identical — only the pinned graph identity changed.
+_GOLDEN_PLAN_DIGEST = "ec8d5b01789a3c8920020523c421796b56909865f90c7a851e47fe097d1e3091"
 
 
 def _registry():

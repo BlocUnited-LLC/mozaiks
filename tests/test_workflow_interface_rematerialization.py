@@ -63,6 +63,7 @@ from mozaiksai.core.semantics.workflow_interface_materialization import (
     render_workflow_module_interface_unit,
 )
 from tests import test_workflow_capability_semantics as capability_fixture
+from tests.implementation_binding_v2_helpers import derive_v2_selection_fields
 
 ROOT = Path(__file__).resolve().parents[1]
 _WORKFLOW_ID = "analyze_document"
@@ -235,6 +236,7 @@ def _state(
             content_digest=graph.graph_digest,
             scope=graph.scope,
         ),
+        **derive_v2_selection_fields(payloads),
         renderer_selections=(
             RendererSelection(
                 materializer_id=MaterializerIdentifier.PAGE_SCHEMA_EXECUTOR,

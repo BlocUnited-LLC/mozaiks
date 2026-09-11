@@ -12,6 +12,51 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- **ImplementationBinding v2 — exact workflow, action, and result
+  implementation authority**: `mozaiks.implementation_binding.v1` is replaced
+  by `mozaiks.implementation_binding.v2` with no compatibility mode, v1
+  parser, dual-read, or migration shim (pre-production atomic migration).
+  The v2 binding keeps the v1 authorities (capability-pack, renderer, and
+  deployment-profile selections with their scope validation and graph
+  pinning) and adds exact implementation/result authority: every
+  capability-owning semantic WORKFLOW binds exactly once to its exact
+  `orchestrator.yaml`/`structured_outputs.yaml` documents through the #488
+  selection primitives; every workflow-referenced module action
+  (`consumes_action` / `commits_result_through_action`) binds exactly once
+  to its certified implementation sources, pinning the recomputable
+  certification identity (`certification_mode`, `method_source`,
+  `implementation_digest`); every semantic WORKFLOW_RESULT gets exactly one
+  realization — a structured-output contract resolved only against its own
+  workflow's exact selected document, a bounded projection under the new
+  `mozaiks.result_projection.v1` profile (identity or top-level fields; no
+  paths/indexes/wildcards/expressions/coercion), a static commit approval
+  requirement (`automatic` / `human_approval_required`), and complete
+  explicit action-input wiring (result property / canonical JSON constant /
+  request-context property) against the exact selected action's closed
+  request contract. The binding also carries an inline closed
+  `request_context_contract` object. `binding_digest` covers every v2 field
+  in canonical order, and the new cold entrypoint
+  `validate_implementation_binding_content_authority` re-resolves every
+  selection through verified content only. CompilationPlan identity and
+  ArtifactRevision closure are unchanged in this slice.
+
+  Correction round 1 (review): cold validation now unconditionally joins the
+  semantic `WorkflowPayload.workflow_id`, the selected workflow instance, and
+  the exact orchestrator-declared `workflow_name` under the runtime loader's
+  canonical case-insensitive workflow identity comparison — shared via the
+  new `mozaiksai.core.workflow.workflow_identity` helper consumed by both the
+  loader and semantics, with no result binding required to complete the
+  proof. Module actions now resolve by the required, digest-covered typed
+  `ActionPayload.action_id` (module-local, unique per owning module,
+  populated by the canonical offline projection from the declared manifest
+  action id); the node-id prefix parser is deleted, so ACTION node-id format
+  never carries implementation meaning. `ResolvedImplementationBindingAuthority`
+  mappings are now immutable copied snapshots (`MappingProxyType`). Adding
+  `ActionPayload.action_id` changes ActionPayload payload digests and the
+  identities of graphs pinning them.
+
 ### Fixed
 
 - Preserve explicit provider-native output token limits and SDK retry counts

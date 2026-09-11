@@ -858,6 +858,20 @@ triggers:
     assert mapped_result.graph.graph_digest == result.graph.graph_digest
     assert all(row.source_file != "unknown" for row in mapped_result.coverage)
 
+    # The projected ACTION payload carries the DECLARED manifest action id as
+    # its typed module-local identity, while the graph node id remains the
+    # deterministic digest-suffixed slug: two explicit, independent facts.
+    action_payload = next(
+        payload
+        for payload in result.payloads
+        if payload.payload_kind is SemanticNodeKind.ACTION
+    )
+    assert action_payload.action_id == "export_report"
+    assert re.fullmatch(
+        r"mozaiks\.action\.reports_export_report_[0-9a-f]{12}",
+        action_payload.node_id,
+    )
+
 
 def test_projection_field_access_is_pinned_to_current_structured_outputs() -> None:
     app = yaml.safe_load(

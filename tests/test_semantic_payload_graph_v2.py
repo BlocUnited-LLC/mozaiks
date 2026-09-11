@@ -139,6 +139,10 @@ _SEMANTICS_OWNER_FILES = frozenset(
         # Slice 5A: the replacement assignment compiler is an explicitly
         # offline substrate consumer of pinned payload and plan-unit refs.
         Path("mozaiksai/core/workflow/plan_assignment_compiler.py"),
+        # ImplementationBinding v2: typed graph-closure validation over
+        # graph v2 + payloads is the binding's own authority surface. The
+        # binding stays behind the same offline semantics seams.
+        Path("mozaiksai/core/semantics/binding.py"),
         # Canonical plan-authority contract: consumes graph/payload authority
         # as typed inputs and re-derives plans through the one canonical
         # derivation function. Offline-only; its production non-importability
@@ -257,11 +261,14 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 
 # Golden Merkle-root vector: pinned digests for the full-corpus v2 graph and
 # its archived fixture.  Independent of host, process, and input order.
-# EXPECTED_SEMANTIC_MIGRATION: only the action request contract and containing
-# graph/archive identities change; test_action_request_contracts restores and
-# verifies the exact original identities from the pinned base evidence.
-_GOLDEN_GRAPH_DIGEST = "421b7359cbd42d0f94a1ac9fbb38387240dda7bbea322add2a72027d14cc4810"
-_GOLDEN_ARCHIVE_DIGEST = "sha256:f1d2e8e104e1778b607b7771c1ff0ff6522628d78df52f548ecca91894ab43e4"
+# EXPECTED_SEMANTIC_MIGRATION: the action request contract (#484) and the
+# typed module-local ActionPayload.action_id (#494 correction) change only the
+# action payload and containing graph/archive identities;
+# test_action_request_contracts restores and verifies the exact original
+# identities from the pinned base evidence.  Recomputed through the canonical
+# builders (_corpus_graph + build_deterministic_archive), never hand-patched.
+_GOLDEN_GRAPH_DIGEST = "6a645d65928bbdf45a683ff884be159a2a1102bdb022f436db4fd01d0e9044b0"
+_GOLDEN_ARCHIVE_DIGEST = "sha256:998d9ec56ff4175e3011506971eb34c53d17acd39c12bf16e81c2321254968e2"
 
 
 def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str = "Home"):
@@ -381,6 +388,7 @@ def _corpus_payloads(*, scope: ExecutionAccessScopeRef = _SCOPE, home_title: str
             node_id="mozaiks.action.create_report",
             payload_version=1,
             scope=scope,
+            action_id="create_report",
             description="Create one report",
             request_contract=ObjectContract(
                 nullable=False,
@@ -1677,6 +1685,7 @@ def test_unordered_identity_collections_remain_permutation_stable() -> None:
         node_id=action.node_id,
         payload_version=action.payload_version,
         scope=action.scope,
+        action_id=action.action_id,
         description=action.description,
         request_contract=ObjectContract(
             nullable=False, properties=properties, additional_properties=False,
@@ -1690,6 +1699,7 @@ def test_unordered_identity_collections_remain_permutation_stable() -> None:
         node_id=action.node_id,
         payload_version=action.payload_version,
         scope=action.scope,
+        action_id=action.action_id,
         description=action.description,
         request_contract=ObjectContract(
             nullable=False, properties=tuple(reversed(properties)), additional_properties=False,

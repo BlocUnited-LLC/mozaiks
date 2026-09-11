@@ -84,12 +84,15 @@ _RIVAL_WORKFLOW = "mozaiks.workflow.rival"
 _RIVAL_CAPABILITY = "mozaiks.workflow_capability.rival_analysis"
 
 
-def _action(node_id: str, *, description: str, emits: tuple[str, ...] = ()) -> ActionPayload:
+def _action(
+    node_id: str, *, action_id: str, description: str, emits: tuple[str, ...] = ()
+) -> ActionPayload:
     return build_semantic_payload(
         ActionPayload,
         node_id=node_id,
         payload_version=1,
         scope=_SCOPE,
+        action_id=action_id,
         description=description,
         request_contract=ObjectContract(
             nullable=False, properties=(), additional_properties=False,
@@ -166,12 +169,25 @@ def _fixture_payloads() -> dict[str, SemanticPayloadBase]:
     _add(
         _action(
             _ACTION_CREATE,
+            action_id="create",
             description="Create one document",
             emits=(_EVENT_ID,),
         )
     )
-    _add(_action(_ACTION_GET, description="Read one document's content"))
-    _add(_action(_ACTION_STORE, description="Persist one analysis result"))
+    _add(
+        _action(
+            _ACTION_GET,
+            action_id="get_content",
+            description="Read one document's content",
+        )
+    )
+    _add(
+        _action(
+            _ACTION_STORE,
+            action_id="store_analysis",
+            description="Persist one analysis result",
+        )
+    )
     _add(
         build_semantic_payload(
             EventPayload,
@@ -348,6 +364,7 @@ def _rebuilt_action(payloads: dict[str, SemanticPayloadBase], node_id: str, **ov
         "node_id": base.node_id,
         "payload_version": base.payload_version,
         "scope": base.scope,
+        "action_id": base.action_id,
         "description": base.description,
         "request_contract": base.request_contract,
         "emits": base.emits,
@@ -495,7 +512,7 @@ def test_unrelated_additions_never_move_binding_or_result_identity() -> None:
         description="Unrelated module",
     )
     extended["mozaiks.action.archive_store"] = _action(
-        "mozaiks.action.archive_store", description="Unrelated action"
+        "mozaiks.action.archive_store", action_id="store", description="Unrelated action"
     )
     rival_workflow, rival_capability = _rival_workflow_and_capability()
     extended[rival_workflow.node_id] = rival_workflow
@@ -1416,12 +1433,14 @@ def test_app_zero_pattern_a_user_launched_report_workflow() -> None:
     _add(
         _action(
             "mozaiks.action.reports_get_source_data",
+            action_id="get_source_data",
             description="Read report source data",
         )
     )
     _add(
         _action(
             "mozaiks.action.reports_store_report",
+            action_id="store_report",
             description="Persist a generated report",
         )
     )
@@ -1579,3 +1598,64 @@ def test_app_zero_pattern_c_no_module_result_write() -> None:
     assert remaining_roles == {WorkflowCapabilityBindingRole.TRIGGERED_BY_EVENT}
     # The declared result stays: the proposal itself is the semantic output.
     assert isinstance(payloads[_RESULT], WorkflowResultPayload)
+
+
+# ---------------------------------------------------------------------------
+# Module-local action identity (typed ActionPayload.action_id)
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_action_id_under_one_module_rejects() -> None:
+    """Two distinct ACTION nodes of ONE module cannot share an action_id."""
+    payloads = _fixture_payloads()
+    payloads[_ACTION_GET] = _rebuilt_action(
+        payloads, _ACTION_GET, action_id="store_analysis"
+    )
+    _expect_rejection(payloads, "module-local action identity must be unique")
+
+
+def test_same_action_id_under_different_modules_is_valid() -> None:
+    """Action identity is module-local: two modules may both declare it."""
+    payloads = _fixture_payloads()
+    payloads["mozaiks.module.archive"] = build_semantic_payload(
+        ModulePayload,
+        node_id="mozaiks.module.archive",
+        payload_version=1,
+        scope=_SCOPE,
+        module_id="archive",
+        description="Unrelated module",
+    )
+    payloads["mozaiks.action.archive_store"] = _action(
+        "mozaiks.action.archive_store",
+        action_id="store_analysis",
+        description="Unrelated action sharing a module-local id",
+    )
+    edges = _fixture_edges(payloads)
+    edges.append(
+        SemanticEdge(
+            kind=SemanticEdgeKind.DECLARES,
+            source_node_id="mozaiks.module.archive",
+            target_node_id="mozaiks.action.archive_store",
+        )
+    )
+    _validate(payloads, edges=edges)
+
+
+def test_absent_action_id_cannot_parse() -> None:
+    """action_id is required typed identity — no optional, no node-id fallback."""
+    base = _fixture_payloads()[_ACTION_GET]
+    document = base.model_dump(mode="json")
+    del document["action_id"]
+    with pytest.raises(ValidationError):
+        ActionPayload.model_validate(document)
+
+
+def test_action_id_tamper_changes_payload_digest() -> None:
+    """action_id participates in payload_digest and therefore graph identity."""
+    payloads = _fixture_payloads()
+    retargeted = _rebuilt_action(payloads, _ACTION_GET, action_id="get_other")
+    assert retargeted.payload_digest != payloads[_ACTION_GET].payload_digest
+    document = payloads[_ACTION_GET].model_dump(mode="json")
+    document["action_id"] = "get_other"
+    with pytest.raises(ValidationError, match="payload_digest"):
+        ActionPayload.model_validate(document)

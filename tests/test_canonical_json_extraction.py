@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from collections import UserDict
 from datetime import date
@@ -13,7 +14,12 @@ import pytest
 from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.layout_registry import build_app_layout_registry
-from mozaiksai.core.semantics import canonical_json, plan_authority
+from mozaiksai.core.semantics import plan_authority
+
+# The package also exports the ``canonical_json`` serialization FUNCTION, so
+# both the bare package attribute and ``import ... as`` (which binds through
+# that attribute) are ambiguous; resolve the shared-types MODULE explicitly.
+canonical_json = importlib.import_module("mozaiksai.core.semantics.canonical_json")
 from mozaiksai.core.semantics.canonical import CanonicalSerializationError, canonical_digest
 from mozaiksai.core.semantics.canonical_json import (
     CanonicalJsonArray,

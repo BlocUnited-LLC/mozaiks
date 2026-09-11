@@ -1000,6 +1000,12 @@ class _Builder:
                     path=f"{base}.owned_mutations[{j}]",
                     group=f"{base}.owned_mutations",
                 )
+                self.content_field(
+                    action,
+                    "action_id",
+                    str(action_id),
+                    f"{base}.owned_mutations[{j}]",
+                )
                 self.edge(
                     SemanticEdgeKind.DECLARES,
                     owner,
@@ -1462,6 +1468,16 @@ class _Builder:
                             group=f"{base}.{field}",
                             taxonomy=taxonomy,
                         )
+                        if kind is SemanticNodeKind.ACTION:
+                            # The module-local semantic action identity is the
+                            # DECLARED manifest action id — never derived from
+                            # the digest-suffixed graph node identity.
+                            self.content_field(
+                                child,
+                                "action_id",
+                                str(value),
+                                f"{base}.manifest.{field}[{j}].{key}",
+                            )
                         self.content_field(
                             child,
                             "description",
