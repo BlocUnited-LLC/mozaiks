@@ -11,9 +11,18 @@ Covers:
   Transport extraction:
     - base64url credential in the bearer subprotocol is decoded
     - marker without a credential value is rejected
-    - malformed base64url is rejected
+    - malformed base64url is refused, not repaired
     - unrelated subprotocols are ignored
     - credential is never echoed as the selected subprotocol
+
+  Strict credential encoding (the credential must be canonical unpadded base64url):
+    - trailing garbage, illegal characters, whitespace, `=` padding, impossible
+      lengths, standard-base64 `+`/`/`, empty values, invalid UTF-8, and
+      non-canonical trailing bits are all refused before the auth adapter runs
+    - refusal carries its own bounded reason, distinct from a missing credential
+    - a malformed subprotocol never falls through to the query-token path
+    - the same matrix is re-proven over a real FastAPI/Starlette handshake, with
+      the adapter asserted never to have authenticated a recovered bearer
 
   Authentication through the configured adapter:
     - subprotocol token validates through get_auth_adapter() and binds WebSocketUser
@@ -58,6 +67,8 @@ from mozaiksai.core.auth.adapters.registry import (
 from mozaiksai.core.auth.websocket_auth import (
     WS_BEARER_SUBPROTOCOL,
     WS_CLOSE_POLICY_VIOLATION,
+    WS_REASON_MALFORMED_CREDENTIAL,
+    MalformedBearerCredential,
     accept_websocket,
     authenticate_websocket,
     authenticate_websocket_with_path_binding,
@@ -177,9 +188,11 @@ class TestSubprotocolExtraction:
         socket = _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL])
         assert extract_subprotocol_bearer_token(socket) is None
 
-    def test_malformed_base64url_is_rejected(self):
+    def test_malformed_base64url_raises_rather_than_returning_none(self):
+        """Malformed encoding is a hard refusal, not an absent credential."""
         socket = _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, "!!!not-base64!!!"])
-        assert extract_subprotocol_bearer_token(socket) is None
+        with pytest.raises(MalformedBearerCredential):
+            extract_subprotocol_bearer_token(socket)
 
     def test_unrelated_subprotocols_are_ignored(self):
         socket = _FakeWebSocket(subprotocols=["graphql-ws", "json"])
@@ -247,10 +260,13 @@ class TestAuthenticateThroughAdapter:
         assert socket.closed[0][0] == WS_CLOSE_POLICY_VIOLATION
 
     @pytest.mark.asyncio
-    async def test_malformed_credential_is_rejected_as_missing(self, auth_enabled):
+    async def test_malformed_credential_is_refused_with_its_own_reason(self, auth_enabled):
         socket = _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, "!!!"])
         assert await authenticate_websocket(socket) is None  # type: ignore[arg-type]
         assert socket.accepted is False
+        assert socket.closed == [
+            (WS_CLOSE_POLICY_VIOLATION, WS_REASON_MALFORMED_CREDENTIAL)
+        ]
 
     @pytest.mark.asyncio
     async def test_explicit_access_token_argument_still_wins(self, auth_enabled):
@@ -591,3 +607,243 @@ class TestRealAsgiHandshake:
                 websocket.receive_json()
         assert excinfo.value.code == WS_CLOSE_POLICY_VIOLATION
         assert excinfo.value.reason == "Missing access_token"
+
+
+# ---------------------------------------------------------------------------
+# 7. Strict credential encoding
+# ---------------------------------------------------------------------------
+
+# Malformed representations that must never reach the auth adapter. Each pairs a
+# label with a factory turning a canonical encoding into the malformed form.
+MALFORMED_CREDENTIALS = [
+    ("trailing garbage", lambda c: c + "!!!!"),
+    ("single illegal character", lambda c: c + "!"),
+    ("leading illegal character", lambda c: "!" + c),
+    ("embedded space", lambda c: c[:4] + " " + c[4:]),
+    ("surrounding whitespace", lambda c: "  " + c + "  "),
+    ("embedded tab", lambda c: c[:4] + "\t" + c[4:]),
+    ("trailing newline", lambda c: c + "\n"),
+    ("explicit padding", lambda c: c + "="),
+    ("impossible length", lambda c: c + "A"),
+    ("standard-base64 plus", lambda c: c[:4] + "+" + c[5:]),
+    ("standard-base64 slash", lambda c: c[:4] + "/" + c[5:]),
+    ("empty credential", lambda c: ""),
+]
+
+MALFORMED_IDS = [label for label, _ in MALFORMED_CREDENTIALS]
+
+# HTTP list framing (RFC 7230) strips optional whitespace *around* each element of
+# `Sec-WebSocket-Protocol`, so these two forms are unrepresentable on a real wire: the
+# value the client actually transmits is already the canonical one. They are still
+# refused at our boundary, which is what the _FakeWebSocket matrix above proves.
+WIRE_UNREPRESENTABLE = {"surrounding whitespace", "trailing newline"}
+
+ON_WIRE_MALFORMED = [
+    (label, mangle)
+    for label, mangle in MALFORMED_CREDENTIALS
+    if label not in WIRE_UNREPRESENTABLE
+]
+ON_WIRE_MALFORMED_IDS = [label for label, _ in ON_WIRE_MALFORMED]
+
+
+class TestStrictCredentialEncoding:
+    """
+    The credential after `mozaiks.bearer.v1` must be canonical unpadded base64url.
+
+    Python's base64 silently *discards* characters outside the alphabet by default, so
+    a lenient decoder turns base64url(token) + trailing garbage back into a usable
+    token. That is a transport defect even though the recovered bearer still had to be
+    valid: the transport must refuse a malformed representation, never repair one.
+    """
+
+    @pytest.mark.parametrize("label,mangle", MALFORMED_CREDENTIALS, ids=MALFORMED_IDS)
+    def test_malformed_representation_is_refused(self, label: str, mangle) -> None:
+        mangled = mangle(encode_credential(VALID_TOKEN))
+        socket = _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, mangled])
+        with pytest.raises(MalformedBearerCredential):
+            extract_subprotocol_bearer_token(socket)
+
+    def test_noncanonical_trailing_bits_are_refused(self) -> None:
+        # "QR" decodes to the same byte as canonical "QQ" only because the unused
+        # trailing bits are ignored, so only the canonical form may be accepted.
+        assert extract_subprotocol_bearer_token(
+            _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, "QQ"])
+        ) == "A"
+        with pytest.raises(MalformedBearerCredential):
+            extract_subprotocol_bearer_token(
+                _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, "QR"])
+            )
+
+    def test_invalid_utf8_after_decoding_is_refused(self) -> None:
+        undecodable = base64.urlsafe_b64encode(b"\xff\xfe\xfd").decode("ascii").rstrip("=")
+        with pytest.raises(MalformedBearerCredential):
+            extract_subprotocol_bearer_token(
+                _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, undecodable])
+            )
+
+    def test_canonical_encoding_round_trips_including_multibyte(self) -> None:
+        for token in (VALID_TOKEN, "a+b/c=d?e&f", "tok-é中\U0001f600", "A"):
+            socket = _FakeWebSocket(
+                subprotocols=[WS_BEARER_SUBPROTOCOL, encode_credential(token)]
+            )
+            assert extract_subprotocol_bearer_token(socket) == token
+
+    @pytest.mark.asyncio
+    async def test_malformed_never_falls_through_to_the_query_token(
+        self, auth_enabled, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even with the dev opt-in on, a malformed subprotocol refuses outright."""
+        monkeypatch.setenv("MOZAIKS_WS_ALLOW_QUERY_TOKEN", "true")
+        socket = _FakeWebSocket(
+            subprotocols=[WS_BEARER_SUBPROTOCOL, encode_credential(VALID_TOKEN) + "!!!!"],
+            query_params={"access_token": VALID_TOKEN},
+        )
+        assert await authenticate_websocket(socket) is None  # type: ignore[arg-type]
+        assert socket.accepted is False
+        assert socket.closed == [(WS_CLOSE_POLICY_VIOLATION, WS_REASON_MALFORMED_CREDENTIAL)]
+
+    def test_no_credential_material_in_logs_on_malformed_refusal(
+        self, auth_enabled, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        secret = "super.secret.jwt"
+        encoded = encode_credential(secret)
+        caplog.set_level(logging.DEBUG)
+
+        socket = _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, encoded + "!!!!"])
+        with pytest.raises(MalformedBearerCredential):
+            extract_subprotocol_bearer_token(socket)
+
+        assert caplog.records, "expected a refusal to be logged"
+        emitted = "\n".join(record.getMessage() for record in caplog.records)
+        assert secret not in emitted
+        assert encoded not in emitted
+
+
+class TestStrictEncodingOverRealHandshake:
+    """The same matrix over a real FastAPI/Starlette handshake, not a double."""
+
+    @staticmethod
+    def _app(seen: list[str]):
+        app = FastAPI()
+
+        @app.websocket("/ws/{app_id}/{chat_id}/{user_id}")
+        async def endpoint(websocket: WebSocket, app_id: str, chat_id: str, user_id: str):
+            user = await authenticate_websocket_with_path_binding(
+                websocket,
+                path_user_id=user_id,
+                path_app_id=app_id,
+                path_chat_id=chat_id,
+            )
+            if user is None:
+                return
+            seen.append(user.user_id)
+            await accept_websocket(websocket)
+            await websocket.send_json({"user_id": user.user_id})
+            await websocket.close()
+
+        return app
+
+    def _connect(self, subprotocols, seen):
+        from starlette.testclient import TestClient
+
+        client = TestClient(self._app(seen))
+        return client.websocket_connect("/ws/app-1/chat-1/user-1", subprotocols=subprotocols)
+
+    def test_canonical_credential_is_accepted(self, auth_enabled) -> None:
+        """Positive control: the canonical encoding still authenticates end to end."""
+        seen: list[str] = []
+        with self._connect([WS_BEARER_SUBPROTOCOL, encode_credential(VALID_TOKEN)], seen) as ws:
+            assert ws.accepted_subprotocol == WS_BEARER_SUBPROTOCOL
+            assert ws.receive_json() == {"user_id": "user-1"}
+        assert seen == ["user-1"]
+
+    def test_canonical_plus_trailing_garbage_is_refused(self, auth_enabled) -> None:
+        """The exact reproduction: canonical encoding followed by trailing garbage."""
+        from starlette.websockets import WebSocketDisconnect
+
+        seen: list[str] = []
+        mangled = encode_credential(VALID_TOKEN) + "!!!!"
+        with pytest.raises(WebSocketDisconnect) as excinfo:  # noqa: PT012
+            with self._connect([WS_BEARER_SUBPROTOCOL, mangled], seen) as ws:
+                ws.receive_json()
+
+        assert excinfo.value.code == WS_CLOSE_POLICY_VIOLATION
+        assert excinfo.value.reason == WS_REASON_MALFORMED_CREDENTIAL
+        # The adapter must never have authenticated the recovered underlying bearer.
+        assert seen == []
+
+    @pytest.mark.parametrize("label,mangle", ON_WIRE_MALFORMED, ids=ON_WIRE_MALFORMED_IDS)
+    def test_malformed_matrix_is_refused_over_the_wire(
+        self, auth_enabled, label: str, mangle
+    ) -> None:
+        from starlette.websockets import WebSocketDisconnect
+
+        seen: list[str] = []
+        mangled = mangle(encode_credential(VALID_TOKEN))
+        with pytest.raises(WebSocketDisconnect) as excinfo:  # noqa: PT012
+            with self._connect([WS_BEARER_SUBPROTOCOL, mangled], seen) as ws:
+                ws.receive_json()
+
+        assert excinfo.value.code == WS_CLOSE_POLICY_VIOLATION
+        assert seen == [], label + " authenticated a recovered bearer"
+
+    def test_invalid_utf8_is_refused_over_the_wire(self, auth_enabled) -> None:
+        from starlette.websockets import WebSocketDisconnect
+
+        seen: list[str] = []
+        undecodable = base64.urlsafe_b64encode(b"\xff\xfe\xfd").decode("ascii").rstrip("=")
+        with pytest.raises(WebSocketDisconnect) as excinfo:  # noqa: PT012
+            with self._connect([WS_BEARER_SUBPROTOCOL, undecodable], seen) as ws:
+                ws.receive_json()
+
+        assert excinfo.value.code == WS_CLOSE_POLICY_VIOLATION
+        assert excinfo.value.reason == WS_REASON_MALFORMED_CREDENTIAL
+        assert seen == []
+
+    @pytest.mark.parametrize("label", sorted(WIRE_UNREPRESENTABLE))
+    def test_surrounding_whitespace_is_http_framing_not_a_credential(
+        self, auth_enabled, label: str
+    ) -> None:
+        """
+        OWS around a list element is removed by HTTP before our boundary sees it.
+
+        The client therefore transmitted a canonical credential and is accepted. This
+        is correct RFC 7230 framing, not the transport normalizing a malformed value —
+        our boundary still refuses whitespace when it is presented directly, which
+        TestStrictCredentialEncoding asserts.
+        """
+        mangle = dict(MALFORMED_CREDENTIALS)[label]
+        canonical = encode_credential(VALID_TOKEN)
+        seen: list[str] = []
+
+        with self._connect([WS_BEARER_SUBPROTOCOL, mangle(canonical)], seen) as ws:
+            assert ws.receive_json() == {"user_id": "user-1"}
+        assert seen == ["user-1"]
+
+        # Presented directly to the boundary, the same value is refused.
+        with pytest.raises(MalformedBearerCredential):
+            extract_subprotocol_bearer_token(
+                _FakeWebSocket(subprotocols=[WS_BEARER_SUBPROTOCOL, mangle(canonical)])
+            )
+
+    def test_query_token_development_compatibility_is_unchanged(
+        self, auth_enabled, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The dev opt-in still works over a real handshake, and stays off by default."""
+        from starlette.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect
+
+        seen: list[str] = []
+        client = TestClient(self._app(seen))
+        url = "/ws/app-1/chat-1/user-1?access_token=" + VALID_TOKEN
+
+        with pytest.raises(WebSocketDisconnect) as excinfo:  # noqa: PT012
+            with client.websocket_connect(url) as ws:
+                ws.receive_json()
+        assert excinfo.value.reason == "Missing access_token"
+        assert seen == []
+
+        monkeypatch.setenv("MOZAIKS_WS_ALLOW_QUERY_TOKEN", "true")
+        with client.websocket_connect(url) as ws:
+            assert ws.receive_json() == {"user_id": "user-1"}
+        assert seen == ["user-1"]
