@@ -13,6 +13,10 @@ import yaml
 
 from mozaiks_cli.agent_guidance import build_agent_guidance_files
 from mozaiks_cli.workspace import is_framework_repo_root
+from mozaiksai.core.runtime.app.auth_contract import (
+    app_auth_route_entries,
+    validate_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.provenance import (
     build_default_app_provenance,
     dump_app_provenance_yaml,
@@ -319,6 +323,18 @@ def _create_bundle_scaffold(
   _write_json(config_dir / "shell.json", _build_shell_config(app_name))
   print("Created app/config/shell.json")
 
+  auth_pages = []
+  if features.get("auth"):
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+      raise RuntimeError("Authenticated presets require the packaged Factory auth template")
+    template = factory_root / "build_context/webapp_builder/templates/config/auth.yaml"
+    auth_yaml = template.read_text(encoding="utf-8").replace("{{AUTH_DEFAULT_ROUTE}}", "/")
+    auth_contract = validate_app_auth_contract(yaml.safe_load(auth_yaml))
+    _write_text(config_dir / "auth.yaml", auth_yaml)
+    auth_pages = app_auth_route_entries(auth_contract)
+    print("Created app/config/auth.yaml")
+
   _write_text(security_dir / "secrets.yaml", _secrets_yaml_placeholder())
   print("Created app/security/secrets.yaml")
 
@@ -331,7 +347,7 @@ def _create_bundle_scaffold(
   _copy_default_brand_bundle(brand_dir, app_name)
   print("Created app/brand from factory_app default brand")
 
-  _write_json(ui_dir / "route_manifest.json", {"pages": []})
+  _write_json(ui_dir / "route_manifest.json", {"pages": auth_pages})
   print("Created app/ui/route_manifest.json")
 
   _write_text(ui_dir / "index.js", _ui_component_registry_index())

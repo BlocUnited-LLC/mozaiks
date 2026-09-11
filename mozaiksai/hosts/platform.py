@@ -47,6 +47,10 @@ from mozaiksai.core.profile.discovery import (
 )
 from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
+from mozaiksai.core.runtime.app.auth_contract import (
+    build_app_auth_projection,
+    load_app_auth_contract,
+)
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
@@ -359,7 +363,12 @@ async def _platform_startup() -> None:
             workflow_capability_routes = _load_workflow_capability_routes(app_root)
             app.state.workflow_capability_routes = workflow_capability_routes
 
-            mongo_uri = str(os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or "").strip()
+            from mozaiksai.core.secrets import inspect_secret_config, resolve_secret
+
+            mongo_uri = (
+                resolve_secret("MONGO_URI", app_root=app_root)
+                if inspect_secret_config("MONGO_URI", app_root=app_root).configured else ""
+            )
             _reaction_idempotency_store = ReactionIdempotencyStore() if mongo_uri else None
             workflow_trigger_guard = WorkflowTriggerGuard(
                 claim_store=_reaction_idempotency_store,
@@ -1197,6 +1206,8 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
         "landing_spot": "/apps" if is_studio else "/me" if is_user else "/",
     }
     app_manifest = _load_app_manifest()
+    auth_contract = load_app_auth_contract(app_root, auth_required=app_manifest.get("authRequired", False))
+    result["auth"] = await build_app_auth_projection(auth_contract)
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
     shell_chrome: dict[str, Any] | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
@@ -641,6 +642,16 @@ async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Pa
 async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A previously loaded app's regular package must not shadow this replay's
+    # authored services package. The scoped path also restores loader additions.
+    prior_app = tmp_path / "prior-app"
+    _write_files(prior_app, {
+        "services/__init__.py": "",
+        "services/integrations/__init__.py": "",
+        "services/integrations/billing_client.py": "",
+    })
+    monkeypatch.syspath_prepend(str(prior_app))
+
     descriptor, contract = _load_mozaikspay_descriptor()
     ctx = _Context(
         {
@@ -691,6 +702,8 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
 
     assert "config/subscriptions.yaml" in files
     assert "services/integrations/mozaikspay_client.py" in files
+    assert files["services/__init__.py"] == ""
+    assert files["services/integrations/__init__.py"] == ""
     assert "modules/billing_portal/module.yaml" in files
     assert "modules/reports/module.yaml" in files
     assert "ui/pages/billing.yaml" in files
@@ -741,6 +754,9 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert loaded.definition.name == "MozaiksPay Replay"
     assert [module.name for module in loaded.modules] == ["billing_portal", "reports"]
     assert loaded.failed_module_names == []
+    assert Path(sys.modules["services.integrations.mozaikspay_client"].__file__).resolve() == (
+        app_root / "services/integrations/mozaikspay_client.py"
+    ).resolve()
     assert [page.name for page in loaded.definition.pages] == ["billing", "pricing", "usage"]
     assert loaded.subscriptions_config is not None
     assert loaded.subscriptions_config.default_plan_id == "free"

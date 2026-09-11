@@ -24,6 +24,7 @@ include chat-ui/vite.embed.config.js
 include chat-ui/README.md
 prune web_shell/node_modules
 prune web_shell/dist
+prune web_shell/.mozaiks-tailwind-sources
 prune web_shell/playwright
 prune web_shell/test-results
 prune web_shell/playwright-report

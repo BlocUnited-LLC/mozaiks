@@ -205,7 +205,9 @@ def _normalize_code_file_entries(raw_entries: Any) -> dict[str, str]:
         if not isinstance(item, dict):
             continue
         filename = item.get("filename") or item.get("path")
-        content = item.get("content") or item.get("filecontent")
+        content = item.get("content")
+        if content is None:
+            content = item.get("filecontent")
         if not filename or content is None:
             continue
         safe = safe_relpath(str(filename))

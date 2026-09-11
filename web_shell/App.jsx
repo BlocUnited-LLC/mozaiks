@@ -1,63 +1,65 @@
+import { useEffect, useState } from 'react';
 import {
   MozaiksApp,
   WebSocketApiAdapter,
   componentRegistry,
+  loadShellAuth,
+  LoginPage,
+  AuthCallbackPage,
 } from '@mozaiks/chat-ui';
-
-// Active app UI barrel — resolved at build time via @platform/extensions.
-// The selected app root owns custom route components, including any
-// management surfaces it declares in its route manifest.
 import * as platformExtensions from '@platform/extensions';
 
-const { register, createAuthAdapter } = platformExtensions;
-
-// Register active app UI extensions once.
-// Core substrate components are always loaded from coreComponents.js.
-register(componentRegistry.registerComponent.bind(componentRegistry));
-
-// ── API adapter ────────────────────────────────────────────────────────────
-// apiUrl and wsUrl come from the platform's app.json or env vars.
-// Vite proxies /api and /ws to apiUrl during dev (see vite.config.js).
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? '';
-const wsBaseUrl = import.meta.env.VITE_WS_URL || (
-  apiBaseUrl ? apiBaseUrl.replace(/^http/, 'ws') : undefined
-);
+const wsBaseUrl = import.meta.env.VITE_WS_URL || (apiBaseUrl ? apiBaseUrl.replace(/^http/, 'ws') : undefined);
+let bootstrapPromise;
 
-const apiAdapter = new WebSocketApiAdapter({
-  // Empty string is intentional: deployed single-origin apps should call
-  // /api on the current host. Local Vite dev proxies that relative path.
-  baseUrl: apiBaseUrl,
-  ...(wsBaseUrl ? { wsUrl: wsBaseUrl } : {}),
-});
-
-// ── Auth adapter ───────────────────────────────────────────────────────────
-// Platform app exports createAuthAdapter() — uses OIDC when VITE_OIDC_AUTHORITY
-// is set, falls back to mock adapter (VITE_MOCK_MODE=true or no authority).
-// If the platform extension doesn't export createAuthAdapter, fall back to the
-// development mock so the shell always works.
-const fallbackMockAdapter = {
-  isAuthenticated:   () => true,
-  getCurrentUser:    () => Promise.resolve({ id: 'demo-user', name: 'Developer', email: 'demo@example.com', roles: ['admin', 'user'] }),
-  getToken:          () => Promise.resolve('demo-token'),
-  login:             () => Promise.resolve(),
-  logout:            () => Promise.resolve(),
-  onAuthStateChange: (callback) => {
-    callback({ id: 'demo-user', name: 'Developer', email: 'demo@example.com', roles: ['admin', 'user'] });
-    return () => {};
-  },
-  getAccessToken: () => 'demo-token',
-  handleCallback: () => Promise.resolve(),
-};
-
-const authAdapter = typeof createAuthAdapter === 'function'
-  ? createAuthAdapter()
-  : fallbackMockAdapter;
+function bootstrap() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = loadShellAuth({
+      apiBaseUrl,
+      createAppAuthAdapter: Reflect.get(platformExtensions, 'createAuthAdapter'),
+      env: import.meta.env,
+    }).then(({ authAdapter, shellConfig }) => {
+      window.mozaiksAuth = authAdapter;
+      // App initialization runs only after the host's authentication bootstrap.
+      platformExtensions.register(componentRegistry.registerComponent.bind(componentRegistry));
+      if (!componentRegistry.hasComponent('LoginPage')) componentRegistry.registerComponent('LoginPage', LoginPage);
+      if (!componentRegistry.hasComponent('AuthCallbackPage')) componentRegistry.registerComponent('AuthCallbackPage', AuthCallbackPage);
+      const apiAdapter = new WebSocketApiAdapter({
+        baseUrl: apiBaseUrl,
+        ...(wsBaseUrl ? { wsUrl: wsBaseUrl } : {}),
+        auth: authAdapter,
+      });
+      return { authAdapter, shellConfig, apiAdapter };
+    }).catch(error => { bootstrapPromise = undefined; throw error; });
+  }
+  return bootstrapPromise;
+}
 
 export default function App() {
-  return (
-    <MozaiksApp
-      apiAdapter={apiAdapter}
-      authAdapter={authAdapter}
-    />
+  const [state, setState] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    bootstrap().then(value => { if (!cancelled) setState(value); }).catch(error => {
+      console.error('Application bootstrap failed:', error);
+      if (!cancelled) setFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [attempt]);
+
+  if (!state) return (
+    <main id="main-content" className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+      <div className="max-w-md text-center">
+        {failed ? <>
+          <h1 className="mb-3 text-xl font-semibold">Unable to open this app</h1>
+          <p role="alert" className="mb-6 text-muted-foreground">The app could not load its sign-in settings. Please try again.</p>
+          <button type="button" className="rounded-md bg-primary px-5 py-2 text-primary-foreground" onClick={() => setAttempt(value => value + 1)}>Try again</button>
+        </> : <p role="status">Loading app…</p>}
+      </div>
+    </main>
   );
+  return <MozaiksApp {...state} />;
 }

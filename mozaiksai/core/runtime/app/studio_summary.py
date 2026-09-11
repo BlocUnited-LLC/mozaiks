@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from mozaiksai.control_plane import load_control_plane_config
+from mozaiksai.core.adapters.llm_fallback import MODEL_API_KEY_ENV_NAMES
 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 from mozaiksai.core.data.persistence.namespaces import (
     SYSTEM_DATABASE,
@@ -15,6 +16,7 @@ from mozaiksai.core.data.persistence.namespaces import (
     PlatformCollections,
 )
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
+from mozaiksai.core.secrets import inspect_secret_config
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,
 )
@@ -380,8 +382,6 @@ def _build_connector_summary(connectors: list[dict[str, Any]]) -> dict[str, int]
 
 
 async def build_integrations_summary(*, app_id: str | None = None) -> dict:
-    import os
-
     def _mask(value: str, show: int = 6) -> str:
         if len(value) <= show:
             return "•" * len(value)
@@ -390,8 +390,17 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     def _configured(value: str) -> bool:
         return bool(value and value.strip())
 
-    openai_key = os.getenv("OPENAI_API_KEY", "")
-    mongo_uri = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or os.getenv("MONGO_URL") or ""
+    api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
+    key_names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
+    model_key = None
+    for env_name in key_names:
+        model_key = inspect_secret_config(env_name)
+        # Match credential resolution: invalid configured references cannot fall
+        # through to another provider handle or a database configuration.
+        if model_key.source != "missing":
+            break
+    model_configured = not key_names or bool(model_key and model_key.configured)
+    mongo_config = inspect_secret_config("MONGO_URI")
     e2b_key = os.getenv("E2B_API_KEY", "")
     internal_key = os.getenv("INTERNAL_API_KEY", "")
     backend_url = os.getenv("MOZAIKS_BACKEND_URL", "")
@@ -409,31 +418,34 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     fallback_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()]
 
     mongo_llm_configured = False
-    try:
-        from mozaiksai.core.core_config import get_mongo_client
+    if not model_configured and model_key and model_key.source == "missing" and mongo_config.configured:
+        try:
+            from mozaiksai.core.core_config import get_mongo_client
 
-        db_client = get_mongo_client()
-        document = await db_client[SYSTEM_DATABASE][BuilderCollections.LLM_CONFIG].find_one({}, {"_id": 0, "model": 1})
-        mongo_llm_configured = document is not None
-    except Exception:
-        pass
+            db_client = get_mongo_client()
+            document = await db_client[SYSTEM_DATABASE][BuilderCollections.LLM_CONFIG].find_one({}, {"_id": 0, "model": 1})
+            mongo_llm_configured = document is not None
+        except Exception:
+            pass
 
     integrations: dict = {
         "llm": {
             "label": "LLM Provider",
             "kind": "llm",
-            "configured": _configured(openai_key) or mongo_llm_configured,
-            "source": "database" if mongo_llm_configured else ("environment" if _configured(openai_key) else None),
+            "configured": model_configured or mongo_llm_configured,
+            "provider": api_type,
+            "source": "database" if mongo_llm_configured else (model_key.source if model_key else "not_required"),
             "primary_model": default_model,
             "fallback_models": fallback_models,
-            "api_key_set": _configured(openai_key),
-            "api_key_masked": _mask(openai_key) if openai_key else None,
+            "api_key_set": bool(model_key and model_key.configured),
+            "api_key_env": model_key.env_name if model_key else None,
         },
         "database": {
             "label": "MongoDB",
             "kind": "database",
-            "configured": _configured(mongo_uri),
-            "uri_masked": _mask(mongo_uri, 12) if mongo_uri else None,
+            "configured": mongo_config.configured,
+            "source": mongo_config.source,
+            "env_name": mongo_config.env_name,
         },
         "sandbox": {
             "label": "E2B Sandbox",

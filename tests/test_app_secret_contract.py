@@ -102,3 +102,87 @@ def test_explicit_env_provider_ignores_ambient_vault_references(tmp_path, monkey
     assert inspect_secret_config("SERVICE_KEY", app_root=tmp_path).source == "env"
     assert resolve_secret("SERVICE_KEY", app_root=tmp_path, client_factory=client_factory) == "local-test-value"
     client_factory.assert_not_called()
+
+
+def test_factory_secret_policy_is_names_only_and_provider_conditional(monkeypatch):
+    from mozaiksai.resources import resolve_factory_app_root
+
+    monkeypatch.delenv("MOZAIKS_SECRETS_CONFIG_PATH", raising=False)
+    root = resolve_factory_app_root() / "app"
+    policy = validate_secret_contract(load_secret_contract(app_root=root))
+    assert policy.provider.type == "env"
+    entries = {entry.env: entry for entry in policy.secrets}
+    assert set(entries) == {
+        "MONGO_URI", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY", "LLM_PRIMARY_API_KEY", "LLM_FALLBACK_API_KEYS",
+    }
+    assert entries["MONGO_URI"].required
+    assert all(not entry.required for name, entry in entries.items() if name != "MONGO_URI")
+    for name in entries:
+        monkeypatch.delenv(name, raising=False)
+    # Loading metadata never requires every credential to be supplied.
+    assert load_secret_contract(app_root=root)["secrets"]
+
+
+@pytest.mark.parametrize("provider,env_name", [
+    ("google", "GEMINI_API_KEY"), ("google", "GOOGLE_API_KEY"),
+    ("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY"),
+    ("openai", "LLM_PRIMARY_API_KEY"),
+])
+def test_model_and_startup_consume_selected_app_vault_policy(provider, env_name, monkeypatch, tmp_path):
+    from mozaiksai.core.adapters.llm_fallback import build_fallback_config_list
+    from mozaiksai.core.secrets import app_secrets
+    from mozaiksai.core.startup.validation import _can_resolve_api_key
+
+    policy = _write_contract(tmp_path, {
+        "version": 1,
+        "provider": {"type": "azure_key_vault", "azure_key_vault": {
+            "vault_url": "https://example.vault.azure.net",
+        }},
+        "secrets": [
+            {"env": env_name, "azure_key_vault": {"secret_name": "selected-model"}},
+            {"env": "LLM_FALLBACK_API_KEYS", "azure_key_vault": {"secret_name": "fallback-models"}},
+        ],
+    })
+    monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", provider)
+    monkeypatch.setenv("LLM_FALLBACK_ENABLED", "true")
+    for name in (
+        "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY",
+        "LLM_PRIMARY_API_KEY", "LLM_FALLBACK_API_KEYS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(f"{name}_SECRET_NAME", raising=False)
+    client = Mock()
+    client.get_secret.side_effect = lambda name: Mock(value={
+        "selected-model": "local-model-placeholder", "fallback-models": "fallback-one, fallback-two",
+    }[name])
+    monkeypatch.setattr(app_secrets, "build_secret_client", Mock(return_value=client))
+
+    config = build_fallback_config_list(primary_model="example", fallback_models=["one", "two"])
+    assert [entry["api_key"] for entry in config] == [
+        "local-model-placeholder", "fallback-one", "fallback-two",
+    ]
+    assert _can_resolve_api_key()[0]
+    assert {call.args[0] for call in client.get_secret.call_args_list} == {"selected-model", "fallback-models"}
+
+
+def test_model_does_not_mask_configured_vault_failure(monkeypatch, tmp_path):
+    from mozaiksai.core.adapters.llm_fallback import resolve_model_api_key
+    from mozaiksai.core.secrets import app_secrets
+
+    policy = _write_contract(tmp_path, {
+        "version": 1,
+        "provider": {"type": "azure_key_vault", "azure_key_vault": {
+            "vault_url": "https://example.vault.azure.net",
+        }},
+        "secrets": [{"env": "GEMINI_API_KEY", "azure_key_vault": {"secret_name": "model"}}],
+    })
+    monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PRIMARY_API_KEY", "otherwise-usable-key")
+    monkeypatch.setattr(app_secrets, "build_secret_client", Mock(side_effect=RuntimeError("private-detail")))
+    with pytest.raises(SecretResolutionError) as error:
+        resolve_model_api_key("google")
+    assert error.value.source == "azure_key_vault"
+    assert "private-detail" not in str(error.value)

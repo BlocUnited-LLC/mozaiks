@@ -97,9 +97,15 @@ def test_every_pre_existing_corpus_unit_retains_exact_identity_and_bytes() -> No
 
 
 def test_only_canonical_interface_rows_and_their_units_extend_the_corpus() -> None:
+    from tests.service_package_marker_migration_helpers import (
+        registry_before_service_package_markers,
+    )
+
     baseline = _baseline()
     graph, payloads = _corpus_graph()
-    registry = build_app_layout_registry(())
+    # Isolate the original interface-family addition from the subsequent
+    # package-marker rows; current-unit byte equality is checked above.
+    registry = registry_before_service_package_markers()
     plan = derive_compilation_plan(graph=graph, payloads=payloads, registry=registry)
     snapshot = snapshot_layout_registry(registry)
     old_snapshot = LayoutRegistrySnapshot.model_validate(baseline["registry_snapshot"])

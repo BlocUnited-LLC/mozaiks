@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -40,6 +41,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 from mozaiksai.core.runtime.persistence.startup_policy import (
     DATABASE_STARTUP_POLICY_ENV,
     DatabaseStartupPolicyError,
+    database_persistence_is_enabled,
     get_database_startup_policy,
 )
 
@@ -83,6 +85,34 @@ def _collection(name: str = "records", module_id: str = "my_module") -> dict:
 # ---------------------------------------------------------------------------
 
 class TestGetDatabaseStartupPolicy:
+    def test_vault_reference_enables_readiness_without_fetching_secret(self, monkeypatch, tmp_path):
+        from mozaiksai.core.secrets import app_secrets
+
+        policy = tmp_path / "secrets.yaml"
+        policy.write_text(
+            "version: 1\nprovider:\n  type: azure_key_vault\n  azure_key_vault:\n"
+            "    vault_url: https://example.vault.azure.net\nsecrets:\n"
+            "  - env: MONGO_URI\n    azure_key_vault: {secret_name: app-database}\n"
+        )
+        monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+        monkeypatch.delenv("MONGO_URI", raising=False)
+        monkeypatch.setenv("ENV", "test")
+        factory = Mock(side_effect=AssertionError("readiness must not retrieve secrets"))
+        monkeypatch.setattr(app_secrets, "build_secret_client", factory)
+        assert database_persistence_is_enabled("best_effort")
+        factory.assert_not_called()
+
+    def test_retired_mongo_aliases_do_not_enable_persistence(self, monkeypatch, tmp_path):
+        policy = tmp_path / "secrets.yaml"
+        policy.write_text("version: 1\nprovider: {type: env}\nsecrets: []\n")
+        monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+        monkeypatch.delenv("MONGO_URI", raising=False)
+        monkeypatch.setenv("ENV", "test")
+        monkeypatch.setenv("MONGODB_URI", "mongodb://retired")
+        monkeypatch.setenv("MONGO_URL", "mongodb://retired")
+        assert not database_persistence_is_enabled("best_effort")
+        assert database_persistence_is_enabled("required")
+
     def test_defaults_to_best_effort_when_unset(self, monkeypatch):
         monkeypatch.delenv(DATABASE_STARTUP_POLICY_ENV, raising=False)
         assert get_database_startup_policy() == "best_effort"

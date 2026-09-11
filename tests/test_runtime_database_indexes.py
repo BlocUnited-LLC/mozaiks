@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -581,6 +582,70 @@ async def test_platform_startup_applies_indexes_when_data_contract_is_loaded(mon
     await platform._platform_startup()
 
     assert calls == [{"intent": intent, "app_id": "app_1"}]
+
+
+@pytest.mark.asyncio
+async def test_vault_mongo_policy_enables_platform_indexes_and_workflow_guards(monkeypatch, tmp_path) -> None:
+    from starlette.datastructures import State
+
+    from mozaiksai.core.runtime.app.module_loader import (
+        LoadedModule,
+        ModuleCompanionManifests,
+        ModuleDefinition,
+    )
+    from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
+    from mozaiksai.core.secrets import app_secrets
+    from mozaiksai.hosts import platform
+
+    policy = tmp_path / "secrets.yaml"
+    policy.write_text(
+        "version: 1\nprovider:\n  type: azure_key_vault\n  azure_key_vault:\n"
+        "    vault_url: https://example.vault.azure.net\nsecrets:\n"
+        "  - env: MONGO_URI\n    azure_key_vault: {secret_name: app-database}\n"
+    )
+    monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+    monkeypatch.delenv("MONGO_URI", raising=False)
+    monkeypatch.delenv("MONGO_URI_SECRET_NAME", raising=False)
+    monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "best_effort")
+    monkeypatch.setenv("ENV", "test")
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_PROVIDER", "")
+    client = Mock()
+    client.get_secret.return_value.value = "mongodb://selected-app"
+    monkeypatch.setattr(app_secrets, "build_secret_client", Mock(return_value=client))
+    module = LoadedModule(
+        definition=ModuleDefinition.model_validate({
+            "schema_version": "mozaiks.module.v1",
+            "module": {"id": "example", "display_name": "Example", "version": "1.0.0",
+                       "handler": "backend.handler:Handler"},
+        }),
+        handler=object(), path=tmp_path, manifests=ModuleCompanionManifests(),
+    )
+    intent = _intent([{"name": "idx", "keys": [["field", 1]]}])
+    monkeypatch.setattr(platform.AppLoader, "load", AsyncMock(return_value=AppLoadResult(
+        definition=AppDefinition(name="Vault App", version="1.0"), modules=[module], data_contract=intent,
+    )))
+    indexes = AsyncMock(return_value=DataContractIndexRunResult(
+        items=[], planned=1, created=1, skipped=0, conflicts=0, verified=1, dry_run=False, success=True,
+    ))
+    monkeypatch.setattr(platform, "apply_database_indexes", indexes)
+    monkeypatch.setattr(platform, "load_data_migrations", lambda _root: [])
+    monkeypatch.setattr(platform, "get_platform_hooks", lambda: Mock(run_startup=AsyncMock()))
+    monkeypatch.setattr(platform, "executor_registry", ExecutorRegistry())
+    limiter = Mock()
+    monkeypatch.setattr(platform, "MongoWorkflowTriggerRateLimiter", limiter)
+    monkeypatch.setattr(platform.app, "state", State({"startup_degraded": False}))
+
+    await platform._platform_startup()
+
+    assert not platform.app.state.startup_degraded
+    indexes.assert_awaited_once_with(intent, app_id="app_1")
+    client.get_secret.assert_called_once_with("app-database")
+    limiter.assert_called_once_with("mongodb://selected-app")
+    guard = platform.app.state.workflow_trigger_guard
+    assert guard._claim_store is not None
+    assert guard._rate_limiter is limiter.return_value
 
 
 @pytest.mark.asyncio

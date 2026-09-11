@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from './fixtures/localAuth.js';
 /**
  * Visual regression tests — Mozaiks web shell.
  *
@@ -39,6 +40,7 @@ const routeManifest = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'ui', 'route_manifest.json'), 'utf8'),
 );
 const composedShellConfig = {
+  auth: localDevelopmentAuth,
   ...shellConfig,
   appId: appConfig.appId,
   appName: appConfig.appName,
@@ -200,7 +202,7 @@ test.describe('App shell visual regression', () => {
     });
     try {
       await page.goto('/chat?workflow=RuntimeSmoke&mode=workflow&new=1');
-      await expect(page.getByText('Initializing ChatUI...')).toBeVisible();
+      await expect(page.getByRole('status')).toBeVisible();
       expect(starts).toEqual([]);
       releaseShell();
       await expect.poll(() => starts.length).toBeGreaterThan(0);

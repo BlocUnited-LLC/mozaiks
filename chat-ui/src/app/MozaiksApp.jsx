@@ -33,7 +33,8 @@ function AppShell({ onAuthRequired }) {
  *   appName         {string}   App display name
  *   defaultAppId    {string}   App identifier sent to the backend
  *   apiAdapter      {object}   API adapter — use mockApiAdapter for local dev, RestApiAdapter for production
- *   authAdapter     {object}   Auth adapter — host-provided (any OIDC provider, or mock for VITE_MOCK_MODE)
+ *   authAdapter     {object}   Host-provided auth adapter, initialized from verified shell auth configuration
+ *   shellConfig     {object}   Verified backend shell configuration shared with auth bootstrap
  *   uiConfig        {object}   Full uiConfig override (replaces individual props when supplied)
  *   children        {node}     Override the default page renderer
  */
@@ -42,6 +43,7 @@ export default function MozaiksApp({
   defaultAppId = null,
   apiAdapter,
   authAdapter,
+  shellConfig = null,
   uiConfig: uiConfigProp,
   children,
 }) {
@@ -86,7 +88,7 @@ export default function MozaiksApp({
   }), [appName, defaultAppId]);
 
   return (
-    <NavigationProvider>
+    <NavigationProvider config={shellConfig}>
       <ChatUIProvider
         workflowInitializer={moduleInitializer}
         uiToolRenderer={renderUiTool}

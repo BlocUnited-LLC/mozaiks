@@ -20,6 +20,13 @@ hardcoded app-specific branches.
 
 ### `app/config/`
 
+Authenticated apps declare `config/auth.yaml` using the shared typed
+`mozaiks.auth.v1` contract. AppLoader validates it and checks agreement with
+`app.json.authRequired`. `/api/shell-config` exposes its public browser settings
+and the backend's effective auth mode. The shared shell enables local development
+identity only when the backend explicitly allows it. Factory exercises these
+same declarations; see [Factory security](../../guides/factory-security.md).
+
 Runtime-facing app configuration, including AI provider settings, shell config,
 admin config, and theme config. When an app needs durable runtime secrets,
 `app/security/secrets.yaml` declares the secret provider/vault policy, env

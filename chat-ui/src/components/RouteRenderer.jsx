@@ -23,6 +23,7 @@ import MobileBottomBar from './layout/MobileBottomBar';
 import { useTheme } from '../styles/useTheme';
 import { getChatBackgroundSrc } from '../styles/brandAssets';
 import { getUserRoles, roleMatches } from '../navigation/shellActions';
+import { safeReturnPath } from '../auth/authAdapter.js';
 
 /**
  * Core routes that are ALWAYS mounted — not driven by owner manifests.
@@ -395,7 +396,8 @@ const RouteWrapper = ({
   const { meta = {} } = route;
   const routeParams = useParams();
   const location = useLocation();
-  const { user } = useChatUI();
+  const { user, loading: authLoading } = useChatUI();
+  const { navigation } = useNavigation();
   const userRoles = useMemo(() => getUserRoles(user), [user]);
   const requiredRoles = meta.requiresRole || meta.requiredRole || meta.roles;
   const hasRequiredRole = roleMatches(requiredRoles, userRoles);
@@ -478,10 +480,14 @@ const RouteWrapper = ({
 
   // Check auth requirement
   if (meta.requiresAuth && !isAuthenticated) {
+    if (authLoading) return <DefaultLoadingFallback />;
     if (onAuthRequired) {
       onAuthRequired(route.path);
     }
-    return <Navigate to={meta.authRedirect || '/login'} replace />;
+    const loginPath = safeReturnPath(meta.authRedirect || navigation.auth?.contract?.routes?.login, '/login');
+    const target = new URL(loginPath, window.location.origin);
+    target.searchParams.set('returnTo', location.pathname + location.search + location.hash);
+    return <Navigate to={target.pathname + target.search} replace />;
   }
 
   if (!hasRequiredRole) {

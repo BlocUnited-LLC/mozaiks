@@ -1,3 +1,4 @@
+import { localDevelopmentAuth } from './fixtures/localAuth.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,7 @@ const transitionRoutes = (extensionRegistry.entrypoints || []).map((entrypoint) 
   },
 }));
 const composedShellConfig = {
+  auth: localDevelopmentAuth,
   ...shellConfig,
   appId: appConfig.appId,
   appName: appConfig.appName,

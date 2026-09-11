@@ -2516,7 +2516,7 @@ agents:
 
       `save_infra_scaffold` is auto-invoked after your structured output. It reads
       the parameterized templates from the build context, substitutes template variables
-      (APP_NAME, TOKEN_KEY_PREFIX, OIDC_CLIENT_ID, MOZAIKS_VERSION, REGISTRY,
+      (APP_NAME, AUTH_DEFAULT_ROUTE, MOZAIKS_VERSION, REGISTRY,
       DEPLOY_TARGET) from session context, and returns the rendered files as code_files.
   - id: objective
     heading: '[OBJECTIVE]'
@@ -2538,14 +2538,18 @@ agents:
         never be self-hosted.
 
       **emit_auth_adapter** — set `emit_auth_adapter: true` when:
-        - `app_build_plan.auth_provider` is not "mock" or "none", OR
-        - `VITE_OIDC_AUTHORITY` or `VITE_OIDC_DISCOVERY_URL` appears in the integration manifest.
-        Set `emit_auth_adapter: false` only when the app is mock-mode only (VITE_MOCK_MODE=true
-        and no real OIDC provider is configured).
+        - The persisted `app_manifest.auth_strategy` is non-empty and not "public",
+          matching the materialized `app.json.authRequired: true`.
+        Set `emit_auth_adapter: false` for public apps whose materialized manifest
+        declares `authRequired: false`. Provider environment handles do not change app intent.
+        Local development of authenticated apps still emits the contract and shared adapter facade;
+        only explicit backend local no-auth configuration enables the development identity.
 
         When true, the scaffold tool emits both:
         - `config/auth.yaml`: provider-neutral mozaiks.auth.v1 behavior/env contract.
-        - `ui/auth/authAdapter.js`: state-bound OIDC PKCE browser adapter.
+        - `ui/auth/authAdapter.js`: deterministic facade for `@mozaiks/chat-ui/auth`.
+        Preserve this shared delegation. Do not emit token storage, PKCE, discovery,
+        callback exchange, or mock-identity implementations into the app bundle.
 
         The auth contract may declare `mode` (`brokered_oidc`, `public_self_signup`,
         `private_workspace`, `enterprise_sso`, or `multi_provider`), `signup_enabled`,
@@ -2566,14 +2570,15 @@ agents:
         Use app-owned auth adapters only when the requested app directly owns custom
         auth mechanics that cannot be represented by the OIDC/JWT runtime contract.
 
-      When in doubt, default both to true. These files are operator-owned after first emit
-      and safe to include even when not immediately needed.
+      Resolve authentication intent from the persisted app manifest before selecting
+      the auth scaffold. Its declaration must agree with app.json during validation.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream**:
       - AppValidationAgent has completed with integration_tests_passed=true.
-      - `app_build_plan` is available in context (deployment_profile, auth_provider, pages).
+      - `app_build_plan` and the persisted `app_manifest` are available in context;
+        `app_manifest.auth_strategy` owns the materialized app's authRequired intent.
       - `integration_manifest` is available in context (may include VITE_OIDC_* env keys).
 
       **Runtime**:

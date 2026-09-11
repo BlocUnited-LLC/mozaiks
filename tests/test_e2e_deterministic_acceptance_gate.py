@@ -242,6 +242,8 @@ def _canonical_fixture() -> dict[str, str]:
         "ui/route_manifest.json": json.dumps(
             {
                 "pages": [
+                    {"path": "/login", "component": "LoginPage", "meta": {"requiresAuth": False, "appShell": False}},
+                    {"path": "/auth/callback", "component": "AuthCallbackPage", "meta": {"requiresAuth": False, "appShell": False}},
                     {
                         "path": "/tasks",
                         "component": "SchemaPage",
@@ -497,24 +499,8 @@ def _canonical_fixture() -> dict[str, str]:
                 async def deactivate_subscription(self, ctx, **params):
                     return {"deactivated": True}
         """),
-        # ---- Auth frontend escape hatch (required for authRequired apps) ----
-        "ui/auth/authAdapter.js": textwrap.dedent("""\
-            const TRANSACTION_KEY = 'e2e_oidc_transactions';
-            function writeAuthTransaction(transaction) {
-              return transaction.state;
-            }
-            function readAuthTransaction(state) {
-              return state;
-            }
-            function clearStoredUserSession() {
-              sessionStorage.removeItem('e2e_access_token');
-            }
-            async function handleCallback() {
-              const state = new URLSearchParams(window.location.search).get('state');
-              const transaction = readAuthTransaction(state);
-              return { returnPath: transaction?.returnPath || '/tasks' };
-            }
-        """),
+        # Deterministic facade consumes the shared browser auth implementation.
+        "ui/auth/authAdapter.js": "import { createAuthAdapter as createSharedAuthAdapter } from '@mozaiks/chat-ui/auth';\n\nexport function createAuthAdapter(options) {\n  return createSharedAuthAdapter({ ...options, env: import.meta.env });\n}\n",
     }
 
 

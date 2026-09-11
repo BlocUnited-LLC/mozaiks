@@ -384,11 +384,15 @@ def _materialize(graph, payloads, plan):
 
 
 def test_accepted_b1_registry_census_is_unchanged() -> None:
+    from tests.service_package_marker_migration_helpers import SERVICE_PACKAGE_MARKER_PATHS
+
     registry = build_app_layout_registry(())
-    # The new interface twins have their own layout proof; every B1 row stays.
+    # Interface twins and optional package markers have separate addition
+    # proofs; this historical census still accounts for every original B1 row.
     census = Counter(
         f.disposition.value for f in registry.families
         if f.kind.value != "workflow_module_interface"
+        and f.path_template not in SERVICE_PACKAGE_MARKER_PATHS
     )
     assert dict(census) == {
         "render": 79,

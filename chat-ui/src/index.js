@@ -27,6 +27,8 @@ export { default as PersistentChatWidget } from './components/chat/PersistentCha
 
 // MozaiksApp: Full application shell with routing and navigation
 export { default as MozaiksApp } from './app/MozaiksApp';
+export { createAuthAdapter, loadShellAuth } from './auth/authAdapter.js';
+export { LoginPage, AuthCallbackPage } from './auth/AuthPages.jsx';
 
 // -----------------------------------------------------------------------------
 // HOOKS

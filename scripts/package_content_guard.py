@@ -62,6 +62,8 @@ REQUIRED_RUNTIME_FAMILIES: list[str] = [
 # Compiled regexes matched against the archive-relative member path.
 # A match is an immediate error — publication is blocked.
 PROHIBITED_PATH_PATTERNS: list[re.Pattern[str]] = [
+    # Local frontend staging can mirror private app/workflow overlay sources.
+    re.compile(r"(?:^|/)\.mozaiks-tailwind-sources/", re.IGNORECASE),
     # Learned-artifact directories — private by default per OSS_PUBLICATION_POLICY.md.
     re.compile(r"(?:^|/)evals?/", re.IGNORECASE),
     re.compile(r"(?:^|/)corpora?/", re.IGNORECASE),

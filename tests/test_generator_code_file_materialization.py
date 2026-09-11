@@ -13,6 +13,24 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 
 
+def test_extract_code_file_map_preserves_empty_package_markers() -> None:
+    payload = {
+        "code_files": [
+            {"filename": "services/__init__.py", "content": ""},
+            {
+                "filename": "services/integrations/__init__.py",
+                "content": "",
+                "filecontent": "raise RuntimeError('must not override explicit empty content')",
+            },
+            {"filename": "services/missing.py", "content": None},
+        ],
+    }
+
+    expected = {"services/__init__.py": "", "services/integrations/__init__.py": ""}
+    assert extract_code_file_map_from_payload(payload) == expected
+    assert {item["filename"]: item["content"] for item in _merge_code_files([payload])} == expected
+
+
 def test_extract_code_file_map_materializes_typed_service_output() -> None:
     payload = {
         "python_files": [

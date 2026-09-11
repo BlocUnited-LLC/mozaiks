@@ -204,6 +204,8 @@ export const ChatUIProvider = ({
   }, [conversationMode]);
 
   useEffect(() => {
+    let cancelled = false;
+    let unsubscribeAuth;
     const initializeServices = async () => {
       try {
         // Optional: allow host to initialize workflow/tool registry without bundling
@@ -224,6 +226,7 @@ export const ChatUIProvider = ({
           }
         }
 
+        if (cancelled) return;
         // Adapters are host-injected; keep local state to avoid undefined access.
         setAuthAdapterInstance(authAdapter);
         setApiAdapterInstance(apiAdapter);
@@ -231,14 +234,16 @@ export const ChatUIProvider = ({
         // Get initial user (optional)
         try {
           const currentUser = await authAdapter?.getCurrentUser?.();
+          if (cancelled) return;
           setUser(currentUser || null);
         } catch (_) {
+          if (cancelled) return;
           setUser(null);
         }
 
         // Listen for auth state changes (optional)
         if (authAdapter?.onAuthStateChange) {
-          authAdapter.onAuthStateChange((newUser) => {
+          unsubscribeAuth = authAdapter.onAuthStateChange((newUser) => {
             setUser(newUser || null);
           });
         }
@@ -256,6 +261,10 @@ export const ChatUIProvider = ({
     };
 
     initializeServices();
+    return () => {
+      cancelled = true;
+      if (typeof unsubscribeAuth === 'function') unsubscribeAuth();
+    };
   }, [authAdapter, apiAdapter, workflowInitializer]);
 
   useEffect(() => {
