@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -305,23 +307,26 @@ def test_admin_studio_pages_use_workspace_layout_not_page_frame() -> None:
 
 
 def test_route_manifest_components_all_registered_in_admin_index() -> None:
-    """Every component named in factory_app/app/ui/route_manifest.json must have
-    a registerComponent() call in factory_app/app/admin/index.js, or the shell
-    will log 'Component Not Registered' and render nothing."""
+    """Factory routes bind app admin components or the two shared auth pages."""
     import json
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     admin_index = _read("factory_app/app/admin/index.js")
+    shell_bootstrap = _read("web_shell/App.jsx")
+    shared_auth_pages = _read("chat-ui/src/auth/AuthPages.jsx")
 
     unregistered = []
     for page in manifest["pages"]:
         component = page.get("component")
         if not component or component == "AdminPortal":
             continue
-        if f"registerComponent('{component}'" not in admin_index:
+        if component in APP_AUTH_COMPONENTS:
+            assert f"export function {component}(" in shared_auth_pages
+            assert f"registerComponent('{component}', {component})" in shell_bootstrap
+        elif f"registerComponent('{component}'" not in admin_index:
             unregistered.append(component)
 
     assert not unregistered, (
-        f"Components in route_manifest.json not registered in admin/index.js: {unregistered}. "
+        f"Factory-owned components in route_manifest.json not registered in admin/index.js: {unregistered}. "
         "Add a registerComponent() call for each or the shell will fail to render the route."
     )
 

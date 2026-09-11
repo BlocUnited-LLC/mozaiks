@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -184,6 +186,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
 def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     smoke_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
+    auth_smoke_source = _read("web_shell/playwright/auth.spec.js")
     console_components = {
         path.stem
         for path in (_workspace() / "factory_app" / "app" / "admin" / "pages").glob("*.jsx")
@@ -217,11 +220,15 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         and page["component"] not in _chat_ui_components
     }
 
-    assert route_components == set(smoke_titles_by_component)
+    assert route_components == set(smoke_titles_by_component) | APP_AUTH_COMPONENTS
     for title in smoke_titles_by_component.values():
         assert title in smoke_source
+    assert "Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token" in auth_smoke_source
+    assert "a forged callback shows failure without authenticated identity" in auth_smoke_source
+    assert "page.goto('/auth/callback?code=unsolicited&state=unknown')" in auth_smoke_source
+    assert "testMatch: 'auth.spec.js'" in _read("web_shell/playwright.auth.config.js")
 
-    assert console_components == route_components | {
+    assert console_components == (route_components - APP_AUTH_COMPONENTS) | {
         "AppStudioChrome",
         "CreateAppRedirectPage",
         "RefinementControls",
@@ -242,7 +249,7 @@ def test_factory_app_react_files_are_classified() -> None:
         if not relative.startswith("factory_app/build_context/")
     }
     # Components registered from chat-ui or custom pages/ (not factory_app/admin/pages/)
-    _non_admin_page_components = {"ProfilePage"}
+    _non_admin_page_components = {"ProfilePage"} | APP_AUTH_COMPONENTS
     route_backed_files = {
         f"factory_app/app/admin/pages/{page['component']}.jsx"
         for page in manifest["pages"]
@@ -275,4 +282,7 @@ def test_factory_app_react_files_are_classified() -> None:
     }
 
     assert react_files == route_backed_files | support_files
+    shared_auth_source = _read("chat-ui/src/auth/AuthPages.jsx")
+    for component in APP_AUTH_COMPONENTS:
+        assert f"export function {component}(" in shared_auth_source
 
