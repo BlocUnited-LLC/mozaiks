@@ -33,6 +33,10 @@ Current repo note:
 
 ## Primary Families
 
+Module loading binds the Python `services` package to the active app root.
+Reloading a workspace must not resolve service clients from another app left
+on the process import path. Python package markers remain optional.
+
 | Family | Purpose | Path |
 | --- | --- | --- |
 | App manifest | Small app identity and target manifest | `app/app.json` |

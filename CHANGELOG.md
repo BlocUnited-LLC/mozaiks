@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Bind app service imports to the selected workspace on reload and reset
+  platform health state for each startup attempt.
+
 - Preserve explicitly empty generated files, including Python package markers,
   so app service imports resolve from the generated bundle.
 
