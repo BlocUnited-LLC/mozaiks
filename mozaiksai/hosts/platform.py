@@ -266,6 +266,9 @@ async def _platform_startup() -> None:
 
     validate_auth_provider_configuration()
 
+    app.state.startup_degraded = False
+    app.state.startup_degraded_reason = None
+    app.state.failed_module_names = []
     app_root = resolve_app_root()
     database_startup_policy = get_database_startup_policy()
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)

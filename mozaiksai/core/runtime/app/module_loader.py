@@ -1159,9 +1159,13 @@ class ModuleLoader:
         import_roots = [self._base.parent, self._base] if self._base.name == "app" else [self._base]
         for root in import_roots:
             root_text = str(root.resolve())
-            if root_text not in sys.path:
-                sys.path.insert(0, root_text)
+            if root_text in sys.path:
+                sys.path.remove(root_text)
+            sys.path.insert(0, root_text)
         self._clear_registered_package("services")
+        # Bind optional app support code to this workspace, even when another
+        # workspace has a regular services package elsewhere on sys.path.
+        self._register_module_package("services", self._base / "services")
 
     def discover_module_names(self) -> list[str]:
         """Return module names for every modules/*/module.yaml in the bundle."""
