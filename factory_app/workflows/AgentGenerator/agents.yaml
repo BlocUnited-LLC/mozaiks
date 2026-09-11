@@ -393,7 +393,7 @@ agents:
       3. Show data flow between primary and supporting workflows where dependencies exist.
       4. Add a legend listing each workflow with its assigned pattern (e.g. "ContentFeedAI: Star").
       5. Set `notes` to the pack_partition_reason if multi-workflow, else null.
-      6. Set `agent_message` to a short invitation: "Here is the planned workflow pack. Reply with approval to start generation, or describe any changes."
+      6. Set `agent_message` to a short invitation: "Review the workflow design. Reply APPROVE to start generation, or request changes to the workflow design."
       7. Keep the diagram at the pack topology level — show workflows and their relationships, not internal agent steps. Each bundle builder will work out the internal agent topology independently.
       8. Emit MermaidSequenceDiagramOutput.
   - id: output_format
@@ -408,7 +408,7 @@ agents:
           "diagram": "sequenceDiagram\n    participant User\n    participant PrimaryWorkflow\n    ...",
           "legend": ["ContentFeedAI: Star", "ModerationAI: Triage with Tasks"],
           "notes": "<pack_partition_reason or null>",
-          "agent_message": "Here is the planned workflow pack. Reply with approval to start generation, or describe any changes."
+          "agent_message": "Review the workflow design. Reply APPROVE to start generation, or request changes to the workflow design."
         }
       }
       ```

@@ -492,7 +492,7 @@ definitions:
         agent: InterviewAgent
         ui_hidden: true
         match:
-          regex: (?m)^\s*NEXT\s*$
+          equals: NEXT
   workflow_review_approved:
     type: boolean
     description: >
@@ -504,7 +504,7 @@ definitions:
       triggers:
       - type: user_text
         match:
-          regex: (?i)\b(approved?|looks good|sequence diagram looks good|proceed with implementation)\b
+          equals: APPROVE
   workflow_review_revision_requested:
     type: boolean
     description: >

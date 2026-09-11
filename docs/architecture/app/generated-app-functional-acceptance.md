@@ -248,6 +248,36 @@ test asserts that the declared workflow, agents, context variables, structured
 outputs, tool function, page route, and referenced generated module action all
 survive the handoff.
 
+## Factory Save Boundaries
+
+Live generation must prove saved artifacts, not only successful model responses
+or workflow-completion messages. Runtime `structured_output` is a read-only,
+turn-local projection. Factory tools use `detach()` before dictionary validation,
+serialization, or persistence; they do not mutate the runtime projection.
+
+ThemeCapture and DesignDocs declare one save attempt and `saved`/`blocked`
+outcomes. SubscriptionContractDesigner declares three review attempts, retries
+only after `changes_requested`, and distinguishes `confirmed`,
+`not_requested_headless`, and `blocked`. A connected review that becomes
+unavailable is not headless approval. Existing tool-outcome validation and AG2
+transition graphs enforce these contracts; failed saves terminate with
+`workflow_failed` rather than starting the next workflow.
+
+The AG2 adapter also treats `no_transition_matched` and `max_turns` as failures.
+Persisted channel closure takes precedence over a simultaneous user-pause
+observation. ThemeCapture explicitly routes user replies back to the active
+interview or analysis stage. AgentGenerator's `NEXT` trigger uses exact matching,
+which the context-authority policy distinguishes from freeform regex extraction.
+
+DesignDocs and AppGenerator represent index keys as ordered objects with `field`
+and `order`, not untyped nested arrays. Runtime strict-response preparation
+rejects untyped values before provider dispatch.
+
+The focused regression suites are `test_factory_auto_tool_acceptance.py`,
+`test_design_docs_bundle_persistence.py`, `test_subscription_contract_designer.py`,
+and `test_structured_output_runtime_contracts.py`. They complement, but do not
+replace, an authenticated live generated-app CRUD/refinement/export proof.
+
 ## Remaining Gaps
 
 P0: none identified by this pass in the covered deterministic fixtures.

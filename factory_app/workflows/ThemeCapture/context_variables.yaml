@@ -4,6 +4,18 @@
 # the same way they do in the rest of the platform workflows.
 
 definitions:
+  theme_save_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: blocked}
+  theme_save_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
   run_build_binding:
     type: object
     description: Server-verified target and build lineage. Execution app_id remains the host identity.

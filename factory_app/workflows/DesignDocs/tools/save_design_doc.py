@@ -8,6 +8,7 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.context.frozen import detach
 
 logger = get_workflow_logger("design_docs")
 
@@ -114,15 +115,10 @@ def _extract_bundle(context_variables: Any) -> dict[str, Any] | None:
     if context_variables is None:
         return None
 
-    raw = _cv_get(context_variables, "structured_output")
-    if not isinstance(raw, dict):
-        raw = _cv_get(context_variables, "DesignDocsBundle")
+    raw = detach(_cv_get(context_variables, "structured_output"))
     if not isinstance(raw, dict):
         return None
 
-    nested = raw.get("DesignDocsBundle")
-    if isinstance(nested, dict):
-        return nested
     return raw
 
 
@@ -493,6 +489,7 @@ async def save_design_docs_bundle(
         "app_id": app_id,
         "stage": normalized_stage,
         "kinds": list(_DOC_KINDS),
+        "outcome": "saved",
         "surface_count": len(surface_map.get("surfaces", [])),
         "page_count": len(experience_spec.get("pages", [])),
         "data_surface_count": len(data_contract.get("surfaces", [])),

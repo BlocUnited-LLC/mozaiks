@@ -199,7 +199,12 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
         return type("ArtifactVersion", (), {"id": "av_theme_capture_1"})()
 
     monkeypatch.setattr(module, "emit_ui_surface", _fake_emit)
-    monkeypatch.setattr(module, "_HAS_PERSISTENCE", False)
+    class Store:
+        async def save_theme_capture(self, **kwargs):
+            from bson import BSON
+            BSON.encode(kwargs)
+
+    monkeypatch.setattr(module, "BuilderArtifactStore", Store)
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     context = {

@@ -99,6 +99,21 @@ class UnifiedWorkflowManager:
             "Initialized unified workflow manager with %s workflows", len(self._workflows))
 
     # ------------------------- UI TOOLS -------------------------
+    def _invalidate_workflow_ui_tools(self, workflow_name: str) -> None:
+        normalized_name = workflow_name.lower()
+        keys = {
+            key for key, record in self._ui_registry.items()
+            if record['workflow_name'].lower() == normalized_name
+        }
+        for key in keys:
+            self._ui_registry.pop(key)
+        self._ui_tool_path_cache = {
+            path: key for path, key in self._ui_tool_path_cache.items() if key not in keys
+        }
+        self._ui_loaded_workflows = {
+            name for name in self._ui_loaded_workflows if name.lower() != normalized_name
+        }
+
     def _load_workflow_tools(self, workflow_path: str, *, tools_payload: dict[str, Any] | None = None) -> None:
         from pathlib import Path as _P
         tools_yaml_path = _P(workflow_path) / "tools.yaml"
@@ -593,17 +608,8 @@ class UnifiedWorkflowManager:
                 except Exception as e:
                     logger.error("WORKFLOW_MODULE_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
         
-        # Reload embedded UI tool metadata
-        try:
-            workflow_path = self.resolve_workflow_path(workflow_name)
-            if workflow_path is None:
-                raise ValueError(f"Workflow not found: {workflow_name}")
-            keys_to_remove = [k for k,v in self._ui_registry.items() if v.get('workflow_name') == workflow_name]
-            for k in keys_to_remove:
-                self._ui_registry.pop(k, None)
-            self._load_workflow_tools(str(workflow_path))
-        except Exception as e:
-            logger.warning("Could not reload UI tools for %s: %s", workflow_name, e)
+        # Rebuild UI metadata only after the replacement workflow validates.
+        self._invalidate_workflow_ui_tools(workflow_name)
         
         # Reload the workflow completely
         try:
@@ -638,6 +644,8 @@ class UnifiedWorkflowManager:
         from .outputs.structured import invalidate_workflow_structured_outputs
 
         normalized_name = workflow_name.lower()
+
+        self._invalidate_workflow_ui_tools(workflow_name)
 
         if normalized_name in self._workflows:
             del self._workflows[normalized_name]

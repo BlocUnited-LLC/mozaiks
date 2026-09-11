@@ -493,7 +493,7 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert response_fixture["tool_responses"]["DownloadCenter"]["action"] == "download_complete"
     assert "ActionPlan" not in response_fixture["tool_responses"]
     assert any(rule["contains"] == "final tweaks" for rule in assistant_reply_rules)
-    assert any("Proceed with implementation." in rule["reply"] for rule in assistant_reply_rules)
+    assert any(rule["reply"] == "APPROVE" for rule in assistant_reply_rules)
     assert "internal helpdesk lead" in smoke_prompt
     assert "classify urgency" in smoke_prompt
     assert "ask for human approval before closing" in smoke_prompt
@@ -526,20 +526,35 @@ def test_agent_generator_review_handoff_uses_user_text_state_triggers() -> None:
     revision_trigger = review_defs["workflow_review_revision_requested"]["source"]["triggers"][0]
 
     assert approved_trigger["type"] == "user_text"
-    assert "regex" in approved_trigger["match"]
+    assert approved_trigger["match"] == {"equals": "APPROVE"}
     assert revision_trigger["type"] == "user_text"
     assert "regex" in revision_trigger["match"]
 
 
-def test_agent_generator_interview_next_trigger_accepts_standalone_next_line() -> None:
+def test_agent_generator_interview_next_trigger_requires_exact_sentinel() -> None:
     context_config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
     interview = context_config["definitions"]["interview_complete"]
     trigger = interview["source"]["triggers"][0]
 
     assert trigger["type"] == "agent_text"
     assert trigger["agent"] == "InterviewAgent"
-    assert trigger["match"]["regex"] == r"(?m)^\s*NEXT\s*$"
-    assert "equals" not in trigger["match"]
+    assert trigger["match"] == {"equals": "NEXT"}
+
+
+@pytest.mark.parametrize(
+    ("text", "approved"),
+    [("APPROVE", True), (" approve ", True), ("Do not approve", False),
+     ("Not approved", False), ("Request changes. Do not approve this workflow design.", False),
+     ("The user has not approved this", False), ("looks good but change the design", False)],
+)
+def test_agent_generator_rejection_text_cannot_approve(text, approved) -> None:
+    from mozaiksai.core.workflow.context.derived import _matches_text_conditions
+
+    config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
+    match = config["definitions"]["workflow_review_approved"]["source"]["triggers"][0]["match"]
+    assert _matches_text_conditions(
+        text=text, equals=match.get("equals"), contains=match.get("contains"), compiled=None,
+    ) is approved
 
 
 def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() -> None:

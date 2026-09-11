@@ -295,22 +295,25 @@ def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
     return strict_model
 
 
-def _find_open_ended_object_path(
+def _find_open_ended_type_path(
     annotation: Any,
     *,
     path: str,
     visited_models: set[type[BaseModel]] | None = None,
 ) -> str | None:
-    """Return the first path that contains a freeform object/dict annotation."""
+    """Return the first path with an untyped value or open-ended object."""
     visited_models = visited_models or set()
 
     origin = get_origin(annotation)
-    if origin in (dict, dict):
+    if annotation is Any or annotation in (dict, list, set, tuple) or origin is dict:
         return path
 
-    if origin in (list, list, set, tuple):
-        for arg in get_args(annotation):
-            found = _find_open_ended_object_path(
+    if origin in (list, set, tuple):
+        args = get_args(annotation)
+        if not args:
+            return path
+        for arg in args:
+            found = _find_open_ended_type_path(
                 arg,
                 path=f"{path}[]",
                 visited_models=visited_models,
@@ -323,7 +326,7 @@ def _find_open_ended_object_path(
         for arg in get_args(annotation):
             if arg is type(None):
                 continue
-            found = _find_open_ended_object_path(
+            found = _find_open_ended_type_path(
                 arg,
                 path=path,
                 visited_models=visited_models,
@@ -343,7 +346,7 @@ def _find_open_ended_object_path(
             model_fields = {}
         for field_name, field_info in model_fields.items():
             field_annotation = getattr(field_info, "annotation", None)
-            found = _find_open_ended_object_path(
+            found = _find_open_ended_type_path(
                 field_annotation,
                 path=f"{path}.{field_name}",
                 visited_models=visited_models,
@@ -358,11 +361,10 @@ def _find_open_ended_object_path(
 def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool, str | None]:
     """Return whether a model is safe for provider-enforced strict response_format.
 
-    OpenAI strict structured outputs do not support open-ended object blobs like
-    Dict[str, Any]. Those remain valid for Mozaiks runtime-side parsing and
-    validation, but they should not be sent as provider response_format schemas.
+    Open-ended objects, untyped arrays, and Any values must not be sent as
+    provider response_format schemas. Runtime-side parsing may still use them.
     """
-    offending_path = _find_open_ended_object_path(model_cls, path=model_cls.__name__)
+    offending_path = _find_open_ended_type_path(model_cls, path=model_cls.__name__)
     if offending_path:
         return False, offending_path
     return True, None
@@ -770,7 +772,7 @@ async def get_llm_for_workflow(
                 )
 
             logger.warning(
-                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses open-ended object fields)",
+                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses an untyped value or open-ended object)",
                 workflow_name,
                 lookup_key,
                 offending_path,

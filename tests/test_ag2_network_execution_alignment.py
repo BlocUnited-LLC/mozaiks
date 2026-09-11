@@ -447,6 +447,63 @@ async def test_ag2_network_runner_executes_mozaiks_transition_rules() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("reason", ["workflow_failed", "no_transition_matched", "max_turns"])
+async def test_ag2_network_runner_does_not_complete_failed_or_exhausted_graphs(reason: str) -> None:
+    agent = _DeterministicAgent("PlannerAgent", "Done with this turn.")
+    target = "user" if reason == "max_turns" else "terminate"
+    rule = {
+        "source_agent": "PlannerAgent",
+        "target_agent": target,
+        "transition_type": "after_turn",
+    }
+    if reason == "workflow_failed":
+        rule["termination_reason"] = reason
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="FailedGraphSmoke",
+            chat_id=f"chat-{reason}",
+            app_id="app-failed-graph",
+            agents={"PlannerAgent": agent},
+            transition_rules=[] if reason == "no_transition_matched" else [rule],
+            initial_agent_name="PlannerAgent",
+            initial_message="Run the graph.",
+            max_turns=1,
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert result.status is RunStatus.FAILED
+    assert result.close_reason == reason
+    assert result.error == reason
+
+
+@pytest.mark.anyio
+async def test_ag2_network_runner_fails_missing_user_return_edge() -> None:
+    agent = _DeterministicAgent("InterviewAgent", "Which color?")
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="MissingReturnSmoke",
+            chat_id="chat-missing-return",
+            app_id="app-missing-return",
+            agents={"InterviewAgent": agent},
+            transition_rules=[{
+                "source_agent": "InterviewAgent",
+                "target_agent": "user",
+                "transition_type": "after_turn",
+            }],
+            initial_agent_name="InterviewAgent",
+            initial_message="Start.",
+            close_timeout_seconds=10.0,
+        )
+    )
+    assert result.status is RunStatus.PAUSED
+    assert result.live_run is not None
+    continued = await result.live_run.continue_with_user_message("Teal.")
+    assert continued.status is RunStatus.FAILED
+    assert continued.close_reason == "no_transition_matched"
+    assert continued.error == "no_transition_matched"
+
+
+@pytest.mark.anyio
 async def test_ag2_network_runner_serializes_context_variables_for_replay() -> None:
     planner_agent = _DeterministicAgent("PlannerAgent", '{"plan_ready": true}')
     created_at = datetime(2026, 7, 30, 21, 15, tzinfo=UTC)

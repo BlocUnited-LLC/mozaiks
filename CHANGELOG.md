@@ -23,6 +23,20 @@ This project follows a practical pre-1.0 changelog format:
 - Studio workspaces inherit packaged first-party modules through the standard
   app loader. App-local modules override defaults by id, so hosted workspaces
   can reuse Security Readiness without copying its implementation.
+- Preserve workflow UI registrations across reloads and carry only declared,
+  writable launch inputs between journey steps. Handoff errors are visible in
+  chat; completing one workflow no longer claims the whole build is complete.
+- Factory theme, design, and subscription saves consume read-only structured
+  output through detached values and use declared failure outcomes. Failed
+  persistence or unavailable subscription review cannot advance the build.
+- DesignDocs index keys now use typed `field`/`order` entries, matching
+  AppGenerator. Untyped arrays and values are rejected before strict model calls.
+- Treat unmatched workflow transitions and exhausted AG2 turn limits as failures,
+  including when channel closure races a user handoff. ThemeCapture declares
+  user-return edges; AgentGenerator uses the authorized exact `NEXT` trigger.
+- Prevent stale browser storage from undoing live workflow handoffs and old
+  WebSocket close handlers from removing replacement connections. Failed message
+  submission is visible instead of leaving an indefinite typing indicator.
 
 - Bind app service imports to the selected workspace on reload and reset
   platform health state for each startup attempt.

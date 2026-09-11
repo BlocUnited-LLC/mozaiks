@@ -184,6 +184,24 @@ async def test_promotion_cannot_activate_a_superseded_build(registry_host):
     assert await host.collection.find_one({"app_id": "owned-app"}) == before
 
 
+async def test_inline_refinement_does_not_inherit_previous_chat(registry_host):
+    host = registry_host
+    record = (await host.service.create_app_record(
+        owner_user_id="alice", app_id="owned-app", status="active",
+        active_chat_id="genesis-chat", active_workflow_id="AppGenerator",
+        current_build_run={"build_id": "genesis-build", "phase": "genesis"},
+    ))["app"]
+    updated = await host.service.repo.update_lifecycle_state(
+        build_registry_id=record["build_registry_id"], owner_user_id="alice",
+        lifecycle_state="building", expected_build_id="genesis-build",
+        current_build_run={"build_id": "inline-build", "phase": "refinement"},
+    )
+    assert updated["current_build_run"]["build_id"] == "inline-build"
+    assert updated["active_chat_id"] is None
+    assert updated["active_workflow_id"] is None
+    assert updated["build_runs"][0]["active_chat_id"] == "genesis-chat"
+
+
 async def test_ensure_status_cannot_reopen_someone_elses_record(registry_host):
     host = registry_host
     await host.service.create_app_record(owner_user_id="alice", app_id="owned-app")

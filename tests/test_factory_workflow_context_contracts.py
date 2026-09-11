@@ -5,6 +5,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.context.authority import (
+    AGENT_TEXT_WRITER,
+    SENTINEL_TEXT_TRIGGER_WRITER,
+    build_context_authority_policy,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
 
@@ -92,6 +98,17 @@ def _definitions(workflow_id: str) -> dict:
 def _agent_variables(workflow_id: str, agent_name: str) -> set[str]:
     agents = _load_context_variables(workflow_id).get("agents") or {}
     return set((agents.get(agent_name) or {}).get("variables") or [])
+
+
+def test_agentgenerator_interview_completion_uses_authorized_exact_sentinel() -> None:
+    definitions = _definitions("AgentGenerator")
+    trigger = definitions["interview_complete"]["source"]["triggers"][0]
+    assert trigger["match"] == {"equals": "NEXT"}
+    policy = build_context_authority_policy(
+        workflow_name="AgentGenerator", definitions=definitions,
+    )
+    policy.require_can_write("interview_complete", writer_id=SENTINEL_TEXT_TRIGGER_WRITER)
+    assert not policy.can_write("interview_complete", writer_id=AGENT_TEXT_WRITER)
 
 
 @pytest.mark.parametrize("workflow_id", BUILD_SEQUENCE_WORKFLOWS)

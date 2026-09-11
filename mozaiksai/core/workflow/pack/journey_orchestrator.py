@@ -14,6 +14,10 @@ from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.persistence import SessionStateStore
 from mozaiksai.core.session.router import get_session_router_for_chat
 from mozaiksai.core.transport.session_registry import session_registry
+from mozaiksai.core.workflow.context.authority import (
+    TRANSITION_ROUTER_WRITER,
+    build_context_authority_policy,
+)
 
 logger = get_core_logger("journey_orchestrator")
 
@@ -35,31 +39,6 @@ def _spawned_workflow_failure_callback(
             )
 
     return _callback
-
-_CHAT_CONTEXT_INTERNAL_KEYS = {
-    "_id",
-    "chat_id",
-    "app_id",
-    "user_id",
-    "workflow_name",
-    "messages",
-    "status",
-    "created_at",
-    "updated_at",
-    "last_updated_at",
-    "completed_at",
-    "last_sequence",
-    "last_artifact",
-    "pending_input_request",
-    "workflow_ui_state",
-    "trigger_meta",
-    "session_router_session_id",
-    "journey_instance_id",
-    "journey_key",
-    "journey_position",
-    "journey_total_steps",
-}
-
 
 def _is_completed_status(value: Any) -> bool:
     if value is None:
@@ -83,17 +62,26 @@ def _is_successful_completion(payload: Any) -> bool:
     return _is_completed_status(payload.get("status"))
 
 
-def _extract_launch_context_from_chat_doc(chat_doc: Any) -> dict[str, Any]:
+def _project_launch_context(chat_doc: Any, workflow_name: str) -> dict[str, Any]:
+    """Carry declared launch inputs, not another workflow's execution state."""
     if not isinstance(chat_doc, dict):
         return {}
-    context: dict[str, Any] = {}
-    for key, value in chat_doc.items():
-        if not isinstance(key, str) or not key.strip():
-            continue
-        if key in _CHAT_CONTEXT_INTERNAL_KEYS or key in SERVER_OWNED_SESSION_FIELDS or key.startswith("_"):
-            continue
-        context[key] = value
-    return context
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    config = workflow_manager.get_config(workflow_name)
+    if not config:
+        raise ValueError(f"Journey target workflow is not loaded: {workflow_name}")
+    definitions = (config.get("context_variables") or {}).get("definitions", {})
+    policy = build_context_authority_policy(
+        workflow_name=workflow_name, definitions=definitions,
+        transition_rules=(config.get("transition_graph") or {}).get("transition_rules", []),
+    )
+    return {
+        key: value for key, value in chat_doc.items()
+        if key in definitions and key not in SERVER_OWNED_SESSION_FIELDS
+        and (definitions[key].get("source") or {}).get("type") == "state"
+        and policy.can_write(key, writer_id=TRANSITION_ROUTER_WRITER)
+    }
 
 
 class JourneyOrchestrator:
@@ -113,8 +101,26 @@ class JourneyOrchestrator:
         async with lock:
             try:
                 await self._handle_run_complete_inner(payload, chat_id)
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
                 logger.error("[JOURNEY] handle_run_complete failed: %s", exc, exc_info=True)
+                try:
+                    conn, transport = await self._get_transport_conn(chat_id)
+                    if conn and transport:
+                        await transport.send_event_to_ui(
+                            {
+                                "schema_version": "mozaiks.ui.event.v1",
+                                "type": "chat.error",
+                                "data": {
+                                    "message": "This workflow finished, but the next journey step could not start. The build is not complete.",
+                                    "error_code": "JOURNEY_ADVANCE_FAILED",
+                                    "chat_id": chat_id,
+                                },
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            },
+                            chat_id,
+                        )
+                except Exception:
+                    logger.exception("[JOURNEY] Could not deliver handoff failure for chat=%s", chat_id)
 
     async def _handle_run_complete_inner(self, payload: dict[str, Any], chat_id: str) -> None:
         workflow_name = str(payload.get("workflow_name") or payload.get("workflow") or "").strip()
@@ -143,7 +149,6 @@ class JourneyOrchestrator:
         source_chat_doc = await coll.find_one(
             {"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)}
         )
-        inherited_context = _extract_launch_context_from_chat_doc(source_chat_doc)
         session_router = await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=chat_id)
         raw_binding = source_chat_doc.get("run_build_binding") if source_chat_doc else None
         binding = RunBuildBinding.model_validate(raw_binding) if raw_binding is not None else None
@@ -194,7 +199,7 @@ class JourneyOrchestrator:
                 "journey_key": advance.journey_key,
                 "journey_position": next_group_index,
             }
-            route_context = {**inherited_context, **dict(advance.context_seed or {})}
+            route_context = {**_project_launch_context(source_chat_doc, wf), **dict(advance.context_seed or {})}
             route_decision = await session_router.route_trigger(
                 TriggerInput(
                     app_id=app_id,

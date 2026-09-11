@@ -1419,10 +1419,10 @@ const ChatPage = () => {
     }
 
     const urlResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(urlWorkflowName);
-    const storedResolvedWorkflow = workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName());
+    // Storage hydrates the provider once. Re-reading it here races the provider's
+    // persistence effect and can undo a live workflow handoff on every render.
     const activeResolvedWorkflow =
-      storedResolvedWorkflow
-      || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+      workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
       || workflowConfig.resolveKnownWorkflowName(currentWorkflowName);
     const nextWorkflowName = (
       currentChatId
@@ -5171,9 +5171,21 @@ const ChatPage = () => {
           setPendingWorkflowReply(null);
         }
         setLoading(true);
+      } else {
+        throw new Error('Workflow connection is unavailable');
       }
     } catch (error) {
       console.error('❌ [SEND] Failed to send message via WebSocket:', error);
+      setLoading(false);
+      setMessagesWithLogging(prev => [
+        ...prev.filter(message => !message.isThinking),
+        {
+          id: `send-failed-${userMessage.id}`,
+          sender: 'system',
+          content: 'Your message was not sent. Reconnect and try again.',
+          timestamp: Date.now(),
+        },
+      ]);
     }
   };
 

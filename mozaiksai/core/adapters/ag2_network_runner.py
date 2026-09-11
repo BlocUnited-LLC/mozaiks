@@ -411,11 +411,18 @@ class AG2NetworkRunner:
                 close_reason: str | None = None,
                 error: str | None = None,
             ) -> AG2NetworkRunnerResult:
-                if close_reason == "workflow_failed":
-                    status = RunStatus.FAILED
-                    error = error or "workflow_failed"
                 state = hub.adapter_state(channel.channel_id)
                 wal = await hub.read_wal(channel.channel_id)
+                # A packet can reach the observer before its subsequent close
+                # event. The durable channel closure takes precedence over pause.
+                channel_closed, persisted_reason = _closed_reason_from_wal(wal)
+                if channel_closed:
+                    close_reason = persisted_reason
+                    if status is not RunStatus.FAILED:
+                        status = RunStatus.COMPLETED
+                if close_reason in {"workflow_failed", "no_transition_matched", "max_turns"}:
+                    status = RunStatus.FAILED
+                    error = error or close_reason
                 agent_name_by_id = _agent_names()
                 structured_outputs, validation_error = _validate_wal_structured_outputs(
                     wal=wal,
@@ -490,6 +497,9 @@ class AG2NetworkRunner:
                     status=RunStatus.PAUSED,
                     close_reason="awaiting_user_input",
                 )
+                if result.status is not RunStatus.PAUSED:
+                    keep_live_run = False
+                    return result
                 result.live_run = live_run
                 return result
 
@@ -567,6 +577,8 @@ class AG2NetworkRunner:
                         status=RunStatus.PAUSED,
                         close_reason="awaiting_user_input",
                     )
+                    if result.status is not RunStatus.PAUSED:
+                        return result
                     result.live_run = _AG2LiveWorkflowRun(
                         workflow_name=request.workflow_name,
                         chat_id=request.chat_id,

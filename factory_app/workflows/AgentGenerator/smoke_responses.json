@@ -13,8 +13,8 @@
       "reply": "No final tweaks. Proceed to workflow planning."
     },
     {
-      "contains": "Review the agent flow below",
-      "reply": "Approved. The sequence diagram looks good. Proceed with implementation."
+      "contains": "Review the workflow design",
+      "reply": "APPROVE"
     }
   ],
   "tool_responses": {

@@ -102,13 +102,23 @@ models:
         - 'null'
         description: Null or true when the field may be set to null.
 
+  DataContractIndexKey:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Document field path to index.
+      order:
+        type: int
+        description: Sort order, 1 for ascending or -1 for descending.
+
   DataContractIndex:
     type: model
     fields:
       keys:
         type: list
-        items: list
-        description: Ordered Mongo index key pairs, for example [["app_id", 1], ["campaign_id", 1]].
+        items: DataContractIndexKey
+        description: 'Ordered index keys, for example [{"field": "app_id", "order": 1}, {"field": "campaign_id", "order": 1}].'
       unique:
         type: union
         variants:

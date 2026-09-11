@@ -13,6 +13,15 @@ tools:
     CapturedThemeConfig. Persists the artifact set and emits a preview card.
   tool_type: UI_Surface
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: theme_save_outcome
+    attempts_key: theme_save_attempts
+    result_field: outcome
+    values: [saved, blocked]
+    error_value: blocked
+    max_attempts: 1
+    retry_on: []
   ui:
     component: ThemePreviewCard
     mode: artifact

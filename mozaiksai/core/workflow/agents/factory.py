@@ -505,7 +505,7 @@ def _prepare_response_schema_for_agent(
                 raise ValueError(
                     f"[AGENTS] Agent '{agent_name}' in workflow '{workflow_name}' requires "
                     "structured outputs, but its model cannot be prepared for provider "
-                    f"strict response_schema: {offending_path} uses an open-ended object field"
+                    f"strict response_schema: {offending_path} uses an untyped value or open-ended object"
                 )
             return None
         return get_provider_response_model(structured_model_cls)

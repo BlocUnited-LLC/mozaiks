@@ -82,3 +82,16 @@ structured output and recording 197 input plus 32 output tokens. Its run was
 That run does not prove Factory generation, authentication of a generated app,
 CRUD across restart, refinement, or export. The hosted-product integration and
 dependency pin must wait for the full acceptance above and a green OSS suite.
+
+The subsequent local OIDC browser test approved and revised a Client Ledger
+concept, then verified actual target-scoped persistence for ThemeCapture,
+DesignDocs, and SubscriptionContractDesigner. Their recorded outcomes were
+`saved`, `saved`, and `confirmed`, respectively. These were real AG2/model calls,
+not captured-output fixtures. Recovery used authenticated public launch APIs;
+the test did not bypass auth or manually insert generated artifacts.
+
+The test exposed and repaired false completion after failed saves or missing
+transitions, read-only structured-output handling, strict index-key schemas,
+workflow UI reload registration, and browser handoff/connection races.
+AgentGenerator and the complete generated-app CRUD/refinement/export acceptance
+remain unverified. Passing the preceding stages is not a completed app build.

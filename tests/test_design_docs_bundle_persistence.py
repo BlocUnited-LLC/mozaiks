@@ -20,7 +20,8 @@ class _Context:
         self.data[key] = value
 
     def get(self, key, default=None):
-        return self.data.get(key, default)
+        from mozaiksai.core.workflow.context.frozen import freeze
+        return freeze(self.data.get(key, default))
 
 
 class _FakeCursor:
@@ -143,7 +144,7 @@ def _bundle():
                                 {"name": "user_id", "type": "string", "required": True},
                             ],
                             "indexes": [
-                                {"keys": [["app_id", 1], ["user_id", 1]], "unique": True}
+                                {"keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}], "unique": True}
                             ],
                             "search_by": "user_id",
                             "lifecycle": {

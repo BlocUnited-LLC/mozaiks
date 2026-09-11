@@ -5,6 +5,15 @@ tools:
   description: Persist the validated DesignDocsBundle plus the canonical surface_map and data_contract contracts for the current app_id.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
+  outcome:
+    context_key: design_docs_save_outcome
+    attempts_key: design_docs_save_attempts
+    result_field: outcome
+    values: [saved, blocked]
+    error_value: blocked
+    max_attempts: 1
+    retry_on: []
 lifecycle_tools:
 - trigger: on_start
   agent: null

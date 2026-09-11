@@ -563,6 +563,28 @@ def test_factory_workflow_transition_rules_compile_to_ag2_network_graphs():
         assert isinstance(graph, TransitionGraph), transition_path
 
 
+@pytest.mark.parametrize(
+    ("interview_complete", "expected_agent"),
+    [(False, "ThemeInterviewAgent"), (True, "ThemeAnalysisAgent")],
+)
+def test_theme_capture_user_reply_returns_to_current_stage(interview_complete, expected_agent):
+    path = Path("factory_app/workflows/ThemeCapture/transition_graph.yaml")
+    rules = yaml.safe_load(path.read_text(encoding="utf-8"))["transition_rules"]
+    names = ["ThemeInterviewAgent", "ThemeAnalysisAgent", "ThemeConfigAssemblerAgent"]
+    graph = compile_transition_rules_to_graph(
+        rules,
+        initial_agent_name=names[0],
+        agent_id_by_name={name: name for name in names},
+    )
+    assert resolve_next_agent(
+        graph,
+        current_agent_name="user",
+        context_variables={"interview_complete": interview_complete},
+        agent_name_by_id={name: name for name in names},
+        participant_order=[*names, "user"],
+    ) == expected_agent
+
+
 def test_appgenerator_validation_routes_repair_context_before_user_fallback():
     workflow_dir = Path("factory_app/workflows/AppGenerator")
     transitions = yaml.safe_load((workflow_dir / "transition_graph.yaml").read_text(encoding="utf-8")) or {}

@@ -9,6 +9,15 @@ tools:
       host-owned billing records, or token ledger entries.
     tool_type: UI_Tool
     auto_tool_call: true
+    bind_to_agent: false
+    outcome:
+      context_key: subscription_contract_review_status
+      attempts_key: subscription_contract_review_attempts
+      result_field: review_status
+      values: [confirmed, not_requested_headless, changes_requested, blocked]
+      error_value: blocked
+      max_attempts: 3
+      retry_on: [changes_requested]
     ui:
       component: SubscriptionContractReview
       mode: artifact
