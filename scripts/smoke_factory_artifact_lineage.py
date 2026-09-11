@@ -472,6 +472,7 @@ async def _run_lineage_smoke_with_store(
         ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
+        ["SecurityReadiness"],
     ]
     expected_transition_steps = [
         "app_type_selector",

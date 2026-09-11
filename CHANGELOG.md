@@ -37,6 +37,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### App workspace alignment
 
+- Add an advisory `SecurityReadiness` Factory workflow and build context so generated app bundles can surface baseline auth, secret, permission, tenant-scope, deployment, and eval-readiness findings during AppReview.
+
 - Add a first-party Factory `security_readiness` module for app/build security
   findings, summaries, and review status without introducing hosted-only
   compliance logic into OSS.

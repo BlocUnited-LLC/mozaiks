@@ -216,6 +216,20 @@ async def test_exact_materialized_file_map_validates_boots_and_executes_http(
     saved = _save_platform_state(platform)
     platform.executor_registry = ExecutorRegistry()
     platform.app.state.executor_registry = platform.executor_registry
+    platform.app.state.subscriptions_config = None
+    platform.app.state.startup_degraded = False
+    platform.app.state.startup_degraded_reason = None
+    platform.app.state.failed_module_names = []
+    platform.app.state.page_schemas = {}
+    platform.app.state.module_action_surfaces = {}
+    platform.app.state.workflow_capability_routes = {}
+    platform.app.state.database_index_readiness = None
+    for state_attr in ("module_event_router", "workflow_trigger_guard"):
+        if hasattr(platform.app.state, state_attr):
+            delattr(platform.app.state, state_attr)
+    runtime_services = getattr(platform, "_runtime_services", None)
+    if isinstance(runtime_services, list):
+        runtime_services.clear()
     monkeypatch.setattr(platform.runtime_app, "mongo_client", fake_mongo_client)
     try:
         with TestClient(platform.app, raise_server_exceptions=False) as client:

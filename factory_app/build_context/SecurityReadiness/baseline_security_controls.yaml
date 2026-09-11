@@ -1,0 +1,50 @@
+contract_id: security_readiness_baseline
+contract_type: build_security_controls
+version: 1
+mode: advisory
+selection_rules:
+  - id: always_review_generated_app_bundle
+    when:
+      artifact_family: app_bundle
+    action: inspect_after_app_generator
+  - id: record_findings_not_credentials
+    when:
+      finding_source: generated_app_bundle
+    action: record_names_and_evidence_only
+required_checks:
+  - id: no_raw_secret_values
+    severity: critical
+    control_area: secrets
+    rule: Generated app files must not contain raw API keys, tokens, passwords, private keys, or webhook secret values.
+  - id: secret_contract_is_names_only
+    severity: high
+    control_area: secrets
+    rule: app/security/secrets.yaml may declare secret names, env handles, and provider policy only; it must not carry credential values.
+  - id: auth_contract_when_auth_required
+    severity: high
+    control_area: auth
+    rule: Apps that require authentication should declare app/config/auth.yaml or an equivalent app-level auth contract.
+  - id: module_permissions_declared
+    severity: high
+    control_area: permissions
+    rule: Module actions that expose private or mutating APIs must declare permissions that resolve to module.yaml permissions entries.
+  - id: tenant_scope_for_persistent_modules
+    severity: high
+    control_area: tenant_isolation
+    rule: Persistent multi-user modules should keep ownership/scope policy in backend/policy.py and use ctx.persistence through backend/repo.py.
+  - id: production_operations_when_deployable
+    severity: medium
+    control_area: deployment
+    rule: Deployable apps should declare production operation expectations instead of relying on hidden hosted defaults.
+forbidden_outputs:
+  - path_prefix: app/services/security/
+    reason: Secret policy belongs in app/security/secrets.yaml and generic secret resolution belongs in mozaiksai.core.secrets.
+  - path_prefix: app/build_context/
+    reason: Build context lives at workspace root build_context/, beside app/ and workflows/.
+runtime_boundaries:
+  - id: advisory_by_default
+    rule: OSS SecurityReadiness records findings and review evidence by default. Promotion blocking requires an explicit future policy switch.
+  - id: no_compliance_claims
+    rule: OSS readiness checks are not SOC2, ISO, HIPAA, or PCI certification claims.
+  - id: hosted_compliance_overlay
+    rule: Hosted product repos may add proprietary SOC2/ISO/evidence build contexts that apply to SecurityReadiness without forking the OSS workflow.
