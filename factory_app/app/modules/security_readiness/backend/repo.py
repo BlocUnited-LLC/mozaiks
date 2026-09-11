@@ -24,7 +24,9 @@ def _document(value: Any) -> dict[str, Any] | None:
 def _collection_query(ctx: ModuleContext, query: dict[str, Any]) -> dict[str, Any]:
     """Verify the requested app scope; the persistence adapter supplies it."""
     scoped = dict(query)
-    if "app_id" in scoped and scoped.pop("app_id") != ctx.persistence.app_id:
+    if "app_id" in scoped and (
+        ctx.persistence is None or scoped.pop("app_id") != ctx.persistence.app_id
+    ):
         raise ValueError("Security findings must use the persistence context app_id.")
     return scoped
 
